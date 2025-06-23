@@ -1,0 +1,245 @@
+I have uploaded the main scripts of my application.
+I want to develop a game based on warhammer 40k.
+The player would play against an AI
+
+V1
+Software installation.
+Hexagon grid display :
+	KT board : 30" x 22"
+	sm base : 1.26"
+	1 hex = 30/1.26 x 22/1.26 = 24 x 18
+
+V2
+Add Units
+Units have attributes
+Move action
+Icons added for units
+
+V3
+Turns / units activation implementation
+Added HP bar on top of the units
+
+V4
+implement of the shooting phase.
+
+V5 
+Implement charge phase
+
+V6
+Implement combat phase
+
+V7 
+Implement IA
+
+
+---------------------------------------------------------------------------------------------------------------------
+Alias :
+Modifier alias : code $PROFILE 
+train : E:\Dropbox\Informatique\Holberton\40k\ p -m ai.train --new
+app : E:\Dropbox\Informatique\Holberton\40k\frontend\ npm run dev
+
+Activatio de l'environnement vituel :
+.venv\Scripts\Activate
+
+Lancer l'api depuis E:\Dropbox\Informatique\Holberton\40k :
+uvicorn ai.api:app --reload --host 0.0.0.0 --port 8000
+
+Lancer le jeu depuis E:\Dropbox\Informatique\Holberton\40k\frontend :
+npm run dev
+
+python -m ai.train --resume
+python -m ai.train --new
+python -m ai.evaluate
+check : 
+tensorboard --logdir ./tensorboard/
+
+Replay :
+http://localhost:5173/replay
+
+
+Open your browser and visit:
+
+    http://localhost:5173/
+    → You should see your Home Page (from HomePage.tsx)
+
+    http://localhost:5173/game
+    → You should see your actual game UI
+
+    http://localhost:5173/replay
+
+PARAMETERS :
+frontend/src/data/Scenario.ts 		(the scenario: IDs, names, player, position, color, icon)
+frontend/src/data/UnitFactory.ts 	(how units are created)
+frontend/src/data/Units.ts 		(types/attributes)
+
+Overview: RL Agent Integration Steps
+    Define the Agent Interface: Decide how your React app will “ask” the RL agent for moves.
+    (E.g., via API call to a Python server, or by loading a JS model.)
+    Prepare the State Serialization: Your game state (units, board, phase, etc.) must be converted into an input format the agent understands.
+    Trigger the RL Agent Instead of the Rule-Based AI: In your runAiMovePhase, etc., call the RL agent for decisions.
+    Apply the RL Agent’s Actions: Use your existing handlers to execute the agent’s chosen actions.
+    (Optional) Expose “Self-Play” or Evaluation Mode: For training/testing the agent in bulk games.
+1. Choose RL Agent Access Method
+A. Python API Server (Most common for Deep RL)
+    You host a Flask/FastAPI server that exposes an /action endpoint.
+    React sends the current state, gets back an action.
+B. In-Browser Model (e.g. ONNX.js, TensorFlow.js)
+    If you export your model to ONNX or TF.js, load it in the browser and run predictions directly.
+For your setup, option A is most common.
+
+
+
+
+1. Smarter AI
+    Right now, the AI always goes for the nearest enemy.
+    You can make the AI evaluate danger, go for objectives, focus-fire, retreat if weak, etc.
+    Add pathfinding (e.g., A*) for better movement around obstacles.
+    Use priorities: e.g., target the weakest or highest-value enemy.
+2. AI vs AI Mode
+    Let both players be AI (good for debugging and automated playtesting).
+    You can add a toggle or just change the isAiTurn check to always be true.
+3. User Interface Enhancements
+    Add visual hints when the AI acts (highlight its moves, animations, action logs).
+    Show why the AI chose a given action (for transparency/debugging).
+4. Performance/Async
+    The AI now has a delay per action; tweak for realism/speed.
+    For a large board or many units, consider batching actions for the AI.
+5. Logging & Analytics
+    Log actions/turns to help debug AI behavior or gather statistics.
+6. Multiplayer or Networked Play
+    If interested: add a backend (socket, REST) for real remote play or AI-vs-human online.
+7. RL Agent Integration
+    As your folder and project name suggest, you may want to swap this "rule-based" AI for a learned policy (RL agent).
+    Your code is now nicely modular for this: swap out AI decision logic for calls to an RL model (Python, ONNX, or TensorFlow.js).
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+
+I want to develop a game based on warhammer 40k.
+The player would play against an AI
+For the AI training, I want it to train on the same scenaro as the game.
+To evaluate the AI, i make it play vs a scripted bot.
+
+Here are the main rules of the game, and behaviour for the ai :
+
+MOVEMENT PHASE DEFINITION
+I want a turn base game.
+Beginning of the turn :
+At the beginning of its turn, all the units of the active player are surrounded by a green hexagon.
+
+The move phase :
+- Unit selection with left click
+	- All the available move cells (calculated with MOVE attribute) are colored in green
+		- Left  click on a non green cell : nothing happen
+		- Left click on a green cell :
+			- Move the unit to this cell
+			- The cells at the RNG_RNG attribute distance are in red
+				- Left click on the active unit : validate the mode, cancel colored cells, end of this unit's activation
+				- Right click on the active unit : cancel the move, cancel colored cells, unselect the unit, back to unit
+Once all the units have been moved this way, the active player's turn ends
+
+ADDING SHOOTING PHASE
+1. Two-Phase Turn Structure
+    After all your units have moved, the game does not switch to the other player. Instead, it transitions to the shooting phase for your side.
+    After the shooting phase is finished (all eligible units have shot or none can shoot), then the turn passes to the other player (who starts with their movement phase).
+2. Movement Phase (as before)
+    You can select and move each unit once per turn, as before.
+    Only your units that haven’t moved are selectable (green outline).
+3. Shooting Phase: Eligible Unit Selection
+    Only your units that have at least one enemy within their RNG_RNG (shooting range) and haven’t shot yet are selectable (green outline).
+    Units that cannot shoot (nobody in range, or already shot this phase) are not selectable.
+4. Shooting Phase: Attack Preview Activation
+    When you select an eligible shooter unit in the shooting phase, the board:
+        Highlights the selected shooter.
+        Highlights the enemy units in range (with a red outline/circle).
+        Red-cells the hexes in range (if using the attackCells logic).
+    This is the "attack preview" state.
+5. Clicking on Enemy Units
+    When you are in attack preview mode (after selecting a shooter):
+        Clicking on an enemy unit within range will attempt to call the (currently unimplemented) onShoot action.
+            You will see the visual feedback from your click handler (e.g., you can log something in the callback for now).
+            No HP reduction or removal yet—that’s for the next patch.
+6. Shooting Once per Shooter
+    After a shooter has shot (if you later implement marking them as used), they will not be selectable again for shooting in this phase.
+
+
+CHARGE PHASE DEFINITION
+1. Eligibility for Selection (charge phase):
+    A unit is eligible (gets green outline and is selectable) if:
+        It has NOT already charged this phase.
+        No enemy is adjacent to it.
+        At least one enemy is within its MOVE range.
+2. Highlight Eligible Units
+    Only those eligible units get a green outline, and only those can be selected.
+3. When a charger is selected (chargePreview):
+    Red outline: all enemy units that are within the charger’s MOVE range.
+    Orange cells:
+        Any cell within the charger’s MOVE range,
+        And that is adjacent (distance = 1) to at least one enemy within the charger’s MOVE range.
+4. Clicking orange cell
+    Moves the charging unit to that cell (just move, don’t immediately “end” or unselect).
+    The user can continue with the activation.
+5. Right click on the active unit
+    Cancels the charge, returns to step 1 (unit is still eligible and re-selectable).
+6. Left click on the active unit (after charge)
+    Validates the charge: marks the unit as charged, unselects, and ends activation for this unit.
+7. One charge per unit per phase
+
+
+COMBAT PHASE DEFINITION
+1. Eligibility for Selection (combat phase):
+    A unit is eligible (gets green outline and is selectable) if:
+        It has NOT already attacked this phase.
+        Enemy is adjacent to it.
+2. Highlight Eligible Units
+    Only those eligible units get a green outline, and only those can be selected.
+3. When a combat unit is selected:
+    Red outline: all enemy units that are adjacent to it.
+4. Right click on the active unit
+    Cancels the attack, returns to step 1 (unit is still eligible and re-selectable).
+5. Clicking enemy unit
+    Reduces target unit's CUR_HP by the active unit's CC_DMG value.
+7. One attack per unit per phase
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+AI BEHAVIOUR
+
+Sequential (Turn-based). 
+First make the ranged units play. 
+A unit will shoot in preference order : 
+1 - the enemy unit at RNG_RNG range :
+	- with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score 
+	- that one or more of our melee units can charge 
+	- would not kill in 1 melee phase
+2 - the enemy unit at RNG_RNG range :
+	- with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score 
+	- can be killed by the active unit in 1 shooting phase
+3 - the enemy unit at RNG_RNG range with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score 
+	- having the less HP
+	- can be killed by the active unit in 1 shooting phase
+
+For charge phase, a melee unit will charge :
+1 - the enemy unit at MOVE range with 
+	- the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
+	- can be killed by the active unit in 1 melee phase
+2 - the enemy unit at MOVE range :
+	-  with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
+	- has the less current HP and 
+	- its HPs >= the active unit's CC_DMG
+3 - the enemy unit at MOVE range with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
+	- has the less current HP
+
+For charge phase, a ranged unit will charge :
+1 - the enemy unit at MOVE range with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
+	- has the highest current HP 
+	- can be killed by the active unit in 1 melee phase
+
+For melee phase, a unit will attack :
+1 - the enemy unit with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
+	- can be killed by the active unit in 1 melee phase
+3 - the enemy unit with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
+	- if there is more than one, target the enemy unit having the less current HP
+
