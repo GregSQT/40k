@@ -84,6 +84,9 @@ backup_*/
 versions/
 *.bak
 
+# Training data
+tensorboard/
+
 # Documentation builds
 docs/_build/
 
