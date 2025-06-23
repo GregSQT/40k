@@ -86,6 +86,7 @@ versions/
 
 # Training data
 tensorboard/
+.tensorboard/
 
 # Documentation builds
 docs/_build/
