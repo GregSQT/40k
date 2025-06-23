@@ -2,17 +2,17 @@
   {
     "turn": 0,
     "unit_id": 3,
-    "action": 3,
+    "action": 0,
     "position": [
-      0,
-      5
+      4,
+      9
     ],
     "hp": 3
   },
   {
     "turn": 0,
     "unit_id": 4,
-    "action": 3,
+    "action": 5,
     "position": [
       22,
       3
@@ -24,8 +24,8 @@
     "unit_id": 3,
     "action": 3,
     "position": [
-      0,
-      1
+      4,
+      9
     ],
     "hp": 3
   },
@@ -44,8 +44,8 @@
     "unit_id": 3,
     "action": 3,
     "position": [
-      0,
-      5
+      4,
+      9
     ],
     "hp": 3
   },
@@ -62,69 +62,69 @@
   {
     "turn": 3,
     "unit_id": 3,
-    "action": 3,
+    "action": 0,
     "position": [
-      0,
-      1
+      8,
+      5
     ],
     "hp": 3
   },
   {
     "turn": 4,
     "unit_id": 3,
-    "action": 3,
+    "action": 2,
     "position": [
-      0,
+      4,
       5
     ],
-    "hp": 3
+    "hp": 1
   },
   {
     "turn": 5,
     "unit_id": 3,
-    "action": 3,
+    "action": 5,
     "position": [
-      0,
-      1
+      4,
+      5
     ],
-    "hp": 3
+    "hp": 1
   },
   {
     "turn": 6,
     "unit_id": 3,
-    "action": 5,
+    "action": 3,
     "position": [
-      0,
-      1
+      4,
+      5
     ],
-    "hp": 3
+    "hp": 1
   },
   {
     "turn": 7,
     "unit_id": 3,
-    "action": 3,
+    "action": 1,
     "position": [
-      0,
-      5
+      8,
+      9
     ],
     "hp": 1
   },
   {
     "turn": 8,
     "unit_id": 3,
-    "action": 3,
+    "action": 0,
     "position": [
-      0,
-      1
+      4,
+      5
     ],
     "hp": 1
   },
   {
     "turn": 9,
     "unit_id": 3,
-    "action": 3,
+    "action": 6,
     "position": [
-      0,
+      4,
       5
     ],
     "hp": 1
@@ -132,30 +132,30 @@
   {
     "turn": 10,
     "unit_id": 3,
-    "action": 3,
+    "action": 0,
     "position": [
-      0,
-      1
+      8,
+      9
     ],
     "hp": 1
   },
   {
     "turn": 11,
     "unit_id": 3,
-    "action": 3,
+    "action": 5,
     "position": [
-      0,
-      5
+      8,
+      9
     ],
     "hp": 1
   },
   {
     "turn": 12,
     "unit_id": 3,
-    "action": 3,
+    "action": 2,
     "position": [
-      0,
-      1
+      8,
+      13
     ],
     "hp": 1
   },
@@ -164,8 +164,8 @@
     "unit_id": 3,
     "action": 3,
     "position": [
-      0,
-      5
+      8,
+      13
     ],
     "hp": 1
   },
@@ -174,38 +174,38 @@
     "unit_id": 3,
     "action": 3,
     "position": [
-      0,
-      1
+      8,
+      13
     ],
     "hp": 1
   },
   {
     "turn": 15,
     "unit_id": 3,
-    "action": 3,
+    "action": 4,
     "position": [
-      0,
-      5
+      8,
+      13
     ],
     "hp": 1
   },
   {
     "turn": 16,
     "unit_id": 3,
-    "action": 3,
+    "action": 2,
     "position": [
-      0,
-      1
+      4,
+      13
     ],
     "hp": 1
   },
   {
     "turn": 17,
     "unit_id": 3,
-    "action": 3,
+    "action": 0,
     "position": [
       0,
-      5
+      9
     ],
     "hp": 1
   },
@@ -215,327 +215,17 @@
     "action": 3,
     "position": [
       0,
-      1
+      9
     ],
     "hp": 1
   },
   {
     "turn": 19,
     "unit_id": 3,
-    "action": 3,
+    "action": 5,
     "position": [
       0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 20,
-    "unit_id": 3,
-    "action": 1,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 21,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 22,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 23,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 24,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 25,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 26,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 27,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 28,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 29,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 30,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 31,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 32,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 33,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 34,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 35,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 36,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 37,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 38,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 39,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 40,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 41,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 42,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 43,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 44,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 45,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 46,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 47,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 48,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 49,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      5
-    ],
-    "hp": 1
-  },
-  {
-    "turn": 50,
-    "unit_id": 3,
-    "action": 3,
-    "position": [
-      0,
-      1
+      9
     ],
     "hp": 1
   }

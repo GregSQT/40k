@@ -12,7 +12,7 @@
   {
     "turn": 0,
     "unit_id": 4,
-    "action": 5,
+    "action": 6,
     "position": [
       22,
       3
@@ -32,31 +32,61 @@
   {
     "turn": 1,
     "unit_id": 4,
-    "action": 7,
+    "action": 1,
     "position": [
-      22,
-      3
+      23,
+      0
     ],
     "hp": 4
   },
   {
     "turn": 2,
     "unit_id": 3,
-    "action": 7,
+    "action": 0,
     "position": [
       0,
-      5
+      9
     ],
     "hp": 1
   },
   {
     "turn": 2,
     "unit_id": 4,
-    "action": 1,
+    "action": 7,
     "position": [
       23,
       0
     ],
     "hp": 2
+  },
+  {
+    "turn": 3,
+    "unit_id": 3,
+    "action": 7,
+    "position": [
+      0,
+      9
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 4,
+    "unit_id": 3,
+    "action": 7,
+    "position": [
+      0,
+      9
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 5,
+    "unit_id": 3,
+    "action": 0,
+    "position": [
+      0,
+      13
+    ],
+    "hp": 1
   }
 ]
