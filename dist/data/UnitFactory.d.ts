@@ -1,0 +1,42 @@
+declare const unitClassMap: Record<string, any>;
+export type UnitType = keyof typeof unitClassMap;
+export type Unit = {
+    id: number;
+    name: string;
+    type: UnitType;
+    player: 0 | 1;
+    col: number;
+    row: number;
+    color: number;
+    MOVE: number;
+    HP_MAX: number;
+    CUR_HP?: number;
+    RNG_RNG: number;
+    RNG_DMG: number;
+    CC_DMG: number;
+    ICON: string;
+};
+export declare function createUnit(params: {
+    id: number;
+    name: string;
+    type: UnitType;
+    player: 0 | 1;
+    col: number;
+    row: number;
+    color: number;
+}): {
+    MOVE: any;
+    HP_MAX: any;
+    RNG_RNG: any;
+    RNG_DMG: any;
+    CC_DMG: any;
+    ICON: any;
+    id: number;
+    name: string;
+    type: UnitType;
+    player: 0 | 1;
+    col: number;
+    row: number;
+    color: number;
+};
+export {};
