@@ -1,8 +1,7 @@
-// frontend/src/components/Board.tsx
-
+// src/components/Board.tsx - Version mise à jour compatible avec les nouveaux types
 import { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js";
-import type { Unit } from "@data/Units";
+import type { Unit } from "../types/game";
 import React from "react";
 
 const BOARD_COLS = 24;
@@ -40,6 +39,7 @@ function hexCorner(cx: number, cy: number, size: number, i: number) {
     cy + size * Math.sin(angle_rad),
   ];
 }
+
 function getHexPolygonPoints(cx: number, cy: number, size: number) {
   return Array.from({ length: 6 }, (_, i) => hexCorner(cx, cy, size, i)).flat();
 }
@@ -119,7 +119,7 @@ export default function Board({
       app.view.style.height = `${height}px`;
     }
 
-    // --- Right click cancels move/attack preview ---
+    // Right click cancels move/attack preview
     app.view.addEventListener("contextmenu", (e) => {
       if (mode === "movePreview" || mode === "attackPreview") {
         e.preventDefault();
@@ -127,11 +127,11 @@ export default function Board({
       }
     });
 
-    // --- Logic for green (move) and red (attack) highlights ---
+    // Logic for green (move) and red (attack) highlights
     let availableCells: { col: number; row: number }[] = [];
     const selectedUnit = units.find(u => u.id === selectedUnitId);
 
-    // === Charge preview: chargeCells & targets ===
+    // Charge preview: chargeCells & targets
     let chargeCells: { col: number; row: number }[] = [];
     let chargeTargets: Unit[] = [];
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
@@ -167,8 +167,7 @@ export default function Board({
       );
     }
 
-
-    // 1. Green move cells (mode: 'select')
+    // Green move cells (mode: 'select')
     if (selectedUnit && mode === "select") {
       if (selectedUnit && mode === "select" && phase !== "charge" && phase !== "combat") {
         const centerCol = selectedUnit.col;
@@ -191,7 +190,7 @@ export default function Board({
       }
     }
 
-    // 2. Red attack cells: Either after move (movePreview) or attackPreview
+    // Red attack cells: Either after move (movePreview) or attackPreview
     let attackCells: { col: number; row: number }[] = [];
     let previewUnit: Unit | undefined = undefined;
     let attackFromCol: number | null = null;
@@ -221,7 +220,7 @@ export default function Board({
       }
     }
 
-    // --- Draw grid cells ---
+    // Draw grid cells
     for (let col = 0; col < BOARD_COLS; col++) {
       for (let row = 0; row < BOARD_ROWS; row++) {
         const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
@@ -246,7 +245,7 @@ export default function Board({
         cell.eventMode = "static";
         (cell as any).buttonMode = true;
 
-        // --- CHARGE PHASE: clickable orange cells ---
+        // CHARGE PHASE: clickable orange cells
         if (phase === "charge" && mode === "chargePreview") {
           const orange = chargeCells.find(c => c.col === col && c.row === row);
           if (orange && selectedUnit) {
@@ -284,7 +283,7 @@ export default function Board({
       }
     }
 
-    // --- Draw units (normal and previewed) ---
+    // Draw units (normal and previewed)
     for (const unit of units) {
       // In movePreview, do not draw the moving unit at its old spot
       if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;
@@ -294,14 +293,12 @@ export default function Board({
       const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
       const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
-      // === Green HP bar above the unit ===
-      // Calculate bar position
+      // Green HP bar above the unit
       if (unit.HP_MAX) {
         const HP_BAR_WIDTH = HEX_RADIUS * 1.4;
         const HP_BAR_HEIGHT = 7;
-        const HP_BAR_Y_OFFSET = HEX_RADIUS * 0.85; // how far above the unit
+        const HP_BAR_Y_OFFSET = HEX_RADIUS * 0.85;
 
-        // Bar starts centered above unit icon
         const barX = centerX - HP_BAR_WIDTH / 2;
         const barY = centerY - HP_BAR_Y_OFFSET - HP_BAR_HEIGHT;
 
@@ -313,7 +310,7 @@ export default function Board({
         app.stage.addChild(barBg);
 
         // Draw slices (green for HP, darker for lost HP)
-        const hp = Math.max(0, unit.CUR_HP ?? unit.HP_MAX); // Use CUR_HP here!
+        const hp = Math.max(0, unit.CUR_HP ?? unit.HP_MAX);
         for (let i = 0; i < unit.HP_MAX; i++) {
           const sliceWidth = (HP_BAR_WIDTH - (unit.HP_MAX - 1)) / unit.HP_MAX;
           const sliceX = barX + i * (sliceWidth + 1);
@@ -326,14 +323,11 @@ export default function Board({
         }
       }
 
-      // === end HP bar ===
-
-      // --- Draw green hex outline ONLY for currentPlayer's units eligible for current phase ---
+      // Draw green hex outline ONLY for currentPlayer's units eligible for current phase
       let isEligible = false;
       if (phase === "move") {
         isEligible = unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id));
       } else if (phase === "shoot") {
-        // Only if not already shot, and has at least one enemy in range
         if (unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id))) {
           const enemies = units.filter(u2 => u2.player !== currentPlayer);
           isEligible = enemies.some(eu => {
@@ -343,7 +337,6 @@ export default function Board({
           });
         }
       } else if (phase === "charge") {
-        // Eligible if: not already charged, no enemy adjacent, at least one enemy in MOVE range
         const unitsChargedArr = unitsCharged || [];
         if (unit.player === currentPlayer && !unitsChargedArr.includes(Number(unit.id))) {
           const enemies = units.filter(u2 => u2.player !== currentPlayer);
@@ -379,7 +372,7 @@ export default function Board({
         }
       }
 
-      // === COMBAT PHASE: highlight adjacent enemy units in red when a friendly unit is selected ===
+      // COMBAT PHASE: highlight adjacent enemy units in red when a friendly unit is selected
       if (phase === "combat" && selectedUnitId !== null) {
         const attacker = units.find(u => u.id === selectedUnitId);
         if (
@@ -395,6 +388,7 @@ export default function Board({
           app.stage.addChild(attackOutline);
         }
       }
+      
       // Red outline for enemy units in charge preview
       if (phase === "charge" && mode === "chargePreview" && chargeTargets.some(eu => eu.col === unit.col && eu.row === unit.row)) {
         const attackOutline = new PIXI.Graphics();
@@ -404,6 +398,7 @@ export default function Board({
         attackOutline.endFill();
         app.stage.addChild(attackOutline);
       }
+      
       if (isEligible) {
         const outline = new PIXI.Graphics();
         const hexPoints = getHexPolygonPoints(centerX, centerY, HEX_RADIUS * 0.9);
@@ -421,19 +416,11 @@ export default function Board({
       unitCircle.eventMode = "static";
       (unitCircle as any).buttonMode = true;
 
-      // === Make eligible chargers clickable in charge phase ===
-      if (isEligible && phase === "charge" && mode === "select") {
-        unitCircle.on("pointerdown", (e: any) => {
-          if (e.button === 0) {
-            onSelectUnit(unit.id);
-          }
-        });
-      }
-
+      // Event handlers for unit interactions
       unitCircle.on("pointerdown", (e: any) => {
         e.stopPropagation();
 
-        // --- Charge phase: handle active unit left/right click ---
+        // Handle various phase-specific interactions
         if (phase === "charge" && mode === "chargePreview" && selectedUnitId === unit.id) {
           if (e.button === 2) {
             if (typeof onCancelCharge === "function") onCancelCharge();
@@ -445,14 +432,12 @@ export default function Board({
           }
         }
 
-        // --- MOVEMENT PHASE: move handling as before ---
         if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) {
           if (e.button === 0) onConfirmMove();
           if (e.button === 2) onCancelMove();
           return;
         }
 
-        // --- SHOOTING PHASE: ATTACK PREVIEW & SHOOT ---
         if (mode === "attackPreview" && attackPreview && unit.player !== currentPlayer) {
           const shooter = units.find(u => u.id === attackPreview.unitId);
           if (shooter && !unitsMoved.includes(Number(shooter.id))) {
@@ -465,7 +450,6 @@ export default function Board({
           return;
         }
 
-        // --- CHARGE PHASE: CHARGE PREVIEW & CHARGE ---
         if (phase === "charge" && mode === "chargePreview" && selectedUnitId !== null && unit.player !== currentPlayer) {
           const charger = units.find(u => u.id === selectedUnitId);
           if (charger && cubeDistance(offsetToCube(charger.col, charger.row), offsetToCube(unit.col, unit.row)) <= charger.MOVE) {
@@ -474,27 +458,23 @@ export default function Board({
           return;
         }
 
-        // --- COMBAT PHASE: allow select and attack ---
         if (phase === "combat") {
-          // 1. Click your own eligible unit (left click): select for attacking
           if (
             unit.player === currentPlayer &&
             !(unitsAttacked || []).includes(Number(unit.id)) &&
             e.button === 0
           ) {
-            // If already selected, left click ends activation (skip attack)
             if (selectedUnitId === unit.id) {
               if (typeof onCombatAttack === "function") {
-                onCombatAttack(unit.id, null); // null = skip attack
+                onCombatAttack(unit.id, null);
               }
               return;
             } else {
-              // Otherwise, select the unit for possible melee attack
               onSelectUnit(Number(unit.id));
               return;
             }
           }
-          // 2. Click adjacent enemy (left click): attack if your unit is selected
+          
           if (
             selectedUnitId !== null &&
             unit.player !== currentPlayer &&
@@ -508,7 +488,7 @@ export default function Board({
               }
             }
           }
-          // 3. Right click cancels selection if on self
+          
           if (
             selectedUnitId !== null &&
             unit.id === selectedUnitId &&
@@ -519,7 +499,7 @@ export default function Board({
           return;
         }
 
-        // --- FALLBACK: SELECT unit in MOVE/SHOOT/CHARGE phase (not in preview) ---
+        // Fallback selection logic
         let canSelect = false;
         if (phase === "move") {
           canSelect = unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id));
@@ -546,6 +526,7 @@ export default function Board({
           onSelectUnit(Number(unit.id));
         }
       });
+      
       app.stage.addChild(unitCircle);
 
       if (unit.ICON) {
@@ -556,7 +537,6 @@ export default function Board({
         iconSprite.width = ICON_SIZE;
         iconSprite.height = ICON_SIZE;
         app.stage.addChild(iconSprite);
-
       } else {
         const label = new PIXI.Text(unit.name, {
           fontFamily: "Arial",
@@ -571,7 +551,6 @@ export default function Board({
         app.stage.addChild(label);
       }
     }
-
 
     // Draw previewed unit at its temporary destination (if any)
     if ((mode === "movePreview" && movePreview && previewUnit) ||

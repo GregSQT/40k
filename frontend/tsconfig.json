@@ -1,18 +1,32 @@
-// frontend/tsconfig.json
-
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@roster/*": ["src/roster/*"],
-      "@data/*": ["src/data/*"],
-      "@components/*": ["src/components/*"],
-      "@images/*": ["../src/images/*"],
-      "@ai/*": ["../ai/*"]
+      "@/*": [
+        "src/*"
+      ],
+      "@roster/*": [
+        "src/roster/*"
+      ],
+      "@data/*": [
+        "src/data/*"
+      ],
+      "@components/*": [
+        "src/components/*"
+      ],
+      "@pages/*": [
+        "src/pages/*"
+      ],
+      "@types/*": [
+        "src/types/*"
+      ],
+      "@ai/*": [
+        "../ai/*"
+      ]
     },
     "composite": true,
-    "outDir": "../dist",
+    "outDir": "dist",
     "rootDir": "src",
     "module": "ESNext",
     "moduleResolution": "node",
@@ -24,9 +38,7 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
-    //"noEmit": true,
-    "tsBuildInfoFile": "../dist/frontend.tsbuildinfo"
-    
+    "tsBuildInfoFile": "dist/frontend.tsbuildinfo"
   },
   "include": [
     "src/**/*"

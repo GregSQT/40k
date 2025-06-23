@@ -1,46 +1,69 @@
-// frontend/src/data/Scenario.ts
+// src/data/Scenario.ts
+import { Unit } from '../types/game';
 
-import { createUnit } from "./UnitFactory.js";
-
-const units = [
+const initialUnits: Unit[] = [
   // Player 0 units
-  createUnit({
+  {
     id: 0,
     name: "P-I",
     type: "Intercessor",
     player: 0,
     col: 23,
-    row: 12, // Game 17, Test 12
+    row: 12,
     color: 0x244488,
-  }),
-  createUnit({
+    MOVE: 4,
+    HP_MAX: 3,
+    RNG_RNG: 8,
+    RNG_DMG: 2,
+    CC_DMG: 1,
+    ICON: "/icons/Intercessor.webp",
+  },
+  {
     id: 1,
     name: "P-A",
     type: "Assault Intercessor",
     player: 0,
     col: 1,
-    row: 12, // Game 17, Test 12
+    row: 12,
     color: 0xff3333,
-  }),
-  // Player 1 units
-  createUnit({
+    MOVE: 6,
+    HP_MAX: 4,
+    RNG_RNG: 4,
+    RNG_DMG: 1,
+    CC_DMG: 2,
+    ICON: "/icons/AssaultIntercessor.webp",
+  },
+  // Player 1 units (AI)
+  {
     id: 2,
     name: "A-I",
     type: "Intercessor",
     player: 1,
     col: 0,
-    row: 5, // Game 0, Test 5
+    row: 5,
     color: 0x882222,
-  }),
-  createUnit({
+    MOVE: 4,
+    HP_MAX: 3,
+    RNG_RNG: 8,
+    RNG_DMG: 2,
+    CC_DMG: 1,
+    ICON: "/icons/Intercessor.webp",
+  },
+  {
     id: 3,
     name: "A-A",
     type: "Assault Intercessor",
     player: 1,
     col: 22,
-    row: 3, // Game 0, Test 3
+    row: 3,
     color: 0x6633cc,
-  }),
+    MOVE: 6,
+    HP_MAX: 4,
+    RNG_RNG: 4,
+    RNG_DMG: 1,
+    CC_DMG: 2,
+    ICON: "/icons/AssaultIntercessor.webp",
+  },
 ];
 
-export default units;
+export default initialUnits;

@@ -1,26 +1,18 @@
 // frontend/src/data/UnitFactory.ts
 
-const unitFiles = import.meta.glob<{
-  [key: string]: { [exported: string]: any }
-}>("../roster/spaceMarine/*.ts", { eager: true });
+// Direct imports instead of dynamic glob
+import { Intercessor } from '../roster/spaceMarine/Intercessor';
+import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
+import { SpaceMarineMeleeUnit } from '../roster/spaceMarine/SpaceMarineMeleeUnit';
+import { SpaceMarineRangedUnit } from '../roster/spaceMarine/SpaceMarineRangedUnit';
 
-const unitClassMap: Record<string, any> = {};
+export type UnitType = 
+  | "Intercessor" 
+  | "AssaultIntercessor" 
+  | "SpaceMarineMeleeUnit" 
+  | "SpaceMarineRangedUnit";
 
-for (const path in unitFiles) {
-  const mod = unitFiles[path];
-  for (const key in mod) {
-    const UnitClass = mod[key] as { NAME: string }; // 👈 Type override for static NAME
-    if (typeof mod[key] === "function" && UnitClass.NAME) {
-      unitClassMap[UnitClass.NAME] = mod[key];
-    }
-  }
-}
-
-// ...add other units as needed
-
-export type UnitType = keyof typeof unitClassMap;
-
-export type Unit = {
+export interface Unit {
   id: number;
   name: string;
   type: UnitType;
@@ -30,11 +22,19 @@ export type Unit = {
   color: number;
   MOVE: number;
   HP_MAX: number;
-  CUR_HP?: number; // Ourrent HP
   RNG_RNG: number;
   RNG_DMG: number;
   CC_DMG: number;
   ICON: string;
+  CUR_HP?: number;
+}
+
+// Unit class registry
+const unitClassMap: Record<UnitType, any> = {
+  "Intercessor": Intercessor,
+  "AssaultIntercessor": AssaultIntercessor,
+  "SpaceMarineMeleeUnit": SpaceMarineMeleeUnit,
+  "SpaceMarineRangedUnit": SpaceMarineRangedUnit,
 };
 
 export function createUnit(params: {
@@ -45,16 +45,21 @@ export function createUnit(params: {
   col: number;
   row: number;
   color: number;
-}) {
+}): Unit {
   const UnitClass = unitClassMap[params.type];
+  
+  if (!UnitClass) {
+    throw new Error(`Unknown unit type: ${params.type}`);
+  }
+  
   return {
     ...params,
-    MOVE: UnitClass.MOVE,
-    HP_MAX: UnitClass.HP_MAX,
-    RNG_RNG: UnitClass.RNG_RNG,
-    RNG_DMG: UnitClass.RNG_DMG,
-    CC_DMG: UnitClass.CC_DMG,
-    ICON: UnitClass.ICON,
-    // ...add other stats as needed
+    MOVE: UnitClass.MOVE || 6,
+    HP_MAX: UnitClass.HP_MAX || 4,
+    RNG_RNG: UnitClass.RNG_RNG || 4,
+    RNG_DMG: UnitClass.RNG_DMG || 1,
+    CC_DMG: UnitClass.CC_DMG || 1,
+    ICON: UnitClass.ICON || "default",
+    CUR_HP: UnitClass.HP_MAX || 4,
   };
 }
