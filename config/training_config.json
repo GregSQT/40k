@@ -1,0 +1,87 @@
+{
+  "default": {
+    "description": "Optimized parameters for complex reward learning",
+    "total_timesteps": 1000000,
+    "model_params": {
+      "policy": "MlpPolicy",
+      "verbose": 1,
+      "buffer_size": 100000,
+      "learning_rate": 0.0005,
+      "learning_starts": 5000,
+      "batch_size": 128,
+      "train_freq": 1,
+      "target_update_interval": 1000,
+      "exploration_fraction": 0.3,
+      "exploration_final_eps": 0.02,
+      "tensorboard_log": "./tensorboard/"
+    }
+  },
+  "original": {
+    "description": "Your original parameters from train.py",
+    "total_timesteps": 1000000,
+    "model_params": {
+      "policy": "MlpPolicy",
+      "verbose": 1,
+      "buffer_size": 10000,
+      "learning_rate": 0.001,
+      "learning_starts": 100,
+      "batch_size": 64,
+      "train_freq": 4,
+      "target_update_interval": 500,
+      "exploration_fraction": 0.5,
+      "exploration_final_eps": 0.05,
+      "tensorboard_log": "./tensorboard/"
+    }
+  },
+  "conservative": {
+    "description": "Conservative increase from original",
+    "total_timesteps": 1000000,
+    "model_params": {
+      "policy": "MlpPolicy",
+      "verbose": 1,
+      "buffer_size": 50000,
+      "learning_rate": 0.0007,
+      "learning_starts": 2000,
+      "batch_size": 128,
+      "train_freq": 2,
+      "target_update_interval": 750,
+      "exploration_fraction": 0.4,
+      "exploration_final_eps": 0.03,
+      "tensorboard_log": "./tensorboard/"
+    }
+  },
+  "aggressive": {
+    "description": "Aggressive parameters for faster learning",
+    "total_timesteps": 2000000,
+    "model_params": {
+      "policy": "MlpPolicy",
+      "verbose": 1,
+      "buffer_size": 200000,
+      "learning_rate": 0.0003,
+      "learning_starts": 10000,
+      "batch_size": 256,
+      "train_freq": 1,
+      "target_update_interval": 1500,
+      "exploration_fraction": 0.2,
+      "exploration_final_eps": 0.01,
+      "tensorboard_log": "./tensorboard/"
+    }
+  },
+  "debug": {
+    "description": "Quick training for testing",
+    "total_timesteps": 50000,
+    "model_params": {
+      "policy": "MlpPolicy",
+      "verbose": 1,
+      "buffer_size": 25000,
+      "learning_rate": 0.001,
+      "learning_starts": 1000,
+      "batch_size": 64,
+      "train_freq": 2,
+      "target_update_interval": 500,
+      "exploration_fraction": 0.3,
+      "exploration_final_eps": 0.05,
+      "tensorboard_log": "./tensorboard/"
+    }
+  }
+}

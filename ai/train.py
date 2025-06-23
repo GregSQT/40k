@@ -11,8 +11,22 @@ from ai.gym40k import W40KEnv
 
 ######################################################################################
 ### Training configuration
-total_timesteps_setup = 1_000_000  # Total timesteps for training. Debug : 100_000
-exploration_fraction_setup = 0.5   # Fraction of timesteps spent exploring
+######################################################################################
+# Total timesteps
+total_timesteps_setup = 1_000_000       # Total timesteps for training. Debug : 100_000
+# Exploration
+exploration_fraction_setup = 0.3        # Fraction of timesteps spent exploring
+exploration_final_eps_setup = 0.02      # Final exploration rate after exploration_fraction timesteps
+# Learning
+learning_rate_setup = 5e-4              # Learning rate for the optimizer
+buffer_size_setup = 100_000             # Replay buffer size for DQN
+# Training frequency
+train_freq_setup = 1                    # (1) - more stable, but slower
+target_update_interval_setup = 1_000    # (1000) - update target network every 1000 steps
+# Learning rate
+# Number of steps to collect before starting training - Conservative : 5_000 - Agressive (more initial exploration) : 10_000
+learning_starts_setup = total_timesteps_setup * 0.015           
+batch_size_setup = 128                  # Batch size for training
 ######################################################################################
 
 def parse_args():
@@ -48,14 +62,14 @@ if __name__ == "__main__":
                 "MlpPolicy",
                 env,
                 verbose=1,
-                buffer_size=10000,
-                learning_rate=1e-3,
+                buffer_size=buffer_size_setup,
+                learning_rate=learning_rate_setup,
                 learning_starts=100,
                 batch_size=64,
-                train_freq=4,
-                target_update_interval=500,
+                train_freq=train_freq_setup,
+                target_update_interval=target_update_interval_setup,
                 exploration_fraction=exploration_fraction_setup,
-                exploration_final_eps=0.05,
+                exploration_final_eps=exploration_final_eps_setup,
                 tensorboard_log="./tensorboard/"
             )
     else:
@@ -64,14 +78,14 @@ if __name__ == "__main__":
             "MlpPolicy",
             env,
             verbose=1,
-            buffer_size=10000,
-            learning_rate=1e-3,
+            buffer_size=buffer_size_setup,
+            learning_rate=learning_rate_setup,
             learning_starts=100,
             batch_size=64,
-            train_freq=4,
-            target_update_interval=500,
-            exploration_fraction=0.5,
-            exploration_final_eps=0.05,
+            train_freq=train_freq_setup,
+            target_update_interval=target_update_interval,
+            exploration_fraction=exploration_fraction_setup,
+            exploration_final_eps=exploration_final_eps_setup,
             tensorboard_log="./tensorboard/"
         )
 
