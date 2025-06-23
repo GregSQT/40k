@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@roster/*": ["frontend/src/roster/*"],
+      "@data/*": ["frontend/src/data/*"],
+      "@components/*": ["frontend/src/components/*"],
+      "@images/*": ["src/images/*"],
+      "@pages/*": ["frontend/src/components/pages/*"],
+      "@ai/*": ["ai/*"]
+    }
+  }
+}

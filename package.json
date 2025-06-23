@@ -1,0 +1,19 @@
+{
+  "dependencies": {
+    "pixi.js": "^8.9.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.2"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "@types/react-router-dom": "^5.3.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "type": "module",
+  "scripts": {
+    "export-scenario": "node export_scenario.js"
+  }
+}
