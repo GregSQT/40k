@@ -1,472 +1,80 @@
 #!/usr/bin/env python3
 """
-TypeScript Fixes + Project Cleanup Script
-=========================================
+Warhammer 40k Project Cleanup and Reorganization Script
+======================================================
 This script will:
-1. Fix all TypeScript compilation errors
-2. Clean up and reorganize the project structure
-3. Update configuration files
+1. Complete the migration to frontend/src/ structure
+2. Remove unnecessary files
+3. Fix configuration files
+4. Reorganize project structure
+5. Create proper .gitignore
 """
 
 import os
 import json
 import shutil
 import sys
-import re
 from pathlib import Path
 
-class TypeScriptFixer:
+class ProjectCleaner:
     def __init__(self, project_root="."):
         self.project_root = Path(project_root).resolve()
-        self.frontend_src = self.project_root / "frontend" / "src"
+        self.backup_created = False
         
     def log(self, message, level="INFO"):
         """Simple logging function"""
         print(f"[{level}] {message}")
         
     def create_backup(self):
-        """Create a backup before making changes"""
-        backup_dir = self.project_root / "backup_before_fixes"
+        """Create a backup of current state before making changes"""
+        backup_dir = self.project_root / "backup_before_cleanup"
         if backup_dir.exists():
             shutil.rmtree(backup_dir)
             
-        self.log("Creating backup...")
-        backup_dir.mkdir()
+        self.log("Creating backup of current project state...")
         
-        # Backup the entire frontend/src directory
-        if (self.project_root / "frontend" / "src").exists():
-            shutil.copytree(
-                self.project_root / "frontend" / "src",
-                backup_dir / "frontend_src"
-            )
+        # Backup important files and directories
+        important_items = [
+            "frontend/src",
+            "ai",
+            "src",  # Old structure
+            "tsconfig.base.json",
+            "frontend/tsconfig.json",
+            "frontend/vite.config.ts",
+            "frontend/package.json",
+            "package.json",
+            ".gitignore"
+        ]
         
+        backup_dir.mkdir(exist_ok=True)
+        
+        for item in important_items:
+            src_path = self.project_root / item
+            if src_path.exists():
+                dest_path = backup_dir / item
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                if src_path.is_dir():
+                    shutil.copytree(src_path, dest_path, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(src_path, dest_path)
+                    
+        self.backup_created = True
         self.log(f"Backup created at: {backup_dir}")
         
-    def fix_ai_ts(self):
-        """Fix ai.ts parameter type error"""
-        ai_file = self.frontend_src / "ai" / "ai.ts"
-        if not ai_file.exists():
-            self.log("ai.ts not found, skipping...", "WARN")
-            return
-            
-        self.log("Fixing ai.ts...")
-        
-        content = '''// frontend/src/ai/ai.ts
-
-interface GameState {
-  units: Array<{
-    id: number;
-    player: number;
-    col: number;
-    row: number;
-    CUR_HP: number;
-    MOVE: number;
-    RNG_RNG: number;
-    RNG_DMG: number;
-    CC_DMG: number;
-  }>;
-}
-
-export async function fetchAiAction(gameState: GameState) {
-  console.log("[AI] Sending gameState to backend:", gameState);
-  const response = await fetch("http://localhost:8000/ai/action", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ state: { units: gameState.units } })
-  });
-  const result = await response.json();
-  console.log("[AI] Got result from backend:", result);
-  return result;
-}
-'''
-        
-        with open(ai_file, 'w', encoding='utf-8') as f:
-            f.write(content)
-        self.log("Fixed ai.ts parameter type")
-        
-    def fix_board_tsx(self):
-        """Fix Board.tsx app.view type error"""
-        board_file = self.frontend_src / "components" / "Board.tsx"
-        if not board_file.exists():
-            self.log("Board.tsx not found, skipping...", "WARN")
-            return
-            
-        self.log("Fixing Board.tsx...")
-        
-        with open(board_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Fix the app.view type issue by adding proper type checking
-        old_pattern = r'app\.view\.addEventListener\("contextmenu"'
-        new_pattern = r'(app.view as HTMLCanvasElement).addEventListener("contextmenu"'
-        
-        if old_pattern in content:
-            content = re.sub(
-                r'app\.view\.addEventListener\("contextmenu"',
-                r'(app.view as HTMLCanvasElement).addEventListener("contextmenu"',
-                content
-            )
-            
-            with open(board_file, 'w', encoding='utf-8') as f:
-                f.write(content)
-            self.log("Fixed Board.tsx app.view type issue")
-        else:
-            self.log("Board.tsx app.view pattern not found", "WARN")
-            
-    def fix_gameboard_tsx(self):
-        """Fix GameBoard.tsx type mismatches"""
-        gameboard_file = self.frontend_src / "components" / "GameBoard.tsx"
-        if not gameboard_file.exists():
-            self.log("GameBoard.tsx not found, skipping...", "WARN")
-            return
-            
-        self.log("Fixing GameBoard.tsx...")
-        
-        # Replace the file with a corrected version
-        content = '''// src/components/GameBoard.tsx
-import React from 'react';
-import Board from './Board';
-import { Unit, GameState, MovePreview, AttackPreview, UnitId } from '../types/game';
-
-interface GameBoardProps {
-  units: Unit[];
-  selectedUnitId: UnitId | null;
-  phase: GameState['phase'];
-  mode: GameState['mode'];
-  movePreview: MovePreview | null;
-  attackPreview: AttackPreview | null;
-  currentPlayer: GameState['currentPlayer'];
-  unitsMoved: UnitId[];
-  unitsCharged: UnitId[];
-  unitsAttacked: UnitId[];
-  onSelectUnit: (id: UnitId | null) => void;
-  onStartMovePreview: (unitId: UnitId, col: number, row: number) => void;
-  onStartAttackPreview: (unitId: UnitId, col: number, row: number) => void;
-  onConfirmMove: () => void;
-  onCancelMove: () => void;
-  onShoot: (shooterId: UnitId, targetId: UnitId) => void;
-  onCombatAttack: (attackerId: UnitId, targetId: UnitId | null) => void;
-  onCharge: (chargerId: UnitId, targetId: UnitId) => void;
-  onMoveCharger: (chargerId: UnitId, destCol: number, destRow: number) => void;
-  onCancelCharge: () => void;
-  onValidateCharge: (chargerId: UnitId) => void;
-}
-
-export const GameBoard: React.FC<GameBoardProps> = (props) => {
-  // Type-safe wrapper for Board component
-  // Convert string/number IDs to proper number type for Board component
-  
-  const handleSelectUnit = (id: number | string | null) => {
-    if (typeof id === 'string') {
-      const numId = parseInt(id, 10);
-      props.onSelectUnit(isNaN(numId) ? null : numId);
-    } else {
-      props.onSelectUnit(id);
-    }
-  };
-  
-  const handleStartMovePreview = (unitId: number | string, col: number | string, row: number | string) => {
-    const numUnitId = typeof unitId === 'string' ? parseInt(unitId, 10) : unitId;
-    const numCol = typeof col === 'string' ? parseInt(col, 10) : col;
-    const numRow = typeof row === 'string' ? parseInt(row, 10) : row;
-    
-    if (!isNaN(numUnitId) && !isNaN(numCol) && !isNaN(numRow)) {
-      props.onStartMovePreview(numUnitId, numCol, numRow);
-    }
-  };
-  
-  return (
-    <div className="game-board">
-      <Board
-        units={props.units}
-        selectedUnitId={props.selectedUnitId}
-        phase={props.phase}
-        mode={props.mode}
-        movePreview={props.movePreview}
-        attackPreview={props.attackPreview}
-        currentPlayer={props.currentPlayer}
-        unitsMoved={props.unitsMoved}
-        unitsCharged={props.unitsCharged}
-        unitsAttacked={props.unitsAttacked}
-        onSelectUnit={handleSelectUnit}
-        onStartMovePreview={handleStartMovePreview}
-        onStartAttackPreview={props.onStartAttackPreview}
-        onConfirmMove={props.onConfirmMove}
-        onCancelMove={props.onCancelMove}
-        onShoot={props.onShoot}
-        onCombatAttack={props.onCombatAttack}
-        onCharge={props.onCharge}
-        onMoveCharger={props.onMoveCharger}
-        onCancelCharge={props.onCancelCharge}
-        onValidateCharge={props.onValidateCharge}
-      />
-    </div>
-  );
-};
-'''
-        
-        with open(gameboard_file, 'w', encoding='utf-8') as f:
-            f.write(content)
-        self.log("Fixed GameBoard.tsx type mismatches")
-        
-    def fix_unitfactory_ts(self):
-        """Fix UnitFactory.ts import.meta.glob error"""
-        unitfactory_file = self.frontend_src / "data" / "UnitFactory.ts"
-        if not unitfactory_file.exists():
-            self.log("UnitFactory.ts not found, skipping...", "WARN")
-            return
-            
-        self.log("Fixing UnitFactory.ts...")
-        
-        # Create a simpler version without import.meta.glob
-        content = '''// frontend/src/data/UnitFactory.ts
-
-// Direct imports instead of dynamic glob
-import { Intercessor } from '../roster/spaceMarine/Intercessor';
-import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
-import { SpaceMarineMeleeUnit } from '../roster/spaceMarine/SpaceMarineMeleeUnit';
-import { SpaceMarineRangedUnit } from '../roster/spaceMarine/SpaceMarineRangedUnit';
-
-export type UnitType = 
-  | "Intercessor" 
-  | "AssaultIntercessor" 
-  | "SpaceMarineMeleeUnit" 
-  | "SpaceMarineRangedUnit";
-
-export interface Unit {
-  id: number;
-  name: string;
-  type: UnitType;
-  player: 0 | 1;
-  col: number;
-  row: number;
-  color: number;
-  MOVE: number;
-  HP_MAX: number;
-  RNG_RNG: number;
-  RNG_DMG: number;
-  CC_DMG: number;
-  ICON: string;
-  CUR_HP?: number;
-}
-
-// Unit class registry
-const unitClassMap: Record<UnitType, any> = {
-  "Intercessor": Intercessor,
-  "AssaultIntercessor": AssaultIntercessor,
-  "SpaceMarineMeleeUnit": SpaceMarineMeleeUnit,
-  "SpaceMarineRangedUnit": SpaceMarineRangedUnit,
-};
-
-export function createUnit(params: {
-  id: number;
-  name: string;
-  type: UnitType;
-  player: 0 | 1;
-  col: number;
-  row: number;
-  color: number;
-}): Unit {
-  const UnitClass = unitClassMap[params.type];
-  
-  if (!UnitClass) {
-    throw new Error(`Unknown unit type: ${params.type}`);
-  }
-  
-  return {
-    ...params,
-    MOVE: UnitClass.MOVE || 6,
-    HP_MAX: UnitClass.HP_MAX || 4,
-    RNG_RNG: UnitClass.RNG_RNG || 4,
-    RNG_DMG: UnitClass.RNG_DMG || 1,
-    CC_DMG: UnitClass.CC_DMG || 1,
-    ICON: UnitClass.ICON || "default",
-    CUR_HP: UnitClass.HP_MAX || 4,
-  };
-}
-'''
-        
-        with open(unitfactory_file, 'w', encoding='utf-8') as f:
-            f.write(content)
-        self.log("Fixed UnitFactory.ts import.meta.glob issue")
-        
-    def create_missing_types(self):
-        """Create missing type definitions"""
-        types_dir = self.frontend_src / "types"
-        types_dir.mkdir(exist_ok=True)
-        
-        # Create game types if missing
-        game_types_file = types_dir / "game.ts"
-        if not game_types_file.exists():
-            self.log("Creating missing game types...")
-            
-            content = '''// src/types/game.ts
-
-export type PlayerId = 0 | 1;
-export type UnitId = number;
-
-export type GamePhase = "move" | "shoot" | "charge" | "combat";
-export type GameMode = "select" | "movePreview" | "attackPreview" | "chargePreview";
-
-export interface Position {
-  col: number;
-  row: number;
-}
-
-export interface Unit {
-  id: UnitId;
-  name: string;
-  type: string;
-  player: PlayerId;
-  col: number;
-  row: number;
-  color: number;
-  MOVE: number;
-  HP_MAX: number;
-  RNG_RNG: number;
-  RNG_DMG: number;
-  CC_DMG: number;
-  ICON: string;
-  CUR_HP: number;
-}
-
-export interface GameState {
-  phase: GamePhase;
-  mode: GameMode;
-  currentPlayer: PlayerId;
-  units: Unit[];
-  selectedUnitId: UnitId | null;
-  unitsMoved: UnitId[];
-  unitsCharged: UnitId[];
-  unitsAttacked: UnitId[];
-}
-
-export interface MovePreview {
-  unitId: UnitId;
-  destCol: number;
-  destRow: number;
-}
-
-export interface AttackPreview {
-  unitId: UnitId;
-  col: number;
-  row: number;
-}
-
-export interface AIGameState {
-  units: Unit[];
-}
-
-export interface AIAction {
-  action: "move" | "moveAwayToRngRng" | "shoot" | "charge" | "attack" | "skip";
-  unitId: UnitId;
-  destCol?: number;
-  destRow?: number;
-  targetId?: UnitId;
-}
-
-export interface GameActions {
-  selectUnit: (id: UnitId | null) => void;
-  startMovePreview: (unitId: UnitId, col: number, row: number) => void;
-  startAttackPreview: (unitId: UnitId, col: number, row: number) => void;
-  confirmMove: () => void;
-  cancelMove: () => void;
-  shoot: (shooterId: UnitId, targetId: UnitId) => void;
-  combatAttack: (attackerId: UnitId, targetId: UnitId | null) => void;
-  charge: (chargerId: UnitId, targetId: UnitId) => void;
-  moveCharger: (chargerId: UnitId, destCol: number, destRow: number) => void;
-  cancelCharge: () => void;
-  validateCharge: (chargerId: UnitId) => void;
-}
-'''
-            
-            with open(game_types_file, 'w', encoding='utf-8') as f:
-                f.write(content)
-            self.log("Created game types")
-        
-        # Update types index
-        types_index_file = types_dir / "index.ts"
-        if not types_index_file.exists():
-            content = '''// src/types/index.ts
-export type {
-  PlayerId,
-  UnitId,
-  GamePhase,
-  GameMode,
-  Position,
-  Unit,
-  GameState,
-  MovePreview,
-  AttackPreview,
-  AIGameState,
-  AIAction,
-  GameActions,
-} from './game';
-
-export type ComponentProps<T = Record<string, unknown>> = T & {
-  className?: string;
-  children?: React.ReactNode;
-};
-'''
-            
-            with open(types_index_file, 'w', encoding='utf-8') as f:
-                f.write(content)
-            self.log("Created types index")
-            
-    def add_vite_env_types(self):
-        """Add proper vite-env.d.ts with import.meta.glob support"""
-        vite_env_file = self.frontend_src / "vite-env.d.ts"
-        
-        content = '''/// <reference types="vite/client" />
-
-// Extend ImportMeta interface to include glob
-interface ImportMeta {
-  glob: <T = any>(
-    pattern: string,
-    options?: {
-      eager?: boolean;
-      import?: string;
-      query?: string;
-      as?: string;
-    }
-  ) => Record<string, T>;
-}
-'''
-        
-        with open(vite_env_file, 'w', encoding='utf-8') as f:
-            f.write(content)
-        self.log("Added proper vite-env.d.ts")
-        
-    def run_typescript_fixes(self):
-        """Run all TypeScript fixes"""
-        self.log("Starting TypeScript fixes...")
-        
-        # Create backup
-        self.create_backup()
-        
-        # Apply fixes
-        self.fix_ai_ts()
-        self.fix_board_tsx()
-        self.fix_gameboard_tsx()
-        self.fix_unitfactory_ts()
-        self.create_missing_types()
-        self.add_vite_env_types()
-        
-        self.log("✅ TypeScript fixes completed!")
-        
-    def run_project_cleanup(self):
-        """Run the project cleanup after TypeScript fixes"""
-        self.log("Starting project cleanup...")
-        
-        # Remove unnecessary files
+    def remove_unnecessary_files(self):
+        """Remove files that shouldn't be in the repository"""
         files_to_remove = [
             "dist/frontend.tsbuildinfo",
-            "frontend/README.md", 
+            "frontend/README.md",  # Generic Vite template
+            "frontend/src/vite-env.d.ts",  # Can be regenerated
             "backup.log",
             "Notes.txt",
             "Path.txt",
-            "dist"  # Root dist folder
+            "dist",  # Root dist folder (we'll use frontend/dist)
         ]
+        
+        self.log("Removing unnecessary files...")
         
         for file_path in files_to_remove:
             full_path = self.project_root / file_path
@@ -477,88 +85,273 @@ interface ImportMeta {
                 else:
                     full_path.unlink()
                     self.log(f"Removed file: {file_path}")
-                    
-        # Move development tools
+            else:
+                self.log(f"File not found (already clean): {file_path}", "DEBUG")
+                
+    def migrate_remaining_src_files(self):
+        """Complete migration from root /src to /frontend/src"""
+        old_src = self.project_root / "src"
+        new_src = self.project_root / "frontend" / "src"
+        
+        if not old_src.exists():
+            self.log("No root /src directory found - migration already complete")
+            return
+            
+        self.log("Completing migration from /src to /frontend/src...")
+        
+        # Ensure target directory exists
+        new_src.mkdir(parents=True, exist_ok=True)
+        
+        # Move roster files if they exist in old location
+        old_roster = old_src / "roster"
+        new_roster = new_src / "roster"
+        
+        if old_roster.exists():
+            if new_roster.exists():
+                # Merge directories
+                self.log("Merging roster directories...")
+                for item in old_roster.rglob("*"):
+                    if item.is_file():
+                        relative_path = item.relative_to(old_roster)
+                        dest_file = new_roster / relative_path
+                        dest_file.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(item, dest_file)
+                        self.log(f"Moved: {item} -> {dest_file}")
+            else:
+                # Move entire directory
+                shutil.move(str(old_roster), str(new_roster))
+                self.log(f"Moved entire roster directory to frontend/src/")
+                
+        # Move any other files from old src
+        for item in old_src.rglob("*"):
+            if item.is_file() and item.parent != old_roster:
+                relative_path = item.relative_to(old_src)
+                dest_file = new_src / relative_path
+                dest_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, dest_file)
+                self.log(f"Moved additional file: {item} -> {dest_file}")
+                
+        # Remove old src directory if empty or only contains moved items
+        try:
+            if old_src.exists():
+                shutil.rmtree(old_src)
+                self.log("Removed old /src directory")
+        except OSError as e:
+            self.log(f"Could not remove old /src directory: {e}", "WARN")
+            
+    def fix_typescript_configs(self):
+        """Update TypeScript configuration files"""
+        self.log("Updating TypeScript configuration files...")
+        
+        # Fix the ROOT tsconfig.json issue
+        root_config_path = self.project_root / "tsconfig.json"
+        if root_config_path.exists():
+            self.log("Fixing root tsconfig.json that's causing the 'No inputs found' error...")
+            
+            # Create a proper root tsconfig that references the frontend
+            root_config = {
+                "files": [],
+                "references": [
+                    {"path": "./frontend"}
+                ],
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {
+                        "@/*": ["frontend/src/*"],
+                        "@roster/*": ["frontend/src/roster/*"],
+                        "@data/*": ["frontend/src/data/*"],
+                        "@components/*": ["frontend/src/components/*"],
+                        "@pages/*": ["frontend/src/pages/*"],
+                        "@types/*": ["frontend/src/types/*"],
+                        "@hooks/*": ["frontend/src/hooks/*"],
+                        "@services/*": ["frontend/src/services/*"],
+                        "@constants/*": ["frontend/src/constants/*"],
+                        "@utils/*": ["frontend/src/utils/*"],
+                        "@ai/*": ["ai/*"]
+                    }
+                }
+            }
+            
+            with open(root_config_path, 'w', encoding='utf-8') as f:
+                json.dump(root_config, f, indent=2)
+            self.log("Fixed root tsconfig.json - now uses project references")
+        
+        # Update tsconfig.base.json (keep for shared settings)
+        base_config_path = self.project_root / "tsconfig.base.json"
+        if base_config_path.exists():
+            base_config = {
+                "compilerOptions": {
+                    "target": "ES2020",
+                    "lib": ["dom", "dom.iterable", "ES6"],
+                    "allowJs": True,
+                    "skipLibCheck": True,
+                    "esModuleInterop": True,
+                    "allowSyntheticDefaultImports": True,
+                    "strict": True,
+                    "forceConsistentCasingInFileNames": True,
+                    "noFallthroughCasesInSwitch": True,
+                    "module": "ESNext",
+                    "moduleResolution": "node",
+                    "resolveJsonModule": True,
+                    "isolatedModules": True,
+                    "jsx": "react-jsx"
+                }
+            }
+            
+            with open(base_config_path, 'w', encoding='utf-8') as f:
+                json.dump(base_config, f, indent=2)
+            self.log("Updated tsconfig.base.json")
+            
+        # Update frontend/tsconfig.json
+        frontend_config_path = self.project_root / "frontend" / "tsconfig.json"
+        if frontend_config_path.exists():
+            frontend_config = {
+                "extends": "../tsconfig.base.json",
+                "compilerOptions": {
+                    "baseUrl": "src",
+                    "paths": {
+                        "@/*": ["*"],
+                        "@roster/*": ["roster/*"],
+                        "@data/*": ["data/*"],
+                        "@components/*": ["components/*"],
+                        "@pages/*": ["pages/*"],
+                        "@types/*": ["types/*"],
+                        "@hooks/*": ["hooks/*"],
+                        "@services/*": ["services/*"],
+                        "@constants/*": ["constants/*"],
+                        "@utils/*": ["utils/*"],
+                        "@ai/*": ["../ai/*"]
+                    },
+                    "composite": True,
+                    "outDir": "dist",
+                    "rootDir": "src",
+                    "noEmit": False,
+                    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+                },
+                "include": [
+                    "src/**/*"
+                ],
+                "exclude": [
+                    "node_modules",
+                    "dist"
+                ]
+            }
+            
+            with open(frontend_config_path, 'w', encoding='utf-8') as f:
+                json.dump(frontend_config, f, indent=2)
+            self.log("Updated frontend/tsconfig.json")
+            
+    def reorganize_development_tools(self):
+        """Move development scripts to tools directory"""
+        self.log("Reorganizing development tools...")
+        
         tools_dir = self.project_root / "tools"
         tools_dir.mkdir(exist_ok=True)
         
+        # Move save.py to tools
         save_py = self.project_root / "frontend" / "save.py"
         if save_py.exists():
-            shutil.move(str(save_py), str(tools_dir / "backup_script.py"))
-            self.log("Moved save.py to tools/backup_script.py")
+            new_save_py = tools_dir / "backup_script.py"
+            shutil.move(str(save_py), str(new_save_py))
+            self.log("Moved frontend/save.py to tools/backup_script.py")
             
-        # Update TypeScript configs
-        self.update_typescript_configs()
-        
-        # Create improved .gitignore
-        self.create_gitignore()
-        
-        self.log("✅ Project cleanup completed!")
-        
-    def update_typescript_configs(self):
-        """Update TypeScript configuration files"""
-        self.log("Updating TypeScript configs...")
-        
-        # Update tsconfig.base.json
-        base_config = {
-            "compilerOptions": {
-                "baseUrl": ".",
-                "paths": {
-                    "@/*": ["frontend/src/*"],
-                    "@roster/*": ["frontend/src/roster/*"],
-                    "@data/*": ["frontend/src/data/*"],
-                    "@components/*": ["frontend/src/components/*"],
-                    "@pages/*": ["frontend/src/pages/*"],
-                    "@types/*": ["frontend/src/types/*"],
-                    "@ai/*": ["ai/*"]
-                }
-            }
-        }
-        
-        with open(self.project_root / "tsconfig.base.json", 'w') as f:
-            json.dump(base_config, f, indent=2)
+            # Update the backup script paths
+            self.update_backup_script(new_save_py)
             
-        # Update frontend/tsconfig.json
-        frontend_config = {
-            "extends": "../tsconfig.base.json",
-            "compilerOptions": {
-                "baseUrl": ".",
-                "paths": {
-                    "@/*": ["src/*"],
-                    "@roster/*": ["src/roster/*"],
-                    "@data/*": ["src/data/*"],
-                    "@components/*": ["src/components/*"],
-                    "@pages/*": ["src/pages/*"],
-                    "@types/*": ["src/types/*"],
-                    "@ai/*": ["../ai/*"]
-                },
-                "composite": True,
-                "outDir": "dist",
-                "rootDir": "src",
-                "module": "ESNext",
-                "moduleResolution": "node",
-                "strict": True,
-                "esModuleInterop": True,
-                "target": "ES2020",
-                "jsx": "react-jsx",
-                "skipLibCheck": True,
-                "allowSyntheticDefaultImports": True,
-                "resolveJsonModule": True,
-                "forceConsistentCasingInFileNames": True,
-                "tsBuildInfoFile": "dist/frontend.tsbuildinfo"
-            },
-            "include": ["src/**/*"]
-        }
-        
-        with open(self.project_root / "frontend" / "tsconfig.json", 'w') as f:
-            json.dump(frontend_config, f, indent=2)
+        # Move generate_scenario.py to tools if it exists
+        gen_scenario = self.project_root / "generate_scenario.py"
+        if gen_scenario.exists():
+            shutil.move(str(gen_scenario), str(tools_dir / "generate_scenario.py"))
+            self.log("Moved generate_scenario.py to tools/")
             
-        self.log("Updated TypeScript configs")
+    def update_backup_script(self, script_path):
+        """Update the backup script with correct file paths"""
+        self.log("Updating backup script with corrected paths...")
         
-    def create_gitignore(self):
-        """Create a clean .gitignore"""
-        content = '''# Dependencies
+        try:
+            with open(script_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            # Update the files_to_copy list to remove old paths and duplicates
+            new_files_list = '''files_to_copy = [
+        # Root config files
+        "package.json",
+        "tsconfig.json", 
+        "tsconfig.base.json",
+        
+        # Frontend files
+        "frontend/tsconfig.json",
+        "frontend/vite.config.ts",
+        "frontend/package.json",
+        
+        # Frontend source
+        "frontend/src/App.tsx",
+        "frontend/src/routes.tsx", 
+        "frontend/src/main.tsx",
+        
+        # AI integration
+        "frontend/src/ai/ai.ts",
+        
+        # Pages
+        "frontend/src/pages/HomePage.tsx",
+        "frontend/src/pages/ReplayPage.tsx", 
+        "frontend/src/pages/GamePage.tsx",
+        
+        # Components
+        "frontend/src/components/Board.tsx",
+        "frontend/src/components/UnitSelector.tsx",
+        "frontend/src/components/ReplayViewer.tsx",
+        "frontend/src/components/LoadReplayButton.tsx",
+        
+        # Data
+        "frontend/src/data/Units.ts",
+        "frontend/src/data/UnitFactory.ts",
+        "frontend/src/data/Scenario.ts",
+        
+        # Roster (now in frontend/src)
+        "frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
+        "frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts", 
+        "frontend/src/roster/spaceMarine/Intercessor.ts",
+        "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
+        "frontend/src/roster/exportRewards.js",
+        
+        # AI backend
+        "ai/agent.py",
+        "ai/api.py", 
+        "ai/evaluate.py",
+        "ai/gym40k.py",
+        "ai/model.py",
+        "ai/env_registration.py",
+        "ai/state.py",
+        "ai/test.py",
+        "ai/train.py", 
+        "ai/utils.py",
+        
+        # Tools
+        "tools/generate_scenario.py",
+    ]'''
+            
+            # Replace the old files_to_copy list
+            import re
+            pattern = r'files_to_copy\s*=\s*\[.*?\]'
+            content = re.sub(pattern, new_files_list, content, flags=re.DOTALL)
+            
+            with open(script_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+                
+            self.log("Updated backup script with correct file paths")
+            
+        except Exception as e:
+            self.log(f"Could not update backup script: {e}", "WARN")
+            
+    def create_improved_gitignore(self):
+        """Create a clean, comprehensive .gitignore"""
+        self.log("Creating improved .gitignore...")
+        
+        gitignore_content = '''# Dependencies
 node_modules/
+*.pnp
+.pnp.js
 
 # Build outputs
 dist/
@@ -568,69 +361,258 @@ build/
 # Development
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # Logs
+logs/
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
 backup.log
 
-# Environment variables
-.env*
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
 
-# OS files
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
 .venv/
+ENV/
+env.bak/
+venv.bak/
 
-# Backups
+# AI/ML
+*.pkl
+*.h5
+*.hdf5
+models/
+checkpoints/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Backup files
 backup_*/
 versions/
+*.bak
+
+# Documentation builds
+docs/_build/
+
+# Local configuration
+config.local.json
 '''
+
+        gitignore_path = self.project_root / ".gitignore"
+        with open(gitignore_path, 'w', encoding='utf-8') as f:
+            f.write(gitignore_content)
+            
+        self.log("Created improved .gitignore")
         
-        with open(self.project_root / ".gitignore", 'w') as f:
-            f.write(content)
-        self.log("Created clean .gitignore")
+    def create_project_structure_doc(self):
+        """Create documentation of the new project structure"""
+        self.log("Creating project structure documentation...")
+        
+        docs_dir = self.project_root / "docs"
+        docs_dir.mkdir(exist_ok=True)
+        
+        structure_doc = '''# Project Structure
+
+## Overview
+This is a Warhammer 40k tactical game with AI opponents, built with React/TypeScript frontend and Python AI backend.
+
+## Directory Structure
+
+```
+wh40k-tactics/
+├── frontend/                    # React/TypeScript frontend
+│   ├── src/
+│   │   ├── components/          # React components
+│   │   ├── pages/              # Page components
+│   │   ├── data/               # Game data & factories
+│   │   ├── roster/             # Unit definitions
+│   │   │   └── spaceMarine/    # Space Marine units
+│   │   └── ai/                 # Frontend AI integration
+│   ├── dist/                   # Frontend build output
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── vite.config.ts
+├── ai/                         # Python AI backend
+│   ├── agent.py               # AI agent implementation
+│   ├── api.py                 # API endpoints
+│   ├── gym40k.py             # Gymnasium environment
+│   ├── model.py              # Neural network models
+│   └── ...
+├── tools/                      # Development tools
+│   ├── backup_script.py       # Project backup utility
+│   └── generate_scenario.py   # Scenario generation
+├── docs/                       # Documentation
+└── README.md
+```
+
+## Key Components
+
+### Frontend (`/frontend/src/`)
+- **components/**: Reusable React components (Board, UnitSelector, etc.)
+- **pages/**: Main application pages (HomePage, GamePage, ReplayPage)
+- **data/**: Game logic and data management
+- **roster/**: Unit definitions and stats
+- **ai/**: Frontend integration with AI backend
+
+### AI Backend (`/ai/`)
+- **agent.py**: Main AI agent logic
+- **gym40k.py**: Gymnasium environment for training
+- **api.py**: FastAPI endpoints for frontend communication
+- **model.py**: Neural network architectures
+
+### Development Tools (`/tools/`)
+- **backup_script.py**: Project versioning and backup
+- **generate_scenario.py**: Scenario generation utilities
+
+## Build Commands
+
+```bash
+# Frontend development
+cd frontend
+npm run dev
+
+# Frontend build
+cd frontend
+npm run build
+
+# AI backend
+cd ai
+python api.py
+```
+
+## Path Aliases
+
+TypeScript path aliases are configured for cleaner imports:
+
+- `@/` → `frontend/src/`
+- `@components/` → `frontend/src/components/`
+- `@data/` → `frontend/src/data/`
+- `@roster/` → `frontend/src/roster/`
+- `@pages/` → `frontend/src/pages/`
+- `@ai/` → `ai/`
+'''
+
+        with open(docs_dir / "project_structure.md", 'w', encoding='utf-8') as f:
+            f.write(structure_doc)
+            
+        self.log("Created project structure documentation")
+        
+    def run_cleanup(self):
+        """Run the complete cleanup process"""
+        self.log("Starting Warhammer 40k project cleanup...")
+        self.log(f"Working directory: {self.project_root}")
+        
+        try:
+            # Step 1: Create backup
+            self.create_backup()
+            
+            # Step 2: Remove unnecessary files
+            self.remove_unnecessary_files()
+            
+            # Step 3: Complete migration
+            self.migrate_remaining_src_files()
+            
+            # Step 4: Fix TypeScript configs
+            self.fix_typescript_configs()
+            
+            # Step 5: Reorganize development tools
+            self.reorganize_development_tools()
+            
+            # Step 6: Create improved .gitignore
+            self.create_improved_gitignore()
+            
+            # Step 7: Create documentation
+            self.create_project_structure_doc()
+            
+            self.log("✅ Project cleanup completed successfully!")
+            self.log("\nNext steps:")
+            self.log("1. Review the changes in your IDE")
+            self.log("2. Test that the frontend builds: cd frontend && npm run build")
+            self.log("3. Update any remaining import paths if needed")
+            self.log("4. Remove the backup_before_cleanup/ directory when satisfied")
+            
+        except Exception as e:
+            self.log(f"❌ Error during cleanup: {e}", "ERROR")
+            if self.backup_created:
+                self.log("Your original files are backed up in backup_before_cleanup/")
+            raise
 
 def main():
     """Main function"""
     import argparse
     
-    parser = argparse.ArgumentParser(description="Fix TypeScript errors and clean up project")
-    parser.add_argument("--project-root", default=".", help="Project root directory")
-    parser.add_argument("--fixes-only", action="store_true", help="Only fix TypeScript errors")
+    parser = argparse.ArgumentParser(description="Clean up and reorganize Warhammer 40k project")
+    parser.add_argument("--project-root", default=".", help="Project root directory (default: current directory)")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
     
     args = parser.parse_args()
     
-    fixer = TypeScriptFixer(args.project_root)
+    if args.dry_run:
+        print("DRY RUN MODE - No changes will be made")
+        print("This would:")
+        print("- Create backup of current state")
+        print("- Remove unnecessary files (build artifacts, generic templates)")
+        print("- Complete migration from /src to /frontend/src")
+        print("- Fix TypeScript configuration files")
+        print("- Move development tools to /tools directory")
+        print("- Create clean .gitignore")
+        print("- Generate project documentation")
+        return
     
-    print("This script will fix TypeScript compilation errors and clean up your project.")
+    # Confirm before proceeding
+    print("This script will reorganize your Warhammer 40k project structure.")
+    print("A backup will be created before making any changes.")
     response = input("Continue? (y/N): ")
     
     if response.lower() not in ['y', 'yes']:
         print("Cancelled.")
         return
-    
-    try:
-        # Always run TypeScript fixes
-        fixer.run_typescript_fixes()
         
-        # Run cleanup unless fixes-only is specified
-        if not args.fixes_only:
-            fixer.run_project_cleanup()
-            
-        print("\n✅ All fixes completed successfully!")
-        print("\nNext steps:")
-        print("1. Test the build: cd frontend && npm run build")
-        print("2. Review changes in your IDE")
-        print("3. Remove backup_before_fixes/ when satisfied")
-        
-    except Exception as e:
-        print(f"\n❌ Error: {e}")
-        print("Check backup_before_fixes/ to restore if needed")
-        raise
+    cleaner = ProjectCleaner(args.project_root)
+    cleaner.run_cleanup()
 
 if __name__ == "__main__":
     main()

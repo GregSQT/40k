@@ -1,25 +1,37 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "baseUrl": ".",
+    "baseUrl": "src",
     "paths": {
       "@/*": [
-        "src/*"
+        "*"
       ],
       "@roster/*": [
-        "src/roster/*"
+        "roster/*"
       ],
       "@data/*": [
-        "src/data/*"
+        "data/*"
       ],
       "@components/*": [
-        "src/components/*"
+        "components/*"
       ],
       "@pages/*": [
-        "src/pages/*"
+        "pages/*"
       ],
       "@types/*": [
-        "src/types/*"
+        "types/*"
+      ],
+      "@hooks/*": [
+        "hooks/*"
+      ],
+      "@services/*": [
+        "services/*"
+      ],
+      "@constants/*": [
+        "constants/*"
+      ],
+      "@utils/*": [
+        "utils/*"
       ],
       "@ai/*": [
         "../ai/*"
@@ -28,19 +40,14 @@
     "composite": true,
     "outDir": "dist",
     "rootDir": "src",
-    "module": "ESNext",
-    "moduleResolution": "node",
-    "strict": true,
-    "esModuleInterop": true,
-    "target": "ES2020",
-    "jsx": "react-jsx",
-    "skipLibCheck": true,
-    "allowSyntheticDefaultImports": true,
-    "resolveJsonModule": true,
-    "forceConsistentCasingInFileNames": true,
-    "tsBuildInfoFile": "dist/frontend.tsbuildinfo"
+    "noEmit": false,
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
   "include": [
     "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
   ]
 }

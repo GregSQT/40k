@@ -1,28 +1,22 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "frontend/src/*"
-      ],
-      "@roster/*": [
-        "frontend/src/roster/*"
-      ],
-      "@data/*": [
-        "frontend/src/data/*"
-      ],
-      "@components/*": [
-        "frontend/src/components/*"
-      ],
-      "@pages/*": [
-        "frontend/src/pages/*"
-      ],
-      "@types/*": [
-        "frontend/src/types/*"
-      ],
-      "@ai/*": [
-        "ai/*"
-      ]
-    }
+    "target": "ES2020",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "ES6"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx"
   }
 }
