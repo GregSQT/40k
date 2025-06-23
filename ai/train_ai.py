@@ -6,11 +6,14 @@ import sys
 import subprocess
 
 # Add current directory to path
-sys.path.insert(0, os.getcwd())
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, script_dir)
+sys.path.insert(0, project_root)
 
 from stable_baselines3 import DQN
 from stable_baselines3.common.env_checker import check_env
-from ai.gym40k import W40KEnv
+from gym40k import W40KEnv
 
 def main():
     print("W40K AI Training - Direct Version")
