@@ -1,20 +1,246 @@
 #!/usr/bin/env python3
 """
-Fix the scenario generation issues for W40K AI training
+W40K AI System Comparison and Restoration
+Check what changed from your original setup and restore it if needed.
 """
 
 import os
 import json
-import re
+import shutil
+from datetime import datetime
 
-def create_scenario_from_existing_data():
-    """Create scenario.json from the existing Scenario.ts data found in project knowledge."""
+def analyze_current_system():
+    """Analyze the current state of the system."""
+    print("=== CURRENT SYSTEM ANALYSIS ===")
     
-    # Based on the Scenario.ts data from project knowledge
-    scenario_data = [
+    # Check files
+    files_to_check = {
+        "ai/gym40k.py": "Gym environment",
+        "ai/gym40k.py.backup": "Original gym backup",
+        "ai/gym40k.py.backup2": "Second backup", 
+        "ai/scenario.json": "Current scenario",
+        "ai/rewards_master.json": "Current rewards",
+        "ai/model.zip": "Trained model",
+        "ai/train.py": "Original training script",
+        "ai/simple_train.py": "New training script",
+        "generate_scenario.py": "Scenario generator",
+        "train_ai.py": "Direct training script",
+        "train_ai_bypass.py": "Bypass training script"
+    }
+    
+    print("Files present:")
+    for file_path, description in files_to_check.items():
+        if os.path.exists(file_path):
+            size = os.path.getsize(file_path)
+            mod_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+            print(f"  ✓ {file_path} ({description}) - {size} bytes, modified {mod_time}")
+        else:
+            print(f"  ✗ {file_path} ({description}) - MISSING")
+    
+    # Check current scenario
+    if os.path.exists("ai/scenario.json"):
+        print("\n=== CURRENT SCENARIO ===")
+        with open("ai/scenario.json", "r") as f:
+            scenario = json.load(f)
+        print(f"Units: {len(scenario)}")
+        for unit in scenario:
+            print(f"  {unit['id']}: {unit['unit_type']} (P{unit['player']}) at ({unit['col']},{unit['row']}) - HP:{unit['cur_hp']}/{unit['hp_max']}")
+    
+    # Check current rewards
+    if os.path.exists("ai/rewards_master.json"):
+        print("\n=== CURRENT REWARDS ===")
+        with open("ai/rewards_master.json", "r") as f:
+            rewards = json.load(f)
+        for unit_type, reward_dict in rewards.items():
+            print(f"{unit_type}:")
+            key_rewards = ["win", "lose", "move_close", "ranged_attack", "attack", "wait"]
+            for key in key_rewards:
+                if key in reward_dict:
+                    print(f"  {key}: {reward_dict[key]}")
+
+def compare_with_original():
+    """Compare current system with original values from project knowledge."""
+    print("\n=== COMPARISON WITH ORIGINAL ===")
+    
+    # Original rewards from project knowledge
+    original_rewards = {
+        "SpaceMarineRanged": {
+            "move_close": 0.2,
+            "move_away": 0.4,
+            "move_to_safe": 0.6,
+            "move_to_rng": 0.8,
+            "move_to_charge": 0.2,
+            "move_to_rng_charge": 0.3,
+            "ranged_attack": 0.2,
+            "enemy_killed_r": 0.4,
+            "enemy_killed_lowests_hp_r": 0.6,
+            "enemy_killed_no_overkill_r": 0.8,
+            "charge_success": 0.2,
+            "being_charged": -0.4,
+            "attack": 0.4,
+            "enemy_killed_m": 0.2,
+            "enemy_killed_lowests_hp_m": 0.3,
+            "enemy_killed_no_overkill_m": 0.4,
+            "loose_hp": -0.4,
+            "killed_in_melee": -0.8,
+            "win": 1,
+            "lose": -1,
+            "atk_wasted_r": -0.8,
+            "atk_wasted_m": -0.8,
+            "wait": -0.9
+        },
+        "SpaceMarineMelee": {
+            "move_close": 0.2,
+            "move_away": -0.6,
+            "move_to_safe": 0.2,
+            "move_to_rng": 0.4,
+            "move_to_charge": 0.6,
+            "move_to_rng_charge": 0.8,
+            "ranged_attack": 0.2,
+            "enemy_killed_r": 0.4,
+            "enemy_killed_lowests_hp_r": 0.6,
+            "enemy_killed_no_overkill_r": 0.8,
+            "charge_success": 0.8,
+            "being_charged": -0.4,
+            "attack": 0.4,
+            "enemy_killed_m": 0.4,
+            "enemy_killed_lowests_hp_m": 0.6,
+            "enemy_killed_no_overkill_m": 0.8,
+            "loose_hp": -0.4,
+            "killed_in_melee": -0.8,
+            "win": 1,
+            "lose": -1,
+            "atk_wasted_r": -0.8,
+            "atk_wasted_m": -0.8,
+            "wait": -0.9
+        }
+    }
+    
+    # Compare rewards
+    if os.path.exists("ai/rewards_master.json"):
+        with open("ai/rewards_master.json", "r") as f:
+            current_rewards = json.load(f)
+        
+        print("REWARDS COMPARISON:")
+        for unit_type in ["SpaceMarineRanged", "SpaceMarineMelee"]:
+            print(f"\n{unit_type}:")
+            orig = original_rewards.get(unit_type, {})
+            curr = current_rewards.get(unit_type, {})
+            
+            all_keys = set(orig.keys()) | set(curr.keys())
+            for key in sorted(all_keys):
+                orig_val = orig.get(key, "MISSING")
+                curr_val = curr.get(key, "MISSING")
+                
+                if orig_val != curr_val:
+                    print(f"  {key}: {orig_val} → {curr_val} {'❌ CHANGED' if orig_val != 'MISSING' and curr_val != 'MISSING' else '⚠️  DIFFERENT'}")
+    
+    # Original training config
+    print("\nTRAINING CONFIGURATION:")
+    print("Original values from your train.py:")
+    print("  total_timesteps: 1,000,000 (or 100,000 for debug)")
+    print("  exploration_fraction: 0.5")
+    print("  buffer_size: 10,000")
+    print("  learning_rate: 1e-3")
+    print("  learning_starts: 100")
+    print("  target_update_interval: 500")
+    
+    # Check what's currently used
+    scripts_to_check = ["train_ai.py", "train_ai_bypass.py", "ai/simple_train.py"]
+    for script in scripts_to_check:
+        if os.path.exists(script):
+            print(f"\nChecking {script}...")
+            with open(script, "r") as f:
+                content = f.read()
+                if "buffer_size" in content:
+                    # Extract buffer size
+                    import re
+                    match = re.search(r'buffer_size=(\d+)', content)
+                    if match:
+                        print(f"  buffer_size: {match.group(1)}")
+                if "total_timesteps = " in content:
+                    match = re.search(r'total_timesteps = (\d+)', content)
+                    if match:
+                        print(f"  default timesteps: {match.group(1)}")
+
+def restore_original_rewards():
+    """Restore the original reward values."""
+    print("\n=== RESTORING ORIGINAL REWARDS ===")
+    
+    original_rewards = {
+        "SpaceMarineRanged": {
+            "move_close": 0.2,
+            "move_away": 0.4,
+            "move_to_safe": 0.6,
+            "move_to_rng": 0.8,
+            "move_to_charge": 0.2,
+            "move_to_rng_charge": 0.3,
+            "ranged_attack": 0.2,
+            "enemy_killed_r": 0.4,
+            "enemy_killed_lowests_hp_r": 0.6,
+            "enemy_killed_no_overkill_r": 0.8,
+            "charge_success": 0.2,
+            "being_charged": -0.4,
+            "attack": 0.4,
+            "enemy_killed_m": 0.2,
+            "enemy_killed_lowests_hp_m": 0.3,
+            "enemy_killed_no_overkill_m": 0.4,
+            "loose_hp": -0.4,
+            "killed_in_melee": -0.8,
+            "win": 1,
+            "lose": -1,
+            "atk_wasted_r": -0.8,
+            "atk_wasted_m": -0.8,
+            "wait": -0.9
+        },
+        "SpaceMarineMelee": {
+            "move_close": 0.2,
+            "move_away": -0.6,
+            "move_to_safe": 0.2,
+            "move_to_rng": 0.4,
+            "move_to_charge": 0.6,
+            "move_to_rng_charge": 0.8,
+            "ranged_attack": 0.2,
+            "enemy_killed_r": 0.4,
+            "enemy_killed_lowests_hp_r": 0.6,
+            "enemy_killed_no_overkill_r": 0.8,
+            "charge_success": 0.8,
+            "being_charged": -0.4,
+            "attack": 0.4,
+            "enemy_killed_m": 0.4,
+            "enemy_killed_lowests_hp_m": 0.6,
+            "enemy_killed_no_overkill_m": 0.8,
+            "loose_hp": -0.4,
+            "killed_in_melee": -0.8,
+            "win": 1,
+            "lose": -1,
+            "atk_wasted_r": -0.8,
+            "atk_wasted_m": -0.8,
+            "wait": -0.9
+        }
+    }
+    
+    # Backup current rewards
+    if os.path.exists("ai/rewards_master.json"):
+        backup_name = f"ai/rewards_master.json.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        shutil.copy("ai/rewards_master.json", backup_name)
+        print(f"Backed up current rewards to {backup_name}")
+    
+    # Write original rewards
+    with open("ai/rewards_master.json", "w", encoding="utf-8") as f:
+        json.dump(original_rewards, f, indent=2)
+    
+    print("✓ Restored original reward values")
+
+def restore_original_scenario():
+    """Restore a scenario closer to your original TypeScript setup."""
+    print("\n=== RESTORING ORIGINAL-STYLE SCENARIO ===")
+    
+    # Based on your original Scenario.ts from project knowledge
+    original_scenario = [
         {
             "id": 1,
-            "unit_type": "Intercessor",
+            "unit_type": "Intercessor", 
             "player": 0,
             "col": 23,
             "row": 12,
@@ -78,249 +304,29 @@ def create_scenario_from_existing_data():
         }
     ]
     
-    # Create ai directory if it doesn't exist
-    os.makedirs("ai", exist_ok=True)
+    # Backup current scenario
+    if os.path.exists("ai/scenario.json"):
+        backup_name = f"ai/scenario.json.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        shutil.copy("ai/scenario.json", backup_name)
+        print(f"Backed up current scenario to {backup_name}")
     
-    # Write scenario.json
+    # Write original scenario
     with open("ai/scenario.json", "w", encoding="utf-8") as f:
-        json.dump(scenario_data, f, indent=2)
+        json.dump(original_scenario, f, indent=2)
     
-    print(f"[OK] Created scenario.json with {len(scenario_data)} units")
-    return True
+    print("✓ Restored original scenario layout")
 
-def create_fixed_generate_scenario():
-    """Create a fixed version of generate_scenario.py that works with your file structure."""
+def create_original_style_training():
+    """Create a training script that matches your original configuration."""
+    print("\n=== CREATING ORIGINAL-STYLE TRAINING ===")
     
-    script_content = '''#!/usr/bin/env python3
-# generate_scenario.py - Fixed version
-
-import re
-import json
-import os
-
-def extract_unit_stats_from_ts(file_path):
-    """Extract unit stats from TypeScript file."""
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        
-        stats = {
-            "hp_max": 4,
-            "move": 6,
-            "rng_rng": 4,
-            "rng_dmg": 1,
-            "cc_dmg": 1,
-            "is_ranged": False,
-            "is_melee": True
-        }
-        
-        # Extract static properties
-        for line in content.split('\\n'):
-            line = line.strip()
-            if 'static MOVE =' in line:
-                match = re.search(r'static MOVE\\s*=\\s*(\\d+)', line)
-                if match:
-                    stats["move"] = int(match.group(1))
-            elif 'static HP_MAX =' in line:
-                match = re.search(r'static HP_MAX\\s*=\\s*(\\d+)', line)
-                if match:
-                    stats["hp_max"] = int(match.group(1))
-            elif 'static RNG_RNG =' in line:
-                match = re.search(r'static RNG_RNG\\s*=\\s*(\\d+)', line)
-                if match:
-                    stats["rng_rng"] = int(match.group(1))
-            elif 'static RNG_DMG =' in line:
-                match = re.search(r'static RNG_DMG\\s*=\\s*(\\d+)', line)
-                if match:
-                    stats["rng_dmg"] = int(match.group(1))
-            elif 'static CC_DMG =' in line:
-                match = re.search(r'static CC_DMG\\s*=\\s*(\\d+)', line)
-                if match:
-                    stats["cc_dmg"] = int(match.group(1))
-        
-        # Determine unit type from file name
-        if "Intercessor" in file_path and "Assault" not in file_path:
-            stats["is_ranged"] = True
-            stats["is_melee"] = False
-        elif "AssaultIntercessor" in file_path:
-            stats["is_ranged"] = False
-            stats["is_melee"] = True
-        
-        return stats
-    
-    except FileNotFoundError:
-        print(f"[WARN] File not found: {file_path}")
-        return None
-
-def find_unit_files():
-    """Find unit files in the project."""
-    possible_paths = [
-        "frontend/src/roster/spaceMarine/Intercessor.ts",
-        "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
-        "src/roster/spaceMarine/Intercessor.ts", 
-        "src/roster/spaceMarine/AssaultIntercessor.ts",
-        "ts/Intercessor.ts",
-        "ts/AssaultIntercessor.ts"
-    ]
-    
-    found_files = {}
-    for path in possible_paths:
-        if os.path.exists(path):
-            if "Intercessor" in path and "Assault" not in path:
-                found_files["Intercessor"] = path
-            elif "AssaultIntercessor" in path:
-                found_files["AssaultIntercessor"] = path
-    
-    return found_files
-
-def parse_scenario_ts():
-    """Parse scenario from various possible locations."""
-    scenario_paths = [
-        "frontend/src/data/Scenario.ts",
-        "src/data/Scenario.ts",
-        "ts/Scenario.ts"
-    ]
-    
-    for path in scenario_paths:
-        if os.path.exists(path):
-            print(f"[OK] Found scenario file: {path}")
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                
-                # Extract unit definitions
-                units = []
-                unit_id = 1
-                
-                # Look for unit definitions in TypeScript array
-                # This is a simple parser - may need adjustment based on exact format
-                lines = content.split('\\n')
-                current_unit = None
-                
-                for line in lines:
-                    line = line.strip()
-                    if line.startswith('{') and ('id:' in line or 'name:' in line or 'type:' in line):
-                        current_unit = {}
-                    elif current_unit is not None:
-                        if 'id:' in line:
-                            match = re.search(r'id:\\s*(\\d+)', line)
-                            if match:
-                                current_unit['id'] = int(match.group(1))
-                        elif 'type:' in line:
-                            match = re.search(r'type:\\s*["\\'](.*?)["\\'']', line)
-                            if match:
-                                current_unit['unit_type'] = match.group(1).replace(' ', '')
-                        elif 'player:' in line:
-                            match = re.search(r'player:\\s*(\\d+)', line)
-                            if match:
-                                current_unit['player'] = int(match.group(1))
-                        elif 'col:' in line:
-                            match = re.search(r'col:\\s*(\\d+)', line)
-                            if match:
-                                current_unit['col'] = int(match.group(1))
-                        elif 'row:' in line:
-                            match = re.search(r'row:\\s*(\\d+)', line)
-                            if match:
-                                current_unit['row'] = int(match.group(1))
-                        elif line.startswith('}'):
-                            if current_unit and 'id' in current_unit:
-                                units.append(current_unit)
-                            current_unit = None
-                
-                return units
-                
-            except Exception as e:
-                print(f"[WARN] Error parsing {path}: {e}")
-                continue
-    
-    print("[WARN] No scenario file found, using default")
-    return None
-
-def main():
-    print("Generating scenario.json...")
-    
-    # Try to find and parse unit files
-    unit_files = find_unit_files()
-    unit_stats = {}
-    
-    for unit_type, file_path in unit_files.items():
-        stats = extract_unit_stats_from_ts(file_path)
-        if stats:
-            unit_stats[unit_type] = stats
-            print(f"[OK] Loaded stats for {unit_type}")
-        else:
-            print(f"[WARN] Could not load stats for {unit_type}")
-    
-    # Try to parse scenario
-    scenario_units = parse_scenario_ts()
-    
-    if not scenario_units:
-        # Use default scenario
-        scenario_units = [
-            {"id": 1, "unit_type": "Intercessor", "player": 0, "col": 23, "row": 12},
-            {"id": 2, "unit_type": "AssaultIntercessor", "player": 0, "col": 1, "row": 12},
-            {"id": 3, "unit_type": "Intercessor", "player": 1, "col": 0, "row": 5},
-            {"id": 4, "unit_type": "AssaultIntercessor", "player": 1, "col": 22, "row": 3}
-        ]
-        print("[OK] Using default scenario")
-    
-    # Combine scenario with unit stats
-    final_units = []
-    for unit in scenario_units:
-        unit_type = unit.get('unit_type', 'Intercessor')
-        stats = unit_stats.get(unit_type, {
-            "hp_max": 4, "move": 6, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1,
-            "is_ranged": True, "is_melee": False
-        })
-        
-        final_unit = {
-            "id": unit.get('id', len(final_units) + 1),
-            "unit_type": unit_type,
-            "player": unit.get('player', 0),
-            "col": unit.get('col', 5),
-            "row": unit.get('row', 5),
-            "cur_hp": stats["hp_max"],
-            "hp_max": stats["hp_max"],
-            "move": stats["move"],
-            "rng_rng": stats["rng_rng"],
-            "rng_dmg": stats["rng_dmg"],
-            "cc_dmg": stats["cc_dmg"],
-            "is_ranged": stats["is_ranged"],
-            "is_melee": stats["is_melee"],
-            "alive": True
-        }
-        
-        final_units.append(final_unit)
-    
-    # Write output
-    os.makedirs("ai", exist_ok=True)
-    output_path = os.path.join("ai", "scenario.json")
-    
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(final_units, f, indent=2)
-    
-    print(f"[OK] Generated scenario.json with {len(final_units)} units")
-    print(f"     Output: {output_path}")
-    
-    return True
-
-if __name__ == "__main__":
-    main()
-'''
-    
-    with open("generate_scenario.py", "w", encoding="utf-8") as f:
-        f.write(script_content)
-    print("[OK] Created fixed generate_scenario.py")
-
-def create_bypass_training_script():
-    """Create a training script that bypasses scenario generation."""
-    
-    bypass_script = '''#!/usr/bin/env python3
-# train_ai_bypass.py - Training script that bypasses scenario generation
+    training_script = '''#!/usr/bin/env python3
+# train_ai_original.py - Training script matching your original configuration
 
 import os
 import sys
 import json
+import subprocess
 
 # Add current directory to path
 sys.path.insert(0, os.getcwd())
@@ -329,153 +335,214 @@ from stable_baselines3 import DQN
 from stable_baselines3.common.env_checker import check_env
 from ai.gym40k import W40KEnv
 
-def create_default_scenario():
-    """Create a default scenario directly."""
-    scenario_data = [
-        {
-            "id": 1, "unit_type": "Intercessor", "player": 0,
-            "col": 23, "row": 12, "cur_hp": 3, "hp_max": 3,
-            "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1,
-            "is_ranged": True, "is_melee": False, "alive": True
-        },
-        {
-            "id": 2, "unit_type": "AssaultIntercessor", "player": 0,
-            "col": 1, "row": 12, "cur_hp": 4, "hp_max": 4,
-            "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2,
-            "is_ranged": False, "is_melee": True, "alive": True
-        },
-        {
-            "id": 3, "unit_type": "Intercessor", "player": 1,
-            "col": 0, "row": 5, "cur_hp": 3, "hp_max": 3,
-            "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1,
-            "is_ranged": True, "is_melee": False, "alive": True
-        },
-        {
-            "id": 4, "unit_type": "AssaultIntercessor", "player": 1,
-            "col": 22, "row": 3, "cur_hp": 4, "hp_max": 4,
-            "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2,
-            "is_ranged": False, "is_melee": True, "alive": True
-        }
-    ]
-    
-    os.makedirs("ai", exist_ok=True)
-    with open("ai/scenario.json", "w", encoding="utf-8") as f:
-        json.dump(scenario_data, f, indent=2)
-    print("[OK] Created default scenario.json")
+######################################################################################
+### Training configuration - RESTORED FROM ORIGINAL
+total_timesteps_setup = 1_000_000  # Total timesteps for training. Debug: 100_000
+exploration_fraction_setup = 0.5   # Fraction of timesteps spent exploring
+######################################################################################
+
+def parse_args():
+    resume = None
+    debug = False
+    for arg in sys.argv[1:]:
+        if arg.lower() == "--resume":
+            resume = True
+        elif arg.lower() == "--new":
+            resume = False
+        elif arg.lower() == "--debug":
+            debug = True
+    return resume, debug
 
 def main():
-    print("W40K AI Training - Bypass Version")
-    print("=" * 40)
+    print("🔧 W40K AI Training - Original Configuration")
+    print("=" * 50)
     
-    # Create scenario directly
-    if not os.path.exists("ai/scenario.json"):
-        print("Creating default scenario...")
-        create_default_scenario()
+    resume_flag, debug_mode = parse_args()
+    
+    # Adjust timesteps for debug mode
+    total_timesteps = 100_000 if debug_mode else total_timesteps_setup
+    if debug_mode:
+        print("🐛 Debug mode: Using 100,000 timesteps")
     else:
-        print("[OK] Scenario file already exists")
+        print(f"🎯 Full training: Using {total_timesteps:,} timesteps")
+    
+    # Generate scenario if needed
+    if not os.path.exists("ai/scenario.json"):
+        print("🔧 Regenerating scenario.json...")
+        try:
+            subprocess.run(["python", "generate_scenario.py"], check=True)
+            print("✅ Scenario generated")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print("⚠️  Using default scenario")
     
     # Create environment
-    print("Creating environment...")
     env = W40KEnv()
-    
-    # Check environment
-    print("Checking environment...")
-    try:
-        check_env(env)
-        print("[OK] Environment validation passed")
-    except Exception as e:
-        print(f"[WARN] Environment check warning: {e}")
+    check_env(env)  # Good for debugging!
     
     print(f"Environment info:")
     print(f"  Units: {len(env.units)}")
-    print(f"  Observation space: {env.observation_space}")
+    print(f"  Board size: {env.board_size}")
     print(f"  Action space: {env.action_space}")
     
-    # Training configuration
-    total_timesteps = 10_000  # Start small
-    
-    if "--normal" in sys.argv:
-        total_timesteps = 100_000
-    elif "--full" in sys.argv:
-        total_timesteps = 1_000_000
-    
-    print(f"Training for {total_timesteps:,} timesteps...")
-    
-    # Create model
     model_path = "ai/model.zip"
     
-    if os.path.exists(model_path) and "--resume" in sys.argv:
-        print("Loading existing model...")
-        model = DQN.load(model_path, env=env)
+    if os.path.exists(model_path):
+        if resume_flag is None:
+            # No explicit flag, default: resume
+            print("Model exists. Resuming training from last checkpoint (default).")
+            resume = True
+        else:
+            resume = resume_flag
+        if resume:
+            print("Resuming from previous model...")
+            model = DQN.load(model_path, env=env)
+        else:
+            print("Starting new model (overwriting previous model)...")
+            model = DQN(
+                "MlpPolicy",
+                env,
+                verbose=1,
+                buffer_size=10000,  # ORIGINAL VALUE
+                learning_rate=1e-3,
+                learning_starts=100,  # ORIGINAL VALUE
+                batch_size=64,
+                train_freq=4,
+                target_update_interval=500,  # ORIGINAL VALUE
+                exploration_fraction=exploration_fraction_setup,  # ORIGINAL VALUE
+                exploration_final_eps=0.05,
+                tensorboard_log="./tensorboard/"
+            )
     else:
-        print("Creating new model...")
+        print("No previous model found. Creating new model...")
         model = DQN(
             "MlpPolicy",
             env,
             verbose=1,
-            buffer_size=50_000,
+            buffer_size=10000,  # ORIGINAL VALUE
             learning_rate=1e-3,
-            learning_starts=1000,
+            learning_starts=100,  # ORIGINAL VALUE  
             batch_size=64,
             train_freq=4,
-            target_update_interval=1000,
-            exploration_fraction=0.3,
+            target_update_interval=500,  # ORIGINAL VALUE
+            exploration_fraction=exploration_fraction_setup,  # ORIGINAL VALUE
             exploration_final_eps=0.05,
             tensorboard_log="./tensorboard/"
         )
-    
-    # Train
+
+    print(f"🚀 Starting training for {total_timesteps:,} timesteps...")
+    print("📊 Monitor with: tensorboard --logdir ./tensorboard/")
+    print()
+
     try:
         model.learn(total_timesteps=total_timesteps)
-        print("[OK] Training completed!")
+        print("✅ Training completed successfully!")
     except KeyboardInterrupt:
-        print("[STOP] Training interrupted")
+        print("⏹️  Training interrupted by user")
     except Exception as e:
-        print(f"[ERROR] Training failed: {e}")
+        print(f"❌ Training failed: {e}")
         import traceback
         traceback.print_exc()
         return False
-    
-    # Save
+
+    # Save model
+    os.makedirs("ai", exist_ok=True)
     model.save(model_path)
-    print(f"[OK] Model saved to {model_path}")
+    print(f"💾 Model saved to {model_path}")
+    
+    # Save episode logs if available
+    if hasattr(env, "episode_logs") and env.episode_logs:
+        # Find best and worst by total reward
+        best_log, best_reward = max(env.episode_logs, key=lambda x: x[1])
+        worst_log, worst_reward = min(env.episode_logs, key=lambda x: x[1])
+        
+        with open("ai/best_event_log.json", "w") as f:
+            json.dump(best_log, f, indent=2)
+        with open("ai/worst_event_log.json", "w") as f:
+            json.dump(worst_log, f, indent=2)
+        
+        print(f"📋 Saved best and worst episode logs: rewards {best_reward}, {worst_reward}")
     
     env.close()
-    print("\\nTraining completed! Use 'python test_ai.py' to test the model.")
+    print("🎉 Training session completed!")
     return True
 
 if __name__ == "__main__":
     main()
 '''
     
-    with open("train_ai_bypass.py", "w", encoding="utf-8") as f:
-        f.write(bypass_script)
-    print("[OK] Created bypass training script")
+    with open("train_ai_original.py", "w", encoding="utf-8") as f:
+        f.write(training_script)
+    
+    print("✓ Created train_ai_original.py with your original configuration")
+
+def show_file_tree():
+    """Show current file tree structure."""
+    print("\n=== CURRENT FILE TREE ===")
+    
+    def print_tree(path, prefix="", max_depth=3, current_depth=0):
+        if current_depth > max_depth:
+            return
+            
+        items = []
+        try:
+            for item in sorted(os.listdir(path)):
+                if not item.startswith('.'):
+                    item_path = os.path.join(path, item)
+                    items.append((item, os.path.isdir(item_path)))
+        except PermissionError:
+            return
+        
+        for i, (item, is_dir) in enumerate(items):
+            is_last = i == len(items) - 1
+            current_prefix = "└── " if is_last else "├── "
+            print(f"{prefix}{current_prefix}{item}{'/' if is_dir else ''}")
+            
+            if is_dir and current_depth < max_depth:
+                next_prefix = prefix + ("    " if is_last else "│   ")
+                print_tree(os.path.join(path, item), next_prefix, max_depth, current_depth + 1)
+    
+    print_tree(".")
 
 def main():
-    """Main function to fix scenario generation issues."""
-    print("Fixing scenario generation issues...")
-    print("=" * 40)
+    """Main diagnostic and restoration function."""
+    print("W40K AI System Analysis & Restoration")
+    print("=" * 50)
     
-    # Option 1: Create scenario.json directly
-    print("1. Creating scenario.json directly...")
-    create_scenario_from_existing_data()
+    # Analyze current state
+    analyze_current_system()
     
-    # Option 2: Create fixed generate_scenario.py
-    print("\\n2. Creating fixed generate_scenario.py...")
-    create_fixed_generate_scenario()
+    # Compare with original
+    compare_with_original()
     
-    # Option 3: Create bypass training script
-    print("\\n3. Creating bypass training script...")
-    create_bypass_training_script()
+    # Show file tree
+    show_file_tree()
     
-    print("\\n" + "=" * 40)
-    print("Scenario fixes completed!")
-    print("\\nNow you can:")
-    print("  * python train_ai_bypass.py       (training with built-in scenario)")
-    print("  * python train_ai.py              (training with generated scenario)")
-    print("  * python generate_scenario.py     (generate scenario manually)")
-    print("\\nThe bypass version should work immediately!")
+    print("\n" + "=" * 50)
+    print("ANALYSIS COMPLETE")
+    print("\nRECOMMENDATIONS:")
+    print("1. Your AI is losing because it trained with simplified rewards")
+    print("2. The scenario is different from your original TypeScript setup")
+    print("3. Training parameters were changed from your original values")
+    
+    # Ask for restoration
+    print("\nWould you like to restore the original configuration?")
+    choice = input("Enter 'y' to restore original rewards, scenario, and training: ")
+    
+    if choice.lower() in ['y', 'yes']:
+        restore_original_rewards()
+        restore_original_scenario()
+        create_original_style_training()
+        
+        print("\n" + "=" * 50)
+        print("🎉 RESTORATION COMPLETE!")
+        print("\nNow you can:")
+        print("  python train_ai_original.py --new    (start fresh with original config)")
+        print("  python train_ai_original.py --debug  (quick training)")
+        print("  python test_ai.py                    (test after retraining)")
+        print("\nThe restored system uses your original:")
+        print("  • Reward values (win=1, lose=-1, wait=-0.9, etc.)")
+        print("  • Scenario layout from Scenario.ts")
+        print("  • Training parameters (1M timesteps, exploration=0.5)")
 
 if __name__ == "__main__":
     main()

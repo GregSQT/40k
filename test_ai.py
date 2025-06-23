@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-# test_ai.py - Direct test script
+# test_ai.py - Fixed test script
 
 import os
 import sys
+import numpy as np
 
 # Add current directory to path
 sys.path.insert(0, os.getcwd())
@@ -35,7 +36,16 @@ def test_model(episodes=3):
         done = False
         
         while not done:
+            # Predict action
             action, _states = model.predict(obs, deterministic=True)
+            
+            # Ensure action is an integer
+            if isinstance(action, np.ndarray):
+                action = int(action.item())
+            else:
+                action = int(action)
+            
+            # Execute action
             obs, reward, terminated, truncated, info = env.step(action)
             total_reward += reward
             step_count += 1
@@ -65,6 +75,8 @@ def test_model(episodes=3):
     print(f"  AI Wins: {wins}/{episodes} ({100*wins/episodes:.1f}%)")
     if total_rewards:
         print(f"  Average Reward: {sum(total_rewards)/len(total_rewards):.3f}")
+        print(f"  Best Reward: {max(total_rewards):.3f}")
+        print(f"  Worst Reward: {min(total_rewards):.3f}")
     
     env.close()
     return True

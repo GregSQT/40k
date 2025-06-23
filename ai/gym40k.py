@@ -1,4 +1,4 @@
-# ai/gym40k.py - Fixed version
+# ai/gym40k.py - Fixed version with proper action handling
 
 import gymnasium as gym
 import numpy as np
@@ -93,6 +93,7 @@ class W40KEnv(gym.Env):
             u.setdefault("attacks_made", 0)
             u.setdefault("shots_fired", 0)
             u.setdefault("kills", 0)
+            u.setdefault("_last_kills", 0)
         
         # Create observation
         self.state = self._get_obs()
@@ -119,6 +120,13 @@ class W40KEnv(gym.Env):
 
     def step(self, action):
         """Execute one step in the environment."""
+        
+        # IMPORTANT: Convert action to int if it's a numpy array
+        if isinstance(action, np.ndarray):
+            action = int(action.item())
+        elif not isinstance(action, int):
+            action = int(action)
+        
         # Get current active AI unit
         ai_units = [u for u in self.units if u["player"] == 1 and u["alive"]]
         if not ai_units:
@@ -155,7 +163,7 @@ class W40KEnv(gym.Env):
         self._check_win_condition()
         
         # Calculate reward
-        reward = self._calculate_reward(acting_unit if acting_unit else ai_units[0], action)
+        reward = self._calculate_reward(acting_unit if acting_unit else ai_units[0] if ai_units else None, action)
         self.episode_reward += reward
         
         # Get new observation
@@ -379,9 +387,10 @@ class W40KEnv(gym.Env):
                         ai_units.remove(target)
                 else:
                     # Move towards nearest AI unit
-                    nearest = min(ai_units, 
-                                key=lambda e: abs(unit["col"] - e["col"]) + abs(unit["row"] - e["row"]))
-                    self._move_towards_enemy(unit, [nearest])
+                    if ai_units:
+                        nearest = min(ai_units, 
+                                    key=lambda e: abs(unit["col"] - e["col"]) + abs(unit["row"] - e["row"]))
+                        self._move_towards_enemy(unit, [nearest])
             
             elif unit["is_melee"]:
                 # Try to attack adjacent enemies
@@ -399,9 +408,10 @@ class W40KEnv(gym.Env):
                         ai_units.remove(target)
                 else:
                     # Move towards nearest AI unit
-                    nearest = min(ai_units, 
-                                key=lambda e: abs(unit["col"] - e["col"]) + abs(unit["row"] - e["row"]))
-                    self._move_towards_enemy(unit, [nearest])
+                    if ai_units:
+                        nearest = min(ai_units, 
+                                    key=lambda e: abs(unit["col"] - e["col"]) + abs(unit["row"] - e["row"]))
+                        self._move_towards_enemy(unit, [nearest])
 
     def _reset_phase_flags(self):
         """Reset phase action flags for all units."""
@@ -422,6 +432,9 @@ class W40KEnv(gym.Env):
 
     def _calculate_reward(self, unit, action):
         """Calculate reward for the action taken."""
+        if unit is None:
+            return 0.0
+            
         unit_type = "SpaceMarineRanged" if unit["is_ranged"] else "SpaceMarineMelee"
         rewards = REWARDS_MASTER.get(unit_type, {})
         
@@ -446,9 +459,12 @@ class W40KEnv(gym.Env):
         base_reward = action_rewards.get(action, 0.0)
         
         # Bonus for killing enemies
-        if hasattr(unit, "kills") and unit["kills"] > getattr(unit, "_last_kills", 0):
-            unit["_last_kills"] = unit["kills"]
-            base_reward += rewards.get("enemy_killed_r" if unit["is_ranged"] else "enemy_killed_m", 0.5)
+        current_kills = unit.get("kills", 0)
+        last_kills = unit.get("_last_kills", 0)
+        if current_kills > last_kills:
+            unit["_last_kills"] = current_kills
+            kill_bonus = rewards.get("enemy_killed_r" if unit["is_ranged"] else "enemy_killed_m", 0.5)
+            base_reward += kill_bonus
         
         return base_reward
 

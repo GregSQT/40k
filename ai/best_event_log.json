@@ -1,2390 +1,542 @@
 [
   {
     "turn": 0,
-    "phase": "charge",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "charge_success": false,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 3
   },
   {
     "turn": 0,
-    "phase": "charge",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 2,
-    "event_flags": {
-      "charge_success": true,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 0,
-    "phase": "melee",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "attack": false,
-      "enemy_killed_m": false,
-      "enemy_killed_no_overkill_m": false,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 0,
-    "phase": "melee",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 2,
-    "event_flags": {
-      "attack": true,
-      "enemy_killed_m": false,
-      "enemy_killed_no_overkill_m": false,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 1,
-      "attacks_made": 1,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 2,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 1,
-        "attacks_made": 1,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "unit_id": 4,
+    "action": 3,
+    "position": [
+      22,
+      3
+    ],
+    "hp": 4
   },
   {
     "turn": 1,
-    "phase": "charge",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "charge_success": false,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 2,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 1,
-        "attacks_made": 1,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 3
   },
   {
     "turn": 1,
-    "phase": "charge",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 2,
-    "event_flags": {
-      "charge_success": true,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 1,
-      "attacks_made": 1,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 2,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 1,
-        "attacks_made": 1,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 1,
-    "phase": "melee",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "attack": false,
-      "enemy_killed_m": false,
-      "enemy_killed_no_overkill_m": false,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 2,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 1,
-        "attacks_made": 1,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 1,
-    "phase": "melee",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 2,
-    "event_flags": {
-      "attack": true,
-      "enemy_killed_m": false,
-      "enemy_killed_no_overkill_m": false,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 2,
-      "attacks_made": 2,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 1,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 2,
-        "attacks_made": 2,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "unit_id": 4,
+    "action": 4,
+    "position": [
+      16,
+      9
+    ],
+    "hp": 4
   },
   {
     "turn": 2,
-    "phase": "charge",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "charge_success": false,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 1,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 2,
-        "attacks_made": 2,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 3
   },
   {
     "turn": 2,
-    "phase": "charge",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 2,
-    "event_flags": {
-      "charge_success": true,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 2,
-      "attacks_made": 2,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 1,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 2,
-        "attacks_made": 2,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 2,
-    "phase": "melee",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "attack": false,
-      "enemy_killed_m": false,
-      "enemy_killed_no_overkill_m": false,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 1,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 2,
-        "attacks_made": 2,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 2,
-    "phase": "melee",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 2,
-    "event_flags": {
-      "attack": true,
-      "enemy_killed_m": true,
-      "enemy_killed_no_overkill_m": true,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 3,
-      "attacks_made": 3,
-      "shots_fired": 0,
-      "kills": 1
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 3,
-        "attacks_made": 3,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "unit_id": 4,
+    "action": 6,
+    "position": [
+      18,
+      9
+    ],
+    "hp": 2
   },
   {
     "turn": 3,
-    "phase": "charge",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "charge_success": false,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 3,
-        "attacks_made": 3,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 3,
-    "phase": "charge",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 0,
-    "event_flags": {
-      "charge_success": true,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 3,
-      "attacks_made": 3,
-      "shots_fired": 0,
-      "kills": 1
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 3,
-        "attacks_made": 3,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 3,
-    "phase": "melee",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "attack": false,
-      "enemy_killed_m": false,
-      "enemy_killed_no_overkill_m": false,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 3,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 3,
-        "attacks_made": 3,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 3,
-    "phase": "melee",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 0,
-    "event_flags": {
-      "attack": true,
-      "enemy_killed_m": false,
-      "enemy_killed_no_overkill_m": false,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 4,
-      "attacks_made": 4,
-      "shots_fired": 0,
-      "kills": 1
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 2,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 4,
-        "attacks_made": 4,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 3
   },
   {
     "turn": 4,
-    "phase": "charge",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "charge_success": false,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 2,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 4,
-        "attacks_made": 4,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 4,
-    "phase": "charge",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 0,
-    "event_flags": {
-      "charge_success": true,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 4,
-      "attacks_made": 4,
-      "shots_fired": 0,
-      "kills": 1
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 2,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 4,
-        "attacks_made": 4,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 4,
-    "phase": "melee",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "attack": false,
-      "enemy_killed_m": false,
-      "enemy_killed_no_overkill_m": false,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 2,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 4,
-        "attacks_made": 4,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
-  },
-  {
-    "turn": 4,
-    "phase": "melee",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 0,
-    "event_flags": {
-      "attack": true,
-      "enemy_killed_m": false,
-      "enemy_killed_no_overkill_m": false,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 5,
-      "attacks_made": 5,
-      "shots_fired": 0,
-      "kills": 1
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 1,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 5,
-        "attacks_made": 5,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 3
   },
   {
     "turn": 5,
-    "phase": "charge",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "charge_success": false,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 1,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 5,
-        "attacks_made": 5,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 3
   },
   {
-    "turn": 5,
-    "phase": "charge",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 0,
-    "event_flags": {
-      "charge_success": true,
-      "wait": true
-    },
-    "unit_stats": {
-      "damage_dealt": 5,
-      "attacks_made": 5,
-      "shots_fired": 0,
-      "kills": 1
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 1,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 5,
-        "attacks_made": 5,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "turn": 6,
+    "unit_id": 3,
+    "action": 5,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 3
   },
   {
-    "turn": 5,
-    "phase": "melee",
-    "acting_unit_idx": 1,
-    "target_unit_idx": null,
-    "event_flags": {
-      "attack": false,
-      "enemy_killed_m": false,
-      "enemy_killed_no_overkill_m": false,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 0,
-      "attacks_made": 0,
-      "shots_fired": 0,
-      "kills": 0
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 1,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 5,
-        "attacks_made": 5,
-        "shots_fired": 0,
-        "kills": 1,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "turn": 7,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
   },
   {
-    "turn": 5,
-    "phase": "melee",
-    "acting_unit_idx": 3,
-    "target_unit_idx": 0,
-    "event_flags": {
-      "attack": true,
-      "enemy_killed_m": true,
-      "enemy_killed_no_overkill_m": true,
-      "enemy_killed_lowests_hp_m": false,
-      "atk_wasted_m": true
-    },
-    "unit_stats": {
-      "damage_dealt": 6,
-      "attacks_made": 6,
-      "shots_fired": 0,
-      "kills": 2
-    },
-    "units": [
-      {
-        "player": 0,
-        "col": 5,
-        "row": 1,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 1,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 20,
-        "row": 17,
-        "cur_hp": 1,
-        "rng_rng": 1,
-        "rng_dmg": 1,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": true,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      },
-      {
-        "player": 0,
-        "col": 0,
-        "row": 0,
-        "cur_hp": 0,
-        "rng_rng": 4,
-        "rng_dmg": 2,
-        "cc_dmg": 2,
-        "unit_type": "SpaceMarineRanged",
-        "is_ranged": true,
-        "is_melee": false,
-        "alive": false,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 0,
-        "attacks_made": 0,
-        "shots_fired": 0,
-        "kills": 0,
-        "ICON": "/icons/Intercessor.webp"
-      },
-      {
-        "player": 1,
-        "col": 0,
-        "row": 5,
-        "cur_hp": 3,
-        "rng_rng": 5,
-        "rng_dmg": 2,
-        "cc_dmg": 1,
-        "unit_type": "SpaceMarineMelee",
-        "is_ranged": false,
-        "is_melee": true,
-        "alive": true,
-        "move": 6,
-        "has_acted_this_phase": false,
-        "damage_dealt": 6,
-        "attacks_made": 6,
-        "shots_fired": 0,
-        "kills": 2,
-        "ICON": "/icons/AssaultIntercessor.webp"
-      }
-    ]
+    "turn": 8,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 9,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 10,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 11,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 12,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 13,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 14,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 15,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 16,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 17,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 18,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 19,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 20,
+    "unit_id": 3,
+    "action": 1,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 21,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 22,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 23,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 24,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 25,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 26,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 27,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 28,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 29,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 30,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 31,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 32,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 33,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 34,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 35,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 36,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 37,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 38,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 39,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 40,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 41,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 42,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 43,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 44,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 45,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 46,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 47,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 48,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 49,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      5
+    ],
+    "hp": 1
+  },
+  {
+    "turn": 50,
+    "unit_id": 3,
+    "action": 3,
+    "position": [
+      0,
+      1
+    ],
+    "hp": 1
   }
 ]
