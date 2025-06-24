@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ai/quick_retrain_organized.py - Training with organized model structure
+ai/train.py - Training with organized model structure
 """
 
 import os
@@ -19,10 +19,10 @@ def setup_imports():
     from stable_baselines3.common.env_checker import check_env
     
     try:
-        from gym40k_improved import W40KEnv
+        from gym40k import W40KEnv
     except ImportError:
         try:
-            from ai.gym40k_improved import W40KEnv
+            from ai.gym40k import W40KEnv
         except ImportError:
             from gym40k import W40KEnv
     

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ai/gym40k_improved.py - Improved W40K environment with proper game logic
+ai/gym40k.py - Improved W40K environment with proper game logic
 """
 
 import gymnasium as gym

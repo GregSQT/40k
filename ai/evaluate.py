@@ -17,10 +17,10 @@ def setup_imports():
         raise
     
     try:
-        from gym40k_improved import W40KEnv
+        from gym40k import W40KEnv
     except ImportError:
         try:
-            from ai.gym40k_improved import W40KEnv
+            from ai.gym40k import W40KEnv
         except ImportError:
             from gym40k import W40KEnv  # Fallback
     
