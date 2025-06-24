@@ -1,599 +1,500 @@
 #!/usr/bin/env python3
 """
-Enhanced gym40k.py with modified self-play support
-Based on your existing implementation with self-play additions
+ai/train.py - Main training script for WH40K AI with Self-Play as Default
 """
 
-import gymnasium as gym
-import numpy as np
-from gymnasium import spaces
-import json
 import os
-import copy
-import random
+import sys
+import shutil
 
-REWARDS_PATH = os.path.join(os.path.dirname(__file__), "rewards_master.json")
-SCENARIO_PATH = os.path.join(os.path.dirname(__file__), "scenario.json") 
+def setup_imports():
+    """Set up import paths and return required modules."""
+    # Add paths for imports
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    sys.path.insert(0, script_dir)
+    sys.path.insert(0, project_root)
 
-# Load rewards configuration
-if os.path.exists(REWARDS_PATH):
-    with open(REWARDS_PATH, "r") as f:
-        REWARDS_MASTER = json.load(f)
-else:
-    # Default rewards if file doesn't exist
-    REWARDS_MASTER = {
-        "SpaceMarineRanged": {"win": 1, "lose": -1, "wait": -0.1},
-        "SpaceMarineMelee": {"win": 1, "lose": -1, "wait": -0.1}
+    # Import modules after setting up paths
+    from stable_baselines3 import DQN
+    from stable_baselines3.common.env_checker import check_env
+    
+    # Try different import paths for gym40k
+    try:
+        from ai.gym40k import W40KEnv
+    except ImportError:
+        try:
+            from gym40k import W40KEnv
+        except ImportError:
+            # Try importing from current directory
+            import importlib.util
+            gym_path = os.path.join(script_dir, "gym40k.py")
+            if os.path.exists(gym_path):
+                spec = importlib.util.spec_from_file_location("gym40k", gym_path)
+                gym_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(gym_module)
+                W40KEnv = gym_module.W40KEnv
+            else:
+                raise ImportError("Could not find gym40k module")
+    
+    # Try different import paths for config_loader
+    try:
+        from ai.config_loader import ConfigLoader
+    except ImportError:
+        try:
+            from config_loader import ConfigLoader
+        except ImportError:
+            import importlib.util
+            config_path = os.path.join(script_dir, "config_loader.py")
+            if os.path.exists(config_path):
+                spec = importlib.util.spec_from_file_location("config_loader", config_path)
+                config_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(config_module)
+                ConfigLoader = config_module.ConfigLoader
+            else:
+                raise ImportError("Could not find config_loader module")
+    
+    return DQN, check_env, W40KEnv, ConfigLoader
+
+def parse_arguments():
+    """Parse command line arguments."""
+    scenario = None
+    training_config = None
+    rewards_config = None
+    model_action = "auto"  # auto, new, append
+    training_mode = "self_play"  # self_play, scripted
+    self_play_update_freq = 1000  # How often to update opponent model
+    
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        
+        if arg == "--scenario" and i + 1 < len(sys.argv):
+            scenario = sys.argv[i + 1]
+            i += 2
+        elif arg == "--training-config" and i + 1 < len(sys.argv):
+            training_config = sys.argv[i + 1]
+            i += 2
+        elif arg == "--rewards-config" and i + 1 < len(sys.argv):
+            rewards_config = sys.argv[i + 1]
+            i += 2
+        elif arg == "--new":
+            model_action = "new"
+            i += 1
+        elif arg == "--append":
+            model_action = "append"
+            i += 1
+        elif arg == "--scripted":
+            training_mode = "scripted"
+            i += 1
+        elif arg == "--self-play":
+            training_mode = "self_play"
+            i += 1
+        elif arg == "--update-freq" and i + 1 < len(sys.argv):
+            self_play_update_freq = int(sys.argv[i + 1])
+            i += 2
+        elif arg == "--help":
+            show_help()
+            return None
+        else:
+            print(f"Unknown argument: {arg}")
+            show_help()
+            return None
+            
+    return {
+        "scenario": scenario,
+        "training_config": training_config,
+        "rewards_config": rewards_config,
+        "model_action": model_action,
+        "training_mode": training_mode,
+        "self_play_update_freq": self_play_update_freq
     }
 
-class W40KEnv(gym.Env):
-    def __init__(self, n_units=4, board_size=(24, 18), 
-                 opponent_model=None, self_play_mode=False, 
-                 scripted_opponent=False, training_player=1):
-        """
-        Enhanced W40K Environment with self-play support.
-        
-        Args:
-            n_units: Number of units (legacy, determined by scenario)
-            board_size: Board dimensions
-            opponent_model: Pre-trained model to use as opponent (for self-play)
-            self_play_mode: If True, use opponent_model instead of scripted bot
-            scripted_opponent: Legacy parameter for compatibility
-            training_player: Which player is being trained (0 or 1)
-        """
-        super().__init__()
-        self.board_size = board_size
-        self.opponent_model = opponent_model
-        self.self_play_mode = self_play_mode
-        self.training_player = training_player
-        self.scripted_opponent = scripted_opponent
+def show_help():
+    """Show help message."""
+    print("WH40K AI Training Script with Self-Play")
+    print("=" * 40)
+    print()
+    print("Usage: python ai/train.py [options]")
+    print()
+    print("Training modes:")
+    print("  DEFAULT: Self-play training (agent vs modified copy of itself)")
+    print("  --scripted              Use scripted opponent instead of self-play")
+    print("  --self-play             Explicitly enable self-play (default)")
+    print()
+    print("Self-play options:")
+    print("  --update-freq N         Update opponent model every N timesteps (default: 1000)")
+    print()
+    print("Model management:")
+    print("  --new                   Create new model (overwrite existing)")
+    print("  --append                Continue training existing model")
+    print()
+    print("Configuration:")
+    print("  --scenario NAME         Override scenario (default from config)")
+    print("  --training-config NAME  Override training config (default from config)")
+    print("  --rewards-config NAME   Override rewards config (default from config)")
+    print("  --help                  Show this help")
+    print()
+    print("Examples:")
+    print("  python ai/train.py                     # Self-play with all defaults")
+    print("  python ai/train.py --scripted          # Train vs scripted opponent") 
+    print("  python ai/train.py --update-freq 2000  # Update opponent every 2000 steps")
 
-        # Load scenario from JSON
-        if os.path.exists(SCENARIO_PATH):
-            with open(SCENARIO_PATH, "r") as f:
-                self.base_scenario = json.load(f)
-        else:
-            self.base_scenario = self._create_default_scenario()
-            
-        self.n_units = len(self.base_scenario)
+def load_config_defaults(ConfigLoader):
+    """Load default configuration values from config.json."""
+    try:
+        loader = ConfigLoader()
+        main_config = loader.load_main_config()
+        defaults = main_config.get("defaults", {})
         
-        # Define spaces
-        self.observation_space = spaces.Box(
-            low=0, high=100, 
-            shape=(self.n_units * 7,), 
-            dtype=np.float32
-        )
-        self.action_space = spaces.Discrete(8)
-        
-        # Initialize
-        self.reset()
-        self.episode_logs = []
-        self.episode_rewards = []
-
-    def set_opponent_model(self, opponent_model):
-        """Update the opponent model (for self-play training)."""
-        self.opponent_model = opponent_model
-        print(f"[Self-Play] Updated opponent model")
-
-    def _create_default_scenario(self):
-        """Create a default scenario if scenario.json doesn't exist."""
-        return [
-            {
-                "id": 1, "unit_type": "Intercessor", "player": 0,
-                "col": 23, "row": 12, "cur_hp": 3, "hp_max": 3,
-                "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1,
-                "is_ranged": True, "is_melee": False, "alive": True
-            },
-            {
-                "id": 2, "unit_type": "AssaultIntercessor", "player": 0,
-                "col": 1, "row": 12, "cur_hp": 4, "hp_max": 4,
-                "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2,
-                "is_ranged": False, "is_melee": True, "alive": True
-            },
-            {
-                "id": 3, "unit_type": "Intercessor", "player": 1,
-                "col": 0, "row": 5, "cur_hp": 3, "hp_max": 3,
-                "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1,
-                "is_ranged": True, "is_melee": False, "alive": True
-            },
-            {
-                "id": 4, "unit_type": "AssaultIntercessor", "player": 1,
-                "col": 22, "row": 3, "cur_hp": 4, "hp_max": 4,
-                "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2,
-                "is_ranged": False, "is_melee": True, "alive": True
-            }
-        ]
-
-    def reset(self, *, seed=None, options=None):
-        super().reset(seed=seed)
-        
-        # Deep copy units from base scenario
-        self.units = copy.deepcopy(self.base_scenario)
-        
-        # Initialize additional fields
-        for u in self.units:
-            u.setdefault("has_acted_this_phase", False)
-            u.setdefault("damage_dealt", 0)
-            u.setdefault("attacks_made", 0)
-            u.setdefault("shots_fired", 0)
-            u.setdefault("kills", 0)
-            u.setdefault("_last_kills", 0)
-        
-        # Create observation
-        self.state = self._get_obs()
-        
-        # Reset game state
-        self.turn = 0
-        self.game_over = False
-        self.event_log = []
-        self.winner = None
-        self.episode_reward = 0
-        self.current_player = self.training_player  # Training player starts
-        
-        return self.state.copy(), {}
-
-    def _get_obs(self):
-        """Create observation from current game state."""
-        obs = []
-        for u in self.units:
-            obs.extend([
-                u["player"], u["col"], u["row"], u["cur_hp"], 
-                u["rng_rng"], u["rng_dmg"], u["cc_dmg"]
-            ])
-        return np.array(obs, dtype=np.float32)
-
-    def _get_obs_for_player(self, player):
-        """Get observation from specific player's perspective."""
-        obs = []
-        for u in self.units:
-            # Flip perspective if needed
-            if player != self.training_player:
-                # For opponent, flip player IDs so they see themselves as "player 1"
-                obs.extend([
-                    1 - u["player"],  # Flip player perspective
-                    u["col"], u["row"], u["cur_hp"], 
-                    u["rng_rng"], u["rng_dmg"], u["cc_dmg"]
-                ])
-            else:
-                # Normal perspective for training player
-                obs.extend([
-                    u["player"], u["col"], u["row"], u["cur_hp"], 
-                    u["rng_rng"], u["rng_dmg"], u["cc_dmg"]
-                ])
-        return np.array(obs, dtype=np.float32)
-
-    def step(self, action):
-        """Execute one step in the environment."""
-        
-        # Convert action to int if it's a numpy array
-        if isinstance(action, np.ndarray):
-            action = int(action.item())
-        elif not isinstance(action, int):
-            action = int(action)
-        
-        # Get current active training player units
-        training_units = [u for u in self.units if u["player"] == self.training_player and u["alive"]]
-        if not training_units:
-            self.game_over = True
-            self.winner = 1 - self.training_player
-            
-        # Select acting unit (first available training unit)
-        acting_unit = None
-        for u in training_units:
-            if not u.get("has_acted_this_phase", False):
-                acting_unit = u
-                break
-                
-        if acting_unit is None:
-            # All training units have acted, opponent's turn
-            self._execute_opponent_turn()
-            self._reset_phase_flags()
-            self.turn += 1
-            
-        if acting_unit:
-            # Execute training player's action
-            self._execute_action(acting_unit, action)
-            acting_unit["has_acted_this_phase"] = True
-        
-        # Check if all training units have acted
-        training_units_acted = all(u.get("has_acted_this_phase", False) for u in training_units)
-        if training_units_acted:
-            # Execute opponent turn
-            self._execute_opponent_turn()
-            self._reset_phase_flags()
-            self.turn += 1
-        
-        # Check win condition
-        self._check_win_condition()
-        
-        # Calculate reward
-        reward = self._calculate_reward(acting_unit if acting_unit else training_units[0] if training_units else None, action)
-        self.episode_reward += reward
-        
-        # Get new observation
-        obs = self._get_obs()
-        
-        # Check termination
-        terminated = self.game_over
-        truncated = self.turn > 50
-        
-        info = {
-            "turn": self.turn,
-            "winner": self.winner,
-            "acting_unit": acting_unit["id"] if acting_unit else None,
-            "self_play_mode": self.self_play_mode
+        return {
+            "scenario": defaults.get("scenario", "default"),
+            "training_config": defaults.get("training_config", "default"),
+            "rewards_config": defaults.get("rewards_config", "original")
         }
-        
-        # Save episode log at end
-        if terminated or truncated:
-            self.episode_logs.append((list(self.event_log), self.episode_reward))
-        
-        return obs, reward, terminated, truncated, info
-
-    def _execute_opponent_turn(self):
-        """Execute opponent turn - either AI or scripted."""
-        if self.self_play_mode and self.opponent_model:
-            self._execute_ai_opponent_turn()
-        else:
-            self._execute_scripted_opponent_turn()
-
-    def _execute_ai_opponent_turn(self):
-        """Execute AI opponent turn using the opponent model."""
-        opponent_player = 1 - self.training_player
-        opponent_units = [u for u in self.units if u["player"] == opponent_player and u["alive"]]
-        
-        for unit in opponent_units:
-            if not opponent_units:  # Check if any units left
-                break
-                
-            try:
-                # Get observation from opponent's perspective
-                obs = self._get_obs_for_player(opponent_player)
-                
-                # Use opponent model to choose action
-                action, _ = self.opponent_model.predict(obs, deterministic=False)
-                
-                # Convert action to int
-                if isinstance(action, np.ndarray):
-                    action = int(action.item())
-                elif not isinstance(action, int):
-                    action = int(action)
-                
-                # Execute the action
-                self._execute_action(unit, action)
-                
-                # Log opponent action
-                self.event_log.append({
-                    "turn": self.turn,
-                    "unit_id": unit["id"],
-                    "action": action,
-                    "position": (unit["col"], unit["row"]),
-                    "hp": unit["cur_hp"],
-                    "player": "opponent_ai"
-                })
-                
-            except Exception as e:
-                print(f"[WARNING] AI opponent action failed: {e}")
-                # Fallback to waiting
-                pass
-
-    def _execute_scripted_opponent_turn(self):
-        """Execute scripted opponent turn (your original implementation)."""
-        opponent_player = 1 - self.training_player
-        opponent_units = [u for u in self.units if u["player"] == opponent_player and u["alive"]]
-        training_units = [u for u in self.units if u["player"] == self.training_player and u["alive"]]
-        
-        for unit in opponent_units:
-            if not training_units:
-                break
-                
-            # Simple scripted behavior (your original code)
-            if unit["is_ranged"]:
-                # Try to attack if in range
-                targets_in_range = [
-                    e for e in training_units 
-                    if max(abs(unit["col"] - e["col"]), abs(unit["row"] - e["row"])) <= unit["rng_rng"]
-                ]
-                if targets_in_range:
-                    target = min(targets_in_range, key=lambda e: e["cur_hp"])
-                    damage = unit["rng_dmg"]
-                    target["cur_hp"] -= damage
-                    if target["cur_hp"] <= 0:
-                        target["cur_hp"] = 0
-                        target["alive"] = False
-                        training_units.remove(target)
-                else:
-                    # Move towards nearest training unit
-                    if training_units:
-                        nearest = min(training_units, 
-                                    key=lambda e: abs(unit["col"] - e["col"]) + abs(unit["row"] - e["row"]))
-                        self._move_towards_enemy(unit, [nearest])
-            
-            elif unit["is_melee"]:
-                # Try to attack adjacent enemies
-                adjacent_enemies = [
-                    e for e in training_units
-                    if max(abs(unit["col"] - e["col"]), abs(unit["row"] - e["row"])) <= 1
-                ]
-                if adjacent_enemies:
-                    target = min(adjacent_enemies, key=lambda e: e["cur_hp"])
-                    damage = unit["cc_dmg"]
-                    target["cur_hp"] -= damage
-                    if target["cur_hp"] <= 0:
-                        target["cur_hp"] = 0
-                        target["alive"] = False
-                        training_units.remove(target)
-                else:
-                    # Move towards nearest training unit
-                    if training_units:
-                        nearest = min(training_units, 
-                                    key=lambda e: abs(unit["col"] - e["col"]) + abs(unit["row"] - e["row"]))
-                        self._move_towards_enemy(unit, [nearest])
-
-    def _execute_action(self, unit, action):
-        """Execute the given action for the unit."""
-        enemy_units = [u for u in self.units if u["player"] != unit["player"] and u["alive"]]
-        
-        if action == 0:  # Move close
-            self._move_towards_enemy(unit, enemy_units)
-        elif action == 1:  # Move away
-            self._move_away_from_enemy(unit, enemy_units)
-        elif action == 2:  # Move to safe
-            self._move_to_safe_position(unit, enemy_units)
-        elif action == 3:  # Move to range
-            self._move_to_range(unit, enemy_units)
-        elif action == 4:  # Move to charge
-            self._move_to_charge_range(unit, enemy_units)
-        elif action == 5:  # Shoot/Attack
-            self._attack_enemy(unit, enemy_units)
-        elif action == 6:  # Charge
-            self._charge_enemy(unit, enemy_units)
-        elif action == 7:  # Wait
-            pass  # Do nothing
-        
-        # Log the action
-        self.event_log.append({
-            "turn": self.turn,
-            "unit_id": unit["id"],
-            "action": action,
-            "position": (unit["col"], unit["row"]),
-            "hp": unit["cur_hp"]
-        })
-
-    def _move_towards_enemy(self, unit, enemy_units):
-        """Move unit towards nearest enemy."""
-        if not enemy_units:
-            return
-            
-        nearest_enemy = min(enemy_units, 
-                          key=lambda e: abs(unit["col"] - e["col"]) + abs(unit["row"] - e["row"]))
-        
-        # Simple movement towards enemy
-        if unit["col"] < nearest_enemy["col"]:
-            unit["col"] = min(unit["col"] + unit["move"], self.board_size[0] - 1)
-        elif unit["col"] > nearest_enemy["col"]:
-            unit["col"] = max(unit["col"] - unit["move"], 0)
-            
-        if unit["row"] < nearest_enemy["row"]:
-            unit["row"] = min(unit["row"] + unit["move"], self.board_size[1] - 1)
-        elif unit["row"] > nearest_enemy["row"]:
-            unit["row"] = max(unit["row"] - unit["move"], 0)
-
-    def _move_away_from_enemy(self, unit, enemy_units):
-        """Move unit away from nearest enemy."""
-        if not enemy_units:
-            return
-            
-        nearest_enemy = min(enemy_units, 
-                          key=lambda e: abs(unit["col"] - e["col"]) + abs(unit["row"] - e["row"]))
-        
-        # Move away from enemy
-        if unit["col"] < nearest_enemy["col"]:
-            unit["col"] = max(unit["col"] - unit["move"], 0)
-        elif unit["col"] > nearest_enemy["col"]:
-            unit["col"] = min(unit["col"] + unit["move"], self.board_size[0] - 1)
-            
-        if unit["row"] < nearest_enemy["row"]:
-            unit["row"] = max(unit["row"] - unit["move"], 0)
-        elif unit["row"] > nearest_enemy["row"]:
-            unit["row"] = min(unit["row"] + unit["move"], self.board_size[1] - 1)
-
-    def _move_to_safe_position(self, unit, enemy_units):
-        """Move to a safer position."""
-        # Simple: move to corner
-        corner_col = 0 if unit["col"] < self.board_size[0] // 2 else self.board_size[0] - 1
-        corner_row = 0 if unit["row"] < self.board_size[1] // 2 else self.board_size[1] - 1
-        
-        if abs(unit["col"] - corner_col) > abs(unit["row"] - corner_row):
-            if unit["col"] < corner_col:
-                unit["col"] = min(unit["col"] + unit["move"], corner_col)
-            else:
-                unit["col"] = max(unit["col"] - unit["move"], corner_col)
-        else:
-            if unit["row"] < corner_row:
-                unit["row"] = min(unit["row"] + unit["move"], corner_row)
-            else:
-                unit["row"] = max(unit["row"] - unit["move"], corner_row)
-
-    def _move_to_range(self, unit, enemy_units):
-        """Move to optimal range for ranged attack."""
-        if not unit["is_ranged"] or not enemy_units:
-            return
-            
-        target = min(enemy_units, 
-                    key=lambda e: abs(unit["col"] - e["col"]) + abs(unit["row"] - e["row"]))
-        
-        distance = max(abs(unit["col"] - target["col"]), abs(unit["row"] - target["row"]))
-        optimal_range = unit["rng_rng"] - 1
-        
-        if distance > optimal_range:
-            self._move_towards_enemy(unit, [target])
-        elif distance < optimal_range // 2:
-            self._move_away_from_enemy(unit, [target])
-
-    def _move_to_charge_range(self, unit, enemy_units):
-        """Move to charge range."""
-        if not unit["is_melee"] or not enemy_units:
-            return
-            
-        target = min(enemy_units, 
-                    key=lambda e: abs(unit["col"] - e["col"]) + abs(unit["row"] - e["row"]))
-        
-        # Move to within charge range (adjacent)
-        self._move_towards_enemy(unit, [target])
-
-    def _attack_enemy(self, unit, enemy_units):
-        """Attack an enemy unit."""
-        if not enemy_units:
-            return
-            
-        # Find targets in range
-        targets_in_range = []
-        for enemy in enemy_units:
-            distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
-            
-            if unit["is_ranged"] and distance <= unit["rng_rng"]:
-                targets_in_range.append(enemy)
-            elif unit["is_melee"] and distance <= 1:
-                targets_in_range.append(enemy)
-        
-        if targets_in_range:
-            # Attack lowest HP target
-            target = min(targets_in_range, key=lambda e: e["cur_hp"])
-            
-            if unit["is_ranged"]:
-                damage = unit["rng_dmg"]
-                unit["shots_fired"] += 1
-            else:
-                damage = unit["cc_dmg"]
-                unit["attacks_made"] += 1
-            
-            old_hp = target["cur_hp"]
-            target["cur_hp"] -= damage
-            unit["damage_dealt"] += min(damage, old_hp)
-            
-            if target["cur_hp"] <= 0:
-                target["cur_hp"] = 0
-                target["alive"] = False
-                unit["kills"] += 1
-
-    def _charge_enemy(self, unit, enemy_units):
-        """Charge an enemy unit."""
-        if not unit["is_melee"] or not enemy_units:
-            return
-            
-        # Find chargeable targets
-        chargeable = []
-        for enemy in enemy_units:
-            distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
-            if distance <= unit["move"] and distance > 1:
-                chargeable.append(enemy)
-        
-        if chargeable:
-            target = min(chargeable, key=lambda e: e["cur_hp"])
-            
-            # Move adjacent to target
-            if unit["col"] < target["col"]:
-                unit["col"] = target["col"] - 1
-            elif unit["col"] > target["col"]:
-                unit["col"] = target["col"] + 1
-            else:
-                if unit["row"] < target["row"]:
-                    unit["row"] = target["row"] - 1
-                else:
-                    unit["row"] = target["row"] + 1
-            
-            # Attack after charge
-            self._attack_enemy(unit, [target])
-
-    def _reset_phase_flags(self):
-        """Reset phase action flags for all units."""
-        for unit in self.units:
-            unit["has_acted_this_phase"] = False
-
-    def _check_win_condition(self):
-        """Check if game is over and determine winner."""
-        training_alive = any(u["alive"] and u["player"] == self.training_player for u in self.units)
-        opponent_alive = any(u["alive"] and u["player"] == (1 - self.training_player) for u in self.units)
-        
-        if not training_alive:
-            self.game_over = True
-            self.winner = 1 - self.training_player  # Opponent wins
-        elif not opponent_alive:
-            self.game_over = True
-            self.winner = self.training_player  # Training player wins
-
-    def _calculate_reward(self, unit, action):
-        """Calculate reward for the action taken."""
-        if unit is None:
-            return 0.0
-            
-        unit_type = "SpaceMarineRanged" if unit["is_ranged"] else "SpaceMarineMelee"
-        rewards = REWARDS_MASTER.get(unit_type, {})
-        
-        if self.game_over:
-            if self.winner == self.training_player:  # Training player wins
-                return rewards.get("win", 1.0)
-            else:  # Training player loses
-                return rewards.get("lose", -1.0)
-        
-        # Action-based rewards
-        action_rewards = {
-            0: rewards.get("move_close", 0.1),
-            1: rewards.get("move_away", 0.1),
-            2: rewards.get("move_to_safe", 0.1),
-            3: rewards.get("move_to_rng", 0.2),
-            4: rewards.get("move_to_charge", 0.2),
-            5: rewards.get("ranged_attack", 0.3) if unit["is_ranged"] else rewards.get("attack", 0.3),
-            6: rewards.get("charge_success", 0.4),
-            7: rewards.get("wait", -0.1)
+    except Exception as e:
+        print(f"Warning: Could not load config defaults: {e}")
+        print("Using fallback defaults...")
+        return {
+            "scenario": "default",
+            "training_config": "default", 
+            "rewards_config": "original"
         }
-        
-        base_reward = action_rewards.get(action, 0.0)
-        
-        # Bonus for killing enemies
-        current_kills = unit.get("kills", 0)
-        last_kills = unit.get("_last_kills", 0)
-        if current_kills > last_kills:
-            unit["_last_kills"] = current_kills
-            kill_bonus = rewards.get("enemy_killed_r" if unit["is_ranged"] else "enemy_killed_m", 0.5)
-            base_reward += kill_bonus
-        
-        return base_reward
 
-    def did_win(self):
-        """Check if training player won the game."""
-        return getattr(self, "winner", None) == self.training_player
-
-    def close(self):
-        """Clean up the environment."""
-        pass
-
-
-# Test the enhanced environment
-def test_enhanced_environment():
-    """Test the enhanced environment."""
-    print("Testing Enhanced W40K Environment...")
+def determine_model_action(requested_action, model_path):
+    """Determine what to do with the model based on user request and file existence."""
+    model_exists = os.path.exists(model_path)
     
-    # Test scripted mode
-    env = W40KEnv(self_play_mode=False)
-    print(f"[OK] Scripted mode: {len(env.units)} units")
+    if requested_action == "new":
+        if model_exists:
+            print("Existing model will be overwritten (--new specified)")
+        return "new"
+    elif requested_action == "append":
+        if not model_exists:
+            print("No existing model found, creating new model (--append specified but no model exists)")
+            return "new"
+        return "append"
+    else:  # auto
+        if model_exists:
+            print("Existing model found, continuing training (use --new to overwrite)")
+            return "append"
+        else:
+            print("No existing model found, creating new model")
+            return "new"
+
+def create_self_play_callback(env, opponent_model_path, update_frequency):
+    """Create a callback for updating the opponent model during self-play training."""
+    from stable_baselines3.common.callbacks import BaseCallback
     
-    obs, info = env.reset()
-    print(f"[OK] Reset successful, observation shape: {obs.shape}")
+    class SelfPlayCallback(BaseCallback):
+        def __init__(self, env, opponent_model_path, update_frequency, verbose=0):
+            super().__init__(verbose)
+            self.env = env
+            self.opponent_model_path = opponent_model_path
+            self.update_frequency = update_frequency
+            self.last_update = 0
+            
+        def _on_step(self) -> bool:
+            # Update opponent model every N timesteps
+            if self.num_timesteps - self.last_update >= self.update_frequency:
+                try:
+                    # Save current model as new opponent
+                    temp_path = f"{self.opponent_model_path}.temp"
+                    self.model.save(temp_path)
+                    
+                    # Load the saved model as opponent
+                    from stable_baselines3 import DQN
+                    opponent_model = DQN.load(temp_path)
+                    
+                    # Update environment's opponent
+                    if hasattr(self.env, 'set_opponent_model'):
+                        self.env.set_opponent_model(opponent_model)
+                        print(f"[Self-Play] Updated opponent model at timestep {self.num_timesteps}")
+                    
+                    # Clean up temp file
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                    
+                    self.last_update = self.num_timesteps
+                    
+                except Exception as e:
+                    print(f"[Self-Play] Failed to update opponent: {e}")
+            
+            return True
     
-    # Test a few steps
-    for i in range(5):
-        action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action)
-        print(f"     Step {i+1}: action={action}, reward={reward:.3f}, done={terminated or truncated}")
+    return SelfPlayCallback(env, opponent_model_path, update_frequency)
+
+def main():
+    """Main training function with self-play as default."""
+    print("WH40K AI Training with Self-Play")
+    print("=" * 40)
+    
+    # Parse command line arguments
+    args = parse_arguments()
+    if args is None:
+        return False
+    
+    # Set up imports
+    try:
+        DQN, check_env, W40KEnv, ConfigLoader = setup_imports()
+    except ImportError as e:
+        print(f"Import error: {e}")
+        print("Make sure you're running from the project root and have installed dependencies.")
+        return False
+    
+    # Load default configurations
+    defaults = load_config_defaults(ConfigLoader)
+    
+    # Use command line args or defaults
+    scenario = args["scenario"] or defaults["scenario"]
+    training_config = args["training_config"] or defaults["training_config"]
+    rewards_config = args["rewards_config"] or defaults["rewards_config"]
+    model_action = args["model_action"]
+    training_mode = args["training_mode"]
+    self_play_update_freq = args["self_play_update_freq"]
+    
+    print(f"Configuration:")
+    print(f"  Scenario: {scenario}")
+    print(f"  Training: {training_config}")
+    print(f"  Rewards: {rewards_config}")
+    print(f"  Mode: {training_mode}")
+    if training_mode == "self_play":
+        print(f"  Self-play update frequency: {self_play_update_freq} timesteps")
+    print()
+    
+    # Load configurations
+    loader = ConfigLoader()
+    
+    try:
+        scenario_config = loader.load_scenario(scenario)
+        training_cfg = loader.load_training_config(training_config)
+        rewards_cfg = loader.load_rewards_config(rewards_config)
         
-        if terminated or truncated:
-            print(f"     Game ended. Winner: {info.get('winner', 'None')}")
-            break
+        print(f"Loaded configurations:")
+        print(f"  Scenario: {scenario_config['description']}")
+        print(f"  Training: {training_cfg['description']}")
+        print(f"  Rewards: {rewards_cfg['description']}")
+        print()
+        
+    except Exception as e:
+        print(f"Configuration error: {e}")
+        print("Run 'python ai/train.py --help' to see available options")
+        return False
+    
+    # Apply configurations to files
+    print("Applying configurations...")
+    loader.apply_scenario_to_file(scenario)
+    loader.apply_rewards_to_file(rewards_config)
+    
+    # Create environment with appropriate mode
+    print(f"Creating environment ({training_mode} mode)...")
+    
+    if training_mode == "self_play":
+        # For self-play, we'll set up the opponent model after creating the main model
+        env = W40KEnv(self_play_mode=True, training_player=1)
+        print("✓ Self-play environment created")
+    else:
+        env = W40KEnv(scripted_opponent=True, training_player=1) 
+        print("✓ Scripted opponent environment created")
+    
+    try:
+        check_env(env)
+        print("✓ Environment validation passed")
+    except Exception as e:
+        print(f"⚠ Environment check warning: {e}")
+    
+    print(f"Environment info:")
+    print(f"  Units: {len(env.units)}")
+    print(f"  Board size: {env.board_size}")
+    print(f"  Observation space: {env.observation_space}")
+    print(f"  Action space: {env.action_space}")
+    print()
+    
+    # Extract training parameters
+    total_timesteps = training_cfg['total_timesteps']
+    model_params = training_cfg['model_params'].copy()
+    
+    print(f"Training parameters:")
+    print(f"  Total timesteps: {total_timesteps:,}")
+    print(f"  Learning rate: {model_params['learning_rate']}")
+    print(f"  Buffer size: {model_params['buffer_size']:,}")
+    print(f"  Learning starts: {model_params['learning_starts']:,}")
+    print(f"  Batch size: {model_params['batch_size']}")
+    print()
+    
+    # Determine model action
+    model_path = "model.zip"
+    opponent_model_path = "opponent_model.zip"
+    action = determine_model_action(model_action, model_path)
+    
+    # Create or load model
+    if action == "new":
+        print("Creating new model...")
+        if os.path.exists(model_path):
+            # Create backup of existing model
+            backup_path = f"model_backup_{int(__import__('time').time())}.zip"
+            shutil.copy(model_path, backup_path)
+            print(f"Backed up existing model to {backup_path}")
+        
+        model = DQN(env=env, **model_params)
+        print("✓ New model created successfully")
+        
+        # For self-play, initialize opponent model
+        if training_mode == "self_play":
+            print("Initializing opponent model for self-play...")
+            model.save(opponent_model_path)
+            opponent_model = DQN.load(opponent_model_path)
+            env.set_opponent_model(opponent_model)
+            print("✓ Opponent model initialized")
+        
+    else:  # append
+        print("Loading existing model...")
+        try:
+            model = DQN.load(model_path, env=env)
+            print("✓ Existing model loaded successfully")
+            
+            # For self-play, try to load existing opponent or create one
+            if training_mode == "self_play":
+                if os.path.exists(opponent_model_path):
+                    print("Loading existing opponent model...")
+                    opponent_model = DQN.load(opponent_model_path)
+                else:
+                    print("Creating opponent model from current model...")
+                    model.save(opponent_model_path)
+                    opponent_model = DQN.load(opponent_model_path)
+                
+                env.set_opponent_model(opponent_model)
+                print("✓ Opponent model ready")
+                
+        except Exception as e:
+            print(f"Failed to load existing model: {e}")
+            print("Creating new model instead...")
+            model = DQN(env=env, **model_params)
+            
+            if training_mode == "self_play":
+                model.save(opponent_model_path)
+                opponent_model = DQN.load(opponent_model_path)
+                env.set_opponent_model(opponent_model)
+    
+    print()
+    
+    # Set up callbacks for self-play
+    callbacks = []
+    if training_mode == "self_play":
+        self_play_callback = create_self_play_callback(env, opponent_model_path, self_play_update_freq)
+        callbacks.append(self_play_callback)
+        print(f"✓ Self-play callback configured (update every {self_play_update_freq} timesteps)")
+    
+    # Start training
+    print("=" * 60)
+    print("STARTING TRAINING")
+    print("=" * 60)
+    print(f"Mode: {training_mode.upper()}")
+    print(f"Training for {total_timesteps:,} timesteps...")
+    print("Monitor progress with: tensorboard --logdir ./tensorboard/")
+    print("Press Ctrl+C to interrupt training")
+    print()
+    
+    try:
+        if callbacks:
+            model.learn(total_timesteps=total_timesteps, callback=callbacks)
+        else:
+            model.learn(total_timesteps=total_timesteps)
+        print()
+        print("🎉 TRAINING COMPLETED SUCCESSFULLY!")
+        
+    except KeyboardInterrupt:
+        print()
+        print("⏹️ TRAINING INTERRUPTED BY USER")
+        print("Model will be saved with current progress...")
+        
+    except Exception as e:
+        print()
+        print("❌ TRAINING FAILED")
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    
+    # Save models
+    print("Saving models...")
+    model.save(model_path)
+    print(f"✓ Main model saved to {model_path}")
+    
+    if training_mode == "self_play" and hasattr(env, 'opponent_model'):
+        env.opponent_model.save(opponent_model_path)
+        print(f"✓ Opponent model saved to {opponent_model_path}")
+    
+    # Save episode logs if available
+    if hasattr(env, "episode_logs") and env.episode_logs:
+        import json
+        
+        # Find best and worst episodes
+        best_log, best_reward = max(env.episode_logs, key=lambda x: x[1])
+        worst_log, worst_reward = min(env.episode_logs, key=lambda x: x[1])
+        
+        with open("best_event_log.json", "w") as f:
+            json.dump(best_log, f, indent=2)
+        with open("worst_event_log.json", "w") as f:
+            json.dump(worst_log, f, indent=2)
+        
+        print(f"📋 Episode logs saved:")
+        print(f"   Best reward: {best_reward:.2f}")
+        print(f"   Worst reward: {worst_reward:.2f}")
     
     env.close()
-    print("[OK] Enhanced environment test completed successfully!")
+    
+    print()
+    print("🎉 TRAINING SESSION COMPLETE!")
+    print("Next steps:")
+    if training_mode == "self_play":
+        print("  📊 Evaluate vs scripted:   python ai/evaluate.py --vs-scripted")
+        print("  🤖 Evaluate vs self-play: python ai/evaluate.py --vs-self-play")
+        print("  📈 Evaluate both:         python ai/evaluate.py --vs-both")
+    else:
+        print("  📊 Evaluate model:        python ai/evaluate.py")
+    print("  🔄 Continue training:      python ai/train.py --append")
+    print("  🆕 Start fresh:           python ai/train.py --new")
+    
+    # Ask about TensorBoard
+    try:
+        response = input("\nDo you want to see the TensorBoard report? (y/N): ").lower().strip()
+        if response in ['y', 'yes']:
+            print("\n🚀 Starting TensorBoard...")
+            print("📊 Open http://localhost:6006 in your browser")
+            print("⏹️  Press Ctrl+C to stop TensorBoard when done")
+            
+            import subprocess
+            try:
+                # Start TensorBoard
+                subprocess.run(["tensorboard", "--logdir", "./tensorboard/"], check=True)
+            except subprocess.CalledProcessError:
+                print("❌ Failed to start TensorBoard")
+                print("💡 Try manually: tensorboard --logdir ./tensorboard/")
+            except KeyboardInterrupt:
+                print("\n⏹️  TensorBoard stopped")
+            except FileNotFoundError:
+                print("❌ TensorBoard not found. Install with: pip install tensorboard")
+                print("💡 Or run manually: tensorboard --logdir ./tensorboard/")
+        else:
+            print("\n💡 To view training metrics later, run:")
+            print("   tensorboard --logdir ./tensorboard/")
+            
+    except KeyboardInterrupt:
+        print("\n⏹️  Skipped TensorBoard")
+    
+    return True
 
 if __name__ == "__main__":
-    test_enhanced_environment()
+    try:
+        success = main()
+        if not success:
+            sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nTraining interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\nUnexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

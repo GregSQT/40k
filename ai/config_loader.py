@@ -124,10 +124,6 @@ class ConfigLoader:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         scenario_file = os.path.join(script_dir, "scenario.json")
         
-        if os.path.exists(scenario_file):
-            backup = f"{scenario_file}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            shutil.copy(scenario_file, backup)
-        
         with open(scenario_file, "w") as f:
             json.dump(scenario_config["units"], f, indent=2)
         print(f"Applied '{scenario_name}' scenario")
@@ -137,10 +133,6 @@ class ConfigLoader:
         rewards_config = self.load_rewards_config(rewards_config_name)
         script_dir = os.path.dirname(os.path.abspath(__file__))
         rewards_file = os.path.join(script_dir, "rewards_master.json")
-        
-        if os.path.exists(rewards_file):
-            backup = f"{rewards_file}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            shutil.copy(rewards_file, backup)
         
         with open(rewards_file, "w") as f:
             reward_data = {k: v for k, v in rewards_config.items() if k != "description"}
