@@ -244,7 +244,7 @@ def main():
     print("STARTING TRAINING")
     print("=" * 50)
     print(f"Training for {total_timesteps:,} timesteps...")
-    print("Monitor progress with: tensorboard --logdir ../tensorboard/")
+    print("Monitor progress with: tensorboard --logdir ./tensorboard/")
     print("Press Ctrl+C to interrupt training")
     print()
     
@@ -295,8 +295,34 @@ def main():
     print("Next steps:")
     print("  Test your model:    python ai/test.py")
     print("  Continue training:  python ai/train.py --append")
-    print("  View tensorboard:   tensorboard --logdir ../tensorboard/")
     print("  Start fresh:        python ai/train.py --new")
+    
+    # Ask about TensorBoard
+    try:
+        response = input("\nDo you want to see the TensorBoard report? (y/N): ").lower().strip()
+        if response in ['y', 'yes']:
+            print("\n🚀 Starting TensorBoard...")
+            print("📊 Open http://localhost:6006 in your browser")
+            print("⏹️  Press Ctrl+C to stop TensorBoard when done")
+            
+            import subprocess
+            try:
+                # Start TensorBoard
+                subprocess.run(["tensorboard", "--logdir", "./tensorboard/"], check=True)
+            except subprocess.CalledProcessError:
+                print("❌ Failed to start TensorBoard")
+                print("💡 Try manually: tensorboard --logdir ./tensorboard/")
+            except KeyboardInterrupt:
+                print("\n⏹️  TensorBoard stopped")
+            except FileNotFoundError:
+                print("❌ TensorBoard not found. Install with: pip install tensorboard")
+                print("💡 Or run manually: tensorboard --logdir ./tensorboard/")
+        else:
+            print("\n💡 To view training metrics later, run:")
+            print("   tensorboard --logdir ./tensorboard/")
+            
+    except KeyboardInterrupt:
+        print("\n⏹️  Skipped TensorBoard")
     
     return True
 

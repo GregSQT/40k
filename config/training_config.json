@@ -1,7 +1,7 @@
 {
   "default": {
     "description": "Optimized parameters for complex reward learning",
-    "total_timesteps": 1000000,
+    "total_timesteps": 10000,
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
@@ -18,7 +18,7 @@
   },
   "original": {
     "description": "Your original parameters from train.py",
-    "total_timesteps": 1000000,
+    "total_timesteps": 10000,
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
