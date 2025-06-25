@@ -163,6 +163,7 @@ def generate_scenario_if_needed():
 
 def create_or_load_model(env, model_path, resume_flag, total_timesteps, exploration_fraction_setup=0.3):
     """Create new model or load existing one based on arguments."""
+    from stable_baselines3 import DQN
     
     if os.path.exists(model_path):
         if resume_flag is None:
