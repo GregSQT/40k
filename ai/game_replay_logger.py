@@ -6,6 +6,7 @@ game_replay_logger.py - Capture full game state for visual replay
 import json
 import os
 import copy
+import numpy as np
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -39,6 +40,15 @@ class GameReplayLogger:
             7: "attack_adjacent"
         }
     
+    def _normalize_action(self, action):
+        """Convert action to integer if it's a numpy array."""
+        if isinstance(action, np.ndarray):
+            return int(action.item())
+        elif hasattr(action, 'item'):
+            return int(action.item())
+        else:
+            return int(action)
+    
     def capture_initial_state(self):
         """Capture the initial game state."""
         initial_state = self._create_game_state_snapshot(
@@ -56,17 +66,19 @@ class GameReplayLogger:
         self.game_states.append(initial_state)
         print(f"📸 Captured initial game state with {len(self.env.units)} units")
     
-    def capture_action_state(self, action: int, reward: float, pre_action_units: List[Dict], 
+    def capture_action_state(self, action, reward: float, pre_action_units: List[Dict], 
                            post_action_units: List[Dict], acting_unit_id: Optional[int] = None,
                            target_unit_id: Optional[int] = None, description: str = ""):
         """Capture game state after an action."""
+        # Normalize action to integer
+        action_int = self._normalize_action(action)
         
-        # Determine what happened by comparing before/after
-        changes = self._analyze_changes(pre_action_units, post_action_units)
+        # Detect changes
+        changes = self._detect_unit_changes(pre_action_units, post_action_units)
         
         # Create state snapshot
         state = self._create_game_state_snapshot(
-            action_taken=action,
+            action_taken=action_int,
             acting_unit_id=acting_unit_id,
             target_unit_id=target_unit_id,
             phase=self.current_phase,
@@ -74,19 +86,27 @@ class GameReplayLogger:
             reward=reward
         )
         
-        # Add change analysis
-        state["event_flags"].update(changes)
-        state["event_flags"]["action_name"] = self.action_names.get(action, f"action_{action}")
-        state["event_flags"]["description"] = description or self._generate_description(action, changes)
+        # Add change detection
+        state["event_flags"].update({
+            "movement_occurred": changes["movement_occurred"],
+            "combat_occurred": changes["combat_occurred"],
+            "units_destroyed": changes["units_destroyed"],
+            "hp_changes": changes["hp_changes"]
+        })
+        
+        # Enhanced description
+        if not description:
+            action_name = self.action_names.get(action_int, f"action_{action_int}")
+            description = f"AI performs {action_name}"
+        
+        state["event_flags"]["description"] = description
         
         self.game_states.append(state)
-        
-        # Check for turn/phase progression
         self._update_turn_phase()
     
-    def capture_game_end(self, winner: Optional[str], final_reward: float):
+    def capture_game_end(self, winner: str, final_reward: float):
         """Capture the final game state."""
-        end_state = self._create_game_state_snapshot(
+        final_state = self._create_game_state_snapshot(
             action_taken=None,
             acting_unit_id=None,
             target_unit_id=None,
@@ -95,182 +115,100 @@ class GameReplayLogger:
             reward=final_reward
         )
         
-        end_state["event_flags"]["game_event"] = "battle_ends"
-        end_state["event_flags"]["winner"] = winner or "draw"
-        end_state["event_flags"]["description"] = f"Battle concluded - {winner or 'Draw'}"
+        final_state["event_flags"].update({
+            "game_event": "battle_ends",
+            "winner": winner,
+            "description": f"Battle concludes - {winner} victorious"
+        })
         
-        self.game_states.append(end_state)
-        print(f"🏁 Captured game end state - Winner: {winner or 'Draw'}")
+        self.game_states.append(final_state)
     
-    def _create_game_state_snapshot(self, action_taken: Optional[int], acting_unit_id: Optional[int],
-                                  target_unit_id: Optional[int], phase: str, turn: int, 
-                                  reward: float) -> Dict[str, Any]:
-        """Create a complete snapshot of the current game state."""
-        
-        # Copy all units with full details
-        units = []
-        for unit in self.env.units:
-            unit_copy = {
-                "id": unit["id"],
-                "name": self._get_unit_name(unit),
-                "type": unit["unit_type"],
-                "player": unit["player"],
-                "col": unit["col"],
-                "row": unit["row"],
+    def _create_game_state_snapshot(self, action_taken, acting_unit_id, target_unit_id, 
+                                  phase: str, turn: int, reward: float) -> Dict[str, Any]:
+        """Create a complete game state snapshot."""
+        # Convert units to the format expected by the web app
+        units_data = []
+        for i, unit in enumerate(self.env.units):
+            unit_data = {
+                "id": i,
+                "name": unit.get("name", f"{unit.get('unit_type', 'Unit')} {i+1}"),
+                "unit_type": unit.get("unit_type", "Unknown"),
+                "player": unit.get("player", 0),
+                "row": unit.get("row", 0),
+                "col": unit.get("col", 0),
+                "hp": unit.get("hp", unit.get("max_hp", 1)),
+                "max_hp": unit.get("max_hp", 1),
+                "alive": unit.get("alive", True),
+                "movement": unit.get("movement", 6),
+                "weapon_skill": unit.get("weapon_skill", 3),
+                "ballistic_skill": unit.get("ballistic_skill", 3),
+                "strength": unit.get("strength", 4),
+                "toughness": unit.get("toughness", 4),
+                "wounds": unit.get("wounds", 2),
+                "attacks": unit.get("attacks", 1),
+                "leadership": unit.get("leadership", 7),
+                "save": unit.get("save", 3),
                 "color": self._get_unit_color(unit),
-                "MOVE": unit["move"],
-                "HP_MAX": unit["hp_max"],
-                "CUR_HP": unit["cur_hp"],
-                "RNG_RNG": unit["rng_rng"],
-                "RNG_DMG": unit["rng_dmg"],
-                "CC_DMG": unit["cc_dmg"],
-                "ICON": self._get_unit_icon(unit),
-                "alive": unit["alive"],
-                "is_ranged": unit.get("is_ranged", True),
-                "is_melee": unit.get("is_melee", False)
+                "icon": self._get_unit_icon(unit)
             }
-            units.append(unit_copy)
+            units_data.append(unit_data)
         
-        # Create the game state
-        game_state = {
+        # Create the state
+        state = {
             "turn": turn,
             "phase": phase,
-            "acting_unit_idx": acting_unit_id,
-            "target_unit_idx": target_unit_id,
+            "active_player": getattr(self.env, 'current_player', 0),
+            "units": units_data,
+            "board_state": {
+                "width": self.env.board_size,
+                "height": self.env.board_size,
+                "terrain": []  # Add terrain if available
+            },
             "event_flags": {
                 "action_id": action_taken,
+                "acting_unit_id": acting_unit_id,
+                "target_unit_id": target_unit_id,
                 "reward": reward,
-                "ai_units_alive": len([u for u in self.env.units if u["player"] == 1 and u["alive"]]),
-                "enemy_units_alive": len([u for u in self.env.units if u["player"] == 0 and u["alive"]]),
-                "step_number": len(self.game_states) + 1
-            },
-            "unit_stats": self._calculate_unit_stats(),
-            "units": units,
-            "board_state": self._create_board_representation()
+                "timestamp": datetime.now().isoformat()
+            }
         }
         
-        return game_state
+        return state
     
-    def _analyze_changes(self, before_units: List[Dict], after_units: List[Dict]) -> Dict[str, Any]:
-        """Analyze what changed between before and after states."""
+    def _detect_unit_changes(self, pre_units: List[Dict], post_units: List[Dict]) -> Dict[str, Any]:
+        """Detect what changed between pre and post action states."""
         changes = {
-            "units_moved": [],
-            "units_damaged": [],
-            "units_killed": [],
-            "positions_changed": [],
+            "movement_occurred": False,
             "combat_occurred": False,
-            "shooting_occurred": False
+            "units_destroyed": [],
+            "hp_changes": []
         }
         
-        # Create lookup maps
-        before_map = {u["id"]: u for u in before_units}
-        after_map = {u["id"]: u for u in after_units}
-        
-        for unit_id in before_map:
-            before_unit = before_map[unit_id]
-            after_unit = after_map.get(unit_id)
+        # Check for position changes
+        for i, (pre, post) in enumerate(zip(pre_units, post_units)):
+            if pre.get("row") != post.get("row") or pre.get("col") != post.get("col"):
+                changes["movement_occurred"] = True
             
-            if after_unit:
-                # Check for movement
-                if (before_unit["col"] != after_unit["col"] or 
-                    before_unit["row"] != after_unit["row"]):
-                    changes["units_moved"].append({
-                        "unit_id": unit_id,
-                        "from": {"col": before_unit["col"], "row": before_unit["row"]},
-                        "to": {"col": after_unit["col"], "row": after_unit["row"]}
-                    })
-                    changes["positions_changed"].append(unit_id)
-                
-                # Check for damage
-                if before_unit["cur_hp"] > after_unit["cur_hp"]:
-                    damage = before_unit["cur_hp"] - after_unit["cur_hp"]
-                    changes["units_damaged"].append({
-                        "unit_id": unit_id,
-                        "damage": damage,
-                        "hp_before": before_unit["cur_hp"],
-                        "hp_after": after_unit["cur_hp"]
-                    })
-                    
-                    # Determine if it was shooting or combat
-                    if any(self._get_distance(before_unit, other) > 1 
-                          for other in before_units if other["player"] != before_unit["player"]):
-                        changes["shooting_occurred"] = True
-                    else:
-                        changes["combat_occurred"] = True
-                
-                # Check for death
-                if before_unit["alive"] and not after_unit["alive"]:
-                    changes["units_killed"].append({
-                        "unit_id": unit_id,
-                        "unit_type": before_unit["unit_type"],
-                        "player": before_unit["player"]
-                    })
+            # Check for HP changes
+            pre_hp = pre.get("hp", 0)
+            post_hp = post.get("hp", 0)
+            if pre_hp != post_hp:
+                changes["combat_occurred"] = True
+                changes["hp_changes"].append({
+                    "unit_id": i,
+                    "hp_before": pre_hp,
+                    "hp_after": post_hp,
+                    "damage_taken": pre_hp - post_hp
+                })
+            
+            # Check for destroyed units
+            if pre.get("alive", True) and not post.get("alive", True):
+                changes["units_destroyed"].append(i)
         
         return changes
     
-    def _generate_description(self, action: int, changes: Dict[str, Any]) -> str:
-        """Generate a human-readable description of what happened."""
-        action_name = self.action_names.get(action, f"Action {action}")
-        
-        descriptions = []
-        
-        if changes["units_moved"]:
-            unit_count = len(changes["units_moved"])
-            descriptions.append(f"{unit_count} unit(s) moved")
-        
-        if changes["units_damaged"]:
-            for damage_info in changes["units_damaged"]:
-                descriptions.append(f"Unit {damage_info['unit_id']} takes {damage_info['damage']} damage")
-        
-        if changes["units_killed"]:
-            for kill_info in changes["units_killed"]:
-                descriptions.append(f"Unit {kill_info['unit_id']} eliminated")
-        
-        if changes["shooting_occurred"]:
-            descriptions.append("Ranged combat")
-        elif changes["combat_occurred"]:
-            descriptions.append("Melee combat")
-        
-        if not descriptions:
-            descriptions.append("Unit waits")
-        
-        return f"{action_name}: " + ", ".join(descriptions)
-    
-    def _calculate_unit_stats(self) -> Dict[str, Any]:
-        """Calculate current battlefield statistics."""
-        stats = {
-            "total_units": len(self.env.units),
-            "alive_units": len([u for u in self.env.units if u["alive"]]),
-            "player_0_units": len([u for u in self.env.units if u["player"] == 0 and u["alive"]]),
-            "player_1_units": len([u for u in self.env.units if u["player"] == 1 and u["alive"]]),
-            "total_hp": sum(u["cur_hp"] for u in self.env.units if u["alive"]),
-            "average_hp": 0
-        }
-        
-        if stats["alive_units"] > 0:
-            stats["average_hp"] = stats["total_hp"] / stats["alive_units"]
-        
-        return stats
-    
-    def _create_board_representation(self) -> List[List[Optional[int]]]:
-        """Create a 2D representation of the board with unit IDs."""
-        board = [[None for _ in range(self.env.board_size[1])] 
-                for _ in range(self.env.board_size[0])]
-        
-        for unit in self.env.units:
-            if unit["alive"] and 0 <= unit["col"] < self.env.board_size[0] and 0 <= unit["row"] < self.env.board_size[1]:
-                board[unit["col"]][unit["row"]] = unit["id"]
-        
-        return board
-    
-    def _get_unit_name(self, unit: Dict) -> str:
-        """Get display name for unit."""
-        player_prefix = "P" if unit["player"] == 0 else "A"
-        type_prefix = "I" if unit["unit_type"] == "Intercessor" else "A"
-        return f"{player_prefix}-{type_prefix}"
-    
     def _get_unit_color(self, unit: Dict) -> int:
-        """Get color for unit based on type and player."""
+        """Get color for unit based on player and type."""
         if unit["player"] == 0:  # Player units
             return 0x244488 if unit["unit_type"] == "Intercessor" else 0xff3333
         else:  # AI units
@@ -353,19 +291,31 @@ class GameReplayIntegration:
             pre_action_units = copy.deepcopy(env.units)
             
             # Execute original step
-            obs, reward, terminated, truncated, info = original_step(action)
+            step_result = original_step(action)
+            
+            # Handle both old and new Gym API
+            if len(step_result) == 5:  # New Gym API
+                obs, reward, terminated, truncated, info = step_result
+                done = terminated or truncated
+            else:  # Old Gym API
+                obs, reward, done, info = step_result
+                terminated = done
+                truncated = False
             
             # Capture state after action
             post_action_units = copy.deepcopy(env.units)
             
+            # Normalize action for logging
+            action_int = env.replay_logger._normalize_action(action)
+            
             # Log the action and its effects
             env.replay_logger.capture_action_state(
-                action=action,
+                action=action_int,
                 reward=reward,
                 pre_action_units=pre_action_units,
                 post_action_units=post_action_units,
                 acting_unit_id=env.current_player,  # Approximate
-                description=f"AI performs {env.replay_logger.action_names.get(action, 'unknown action')}"
+                description=f"AI performs {env.replay_logger.action_names.get(action_int, 'unknown action')}"
             )
             
             # Check for game end
@@ -373,7 +323,11 @@ class GameReplayIntegration:
                 winner = "player" if env.winner == 0 else "ai" if env.winner == 1 else "draw"
                 env.replay_logger.capture_game_end(winner, reward)
             
-            return obs, reward, terminated, truncated, info
+            # Return in the same format as received
+            if len(step_result) == 5:
+                return obs, reward, terminated, truncated, info
+            else:
+                return obs, reward, done, info
         
         # Replace step method
         env.step = enhanced_step
@@ -388,3 +342,9 @@ class GameReplayIntegration:
             env.replay_logger.save_replay(filename, episode_reward)
             return filename
         return None
+
+# Example usage
+if __name__ == "__main__":
+    print("GameReplayLogger - Capture complete W40K game states")
+    print("This module provides full game replay logging for training and evaluation.")
+    print("Usage: Import and use GameReplayIntegration.enhance_training_env(env)")

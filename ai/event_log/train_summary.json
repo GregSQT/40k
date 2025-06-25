@@ -1,12 +1,20 @@
 {
-  "timestamp": "2025-06-25T03:47:36.111444",
+  "timestamp": "2025-06-25T04:11:24.961364",
   "total_episodes": 10,
-  "best_reward": 19.2,
-  "worst_reward": 18.349999999999998,
-  "average_reward": 18.874999999999993,
+  "best_reward": -0.1499999999999999,
+  "worst_reward": -5.7,
+  "average_reward": -3.25,
   "files": {
-    "best": "train_best_event_log_simple.json",
-    "worst": "train_worst_event_log_simple.json"
+    "best_replay": "train_best_game_replay.json",
+    "worst_replay": "train_worst_game_replay.json"
   },
-  "web_compatible": false
+  "replay_type": "full_game_state",
+  "web_compatible": true,
+  "features": [
+    "Complete unit positions",
+    "HP tracking",
+    "Movement visualization",
+    "Combat events",
+    "Turn-by-turn progression"
+  ]
 }

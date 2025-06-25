@@ -1,18 +1,27 @@
 {
   "model_path": "ai/models/current/model.zip",
-  "timestamp": "2025-06-25T03:47:46.413383",
+  "timestamp": "2025-06-25T04:13:56.646096",
   "episodes": 100,
   "wins": 0,
   "losses": 0,
   "draws": 100,
   "win_rate": 0.0,
-  "avg_reward": 18.790999999999986,
-  "avg_steps": 21.3,
+  "avg_reward": 18.786499999999982,
+  "avg_steps": 21.47,
   "best_reward": 18.849999999999998,
-  "worst_reward": 18.65,
+  "worst_reward": 18.7,
   "files": {
-    "best": "eval_best_event_log_simple.json",
-    "worst": "eval_worst_event_log_simple.json"
+    "best_replay": "eval_best_game_replay.json",
+    "worst_replay": "eval_worst_game_replay.json"
   },
-  "web_compatible": false
+  "replay_type": "full_game_state",
+  "web_compatible": true,
+  "features": [
+    "Complete unit positions",
+    "HP tracking",
+    "Movement visualization",
+    "Combat events",
+    "Turn-by-turn progression",
+    "Deterministic AI evaluation"
+  ]
 }
