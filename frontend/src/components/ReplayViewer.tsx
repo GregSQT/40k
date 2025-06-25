@@ -78,7 +78,6 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const HEX_HORIZ_SPACING = HEX_WIDTH;
   const HEX_VERT_SPACING = HEX_HEIGHT;
   const HIGHLIGHT_COLOR = 0x80ff80;
-  const ATTACK_COLOR = 0xff4444;
 
   // Initialize replay data
   useEffect(() => {
@@ -94,13 +93,6 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const selectedUnitId = currentEvent?.acting_unit_idx ?? null;
 
   // Hex utility functions - exactly from your Board.tsx
-  const offsetToCube = (col: number, row: number) => {
-    const x = col;
-    const z = row - ((col - (col & 1)) >> 1);
-    const y = -x - z;
-    return { x, y, z };
-  };
-
   const hexCorner = (cx: number, cy: number, size: number, i: number) => {
     const angle_deg = 60 * i;
     const angle_rad = Math.PI / 180 * angle_deg;
@@ -117,22 +109,20 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
   // Create units based on current event
   const createUnitsFromEvent = useCallback((event: ReplayEvent): Unit[] => {
     if (event.units && Array.isArray(event.units)) {
-      // If full unit data is available, use it
       return event.units.map(unit => ({
         ...unit,
         CUR_HP: unit.CUR_HP ?? unit.HP_MAX
       }));
     }
 
-    // Otherwise, create units based on alive counts and default positions
-    const units: Unit[] = [];
+    const unitsArray: Unit[] = [];
     const aiAlive = event.ai_units_alive || 0;
     const playerAlive = event.enemy_units_alive || 0;
 
     // Create AI units (player 1, red)
     for (let i = 0; i < 2; i++) {
       const defaultPos = DEFAULT_POSITIONS[i + 2] || { col: 0, row: 0 };
-      units.push({
+      unitsArray.push({
         id: i + 2,
         name: `A-${i === 0 ? 'I' : 'A'}`,
         type: i === 0 ? 'Intercessor' : 'AssaultIntercessor',
@@ -153,7 +143,7 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
     // Create Player units (player 0, blue)
     for (let i = 0; i < 2; i++) {
       const defaultPos = DEFAULT_POSITIONS[i] || { col: 0, row: 0 };
-      units.push({
+      unitsArray.push({
         id: i,
         name: `P-${i === 0 ? 'I' : 'A'}`,
         type: i === 0 ? 'Intercessor' : 'AssaultIntercessor',
@@ -171,7 +161,7 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
       });
     }
 
-    return units;
+    return unitsArray;
   }, []);
 
   // Update units when step changes
@@ -181,24 +171,10 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
     }
   }, [currentStep, replayData, currentEvent, createUnitsFromEvent]);
 
-  // Create hexagonal board with PixiJS - matching your Board.tsx
-  const createHexBoard = React.useCallback(() => {
+  // Redraw board when units change - exactly like Board.tsx
+  useEffect(() => {
     if (!boardRef.current) return;
-
-    // Clear existing content
-    boardRef.current.innerHTML = '';
-
-    // Check if PIXI is available
-    const PIXI = (window as any).PIXI;
-    if (!PIXI.Application) {
-  boardRef.current.innerHTML = `
-    <div style="color: #ff4444; padding: 40px; text-align: center; background: rgba(0,0,0,0.8); border-radius: 8px;">
-      <h3>PixiJS Import Error</h3>
-      <p>Failed to load PixiJS properly</p>
-    </div>
-  `;
-  return;
-}
+    boardRef.current.innerHTML = "";
 
     const gridWidth = (BOARD_COLS - 1) * HEX_HORIZ_SPACING + HEX_WIDTH;
     const gridHeight = (BOARD_ROWS - 1) * HEX_VERT_SPACING + HEX_HEIGHT;
@@ -213,17 +189,21 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
     });
+    
+    boardRef.current.appendChild(app.view as unknown as HTMLCanvasElement);
+    if (app.view && app.view.style) {
+      app.view.style.width = `${width}px`;
+      app.view.style.height = `${height}px`;
+    }
 
-    boardRef.current.appendChild(app.view);
-
-    // Draw hex grid - exactly like Board.tsx
+    // Draw grid cells - exactly like Board.tsx
     for (let col = 0; col < BOARD_COLS; col++) {
       for (let row = 0; row < BOARD_ROWS; row++) {
         const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
         const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
         const points = getHexPolygonPoints(centerX, centerY, HEX_RADIUS);
-        
         const cell = new PIXI.Graphics();
+
         cell.lineStyle(1, 0x333333, 0.5);
         cell.beginFill(0x000000, 0.1);
         cell.drawPolygon(points);
@@ -234,7 +214,7 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
     }
 
     // Draw units - exactly like Board.tsx
-    units.forEach(unit => {
+    for (const unit of units) {
       const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
       const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
@@ -254,7 +234,7 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
         barBg.endFill();
         app.stage.addChild(barBg);
 
-        // Draw HP slices - exactly like Board.tsx
+        // Draw slices (green for HP, darker for lost HP)
         const hp = Math.max(0, unit.CUR_HP ?? unit.HP_MAX);
         for (let i = 0; i < unit.HP_MAX; i++) {
           const sliceWidth = (HP_BAR_WIDTH - (unit.HP_MAX - 1)) / unit.HP_MAX;
@@ -275,43 +255,28 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
       unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.6);
       unitCircle.endFill();
 
-      // Selected unit outline
+      // Draw green hex outline for selected unit
       if (isSelected) {
         unitCircle.lineStyle(3, HIGHLIGHT_COLOR, 1);
         unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.7);
       }
-
+      
       app.stage.addChild(unitCircle);
 
       // Unit icon or label - exactly like Board.tsx
       if (unit.ICON) {
         const ICON_SIZE = HEX_RADIUS * 1.5;
-        try {
-          const iconSprite = PIXI.Sprite.from(unit.ICON);
-          iconSprite.x = centerX - ICON_SIZE / 2;
-          iconSprite.y = centerY - ICON_SIZE / 2;
-          iconSprite.width = ICON_SIZE;
-          iconSprite.height = ICON_SIZE;
-          app.stage.addChild(iconSprite);
-        } catch (e) {
-          // Fallback to text if icon fails to load
-          const label = new PIXI.Text(unit.name, {
-            fontFamily: "Arial",
-            fontWeight: "bold",
-            fontSize: 14,
-            fill: 0xffffff,
-            align: "center",
-          });
-          label.anchor.set(0.5);
-          label.x = centerX;
-          label.y = centerY;
-          app.stage.addChild(label);
-        }
+        const iconSprite = PIXI.Sprite.from(unit.ICON);
+        iconSprite.x = centerX - ICON_SIZE / 2;
+        iconSprite.y = centerY - ICON_SIZE / 2;
+        iconSprite.width = ICON_SIZE;
+        iconSprite.height = ICON_SIZE;
+        app.stage.addChild(iconSprite);
       } else {
         const label = new PIXI.Text(unit.name, {
           fontFamily: "Arial",
           fontWeight: "bold",
-          fontSize: 14,
+          fontSize: 18,
           fill: 0xffffff,
           align: "center",
         });
@@ -320,18 +285,13 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
         label.y = centerY;
         app.stage.addChild(label);
       }
-    });
+    }
 
-    // Cleanup function
+    // Cleanup
     return () => {
       app.destroy(true);
     };
   }, [units, selectedUnitId, BOARD_COLS, BOARD_ROWS, HEX_RADIUS, HEX_HORIZ_SPACING, HEX_VERT_SPACING, HEX_WIDTH, HEX_HEIGHT, MARGIN, HIGHLIGHT_COLOR, getHexPolygonPoints]);
-
-  // Redraw board when units change
-  React.useEffect(() => {
-    createHexBoard();
-  }, [createHexBoard]);
 
   // Auto-play logic
   useEffect(() => {
@@ -519,7 +479,7 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
         </div>
       </div>
 
-      {/* Hexagonal Game Board - Matching your Board.tsx implementation */}
+      {/* Hexagonal Game Board */}
       <div style={{ 
         marginBottom: '20px',
         position: 'relative',
