@@ -1,13 +1,30 @@
 #!/usr/bin/env python3
 """
-ai/train.py - Training with organized model structure and unified logging
+ai/train.py - Training with configuration system and unified logging
 """
 
 import os
 import sys
+import json
 import shutil
 import subprocess
 from datetime import datetime
+
+def load_config(config_name="default"):
+    """Load training configuration from config file."""
+    config_path = "config/training_config.json"
+    
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Training config not found: {config_path}")
+    
+    with open(config_path, "r") as f:
+        configs = json.load(f)
+    
+    if config_name not in configs:
+        available = list(configs.keys())
+        raise ValueError(f"Config '{config_name}' not found. Available: {available}")
+    
+    return configs[config_name]
 
 def setup_imports():
     """Set up import paths."""
@@ -34,36 +51,63 @@ def parse_args():
     resume = None
     debug = False
     timesteps = None
+    config_name = "default"
     
-    for arg in sys.argv[1:]:
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
         if arg.lower() == "--resume":
             resume = True
+            i += 1
         elif arg.lower() == "--new":
             resume = False
+            i += 1
         elif arg.lower() == "--debug":
             debug = True
+            i += 1
         elif arg.lower() == "--append":
             resume = True
+            i += 1
         elif arg.startswith("--t="):
             timesteps = int(arg.split("=")[1])
+            i += 1
+        elif arg == "--config" and i + 1 < len(sys.argv):
+            config_name = sys.argv[i + 1]
+            i += 2
         elif arg.lower() == "--help":
-            print("🔧 W40K AI Training - Full Features")
-            print("=" * 40)
+            print("🔧 W40K AI Training - Configuration System")
+            print("=" * 50)
             print("Usage: python ai/train.py [options]")
             print()
             print("Options:")
-            print("  --resume      Resume from existing model (default)")
-            print("  --new         Start new model (overwrite existing)")
-            print("  --append      Same as --resume")
-            print("  --debug       Debug mode (shorter training)")
-            print("  --t=N         Set specific number of timesteps")
-            print("  --help        Show this help")
+            print("  --resume        Resume from existing model (default)")
+            print("  --new           Start new model (overwrite existing)")
+            print("  --append        Same as --resume")
+            print("  --debug         Debug mode (uses debug config)")
+            print("  --t=N           Override timesteps from config")
+            print("  --config NAME   Use specific config (default: 'default')")
+            print("  --help          Show this help")
+            print()
+            print("Available configs:")
+            try:
+                config_path = "config/training_config.json"
+                if os.path.exists(config_path):
+                    with open(config_path, "r") as f:
+                        configs = json.load(f)
+                    for name, config in configs.items():
+                        print(f"  {name:12} - {config['description']}")
+                        print(f"              ({config['total_timesteps']:,} timesteps)")
+                else:
+                    print("  No config file found!")
+            except Exception as e:
+                print(f"  Error reading configs: {e}")
             print()
             print("Examples:")
-            print("  python ai/train.py                    # Resume training")
-            print("  python ai/train.py --new              # Start fresh")
-            print("  python ai/train.py --debug            # Quick debug run")
-            print("  python ai/train.py --t=100000 # Custom timesteps")
+            print("  python ai/train.py                       # Use default config")
+            print("  python ai/train.py --config debug        # Use debug config")
+            print("  python ai/train.py --config conservative # Use conservative config")
+            print("  python ai/train.py --new --config debug  # Start fresh with debug")
+            print("  python ai/train.py --t=50000             # Override timesteps")
             print()
             print("Output files:")
             print("  ai/models/current/model.zip")
@@ -71,8 +115,15 @@ def parse_args():
             print("  ai/event_log/train_worst_event_log.json")
             print("  ai/event_log/train_summary.json")
             sys.exit(0)
+        else:
+            print(f"Unknown argument: {arg}")
+            sys.exit(1)
     
-    return resume, debug, timesteps
+    # Debug mode auto-selects debug config unless overridden
+    if debug and config_name == "default":
+        config_name = "debug"
+    
+    return resume, debug, timesteps, config_name
 
 def backup_current_model():
     """Create backup before training."""
@@ -99,7 +150,22 @@ def backup_current_model():
     return None
 
 def save_training_logs(env):
-    """Save training episode logs to unified location."""
+    """Save training episode logs in web-compatible format."""
+    # Import the web log generator
+    try:
+        from web_log_generator import WebLogGenerator
+    except ImportError:
+        # Fallback to simple format if web_log_generator not available
+        print("⚠️  WebLogGenerator not found, using simple format")
+        save_training_logs_simple(env)
+        return
+    
+    # Use web log generator
+    generator = WebLogGenerator()
+    generator.convert_and_save_training_logs(env)
+
+def save_training_logs_simple(env):
+    """Fallback: Save training logs in simple format."""
     if not hasattr(env, "episode_logs") or not env.episode_logs:
         print("⚠️  No episode logs to save")
         return
@@ -115,8 +181,8 @@ def save_training_logs(env):
     worst_log, worst_reward = min(env.episode_logs, key=lambda x: x[1])
     
     # Save training logs with new naming convention
-    train_best_file = os.path.join(event_log_dir, "train_best_event_log.json")
-    train_worst_file = os.path.join(event_log_dir, "train_worst_event_log.json")
+    train_best_file = os.path.join(event_log_dir, "train_best_event_log_simple.json")
+    train_worst_file = os.path.join(event_log_dir, "train_worst_event_log_simple.json")
     
     with open(train_best_file, "w", encoding="utf-8") as f:
         json.dump(best_log, f, indent=2)
@@ -124,7 +190,7 @@ def save_training_logs(env):
     with open(train_worst_file, "w", encoding="utf-8") as f:
         json.dump(worst_log, f, indent=2)
     
-    print(f"📋 LOGS: Training episode logs saved")
+    print(f"📋 LOGS: Training episode logs saved (simple format)")
     print(f"   📈 Best episode (reward: {best_reward:.2f}): {train_best_file}")
     print(f"   📉 Worst episode (reward: {worst_reward:.2f}): {train_worst_file}")
     
@@ -137,255 +203,93 @@ def save_training_logs(env):
         "worst_reward": worst_reward,
         "average_reward": sum(x[1] for x in env.episode_logs) / len(env.episode_logs),
         "files": {
-            "best": "train_best_event_log.json",
-            "worst": "train_worst_event_log.json"
-        }
+            "best": "train_best_event_log_simple.json",
+            "worst": "train_worst_event_log_simple.json"
+        },
+        "web_compatible": False
     }
     
     with open(summary_file, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
     
     print(f"   📊 Summary: {summary_file}")
+    print(f"   ⚠️  Use convert_replays.py to make web-compatible")
 
 def generate_scenario_if_needed():
     """Generate scenario if needed."""
     if not os.path.exists("ai/scenario.json"):
         print("🔧 Regenerating scenario.json...")
-        
-        # First try to copy from existing scenario.json in root
-        if os.path.exists("scenario.json"):
-            print("📋 Found existing scenario.json in root, copying to ai/")
-            import shutil
-            shutil.copy2("scenario.json", "ai/scenario.json")
-            print("✅ Scenario copied successfully")
-            return
-        
-        # Try using the tools generator
         try:
-            # Try local ai/ version first
-            subprocess.run([sys.executable, "ai/generate_scenario.py"], check=True)
-            print("✅ Scenario generated from ai/generate_scenario.py")
-            return
+            subprocess.run(["python", "generate_scenario.py"], check=True)
+            print("✅ Scenario generated")
         except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-            
-        try:
-            # Fallback to tools/ version
-            subprocess.run([sys.executable, "tools/generate_scenario.py"], check=True)
-            print("✅ Scenario generated from tools/generate_scenario.py")
-            return
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-        
-        # Last resort: try to parse from frontend TypeScript
-        try:
-            print("🔧 Trying to parse from frontend/src/data/Scenario.ts...")
-            if os.path.exists("frontend/src/data/Scenario.ts"):
-                # Read the TypeScript scenario file and extract data
-                with open("frontend/src/data/Scenario.ts", "r", encoding="utf-8") as f:
-                    content = f.read()
-                
-                # Convert TypeScript scenario to JSON format
-                scenario_data = []
-                import re
-                
-                # Find unit definitions in the TypeScript
-                # This is a simple extraction - may need refinement
-                units_found = False
-                current_unit = {}
-                
-                for line in content.split('\n'):
-                    line = line.strip()
-                    
-                    if 'id:' in line:
-                        match = re.search(r'id:\s*(\d+)', line)
-                        if match:
-                            if current_unit:  # Save previous unit
-                                scenario_data.append(current_unit)
-                            current_unit = {"id": int(match.group(1))}
-                    
-                    elif 'type:' in line:
-                        match = re.search(r'type:\s*["\']([^"\']+)["\']', line)
-                        if match:
-                            unit_type = match.group(1).replace(' ', '')
-                            current_unit["unit_type"] = unit_type
-                    
-                    elif 'player:' in line:
-                        match = re.search(r'player:\s*(\d+)', line)
-                        if match:
-                            current_unit["player"] = int(match.group(1))
-                    
-                    elif 'col:' in line:
-                        match = re.search(r'col:\s*(\d+)', line)
-                        if match:
-                            current_unit["col"] = int(match.group(1))
-                    
-                    elif 'row:' in line:
-                        match = re.search(r'row:\s*(\d+)', line)
-                        if match:
-                            current_unit["row"] = int(match.group(1))
-                    
-                    elif 'HP_MAX:' in line:
-                        match = re.search(r'HP_MAX:\s*(\d+)', line)
-                        if match:
-                            hp_max = int(match.group(1))
-                            current_unit["cur_hp"] = hp_max
-                            current_unit["hp_max"] = hp_max
-                    
-                    elif 'MOVE:' in line:
-                        match = re.search(r'MOVE:\s*(\d+)', line)
-                        if match:
-                            current_unit["move"] = int(match.group(1))
-                    
-                    elif 'RNG_RNG:' in line:
-                        match = re.search(r'RNG_RNG:\s*(\d+)', line)
-                        if match:
-                            current_unit["rng_rng"] = int(match.group(1))
-                    
-                    elif 'RNG_DMG:' in line:
-                        match = re.search(r'RNG_DMG:\s*(\d+)', line)
-                        if match:
-                            current_unit["rng_dmg"] = int(match.group(1))
-                    
-                    elif 'CC_DMG:' in line:
-                        match = re.search(r'CC_DMG:\s*(\d+)', line)
-                        if match:
-                            current_unit["cc_dmg"] = int(match.group(1))
-                
-                # Don't forget the last unit
-                if current_unit:
-                    scenario_data.append(current_unit)
-                
-                # Add missing fields and defaults
-                for unit in scenario_data:
-                    if "unit_type" not in unit:
-                        unit["unit_type"] = "Intercessor"
-                    
-                    # Set ranged/melee flags based on unit type
-                    if "Assault" in unit["unit_type"]:
-                        unit["is_ranged"] = False
-                        unit["is_melee"] = True
-                    else:
-                        unit["is_ranged"] = True
-                        unit["is_melee"] = False
-                    
-                    unit["alive"] = True
-                    
-                    # Set defaults if missing
-                    if "hp_max" not in unit:
-                        unit["hp_max"] = 4
-                        unit["cur_hp"] = 4
-                    if "move" not in unit:
-                        unit["move"] = 6
-                    if "rng_rng" not in unit:
-                        unit["rng_rng"] = 8 if unit["is_ranged"] else 4
-                    if "rng_dmg" not in unit:
-                        unit["rng_dmg"] = 2 if unit["is_ranged"] else 1
-                    if "cc_dmg" not in unit:
-                        unit["cc_dmg"] = 1 if unit["is_ranged"] else 2
-                
-                if scenario_data:
-                    import json
-                    with open("ai/scenario.json", "w") as f:
-                        json.dump(scenario_data, f, indent=2)
-                    print(f"✅ Parsed scenario from TypeScript ({len(scenario_data)} units)")
-                    return
-        
-        except Exception as e:
-            print(f"⚠️  Could not parse TypeScript scenario: {e}")
-        
-        print("⚠️  Could not generate scenario, training may fail")
+            print("⚠️  Using default scenario")
 
-def create_or_load_model(env, model_path, resume_flag, total_timesteps, exploration_fraction_setup=0.3):
-    """Create new model or load existing one based on arguments."""
-    from stable_baselines3 import DQN
-
-    if os.path.exists(model_path):
+def create_or_load_model(env, model_path, resume_flag, config, DQN):
+    """Create or load model using configuration."""
+    model_params = config['model_params'].copy()
+    
+    if os.path.exists(model_path) and resume_flag != False:
         if resume_flag is None:
-            # No explicit flag, default: resume
-            print("📂 Model exists. Resuming training from last checkpoint (default).")
+            print("📁 Model exists. Resuming training from last checkpoint (default).")
             resume = True
         else:
             resume = resume_flag
-            
+        
         if resume:
-            print("🔄 Resuming from previous model...")
-            try:
-                model = DQN.load(model_path, env=env)
-                print("✅ Model loaded successfully")
-                return model
-            except Exception as e:
-                print(f"❌ Failed to load model: {e}")
-                print("🔧 Creating new model instead...")
-                # Fall through to create new model
+            print("🔄 Loading existing model...")
+            model = DQN.load(model_path, env=env)
         else:
-            print("🆕 Starting new model (overwriting previous model)...")
+            print("🆕 Starting new model (overwriting previous)...")
+            model = DQN(env=env, **model_params)
     else:
         print("🆕 No previous model found. Creating new model...")
-
-    # Create new model with original parameters
-    print("🔧 Creating new DQN model...")
-    model = DQN(
-        "MlpPolicy",
-        env,
-        verbose=1,
-        buffer_size=25000,        # Increased from original 10000
-        learning_rate=1e-3,       # Original value
-        learning_starts=1000,     # Increased from original 100
-        batch_size=128,           # Increased from original 64
-        train_freq=4,             # Original value
-        target_update_interval=500, # Original value
-        exploration_fraction=exploration_fraction_setup, # Original value
-        exploration_final_eps=0.05, # Original value
-        tensorboard_log="./tensorboard/"
-    )
+        model = DQN(env=env, **model_params)
     
-    print("✅ New model created successfully")
     return model
 
-def quick_test_model(model, env, episodes=5):
+def quick_test_model(model, env):
     """Quick test of the trained model."""
-    print(f"\n🎮 Quick evaluation ({episodes} episodes)...")
-    wins = 0
+    print("\n🧪 Running quick model test...")
     
-    for ep in range(episodes):
-        try:
-            obs, _ = env.reset()
-            done = False
-            steps = 0
-            total_reward = 0
-            
-            while not done and steps < 100:
-                action, _ = model.predict(obs, deterministic=True)
-                obs, reward, terminated, truncated, info = env.step(action)
-                total_reward += reward
-                steps += 1
-                done = terminated or truncated
-            
-            winner = info.get("winner", None)
-            if winner == 1:
+    wins, losses, draws = 0, 0, 0
+    
+    for episode in range(10):
+        obs, info = env.reset()
+        done = False
+        
+        while not done:
+            action, _ = model.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
+        
+        # Determine outcome
+        if hasattr(env, 'game_state') and hasattr(env.game_state, 'winner'):
+            if env.game_state.winner == 'player':
                 wins += 1
-                result = "WIN"
-            elif winner == 0:
-                result = "LOSS"
+            elif env.game_state.winner == 'ai':
+                losses += 1
             else:
-                result = "DRAW"
-                
-            print(f"   Episode {ep+1}: {result:4s} ({steps:2d} steps, reward: {total_reward:6.2f})")
-            
-        except Exception as e:
-            print(f"   Episode {ep+1}: ERROR - {e}")
+                draws += 1
+        else:
+            # Fallback: use reward to estimate outcome
+            if reward > 50:
+                wins += 1
+            elif reward < -50:
+                losses += 1
+            else:
+                draws += 1
     
-    win_rate = (wins / episodes) * 100
-    print(f"📊 RESULTS: {wins}/{episodes} wins ({win_rate:.1f}%)")
+    total_games = wins + losses + draws
+    win_rate = (wins / total_games * 100) if total_games > 0 else 0
+    
+    print(f"📊 Test Results: {wins}W/{losses}L/{draws}D (Win rate: {win_rate:.1f}%)")
     
     if win_rate >= 80:
-        print("🌟 OUTSTANDING: AI is performing excellently!")
-    elif win_rate >= 60:
         print("🏆 EXCELLENT: AI is performing very well!")
-    elif win_rate >= 40:
+    elif win_rate >= 60:
         print("👍 GOOD: AI is learning, consider more training")
-    elif win_rate >= 20:
+    elif win_rate >= 40:
         print("😐 FAIR: AI shows some learning, needs more training")
     else:
         print("📊 NEEDS WORK: Consider longer training or parameter tuning")
@@ -393,25 +297,40 @@ def quick_test_model(model, env, episodes=5):
     return win_rate
 
 def main():
-    """Main training function with full original functionality."""
-    print("🔧 W40K AI Training - Full Features with Unified Logging")
+    """Main training function with configuration system."""
+    print("🔧 W40K AI Training - Configuration System")
     print("=" * 60)
     
     # Parse command line arguments
-    resume_flag, debug_mode, custom_timesteps = parse_args()
+    resume_flag, debug_mode, custom_timesteps, config_name = parse_args()
     
-    # Determine training parameters
+    # Load configuration
+    try:
+        config = load_config(config_name)
+        print(f"⚙️  Using config: '{config_name}'")
+        print(f"   📝 {config['description']}")
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ Configuration error: {e}")
+        return False
+    
+    # Determine training parameters from config
+    total_timesteps = config['total_timesteps']
+    
+    # Override timesteps if specified
     if custom_timesteps:
         total_timesteps = custom_timesteps
-        print(f"🎯 Custom training: {total_timesteps:,} timesteps")
-    elif debug_mode:
-        total_timesteps = 50_000  # Shorter for debug
-        print(f"🐛 Debug mode: {total_timesteps:,} timesteps")
+        print(f"🎯 Custom timesteps override: {total_timesteps:,}")
     else:
-        total_timesteps = 1_000_000  # Full training
-        print(f"🎯 Full training: {total_timesteps:,} timesteps")
+        print(f"🎯 Config timesteps: {total_timesteps:,}")
     
-    exploration_fraction_setup = 0.3  # Default exploration
+    # Show key parameters
+    model_params = config['model_params']
+    print(f"🔧 Key parameters:")
+    print(f"   🧠 Learning rate: {model_params['learning_rate']}")
+    print(f"   💾 Buffer size: {model_params['buffer_size']:,}")
+    print(f"   🚀 Learning starts: {model_params['learning_starts']:,}")
+    print(f"   📦 Batch size: {model_params['batch_size']}")
+    print(f"   🎲 Exploration: {model_params['exploration_fraction']}")
     
     # Ensure directory structure exists
     os.makedirs("ai/models/current", exist_ok=True)
@@ -449,9 +368,9 @@ def main():
     print(f"   🎲 Action space: {env.action_space}")
     print(f"   👁️  Observation space: {env.observation_space}")
     
-    # Create or load model
+    # Create or load model using configuration
     model_path = "ai/models/current/model.zip"
-    model = create_or_load_model(env, model_path, resume_flag, total_timesteps, exploration_fraction_setup)
+    model = create_or_load_model(env, model_path, resume_flag, config, DQN)
     
     # Start training
     print(f"\n🚀 Starting training for {total_timesteps:,} timesteps...")
@@ -461,11 +380,10 @@ def main():
     try:
         model.learn(total_timesteps=total_timesteps)
         print("✅ Training completed successfully!")
-        
     except KeyboardInterrupt:
         print("⏹️  Training interrupted by user")
-        print("💾 Saving current progress...")
-        
+        model.save(model_path)
+        print(f"💾 Model saved to {model_path}")
     except Exception as e:
         print(f"❌ Training failed: {e}")
         import traceback
@@ -473,31 +391,27 @@ def main():
         return False
     
     # Save model
-    print(f"\n💾 Saving model...")
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
     model.save(model_path)
-    print(f"✅ Model saved to {model_path}")
+    print(f"💾 Model saved to {model_path}")
     
-    # Save episode logs with unified naming
-    print(f"\n📋 Saving training logs...")
+    # Save training logs
     save_training_logs(env)
     
-    # Quick test of the model
-    win_rate = quick_test_model(model, env, episodes=5)
+    # Quick test
+    win_rate = quick_test_model(model, env)
     
     # Cleanup
     env.close()
     
-    # Success summary
-    print(f"\n🎉 Training session completed!")
-    print(f"📈 Quick test win rate: {win_rate:.1f}%")
-    
+    # Success message
+    print("\n" + "=" * 60)
+    print("✅ Training completed successfully!")
     print(f"\n🎯 Next Steps:")
-    print(f"   📊 Full evaluation:   python ai/evaluate.py --episodes 100")
-    print(f"   🔄 More training:     python ai/train.py --resume")
-    print(f"   🔄 Convert for web:   python convert_replays.py")
-    print(f"   📋 View logs:         ls ai/event_log/")
-    print(f"   🌐 Web app:           cd frontend && npm run dev")
+    print(f"   🧪 Test model:       python ai/evaluate.py")
+    print(f"   🔄 More training:    python ai/train.py --resume")
+    print(f"   🔄 Different config: python ai/train.py --config conservative")
+    print(f"   📋 View logs:        ls ai/event_log/")
+    print(f"   🌐 Web app:          cd frontend && npm run dev")
     
     return True
 
@@ -506,10 +420,10 @@ if __name__ == "__main__":
         success = main()
         sys.exit(0 if success else 1)
     except KeyboardInterrupt:
-        print("\n⏹️  Training interrupted")
+        print(f"\n⏹️ Training interrupted")
         sys.exit(0)
     except Exception as e:
-        print(f"\n💥 Unexpected error: {e}")
+        print(f"\n💥 Error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
