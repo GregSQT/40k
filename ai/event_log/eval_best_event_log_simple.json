@@ -1,0 +1,107 @@
+[
+  {
+    "step": 1,
+    "action": 4,
+    "reward": 0.0
+  },
+  {
+    "step": 2,
+    "action": 4,
+    "reward": 0.0
+  },
+  {
+    "step": 3,
+    "action": 4,
+    "reward": 0.0
+  },
+  {
+    "step": 4,
+    "action": 4,
+    "reward": 0.0
+  },
+  {
+    "step": 5,
+    "action": 4,
+    "reward": 0.0
+  },
+  {
+    "step": 6,
+    "action": 4,
+    "reward": 0.0
+  },
+  {
+    "step": 7,
+    "action": 0,
+    "reward": 0.1
+  },
+  {
+    "step": 8,
+    "action": 3,
+    "reward": 1.0
+  },
+  {
+    "step": 9,
+    "action": 5,
+    "reward": 0.1
+  },
+  {
+    "step": 10,
+    "action": 5,
+    "reward": 0.1
+  },
+  {
+    "step": 11,
+    "action": 4,
+    "reward": 3.0
+  },
+  {
+    "step": 12,
+    "action": 2,
+    "reward": 0.05
+  },
+  {
+    "step": 13,
+    "action": 5,
+    "reward": 0.1
+  },
+  {
+    "step": 14,
+    "action": 5,
+    "reward": 0.1
+  },
+  {
+    "step": 15,
+    "action": 5,
+    "reward": 0.1
+  },
+  {
+    "step": 16,
+    "action": 5,
+    "reward": 0.1
+  },
+  {
+    "step": 17,
+    "action": 5,
+    "reward": 0.1
+  },
+  {
+    "step": 18,
+    "action": 4,
+    "reward": 0.0
+  },
+  {
+    "step": 19,
+    "action": 4,
+    "reward": 0.0
+  },
+  {
+    "step": 20,
+    "action": 4,
+    "reward": 1.0
+  },
+  {
+    "step": 21,
+    "action": 4,
+    "reward": 13.0
+  }
+]

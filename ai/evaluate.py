@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-ai/evaluate.py - Model evaluation with web-compatible event logging
+Enhanced evaluation script with full game replay logging
 """
 
 import os
 import sys
 import json
+import shutil
+from datetime import datetime
 
 def setup_imports():
     """Set up import paths and return required modules."""
@@ -31,53 +33,130 @@ def setup_imports():
     
     return DQN, W40KEnv
 
-def save_evaluation_logs(results, model_path):
-    """Save evaluation episode logs in web-compatible format."""
+def run_evaluation_episode_with_replay(model, env, episode_num):
+    """Run a single evaluation episode with full replay logging."""
+    try:
+        from game_replay_logger import GameReplayIntegration
+    except ImportError:
+        print("⚠️  GameReplayLogger not found, running without replay")
+        return run_simple_evaluation_episode(model, env, episode_num)
+    
+    # Enhanced environment with replay logging
+    env_with_replay = GameReplayIntegration.enhance_training_env(env)
+    
+    # Run the episode
+    obs, info = env_with_replay.reset()
+    episode_reward = 0
+    episode_steps = 0
+    episode_data = []
+    done = False
+    
+    while not done:
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, info = env_with_replay.step(action)
+        
+        episode_reward += reward
+        episode_steps += 1
+        
+        # Still collect simple data for compatibility
+        episode_data.append({
+            "step": episode_steps,
+            "action": int(action),
+            "reward": float(reward)
+        })
+        
+        done = terminated or truncated
+    
+    # Save the replay for this episode
+    event_log_dir = "ai/event_log"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    replay_file = os.path.join(event_log_dir, f"eval_episode_{episode_num}_{timestamp}.json")
+    
+    GameReplayIntegration.save_episode_replay(env_with_replay, episode_reward)
+    
+    # Get the most recent replay file (just saved)
+    import glob
+    recent_replays = sorted(glob.glob(os.path.join(event_log_dir, "game_replay_*.json")), 
+                           key=os.path.getmtime)
+    if recent_replays:
+        # Move to evaluation-specific name
+        shutil.move(recent_replays[-1], replay_file)
+    
+    return {
+        "episode": episode_num,
+        "reward": episode_reward,
+        "steps": episode_steps,
+        "data": episode_data,
+        "replay_file": replay_file if os.path.exists(replay_file) else None
+    }
+
+def run_simple_evaluation_episode(model, env, episode_num):
+    """Fallback: Run episode without replay logging."""
+    obs, info = env.reset()
+    episode_reward = 0
+    episode_steps = 0
+    episode_data = []
+    done = False
+    
+    while not done:
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, info = env.step(action)
+        
+        episode_reward += reward
+        episode_steps += 1
+        
+        episode_data.append({
+            "step": episode_steps,
+            "action": int(action),
+            "reward": float(reward)
+        })
+        
+        done = terminated or truncated
+    
+    return {
+        "episode": episode_num,
+        "reward": episode_reward,
+        "steps": episode_steps,
+        "data": episode_data,
+        "replay_file": None
+    }
+
+def save_evaluation_logs_with_replay(results, model_path):
+    """Save evaluation logs with full game replay data."""
     if not results["episodes"]:
         print("No episode data to save")
         return
     
-    # Try to use web log generator
-    try:
-        from web_log_generator import WebLogGenerator
-        generator = WebLogGenerator()
-        generator.convert_and_save_evaluation_logs(results, model_path)
-    except ImportError:
-        # Fallback to simple format
-        print("⚠️  WebLogGenerator not found, using simple format")
-        save_evaluation_logs_simple(results, model_path)
-
-def save_evaluation_logs_simple(results, model_path):
-    """Fallback: Save evaluation logs in simple format."""
-    # Create unified event log directory
     event_log_dir = "ai/event_log"
     os.makedirs(event_log_dir, exist_ok=True)
     
-    # Find best and worst episodes by reward
+    # Find best and worst episodes
     best_episode = max(results["episodes"], key=lambda x: x["reward"])
     worst_episode = min(results["episodes"], key=lambda x: x["reward"])
     
-    # Save evaluation logs with new naming convention
-    eval_best_file = os.path.join(event_log_dir, "eval_best_event_log_simple.json")
-    eval_worst_file = os.path.join(event_log_dir, "eval_worst_event_log_simple.json")
+    print(f"📋 LOGS: Saving evaluation replays...")
     
-    # Save best episode data
-    with open(eval_best_file, "w", encoding="utf-8") as f:
-        json.dump(best_episode["data"], f, indent=2)
+    # Copy replay files to standard locations
+    best_replay_dest = os.path.join(event_log_dir, "eval_best_game_replay.json")
+    worst_replay_dest = os.path.join(event_log_dir, "eval_worst_game_replay.json")
     
-    # Save worst episode data  
-    with open(eval_worst_file, "w", encoding="utf-8") as f:
-        json.dump(worst_episode["data"], f, indent=2)
+    if best_episode.get("replay_file") and os.path.exists(best_episode["replay_file"]):
+        shutil.copy2(best_episode["replay_file"], best_replay_dest)
+        print(f"   🏆 Best episode replay: {best_replay_dest}")
+    else:
+        print(f"   ⚠️  No replay file for best episode")
     
-    print(f"LOGS: Evaluation episode logs saved (simple format)")
-    print(f"  📈 Best episode (reward: {best_episode['reward']:.2f}): {eval_best_file}")
-    print(f"  📉 Worst episode (reward: {worst_episode['reward']:.2f}): {eval_worst_file}")
+    if worst_episode.get("replay_file") and os.path.exists(worst_episode["replay_file"]):
+        shutil.copy2(worst_episode["replay_file"], worst_replay_dest)
+        print(f"   📉 Worst episode replay: {worst_replay_dest}")
+    else:
+        print(f"   ⚠️  No replay file for worst episode")
     
     # Save evaluation summary
     summary_file = os.path.join(event_log_dir, "eval_summary.json")
     summary = {
         "model_path": model_path,
-        "timestamp": __import__('datetime').datetime.now().isoformat(),
+        "timestamp": datetime.now().isoformat(),
         "episodes": len(results["episodes"]),
         "wins": results["wins"],
         "losses": results["losses"],
@@ -88,21 +167,52 @@ def save_evaluation_logs_simple(results, model_path):
         "best_reward": max(results["rewards"]) if results["rewards"] else 0,
         "worst_reward": min(results["rewards"]) if results["rewards"] else 0,
         "files": {
-            "best": "eval_best_event_log_simple.json",
-            "worst": "eval_worst_event_log_simple.json"
+            "best_replay": "eval_best_game_replay.json",
+            "worst_replay": "eval_worst_game_replay.json"
         },
-        "web_compatible": False
+        "replay_type": "full_game_state",
+        "web_compatible": True,
+        "features": [
+            "Complete unit positions",
+            "HP tracking", 
+            "Movement visualization",
+            "Combat events",
+            "Turn-by-turn progression",
+            "Deterministic AI evaluation"
+        ]
     }
     
     with open(summary_file, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
     
-    print(f"  📊 Summary: {summary_file}")
-    print(f"  ⚠️  Use convert_replays.py to make web-compatible")
+    print(f"   📊 Summary: {summary_file}")
+    print(f"   🌐 Game replays ready for web app!")
+    
+    # Cleanup temporary episode files
+    cleanup_temp_episode_files(event_log_dir)
 
-def evaluate_model(model_path=None, n_episodes=100, save_logs=True):
-    """Evaluate AI model with web-compatible logging."""
-    print("🏆 Starting model evaluation...")
+def cleanup_temp_episode_files(event_log_dir):
+    """Clean up temporary episode replay files."""
+    import glob
+    temp_files = glob.glob(os.path.join(event_log_dir, "eval_episode_*.json"))
+    temp_files += glob.glob(os.path.join(event_log_dir, "game_replay_*.json"))
+    
+    kept_files = [
+        os.path.join(event_log_dir, "eval_best_game_replay.json"),
+        os.path.join(event_log_dir, "eval_worst_game_replay.json")
+    ]
+    
+    for temp_file in temp_files:
+        if temp_file not in kept_files:
+            try:
+                os.remove(temp_file)
+                print(f"   🧹 Cleaned up: {os.path.basename(temp_file)}")
+            except OSError:
+                pass
+
+def evaluate_model_with_replay(model_path=None, n_episodes=100, save_logs=True):
+    """Evaluate AI model with full game replay logging."""
+    print("🏆 Starting model evaluation with game replay...")
     
     # Setup imports
     try:
@@ -141,46 +251,29 @@ def evaluate_model(model_path=None, n_episodes=100, save_logs=True):
         "draws": 0
     }
     
-    print(f"🎮 Running {n_episodes} evaluation episodes...")
+    print(f"🎮 Running {n_episodes} evaluation episodes with replay capture...")
+    print(f"   🎬 Each episode will generate a complete game visualization")
+    
+    # Limit replay capture for performance
+    capture_replays_for = min(n_episodes, 20)  # Capture replays for first 20 episodes max
     
     for episode in range(n_episodes):
-        obs, info = env.reset()
-        episode_reward = 0
-        episode_steps = 0
-        episode_data = []
-        done = False
-        
-        while not done:
-            action, _ = model.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = env.step(action)
-            
-            episode_reward += reward
-            episode_steps += 1
-            
-            # Record step data for web format
-            episode_data.append({
-                "step": episode_steps,
-                "action": int(action),
-                "reward": float(reward)
-            })
-            
-            done = terminated or truncated
+        if episode < capture_replays_for:
+            print(f"   🎬 Episode {episode + 1}: Capturing full replay...")
+            episode_result = run_evaluation_episode_with_replay(model, env, episode + 1)
+        else:
+            # Run without replay for performance
+            episode_result = run_simple_evaluation_episode(model, env, episode + 1)
         
         # Store episode results
-        results["episodes"].append({
-            "episode": episode + 1,
-            "reward": episode_reward,
-            "steps": episode_steps,
-            "data": episode_data
-        })
-        
-        results["rewards"].append(episode_reward)
-        results["step_counts"].append(episode_steps)
+        results["episodes"].append(episode_result)
+        results["rewards"].append(episode_result["reward"])
+        results["step_counts"].append(episode_result["steps"])
         
         # Determine outcome (basic estimation)
-        if episode_reward > 50:
+        if episode_result["reward"] > 50:
             results["wins"] += 1
-        elif episode_reward < -50:
+        elif episode_result["reward"] < -50:
             results["losses"] += 1
         else:
             results["draws"] += 1
@@ -203,10 +296,11 @@ def evaluate_model(model_path=None, n_episodes=100, save_logs=True):
     print(f"   Avg Steps: {avg_steps:.1f}")
     print(f"   Best Reward: {max(results['rewards']):.2f}")
     print(f"   Worst Reward: {min(results['rewards']):.2f}")
+    print(f"   Game Replays: {min(capture_replays_for, total_episodes)} episodes captured")
     
     # Save logs if requested
     if save_logs:
-        save_evaluation_logs(results, model_path)
+        save_evaluation_logs_with_replay(results, model_path)
     
     env.close()
     print("✅ Evaluation completed")
@@ -243,7 +337,7 @@ def parse_args():
             episodes = int(sys.argv[i + 1])
             i += 2
         elif arg == "--help":
-            print("🏆 WH40K AI Model Evaluation (Web-Compatible Logging)")
+            print("🏆 WH40K AI Model Evaluation (Game Replay System)")
             print("=" * 55)
             print("Usage: python ai/evaluate.py [options]")
             print()
@@ -259,27 +353,39 @@ def parse_args():
             print("  python ai/evaluate.py --current --episodes 50")
             print("  python ai/evaluate.py --backup 1")
             print()
-            print("Output files (Web-Compatible):")
-            print("  ai/event_log/eval_best_event_log.json")
-            print("  ai/event_log/eval_worst_event_log.json")
+            print("Output files (Game Replay System):")
+            print("  ai/event_log/eval_best_game_replay.json")
+            print("  ai/event_log/eval_worst_game_replay.json")
             print("  ai/event_log/eval_summary.json")
             print()
-            print("🌐 Files are directly compatible with web app - no conversion needed!")
+            print("🎬 Features:")
+            print("  ✅ Complete unit movements and positions")
+            print("  ✅ HP tracking and combat visualization")
+            print("  ✅ Turn-by-turn game progression")
+            print("  ✅ Direct web app compatibility")
+            print("  ✅ Deterministic AI evaluation")
+            print()
+            print("🌐 Load eval_best_game_replay.json in web app to watch your AI!")
             return True
         else:
             print(f"Unknown argument: {arg}")
             return False
     
     # Run evaluation
-    success = evaluate_model(model_path, episodes)
+    success = evaluate_model_with_replay(model_path, episodes)
     
     if success:
         print(f"\n✅ Evaluation completed!")
         print(f"\n🎯 Next Steps:")
         print(f"   🔄 More training:     python ai/train.py")
-        print(f"   🌐 Load in web app:   Open web app and load eval_best_event_log.json")
+        print(f"   🎬 Watch AI battle:   Load eval_best_game_replay.json in web app")
         print(f"   📋 View logs:         ls ai/event_log/")
         print(f"   🌐 Web app:           cd frontend && npm run dev")
+        print(f"\n🎮 Game Replay Features:")
+        print(f"   🎯 Unit movements and positioning")
+        print(f"   ⚔️  Combat and damage visualization")
+        print(f"   📊 HP tracking throughout battle")
+        print(f"   🎬 Complete turn-by-turn progression")
     
     return success
 
