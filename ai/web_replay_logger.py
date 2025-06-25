@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
 """
-quick_setup.py - Quick setup script to create the new web-compatible replay system
-"""
-
-import os
-import shutil
-from pathlib import Path
-
-def create_web_replay_logger():
-    """Create the web_replay_logger.py file."""
-    web_logger_content = '''#!/usr/bin/env python3
-"""
 web_replay_logger.py - Direct Web-Compatible Replay Logger
 Generates web-compatible replay files directly without simplified intermediates
 """
@@ -354,77 +343,3 @@ class WebReplayIntegration:
             env.web_replay_logger.save_web_replay(filename, episode_reward)
             return filename
         return None
-'''
-    
-    # Create ai directory if it doesn't exist
-    os.makedirs("ai", exist_ok=True)
-    
-    # Write the web replay logger
-    with open("ai/web_replay_logger.py", "w", encoding="utf-8") as f:
-        f.write(web_logger_content)
-    
-    print("✅ Created ai/web_replay_logger.py")
-
-def check_current_setup():
-    """Check what files currently exist."""
-    print("🔍 Checking current setup...")
-    
-    files_to_check = [
-        "ai/gym40k.py",
-        "ai/train.py", 
-        "ai/evaluate.py",
-        "ai/web_replay_logger.py",
-        "ai/event_log/"
-    ]
-    
-    for file_path in files_to_check:
-        if os.path.exists(file_path):
-            if os.path.isdir(file_path):
-                file_count = len([f for f in os.listdir(file_path) if f.endswith('.json')])
-                print(f"   ✅ {file_path} (directory with {file_count} JSON files)")
-            else:
-                size = os.path.getsize(file_path)
-                print(f"   ✅ {file_path} ({size} bytes)")
-        else:
-            print(f"   ❌ {file_path} (missing)")
-
-def backup_existing_train_py():
-    """Backup existing train.py if it exists."""
-    if os.path.exists("ai/train.py"):
-        backup_path = "ai/train_backup.py"
-        shutil.copy2("ai/train.py", backup_path)
-        print(f"📦 Backed up existing train.py to {backup_path}")
-
-def main():
-    """Main setup function."""
-    print("🚀 W40K AI - Web-Compatible Replay Setup")
-    print("=" * 50)
-    
-    # Check current setup
-    check_current_setup()
-    
-    print("\n🔧 Setting up web-compatible replay system...")
-    
-    # Backup existing train.py
-    backup_existing_train_py()
-    
-    # Create web replay logger
-    create_web_replay_logger()
-    
-    print("\n✅ Setup completed!")
-    print("\n📋 Next steps:")
-    print("1. Update your ai/train.py to use WebReplayIntegration")
-    print("2. Update your ai/evaluate.py to use WebReplayIntegration") 
-    print("3. Run: python ai/train.py --timesteps 10000")
-    print("4. Check for *_web_replay.json files in ai/event_log/")
-    
-    print("\n🔧 Manual updates needed:")
-    print("In your ai/train.py, change:")
-    print("  OLD: from ai.game_replay_logger import GameReplayIntegration")
-    print("  NEW: from ai.web_replay_logger import WebReplayIntegration")
-    print()
-    print("  OLD: env = GameReplayIntegration.enhance_training_env(env)")
-    print("  NEW: env = WebReplayIntegration.enhance_training_env(env)")
-
-if __name__ == "__main__":
-    main()

@@ -1,9 +1,9 @@
 {
-  "timestamp": "2025-06-25T04:11:24.961364",
+  "timestamp": "2025-06-26T01:00:59.679456",
   "total_episodes": 10,
-  "best_reward": -0.1499999999999999,
-  "worst_reward": -5.7,
-  "average_reward": -3.25,
+  "best_reward": -0.0999999999999992,
+  "worst_reward": -6.0,
+  "average_reward": -3.275,
   "files": {
     "best_replay": "train_best_game_replay.json",
     "worst_replay": "train_worst_game_replay.json"

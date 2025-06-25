@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import glob
 from datetime import datetime
+from ai.web_replay_logger import WebReplayIntegration
+
 
 def load_config(config_name="default"):
     """Load training configuration from config file."""
