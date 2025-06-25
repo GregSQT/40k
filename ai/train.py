@@ -151,20 +151,155 @@ def generate_scenario_if_needed():
     """Generate scenario if needed."""
     if not os.path.exists("ai/scenario.json"):
         print("🔧 Regenerating scenario.json...")
+        
+        # First try to copy from existing scenario.json in root
+        if os.path.exists("scenario.json"):
+            print("📋 Found existing scenario.json in root, copying to ai/")
+            import shutil
+            shutil.copy2("scenario.json", "ai/scenario.json")
+            print("✅ Scenario copied successfully")
+            return
+        
+        # Try using the tools generator
         try:
-            subprocess.run([sys.executable, "tools/generate_scenario.py"], check=True)
-            print("✅ Scenario generated")
+            # Try local ai/ version first
+            subprocess.run([sys.executable, "ai/generate_scenario.py"], check=True)
+            print("✅ Scenario generated from ai/generate_scenario.py")
+            return
         except (subprocess.CalledProcessError, FileNotFoundError):
-            try:
-                subprocess.run([sys.executable, "generate_scenario.py"], check=True)
-                print("✅ Scenario generated")
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                print("⚠️  Using default scenario")
+            pass
+            
+        try:
+            # Fallback to tools/ version
+            subprocess.run([sys.executable, "tools/generate_scenario.py"], check=True)
+            print("✅ Scenario generated from tools/generate_scenario.py")
+            return
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+        
+        # Last resort: try to parse from frontend TypeScript
+        try:
+            print("🔧 Trying to parse from frontend/src/data/Scenario.ts...")
+            if os.path.exists("frontend/src/data/Scenario.ts"):
+                # Read the TypeScript scenario file and extract data
+                with open("frontend/src/data/Scenario.ts", "r", encoding="utf-8") as f:
+                    content = f.read()
+                
+                # Convert TypeScript scenario to JSON format
+                scenario_data = []
+                import re
+                
+                # Find unit definitions in the TypeScript
+                # This is a simple extraction - may need refinement
+                units_found = False
+                current_unit = {}
+                
+                for line in content.split('\n'):
+                    line = line.strip()
+                    
+                    if 'id:' in line:
+                        match = re.search(r'id:\s*(\d+)', line)
+                        if match:
+                            if current_unit:  # Save previous unit
+                                scenario_data.append(current_unit)
+                            current_unit = {"id": int(match.group(1))}
+                    
+                    elif 'type:' in line:
+                        match = re.search(r'type:\s*["\']([^"\']+)["\']', line)
+                        if match:
+                            unit_type = match.group(1).replace(' ', '')
+                            current_unit["unit_type"] = unit_type
+                    
+                    elif 'player:' in line:
+                        match = re.search(r'player:\s*(\d+)', line)
+                        if match:
+                            current_unit["player"] = int(match.group(1))
+                    
+                    elif 'col:' in line:
+                        match = re.search(r'col:\s*(\d+)', line)
+                        if match:
+                            current_unit["col"] = int(match.group(1))
+                    
+                    elif 'row:' in line:
+                        match = re.search(r'row:\s*(\d+)', line)
+                        if match:
+                            current_unit["row"] = int(match.group(1))
+                    
+                    elif 'HP_MAX:' in line:
+                        match = re.search(r'HP_MAX:\s*(\d+)', line)
+                        if match:
+                            hp_max = int(match.group(1))
+                            current_unit["cur_hp"] = hp_max
+                            current_unit["hp_max"] = hp_max
+                    
+                    elif 'MOVE:' in line:
+                        match = re.search(r'MOVE:\s*(\d+)', line)
+                        if match:
+                            current_unit["move"] = int(match.group(1))
+                    
+                    elif 'RNG_RNG:' in line:
+                        match = re.search(r'RNG_RNG:\s*(\d+)', line)
+                        if match:
+                            current_unit["rng_rng"] = int(match.group(1))
+                    
+                    elif 'RNG_DMG:' in line:
+                        match = re.search(r'RNG_DMG:\s*(\d+)', line)
+                        if match:
+                            current_unit["rng_dmg"] = int(match.group(1))
+                    
+                    elif 'CC_DMG:' in line:
+                        match = re.search(r'CC_DMG:\s*(\d+)', line)
+                        if match:
+                            current_unit["cc_dmg"] = int(match.group(1))
+                
+                # Don't forget the last unit
+                if current_unit:
+                    scenario_data.append(current_unit)
+                
+                # Add missing fields and defaults
+                for unit in scenario_data:
+                    if "unit_type" not in unit:
+                        unit["unit_type"] = "Intercessor"
+                    
+                    # Set ranged/melee flags based on unit type
+                    if "Assault" in unit["unit_type"]:
+                        unit["is_ranged"] = False
+                        unit["is_melee"] = True
+                    else:
+                        unit["is_ranged"] = True
+                        unit["is_melee"] = False
+                    
+                    unit["alive"] = True
+                    
+                    # Set defaults if missing
+                    if "hp_max" not in unit:
+                        unit["hp_max"] = 4
+                        unit["cur_hp"] = 4
+                    if "move" not in unit:
+                        unit["move"] = 6
+                    if "rng_rng" not in unit:
+                        unit["rng_rng"] = 8 if unit["is_ranged"] else 4
+                    if "rng_dmg" not in unit:
+                        unit["rng_dmg"] = 2 if unit["is_ranged"] else 1
+                    if "cc_dmg" not in unit:
+                        unit["cc_dmg"] = 1 if unit["is_ranged"] else 2
+                
+                if scenario_data:
+                    import json
+                    with open("ai/scenario.json", "w") as f:
+                        json.dump(scenario_data, f, indent=2)
+                    print(f"✅ Parsed scenario from TypeScript ({len(scenario_data)} units)")
+                    return
+        
+        except Exception as e:
+            print(f"⚠️  Could not parse TypeScript scenario: {e}")
+        
+        print("⚠️  Could not generate scenario, training may fail")
 
 def create_or_load_model(env, model_path, resume_flag, total_timesteps, exploration_fraction_setup=0.3):
     """Create new model or load existing one based on arguments."""
     from stable_baselines3 import DQN
-    
+
     if os.path.exists(model_path):
         if resume_flag is None:
             # No explicit flag, default: resume
