@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+ai/evaluate.py - Model evaluation with unified event logging
+"""
+
 import os
 import sys
 import json
@@ -26,14 +31,69 @@ def setup_imports():
     
     return DQN, W40KEnv
 
+def save_evaluation_logs(results, model_path):
+    """Save evaluation episode logs to unified location."""
+    if not results["episodes"]:
+        print("No episode data to save")
+        return
+    
+    # Create unified event log directory
+    event_log_dir = "ai/event_log"
+    os.makedirs(event_log_dir, exist_ok=True)
+    
+    # Find best and worst episodes by reward
+    best_episode = max(results["episodes"], key=lambda x: x["reward"])
+    worst_episode = min(results["episodes"], key=lambda x: x["reward"])
+    
+    # Save evaluation logs with new naming convention
+    eval_best_file = os.path.join(event_log_dir, "eval_best_event_log.json")
+    eval_worst_file = os.path.join(event_log_dir, "eval_worst_event_log.json")
+    
+    # Save best episode data
+    with open(eval_best_file, "w", encoding="utf-8") as f:
+        json.dump(best_episode["data"], f, indent=2)
+    
+    # Save worst episode data  
+    with open(eval_worst_file, "w", encoding="utf-8") as f:
+        json.dump(worst_episode["data"], f, indent=2)
+    
+    print(f"LOGS: Evaluation episode logs saved")
+    print(f"  📈 Best episode (reward: {best_episode['reward']:.2f}): {eval_best_file}")
+    print(f"  📉 Worst episode (reward: {worst_episode['reward']:.2f}): {eval_worst_file}")
+    
+    # Save evaluation summary
+    summary_file = os.path.join(event_log_dir, "eval_summary.json")
+    summary = {
+        "model_path": model_path,
+        "timestamp": __import__('datetime').datetime.now().isoformat(),
+        "episodes": len(results["episodes"]),
+        "wins": results["wins"],
+        "losses": results["losses"],
+        "draws": results["draws"],
+        "win_rate": results["wins"] / len(results["episodes"]) if results["episodes"] else 0,
+        "avg_reward": sum(results["rewards"]) / len(results["rewards"]) if results["rewards"] else 0,
+        "avg_steps": sum(results["step_counts"]) / len(results["step_counts"]) if results["step_counts"] else 0,
+        "best_reward": max(results["rewards"]) if results["rewards"] else 0,
+        "worst_reward": min(results["rewards"]) if results["rewards"] else 0,
+        "files": {
+            "best": "eval_best_event_log.json",
+            "worst": "eval_worst_event_log.json"
+        }
+    }
+    
+    with open(summary_file, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+    
+    print(f"  📊 Summary: {summary_file}")
+
 def evaluate_model(model_path=None, n_episodes=100, save_logs=True):
-    """Evaluate AI model with organized file structure."""
+    """Evaluate AI model with unified logging."""
     
     # Default to organized model path
     if model_path is None:
         model_path = "ai/models/current/model.zip"
     
-    print(f"🏆 WH40K AI Model Evaluation (Organized)")
+    print(f"🏆 WH40K AI Model Evaluation (Unified Logging)")
     print("=" * 50)
     print(f"Model: {model_path}")
     print(f"Episodes: {n_episodes}")
@@ -185,46 +245,7 @@ def evaluate_model(model_path=None, n_episodes=100, save_logs=True):
     
     # Save logs if requested
     if save_logs and results["episodes"]:
-        logs_dir = "ai/models/logs"
-        os.makedirs(logs_dir, exist_ok=True)
-        
-        # Find best and worst episodes
-        best_episode = max(results["episodes"], key=lambda x: x["reward"])
-        worst_episode = min(results["episodes"], key=lambda x: x["reward"])
-        
-        # Save best episode
-        best_file = f"{logs_dir}/best_event_log.json"
-        with open(best_file, "w") as f:
-            json.dump(best_episode["data"], f, indent=2)
-        
-        # Save worst episode  
-        worst_file = f"{logs_dir}/worst_event_log.json"
-        with open(worst_file, "w") as f:
-            json.dump(worst_episode["data"], f, indent=2)
-        
-        # Save evaluation summary
-        summary_file = f"{logs_dir}/evaluation_summary.json"
-        summary = {
-            "model_path": model_path,
-            "timestamp": __import__('datetime').datetime.now().isoformat(),
-            "episodes": total_episodes,
-            "wins": results["wins"],
-            "losses": results["losses"],
-            "draws": results["draws"],
-            "win_rate": win_rate,
-            "avg_reward": avg_reward,
-            "avg_steps": avg_steps,
-            "best_reward": max(results["rewards"]) if results["rewards"] else 0,
-            "worst_reward": min(results["rewards"]) if results["rewards"] else 0
-        }
-        
-        with open(summary_file, "w") as f:
-            json.dump(summary, f, indent=2)
-        
-        print(f"\n💾 Logs saved:")
-        print(f"   📈 Best episode: {best_file}")
-        print(f"   📉 Worst episode: {worst_file}")
-        print(f"   📊 Summary: {summary_file}")
+        save_evaluation_logs(results, model_path)
     
     env.close()
     return True
@@ -259,9 +280,9 @@ def main():
                 return False
             i += 2
         elif arg == "--help":
-            print("🏆 WH40K AI Model Evaluation (Organized)")
+            print("🏆 WH40K AI Model Evaluation (Unified Logging)")
             print("=" * 45)
-            print("Usage: python ai/evaluate_organized.py [options]")
+            print("Usage: python ai/evaluate.py [options]")
             print()
             print("Options:")
             print("  --model PATH     Specific model file")
@@ -271,9 +292,14 @@ def main():
             print("  --help          Show this help")
             print()
             print("Examples:")
-            print("  python ai/evaluate_organized.py")
-            print("  python ai/evaluate_organized.py --current --episodes 50")
-            print("  python ai/evaluate_organized.py --backup 1")
+            print("  python ai/evaluate.py")
+            print("  python ai/evaluate.py --current --episodes 50")
+            print("  python ai/evaluate.py --backup 1")
+            print()
+            print("Output files:")
+            print("  ai/event_log/eval_best_event_log.json")
+            print("  ai/event_log/eval_worst_event_log.json")
+            print("  ai/event_log/eval_summary.json")
             return True
         else:
             print(f"Unknown argument: {arg}")
@@ -285,9 +311,10 @@ def main():
     if success:
         print(f"\n✅ Evaluation completed!")
         print(f"\n🎯 Next Steps:")
-        print(f"   🔄 More training:     python ai/quick_retrain_organized.py")
-        print(f"   💾 Backup model:      python ai/models/backup_model.py")
-        print(f"   📋 View logs:         ls ai/models/logs/")
+        print(f"   🔄 More training:     python ai/train.py")
+        print(f"   🔄 Convert for web:   python convert_replays.py")
+        print(f"   📋 View logs:         ls ai/event_log/")
+        print(f"   🌐 Web app:           cd frontend && npm run dev")
     
     return success
 
