@@ -12,6 +12,12 @@ import glob
 from datetime import datetime
 from ai.web_replay_logger import WebReplayIntegration
 
+try:
+    from ai.web_replay_logger import WebReplayIntegration
+    WEB_REPLAY_AVAILABLE = True
+except ImportError:
+    WEB_REPLAY_AVAILABLE = False
+    print("⚠️  Web replay logger not available")
 
 def load_config(config_name="default"):
     """Load training configuration from config file."""
@@ -205,28 +211,44 @@ def run_training_episode_with_replay(model, env):
         
         return total_reward, steps, None
 
-def enhanced_training_with_replay(model, total_timesteps, replay_interval=10000):
-    """Enhanced training that captures replay data at intervals."""
+def enhanced_training_with_replay(model, total_timesteps):
+    """Enhanced training with web-compatible replay capture."""
+    if not WEB_REPLAY_AVAILABLE:
+        print("🔄 Web replay not available, using standard training...")
+        model.learn(total_timesteps=total_timesteps)
+        return
+    
+    print(f"🎬 Enhanced training with web-compatible replay generation")
+    
+    # Create a new environment with web replay logging
+    env_with_replay = model.env
+    
+    # Check if environment already has web replay (avoid double-wrapping)
+    if not hasattr(env_with_replay, 'web_replay_logger'):
+        print("🔧 Adding web-compatible replay logging to environment...")
+        env_with_replay = WebReplayIntegration.enhance_training_env(env_with_replay)
+        model.set_env(env_with_replay)
+    
+    # Calculate replay intervals (capture every 10% of training)
+    replay_interval = max(1000, total_timesteps // 10)
+    episode_replays = []
+    episode_rewards = []
+    episodes_captured = 0
+    current_step = 0
+    
     try:
-        print(f"🎬 Enhanced training with replay capture every {replay_interval} steps")
-        
-        episode_replays = []
-        episode_rewards = []
-        episodes_captured = 0
-        current_step = 0
-        
         while current_step < total_timesteps:
             if current_step % replay_interval == 0 and current_step > 0:
-                # Capture a replay episode
-                print(f"🎥 Capturing replay at step {current_step}")
+                # Capture a web-compatible replay episode
+                print(f"🎥 Capturing web replay at step {current_step}")
                 
-                # Run episode with replay
-                episode_reward, episode_steps, replay_file = run_training_episode_with_replay(model, model.env)
+                episode_reward, episode_steps, replay_file = run_training_episode_with_web_replay(model, env_with_replay)
                 
                 if replay_file:
                     episode_replays.append(replay_file)
                     episode_rewards.append(episode_reward)
                     episodes_captured += 1
+                    print(f"   ✅ Captured: {replay_file}")
                 
                 current_step += episode_steps
             else:
@@ -239,31 +261,74 @@ def enhanced_training_with_replay(model, total_timesteps, replay_interval=10000)
         if current_step < total_timesteps:
             model.learn(total_timesteps=total_timesteps - current_step)
         
-        print(f"✅ Training completed with {episodes_captured} replays captured")
+        print(f"✅ Training completed with {episodes_captured} web replays captured")
         
-        # Select best and worst replays
+        # Select best and worst replays and copy to standard locations
         if episode_replays and episode_rewards:
             best_idx = episode_rewards.index(max(episode_rewards))
             worst_idx = episode_rewards.index(min(episode_rewards))
             
-            # Copy best and worst to standard locations
             event_log_dir = "ai/event_log"
+            os.makedirs(event_log_dir, exist_ok=True)
             
-            best_dest = os.path.join(event_log_dir, "train_best_game_replay.json")
-            worst_dest = os.path.join(event_log_dir, "train_worst_game_replay.json")
+            best_dest = os.path.join(event_log_dir, "train_best_web_replay.json")
+            worst_dest = os.path.join(event_log_dir, "train_worst_web_replay.json")
             
             shutil.copy2(episode_replays[best_idx], best_dest)
             shutil.copy2(episode_replays[worst_idx], worst_dest)
             
-            print(f"   🏆 Best replay (reward: {episode_rewards[best_idx]:.2f}): train_best_game_replay.json")
-            print(f"   📉 Worst replay (reward: {episode_rewards[worst_idx]:.2f}): train_worst_game_replay.json")
+            print(f"   🏆 Best web replay: train_best_web_replay.json")
+            print(f"   📉 Worst web replay: train_worst_web_replay.json")
         
-    except KeyboardInterrupt:
-        print("⏹️  Training interrupted - saving current progress")
-        raise
+    except Exception as e:
+        print(f"⚠️  Enhanced training failed: {e}")
+        print("🔄 Falling back to standard training...")
+        model.learn(total_timesteps=total_timesteps)
+
+def run_training_episode_with_web_replay(model, env):
+    """Run a single training episode with web replay capture."""
+    try:
+        # Run episode
+        reset_result = env.reset()
+        if isinstance(reset_result, tuple):
+            obs, info = reset_result
+        else:
+            obs = reset_result
+            
+        total_reward = 0
+        steps = 0
+        done = False
+        
+        while not done and steps < 1000:  # Prevent infinite episodes
+            action, _ = model.predict(obs, deterministic=False)
+            step_result = env.step(action)
+            
+            if len(step_result) == 5:  # New Gym API
+                obs, reward, terminated, truncated, info = step_result
+                done = terminated or truncated
+            else:  # Old Gym API
+                obs, reward, done, info = step_result
+                
+            total_reward += reward
+            steps += 1
+        
+        # Save replay if logger available
+        replay_file = None
+        if hasattr(env, 'web_replay_logger'):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            event_log_dir = "ai/event_log"
+            os.makedirs(event_log_dir, exist_ok=True)
+            replay_file = os.path.join(event_log_dir, f"web_replay_{timestamp}.json")
+            env.web_replay_logger.save_web_replay(replay_file, total_reward)
+        
+        return total_reward, steps, replay_file
+        
+    except Exception as e:
+        print(f"   ⚠️  Episode failed: {e}")
+        return 0.0, 0, None
 
 def save_training_logs_with_replay(env):
-    """Save training logs with full game replay data."""
+    """Save training logs with web-compatible replay data only."""
     if not hasattr(env, "episode_logs") or not env.episode_logs:
         print("⚠️  No episode logs to save")
         return
@@ -275,26 +340,9 @@ def save_training_logs_with_replay(env):
     best_log, best_reward = max(env.episode_logs, key=lambda x: x[1])
     worst_log, worst_reward = min(env.episode_logs, key=lambda x: x[1])
     
-    print(f"📋 LOGS: Generating full game replay logs...")
+    print(f"📋 SUMMARY: Saving training summary (web-compatible format only)")
     
-    # Check for existing replay files
-    best_replay_file = os.path.join(event_log_dir, "train_best_game_replay.json")
-    worst_replay_file = os.path.join(event_log_dir, "train_worst_game_replay.json")
-    
-    # If we have replay files from the training process, they're already there
-    # Otherwise, create basic event logs
-    if not os.path.exists(best_replay_file):
-        with open(best_replay_file, "w", encoding="utf-8") as f:
-            json.dump(best_log, f, indent=2)
-    
-    if not os.path.exists(worst_replay_file):
-        with open(worst_replay_file, "w", encoding="utf-8") as f:
-            json.dump(worst_log, f, indent=2)
-    
-    print(f"   🎮 Best episode replay: {best_replay_file}")
-    print(f"   🎮 Worst episode replay: {worst_replay_file}")
-    
-    # Save training summary
+    # Save training summary ONLY - NO SIMPLIFIED EVENT LOGS
     summary_file = os.path.join(event_log_dir, "train_summary.json")
     summary = {
         "timestamp": datetime.now().isoformat(),
@@ -303,24 +351,29 @@ def save_training_logs_with_replay(env):
         "worst_reward": worst_reward,
         "average_reward": sum(x[1] for x in env.episode_logs) / len(env.episode_logs),
         "files": {
-            "best_replay": "train_best_game_replay.json",
-            "worst_replay": "train_worst_game_replay.json"
+            "best_replay": "train_best_web_replay.json",
+            "worst_replay": "train_worst_web_replay.json"
         },
-        "replay_type": "full_game_state",
+        "replay_type": "web_compatible_direct",
         "web_compatible": True,
         "features": [
+            "Direct web compatibility",
             "Complete unit positions",
             "HP tracking", 
             "Movement visualization",
             "Combat events",
-            "Turn-by-turn progression"
-        ]
+            "Turn-by-turn progression",
+            "No conversion needed"
+        ],
+        "note": "Replays generated directly in web-compatible format - no simplified event logs created"
     }
     
     with open(summary_file, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
     
     print(f"   📊 Summary: {summary_file}")
+    print(f"   ℹ️  NOTE: NO simplified event logs generated - only web-compatible files")
+    print(f"   🌐 Web replay files: train_best_web_replay.json, train_worst_web_replay.json")
 
 def quick_test_model(model, env):
     """Quick test of trained model."""

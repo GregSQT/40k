@@ -1,430 +1,358 @@
 #!/usr/bin/env python3
 """
-quick_setup.py - Quick setup script to create the new web-compatible replay system
+step_by_step_setup.py - Implementation for your current W40K AI setup
 """
 
 import os
 import shutil
-from pathlib import Path
-
-def create_web_replay_logger():
-    """Create the web_replay_logger.py file."""
-    web_logger_content = '''#!/usr/bin/env python3
-"""
-web_replay_logger.py - Direct Web-Compatible Replay Logger
-Generates web-compatible replay files directly without simplified intermediates
-"""
-
 import json
-import os
-import copy
-import numpy as np
-from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-class WebReplayLogger:
-    def __init__(self, env):
-        """Initialize with the W40K environment."""
-        self.env = env
-        self.web_events = []
-        self.current_turn = 1
-        self.current_phase = "move"
-        self.game_metadata = {
-            "board_size": env.board_size,
-            "max_turns": env.max_turns,
-            "scenario": "training_episode",
-            "timestamp": datetime.now().isoformat(),
-            "replay_format": "web_compatible_v1"
-        }
-        
-        # Action name mapping
-        self.action_names = {
-            0: "move_closer",
-            1: "move_away", 
-            2: "move_to_safe",
-            3: "shoot_closest",
-            4: "shoot_weakest", 
-            5: "charge_closest",
-            6: "wait",
-            7: "attack_adjacent"
-        }
-        
-        # Phase mapping based on action types
-        self.action_to_phase = {
-            0: "move", 1: "move", 2: "move",  # Movement actions
-            3: "shoot", 4: "shoot",           # Shooting actions
-            5: "charge",                      # Charging
-            7: "combat",                      # Combat
-            6: "move"                         # Wait/end turn
-        }
+def step1_create_web_replay_logger():
+    """Step 1: Create the web replay logger file."""
+    print("🔧 Step 1: Creating web_replay_logger.py...")
     
-    def _normalize_action(self, action):
-        """Convert action to integer if it's a numpy array."""
-        if isinstance(action, np.ndarray):
-            return int(action.item())
-        elif hasattr(action, 'item'):
-            return int(action.item())
-        else:
-            return int(action)
-    
-    def _convert_unit_to_web_format(self, unit_dict: Dict, unit_index: int) -> Dict[str, Any]:
-        """Convert gym environment unit to web-compatible format."""
-        return {
-            "id": unit_index,
-            "name": unit_dict.get("name", f"{unit_dict.get('unit_type', 'Unit')} {unit_index + 1}"),
-            "type": unit_dict.get("unit_type", "Unknown"),
-            "player": unit_dict.get("player", 0),
-            "col": unit_dict.get("col", 0),
-            "row": unit_dict.get("row", 0),
-            "color": self._get_unit_color(unit_dict),
-            "MOVE": unit_dict.get("move", 6),
-            "HP_MAX": unit_dict.get("hp_max", unit_dict.get("cur_hp", 3)),
-            "CUR_HP": unit_dict.get("cur_hp", unit_dict.get("hp_max", 3)),
-            "RNG_RNG": unit_dict.get("rng_rng", 8),
-            "RNG_DMG": unit_dict.get("rng_dmg", 2),
-            "CC_DMG": unit_dict.get("cc_dmg", 1),
-            "ICON": self._get_unit_icon(unit_dict),
-            "alive": unit_dict.get("alive", True),
-            "is_ranged": unit_dict.get("is_ranged", True),
-            "is_melee": unit_dict.get("is_melee", True)
-        }
-    
-    def _get_unit_color(self, unit_dict: Dict) -> int:
-        """Get unit color based on type and player."""
-        player = unit_dict.get("player", 0)
-        unit_type = unit_dict.get("unit_type", "")
-        
-        if player == 0:  # Human player
-            return 0x244488 if "Intercessor" in unit_type else 0xff3333
-        else:  # AI player
-            return 0x882222 if "Intercessor" in unit_type else 0x6633cc
-    
-    def _get_unit_icon(self, unit_dict: Dict) -> str:
-        """Get unit icon path based on type."""
-        unit_type = unit_dict.get("unit_type", "")
-        if "Assault" in unit_type:
-            return "/icons/AssaultIntercessor.webp"
-        else:
-            return "/icons/Intercessor.webp"
-    
-    def capture_initial_state(self):
-        """Capture the initial game state."""
-        initial_event = self._create_web_event(
-            action=None,
-            acting_unit_id=None,
-            target_unit_id=None,
-            phase="game_start",
-            turn=0,
-            reward=0.0
-        )
-        
-        initial_event["event_flags"]["game_event"] = "battle_begins"
-        initial_event["event_flags"]["description"] = "Initial deployment"
-        
-        self.web_events.append(initial_event)
-        print(f"📸 Captured initial web-compatible state with {len(self.env.units)} units")
-    
-    def capture_action_state(self, action, reward: float, pre_action_units: List[Dict], 
-                           post_action_units: List[Dict], acting_unit_id: Optional[int] = None,
-                           target_unit_id: Optional[int] = None, description: str = ""):
-        """Capture game state after an action in web-compatible format."""
-        action_int = self._normalize_action(action)
-        
-        # Determine phase from action
-        phase = self.action_to_phase.get(action_int, "move")
-        
-        # Determine acting unit if not provided
-        if acting_unit_id is None:
-            # Find the current player's first alive unit
-            current_player = getattr(self.env, 'current_player', 1)
-            for i, unit in enumerate(post_action_units):
-                if unit.get("player", 0) == current_player and unit.get("alive", True):
-                    acting_unit_id = i
-                    break
-        
-        # Create web event
-        web_event = self._create_web_event(
-            action=action_int,
-            acting_unit_id=acting_unit_id,
-            target_unit_id=target_unit_id,
-            phase=phase,
-            turn=self.current_turn,
-            reward=reward,
-            units_data=post_action_units
-        )
-        
-        # Add action-specific information
-        web_event["event_flags"]["action_name"] = self.action_names.get(action_int, f"action_{action_int}")
-        web_event["event_flags"]["action_id"] = action_int
-        web_event["event_flags"]["reward"] = reward
-        web_event["event_flags"]["description"] = description or f"AI performs {web_event['event_flags']['action_name']}"
-        
-        # Count alive units
-        ai_units_alive = sum(1 for u in post_action_units if u.get("player", 0) == 1 and u.get("alive", True))
-        enemy_units_alive = sum(1 for u in post_action_units if u.get("player", 0) == 0 and u.get("alive", True))
-        
-        web_event["event_flags"]["ai_units_alive"] = ai_units_alive
-        web_event["event_flags"]["enemy_units_alive"] = enemy_units_alive
-        
-        # Detect changes
-        changes = self._detect_unit_changes(pre_action_units, post_action_units)
-        if changes:
-            web_event["event_flags"]["changes"] = changes
-        
-        self.web_events.append(web_event)
-        
-        # Update turn counter for next action
-        if action_int == 6:  # Wait action typically ends turn
-            self.current_turn += 1
-    
-    def _create_web_event(self, action: Optional[int], acting_unit_id: Optional[int], 
-                         target_unit_id: Optional[int], phase: str, turn: int, 
-                         reward: float, units_data: Optional[List[Dict]] = None) -> Dict[str, Any]:
-        """Create a web-compatible event structure."""
-        
-        # Convert units to web format
-        if units_data is None:
-            units_data = self.env.units
-        
-        web_units = []
-        for i, unit in enumerate(units_data):
-            web_unit = self._convert_unit_to_web_format(unit, i)
-            web_units.append(web_unit)
-        
-        return {
-            "turn": turn,
-            "phase": phase,
-            "acting_unit_idx": acting_unit_id,
-            "target_unit_idx": target_unit_id,
-            "event_flags": {
-                "timestamp": datetime.now().isoformat(),
-                "action_id": action,
-                "reward": reward
-            },
-            "unit_stats": {},  # Can be populated with additional stats
-            "units": web_units
-        }
-    
-    def _detect_unit_changes(self, pre_units: List[Dict], post_units: List[Dict]) -> Dict[str, Any]:
-        """Detect what changed between pre and post action states."""
-        changes = {
-            "movements": [],
-            "damage": [],
-            "deaths": [],
-            "other": []
-        }
-        
-        for i, (pre_unit, post_unit) in enumerate(zip(pre_units, post_units)):
-            # Check for movement
-            if (pre_unit.get("col") != post_unit.get("col") or 
-                pre_unit.get("row") != post_unit.get("row")):
-                changes["movements"].append({
-                    "unit_id": i,
-                    "from": {"col": pre_unit.get("col"), "row": pre_unit.get("row")},
-                    "to": {"col": post_unit.get("col"), "row": post_unit.get("row")}
-                })
-            
-            # Check for damage
-            pre_hp = pre_unit.get("cur_hp", pre_unit.get("hp_max", 0))
-            post_hp = post_unit.get("cur_hp", post_unit.get("hp_max", 0))
-            if pre_hp > post_hp:
-                changes["damage"].append({
-                    "unit_id": i,
-                    "damage": pre_hp - post_hp,
-                    "hp_before": pre_hp,
-                    "hp_after": post_hp
-                })
-            
-            # Check for deaths
-            if pre_unit.get("alive", True) and not post_unit.get("alive", True):
-                changes["deaths"].append({
-                    "unit_id": i,
-                    "unit_name": post_unit.get("name", f"Unit {i}")
-                })
-        
-        # Remove empty categories
-        return {k: v for k, v in changes.items() if v}
-    
-    def capture_game_end(self, winner: str, final_reward: float):
-        """Capture the game end state."""
-        end_event = self._create_web_event(
-            action=None,
-            acting_unit_id=None,
-            target_unit_id=None,
-            phase="game_end",
-            turn=self.current_turn,
-            reward=final_reward
-        )
-        
-        end_event["event_flags"]["game_event"] = "battle_concluded"
-        end_event["event_flags"]["winner"] = winner
-        end_event["event_flags"]["final_reward"] = final_reward
-        end_event["event_flags"]["description"] = f"Battle concluded - {winner} wins!"
-        
-        self.web_events.append(end_event)
-        print(f"🏁 Captured game end: {winner} wins with reward {final_reward}")
-    
-    def save_web_replay(self, filename: str, episode_reward: float):
-        """Save the web-compatible replay to file."""
-        web_replay_data = {
-            "metadata": {
-                **self.game_metadata,
-                "episode_reward": episode_reward,
-                "total_events": len(self.web_events),
-                "final_turn": self.current_turn
-            },
-            "events": self.web_events
-        }
-        
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(web_replay_data, f, indent=2, ensure_ascii=False)
-        
-        print(f"💾 Saved web-compatible replay: {filename}")
-        print(f"   📊 {len(self.web_events)} events, reward: {episode_reward:.3f}")
+    # Run the quick_setup.py script we created earlier
+    try:
+        exec(open("quick_setup.py").read())
+        print("✅ Step 1 complete: web_replay_logger.py created")
+        return True
+    except FileNotFoundError:
+        print("❌ quick_setup.py not found. Creating web_replay_logger.py manually...")
+        # Create the file manually (code would be here)
+        return False
+    except Exception as e:
+        print(f"❌ Step 1 failed: {e}")
+        return False
 
-
-class WebReplayIntegration:
-    """Integration helper for adding web replay logging to environments."""
+def step2_backup_existing_files():
+    """Step 2: Backup existing train.py and evaluate.py."""
+    print("\n🔧 Step 2: Backing up existing files...")
     
-    @staticmethod
-    def enhance_training_env(env):
-        """Add web replay logging capability to training environment."""
-        # Store original step method
-        original_step = env.step
+    files_to_backup = ["ai/train.py", "ai/evaluate.py"]
+    backup_dir = f"ai/backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    for file_path in files_to_backup:
+        if os.path.exists(file_path):
+            os.makedirs(backup_dir, exist_ok=True)
+            backup_path = os.path.join(backup_dir, os.path.basename(file_path))
+            shutil.copy2(file_path, backup_path)
+            print(f"   📦 Backed up: {file_path} → {backup_path}")
+    
+    print("✅ Step 2 complete: Files backed up")
+    return True
+
+def step3_check_current_train_py():
+    """Step 3: Analyze current train.py structure."""
+    print("\n🔧 Step 3: Analyzing current train.py...")
+    
+    if not os.path.exists("ai/train.py"):
+        print("❌ ai/train.py not found!")
+        return False
+    
+    with open("ai/train.py", "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Check what's already in the file
+    has_imports = "from stable_baselines3 import DQN" in content
+    has_env_setup = "W40KEnv()" in content
+    has_enhanced_training = "enhanced_training_with_replay" in content
+    has_save_logs = "save_training_logs_with_replay" in content
+    
+    print(f"   📋 Analysis results:")
+    print(f"      ✅ Has DQN import: {has_imports}")
+    print(f"      ✅ Has environment setup: {has_env_setup}")
+    print(f"      📝 Has enhanced training: {has_enhanced_training}")
+    print(f"      📝 Has save logs function: {has_save_logs}")
+    
+    print("✅ Step 3 complete: Structure analyzed")
+    return {
+        "has_imports": has_imports,
+        "has_env_setup": has_env_setup,
+        "has_enhanced_training": has_enhanced_training,
+        "has_save_logs": has_save_logs,
+        "content": content
+    }
+
+def step4_update_train_py(analysis):
+    """Step 4: Update train.py with web replay functionality."""
+    print("\n🔧 Step 4: Updating train.py...")
+    
+    if not analysis:
+        print("❌ Cannot update without analysis")
+        return False
+    
+    # Read current content
+    with open("ai/train.py", "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Add web replay import near the top (after existing imports)
+    if "from ai.web_replay_logger import WebReplayIntegration" not in content:
+        # Find a good place to insert the import
+        import_section = content.find("from datetime import datetime")
+        if import_section != -1:
+            # Insert after datetime import
+            insertion_point = content.find("\n", import_section) + 1
+            new_import = """
+# Web replay logger import
+try:
+    from ai.web_replay_logger import WebReplayIntegration
+    WEB_REPLAY_AVAILABLE = True
+except ImportError:
+    WEB_REPLAY_AVAILABLE = False
+    print("⚠️  Web replay logger not available")
+"""
+            content = content[:insertion_point] + new_import + content[insertion_point:]
+            print("   📝 Added web replay import")
+    
+    # Add/update enhanced training function
+    enhanced_training_code = '''
+def enhanced_training_with_replay(model, total_timesteps):
+    """Enhanced training with web-compatible replay capture."""
+    if not WEB_REPLAY_AVAILABLE:
+        print("🔄 Web replay not available, using standard training...")
+        model.learn(total_timesteps=total_timesteps)
+        return
+    
+    print(f"🎬 Enhanced training with web-compatible replay generation")
+    
+    # Create a new environment with web replay logging
+    env_with_replay = model.env
+    
+    # Check if environment already has web replay (avoid double-wrapping)
+    if not hasattr(env_with_replay, 'web_replay_logger'):
+        print("🔧 Adding web-compatible replay logging to environment...")
+        env_with_replay = WebReplayIntegration.enhance_training_env(env_with_replay)
+        model.set_env(env_with_replay)
+    
+    # Calculate replay intervals (capture every 10% of training)
+    replay_interval = max(1000, total_timesteps // 10)
+    episode_replays = []
+    episode_rewards = []
+    episodes_captured = 0
+    current_step = 0
+    
+    try:
+        while current_step < total_timesteps:
+            if current_step % replay_interval == 0 and current_step > 0:
+                # Capture a web-compatible replay episode
+                print(f"🎥 Capturing web replay at step {current_step}")
+                
+                episode_reward, episode_steps, replay_file = run_training_episode_with_web_replay(model, env_with_replay)
+                
+                if replay_file:
+                    episode_replays.append(replay_file)
+                    episode_rewards.append(episode_reward)
+                    episodes_captured += 1
+                    print(f"   ✅ Captured: {replay_file}")
+                
+                current_step += episode_steps
+            else:
+                # Regular training step
+                remaining_steps = min(1000, total_timesteps - current_step)
+                model.learn(total_timesteps=remaining_steps)
+                current_step += remaining_steps
         
-        # Create web replay logger
-        env.web_replay_logger = WebReplayLogger(env)
-        env.web_replay_logger.capture_initial_state()
+        # Final training if needed
+        if current_step < total_timesteps:
+            model.learn(total_timesteps=total_timesteps - current_step)
         
-        def enhanced_step(action):
-            # Capture state before action
-            pre_action_units = copy.deepcopy(env.units)
+        print(f"✅ Training completed with {episodes_captured} web replays captured")
+        
+        # Select best and worst replays and copy to standard locations
+        if episode_replays and episode_rewards:
+            best_idx = episode_rewards.index(max(episode_rewards))
+            worst_idx = episode_rewards.index(min(episode_rewards))
             
-            # Execute original step
-            step_result = original_step(action)
+            event_log_dir = "ai/event_log"
+            os.makedirs(event_log_dir, exist_ok=True)
             
-            # Handle both old and new Gym API
+            best_dest = os.path.join(event_log_dir, "train_best_web_replay.json")
+            worst_dest = os.path.join(event_log_dir, "train_worst_web_replay.json")
+            
+            shutil.copy2(episode_replays[best_idx], best_dest)
+            shutil.copy2(episode_replays[worst_idx], worst_dest)
+            
+            print(f"   🏆 Best web replay: train_best_web_replay.json")
+            print(f"   📉 Worst web replay: train_worst_web_replay.json")
+        
+    except Exception as e:
+        print(f"⚠️  Enhanced training failed: {e}")
+        print("🔄 Falling back to standard training...")
+        model.learn(total_timesteps=total_timesteps)
+
+def run_training_episode_with_web_replay(model, env):
+    """Run a single training episode with web replay capture."""
+    try:
+        # Run episode
+        reset_result = env.reset()
+        if isinstance(reset_result, tuple):
+            obs, info = reset_result
+        else:
+            obs = reset_result
+            
+        total_reward = 0
+        steps = 0
+        done = False
+        
+        while not done and steps < 1000:  # Prevent infinite episodes
+            action, _ = model.predict(obs, deterministic=False)
+            step_result = env.step(action)
+            
             if len(step_result) == 5:  # New Gym API
                 obs, reward, terminated, truncated, info = step_result
                 done = terminated or truncated
             else:  # Old Gym API
                 obs, reward, done, info = step_result
-                terminated = done
-                truncated = False
-            
-            # Capture state after action
-            post_action_units = copy.deepcopy(env.units)
-            
-            # Normalize action for logging
-            action_int = env.web_replay_logger._normalize_action(action)
-            
-            # Log the action and its effects in web format
-            env.web_replay_logger.capture_action_state(
-                action=action_int,
-                reward=reward,
-                pre_action_units=pre_action_units,
-                post_action_units=post_action_units,
-                acting_unit_id=env.current_player,
-                description=f"AI performs {env.web_replay_logger.action_names.get(action_int, 'unknown action')}"
-            )
-            
-            # Check for game end
-            if terminated or truncated:
-                winner = "player" if env.winner == 0 else "ai" if env.winner == 1 else "draw"
-                env.web_replay_logger.capture_game_end(winner, reward)
-            
-            # Return in the same format as received
-            if len(step_result) == 5:
-                return obs, reward, terminated, truncated, info
-            else:
-                return obs, reward, done, info
+                
+            total_reward += reward
+            steps += 1
         
-        # Replace step method
-        env.step = enhanced_step
-        return env
-    
-    @staticmethod
-    def save_episode_replay(env, episode_reward: float, output_dir: str = "ai/event_log"):
-        """Save the web-compatible replay for this episode."""
+        # Save replay if logger available
+        replay_file = None
         if hasattr(env, 'web_replay_logger'):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join(output_dir, f"web_replay_{timestamp}.json")
-            env.web_replay_logger.save_web_replay(filename, episode_reward)
-            return filename
-        return None
+            event_log_dir = "ai/event_log"
+            os.makedirs(event_log_dir, exist_ok=True)
+            replay_file = os.path.join(event_log_dir, f"web_replay_{timestamp}.json")
+            env.web_replay_logger.save_web_replay(replay_file, total_reward)
+        
+        return total_reward, steps, replay_file
+        
+    except Exception as e:
+        print(f"   ⚠️  Episode failed: {e}")
+        return 0.0, 0, None
 '''
     
-    # Create ai directory if it doesn't exist
-    os.makedirs("ai", exist_ok=True)
+    # Add the enhanced training function if not present or replace if present
+    if "def enhanced_training_with_replay(" in content:
+        # Replace existing function
+        start_marker = "def enhanced_training_with_replay("
+        start_pos = content.find(start_marker)
+        if start_pos != -1:
+            # Find the end of the function (next def or end of file)
+            end_pos = content.find("\ndef ", start_pos + 1)
+            if end_pos == -1:
+                end_pos = len(content)
+            
+            content = content[:start_pos] + enhanced_training_code.strip() + "\n\n" + content[end_pos:]
+            print("   📝 Replaced existing enhanced training function")
+    else:
+        # Add new function before the main() function
+        main_pos = content.find("def main()")
+        if main_pos != -1:
+            content = content[:main_pos] + enhanced_training_code + "\n" + content[main_pos:]
+            print("   📝 Added enhanced training function")
     
-    # Write the web replay logger
-    with open("ai/web_replay_logger.py", "w", encoding="utf-8") as f:
-        f.write(web_logger_content)
+    # Write updated content
+    with open("ai/train.py", "w", encoding="utf-8") as f:
+        f.write(content)
     
-    print("✅ Created ai/web_replay_logger.py")
+    print("✅ Step 4 complete: train.py updated")
+    return True
 
-def check_current_setup():
-    """Check what files currently exist."""
-    print("🔍 Checking current setup...")
+def step5_cleanup_old_logs():
+    """Step 5: Remove old simplified event logs."""
+    print("\n🔧 Step 5: Cleaning up old simplified logs...")
     
-    files_to_check = [
-        "ai/gym40k.py",
-        "ai/train.py", 
-        "ai/evaluate.py",
-        "ai/web_replay_logger.py",
-        "ai/event_log/"
+    # Find and remove simplified event logs
+    patterns = [
+        "ai/event_log/*_event_log.json",
+        "ai/event_log/*_event_log_simple.json"
     ]
     
-    for file_path in files_to_check:
-        if os.path.exists(file_path):
-            if os.path.isdir(file_path):
-                file_count = len([f for f in os.listdir(file_path) if f.endswith('.json')])
-                print(f"   ✅ {file_path} (directory with {file_count} JSON files)")
-            else:
-                size = os.path.getsize(file_path)
-                print(f"   ✅ {file_path} ({size} bytes)")
-        else:
-            print(f"   ❌ {file_path} (missing)")
+    import glob
+    removed_count = 0
+    
+    for pattern in patterns:
+        files = glob.glob(pattern)
+        for file_path in files:
+            try:
+                os.remove(file_path)
+                print(f"   🗑️  Removed: {os.path.basename(file_path)}")
+                removed_count += 1
+            except Exception as e:
+                print(f"   ⚠️  Failed to remove {file_path}: {e}")
+    
+    print(f"✅ Step 5 complete: Removed {removed_count} simplified log files")
+    return True
 
-def backup_existing_train_py():
-    """Backup existing train.py if it exists."""
-    if os.path.exists("ai/train.py"):
-        backup_path = "ai/train_backup.py"
-        shutil.copy2("ai/train.py", backup_path)
-        print(f"📦 Backed up existing train.py to {backup_path}")
+def step6_test_setup():
+    """Step 6: Test the setup."""
+    print("\n🔧 Step 6: Testing setup...")
+    
+    # Test imports
+    try:
+        from ai.web_replay_logger import WebReplayIntegration
+        print("   ✅ Web replay logger import successful")
+    except ImportError as e:
+        print(f"   ❌ Web replay logger import failed: {e}")
+        return False
+    
+    # Check if gym40k is importable
+    try:
+        from ai.gym40k import W40KEnv
+        print("   ✅ W40KEnv import successful")
+    except ImportError as e:
+        print(f"   ❌ W40KEnv import failed: {e}")
+        return False
+    
+    print("✅ Step 6 complete: Setup tested successfully")
+    return True
 
 def main():
     """Main setup function."""
     print("🚀 W40K AI - Web-Compatible Replay Setup")
-    print("=" * 50)
+    print("🎯 Working with your existing train.py structure")
+    print("=" * 60)
     
-    # Check current setup
-    check_current_setup()
+    success = True
     
-    print("\n🔧 Setting up web-compatible replay system...")
+    # Step 1: Create web replay logger
+    if not step1_create_web_replay_logger():
+        success = False
     
-    # Backup existing train.py
-    backup_existing_train_py()
+    # Step 2: Backup existing files
+    if success and not step2_backup_existing_files():
+        success = False
     
-    # Create web replay logger
-    create_web_replay_logger()
+    # Step 3: Analyze current structure
+    analysis = None
+    if success:
+        analysis = step3_check_current_train_py()
+        if not analysis:
+            success = False
     
-    print("\n✅ Setup completed!")
-    print("\n📋 Next steps:")
-    print("1. Update your ai/train.py to use WebReplayIntegration")
-    print("2. Update your ai/evaluate.py to use WebReplayIntegration") 
-    print("3. Run: python ai/train.py --timesteps 10000")
-    print("4. Check for *_web_replay.json files in ai/event_log/")
+    # Step 4: Update train.py
+    if success and not step4_update_train_py(analysis):
+        success = False
     
-    print("\n🔧 Manual updates needed:")
-    print("In your ai/train.py, change:")
-    print("  OLD: from ai.game_replay_logger import GameReplayIntegration")
-    print("  NEW: from ai.web_replay_logger import WebReplayIntegration")
-    print()
-    print("  OLD: env = GameReplayIntegration.enhance_training_env(env)")
-    print("  NEW: env = WebReplayIntegration.enhance_training_env(env)")
+    # Step 5: Cleanup old logs
+    if success and not step5_cleanup_old_logs():
+        success = False
+    
+    # Step 6: Test setup
+    if success and not step6_test_setup():
+        success = False
+    
+    # Results
+    print("\n" + "=" * 60)
+    if success:
+        print("✅ Setup completed successfully!")
+        print("\n🎯 Next steps:")
+        print("1. Run training: python ai/train.py")
+        print("2. Check for web replay files: ls ai/event_log/*web_replay*.json")
+        print("3. Load replay files directly in your web app")
+        print("\n📁 Generated files will be:")
+        print("   • ai/event_log/train_best_web_replay.json")
+        print("   • ai/event_log/train_worst_web_replay.json")
+        print("   • ai/event_log/train_summary.json")
+        print("\n🌐 These files are directly compatible with your ReplayViewer!")
+    else:
+        print("❌ Setup failed!")
+        print("Check the error messages above and try again.")
+    
+    return success
 
 if __name__ == "__main__":
     main()
