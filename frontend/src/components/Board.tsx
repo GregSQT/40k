@@ -120,12 +120,14 @@ export default function Board({
     }
 
     // Right click cancels move/attack preview
-    app.view.addEventListener("contextmenu", (e) => {
-      if (mode === "movePreview" || mode === "attackPreview") {
-        e.preventDefault();
-        onCancelMove();
-      }
-    });
+    if (app.view && app.view.addEventListener) {
+      app.view.addEventListener("contextmenu", (e) => {
+        if (mode === "movePreview" || mode === "attackPreview") {
+          e.preventDefault();
+          onCancelMove?.();
+        }
+      });
+    }
 
     // Logic for green (move) and red (attack) highlights
     let availableCells: { col: number; row: number }[] = [];

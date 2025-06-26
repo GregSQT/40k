@@ -18,7 +18,7 @@ export const initialUnits = [
   createUnit({
     id: 2,
     name: "A-A",
-    type: "Assault Intercessor",
+    type: "AssaultIntercessor",
     player: 1,
     col: 22,
     row: 0,
@@ -28,7 +28,7 @@ export const initialUnits = [
   createUnit({
     id: 3,
     name: "P-A",
-    type: "Assault Intercessor",
+    type: "AssaultIntercessor",
     player: 0,
     col: 1,
     row: 17,
