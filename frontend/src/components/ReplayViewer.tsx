@@ -1,4 +1,4 @@
-﻿// frontend/src/components/ReplayViewer.tsx
+﻿// frontend/src/components/GameReplayViewer.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as PIXI from 'pixi.js';
 import { Intercessor } from '../roster/spaceMarine/Intercessor';
@@ -53,15 +53,24 @@ interface ReplayEvent {
 }
 
 interface ReplayData {
-  metadata: {
-    total_reward: number;
-    total_turns: number;
-    timestamp: string;
+  metadata?: {
+    total_reward?: number;
+    total_turns?: number;
+    timestamp?: string;
+    episode_reward?: number;
+    final_turn?: number;
+  };
+  game_summary?: {
+    final_reward?: number;
+    total_turns?: number;
+    game_result?: string;
   };
   events: ReplayEvent[];
+  web_compatible?: boolean;
+  features?: string[];
 }
 
-interface ReplayViewerProps {
+interface GameReplayViewerProps {
   replayFile?: string;
 }
 
@@ -71,7 +80,7 @@ const UNIT_REGISTRY = {
   'AssaultIntercessor': AssaultIntercessor
 };
 
-export const ReplayViewer: React.FC<ReplayViewerProps> = ({ 
+export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({ 
   replayFile = 'ai/event_log/train_best_game_replay.json' 
 }) => {
   const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
@@ -90,11 +99,13 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   // Load scenario configuration
   const loadScenario = useCallback(async () => {
     try {
+      console.log('Loading scenario from /ai/scenario.json...');
       const response = await fetch('/ai/scenario.json');
       if (!response.ok) {
         throw new Error(`Failed to load scenario: ${response.statusText}`);
       }
       const data = await response.json();
+      console.log('Scenario loaded:', data);
       setScenario(data);
       return data;
     } catch (err) {
@@ -160,8 +171,11 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
       throw new Error('Scenario not loaded');
     }
 
+    console.log('Converting units from event:', event);
+
     // If the event has full unit data, use it
     if (event.units && event.units.length > 0) {
+      console.log('Using units from event data');
       return event.units.map(unit => {
         if (!unit.type) {
           throw new Error(`Unit ${unit.id} missing type property`);
@@ -192,12 +206,13 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
       throw new Error('No units defined in scenario');
     }
 
-    const aiAlive = event.ai_units_alive;
-    const playerAlive = event.enemy_units_alive;
+    console.log('Reconstructing units from scenario and event data');
+    
+    // Use provided alive counts, or assume all alive if not provided
+    const aiAlive = event.ai_units_alive ?? 2;
+    const playerAlive = event.enemy_units_alive ?? 2;
 
-    if (aiAlive === undefined || playerAlive === undefined) {
-      throw new Error('Replay event missing ai_units_alive or enemy_units_alive data');
-    }
+    console.log(`AI units alive: ${aiAlive}, Player units alive: ${playerAlive}`);
 
     return scenario.units.map((scenarioUnit, index) => {
       if (!scenarioUnit.unit_type) {
@@ -218,7 +233,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         (index - 2 < aiAlive) : 
         (index < playerAlive);
 
-      return {
+      const unit = {
         id: scenarioUnit.id,
         name: `${scenarioUnit.player === 0 ? 'P' : 'A'}-${scenarioUnit.unit_type.charAt(0)}`,
         type: scenarioUnit.unit_type,
@@ -235,6 +250,9 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         ICON: stats.ICON,
         alive: isAlive
       };
+
+      console.log(`Created unit ${unit.name}:`, unit);
+      return unit;
     });
   }, [scenario, getUnitStats]);
 
@@ -630,13 +648,10 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
     );
   }
 
-  if (!replayData.metadata) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-red-500">Replay metadata missing</div>
-      </div>
-    );
-  }
+  // Get metadata from either location
+  const metadata = replayData.metadata || replayData.game_summary;
+  const totalReward = (metadata as any)?.episode_reward ?? (metadata as any)?.final_reward ?? 0;
+  const totalTurns = (metadata as any)?.final_turn ?? (metadata as any)?.total_turns ?? replayData.events.length;
 
   const currentEvent = replayData.events[currentStep];
 
@@ -646,8 +661,8 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
       
       {/* Replay info */}
       <div className="text-white mb-4 text-center">
-        <div>Total Reward: {replayData.metadata.total_reward.toFixed(2)}</div>
-        <div>Total Turns: {replayData.metadata.total_turns}</div>
+        <div>Total Reward: {totalReward.toFixed(2)}</div>
+        <div>Total Turns: {totalTurns}</div>
         <div>Step: {currentStep + 1} / {replayData.events.length}</div>
         {currentEvent && (
           <div>
