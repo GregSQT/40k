@@ -1,60 +1,27 @@
 // frontend/src/components/GameReplayViewer.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as PIXI from 'pixi.js';
+import { Intercessor } from '../roster/spaceMarine/Intercessor';
+import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
 
-// Board configuration from your game
-const BOARD_COLS = 24;
-const BOARD_ROWS = 18;
-const HEX_RADIUS = 24;
-const MARGIN = 32;
-const HEX_WIDTH = 1.5 * HEX_RADIUS;
-const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
-const HEX_HORIZ_SPACING = HEX_WIDTH;
-const HEX_VERT_SPACING = HEX_HEIGHT;
-
-// Colors from your game
-const COLORS = {
-  BOARD_BG: 0x002200,
-  CELL_EVEN: 0x002200,
-  CELL_ODD: 0x001a00,
-  CELL_BORDER: 0x00ff00,
-  PLAYER_0: 0x244488,
-  PLAYER_1: 0x882222,
-  HP_FULL: 0x36e36b,
-  HP_DAMAGED: 0x444444,
-  HIGHLIGHT: 0x80ff80,
-  CURRENT_UNIT: 0xffd700
-};
-
-// Unit types from your scenario
-const UNIT_TYPES = {
-  'Intercessor': {
-    HP_MAX: 3,
-    MOVE: 4,
-    RNG_RNG: 8,
-    RNG_DMG: 2,
-    CC_DMG: 1,
-    ICON: '/icons/Intercessor.webp',
-    SYMBOL: 'I'
-  },
-  'AssaultIntercessor': {
-    HP_MAX: 4,
-    MOVE: 6,
-    RNG_RNG: 4,
-    RNG_DMG: 1,
-    CC_DMG: 2,
-    ICON: '/icons/AssaultIntercessor.webp',
-    SYMBOL: 'A'
-  }
-};
-
-// Default unit positions from your scenario
-const DEFAULT_POSITIONS = [
-  { col: 23, row: 12 }, // Player 0 Intercessor
-  { col: 1, row: 12 },  // Player 0 Assault Intercessor
-  { col: 0, row: 5 },   // Player 1 Intercessor
-  { col: 22, row: 3 }   // Player 1 Assault Intercessor
-];
+interface ScenarioConfig {
+  board: {
+    cols: number;
+    rows: number;
+    hex_radius: number;
+    margin: number;
+  };
+  colors: {
+    [key: string]: string;
+  };
+  units: Array<{
+    id: number;
+    unit_type: string;
+    player: number;
+    col: number;
+    row: number;
+  }>;
+}
 
 interface Unit {
   id: number;
@@ -85,14 +52,39 @@ interface ReplayEvent {
   reward?: number;
 }
 
+interface ReplayData {
+  metadata?: {
+    total_reward?: number;
+    total_turns?: number;
+    timestamp?: string;
+    episode_reward?: number;
+    final_turn?: number;
+  };
+  game_summary?: {
+    final_reward?: number;
+    total_turns?: number;
+    game_result?: string;
+  };
+  events: ReplayEvent[];
+  web_compatible?: boolean;
+  features?: string[];
+}
+
 interface GameReplayViewerProps {
   replayFile?: string;
 }
 
+// Unit type registry - imports the actual unit classes to get their static properties
+const UNIT_REGISTRY = {
+  'Intercessor': Intercessor,
+  'AssaultIntercessor': AssaultIntercessor
+};
+
 export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({ 
   replayFile = 'ai/event_log/train_best_game_replay.json' 
 }) => {
-  const [replayData, setReplayData] = useState<ReplayEvent[]>([]);
+  const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
+  const [replayData, setReplayData] = useState<ReplayData | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed, setPlaySpeed] = useState(1000);
@@ -102,175 +94,40 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
   const boardRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<PIXI.Application | null>(null);
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const unitSpritesRef = useRef<Map<number, PIXI.Container>>(new Map());
 
-  // Load scenario parameters
-  const loadScenarioData = useCallback(async () => {
+  // Load scenario configuration
+  const loadScenario = useCallback(async () => {
     try {
+      console.log('Loading scenario from /ai/scenario.json...');
       const response = await fetch('/ai/scenario.json');
-      if (response.ok) {
-        const scenarioData = await response.json();
-        return scenarioData;
-      }
-    } catch (error) {
-      console.warn('Could not load scenario.json, using defaults');
-    }
-    
-    // Return default scenario if file not found
-    return [
-      {
-        id: 1,
-        unit_type: "Intercessor",
-        player: 0,
-        col: 23,
-        row: 12,
-        cur_hp: 3,
-        hp_max: 3,
-        move: 4,
-        rng_rng: 8,
-        rng_dmg: 2,
-        cc_dmg: 1,
-        is_ranged: true,
-        is_melee: false,
-        alive: true
-      },
-      {
-        id: 2,
-        unit_type: "AssaultIntercessor",
-        player: 0,
-        col: 1,
-        row: 12,
-        cur_hp: 4,
-        hp_max: 4,
-        move: 6,
-        rng_rng: 4,
-        rng_dmg: 1,
-        cc_dmg: 2,
-        is_ranged: false,
-        is_melee: true,
-        alive: true
-      },
-      {
-        id: 3,
-        unit_type: "Intercessor",
-        player: 1,
-        col: 0,
-        row: 5,
-        cur_hp: 3,
-        hp_max: 3,
-        move: 4,
-        rng_rng: 8,
-        rng_dmg: 2,
-        cc_dmg: 1,
-        is_ranged: true,
-        is_melee: false,
-        alive: true
-      },
-      {
-        id: 4,
-        unit_type: "AssaultIntercessor",
-        player: 1,
-        col: 22,
-        row: 3,
-        cur_hp: 4,
-        hp_max: 4,
-        move: 6,
-        rng_rng: 4,
-        rng_dmg: 1,
-        cc_dmg: 2,
-        is_ranged: false,
-        is_melee: true,
-        alive: true
-      }
-    ];
-  }, []);
-
-  // Load replay data
-  const loadReplayData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const response = await fetch(replayFile);
       if (!response.ok) {
-        throw new Error(`Failed to load replay file: ${response.statusText}`);
+        throw new Error(`Failed to load scenario: ${response.statusText}`);
       }
-      
       const data = await response.json();
-      
-      // Handle different replay formats
-      let events: ReplayEvent[] = [];
-      
-      if (Array.isArray(data)) {
-        events = data;
-      } else if (data.events && Array.isArray(data.events)) {
-        events = data.events;
-      } else if (data.log && Array.isArray(data.log)) {
-        events = data.log;
-      } else {
-        events = [data];
-      }
-      
-      setReplayData(events);
-      setCurrentStep(0);
-      console.log(`Loaded ${events.length} replay events`);
-      
+      console.log('Scenario loaded:', data);
+      setScenario(data);
+      return data;
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error loading replay';
-      setError(errorMsg);
-      console.error('Error loading replay:', err);
-    } finally {
-      setLoading(false);
+      console.error('Error loading scenario:', err);
+      throw err;
     }
-  }, [replayFile]);
-
-  // Create units from event data
-  const createUnitsFromEvent = useCallback(async (event: ReplayEvent): Promise<Unit[]> => {
-    // If event has full unit data, use it
-    if (event.units && Array.isArray(event.units)) {
-      return event.units.map(unit => ({
-        ...unit,
-        CUR_HP: unit.CUR_HP ?? unit.HP_MAX,
-        alive: (unit.CUR_HP ?? unit.HP_MAX) > 0
-      }));
-    }
-
-    // Otherwise, reconstruct from scenario and event data
-    const scenarioData = await loadScenarioData();
-    const aiAlive = event.ai_units_alive ?? 2;
-    const playerAlive = event.enemy_units_alive ?? 2;
-
-    return scenarioData.map((scenarioUnit: any, index: number) => {
-      const unitType = UNIT_TYPES[scenarioUnit.unit_type as keyof typeof UNIT_TYPES];
-      const isAlive = scenarioUnit.player === 1 ? 
-        (index - 2 < aiAlive) : 
-        (index < playerAlive);
-
-      return {
-        id: scenarioUnit.id,
-        name: `${scenarioUnit.player === 0 ? 'P' : 'A'}-${unitType?.SYMBOL || 'U'}`,
-        type: scenarioUnit.unit_type,
-        player: scenarioUnit.player,
-        col: scenarioUnit.col,
-        row: scenarioUnit.row,
-        color: scenarioUnit.player === 0 ? COLORS.PLAYER_0 : COLORS.PLAYER_1,
-        MOVE: scenarioUnit.move,
-        HP_MAX: scenarioUnit.hp_max,
-        CUR_HP: isAlive ? scenarioUnit.cur_hp : 0,
-        RNG_RNG: scenarioUnit.rng_rng,
-        RNG_DMG: scenarioUnit.rng_dmg,
-        CC_DMG: scenarioUnit.cc_dmg,
-        ICON: unitType?.ICON || '/icons/default.webp',
-        alive: isAlive
-      };
-    });
-  }, [loadScenarioData]);
-
-  // Hex utility functions (same as your Board.tsx)
-  const getHexCenter = useCallback((col: number, row: number) => {
-    const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-    const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
-    return { x: centerX, y: centerY };
   }, []);
+
+  // Hex utility functions
+  const getHexCenter = useCallback((col: number, row: number) => {
+    if (!scenario) return { x: 0, y: 0 };
+    
+    const { board } = scenario;
+    const HEX_WIDTH = 1.5 * board.hex_radius;
+    const HEX_HEIGHT = Math.sqrt(3) * board.hex_radius;
+    const HEX_HORIZ_SPACING = HEX_WIDTH;
+    const HEX_VERT_SPACING = HEX_HEIGHT;
+    
+    const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + board.margin;
+    const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + board.margin;
+    return { x: centerX, y: centerY };
+  }, [scenario]);
 
   const getHexPolygonPoints = useCallback((cx: number, cy: number, size: number) => {
     const points = [];
@@ -283,22 +140,143 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
     return points;
   }, []);
 
+  // Get unit stats from the actual unit classes
+  const getUnitStats = useCallback((unitType: string) => {
+    const UnitClass = UNIT_REGISTRY[unitType as keyof typeof UNIT_REGISTRY];
+    if (!UnitClass) {
+      throw new Error(`Unknown unit type: ${unitType}. Available types: ${Object.keys(UNIT_REGISTRY).join(', ')}`);
+    }
+
+    // Verify all required properties exist
+    const requiredProps = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG', 'ICON'];
+    for (const prop of requiredProps) {
+      if (UnitClass[prop as keyof typeof UnitClass] === undefined) {
+        throw new Error(`Missing required property ${prop} in unit class ${unitType}`);
+      }
+    }
+
+    return {
+      HP_MAX: UnitClass.HP_MAX,
+      MOVE: UnitClass.MOVE,
+      RNG_RNG: UnitClass.RNG_RNG,
+      RNG_DMG: UnitClass.RNG_DMG,
+      CC_DMG: UnitClass.CC_DMG,
+      ICON: UnitClass.ICON
+    };
+  }, []);
+
+  // Convert units from scenario/replay format to display format
+  const convertUnits = useCallback((event: ReplayEvent): Unit[] => {
+    if (!scenario) {
+      throw new Error('Scenario not loaded');
+    }
+
+    console.log('Converting units from event:', event);
+
+    // If the event has full unit data, use it
+    if (event.units && event.units.length > 0) {
+      console.log('Using units from event data');
+      return event.units.map(unit => {
+        if (!unit.type) {
+          throw new Error(`Unit ${unit.id} missing type property`);
+        }
+        if (unit.player === undefined || unit.player === null) {
+          throw new Error(`Unit ${unit.id} missing player property`);
+        }
+        if (unit.col === undefined || unit.col === null) {
+          throw new Error(`Unit ${unit.id} missing col property`);
+        }
+        if (unit.row === undefined || unit.row === null) {
+          throw new Error(`Unit ${unit.id} missing row property`);
+        }
+
+        const stats = getUnitStats(unit.type);
+        return {
+          ...unit,
+          name: `${unit.player === 0 ? 'P' : 'A'}-${unit.type.charAt(0)}`,
+          color: parseInt(unit.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1),
+          ICON: stats.ICON,
+          alive: (unit.CUR_HP ?? unit.HP_MAX) > 0
+        };
+      });
+    }
+
+    // Otherwise, reconstruct from scenario and event data
+    if (!scenario.units || scenario.units.length === 0) {
+      throw new Error('No units defined in scenario');
+    }
+
+    console.log('Reconstructing units from scenario and event data');
+    
+    // Use provided alive counts, or assume all alive if not provided
+    const aiAlive = event.ai_units_alive ?? 2;
+    const playerAlive = event.enemy_units_alive ?? 2;
+
+    console.log(`AI units alive: ${aiAlive}, Player units alive: ${playerAlive}`);
+
+    return scenario.units.map((scenarioUnit, index) => {
+      if (!scenarioUnit.unit_type) {
+        throw new Error(`Scenario unit ${scenarioUnit.id} missing unit_type`);
+      }
+      if (scenarioUnit.player === undefined || scenarioUnit.player === null) {
+        throw new Error(`Scenario unit ${scenarioUnit.id} missing player`);
+      }
+      if (scenarioUnit.col === undefined || scenarioUnit.col === null) {
+        throw new Error(`Scenario unit ${scenarioUnit.id} missing col`);
+      }
+      if (scenarioUnit.row === undefined || scenarioUnit.row === null) {
+        throw new Error(`Scenario unit ${scenarioUnit.id} missing row`);
+      }
+
+      const stats = getUnitStats(scenarioUnit.unit_type);
+      const isAlive = scenarioUnit.player === 1 ? 
+        (index - 2 < aiAlive) : 
+        (index < playerAlive);
+
+      const unit = {
+        id: scenarioUnit.id,
+        name: `${scenarioUnit.player === 0 ? 'P' : 'A'}-${scenarioUnit.unit_type.charAt(0)}`,
+        type: scenarioUnit.unit_type,
+        player: scenarioUnit.player as 0 | 1,
+        col: scenarioUnit.col,
+        row: scenarioUnit.row,
+        color: parseInt(scenarioUnit.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1),
+        MOVE: stats.MOVE,
+        HP_MAX: stats.HP_MAX,
+        CUR_HP: isAlive ? stats.HP_MAX : 0,
+        RNG_RNG: stats.RNG_RNG,
+        RNG_DMG: stats.RNG_DMG,
+        CC_DMG: stats.CC_DMG,
+        ICON: stats.ICON,
+        alive: isAlive
+      };
+
+      console.log(`Created unit ${unit.name}:`, unit);
+      return unit;
+    });
+  }, [scenario, getUnitStats]);
+
   // Draw the game board
   const drawBoard = useCallback(async (units: Unit[], activeUnitId?: number) => {
-    if (!boardRef.current || !appRef.current) return;
+    if (!boardRef.current || !appRef.current || !scenario) {
+      throw new Error('Missing board reference, PIXI app, or scenario data');
+    }
 
+    console.log(`Drawing board with ${units.length} units:`, units);
+    
     const app = appRef.current;
+    const { board, colors } = scenario;
     app.stage.removeChildren();
 
     // Draw hex grid
-    for (let col = 0; col < BOARD_COLS; col++) {
-      for (let row = 0; row < BOARD_ROWS; row++) {
+    for (let col = 0; col < board.cols; col++) {
+      for (let row = 0; row < board.rows; row++) {
         const center = getHexCenter(col, row);
-        const points = getHexPolygonPoints(center.x, center.y, HEX_RADIUS);
+        const points = getHexPolygonPoints(center.x, center.y, board.hex_radius);
         
         const cell = new PIXI.Graphics();
-        cell.lineStyle(1, COLORS.CELL_BORDER, 0.3);
-        cell.beginFill((col + row) % 2 === 0 ? COLORS.CELL_EVEN : COLORS.CELL_ODD, 0.2);
+        cell.lineStyle(1, parseInt(colors.cell_border), 0.3);
+        cell.beginFill((col + row) % 2 === 0 ? parseInt(colors.cell_even) : parseInt(colors.cell_odd), 0.2);
         cell.drawPolygon(points);
         cell.endFill();
         
@@ -306,95 +284,280 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
       }
     }
 
+    // Clear old unit sprites
+    unitSpritesRef.current.clear();
+
     // Draw units
     for (const unit of units) {
-      if (!unit.alive || (unit.CUR_HP ?? 0) <= 0) continue;
-
-      const center = getHexCenter(unit.col, unit.row);
-      const isActiveUnit = activeUnitId === unit.id;
-
-      // Unit circle
-      const unitCircle = new PIXI.Graphics();
-      unitCircle.lineStyle(2, isActiveUnit ? COLORS.CURRENT_UNIT : 0xffffff, 1);
-      unitCircle.beginFill(unit.color, 0.8);
-      unitCircle.drawCircle(center.x, center.y, HEX_RADIUS * 0.6);
-      unitCircle.endFill();
-      app.stage.addChild(unitCircle);
-
-      // Unit symbol
-      const unitText = new PIXI.Text(UNIT_TYPES[unit.type as keyof typeof UNIT_TYPES]?.SYMBOL || 'U', {
-        fontFamily: 'Arial',
-        fontSize: 16,
-        fill: 0xffffff,
-        fontWeight: 'bold'
-      });
-      unitText.anchor.set(0.5);
-      unitText.x = center.x;
-      unitText.y = center.y;
-      app.stage.addChild(unitText);
-
-      // HP Bar
-      const HP_BAR_WIDTH = HEX_RADIUS * 1.4;
-      const HP_BAR_HEIGHT = 7;
-      const HP_BAR_Y_OFFSET = HEX_RADIUS * 0.85;
-
-      const barX = center.x - HP_BAR_WIDTH / 2;
-      const barY = center.y - HP_BAR_Y_OFFSET - HP_BAR_HEIGHT;
-
-      // HP background
-      const barBg = new PIXI.Graphics();
-      barBg.beginFill(0x222222, 1);
-      barBg.drawRoundedRect(barX, barY, HP_BAR_WIDTH, HP_BAR_HEIGHT, 3);
-      barBg.endFill();
-      app.stage.addChild(barBg);
-
-      // HP segments
-      const hp = Math.max(0, unit.CUR_HP || 0);
-      for (let i = 0; i < unit.HP_MAX; i++) {
-        const sliceWidth = (HP_BAR_WIDTH - (unit.HP_MAX - 1)) / unit.HP_MAX;
-        const sliceX = barX + i * (sliceWidth + 1);
-        const color = i < hp ? COLORS.HP_FULL : COLORS.HP_DAMAGED;
-        
-        const slice = new PIXI.Graphics();
-        slice.beginFill(color, 1);
-        slice.drawRoundedRect(sliceX, barY + 1, sliceWidth, HP_BAR_HEIGHT - 2, 2);
-        slice.endFill();
-        app.stage.addChild(slice);
+      if (!unit.alive || (unit.CUR_HP ?? unit.HP_MAX) <= 0) {
+        console.log(`Skipping dead unit:`, unit);
+        continue;
       }
 
-      // Unit name
+      console.log(`Drawing unit ${unit.name} at (${unit.col}, ${unit.row})`);
+      
+      const center = getHexCenter(unit.col, unit.row);
+      const unitContainer = new PIXI.Container();
+      
+      // Unit background circle
+      const background = new PIXI.Graphics();
+      background.lineStyle(2, unit.color, 1);
+      background.beginFill(unit.color, 0.3);
+      background.drawCircle(0, 0, board.hex_radius * 0.8);
+      background.endFill();
+      
+      // Highlight active unit
+      if (activeUnitId === unit.id) {
+        background.lineStyle(3, parseInt(colors.current_unit), 1);
+        background.beginFill(parseInt(colors.current_unit), 0.2);
+        background.drawCircle(0, 0, board.hex_radius * 0.9);
+        background.endFill();
+      }
+      
+      unitContainer.addChild(background);
+      
+      // Unit icon/sprite - try to load icon, fallback to text
+      try {
+        const texture = await PIXI.Assets.load(unit.ICON);
+        const sprite = new PIXI.Sprite(texture);
+        sprite.anchor.set(0.5);
+        sprite.width = board.hex_radius * 1.2;
+        sprite.height = board.hex_radius * 1.2;
+        sprite.position.set(0, -5);
+        unitContainer.addChild(sprite);
+        console.log(`Loaded icon for unit ${unit.name}`);
+      } catch (iconError) {
+        console.warn(`Failed to load icon for unit ${unit.name}, using fallback text`);
+        // Fallback to text if icon fails to load
+        const nameText = new PIXI.Text(unit.name, {
+          fontSize: 12,
+          fill: 0xffffff,
+          align: 'center'
+        });
+        nameText.anchor.set(0.5);
+        nameText.position.set(0, -8);
+        unitContainer.addChild(nameText);
+      }
+      
+      // HP bar background
+      const hpBarWidth = board.hex_radius * 1.4;
+      const hpBarHeight = 6;
+      const hpRatio = unit.CUR_HP / unit.HP_MAX;
+      
+      // HP background
+      const hpBg = new PIXI.Graphics();
+      hpBg.beginFill(parseInt(colors.hp_damaged));
+      hpBg.drawRect(-hpBarWidth / 2, board.hex_radius * 0.6, hpBarWidth, hpBarHeight);
+      hpBg.endFill();
+      unitContainer.addChild(hpBg);
+      
+      // HP fill
+      const hpFill = new PIXI.Graphics();
+      hpFill.beginFill(parseInt(colors.hp_full));
+      hpFill.drawRect(-hpBarWidth / 2, board.hex_radius * 0.6, hpBarWidth * hpRatio, hpBarHeight);
+      hpFill.endFill();
+      unitContainer.addChild(hpFill);
+      
+      // HP text
+      const hpText = new PIXI.Text(`${unit.CUR_HP}/${unit.HP_MAX}`, {
+        fontSize: 10,
+        fill: 0xffffff,
+        align: 'center',
+        stroke: 0x000000,
+        strokeThickness: 2
+      });
+      hpText.anchor.set(0.5);
+      hpText.position.set(0, board.hex_radius * 0.8);
+      unitContainer.addChild(hpText);
+      
+      // Unit name below HP
       const nameText = new PIXI.Text(unit.name, {
-        fontFamily: 'Arial',
-        fontSize: 12,
-        fill: 0xffffff
+        fontSize: 8,
+        fill: 0xffffff,
+        align: 'center',
+        stroke: 0x000000,
+        strokeThickness: 1
       });
       nameText.anchor.set(0.5);
-      nameText.x = center.x;
-      nameText.y = center.y + HEX_RADIUS * 0.8;
-      app.stage.addChild(nameText);
+      nameText.position.set(0, board.hex_radius * 1.0);
+      unitContainer.addChild(nameText);
+      
+      // Position the unit container
+      unitContainer.position.set(center.x, center.y);
+      app.stage.addChild(unitContainer);
+      
+      // Store reference for animations
+      unitSpritesRef.current.set(unit.id, unitContainer);
     }
-  }, [getHexCenter, getHexPolygonPoints]);
+    
+    console.log(`Board drawn with ${app.stage.children.length} PIXI objects`);
+  }, [scenario, getHexCenter, getHexPolygonPoints]);
 
-  // Initialize PIXI application
+  // Animate unit movement
+  const animateUnitMovement = useCallback((unitId: number, fromCol: number, fromRow: number, toCol: number, toRow: number) => {
+    const unitSprite = unitSpritesRef.current.get(unitId);
+    if (!unitSprite || !scenario) {
+      throw new Error(`Cannot animate unit ${unitId}: missing sprite or scenario`);
+    }
+
+    const fromCenter = getHexCenter(fromCol, fromRow);
+    const toCenter = getHexCenter(toCol, toRow);
+    
+    return new Promise<void>((resolve) => {
+      const duration = 800; // milliseconds for smooth movement
+      const startTime = Date.now();
+      
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Smooth easing function (ease-in-out)
+        const eased = progress < 0.5 
+          ? 2 * progress * progress 
+          : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+        
+        // Update position
+        unitSprite.position.x = fromCenter.x + (toCenter.x - fromCenter.x) * eased;
+        unitSprite.position.y = fromCenter.y + (toCenter.y - fromCenter.y) * eased;
+        
+        // Add slight bounce effect
+        const bounceHeight = Math.sin(progress * Math.PI) * 10;
+        unitSprite.position.y -= bounceHeight;
+        
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          // Ensure final position is exact
+          unitSprite.position.x = toCenter.x;
+          unitSprite.position.y = toCenter.y;
+          resolve();
+        }
+      };
+      
+      animate();
+    });
+  }, [scenario, getHexCenter]);
+
+  // Update the display for current step
+  const updateDisplay = useCallback(async () => {
+    if (!replayData) {
+      throw new Error('No replay data loaded');
+    }
+    if (!replayData.events || replayData.events.length === 0) {
+      throw new Error('Replay data contains no events');
+    }
+    if (currentStep >= replayData.events.length) {
+      throw new Error(`Current step ${currentStep} exceeds replay events length ${replayData.events.length}`);
+    }
+
+    const currentEvent = replayData.events[currentStep];
+    if (!currentEvent) {
+      throw new Error(`No event found at step ${currentStep}`);
+    }
+
+    const units = convertUnits(currentEvent);
+    
+    // Check if this is a movement action by comparing with previous step
+    let animationPromise = Promise.resolve();
+    if (currentStep > 0) {
+      const prevEvent = replayData.events[currentStep - 1];
+      if (!prevEvent) {
+        throw new Error(`No previous event found at step ${currentStep - 1}`);
+      }
+      const prevUnits = convertUnits(prevEvent);
+      
+      // Find units that moved
+      for (const unit of units) {
+        const prevUnit = prevUnits.find((u: Unit) => u.id === unit.id);
+        if (prevUnit && (prevUnit.col !== unit.col || prevUnit.row !== unit.row)) {
+          animationPromise = animateUnitMovement(unit.id, prevUnit.col, prevUnit.row, unit.col, unit.row);
+        }
+      }
+    }
+    
+    await animationPromise;
+    await drawBoard(units, currentEvent.acting_unit_idx);
+  }, [replayData, currentStep, convertUnits, drawBoard, animateUnitMovement]);
+
+  // Load replay data
   useEffect(() => {
-    if (!boardRef.current || appRef.current) return;
+    const loadReplayData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        console.log('Loading scenario from /ai/scenario.json...');
+        // Load scenario first
+        const scenarioData = await loadScenario();
+        console.log('Scenario loaded:', scenarioData);
+        
+        console.log(`Loading replay from /${replayFile}...`);
+        // Load replay data
+        const response = await fetch(`/${replayFile}`);
+        if (!response.ok) {
+          throw new Error(`Failed to load replay file: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        console.log('Replay data loaded:', data);
+        setReplayData(data);
+        setCurrentStep(0);
+        
+      } catch (err) {
+        console.error('Error loading replay:', err);
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    const gridWidth = (BOARD_COLS - 1) * HEX_HORIZ_SPACING + HEX_WIDTH;
-    const gridHeight = (BOARD_ROWS - 1) * HEX_VERT_SPACING + HEX_HEIGHT;
-    const width = Math.min(gridWidth + 2 * MARGIN, window.innerWidth - 40);
-    const height = Math.min(gridHeight + 2 * MARGIN, window.innerHeight - 300);
+    loadReplayData();
+  }, [replayFile, loadScenario]);
+
+  // Initialize PIXI application and draw initial board
+  useEffect(() => {
+    if (!boardRef.current || !scenario || appRef.current) return;
+
+    const { board } = scenario;
+    const HEX_WIDTH = 1.5 * board.hex_radius;
+    const HEX_HEIGHT = Math.sqrt(3) * board.hex_radius;
+    const HEX_HORIZ_SPACING = HEX_WIDTH;
+    const HEX_VERT_SPACING = HEX_HEIGHT;
+
+    const boardWidth = board.cols * HEX_HORIZ_SPACING + board.margin * 2;
+    const boardHeight = board.rows * HEX_VERT_SPACING + board.margin * 2;
+
+    if (!scenario.colors.board_bg) {
+      throw new Error('Missing board_bg color in scenario colors');
+    }
 
     const app = new PIXI.Application({
-      width,
-      height,
-      backgroundColor: COLORS.BOARD_BG,
+      width: boardWidth,
+      height: boardHeight,
+      backgroundColor: parseInt(scenario.colors.board_bg),
       antialias: true,
       resolution: window.devicePixelRatio || 1,
-      autoDensity: true,
+      autoDensity: true
     });
 
-    boardRef.current.appendChild(app.view as unknown as HTMLCanvasElement);
+    // Ensure canvas fits properly
+    const canvas = app.view as HTMLCanvasElement;
+    canvas.style.display = 'block';
+    canvas.style.maxWidth = '100%';
+    canvas.style.height = 'auto';
+
+    boardRef.current.appendChild(canvas);
     appRef.current = app;
+
+    // Draw initial board if we have replay data
+    if (replayData && replayData.events && replayData.events.length > 0) {
+      const initialEvent = replayData.events[0];
+      const initialUnits = convertUnits(initialEvent);
+      drawBoard(initialUnits).catch(err => {
+        console.error('Error drawing initial board:', err);
+        setError(err instanceof Error ? err.message : 'Unknown board drawing error');
+      });
+    }
 
     return () => {
       if (appRef.current) {
@@ -402,79 +565,59 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
         appRef.current = null;
       }
     };
-  }, []);
+  }, [scenario, replayData, convertUnits, drawBoard]);
 
-  // Update board when current step changes
+  // Update display when step changes
   useEffect(() => {
-    if (!replayData.length || !appRef.current) return;
-
-    const currentEvent = replayData[currentStep];
-    if (!currentEvent) return;
-
-    createUnitsFromEvent(currentEvent).then(units => {
-      drawBoard(units, currentEvent.acting_unit_idx);
-    });
-  }, [currentStep, replayData, createUnitsFromEvent, drawBoard]);
+    if (replayData && scenario && appRef.current) {
+      try {
+        updateDisplay();
+      } catch (err) {
+        console.error('Error updating display:', err);
+        setError(err instanceof Error ? err.message : 'Unknown display error');
+      }
+    }
+  }, [currentStep, replayData, scenario, updateDisplay]);
 
   // Auto-play functionality
   useEffect(() => {
-    if (isPlaying && replayData.length > 0) {
-      playIntervalRef.current = setInterval(() => {
-        setCurrentStep(prev => {
-          if (prev >= replayData.length - 1) {
-            setIsPlaying(false);
-            return prev;
-          }
-          return prev + 1;
-        });
+    if (isPlaying && replayData && currentStep < replayData.events.length - 1) {
+      playIntervalRef.current = setTimeout(() => {
+        setCurrentStep((prev: number) => prev + 1);
       }, playSpeed);
-    } else if (playIntervalRef.current) {
-      clearInterval(playIntervalRef.current);
-      playIntervalRef.current = null;
+    } else {
+      setIsPlaying(false);
     }
 
     return () => {
       if (playIntervalRef.current) {
-        clearInterval(playIntervalRef.current);
+        clearTimeout(playIntervalRef.current);
       }
     };
-  }, [isPlaying, playSpeed, replayData.length]);
+  }, [isPlaying, currentStep, replayData, playSpeed]);
 
-  // Load replay on mount
-  useEffect(() => {
-    loadReplayData();
-  }, [loadReplayData]);
-
-  const handlePlayPause = () => {
-    setIsPlaying(!isPlaying);
-  };
-
-  const handleStepForward = () => {
-    if (currentStep < replayData.length - 1) {
-      setCurrentStep(currentStep + 1);
-    }
-  };
-
-  const handleStepBackward = () => {
-    if (currentStep > 0) {
-      setCurrentStep(currentStep - 1);
-    }
-  };
-
-  const handleReset = () => {
-    setCurrentStep(0);
+  // Control functions
+  const play = () => setIsPlaying(true);
+  const pause = () => setIsPlaying(false);
+  const reset = () => {
     setIsPlaying(false);
+    setCurrentStep(0);
   };
-
-  const currentEvent = replayData[currentStep];
+  const nextStep = () => {
+    if (replayData && currentStep < replayData.events.length - 1) {
+      setCurrentStep((prev: number) => prev + 1);
+    }
+  };
+  const prevStep = () => {
+    if (currentStep > 0) {
+      setCurrentStep((prev: number) => prev - 1);
+    }
+  };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="mt-4 text-lg">Loading replay data...</p>
-        </div>
+        <div className="text-lg">Loading replay...</div>
       </div>
     );
   }
@@ -482,136 +625,99 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
   if (error) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center text-red-500">
-          <h2 className="text-2xl font-bold mb-4">Error Loading Replay</h2>
-          <p className="mb-4">{error}</p>
-          <button 
-            onClick={loadReplayData}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          >
-            Retry
-          </button>
+        <div className="text-red-500">Error: {error}</div>
+      </div>
+    );
+  }
+
+  if (!replayData || !scenario) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-red-500">
+          Missing required data: {!replayData ? 'replay data' : ''} {!scenario ? 'scenario configuration' : ''}
         </div>
       </div>
     );
   }
 
+  if (!replayData.events || replayData.events.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-red-500">No replay events found in data</div>
+      </div>
+    );
+  }
+
+  // Get metadata from either location
+  const metadata = replayData.metadata || replayData.game_summary;
+  const totalReward = (metadata as any)?.episode_reward ?? (metadata as any)?.final_reward ?? 0;
+  const totalTurns = (metadata as any)?.final_turn ?? (metadata as any)?.total_turns ?? replayData.events.length;
+
+  const currentEvent = replayData.events[currentStep];
+
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold mb-2">Game Replay Viewer</h1>
-          <p className="text-gray-400">Watching: {replayFile}</p>
-        </div>
-
-        {/* Controls */}
-        <div className="mb-6 p-4 bg-gray-800 rounded-lg">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={handleReset}
-                className="px-3 py-1 bg-gray-600 rounded hover:bg-gray-500"
-              >
-                ⏮ Reset
-              </button>
-              <button
-                onClick={handleStepBackward}
-                disabled={currentStep === 0}
-                className="px-3 py-1 bg-gray-600 rounded hover:bg-gray-500 disabled:opacity-50"
-              >
-                ⏪ Step Back
-              </button>
-              <button
-                onClick={handlePlayPause}
-                className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-500"
-              >
-                {isPlaying ? '⏸ Pause' : '▶ Play'}
-              </button>
-              <button
-                onClick={handleStepForward}
-                disabled={currentStep >= replayData.length - 1}
-                className="px-3 py-1 bg-gray-600 rounded hover:bg-gray-500 disabled:opacity-50"
-              >
-                Step Forward ⏩
-              </button>
-            </div>
-            
-            <div className="flex items-center space-x-4">
-              <label className="text-sm">
-                Speed:
-                <select 
-                  value={playSpeed} 
-                  onChange={(e) => setPlaySpeed(Number(e.target.value))}
-                  className="ml-2 bg-gray-700 rounded px-2 py-1"
-                >
-                  <option value={2000}>0.5x</option>
-                  <option value={1000}>1x</option>
-                  <option value={500}>2x</option>
-                  <option value={250}>4x</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          {/* Progress bar */}
-          <div className="w-full bg-gray-700 rounded-full h-2">
-            <div 
-              className="bg-blue-500 h-2 rounded-full transition-all duration-200"
-              style={{ width: `${(currentStep / Math.max(replayData.length - 1, 1)) * 100}%` }}
-            />
-          </div>
-          
-          <div className="flex justify-between text-sm mt-2">
-            <span>Step {currentStep + 1} of {replayData.length}</span>
-            {currentEvent && (
-              <span>
-                Turn: {currentEvent.turn || '?'} | 
-                Action: {currentEvent.action || '?'} | 
-                Reward: {currentEvent.reward?.toFixed(2) || '?'}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Game Board */}
-        <div className="flex justify-center">
-          <div 
-            ref={boardRef} 
-            className="border border-gray-600 rounded-lg overflow-hidden"
-            style={{ backgroundColor: '#002200' }}
-          />
-        </div>
-
-        {/* Event Info */}
+    <div className="flex flex-col items-center p-4 bg-gray-900 min-h-screen">
+      <h1 className="text-2xl font-bold text-white mb-4">Training Replay Viewer</h1>
+      
+      {/* Replay info */}
+      <div className="text-white mb-4 text-center">
+        <div>Total Reward: {totalReward.toFixed(2)}</div>
+        <div>Total Turns: {totalTurns}</div>
+        <div>Step: {currentStep + 1} / {replayData.events.length}</div>
         {currentEvent && (
-          <div className="mt-6 p-4 bg-gray-800 rounded-lg">
-            <h3 className="text-lg font-bold mb-2">Current Event</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <span className="text-gray-400">Turn:</span> {currentEvent.turn || 'N/A'}
-              </div>
-              <div>
-                <span className="text-gray-400">Action:</span> {currentEvent.action || 'N/A'}
-              </div>
-              <div>
-                <span className="text-gray-400">Acting Unit:</span> {currentEvent.acting_unit_idx || 'N/A'}
-              </div>
-              <div>
-                <span className="text-gray-400">Reward:</span> {currentEvent.reward?.toFixed(2) || 'N/A'}
-              </div>
-              <div>
-                <span className="text-gray-400">AI Units:</span> {currentEvent.ai_units_alive || 'N/A'}
-              </div>
-              <div>
-                <span className="text-gray-400">Player Units:</span> {currentEvent.enemy_units_alive || 'N/A'}
-              </div>
-              <div>
-                <span className="text-gray-400">Game Over:</span> {currentEvent.game_over ? 'Yes' : 'No'}
-              </div>
-            </div>
+          <div>
+            Turn: {currentEvent.turn ?? 'N/A'} | 
+            Action: {currentEvent.action ?? 'N/A'} | 
+            Reward: {currentEvent.reward?.toFixed(2) ?? 'N/A'}
           </div>
         )}
+      </div>
+
+      {/* Game board */}
+      <div ref={boardRef} className="border border-gray-600 mb-4" />
+
+      {/* Controls */}
+      <div className="flex items-center gap-4 bg-gray-800 p-4 rounded">
+        <button
+          onClick={reset}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        >
+          Reset
+        </button>
+        <button
+          onClick={prevStep}
+          disabled={currentStep === 0}
+          className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
+        >
+          Previous
+        </button>
+        <button
+          onClick={isPlaying ? pause : play}
+          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+        >
+          {isPlaying ? 'Pause' : 'Play'}
+        </button>
+        <button
+          onClick={nextStep}
+          disabled={currentStep === replayData.events.length - 1}
+          className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
+        >
+          Next
+        </button>
+        
+        <div className="flex items-center gap-2 text-white">
+          <label>Speed:</label>
+          <select
+            value={playSpeed}
+            onChange={(e) => setPlaySpeed(Number(e.target.value))}
+            className="bg-gray-700 text-white rounded px-2 py-1"
+          >
+            <option value={2000}>Slow</option>
+            <option value={1000}>Normal</option>
+            <option value={500}>Fast</option>
+            <option value={200}>Very Fast</option>
+          </select>
+        </div>
       </div>
     </div>
   );
