@@ -1,5 +1,4 @@
-// frontend/src/pages/GamePage.tsx
-
+﻿// frontend/src/pages/GamePage.tsx
 import React from "react";
 import App from "../App";
 

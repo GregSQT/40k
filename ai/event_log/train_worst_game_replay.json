@@ -3,20 +3,20 @@
     "version": "1.0",
     "format": "web_compatible",
     "game_type": "wh40k_tactics",
-    "created": "2025-06-26T21:46:36.391337",
+    "created": "2025-06-27T00:46:37.692839",
     "episode_reward": -6.1,
-    "total_events": 13,
+    "total_events": 15,
     "source": "training"
   },
   "events": [
     {
       "turn": 1,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
-        "action_id": 5,
-        "reward": 0.1
+        "action_id": 1,
+        "reward": -0.05
       },
       "game_state": {
         "turn": 1,
@@ -32,11 +32,11 @@
     {
       "turn": 2,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
-        "action_id": 7,
-        "reward": -0.1
+        "action_id": 1,
+        "reward": -0.05
       },
       "game_state": {
         "turn": 2,
@@ -52,11 +52,11 @@
     {
       "turn": 3,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
-        "action_id": 5,
-        "reward": 0.1
+        "action_id": 6,
+        "reward": -0.5
       },
       "game_state": {
         "turn": 3,
@@ -72,7 +72,7 @@
     {
       "turn": 4,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
         "action_id": 5,
@@ -92,11 +92,11 @@
     {
       "turn": 5,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
-        "action_id": 1,
-        "reward": -0.05
+        "action_id": 5,
+        "reward": 0.1
       },
       "game_state": {
         "turn": 5,
@@ -112,11 +112,11 @@
     {
       "turn": 6,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
-        "action_id": 2,
-        "reward": 0.05
+        "action_id": 6,
+        "reward": -0.5
       },
       "game_state": {
         "turn": 6,
@@ -132,11 +132,11 @@
     {
       "turn": 7,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
-        "action_id": 2,
-        "reward": 0.05
+        "action_id": 6,
+        "reward": -0.5
       },
       "game_state": {
         "turn": 7,
@@ -152,7 +152,7 @@
     {
       "turn": 8,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
         "action_id": 0,
@@ -172,11 +172,11 @@
     {
       "turn": 9,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
-        "action_id": 6,
-        "reward": -0.5
+        "action_id": 4,
+        "reward": 0.0
       },
       "game_state": {
         "turn": 9,
@@ -192,11 +192,11 @@
     {
       "turn": 10,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
-        "action_id": 6,
-        "reward": -0.5
+        "action_id": 2,
+        "reward": 0.05
       },
       "game_state": {
         "turn": 10,
@@ -212,11 +212,11 @@
     {
       "turn": 11,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
-        "action_id": 4,
-        "reward": 0.0
+        "action_id": 5,
+        "reward": 0.1
       },
       "game_state": {
         "turn": 11,
@@ -232,11 +232,11 @@
     {
       "turn": 12,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
-        "action_id": 6,
-        "reward": -0.5
+        "action_id": 4,
+        "reward": 0.0
       },
       "game_state": {
         "turn": 12,
@@ -252,14 +252,54 @@
     {
       "turn": 13,
       "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
+      "timestamp": "2025-06-27T00:46:37.692839",
       "action": {
         "type": "game_action",
-        "action_id": 2,
-        "reward": -4.95
+        "action_id": 4,
+        "reward": 0.0
       },
       "game_state": {
         "turn": 13,
+        "ai_units_alive": 1,
+        "enemy_units_alive": 2,
+        "game_over": false
+      },
+      "units": {
+        "ai_count": 1,
+        "enemy_count": 2
+      }
+    },
+    {
+      "turn": 14,
+      "type": "ai_action",
+      "timestamp": "2025-06-27T00:46:37.692839",
+      "action": {
+        "type": "game_action",
+        "action_id": 2,
+        "reward": 0.05
+      },
+      "game_state": {
+        "turn": 14,
+        "ai_units_alive": 1,
+        "enemy_units_alive": 2,
+        "game_over": false
+      },
+      "units": {
+        "ai_count": 1,
+        "enemy_count": 2
+      }
+    },
+    {
+      "turn": 15,
+      "type": "ai_action",
+      "timestamp": "2025-06-27T00:46:37.692839",
+      "action": {
+        "type": "game_action",
+        "action_id": 4,
+        "reward": -5.0
+      },
+      "game_state": {
+        "turn": 15,
         "ai_units_alive": 0,
         "enemy_units_alive": 2,
         "game_over": true
