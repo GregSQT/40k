@@ -10,10 +10,10 @@ import shutil
 import subprocess
 import glob
 from datetime import datetime
-from ai.web_replay_logger import WebReplayIntegration
+from web_replay_logger import WebReplayIntegration
 
 try:
-    from ai.web_replay_logger import WebReplayIntegration
+    from web_replay_logger import WebReplayIntegration
     WEB_REPLAY_AVAILABLE = True
 except ImportError:
     WEB_REPLAY_AVAILABLE = False
@@ -412,6 +412,82 @@ def quick_test_model(model, env):
     win_rate = wins / total_games
     print(f"   Win rate: {wins}/{total_games} ({win_rate:.1%})")
     return win_rate
+
+
+def enhanced_training_with_replay_web(model, total_timesteps):
+    """Enhanced training with web-compatible replay capture."""
+    if not WEB_REPLAY_AVAILABLE:
+        print("🔄 Web replay not available, using standard training...")
+        model.learn(total_timesteps=total_timesteps)
+        return
+    
+    print(f"🎬 Enhanced training with web-compatible replay generation")
+    
+    # Add web replay to environment
+    env_with_replay = model.env
+    if not hasattr(env_with_replay, 'web_replay_logger'):
+        print("🔧 Adding web-compatible replay logging...")
+        env_with_replay = WebReplayIntegration.enhance_training_env(env_with_replay)
+        model.set_env(env_with_replay)
+    
+    # Training with replay capture
+    replay_interval = max(1000, total_timesteps // 10)
+    episode_replays = []
+    episode_rewards = []
+    current_step = 0
+    
+    while current_step < total_timesteps:
+        if current_step % replay_interval == 0 and current_step > 0:
+            print(f"🎥 Capturing web replay at step {current_step}")
+            
+            # Run one episode with replay
+            obs = env_with_replay.reset()
+            if isinstance(obs, tuple):
+                obs = obs[0]
+            
+            episode_reward = 0
+            episode_steps = 0
+            done = False
+            
+            while not done and episode_steps < 1000:
+                action, _ = model.predict(obs, deterministic=False)
+                step_result = env_with_replay.step(action)
+                
+                if len(step_result) == 5:
+                    obs, reward, terminated, truncated, info = step_result
+                    done = terminated or truncated
+                else:
+                    obs, reward, done, info = step_result
+                
+                episode_reward += reward
+                episode_steps += 1
+            
+            # Save replay
+            if hasattr(env_with_replay, 'web_replay_logger'):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                os.makedirs("ai/event_log", exist_ok=True)
+                replay_file = f"ai/event_log/web_replay_{timestamp}.json"
+                env_with_replay.web_replay_logger.save_web_replay(replay_file, episode_reward)
+                episode_replays.append(replay_file)
+                episode_rewards.append(episode_reward)
+            
+            current_step += episode_steps
+        else:
+            remaining_steps = min(1000, total_timesteps - current_step)
+            model.learn(total_timesteps=remaining_steps)
+            current_step += remaining_steps
+    
+    # Copy best and worst replays
+    if episode_replays and episode_rewards:
+        best_idx = episode_rewards.index(max(episode_rewards))
+        worst_idx = episode_rewards.index(min(episode_rewards))
+        
+        import shutil
+        shutil.copy2(episode_replays[best_idx], "ai/event_log/train_best_web_replay.json")
+        shutil.copy2(episode_replays[worst_idx], "ai/event_log/train_worst_web_replay.json")
+        
+        print(f"🏆 Best web replay: train_best_web_replay.json")
+        print(f"📉 Worst web replay: train_worst_web_replay.json")
 
 def main():
     """Main training function with full replay support."""

@@ -1,5 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import * as PIXI from 'pixi.js';
+
+const safeGetNumber = (value: any): number => {
+  if (Array.isArray(value)) {
+    return typeof value[0] === 'number' ? value[0] : 0;
+  }
+  return typeof value === 'number' ? value : 0;
+};
+
+const safeFormatNumber = (value: any): string => {
+  const num = Array.isArray(value) ? (value[0] || 0) : (value || 0);
+  return typeof num === 'number' ? num.toFixed(2) : '0.00';
+};
 
 // Define types inline to match your existing game types
 interface Unit {
@@ -30,6 +42,33 @@ interface ReplayEvent {
   acting_unit_idx?: number;
 }
 
+// Web replay format interfaces
+interface WebReplayEvent {
+  turn: number;
+  phase: string;
+  acting_unit_idx?: number;
+  target_unit_idx?: number;
+  event_flags: {
+    action_name?: string;
+    action_id?: number;
+    reward?: number;
+    ai_units_alive?: number;
+    enemy_units_alive?: number;
+    description?: string;
+  };
+  units: Unit[];
+}
+
+interface WebReplayData {
+  metadata: {
+    episode_reward: number;
+    total_events: number;
+    final_turn: number;
+    replay_format?: string;
+  };
+  events: WebReplayEvent[];
+}
+
 // Action mapping for display
 const ACTION_NAMES: { [key: number]: string } = {
   0: "Move Closer",
@@ -51,10 +90,44 @@ const DEFAULT_POSITIONS: { [key: number]: { col: number; row: number } } = {
 };
 
 interface ReplayViewerProps {
-  eventLog?: ReplayEvent[];
+  eventLog?: ReplayEvent[] | WebReplayData;
   autoPlay?: boolean;
   stepDelay?: number;
 }
+
+// Web replay converter function
+const convertWebReplayToSimple = (data: WebReplayData): ReplayEvent[] => {
+  console.log('Converting web replay data:', data);
+  
+  const safeExtract = (value: any): any => {
+    if (Array.isArray(value)) {
+      return value[0] !== undefined ? value[0] : 0;
+    }
+    return value !== undefined ? value : 0;
+  };
+
+  return data.events.map((event, index) => ({
+    turn: safeExtract(event.turn) || index + 1,
+    action: safeExtract(event.event_flags?.action_id) || 0,
+    reward: safeExtract(event.event_flags?.reward) || 0,
+    ai_units_alive: safeExtract(event.event_flags?.ai_units_alive) || 0,
+    enemy_units_alive: safeExtract(event.event_flags?.enemy_units_alive) || 0,
+    game_over: event.phase === "game_end" || index === data.events.length - 1,
+    units: event.units ? event.units.map(unit => ({
+      ...unit,
+      CUR_HP: safeExtract(unit.CUR_HP) || safeExtract(unit.HP_MAX) || 1,
+      HP_MAX: safeExtract(unit.HP_MAX) || 1,
+      col: safeExtract(unit.col) || 0,
+      row: safeExtract(unit.row) || 0,
+      color: safeExtract(unit.color) || (unit.player === 0 ? 0x244488 : 0x882222),
+      MOVE: safeExtract(unit.MOVE) || 4,
+      RNG_RNG: safeExtract(unit.RNG_RNG) || 8,
+      RNG_DMG: safeExtract(unit.RNG_DMG) || 2,
+      CC_DMG: safeExtract(unit.CC_DMG) || 1
+    })) : [],
+    acting_unit_idx: safeExtract(event.acting_unit_idx)
+  }));
+};
 
 const ReplayViewer: React.FC<ReplayViewerProps> = ({ 
   eventLog, 
@@ -66,9 +139,10 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [replayData, setReplayData] = useState<ReplayEvent[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
+  const [replayMetadata, setReplayMetadata] = useState<any>(null);
   const boardRef = React.useRef<HTMLDivElement>(null);
 
-  // Board configuration - matching your Board.tsx exactly
+  // Board configuration - matching Board.tsx exactly
   const BOARD_COLS = 24;
   const BOARD_ROWS = 18;
   const HEX_RADIUS = 24;
@@ -79,12 +153,25 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const HEX_VERT_SPACING = HEX_HEIGHT;
   const HIGHLIGHT_COLOR = 0x80ff80;
 
-  // Initialize replay data
+  // Initialize replay data with web format support
   useEffect(() => {
-    if (!eventLog || eventLog.length === 0) {
-      throw new Error('No replay data provided. Please provide eventLog prop.');
+    if (!eventLog || (Array.isArray(eventLog) && eventLog.length === 0)) {
+      console.warn('No replay data provided');
+      return;
     }
-    setReplayData(eventLog);
+    
+    // Check if it's web replay format
+    if (eventLog && typeof eventLog === 'object' && 'metadata' in eventLog && 'events' in eventLog) {
+      console.log('Loading web replay format:', eventLog);
+      const webData = eventLog as WebReplayData;
+      setReplayMetadata(webData.metadata);
+      const convertedData = convertWebReplayToSimple(webData);
+      setReplayData(convertedData);
+    } else {
+      console.log('Loading simple replay format:', eventLog);
+      setReplayData(eventLog as ReplayEvent[]);
+    }
+    
     setCurrentStep(0);
   }, [eventLog]);
 
@@ -92,7 +179,7 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const currentEvent = replayData.length > 0 ? replayData[currentStep] : null;
   const selectedUnitId = currentEvent?.acting_unit_idx ?? null;
 
-  // Hex utility functions - exactly from your Board.tsx
+  // Hex utility functions - exactly from Board.tsx
   const hexCorner = (cx: number, cy: number, size: number, i: number) => {
     const angle_deg = 60 * i;
     const angle_rad = Math.PI / 180 * angle_deg;
@@ -106,14 +193,23 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
     return Array.from({ length: 6 }, (_, i) => hexCorner(cx, cy, size, i)).flat();
   };
 
-  // Create units based on current event
+  // Create units based on current event with enhanced debugging
   const createUnitsFromEvent = useCallback((event: ReplayEvent): Unit[] => {
-    if (event.units && Array.isArray(event.units)) {
+    console.log('🏗️ Creating units from event:', event);
+    console.log('🏗️ Event has units array?', !!event.units);
+    console.log('🏗️ Units array length:', event.units?.length || 0);
+    
+    if (event.units && Array.isArray(event.units) && event.units.length > 0) {
+      console.log('✅ Using units from event data:', event.units);
       return event.units.map(unit => ({
         ...unit,
         CUR_HP: unit.CUR_HP ?? unit.HP_MAX
       }));
     }
+
+    console.log('⚠️ No units in event, creating default units from alive counts');
+    console.log('🔢 AI units alive:', event.ai_units_alive);
+    console.log('🔢 Enemy units alive:', event.enemy_units_alive);
 
     const unitsArray: Unit[] = [];
     const aiAlive = event.ai_units_alive || 0;
@@ -122,11 +218,11 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
     // Create AI units (player 1, red)
     for (let i = 0; i < 2; i++) {
       const defaultPos = DEFAULT_POSITIONS[i + 2] || { col: 0, row: 0 };
-      unitsArray.push({
+      const unit = {
         id: i + 2,
         name: `A-${i === 0 ? 'I' : 'A'}`,
         type: i === 0 ? 'Intercessor' : 'AssaultIntercessor',
-        player: 1,
+        player: 1 as 0 | 1,
         col: defaultPos.col,
         row: defaultPos.row,
         color: i === 0 ? 0x882222 : 0x6633cc,
@@ -137,17 +233,19 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
         RNG_DMG: i === 0 ? 2 : 1,
         CC_DMG: i === 0 ? 1 : 2,
         ICON: i === 0 ? '/icons/Intercessor.webp' : '/icons/AssaultIntercessor.webp'
-      });
+      };
+      console.log(`🤖 Created AI unit ${i}:`, unit);
+      unitsArray.push(unit);
     }
 
     // Create Player units (player 0, blue)
     for (let i = 0; i < 2; i++) {
       const defaultPos = DEFAULT_POSITIONS[i] || { col: 0, row: 0 };
-      unitsArray.push({
+      const unit = {
         id: i,
         name: `P-${i === 0 ? 'I' : 'A'}`,
         type: i === 0 ? 'Intercessor' : 'AssaultIntercessor',
-        player: 0,
+        player: 0 as 0 | 1,
         col: defaultPos.col,
         row: defaultPos.row,
         color: i === 0 ? 0x244488 : 0xff3333,
@@ -158,20 +256,25 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
         RNG_DMG: i === 0 ? 2 : 1,
         CC_DMG: i === 0 ? 1 : 2,
         ICON: i === 0 ? '/icons/Intercessor.webp' : '/icons/AssaultIntercessor.webp'
-      });
+      };
+      console.log(`👤 Created Player unit ${i}:`, unit);
+      unitsArray.push(unit);
     }
 
+    console.log(`🏁 Final units array (${unitsArray.length} units):`, unitsArray);
     return unitsArray;
   }, []);
 
   // Update units when step changes
   useEffect(() => {
     if (replayData.length > 0 && currentStep < replayData.length && currentEvent) {
-      setUnits(createUnitsFromEvent(currentEvent));
+      const newUnits = createUnitsFromEvent(currentEvent);
+      console.log(`Step ${currentStep + 1}: Loading ${newUnits.length} units`, newUnits);
+      setUnits(newUnits);
     }
   }, [currentStep, replayData, currentEvent, createUnitsFromEvent]);
 
-  // Redraw board when units change - exactly like Board.tsx
+  // Board rendering - using exact Board.tsx layout
   useEffect(() => {
     if (!boardRef.current) return;
     boardRef.current.innerHTML = "";
@@ -181,117 +284,166 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
     const width = gridWidth + 2 * MARGIN;
     const height = gridHeight + 2 * MARGIN;
 
-    const app = new PIXI.Application({
-      width,
-      height,
-      backgroundColor: 0x000000,
-      antialias: true,
-      resolution: window.devicePixelRatio || 1,
-      autoDensity: true,
-    });
-    
-    boardRef.current.appendChild(app.view as unknown as HTMLCanvasElement);
-    if (app.view && app.view.style) {
-      app.view.style.width = `${width}px`;
-      app.view.style.height = `${height}px`;
-    }
+    let app: PIXI.Application | null = null;
 
-    // Draw grid cells - exactly like Board.tsx
-    for (let col = 0; col < BOARD_COLS; col++) {
-      for (let row = 0; row < BOARD_ROWS; row++) {
-        const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
-        const points = getHexPolygonPoints(centerX, centerY, HEX_RADIUS);
-        const cell = new PIXI.Graphics();
-
-        cell.lineStyle(1, 0x333333, 0.5);
-        cell.beginFill(0x000000, 0.1);
-        cell.drawPolygon(points);
-        cell.endFill();
-        
-        app.stage.addChild(cell);
+    try {
+      app = new PIXI.Application({
+        width,
+        height,
+        backgroundColor: 0x000000,
+        antialias: true,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true,
+      });
+      
+      boardRef.current.appendChild(app.view as unknown as HTMLCanvasElement);
+      if (app.view && app.view.style) {
+        app.view.style.width = `${width}px`;
+        app.view.style.height = `${height}px`;
       }
-    }
 
-    // Draw units - exactly like Board.tsx
-    for (const unit of units) {
-      const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-      const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+      console.log(`Drawing board with ${units.length} units`);
 
-      // HP Bar - exactly like Board.tsx
-      if (unit.HP_MAX) {
-        const HP_BAR_WIDTH = HEX_RADIUS * 1.4;
-        const HP_BAR_HEIGHT = 7;
-        const HP_BAR_Y_OFFSET = HEX_RADIUS * 0.85;
+      // Draw grid cells - exactly like Board.tsx
+      for (let col = 0; col < BOARD_COLS; col++) {
+        for (let row = 0; row < BOARD_ROWS; row++) {
+          const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          const points = getHexPolygonPoints(centerX, centerY, HEX_RADIUS);
+          const cell = new PIXI.Graphics();
 
-        const barX = centerX - HP_BAR_WIDTH / 2;
-        const barY = centerY - HP_BAR_Y_OFFSET - HP_BAR_HEIGHT;
-
-        // Draw background (gray)
-        const barBg = new PIXI.Graphics();
-        barBg.beginFill(0x222222, 1);
-        barBg.drawRoundedRect(barX, barY, HP_BAR_WIDTH, HP_BAR_HEIGHT, 3);
-        barBg.endFill();
-        app.stage.addChild(barBg);
-
-        // Draw slices (green for HP, darker for lost HP)
-        const hp = Math.max(0, unit.CUR_HP ?? unit.HP_MAX);
-        for (let i = 0; i < unit.HP_MAX; i++) {
-          const sliceWidth = (HP_BAR_WIDTH - (unit.HP_MAX - 1)) / unit.HP_MAX;
-          const sliceX = barX + i * (sliceWidth + 1);
-          const color = i < hp ? 0x36e36b : 0x444444;
-          const slice = new PIXI.Graphics();
-          slice.beginFill(color, 1);
-          slice.drawRoundedRect(sliceX, barY + 1, sliceWidth, HP_BAR_HEIGHT - 2, 2);
-          slice.endFill();
-          app.stage.addChild(slice);
+          cell.lineStyle(1, 0x333333, 0.5);
+          cell.beginFill(0x000000, 0.1);
+          cell.drawPolygon(points);
+          cell.endFill();
+          
+          app.stage.addChild(cell);
         }
       }
 
-      // Unit circle - exactly like Board.tsx
-      const isSelected = unit.id === selectedUnitId;
-      const unitCircle = new PIXI.Graphics();
-      unitCircle.beginFill(unit.color, 1);
-      unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.6);
-      unitCircle.endFill();
+      // Draw units - exactly like Board.tsx
+      for (const unit of units) {
+        if (!unit || typeof unit.col !== 'number' || typeof unit.row !== 'number') {
+          console.warn('Invalid unit:', unit);
+          continue;
+        }
 
-      // Draw green hex outline for selected unit
-      if (isSelected) {
-        unitCircle.lineStyle(3, HIGHLIGHT_COLOR, 1);
-        unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.7);
+        const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+
+        console.log(`Drawing unit ${unit.name} at (${unit.col}, ${unit.row}) -> screen (${centerX}, ${centerY})`);
+
+        // HP Bar - exactly like Board.tsx
+        if (unit.HP_MAX && unit.HP_MAX > 0) {
+          const HP_BAR_WIDTH = HEX_RADIUS * 1.4;
+          const HP_BAR_HEIGHT = 7;
+          const HP_BAR_Y_OFFSET = HEX_RADIUS * 0.85;
+
+          const barX = centerX - HP_BAR_WIDTH / 2;
+          const barY = centerY - HP_BAR_Y_OFFSET - HP_BAR_HEIGHT;
+
+          // Draw background (gray)
+          const barBg = new PIXI.Graphics();
+          barBg.beginFill(0x222222, 1);
+          barBg.drawRoundedRect(barX, barY, HP_BAR_WIDTH, HP_BAR_HEIGHT, 3);
+          barBg.endFill();
+          app.stage.addChild(barBg);
+
+          // Draw slices (green for HP, darker for lost HP)
+          const hp = Math.max(0, unit.CUR_HP || 0);
+          for (let i = 0; i < unit.HP_MAX; i++) {
+            const sliceWidth = (HP_BAR_WIDTH - (unit.HP_MAX - 1)) / unit.HP_MAX;
+            const sliceX = barX + i * (sliceWidth + 1);
+            const color = i < hp ? 0x36e36b : 0x444444;
+            const slice = new PIXI.Graphics();
+            slice.beginFill(color, 1);
+            slice.drawRoundedRect(sliceX, barY + 1, sliceWidth, HP_BAR_HEIGHT - 2, 2);
+            slice.endFill();
+            app.stage.addChild(slice);
+          }
+        }
+
+        // Unit circle - exactly like Board.tsx
+        const isSelected = unit.id === selectedUnitId;
+        const unitCircle = new PIXI.Graphics();
+        unitCircle.beginFill(unit.color || 0x888888, 1);
+        unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.6);
+        unitCircle.endFill();
+
+        // Draw green hex outline for selected unit
+        if (isSelected) {
+          unitCircle.lineStyle(3, HIGHLIGHT_COLOR, 1);
+          unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.7);
+        }
+        
+        app.stage.addChild(unitCircle);
+
+        // Unit icon or label - exactly like Board.tsx
+        if (unit.ICON) {
+          const ICON_SIZE = HEX_RADIUS * 1.5;
+          const iconSprite = PIXI.Sprite.from(unit.ICON);
+          iconSprite.x = centerX - ICON_SIZE / 2;
+          iconSprite.y = centerY - ICON_SIZE / 2;
+          iconSprite.width = ICON_SIZE;
+          iconSprite.height = ICON_SIZE;
+          app.stage.addChild(iconSprite);
+        } else {
+          const label = new PIXI.Text(unit.name || `Unit ${unit.id}`, {
+            fontFamily: "Arial",
+            fontWeight: "bold",
+            fontSize: 14,
+            fill: 0xffffff,
+            align: "center",
+          });
+          label.anchor.set(0.5);
+          label.x = centerX;
+          label.y = centerY;
+          app.stage.addChild(label);
+        }
+      }
+
+      // Cleanup function
+      return () => {
+        if (app) {
+          try {
+            app.destroy(true);
+          } catch (e) {
+            console.warn('Error destroying PIXI app:', e);
+          }
+        }
+      };
+
+    } catch (error) {
+      console.error('PIXI Application creation failed:', error);
+      
+      // Fallback to basic display
+      if (boardRef.current) {
+        boardRef.current.innerHTML = `
+          <div style="
+            width: ${width}px; 
+            height: ${height}px; 
+            background: #001100; 
+            border: 2px solid #00ff00;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #00ff00;
+            font-family: monospace;
+            text-align: center;
+          ">
+            <div>
+              <div style="font-size: 18px; margin-bottom: 10px;">🎮 Replay Board</div>
+              <div>Turn: ${currentEvent?.turn || 0}</div>
+              <div>Units: ${units.length}</div>
+              <div style="margin-top: 10px; font-size: 12px;">WebGL unavailable - using fallback</div>
+            </div>
+          </div>
+        `;
       }
       
-      app.stage.addChild(unitCircle);
-
-      // Unit icon or label - exactly like Board.tsx
-      if (unit.ICON) {
-        const ICON_SIZE = HEX_RADIUS * 1.5;
-        const iconSprite = PIXI.Sprite.from(unit.ICON);
-        iconSprite.x = centerX - ICON_SIZE / 2;
-        iconSprite.y = centerY - ICON_SIZE / 2;
-        iconSprite.width = ICON_SIZE;
-        iconSprite.height = ICON_SIZE;
-        app.stage.addChild(iconSprite);
-      } else {
-        const label = new PIXI.Text(unit.name, {
-          fontFamily: "Arial",
-          fontWeight: "bold",
-          fontSize: 18,
-          fill: 0xffffff,
-          align: "center",
-        });
-        label.anchor.set(0.5);
-        label.x = centerX;
-        label.y = centerY;
-        app.stage.addChild(label);
-      }
+      return () => {};
     }
-
-    // Cleanup
-    return () => {
-      app.destroy(true);
-    };
-  }, [units, selectedUnitId, BOARD_COLS, BOARD_ROWS, HEX_RADIUS, HEX_HORIZ_SPACING, HEX_VERT_SPACING, HEX_WIDTH, HEX_HEIGHT, MARGIN, HIGHLIGHT_COLOR, getHexPolygonPoints]);
+  }, [units, selectedUnitId, BOARD_COLS, BOARD_ROWS, HEX_RADIUS, HEX_HORIZ_SPACING, HEX_VERT_SPACING, HEX_WIDTH, HEX_HEIGHT, MARGIN, HIGHLIGHT_COLOR, getHexPolygonPoints, currentEvent]);
 
   // Auto-play logic
   useEffect(() => {
@@ -313,6 +465,7 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
     setIsPlaying(false);
   };
 
+  // Load replay file handler with web format support
   const loadReplayFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -320,10 +473,29 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
       reader.onload = (e) => {
         try {
           const data = JSON.parse(e.target?.result as string);
-          setReplayData(Array.isArray(data) ? data : [data]);
+          console.log('Loaded file data:', data);
+          
+          // Check if it's web replay format
+          if (data && typeof data === 'object' && 'metadata' in data && 'events' in data) {
+            console.log('Converting web replay format');
+            const webData = data as WebReplayData;
+            setReplayMetadata(webData.metadata);
+            const convertedData = convertWebReplayToSimple(webData);
+            setReplayData(convertedData);
+          } else if (Array.isArray(data)) {
+            console.log('Using simple replay format');
+            setReplayData(data);
+            setReplayMetadata(null);
+          } else {
+            console.log('Wrapping single event');
+            setReplayData([data]);
+            setReplayMetadata(null);
+          }
+          
           setCurrentStep(0);
           setIsPlaying(false);
         } catch (error) {
+          console.error('Error parsing JSON file:', error);
           alert('Error parsing JSON file: ' + (error as Error).message);
         }
       };
@@ -342,6 +514,23 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
       }}>
         <h3>❌ No Replay Data</h3>
         <p>Please provide eventLog prop to the ReplayViewer component.</p>
+        <input 
+          type="file" 
+          accept=".json" 
+          onChange={loadReplayFile} 
+          style={{ 
+            background: '#002200', 
+            color: '#00ff00', 
+            border: '1px solid #00ff00', 
+            padding: '8px 12px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            marginTop: '20px'
+          }} 
+        />
+        <p style={{ fontSize: '12px', color: '#888', marginTop: '10px' }}>
+          Upload your replay JSON file (supports both simple and web-compatible formats)
+        </p>
       </div>
     );
   }
@@ -386,9 +575,19 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
             }} 
           />
           <span style={{ fontSize: '12px', color: '#888' }}>
-            Upload your replay JSON file
+            Upload replay JSON file (any format)
           </span>
         </div>
+        {replayMetadata && (
+          <div style={{ marginTop: '10px', fontSize: '12px', color: '#aaa' }}>
+            Episode Reward: {safeFormatNumber(replayMetadata.episode_reward)} | 
+            Total Events: {replayMetadata.total_events || 0} | 
+            Final Turn: {replayMetadata.final_turn || 0}
+            {replayMetadata.replay_format && (
+              <span> | Format: {replayMetadata.replay_format}</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Game Info HUD */}
@@ -438,7 +637,7 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
             fontWeight: 'bold',
             color: currentEvent.reward > 0 ? '#4ade80' : currentEvent.reward < 0 ? '#f87171' : '#ffff00'
           }}>
-            {currentEvent.reward?.toFixed(2) || '0.00'}
+            {safeFormatNumber(currentEvent.reward)}
           </div>
         </div>
         
@@ -465,92 +664,59 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
             {currentEvent.ai_units_alive}
           </div>
         </div>
-        
-        <div style={{ 
-          padding: '12px', 
-          background: 'rgba(36, 68, 136, 0.3)', 
-          borderRadius: '6px', 
-          borderLeft: '4px solid #ffd700' 
-        }}>
-          <div style={{ fontSize: '0.8em', color: '#aaa', marginBottom: '4px' }}>Progress</div>
-          <div style={{ fontSize: '1.2em', fontWeight: 'bold', color: '#00ff00' }}>
-            {currentStep + 1} / {replayData.length}
-          </div>
-        </div>
       </div>
 
-      {/* Hexagonal Game Board */}
-      <div style={{ 
-        marginBottom: '20px',
-        position: 'relative',
-        display: 'flex',
-        justifyContent: 'center'
-      }}>
-        <div 
-          ref={boardRef}
-          style={{
-            background: '#000',
-            borderRadius: '8px',
-            border: '2px solid #00ff00'
-          }}
-        />
-        
-        {/* Game Over Overlay */}
-        {currentEvent.game_over && (
-          <div style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            background: 'rgba(255, 0, 0, 0.95)',
-            color: 'white',
-            padding: '30px 50px',
-            borderRadius: '12px',
-            fontSize: '28px',
-            fontWeight: 'bold',
-            textAlign: 'center',
-            border: '4px solid #ff0000',
-            boxShadow: '0 0 30px rgba(255, 0, 0, 0.8)',
-            zIndex: 1000
-          }}>
-            🔴 GAME OVER 🔴
-            <div style={{ fontSize: '16px', marginTop: '10px', fontWeight: 'normal' }}>
-              Battle concluded on turn {currentEvent.turn}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Controls */}
+      {/* Board Display */}
       <div style={{ 
         display: 'flex', 
         justifyContent: 'center', 
-        alignItems: 'center',
+        marginBottom: '20px' 
+      }}>
+        <div 
+          ref={boardRef}
+          style={{ 
+            border: '2px solid #00ff00', 
+            borderRadius: '8px' 
+          }}
+        />
+      </div>
+
+      {/* Playback Controls */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        flexWrap: 'wrap',
         gap: '15px',
         padding: '20px',
         background: 'rgba(0, 0, 0, 0.8)',
         borderRadius: '8px',
-        border: '1px solid rgba(0, 255, 0, 0.3)',
-        flexWrap: 'wrap'
+        border: '2px solid rgba(0, 255, 0, 0.3)'
       }}>
+        <div style={{ 
+          fontSize: '1.2em', 
+          fontWeight: 'bold', 
+          color: '#ffd700',
+          marginRight: '20px'
+        }}>
+          Step {currentStep + 1} of {replayData.length}
+        </div>
+        
         <button 
           onClick={togglePlayPause}
-          style={{
-            background: isPlaying 
-              ? 'linear-gradient(145deg, #ff9900, #cc7700)' 
-              : 'linear-gradient(145deg, #00ff00, #00cc00)',
-            color: '#000',
-            border: 'none',
-            padding: '12px 24px',
-            borderRadius: '6px',
+          style={{ 
+            background: isPlaying ? 'linear-gradient(145deg, #ff6b6b, #ee5a5a)' : 'linear-gradient(145deg, #36e36b, #2bc653)', 
+            color: '#fff', 
+            border: 'none', 
+            padding: '12px 24px', 
+            borderRadius: '8px', 
             cursor: 'pointer',
             fontFamily: 'inherit',
-            fontWeight: 'bold',
             fontSize: '14px',
+            fontWeight: 'bold',
             textTransform: 'uppercase',
-            letterSpacing: '1px',
             transition: 'all 0.3s ease',
-            boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)'
+            boxShadow: '0 4px 8px rgba(0,0,0,0.3)'
           }}
         >
           {isPlaying ? '⏸️ PAUSE' : '▶️ PLAY'}
@@ -679,7 +845,7 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
             color: currentEvent.reward > 0 ? '#4ade80' : currentEvent.reward < 0 ? '#f87171' : '#ffff00',
             fontSize: '14px'
           }}>
-            Reward: <strong>{currentEvent.reward?.toFixed(2) || '0.00'}</strong>
+            Reward: <strong>{safeFormatNumber(currentEvent.reward)}</strong>
           </div>
           {currentEvent.game_over && (
             <div style={{ 
@@ -691,6 +857,148 @@ const ReplayViewer: React.FC<ReplayViewerProps> = ({
               🚨 BATTLE CONCLUDED 🚨
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Unit Details */}
+      <div style={{ 
+        marginTop: '20px',
+        padding: '15px',
+        background: 'rgba(0, 0, 0, 0.6)',
+        borderRadius: '8px',
+        border: '1px solid rgba(0, 255, 0, 0.3)'
+      }}>
+        <h3 style={{ 
+          margin: '0 0 15px 0', 
+          color: '#ffd700', 
+          fontSize: '1.2em',
+          textAlign: 'center'
+        }}>
+          👥 Unit Status
+        </h3>
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+          gap: '15px' 
+        }}>
+          {units.map((unit) => (
+            <div 
+              key={unit.id}
+              style={{ 
+                padding: '15px',
+                background: unit.CUR_HP && unit.CUR_HP > 0 
+                  ? 'rgba(0, 50, 0, 0.5)' 
+                  : 'rgba(50, 0, 0, 0.5)',
+                borderRadius: '6px',
+                border: `2px solid ${unit.player === 0 ? '#4488ff' : '#ff4444'}`,
+                transition: 'all 0.3s ease'
+              }}
+            >
+              <div style={{ 
+                fontWeight: 'bold', 
+                color: unit.player === 0 ? '#4488ff' : '#ff4444',
+                fontSize: '16px',
+                marginBottom: '8px'
+              }}>
+                {unit.name} ({unit.type})
+              </div>
+              <div style={{ fontSize: '12px', color: '#aaa', marginBottom: '4px' }}>
+                Position: ({unit.col}, {unit.row})
+              </div>
+              <div style={{ fontSize: '12px', color: '#aaa', marginBottom: '4px' }}>
+                HP: {unit.CUR_HP}/{unit.HP_MAX}
+              </div>
+              <div style={{ fontSize: '12px', color: '#aaa', marginBottom: '4px' }}>
+                Range: {unit.RNG_RNG} | Damage: {unit.RNG_DMG}
+              </div>
+              <div style={{ 
+                fontSize: '12px', 
+                fontWeight: 'bold',
+                color: unit.CUR_HP && unit.CUR_HP > 0 ? '#4ade80' : '#ff4444'
+              }}>
+                Status: {unit.CUR_HP && unit.CUR_HP > 0 ? '✅ Alive' : '💀 Dead'}
+              </div>
+              {unit.id === selectedUnitId && (
+                <div style={{ 
+                  marginTop: '8px',
+                  padding: '4px 8px',
+                  background: 'rgba(0, 255, 0, 0.2)',
+                  borderRadius: '4px',
+                  fontSize: '10px',
+                  fontWeight: 'bold',
+                  color: '#00ff00',
+                  textAlign: 'center'
+                }}>
+                  🎯 ACTIVE UNIT
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div style={{ 
+        marginTop: '20px',
+        padding: '15px',
+        background: 'rgba(0, 0, 0, 0.6)',
+        borderRadius: '8px',
+        border: '1px solid rgba(0, 255, 0, 0.3)'
+      }}>
+        <h3 style={{ 
+          margin: '0 0 15px 0', 
+          color: '#ffd700', 
+          fontSize: '1.2em',
+          textAlign: 'center'
+        }}>
+          🔑 Legend
+        </h3>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          gap: '30px', 
+          flexWrap: 'wrap',
+          fontSize: '14px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ 
+              width: '16px', 
+              height: '16px', 
+              background: '#4488ff', 
+              borderRadius: '50%',
+              border: '2px solid #fff'
+            }}></div>
+            <span style={{ fontWeight: 'bold', color: '#4488ff' }}>Player Units</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ 
+              width: '16px', 
+              height: '16px', 
+              background: '#ff4444', 
+              borderRadius: '50%',
+              border: '2px solid #fff'
+            }}></div>
+            <span style={{ fontWeight: 'bold', color: '#ff4444' }}>AI Units</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ 
+              width: '16px', 
+              height: '8px', 
+              background: '#36e36b',
+              border: '1px solid #fff'
+            }}></div>
+            <span style={{ fontWeight: 'bold', color: '#36e36b' }}>HP Bar</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ 
+              width: '20px', 
+              height: '20px', 
+              border: '3px solid #80ff80',
+              borderRadius: '50%',
+              background: 'transparent'
+            }}></div>
+            <span style={{ fontWeight: 'bold', color: '#80ff80' }}>Selected Unit</span>
+          </div>
         </div>
       </div>
     </div>

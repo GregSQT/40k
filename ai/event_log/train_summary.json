@@ -1,20 +1,23 @@
 {
-  "timestamp": "2025-06-26T01:00:59.679456",
+  "timestamp": "2025-06-26T04:16:46.822642",
   "total_episodes": 10,
-  "best_reward": -0.0999999999999992,
-  "worst_reward": -6.0,
-  "average_reward": -3.275,
+  "best_reward": -0.04999999999999982,
+  "worst_reward": -6.2,
+  "average_reward": -2.3649999999999998,
   "files": {
-    "best_replay": "train_best_game_replay.json",
-    "worst_replay": "train_worst_game_replay.json"
+    "best_replay": "train_best_web_replay.json",
+    "worst_replay": "train_worst_web_replay.json"
   },
-  "replay_type": "full_game_state",
+  "replay_type": "web_compatible_direct",
   "web_compatible": true,
   "features": [
+    "Direct web compatibility",
     "Complete unit positions",
     "HP tracking",
     "Movement visualization",
     "Combat events",
-    "Turn-by-turn progression"
-  ]
+    "Turn-by-turn progression",
+    "No conversion needed"
+  ],
+  "note": "Replays generated directly in web-compatible format - no simplified event logs created"
 }
