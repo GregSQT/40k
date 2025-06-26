@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 ai/train.py - Training with configuration system and unified logging with replay support
 """
@@ -10,14 +10,14 @@ import shutil
 import subprocess
 import glob
 from datetime import datetime
-from web_replay_logger import WebReplayIntegration
+from ai.web_replay_logger import WebReplayIntegration
 
 try:
-    from web_replay_logger import WebReplayIntegration
+    from ai.web_replay_logger import WebReplayIntegration
     WEB_REPLAY_AVAILABLE = True
 except ImportError:
     WEB_REPLAY_AVAILABLE = False
-    print("⚠️  Web replay logger not available")
+    print("âš ï¸  Web replay logger not available")
 
 def load_config(config_name="default"):
     """Load training configuration from config file."""
@@ -76,7 +76,7 @@ def parse_args():
         elif arg.startswith("--config="):
             config_name = arg.split("=")[1]
         elif arg.lower() == "--help":
-            print("🔧 W40K AI Training - Full Features")
+            print("ðŸ”§ W40K AI Training - Full Features")
             print("=" * 40)
             print("Usage: python ai/train.py [options]")
             print()
@@ -114,18 +114,18 @@ def backup_current_model():
         os.makedirs(backup_dir, exist_ok=True)
         backup_path = os.path.join(backup_dir, f"model_backup_{timestamp}.zip")
         shutil.copy2(model_path, backup_path)
-        print(f"💾 Model backed up to: {backup_path}")
+        print(f"ðŸ’¾ Model backed up to: {backup_path}")
 
 def ensure_scenario():
     """Ensure scenario.json exists."""
     scenario_path = "ai/scenario.json"
     if not os.path.exists(scenario_path):
-        print("📋 Generating scenario.json...")
+        print("ðŸ“‹ Generating scenario.json...")
         try:
             subprocess.run([sys.executable, "generate_scenario.py"], check=True)
-            print("✅ Scenario generated successfully")
+            print("âœ… Scenario generated successfully")
         except (subprocess.CalledProcessError, FileNotFoundError):
-            print("⚠️  Scenario generator not found, using default scenario")
+            print("âš ï¸  Scenario generator not found, using default scenario")
 
 def run_training_episode_with_replay(model, env):
     """Run a single training episode with full replay logging."""
@@ -214,18 +214,18 @@ def run_training_episode_with_replay(model, env):
 def enhanced_training_with_replay(model, total_timesteps):
     """Enhanced training with web-compatible replay capture."""
     if not WEB_REPLAY_AVAILABLE:
-        print("🔄 Web replay not available, using standard training...")
+        print("ðŸ”„ Web replay not available, using standard training...")
         model.learn(total_timesteps=total_timesteps)
         return
     
-    print(f"🎬 Enhanced training with web-compatible replay generation")
+    print(f"ðŸŽ¬ Enhanced training with web-compatible replay generation")
     
     # Create a new environment with web replay logging
     env_with_replay = model.env
     
     # Check if environment already has web replay (avoid double-wrapping)
     if not hasattr(env_with_replay, 'web_replay_logger'):
-        print("🔧 Adding web-compatible replay logging to environment...")
+        print("ðŸ”§ Adding web-compatible replay logging to environment...")
         env_with_replay = WebReplayIntegration.enhance_training_env(env_with_replay)
         model.set_env(env_with_replay)
     
@@ -240,7 +240,7 @@ def enhanced_training_with_replay(model, total_timesteps):
         while current_step < total_timesteps:
             if current_step % replay_interval == 0 and current_step > 0:
                 # Capture a web-compatible replay episode
-                print(f"🎥 Capturing web replay at step {current_step}")
+                print(f"ðŸŽ¥ Capturing web replay at step {current_step}")
                 
                 episode_reward, episode_steps, replay_file = run_training_episode_with_web_replay(model, env_with_replay)
                 
@@ -248,7 +248,7 @@ def enhanced_training_with_replay(model, total_timesteps):
                     episode_replays.append(replay_file)
                     episode_rewards.append(episode_reward)
                     episodes_captured += 1
-                    print(f"   ✅ Captured: {replay_file}")
+                    print(f"   âœ… Captured: {replay_file}")
                 
                 current_step += episode_steps
             else:
@@ -261,7 +261,7 @@ def enhanced_training_with_replay(model, total_timesteps):
         if current_step < total_timesteps:
             model.learn(total_timesteps=total_timesteps - current_step)
         
-        print(f"✅ Training completed with {episodes_captured} web replays captured")
+        print(f"âœ… Training completed with {episodes_captured} web replays captured")
         
         # Select best and worst replays and copy to standard locations
         if episode_replays and episode_rewards:
@@ -271,18 +271,18 @@ def enhanced_training_with_replay(model, total_timesteps):
             event_log_dir = "ai/event_log"
             os.makedirs(event_log_dir, exist_ok=True)
             
-            best_dest = os.path.join(event_log_dir, "train_best_web_replay.json")
-            worst_dest = os.path.join(event_log_dir, "train_worst_web_replay.json")
+            best_dest = os.path.join(event_log_dir, "train_best_game_replay.json")
+            worst_dest = os.path.join(event_log_dir, "train_worst_game_replay.json")
             
             shutil.copy2(episode_replays[best_idx], best_dest)
             shutil.copy2(episode_replays[worst_idx], worst_dest)
             
-            print(f"   🏆 Best web replay: train_best_web_replay.json")
-            print(f"   📉 Worst web replay: train_worst_web_replay.json")
+            print(f"   ðŸ† Best web replay: train_best_game_replay.json")
+            print(f"   ðŸ“‰ Worst web replay: train_worst_game_replay.json")
         
     except Exception as e:
-        print(f"⚠️  Enhanced training failed: {e}")
-        print("🔄 Falling back to standard training...")
+        print(f"âš ï¸  Enhanced training failed: {e}")
+        print("ðŸ”„ Falling back to standard training...")
         model.learn(total_timesteps=total_timesteps)
 
 def run_training_episode_with_web_replay(model, env):
@@ -324,13 +324,13 @@ def run_training_episode_with_web_replay(model, env):
         return total_reward, steps, replay_file
         
     except Exception as e:
-        print(f"   ⚠️  Episode failed: {e}")
+        print(f"   âš ï¸  Episode failed: {e}")
         return 0.0, 0, None
 
 def save_training_logs_with_replay(env):
     """Save training logs with web-compatible replay data only."""
     if not hasattr(env, "episode_logs") or not env.episode_logs:
-        print("⚠️  No episode logs to save")
+        print("âš ï¸  No episode logs to save")
         return
     
     event_log_dir = "ai/event_log"
@@ -340,7 +340,7 @@ def save_training_logs_with_replay(env):
     best_log, best_reward = max(env.episode_logs, key=lambda x: x[1])
     worst_log, worst_reward = min(env.episode_logs, key=lambda x: x[1])
     
-    print(f"📋 SUMMARY: Saving training summary (web-compatible format only)")
+    print(f"ðŸ“‹ SUMMARY: Saving training summary (web-compatible format only)")
     
     # Save training summary ONLY - NO SIMPLIFIED EVENT LOGS
     summary_file = os.path.join(event_log_dir, "train_summary.json")
@@ -351,8 +351,8 @@ def save_training_logs_with_replay(env):
         "worst_reward": worst_reward,
         "average_reward": sum(x[1] for x in env.episode_logs) / len(env.episode_logs),
         "files": {
-            "best_replay": "train_best_web_replay.json",
-            "worst_replay": "train_worst_web_replay.json"
+            "best_replay": "train_best_game_replay.json",
+            "worst_replay": "train_worst_game_replay.json"
         },
         "replay_type": "web_compatible_direct",
         "web_compatible": True,
@@ -371,13 +371,13 @@ def save_training_logs_with_replay(env):
     with open(summary_file, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
     
-    print(f"   📊 Summary: {summary_file}")
-    print(f"   ℹ️  NOTE: NO simplified event logs generated - only web-compatible files")
-    print(f"   🌐 Web replay files: train_best_web_replay.json, train_worst_web_replay.json")
+    print(f"   ðŸ“Š Summary: {summary_file}")
+    print(f"   â„¹ï¸  NOTE: NO simplified event logs generated - only web-compatible files")
+    print(f"   ðŸŒ Web replay files: train_best_game_replay.json, train_worst_game_replay.json")
 
 def quick_test_model(model, env):
     """Quick test of trained model."""
-    print("🧪 Quick model test...")
+    print("ðŸ§ª Quick model test...")
     
     wins = 0
     total_games = 5
@@ -417,16 +417,16 @@ def quick_test_model(model, env):
 def enhanced_training_with_replay_web(model, total_timesteps):
     """Enhanced training with web-compatible replay capture."""
     if not WEB_REPLAY_AVAILABLE:
-        print("🔄 Web replay not available, using standard training...")
+        print("ðŸ”„ Web replay not available, using standard training...")
         model.learn(total_timesteps=total_timesteps)
         return
     
-    print(f"🎬 Enhanced training with web-compatible replay generation")
+    print(f"ðŸŽ¬ Enhanced training with web-compatible replay generation")
     
     # Add web replay to environment
     env_with_replay = model.env
     if not hasattr(env_with_replay, 'web_replay_logger'):
-        print("🔧 Adding web-compatible replay logging...")
+        print("ðŸ”§ Adding web-compatible replay logging...")
         env_with_replay = WebReplayIntegration.enhance_training_env(env_with_replay)
         model.set_env(env_with_replay)
     
@@ -438,7 +438,7 @@ def enhanced_training_with_replay_web(model, total_timesteps):
     
     while current_step < total_timesteps:
         if current_step % replay_interval == 0 and current_step > 0:
-            print(f"🎥 Capturing web replay at step {current_step}")
+            print(f"ðŸŽ¥ Capturing web replay at step {current_step}")
             
             # Run one episode with replay
             obs = env_with_replay.reset()
@@ -483,15 +483,15 @@ def enhanced_training_with_replay_web(model, total_timesteps):
         worst_idx = episode_rewards.index(min(episode_rewards))
         
         import shutil
-        shutil.copy2(episode_replays[best_idx], "ai/event_log/train_best_web_replay.json")
-        shutil.copy2(episode_replays[worst_idx], "ai/event_log/train_worst_web_replay.json")
+        shutil.copy2(episode_replays[best_idx], "ai/event_log/train_best_game_replay.json")
+        shutil.copy2(episode_replays[worst_idx], "ai/event_log/train_worst_game_replay.json")
         
-        print(f"🏆 Best web replay: train_best_web_replay.json")
-        print(f"📉 Worst web replay: train_worst_web_replay.json")
+        print(f"ðŸ† Best web replay: train_best_game_replay.json")
+        print(f"ðŸ“‰ Worst web replay: train_worst_game_replay.json")
 
 def main():
     """Main training function with full replay support."""
-    print("🤖 W40K AI Training with Enhanced Replay System")
+    print("ðŸ¤– W40K AI Training with Enhanced Replay System")
     print("=" * 50)
     
     # Parse arguments
@@ -500,10 +500,10 @@ def main():
     # Load configuration
     try:
         config = load_config(config_name)
-        print(f"📋 Using config: {config_name}")
+        print(f"ðŸ“‹ Using config: {config_name}")
     except (FileNotFoundError, ValueError) as e:
-        print(f"⚠️  Config error: {e}")
-        print("🔧 Using default parameters")
+        print(f"âš ï¸  Config error: {e}")
+        print("ðŸ”§ Using default parameters")
         config = {
             "total_timesteps": 100_000,
             "buffer_size": 50_000,
@@ -530,18 +530,18 @@ def main():
     else:
         total_timesteps = config.get("total_timesteps", 100_000)
     
-    print(f"🎯 Training for {total_timesteps:,} timesteps")
+    print(f"ðŸŽ¯ Training for {total_timesteps:,} timesteps")
     
     # Create environment
-    print("🌍 Creating environment...")
+    print("ðŸŒ Creating environment...")
     env = W40KEnv()
     
     # Check environment
     try:
         check_env(env)
-        print("✅ Environment validation passed")
+        print("âœ… Environment validation passed")
     except Exception as e:
-        print(f"⚠️  Environment check warning: {e}")
+        print(f"âš ï¸  Environment check warning: {e}")
     
     # Display environment info
     print(f"   Units: {len(env.units)}")
@@ -558,15 +558,15 @@ def main():
         resume = os.path.exists(model_path)
     
     if resume and os.path.exists(model_path):
-        print("📂 Loading existing model...")
+        print("ðŸ“‚ Loading existing model...")
         backup_current_model()
         model = DQN.load(model_path, env=env)
-        print("✅ Model loaded successfully")
+        print("âœ… Model loaded successfully")
     else:
         if os.path.exists(model_path):
             backup_current_model()
         
-        print("🆕 Creating new DQN model...")
+        print("ðŸ†• Creating new DQN model...")
         model = DQN(
             "MlpPolicy",
             env,
@@ -581,9 +581,9 @@ def main():
             exploration_final_eps=config.get("exploration_final_eps", 0.05),
             tensorboard_log="./tensorboard/"
         )
-        print("✅ Model created successfully")
+        print("âœ… Model created successfully")
     
-    print(f"🚀 Starting training...")
+    print(f"ðŸš€ Starting training...")
     print()
     
     try:
@@ -591,23 +591,23 @@ def main():
         try:
             enhanced_training_with_replay(model, total_timesteps)
         except Exception as e:
-            print(f"⚠️  Enhanced replay training failed: {e}")
-            print("🔄 Falling back to standard training...")
+            print(f"âš ï¸  Enhanced replay training failed: {e}")
+            print("ðŸ”„ Falling back to standard training...")
             model.learn(total_timesteps=total_timesteps)
         
     except KeyboardInterrupt:
-        print("⏹️  Training interrupted by user")
+        print("â¹ï¸  Training interrupted by user")
         model.save(model_path)
-        print(f"💾 Model saved to {model_path}")
+        print(f"ðŸ’¾ Model saved to {model_path}")
     except Exception as e:
-        print(f"❌ Training failed: {e}")
+        print(f"âŒ Training failed: {e}")
         import traceback
         traceback.print_exc()
         return False
     
     # Save model
     model.save(model_path)
-    print(f"💾 Model saved to {model_path}")
+    print(f"ðŸ’¾ Model saved to {model_path}")
     
     # Save training logs
     save_training_logs_with_replay(env)
@@ -620,14 +620,14 @@ def main():
     
     # Success message
     print("\n" + "=" * 60)
-    print("✅ Training completed successfully!")
-    print(f"\n🎯 Next Steps:")
-    print(f"   🧪 Test model:       python ai/evaluate.py")
-    print(f"   🔄 More training:    python ai/train.py --resume")
-    print(f"   🔄 Different config: python ai/train.py --config conservative")
-    print(f"   📋 View logs:        ls ai/event_log/")
-    print(f"   🌐 Web app:          cd frontend && npm run dev")
-    print(f"   🎬 View replays:     python ai/replay.py")
+    print("âœ… Training completed successfully!")
+    print(f"\nðŸŽ¯ Next Steps:")
+    print(f"   ðŸ§ª Test model:       python ai/evaluate.py")
+    print(f"   ðŸ”„ More training:    python ai/train.py --resume")
+    print(f"   ðŸ”„ Different config: python ai/train.py --config conservative")
+    print(f"   ðŸ“‹ View logs:        ls ai/event_log/")
+    print(f"   ðŸŒ Web app:          cd frontend && npm run dev")
+    print(f"   ðŸŽ¬ View replays:     python ai/replay.py")
     
     return True
 
@@ -636,10 +636,10 @@ if __name__ == "__main__":
         success = main()
         sys.exit(0 if success else 1)
     except KeyboardInterrupt:
-        print(f"\n⏹️ Training interrupted")
+        print(f"\nâ¹ï¸ Training interrupted")
         sys.exit(0)
     except Exception as e:
-        print(f"\n💥 Error: {e}")
+        print(f"\nðŸ’¥ Error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
