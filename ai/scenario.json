@@ -1,66 +1,50 @@
-[
-  {
-    "id": 1,
-    "unit_type": "Intercessor",
-    "player": 0,
-    "col": 23,
-    "row": 17,
-    "cur_hp": 3,
-    "hp_max": 3,
-    "move": 4,
-    "rng_rng": 8,
-    "rng_dmg": 2,
-    "cc_dmg": 1,
-    "is_ranged": true,
-    "is_melee": false,
-    "alive": true
+{
+  "board": {
+    "cols": 24,
+    "rows": 18,
+    "hex_radius": 24,
+    "margin": 32
   },
-  {
-    "id": 2,
-    "unit_type": "AssaultIntercessor",
-    "player": 0,
-    "col": 1,
-    "row": 17,
-    "cur_hp": 4,
-    "hp_max": 4,
-    "move": 6,
-    "rng_rng": 4,
-    "rng_dmg": 1,
-    "cc_dmg": 2,
-    "is_ranged": false,
-    "is_melee": true,
-    "alive": true
+  "colors": {
+    "board_bg": "0x002200",
+    "cell_even": "0x002200",
+    "cell_odd": "0x001a00",
+    "cell_border": "0x00ff00",
+    "player_0": "0x244488",
+    "player_1": "0x882222",
+    "hp_full": "0x36e36b",
+    "hp_damaged": "0x444444",
+    "highlight": "0x80ff80",
+    "current_unit": "0xffd700"
   },
-  {
-    "id": 3,
-    "unit_type": "Intercessor",
-    "player": 1,
-    "col": 0,
-    "row": 1,
-    "cur_hp": 3,
-    "hp_max": 3,
-    "move": 4,
-    "rng_rng": 8,
-    "rng_dmg": 2,
-    "cc_dmg": 1,
-    "is_ranged": true,
-    "is_melee": false,
-    "alive": true
-  },
-  {
-    "id": 4,
-    "unit_type": "AssaultIntercessor",
-    "player": 1,
-    "col": 22,
-    "row": 1,
-    "cur_hp": 4,
-    "hp_max": 4,
-    "move": 6,
-    "rng_rng": 4,
-    "rng_dmg": 1,
-    "cc_dmg": 2,
-    "is_ranged": false,
-    "is_melee": true,
-    "alive": true
-  }
-]
+  "units": [
+    {
+      "id": 1,
+      "unit_type": "Intercessor",
+      "player": 0,
+      "col": 23,
+      "row": 17
+    },
+    {
+      "id": 2,
+      "unit_type": "AssaultIntercessor",
+      "player": 0,
+      "col": 1,
+      "row": 17
+    },
+    {
+      "id": 3,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 0,
+      "row": 1
+    },
+    {
+      "id": 4,
+      "unit_type": "AssaultIntercessor",
+      "player": 1,
+      "col": 22,
+      "row": 1
+    }
+  ]
+}
