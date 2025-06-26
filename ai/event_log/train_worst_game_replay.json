@@ -4,8 +4,8 @@
     "format": "web_compatible",
     "game_type": "wh40k_tactics",
     "created": "2025-06-26T21:46:36.391337",
-    "episode_reward": -0.9000000000000004,
-    "total_events": 21,
+    "episode_reward": -6.1,
+    "total_events": 13,
     "source": "training"
   },
   "events": [
@@ -15,8 +15,8 @@
       "timestamp": "2025-06-26T21:46:36.391337",
       "action": {
         "type": "game_action",
-        "action_id": 3,
-        "reward": 0.0
+        "action_id": 5,
+        "reward": 0.1
       },
       "game_state": {
         "turn": 1,
@@ -55,8 +55,8 @@
       "timestamp": "2025-06-26T21:46:36.391337",
       "action": {
         "type": "game_action",
-        "action_id": 2,
-        "reward": 0.05
+        "action_id": 5,
+        "reward": 0.1
       },
       "game_state": {
         "turn": 3,
@@ -75,8 +75,8 @@
       "timestamp": "2025-06-26T21:46:36.391337",
       "action": {
         "type": "game_action",
-        "action_id": 7,
-        "reward": -0.1
+        "action_id": 5,
+        "reward": 0.1
       },
       "game_state": {
         "turn": 4,
@@ -95,8 +95,8 @@
       "timestamp": "2025-06-26T21:46:36.391337",
       "action": {
         "type": "game_action",
-        "action_id": 0,
-        "reward": 0.1
+        "action_id": 1,
+        "reward": -0.05
       },
       "game_state": {
         "turn": 5,
@@ -115,8 +115,8 @@
       "timestamp": "2025-06-26T21:46:36.391337",
       "action": {
         "type": "game_action",
-        "action_id": 3,
-        "reward": 0.0
+        "action_id": 2,
+        "reward": 0.05
       },
       "game_state": {
         "turn": 6,
@@ -135,8 +135,8 @@
       "timestamp": "2025-06-26T21:46:36.391337",
       "action": {
         "type": "game_action",
-        "action_id": 1,
-        "reward": -0.05
+        "action_id": 2,
+        "reward": 0.05
       },
       "game_state": {
         "turn": 7,
@@ -175,8 +175,8 @@
       "timestamp": "2025-06-26T21:46:36.391337",
       "action": {
         "type": "game_action",
-        "action_id": 2,
-        "reward": 0.05
+        "action_id": 6,
+        "reward": -0.5
       },
       "game_state": {
         "turn": 9,
@@ -195,8 +195,8 @@
       "timestamp": "2025-06-26T21:46:36.391337",
       "action": {
         "type": "game_action",
-        "action_id": 2,
-        "reward": 0.05
+        "action_id": 6,
+        "reward": -0.5
       },
       "game_state": {
         "turn": 10,
@@ -215,8 +215,8 @@
       "timestamp": "2025-06-26T21:46:36.391337",
       "action": {
         "type": "game_action",
-        "action_id": 3,
-        "reward": 1.0
+        "action_id": 4,
+        "reward": 0.0
       },
       "game_state": {
         "turn": 11,
@@ -235,8 +235,8 @@
       "timestamp": "2025-06-26T21:46:36.391337",
       "action": {
         "type": "game_action",
-        "action_id": 0,
-        "reward": 0.1
+        "action_id": 6,
+        "reward": -0.5
       },
       "game_state": {
         "turn": 12,
@@ -255,178 +255,18 @@
       "timestamp": "2025-06-26T21:46:36.391337",
       "action": {
         "type": "game_action",
-        "action_id": 1,
-        "reward": -0.05
+        "action_id": 2,
+        "reward": -4.95
       },
       "game_state": {
         "turn": 13,
-        "ai_units_alive": 1,
-        "enemy_units_alive": 2,
-        "game_over": false
-      },
-      "units": {
-        "ai_count": 1,
-        "enemy_count": 2
-      }
-    },
-    {
-      "turn": 14,
-      "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
-      "action": {
-        "type": "game_action",
-        "action_id": 2,
-        "reward": 0.05
-      },
-      "game_state": {
-        "turn": 14,
-        "ai_units_alive": 1,
-        "enemy_units_alive": 2,
-        "game_over": false
-      },
-      "units": {
-        "ai_count": 1,
-        "enemy_count": 2
-      }
-    },
-    {
-      "turn": 15,
-      "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
-      "action": {
-        "type": "game_action",
-        "action_id": 0,
-        "reward": 0.1
-      },
-      "game_state": {
-        "turn": 15,
-        "ai_units_alive": 1,
-        "enemy_units_alive": 2,
-        "game_over": false
-      },
-      "units": {
-        "ai_count": 1,
-        "enemy_count": 2
-      }
-    },
-    {
-      "turn": 16,
-      "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
-      "action": {
-        "type": "game_action",
-        "action_id": 4,
-        "reward": 3.0
-      },
-      "game_state": {
-        "turn": 16,
-        "ai_units_alive": 1,
-        "enemy_units_alive": 1,
-        "game_over": false
-      },
-      "units": {
-        "ai_count": 1,
-        "enemy_count": 1
-      }
-    },
-    {
-      "turn": 17,
-      "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
-      "action": {
-        "type": "game_action",
-        "action_id": 5,
-        "reward": 0.1
-      },
-      "game_state": {
-        "turn": 17,
-        "ai_units_alive": 1,
-        "enemy_units_alive": 1,
-        "game_over": false
-      },
-      "units": {
-        "ai_count": 1,
-        "enemy_count": 1
-      }
-    },
-    {
-      "turn": 18,
-      "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
-      "action": {
-        "type": "game_action",
-        "action_id": 6,
-        "reward": -0.5
-      },
-      "game_state": {
-        "turn": 18,
-        "ai_units_alive": 1,
-        "enemy_units_alive": 1,
-        "game_over": false
-      },
-      "units": {
-        "ai_count": 1,
-        "enemy_count": 1
-      }
-    },
-    {
-      "turn": 19,
-      "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
-      "action": {
-        "type": "game_action",
-        "action_id": 4,
-        "reward": 0.0
-      },
-      "game_state": {
-        "turn": 19,
-        "ai_units_alive": 1,
-        "enemy_units_alive": 1,
-        "game_over": false
-      },
-      "units": {
-        "ai_count": 1,
-        "enemy_count": 1
-      }
-    },
-    {
-      "turn": 20,
-      "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
-      "action": {
-        "type": "game_action",
-        "action_id": 0,
-        "reward": 0.1
-      },
-      "game_state": {
-        "turn": 20,
-        "ai_units_alive": 1,
-        "enemy_units_alive": 1,
-        "game_over": false
-      },
-      "units": {
-        "ai_count": 1,
-        "enemy_count": 1
-      }
-    },
-    {
-      "turn": 21,
-      "type": "ai_action",
-      "timestamp": "2025-06-26T21:46:36.391337",
-      "action": {
-        "type": "game_action",
-        "action_id": 5,
-        "reward": -4.9
-      },
-      "game_state": {
-        "turn": 21,
         "ai_units_alive": 0,
-        "enemy_units_alive": 1,
+        "enemy_units_alive": 2,
         "game_over": true
       },
       "units": {
         "ai_count": 0,
-        "enemy_count": 1
+        "enemy_count": 2
       }
     }
   ]
