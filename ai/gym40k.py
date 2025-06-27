@@ -12,23 +12,57 @@ import random
 
 class W40KEnv(gym.Env):
     """Improved W40K environment with proper win conditions and combat."""
-    
+
     def __init__(self):
         super().__init__()
         
-        # Load scenario
+        # Load scenario - FIXED to handle different JSON structures
         scenario_path = os.path.join(os.path.dirname(__file__), "scenario.json")
         if os.path.exists(scenario_path):
-            with open(scenario_path, 'r') as f:
-                scenario_units = json.load(f)
+            try:
+                with open(scenario_path, 'r') as f:
+                    scenario_data = json.load(f)
+                    
+                # Handle different JSON structures
+                if isinstance(scenario_data, list):
+                    # scenario.json contains a direct list of units
+                    scenario_units = scenario_data
+                elif isinstance(scenario_data, dict):
+                    if "units" in scenario_data:
+                        # scenario.json contains {"units": [...]}
+                        scenario_units = scenario_data["units"]
+                    else:
+                        # scenario.json is a dict with other structure
+                        # Convert dict to list if it's keyed by unit names/ids
+                        scenario_units = list(scenario_data.values())
+                else:
+                    print(f"⚠️  Invalid scenario format: {type(scenario_data)}")
+                    raise ValueError(f"Scenario data must be list or dict, got {type(scenario_data)}")
+                    
+                # Validate that we have units data
+                if not scenario_units:
+                    raise ValueError("No units found in scenario data")
+                    
+                # Validate unit structure
+                for i, unit_data in enumerate(scenario_units):
+                    if not isinstance(unit_data, dict):
+                        raise ValueError(f"Unit {i} is not a dictionary: {type(unit_data)} - {unit_data}")
+                        
+                    # Check required fields
+                    required_fields = ["id", "player", "col", "row", "hp_max"]
+                    for field in required_fields:
+                        if field not in unit_data:
+                            print(f"⚠️  Unit {i} missing field '{field}', using defaults")
+                            
+                print(f"✅ Loaded scenario with {len(scenario_units)} units")
+                
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"❌ Error loading scenario from {scenario_path}: {e}")
+                print("🔧 Using default scenario")
+                scenario_units = self._get_default_scenario()
         else:
-            # Default scenario
-            scenario_units = [
-                {"id": 1, "unit_type": "Intercessor", "player": 0, "col": 23, "row": 12, "cur_hp": 3, "hp_max": 3, "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1, "is_ranged": True, "is_melee": False, "alive": True},
-                {"id": 2, "unit_type": "AssaultIntercessor", "player": 0, "col": 1, "row": 12, "cur_hp": 4, "hp_max": 4, "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2, "is_ranged": False, "is_melee": True, "alive": True},
-                {"id": 3, "unit_type": "Intercessor", "player": 1, "col": 0, "row": 5, "cur_hp": 3, "hp_max": 3, "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1, "is_ranged": True, "is_melee": False, "alive": True},
-                {"id": 4, "unit_type": "AssaultIntercessor", "player": 1, "col": 22, "row": 3, "cur_hp": 4, "hp_max": 4, "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2, "is_ranged": False, "is_melee": True, "alive": True}
-            ]
+            print(f"📋 No scenario file found at {scenario_path}, using default")
+            scenario_units = self._get_default_scenario()
         
         # Initialize units
         self.initial_units = scenario_units
@@ -37,27 +71,83 @@ class W40KEnv(gym.Env):
         
         # Game settings
         self.board_size = (24, 18)
-        self.max_turns = 100  # Increased from 52
+        self.max_turns = 100
         self.current_turn = 0
         self.current_player = 1  # AI is player 1
         self.game_over = False
         self.winner = None
         
         # RL spaces
-        # Observation: 4 units * 7 features each = 28 features
-        # Features: [player, col, row, cur_hp, alive, can_shoot, can_move]
         self.observation_space = spaces.Box(
             low=0, high=max(self.board_size[0], self.board_size[1], 10), 
             shape=(28,), dtype=np.float32
         )
         
-        # Actions: 0=move_closer, 1=move_away, 2=move_safe, 3=shoot_closest, 
-        #          4=shoot_weakest, 5=charge_closest, 6=wait, 7=attack_adjacent
         self.action_space = spaces.Discrete(8)
         
         # Episode tracking
         self.episode_logs = []
         self.current_log = []
+
+    def _get_default_scenario(self):
+        """Get default scenario units."""
+        return [
+            {
+                "id": 1, "unit_type": "Intercessor", "player": 0, 
+                "col": 23, "row": 12, "cur_hp": 3, "hp_max": 3, 
+                "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1, 
+                "is_ranged": True, "is_melee": False, "alive": True
+            },
+            {
+                "id": 2, "unit_type": "AssaultIntercessor", "player": 0, 
+                "col": 1, "row": 12, "cur_hp": 4, "hp_max": 4, 
+                "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2, 
+                "is_ranged": False, "is_melee": True, "alive": True
+            },
+            {
+                "id": 3, "unit_type": "Intercessor", "player": 1, 
+                "col": 0, "row": 5, "cur_hp": 3, "hp_max": 3, 
+                "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1, 
+                "is_ranged": True, "is_melee": False, "alive": True
+            },
+            {
+                "id": 4, "unit_type": "AssaultIntercessor", "player": 1, 
+                "col": 22, "row": 3, "cur_hp": 4, "hp_max": 4, 
+                "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2, 
+                "is_ranged": False, "is_melee": True, "alive": True
+            }
+        ]
+
+    # Also add this to the reset_units method to fix the string indices error:
+
+    def reset_units(self):
+        """Reset units to initial state."""
+        self.units = []
+        for unit_data in self.initial_units:
+            # Validate unit_data is a dictionary
+            if not isinstance(unit_data, dict):
+                print(f"⚠️  Skipping invalid unit data: {unit_data} (type: {type(unit_data)})")
+                continue
+                
+            unit = {
+                "id": unit_data.get("id", len(self.units) + 1),
+                "player": unit_data.get("player", 0),
+                "col": unit_data.get("col", 5),
+                "row": unit_data.get("row", 5),
+                "cur_hp": unit_data.get("cur_hp", unit_data.get("hp_max", 4)),
+                "hp_max": unit_data.get("hp_max", 4),
+                "move": unit_data.get("move", 6),
+                "rng_rng": unit_data.get("rng_rng", 8),
+                "rng_dmg": unit_data.get("rng_dmg", 2),
+                "cc_dmg": unit_data.get("cc_dmg", 1),
+                "is_ranged": unit_data.get("is_ranged", True),
+                "is_melee": unit_data.get("is_melee", False),
+                "alive": unit_data.get("alive", True),
+                "unit_type": unit_data.get("unit_type", "Unknown")
+            }
+            self.units.append(unit)
+        
+        print(f"✅ Reset {len(self.units)} units")
         
     def reset_units(self):
         """Reset units to initial state."""
