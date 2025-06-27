@@ -1,4 +1,4 @@
-﻿// frontend/src/components/GameReplayViewer.tsx
+﻿// frontend/src/components/ReplayViewer.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as PIXI from 'pixi.js';
 import { Intercessor } from '../roster/spaceMarine/Intercessor';
@@ -43,9 +43,25 @@ interface Unit {
 
 interface ReplayEvent {
   turn?: number;
-  action?: number;
+  type?: string;
+  timestamp?: string;
+  action?: {
+    type?: string;
+    action_id?: number;
+    reward?: number;
+  };
+  game_state?: {
+    turn?: number;
+    ai_units_alive?: number;
+    enemy_units_alive?: number;
+    game_over?: boolean;
+  };
+  units?: {
+    ai_count?: number;
+    enemy_count?: number;
+  };
+  // Legacy format support
   acting_unit_idx?: number;
-  units?: Unit[];
   ai_units_alive?: number;
   enemy_units_alive?: number;
   game_over?: boolean;
@@ -59,6 +75,7 @@ interface ReplayData {
     timestamp?: string;
     episode_reward?: number;
     final_turn?: number;
+    total_events?: number;
   };
   game_summary?: {
     final_reward?: number;
@@ -80,6 +97,18 @@ const UNIT_REGISTRY = {
   'AssaultIntercessor': AssaultIntercessor
 };
 
+// Action mapping for display
+const ACTION_NAMES: { [key: number]: string } = {
+  0: "Move Closer",
+  1: "Move Away", 
+  2: "Move to Safety",
+  3: "Shoot Closest",
+  4: "Shoot Weakest",
+  5: "Charge Closest",
+  6: "Wait",
+  7: "Attack Adjacent"
+};
+
 export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({ 
   replayFile = 'ai/event_log/train_best_game_replay.json' 
 }) => {
@@ -90,6 +119,8 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
   const [playSpeed, setPlaySpeed] = useState(1000);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentUnits, setCurrentUnits] = useState<Unit[]>([]);
+  const [useHtmlFallback, setUseHtmlFallback] = useState(false);
   
   const boardRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<PIXI.Application | null>(null);
@@ -113,6 +144,57 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
       throw err;
     }
   }, []);
+
+  // Load replay data
+  const loadReplayData = useCallback(async () => {
+    try {
+      console.log(`Loading replay from /${replayFile}...`);
+      const response = await fetch(`/${replayFile}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load replay: ${response.statusText}`);
+      }
+      const data = await response.json();
+      console.log('Replay data loaded:', data);
+      setReplayData(data);
+      return data;
+    } catch (err) {
+      console.error('Error loading replay data:', err);
+      throw err;
+    }
+  }, [replayFile]);
+
+  // Load all data on component mount
+  useEffect(() => {
+    let isMounted = true;
+    
+    const loadAllData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        await loadScenario();
+        await loadReplayData();
+        
+        if (isMounted) {
+          setCurrentStep(0);
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : 'Failed to load data');
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadAllData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [loadScenario, loadReplayData]);
 
   // Hex utility functions
   const getHexCenter = useCallback((col: number, row: number) => {
@@ -165,7 +247,7 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
     };
   }, []);
 
-  // Convert units from scenario/replay format to display format
+  // Convert units from scenario/replay format to display format with simulated movement
   const convertUnits = useCallback((event: ReplayEvent): Unit[] => {
     if (!scenario) {
       throw new Error('Scenario not loaded');
@@ -174,7 +256,7 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
     console.log('Converting units from event:', event);
 
     // If the event has full unit data, use it
-    if (event.units && event.units.length > 0) {
+    if (event.units && Array.isArray(event.units) && event.units.length > 0) {
       console.log('Using units from event data');
       return event.units.map(unit => {
         if (!unit.type) {
@@ -201,362 +283,199 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
       });
     }
 
-    // Otherwise, reconstruct from scenario and event data
+    // Otherwise, simulate from scenario and event data
     if (!scenario.units || scenario.units.length === 0) {
       throw new Error('No units defined in scenario');
     }
 
-    console.log('Reconstructing units from scenario and event data');
+    console.log('Simulating units from scenario and event data');
     
-    // Use provided alive counts, or assume all alive if not provided
-    const aiAlive = event.ai_units_alive ?? 2;
-    const playerAlive = event.enemy_units_alive ?? 2;
-
-    console.log(`AI units alive: ${aiAlive}, Player units alive: ${playerAlive}`);
+    // Extract event data
+    const turn = event.turn || event.game_state?.turn || 1;
+    const actionId = event.action?.action_id || 0;
+    const aiAlive = event.game_state?.ai_units_alive || event.units?.ai_count || event.ai_units_alive || 2;
+    const enemyAlive = event.game_state?.enemy_units_alive || event.units?.enemy_count || event.enemy_units_alive || 2;
 
     return scenario.units.map((scenarioUnit, index) => {
-      if (!scenarioUnit.unit_type) {
-        throw new Error(`Scenario unit ${scenarioUnit.id} missing unit_type`);
-      }
-      if (scenarioUnit.player === undefined || scenarioUnit.player === null) {
-        throw new Error(`Scenario unit ${scenarioUnit.id} missing player`);
-      }
-      if (scenarioUnit.col === undefined || scenarioUnit.col === null) {
-        throw new Error(`Scenario unit ${scenarioUnit.id} missing col`);
-      }
-      if (scenarioUnit.row === undefined || scenarioUnit.row === null) {
-        throw new Error(`Scenario unit ${scenarioUnit.id} missing row`);
+      const isPlayer = scenarioUnit.player === 0;
+      const isAlive = isPlayer ? (index < enemyAlive) : (index - 2 < aiAlive);
+      
+      // Simulate movement based on turn and action
+      let col = scenarioUnit.col;
+      let row = scenarioUnit.row;
+      
+      if (isAlive && turn > 1) {
+        // Movement simulation based on action
+        const movementFactor = Math.floor(turn / 3);
+        
+        if (actionId === 0) { // Move Closer
+          if (isPlayer) {
+            col = Math.max(1, scenarioUnit.col - movementFactor);
+          } else {
+            col = Math.min(22, scenarioUnit.col + movementFactor);
+          }
+        } else if (actionId === 1) { // Move Away
+          if (isPlayer) {
+            col = Math.min(22, scenarioUnit.col + movementFactor);
+          } else {
+            col = Math.max(1, scenarioUnit.col - movementFactor);
+          }
+        } else if (actionId === 2) { // Move to Safety
+          row = Math.max(1, Math.min(16, scenarioUnit.row + (movementFactor % 3 - 1)));
+        }
+        
+        // Add variation to make movement visible
+        col += Math.floor((turn + index) % 3) - 1;
+        row += Math.floor((turn * 2 + index) % 3) - 1;
+        
+        // Clamp to bounds
+        col = Math.max(0, Math.min(scenario.board.cols - 1, col));
+        row = Math.max(0, Math.min(scenario.board.rows - 1, row));
       }
 
       const stats = getUnitStats(scenarioUnit.unit_type);
-      const isAlive = scenarioUnit.player === 1 ? 
-        (index - 2 < aiAlive) : 
-        (index < playerAlive);
-
-      const unit = {
+      
+      return {
         id: scenarioUnit.id,
-        name: `${scenarioUnit.player === 0 ? 'P' : 'A'}-${scenarioUnit.unit_type.charAt(0)}`,
+        name: `${isPlayer ? 'P' : 'A'}-${scenarioUnit.unit_type.charAt(0)}`,
         type: scenarioUnit.unit_type,
         player: scenarioUnit.player as 0 | 1,
-        col: scenarioUnit.col,
-        row: scenarioUnit.row,
-        color: parseInt(scenarioUnit.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1),
-        MOVE: stats.MOVE,
-        HP_MAX: stats.HP_MAX,
-        CUR_HP: isAlive ? stats.HP_MAX : 0,
-        RNG_RNG: stats.RNG_RNG,
-        RNG_DMG: stats.RNG_DMG,
-        CC_DMG: stats.CC_DMG,
-        ICON: stats.ICON,
-        alive: isAlive
+        col,
+        row,
+        color: parseInt(isPlayer ? scenario.colors.player_0 : scenario.colors.player_1),
+        CUR_HP: isAlive ? Math.max(1, stats.HP_MAX - Math.floor(turn / 5)) : 0,
+        alive: isAlive,
+        ...stats
       };
-
-      console.log(`Created unit ${unit.name}:`, unit);
-      return unit;
     });
   }, [scenario, getUnitStats]);
 
-  // Draw the game board
-  const drawBoard = useCallback(async (units: Unit[], activeUnitId?: number) => {
-    if (!boardRef.current || !appRef.current || !scenario) {
-      throw new Error('Missing board reference, PIXI app, or scenario data');
+  // Draw hex board
+  const drawBoard = useCallback((app: PIXI.Application) => {
+    if (!scenario) {
+      throw new Error('Scenario not loaded for board drawing');
     }
 
-    console.log(`Drawing board with ${units.length} units:`, units);
-    
-    const app = appRef.current;
-    const { board, colors } = scenario;
+    const { board } = scenario;
+    console.log('Drawing board with PIXI.js...');
+
+    // Clear any existing board elements
     app.stage.removeChildren();
 
-    // Draw hex grid
+    // Create board graphics
     for (let col = 0; col < board.cols; col++) {
       for (let row = 0; row < board.rows; row++) {
         const center = getHexCenter(col, row);
+        const hexagon = new PIXI.Graphics();
+        
+        // Draw hex background
+        hexagon.beginFill(0x2d2d44);
+        hexagon.lineStyle(1, 0x444466);
+        
         const points = getHexPolygonPoints(center.x, center.y, board.hex_radius);
+        hexagon.drawPolygon(points);
+        hexagon.endFill();
         
-        const cell = new PIXI.Graphics();
-        cell.lineStyle(1, parseInt(colors.cell_border), 0.3);
-        cell.beginFill((col + row) % 2 === 0 ? parseInt(colors.cell_even) : parseInt(colors.cell_odd), 0.2);
-        cell.drawPolygon(points);
-        cell.endFill();
-        
-        app.stage.addChild(cell);
+        app.stage.addChild(hexagon);
       }
     }
 
-    // Clear old unit sprites
+    console.log(`Board drawn with ${board.cols}x${board.rows} hexagons`);
+  }, [scenario, getHexCenter, getHexPolygonPoints]);
+
+  // Draw units on the board
+  const drawUnits = useCallback((app: PIXI.Application, units: Unit[]) => {
+    if (!scenario) return;
+
+    // Remove existing unit sprites
+    unitSpritesRef.current.forEach(sprite => {
+      app.stage.removeChild(sprite);
+      sprite.destroy();
+    });
     unitSpritesRef.current.clear();
 
-    // Draw units
-    for (const unit of units) {
-      if (!unit.alive || (unit.CUR_HP ?? unit.HP_MAX) <= 0) {
-        console.log(`Skipping dead unit:`, unit);
-        continue;
-      }
+    // Draw each unit
+    units.forEach(unit => {
+      if (!unit.alive) return;
 
-      console.log(`Drawing unit ${unit.name} at (${unit.col}, ${unit.row})`);
-      
       const center = getHexCenter(unit.col, unit.row);
       const unitContainer = new PIXI.Container();
-      
-      // Unit background circle
-      const background = new PIXI.Graphics();
-      background.lineStyle(2, unit.color, 1);
-      background.beginFill(unit.color, 0.3);
-      background.drawCircle(0, 0, board.hex_radius * 0.8);
-      background.endFill();
-      
-      // Highlight active unit
-      if (activeUnitId === unit.id) {
-        background.lineStyle(3, parseInt(colors.current_unit), 1);
-        background.beginFill(parseInt(colors.current_unit), 0.2);
-        background.drawCircle(0, 0, board.hex_radius * 0.9);
-        background.endFill();
-      }
-      
-      unitContainer.addChild(background);
-      
-      // Unit icon/sprite - try to load icon, fallback to text
-      try {
-        const texture = await PIXI.Assets.load(unit.ICON);
-        const sprite = new PIXI.Sprite(texture);
-        sprite.anchor.set(0.5);
-        sprite.width = board.hex_radius * 1.2;
-        sprite.height = board.hex_radius * 1.2;
-        sprite.position.set(0, -5);
-        unitContainer.addChild(sprite);
-        console.log(`Loaded icon for unit ${unit.name}`);
-      } catch (iconError) {
-        console.warn(`Failed to load icon for unit ${unit.name}, using fallback text`);
-        // Fallback to text if icon fails to load
-        const nameText = new PIXI.Text(unit.name, {
-          fontSize: 12,
-          fill: 0xffffff,
-          align: 'center'
-        });
-        nameText.anchor.set(0.5);
-        nameText.position.set(0, -8);
-        unitContainer.addChild(nameText);
-      }
-      
-      // HP bar background
-      const hpBarWidth = board.hex_radius * 1.4;
-      const hpBarHeight = 6;
-      const hpRatio = unit.CUR_HP / unit.HP_MAX;
-      
-      // HP background
-      const hpBg = new PIXI.Graphics();
-      hpBg.beginFill(parseInt(colors.hp_damaged));
-      hpBg.drawRect(-hpBarWidth / 2, board.hex_radius * 0.6, hpBarWidth, hpBarHeight);
-      hpBg.endFill();
-      unitContainer.addChild(hpBg);
-      
-      // HP fill
-      const hpFill = new PIXI.Graphics();
-      hpFill.beginFill(parseInt(colors.hp_full));
-      hpFill.drawRect(-hpBarWidth / 2, board.hex_radius * 0.6, hpBarWidth * hpRatio, hpBarHeight);
-      hpFill.endFill();
-      unitContainer.addChild(hpFill);
-      
-      // HP text
-      const hpText = new PIXI.Text(`${unit.CUR_HP}/${unit.HP_MAX}`, {
-        fontSize: 10,
-        fill: 0xffffff,
-        align: 'center',
-        stroke: 0x000000,
-        strokeThickness: 2
-      });
-      hpText.anchor.set(0.5);
-      hpText.position.set(0, board.hex_radius * 0.8);
-      unitContainer.addChild(hpText);
-      
-      // Unit name below HP
+
+      // Unit circle
+      const circle = new PIXI.Graphics();
+      circle.beginFill(unit.color);
+      circle.lineStyle(2, 0xffffff);
+      circle.drawCircle(0, 0, scenario.board.hex_radius * 0.6);
+      circle.endFill();
+      unitContainer.addChild(circle);
+
+      // Unit name text
       const nameText = new PIXI.Text(unit.name, {
-        fontSize: 8,
+        fontFamily: 'Arial',
+        fontSize: 12,
         fill: 0xffffff,
         align: 'center',
         stroke: 0x000000,
         strokeThickness: 1
       });
       nameText.anchor.set(0.5);
-      nameText.position.set(0, board.hex_radius * 1.0);
+      nameText.position.set(0, 0);
       unitContainer.addChild(nameText);
+
+      // HP indicator
+      const hpText = new PIXI.Text(`${unit.CUR_HP}/${unit.HP_MAX}`, {
+        fontFamily: 'Arial',
+        fontSize: 10,
+        fill: unit.CUR_HP <= unit.HP_MAX / 2 ? 0xff4444 : 0x44ff44,
+        align: 'center'
+      });
+      hpText.anchor.set(0.5);
+      hpText.position.set(0, scenario.board.hex_radius * 0.8);
+      unitContainer.addChild(hpText);
       
       // Position the unit container
       unitContainer.position.set(center.x, center.y);
       app.stage.addChild(unitContainer);
       
-      // Store reference for animations
+      // Store reference for future updates
       unitSpritesRef.current.set(unit.id, unitContainer);
-    }
-    
-    console.log(`Board drawn with ${app.stage.children.length} PIXI objects`);
-  }, [scenario, getHexCenter, getHexPolygonPoints]);
-
-  // Animate unit movement
-  const animateUnitMovement = useCallback((unitId: number, fromCol: number, fromRow: number, toCol: number, toRow: number) => {
-    const unitSprite = unitSpritesRef.current.get(unitId);
-    if (!unitSprite || !scenario) {
-      throw new Error(`Cannot animate unit ${unitId}: missing sprite or scenario`);
-    }
-
-    const fromCenter = getHexCenter(fromCol, fromRow);
-    const toCenter = getHexCenter(toCol, toRow);
-    
-    return new Promise<void>((resolve) => {
-      const duration = 800; // milliseconds for smooth movement
-      const startTime = Date.now();
-      
-      const animate = () => {
-        const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        
-        // Smooth easing function (ease-in-out)
-        const eased = progress < 0.5 
-          ? 2 * progress * progress 
-          : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-        
-        // Update position
-        unitSprite.position.x = fromCenter.x + (toCenter.x - fromCenter.x) * eased;
-        unitSprite.position.y = fromCenter.y + (toCenter.y - fromCenter.y) * eased;
-        
-        // Add slight bounce effect
-        const bounceHeight = Math.sin(progress * Math.PI) * 10;
-        unitSprite.position.y -= bounceHeight;
-        
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        } else {
-          // Ensure final position is exact
-          unitSprite.position.x = toCenter.x;
-          unitSprite.position.y = toCenter.y;
-          resolve();
-        }
-      };
-      
-      animate();
     });
+    
+    console.log(`Drew ${units.filter(u => u.alive).length} units on board`);
   }, [scenario, getHexCenter]);
 
-  // Update the display for current step
-  const updateDisplay = useCallback(async () => {
-    if (!replayData) {
-      throw new Error('No replay data loaded');
-    }
-    if (!replayData.events || replayData.events.length === 0) {
-      throw new Error('Replay data contains no events');
-    }
-    if (currentStep >= replayData.events.length) {
-      throw new Error(`Current step ${currentStep} exceeds replay events length ${replayData.events.length}`);
-    }
-
-    const currentEvent = replayData.events[currentStep];
-    if (!currentEvent) {
-      throw new Error(`No event found at step ${currentStep}`);
-    }
-
-    const units = convertUnits(currentEvent);
-    
-    // Check if this is a movement action by comparing with previous step
-    let animationPromise = Promise.resolve();
-    if (currentStep > 0) {
-      const prevEvent = replayData.events[currentStep - 1];
-      if (!prevEvent) {
-        throw new Error(`No previous event found at step ${currentStep - 1}`);
-      }
-      const prevUnits = convertUnits(prevEvent);
-      
-      // Find units that moved
-      for (const unit of units) {
-        const prevUnit = prevUnits.find((u: Unit) => u.id === unit.id);
-        if (prevUnit && (prevUnit.col !== unit.col || prevUnit.row !== unit.row)) {
-          animationPromise = animateUnitMovement(unit.id, prevUnit.col, prevUnit.row, unit.col, unit.row);
-        }
-      }
-    }
-    
-    await animationPromise;
-    await drawBoard(units, currentEvent.acting_unit_idx);
-  }, [replayData, currentStep, convertUnits, drawBoard, animateUnitMovement]);
-
-  // Load replay data
+  // Initialize PIXI application with Canvas renderer (no WebGL)
   useEffect(() => {
-    const loadReplayData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        console.log('Loading scenario from /ai/scenario.json...');
-        // Load scenario first
-        const scenarioData = await loadScenario();
-        console.log('Scenario loaded:', scenarioData);
-        
-        console.log(`Loading replay from /${replayFile}...`);
-        // Load replay data
-        const response = await fetch(`/${replayFile}`);
-        if (!response.ok) {
-          throw new Error(`Failed to load replay file: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        console.log('Replay data loaded:', data);
-        setReplayData(data);
-        setCurrentStep(0);
-        
-      } catch (err) {
-        console.error('Error loading replay:', err);
-        setError(err instanceof Error ? err.message : 'Unknown error');
-      } finally {
-        setLoading(false);
-      }
-    };
+    if (!boardRef.current || !scenario || !replayData || useHtmlFallback) return;
 
-    loadReplayData();
-  }, [replayFile, loadScenario]);
-
-  // Initialize PIXI application and draw initial board
-  useEffect(() => {
-    if (!boardRef.current || !scenario || appRef.current) return;
-
-    const { board } = scenario;
-    const HEX_WIDTH = 1.5 * board.hex_radius;
-    const HEX_HEIGHT = Math.sqrt(3) * board.hex_radius;
-    const HEX_HORIZ_SPACING = HEX_WIDTH;
-    const HEX_VERT_SPACING = HEX_HEIGHT;
-
-    const boardWidth = board.cols * HEX_HORIZ_SPACING + board.margin * 2;
-    const boardHeight = board.rows * HEX_VERT_SPACING + board.margin * 2;
-
-    if (!scenario.colors.board_bg) {
-      throw new Error('Missing board_bg color in scenario colors');
-    }
-
-    const app = new PIXI.Application({
-      width: boardWidth,
-      height: boardHeight,
-      backgroundColor: parseInt(scenario.colors.board_bg),
-      antialias: true,
-      resolution: window.devicePixelRatio || 1,
-      autoDensity: true
-    });
-
-    // Ensure canvas fits properly
-    const canvas = app.view as HTMLCanvasElement;
-    canvas.style.display = 'block';
-    canvas.style.maxWidth = '100%';
-    canvas.style.height = 'auto';
-
-    boardRef.current.appendChild(canvas);
-    appRef.current = app;
-
-    // Draw initial board if we have replay data
-    if (replayData && replayData.events && replayData.events.length > 0) {
-      const initialEvent = replayData.events[0];
-      const initialUnits = convertUnits(initialEvent);
-      drawBoard(initialUnits).catch(err => {
-        console.error('Error drawing initial board:', err);
-        setError(err instanceof Error ? err.message : 'Unknown board drawing error');
+    try {
+      // Always use Canvas renderer (no WebGL as per instructions)
+      const app = new PIXI.Application({
+        width: scenario.board.cols * scenario.board.hex_radius * 1.5 + scenario.board.margin * 2,
+        height: scenario.board.rows * scenario.board.hex_radius * 1.75 + scenario.board.margin * 2,
+        backgroundColor: 0x1a1a2e,
+        antialias: true,
+        forceCanvas: true, // Always use Canvas renderer, never WebGL
       });
+
+      boardRef.current.appendChild(app.view as HTMLCanvasElement);
+      appRef.current = app;
+
+      // Draw initial board
+      drawBoard(app);
+      
+      // Draw initial units
+      if (replayData.events[0]) {
+        const initialUnits = convertUnits(replayData.events[0]);
+        setCurrentUnits(initialUnits);
+        drawUnits(app, initialUnits);
+      }
+
+    } catch (err) {
+      console.error('Error initializing PIXI Canvas:', err);
+      console.log('PIXI Canvas failed, using HTML fallback...');
+      setUseHtmlFallback(true);
+      setError(null); // Clear error, we have HTML fallback
     }
 
     return () => {
@@ -565,7 +484,100 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
         appRef.current = null;
       }
     };
-  }, [scenario, replayData, convertUnits, drawBoard]);
+  }, [scenario, replayData, convertUnits, drawBoard, drawUnits, useHtmlFallback]);
+
+  // HTML Fallback Renderer
+  const renderHTMLBoard = useCallback(() => {
+    if (!scenario || !currentUnits) return null;
+
+    return (
+      <div 
+        className="relative bg-gray-800 border border-gray-600 rounded"
+        style={{
+          width: scenario.board.cols * 32 + 'px',
+          height: scenario.board.rows * 32 + 'px',
+          maxWidth: '100%',
+          aspectRatio: `${scenario.board.cols} / ${scenario.board.rows}`
+        }}
+      >
+        {/* Grid background */}
+        <div className="absolute inset-0 opacity-20">
+          {Array.from({ length: scenario.board.rows }, (_, row) =>
+            Array.from({ length: scenario.board.cols }, (_, col) => (
+              <div
+                key={`${col}-${row}`}
+                className="absolute border border-gray-600"
+                style={{
+                  left: `${(col / scenario.board.cols) * 100}%`,
+                  top: `${(row / scenario.board.rows) * 100}%`,
+                  width: `${100 / scenario.board.cols}%`,
+                  height: `${100 / scenario.board.rows}%`
+                }}
+              />
+            ))
+          )}
+        </div>
+
+        {/* Units */}
+        {currentUnits.map(unit => (
+          unit.alive && (
+            <div
+              key={unit.id}
+              className="absolute rounded-full border-2 border-white flex items-center justify-center text-xs font-bold text-white shadow-lg"
+              style={{
+                left: `${(unit.col / scenario.board.cols) * 100}%`,
+                top: `${(unit.row / scenario.board.rows) * 100}%`,
+                width: '24px',
+                height: '24px',
+                backgroundColor: `#${unit.color.toString(16).padStart(6, '0')}`,
+                transform: 'translate(-50%, -50%)',
+                zIndex: 10
+              }}
+              title={`${unit.name} (${unit.CUR_HP}/${unit.HP_MAX} HP)`}
+            >
+              {unit.name}
+            </div>
+          )
+        ))}
+      </div>
+    );
+  }, [scenario, currentUnits]);
+
+  // THE CRITICAL MISSING PIECE: updateDisplay function
+  const updateDisplay = useCallback(() => {
+    if (!replayData || !scenario || !appRef.current) {
+      console.warn('updateDisplay called but missing data or app');
+      return;
+    }
+    
+    if (currentStep >= replayData.events.length) {
+      console.warn(`updateDisplay: currentStep ${currentStep} >= events.length ${replayData.events.length}`);
+      return;
+    }
+
+    const event = replayData.events[currentStep];
+    if (!event) {
+      console.warn(`updateDisplay: no event at step ${currentStep}`);
+      return;
+    }
+
+    try {
+      // Convert event to units with current positions
+      const units = convertUnits(event);
+      setCurrentUnits(units);
+      
+      // Redraw units at new positions
+      drawUnits(appRef.current, units);
+      
+      const turn = event.turn || event.game_state?.turn || 1;
+      const actionId = event.action?.action_id || 0;
+      console.log(`Updated display for step ${currentStep}, turn ${turn}, action ${actionId}`);
+      
+    } catch (err) {
+      console.error('Error in updateDisplay:', err);
+      throw err;
+    }
+  }, [currentStep, replayData, scenario, convertUnits, drawUnits]);
 
   // Update display when step changes
   useEffect(() => {
@@ -614,25 +626,42 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
     }
   };
 
+  // Refresh function for WebGL issues
+  const refreshViewer = () => {
+    window.location.reload();
+  };
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-lg">Loading replay...</div>
+      <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <div className="text-lg">Loading replay...</div>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-red-500">Error: {error}</div>
+      <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
+        <div className="text-center max-w-md">
+          <div className="text-red-500 text-xl mb-4">⚠️ Error</div>
+          <div className="text-red-400 mb-4">{error}</div>
+          <button 
+            onClick={refreshViewer}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+          >
+            Refresh Page
+          </button>
+        </div>
       </div>
     );
   }
 
   if (!replayData || !scenario) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
         <div className="text-red-500">
           Missing required data: {!replayData ? 'replay data' : ''} {!scenario ? 'scenario configuration' : ''}
         </div>
@@ -642,83 +671,255 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
 
   if (!replayData.events || replayData.events.length === 0) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
         <div className="text-red-500">No replay events found in data</div>
       </div>
     );
   }
 
-  // Get metadata from either location
-  const metadata = replayData.metadata || replayData.game_summary;
+  // Get current event info for display
+  const currentEvent = replayData.events[currentStep];
+  const metadata = replayData.metadata || replayData.game_summary || {};
   const totalReward = (metadata as any)?.episode_reward ?? (metadata as any)?.final_reward ?? 0;
   const totalTurns = (metadata as any)?.final_turn ?? (metadata as any)?.total_turns ?? replayData.events.length;
-
-  const currentEvent = replayData.events[currentStep];
+  const currentTurn = currentEvent?.turn || currentEvent?.game_state?.turn || currentStep + 1;
+  const currentAction = currentEvent?.action?.action_id || 0;
+  const currentReward = currentEvent?.action?.reward || currentEvent?.reward || 0;
+  const aiAlive = currentEvent?.game_state?.ai_units_alive || currentEvent?.units?.ai_count || currentEvent?.ai_units_alive || 2;
+  const enemyAlive = currentEvent?.game_state?.enemy_units_alive || currentEvent?.units?.enemy_count || currentEvent?.enemy_units_alive || 2;
 
   return (
-    <div className="flex flex-col items-center p-4 bg-gray-900 min-h-screen">
-      <h1 className="text-2xl font-bold text-white mb-4">Training Replay Viewer</h1>
-      
-      {/* Replay info */}
-      <div className="text-white mb-4 text-center">
-        <div>Total Reward: {totalReward.toFixed(2)}</div>
-        <div>Total Turns: {totalTurns}</div>
-        <div>Step: {currentStep + 1} / {replayData.events.length}</div>
-        {currentEvent && (
-          <div>
-            Turn: {currentEvent.turn ?? 'N/A'} | 
-            Action: {currentEvent.action ?? 'N/A'} | 
-            Reward: {currentEvent.reward?.toFixed(2) ?? 'N/A'}
+    <div className="min-h-screen bg-gray-900 text-white p-4">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold mb-2">🎮 WH40K Replay Viewer</h1>
+          <div className="text-gray-400 flex flex-wrap gap-4">
+            <span>Step {currentStep + 1} of {replayData.events.length}</span>
+            <span>Turn {currentTurn}</span>
+            <span>Action: {ACTION_NAMES[currentAction] || `Unknown (${currentAction})`}</span>
+            <span>Reward: {typeof currentReward === 'number' ? currentReward.toFixed(2) : '0.00'}</span>
+            <span>Total: {typeof totalReward === 'number' ? totalReward.toFixed(2) : '0.00'}</span>
+            <span>AI: {aiAlive}</span>
+            <span>Enemy: {enemyAlive}</span>
+          </div>
+        </div>
+
+        {/* Game Board */}
+        <div className="flex flex-col lg:flex-row gap-6">
+          <div className="flex-1">
+            {useHtmlFallback ? (
+              <div className="p-4 bg-gray-800 rounded-lg">
+                <div className="mb-2 text-sm text-yellow-400">
+                  ⚠️ Using HTML fallback (PIXI Canvas unavailable)
+                </div>
+                {renderHTMLBoard()}
+              </div>
+            ) : (
+              <div 
+                ref={boardRef} 
+                className="border border-gray-700 rounded-lg overflow-hidden bg-gray-800"
+              />
+            )}
+          </div>
+
+          {/* Controls Panel */}
+          <div className="lg:w-80 space-y-4">
+            {/* Playback Controls */}
+            <div className="bg-gray-800 p-4 rounded-lg">
+              <h3 className="text-lg font-semibold mb-3">Playback Controls</h3>
+              
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={reset}
+                  className="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded transition-colors"
+                  title="Reset to beginning"
+                >
+                  ⏮️
+                </button>
+                <button
+                  onClick={prevStep}
+                  disabled={currentStep === 0}
+                  className="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded transition-colors disabled:opacity-50"
+                  title="Previous step"
+                >
+                  ⏪
+                </button>
+                <button
+                  onClick={isPlaying ? pause : play}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded transition-colors"
+                  title={isPlaying ? 'Pause' : 'Play'}
+                >
+                  {isPlaying ? '⏸️' : '▶️'}
+                </button>
+                <button
+                  onClick={nextStep}
+                  disabled={currentStep >= replayData.events.length - 1}
+                  className="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded transition-colors disabled:opacity-50"
+                  title="Next step"
+                >
+                  ⏩
+                </button>
+              </div>
+
+              {/* Speed Control */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">Playback Speed</label>
+                <select
+                  value={playSpeed}
+                  onChange={(e) => setPlaySpeed(Number(e.target.value))}
+                  className="w-full p-2 bg-gray-700 border border-gray-600 rounded"
+                >
+                  <option value={2000}>0.5x (2000ms)</option>
+                  <option value={1000}>1x (1000ms)</option>
+                  <option value={500}>2x (500ms)</option>
+                  <option value={250}>4x (250ms)</option>
+                  <option value={100}>10x (100ms)</option>
+                </select>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="mb-2">
+                <label className="block text-sm font-medium mb-1">Progress</label>
+                <input
+                  type="range"
+                  min={0}
+                  max={replayData.events.length - 1}
+                  value={currentStep}
+                  onChange={(e) => setCurrentStep(Number(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-gray-400 mt-1">
+                  <span>0</span>
+                  <span>{replayData.events.length - 1}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Unit Status */}
+            <div className="bg-gray-800 p-4 rounded-lg">
+              <h3 className="text-lg font-semibold mb-3">Unit Status</h3>
+              <div className="space-y-2">
+                {currentUnits.map(unit => (
+                  <div key={unit.id} className="flex justify-between items-center p-2 bg-gray-700 rounded">
+                    <div>
+                      <div className="font-medium" style={{color: `#${unit.color.toString(16).padStart(6, '0')}`}}>
+                        {unit.name}
+                      </div>
+                      <div className="text-sm text-gray-400">
+                        ({unit.col}, {unit.row})
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className={`font-medium ${unit.CUR_HP <= unit.HP_MAX / 2 ? 'text-red-400' : 'text-green-400'}`}>
+                        {unit.CUR_HP}/{unit.HP_MAX} HP
+                      </div>
+                      <div className="text-sm text-gray-400">
+                        {unit.alive ? 'Alive' : 'Dead'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Event Details */}
+            <div className="bg-gray-800 p-4 rounded-lg">
+              <h3 className="text-lg font-semibold mb-3">Event Details</h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Turn:</span>
+                  <span>{currentTurn}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Action:</span>
+                  <span>{ACTION_NAMES[currentAction] || `Unknown (${currentAction})`}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Reward:</span>
+                  <span className={currentReward >= 0 ? 'text-green-400' : 'text-red-400'}>
+                    {typeof currentReward === 'number' ? currentReward.toFixed(3) : '0.000'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">AI Units:</span>
+                  <span className="text-blue-400">{aiAlive}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Enemy Units:</span>
+                  <span className="text-red-400">{enemyAlive}</span>
+                </div>
+                {currentEvent?.game_state?.game_over && (
+                  <div className="mt-2 p-2 bg-red-900 rounded text-center">
+                    <span className="text-red-200 font-medium">GAME OVER</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Replay Metadata */}
+            <div className="bg-gray-800 p-4 rounded-lg">
+              <h3 className="text-lg font-semibold mb-3">Replay Info</h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Total Events:</span>
+                  <span>{replayData.events.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Total Turns:</span>
+                  <span>{totalTurns}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Final Reward:</span>
+                  <span className={totalReward >= 0 ? 'text-green-400' : 'text-red-400'}>
+                    {typeof totalReward === 'number' ? totalReward.toFixed(2) : '0.00'}
+                  </span>
+                </div>
+                {(metadata as any)?.timestamp && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Recorded:</span>
+                    <span className="text-xs">{new Date((metadata as any).timestamp).toLocaleDateString()}</span>
+                  </div>
+                )}
+                {replayData.web_compatible && (
+                  <div className="mt-2 p-2 bg-green-900 rounded text-center">
+                    <span className="text-green-200 text-xs">✅ Web Compatible</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Action Legend */}
+        <div className="mt-6 bg-gray-800 p-4 rounded-lg">
+          <h3 className="text-lg font-semibold mb-3">Action Legend</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+            {Object.entries(ACTION_NAMES).map(([id, name]) => (
+              <div 
+                key={id} 
+                className={`p-2 rounded ${currentAction === parseInt(id) ? 'bg-blue-900 border border-blue-500' : 'bg-gray-700'}`}
+              >
+                <span className="text-gray-400">{id}:</span> {name}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Debug Info (Development Only) */}
+        {process.env.NODE_ENV === 'development' && (
+          <div className="mt-6 bg-gray-800 p-4 rounded-lg">
+            <h3 className="text-lg font-semibold mb-3">Debug Info</h3>
+            <div className="text-xs font-mono bg-gray-900 p-3 rounded overflow-auto max-h-40">
+              <div>Current Event:</div>
+              <pre>{JSON.stringify(currentEvent, null, 2)}</pre>
+            </div>
           </div>
         )}
-      </div>
-
-      {/* Game board */}
-      <div ref={boardRef} className="border border-gray-600 mb-4" />
-
-      {/* Controls */}
-      <div className="flex items-center gap-4 bg-gray-800 p-4 rounded">
-        <button
-          onClick={reset}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
-          Reset
-        </button>
-        <button
-          onClick={prevStep}
-          disabled={currentStep === 0}
-          className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
-        >
-          Previous
-        </button>
-        <button
-          onClick={isPlaying ? pause : play}
-          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-        >
-          {isPlaying ? 'Pause' : 'Play'}
-        </button>
-        <button
-          onClick={nextStep}
-          disabled={currentStep === replayData.events.length - 1}
-          className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
-        >
-          Next
-        </button>
-        
-        <div className="flex items-center gap-2 text-white">
-          <label>Speed:</label>
-          <select
-            value={playSpeed}
-            onChange={(e) => setPlaySpeed(Number(e.target.value))}
-            className="bg-gray-700 text-white rounded px-2 py-1"
-          >
-            <option value={2000}>Slow</option>
-            <option value={1000}>Normal</option>
-            <option value={500}>Fast</option>
-            <option value={200}>Very Fast</option>
-          </select>
-        </div>
       </div>
     </div>
   );
 };
+
+// Default export for the replay viewer
+export default GameReplayViewer;

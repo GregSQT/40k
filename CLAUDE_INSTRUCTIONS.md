@@ -2,6 +2,7 @@
 
 ## Core Environment
 - PowerShell for prompts, TypeScript/React for scripts
+- Web display : PIXI.js Canvas + HTML Fallback Strategy
 - Always answer in English
 - Use ai\event_log\train_best_game_replay.json for replay checking
 - French Windows version compatibility

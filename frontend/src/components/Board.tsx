@@ -112,7 +112,9 @@ export default function Board({
       antialias: true,
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
+      forceCanvas: true, // 🔥 FORCE Canvas mode - NO WebGL!
     });
+    
     containerRef.current.appendChild(app.view as unknown as HTMLCanvasElement);
     if (app.view && app.view.style) {
       app.view.style.width = `${width}px`;
