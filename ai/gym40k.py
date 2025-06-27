@@ -1,3 +1,4 @@
+# ai/gym40k.py
 #!/usr/bin/env python3
 """
 ai/gym40k.py - Improved W40K environment with proper game logic
@@ -9,6 +10,7 @@ from gymnasium import spaces
 import json
 import os
 import random
+from datetime import datetime
 
 class W40KEnv(gym.Env):
     """Improved W40K environment with proper win conditions and combat."""
@@ -36,33 +38,30 @@ class W40KEnv(gym.Env):
                         # Convert dict to list if it's keyed by unit names/ids
                         scenario_units = list(scenario_data.values())
                 else:
-                    print(f"⚠️  Invalid scenario format: {type(scenario_data)}")
                     raise ValueError(f"Scenario data must be list or dict, got {type(scenario_data)}")
                     
                 # Validate that we have units data
                 if not scenario_units:
                     raise ValueError("No units found in scenario data")
                     
-                # Validate unit structure
+                # Validate unit structure - raise error if required fields are missing
+                required_fields = ["id", "player", "col", "row", "hp_max", "cur_hp", "move", "rng_rng", "rng_dmg", "cc_dmg", "is_ranged", "is_melee", "alive", "unit_type"]
+                
                 for i, unit_data in enumerate(scenario_units):
                     if not isinstance(unit_data, dict):
                         raise ValueError(f"Unit {i} is not a dictionary: {type(unit_data)} - {unit_data}")
                         
-                    # Check required fields
-                    required_fields = ["id", "player", "col", "row", "hp_max"]
+                    # Check all required fields are present
                     for field in required_fields:
                         if field not in unit_data:
-                            print(f"⚠️  Unit {i} missing field '{field}', using defaults")
+                            raise ValueError(f"Unit {i} missing required field '{field}'. All units must have: {required_fields}")
                             
                 print(f"✅ Loaded scenario with {len(scenario_units)} units")
                 
             except (json.JSONDecodeError, ValueError) as e:
-                print(f"❌ Error loading scenario from {scenario_path}: {e}")
-                print("🔧 Using default scenario")
-                scenario_units = self._get_default_scenario()
+                raise RuntimeError(f"Error loading scenario from {scenario_path}: {e}")
         else:
-            print(f"📋 No scenario file found at {scenario_path}, using default")
-            scenario_units = self._get_default_scenario()
+            raise FileNotFoundError(f"Scenario file not found at {scenario_path}. Please ensure scenario.json exists with all required unit fields.")
         
         # Initialize units
         self.initial_units = scenario_units
@@ -89,87 +88,40 @@ class W40KEnv(gym.Env):
         self.episode_logs = []
         self.current_log = []
 
-    def _get_default_scenario(self):
-        """Get default scenario units."""
-        return [
-            {
-                "id": 1, "unit_type": "Intercessor", "player": 0, 
-                "col": 23, "row": 12, "cur_hp": 3, "hp_max": 3, 
-                "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1, 
-                "is_ranged": True, "is_melee": False, "alive": True
-            },
-            {
-                "id": 2, "unit_type": "AssaultIntercessor", "player": 0, 
-                "col": 1, "row": 12, "cur_hp": 4, "hp_max": 4, 
-                "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2, 
-                "is_ranged": False, "is_melee": True, "alive": True
-            },
-            {
-                "id": 3, "unit_type": "Intercessor", "player": 1, 
-                "col": 0, "row": 5, "cur_hp": 3, "hp_max": 3, 
-                "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1, 
-                "is_ranged": True, "is_melee": False, "alive": True
-            },
-            {
-                "id": 4, "unit_type": "AssaultIntercessor", "player": 1, 
-                "col": 22, "row": 3, "cur_hp": 4, "hp_max": 4, 
-                "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2, 
-                "is_ranged": False, "is_melee": True, "alive": True
-            }
-        ]
-
-    # Also add this to the reset_units method to fix the string indices error:
-
     def reset_units(self):
         """Reset units to initial state."""
         self.units = []
         for unit_data in self.initial_units:
             # Validate unit_data is a dictionary
             if not isinstance(unit_data, dict):
-                print(f"⚠️  Skipping invalid unit data: {unit_data} (type: {type(unit_data)})")
-                continue
+                raise ValueError(f"Invalid unit data: {unit_data} (type: {type(unit_data)})")
                 
-            unit = {
-                "id": unit_data.get("id", len(self.units) + 1),
-                "player": unit_data.get("player", 0),
-                "col": unit_data.get("col", 5),
-                "row": unit_data.get("row", 5),
-                "cur_hp": unit_data.get("cur_hp", unit_data.get("hp_max", 4)),
-                "hp_max": unit_data.get("hp_max", 4),
-                "move": unit_data.get("move", 6),
-                "rng_rng": unit_data.get("rng_rng", 8),
-                "rng_dmg": unit_data.get("rng_dmg", 2),
-                "cc_dmg": unit_data.get("cc_dmg", 1),
-                "is_ranged": unit_data.get("is_ranged", True),
-                "is_melee": unit_data.get("is_melee", False),
-                "alive": unit_data.get("alive", True),
-                "unit_type": unit_data.get("unit_type", "Unknown")
-            }
-            self.units.append(unit)
-        
-        print(f"✅ Reset {len(self.units)} units")
-        
-    def reset_units(self):
-        """Reset units to initial state."""
-        self.units = []
-        for unit_data in self.initial_units:
+            # Strict field validation - all fields must exist
+            required_fields = ["id", "player", "col", "row", "hp_max", "cur_hp", "move", "rng_rng", "rng_dmg", "cc_dmg", "is_ranged", "is_melee", "alive", "unit_type"]
+            
+            for field in required_fields:
+                if field not in unit_data:
+                    raise KeyError(f"Unit {unit_data.get('id', 'unknown')} missing required field '{field}'")
+                
             unit = {
                 "id": unit_data["id"],
                 "player": unit_data["player"],
                 "col": unit_data["col"],
                 "row": unit_data["row"],
-                "cur_hp": unit_data["hp_max"],
+                "cur_hp": unit_data["hp_max"],  # Reset to full health
                 "hp_max": unit_data["hp_max"],
-                "move": unit_data.get("move", 6),
-                "rng_rng": unit_data.get("rng_rng", 8),
-                "rng_dmg": unit_data.get("rng_dmg", 2),
-                "cc_dmg": unit_data.get("cc_dmg", 1),
-                "is_ranged": unit_data.get("is_ranged", True),
-                "is_melee": unit_data.get("is_melee", False),
-                "alive": True,
-                "unit_type": unit_data.get("unit_type", "Unknown")
+                "move": unit_data["move"],
+                "rng_rng": unit_data["rng_rng"],
+                "rng_dmg": unit_data["rng_dmg"],
+                "cc_dmg": unit_data["cc_dmg"],
+                "is_ranged": unit_data["is_ranged"],
+                "is_melee": unit_data["is_melee"],
+                "alive": True,  # Reset all units to alive
+                "unit_type": unit_data["unit_type"]
             }
             self.units.append(unit)
+        
+        print(f"✅ Reset {len(self.units)} units")
     
     def reset(self, *, seed=None, options=None):
         """Reset the environment."""
@@ -241,283 +193,336 @@ class W40KEnv(gym.Env):
     
     def _move_toward_target(self, unit, target):
         """Move unit toward target."""
-        if not unit["alive"]:
-            return
+        # Calculate direction
+        col_diff = target["col"] - unit["col"]
+        row_diff = target["row"] - unit["row"]
         
-        # Simple movement logic
-        dx = 0
-        dy = 0
-        if target["col"] > unit["col"]:
-            dx = 1
-        elif target["col"] < unit["col"]:
-            dx = -1
-            
-        if target["row"] > unit["row"]:
-            dy = 1
-        elif target["row"] < unit["row"]:
-            dy = -1
+        # Normalize to movement of 1 tile
+        if abs(col_diff) > abs(row_diff):
+            new_col = unit["col"] + (1 if col_diff > 0 else -1)
+            new_row = unit["row"]
+        else:
+            new_col = unit["col"]
+            new_row = unit["row"] + (1 if row_diff > 0 else -1)
         
-        # Check bounds and collision
-        new_col = max(0, min(self.board_size[0] - 1, unit["col"] + dx))
-        new_row = max(0, min(self.board_size[1] - 1, unit["row"] + dy))
-        
-        # Check if position is occupied
-        occupied = any(u["col"] == new_col and u["row"] == new_row and u["alive"] and u["id"] != unit["id"] 
-                      for u in self.units)
-        
-        if not occupied:
+        # Validate bounds
+        if 0 <= new_col < self.board_size[0] and 0 <= new_row < self.board_size[1]:
             unit["col"] = new_col
             unit["row"] = new_row
+            return True
+        return False
     
-    def _move_away_from_enemies(self, unit):
-        """Move unit away from enemies."""
-        if not unit["alive"]:
-            return
+    def _attack_target(self, attacker, target):
+        """Execute attack between units."""
+        if not attacker["alive"] or not target["alive"]:
+            return False
             
-        enemies = self._get_enemies(unit["player"])
-        if not enemies:
-            return
+        distance = self._get_distance(attacker, target)
+        damage = 0
         
-        # Find direction away from closest enemy
-        closest_enemy = min(enemies, key=lambda e: self._get_distance(unit, e))
+        # Ranged attack
+        if attacker["is_ranged"] and distance <= attacker["rng_rng"]:
+            damage = attacker["rng_dmg"]
+        # Melee attack (adjacent)
+        elif attacker["is_melee"] and distance <= 1:
+            damage = attacker["cc_dmg"]
         
-        dx = 0
-        dy = 0
-        if closest_enemy["col"] > unit["col"]:
-            dx = -1
-        elif closest_enemy["col"] < unit["col"]:
-            dx = 1
-            
-        if closest_enemy["row"] > unit["row"]:
-            dy = -1
-        elif closest_enemy["row"] < unit["row"]:
-            dy = 1
-        
-        # Apply movement
-        new_col = max(0, min(self.board_size[0] - 1, unit["col"] + dx))
-        new_row = max(0, min(self.board_size[1] - 1, unit["row"] + dy))
-        
-        occupied = any(u["col"] == new_col and u["row"] == new_row and u["alive"] and u["id"] != unit["id"] 
-                      for u in self.units)
-        
-        if not occupied:
-            unit["col"] = new_col
-            unit["row"] = new_row
-    
-    def _shoot_at_target(self, unit, target):
-        """Unit shoots at target."""
-        if not unit["alive"] or not target["alive"]:
-            return 0
-        
-        dist = self._get_distance(unit, target)
-        if dist > unit["rng_rng"]:
-            return 0  # Out of range
-        
-        # Apply damage
-        damage = unit["rng_dmg"]
-        target["cur_hp"] -= damage
-        
-        if target["cur_hp"] <= 0:
-            target["cur_hp"] = 0
-            target["alive"] = False
-            return damage + 1.0  # Bonus for kill
-        
-        return damage * 0.5  # Partial reward for damage
-    
-    def _attack_adjacent(self, unit):
-        """Attack adjacent enemy."""
-        if not unit["alive"]:
-            return 0
-        
-        enemies = self._get_enemies(unit["player"])
-        adjacent_enemies = [e for e in enemies if self._get_distance(unit, e) == 1]
-        
-        if not adjacent_enemies:
-            return -0.1  # Penalty for invalid action
-        
-        # Attack weakest adjacent enemy
-        target = min(adjacent_enemies, key=lambda e: e["cur_hp"])
-        damage = unit["cc_dmg"]
-        target["cur_hp"] -= damage
-        
-        if target["cur_hp"] <= 0:
-            target["cur_hp"] = 0
-            target["alive"] = False
-            return damage + 1.0  # Bonus for kill
-        
-        return damage * 0.5  # Partial reward for damage
+        if damage > 0:
+            target["cur_hp"] = max(0, target["cur_hp"] - damage)
+            if target["cur_hp"] <= 0:
+                target["alive"] = False
+            return True
+        return False
     
     def step(self, action):
         """Execute one step."""
         if self.game_over:
-            return self._get_obs(), 0, True, False, {"winner": self.winner}
+            return self._get_obs(), 0, True, True, {}
         
-        # Get AI unit (player 1)
+        reward = 0
+        info = {}
+        
+        # Get AI units (player 1)
         ai_units = [u for u in self.units if u["player"] == 1 and u["alive"]]
+        enemy_units = [u for u in self.units if u["player"] == 0 and u["alive"]]
+        
         if not ai_units:
             self.game_over = True
             self.winner = 0
-            return self._get_obs(), -10.0, True, False, {"winner": self.winner}
+            reward = -10
+            return self._get_obs(), reward, True, False, {"winner": 0}
         
-        # Pick first alive AI unit for simplicity
-        ai_unit = ai_units[0]
-        enemies = self._get_enemies(1)
-        
-        reward = 0.0
-        
-        # Execute action
-        if action == 0:  # move_closer
-            if enemies:
-                closest = min(enemies, key=lambda e: self._get_distance(ai_unit, e))
-                self._move_toward_target(ai_unit, closest)
-                reward = 0.1
-            else:
-                reward = -0.1
-                
-        elif action == 1:  # move_away
-            self._move_away_from_enemies(ai_unit)
-            reward = -0.05  # Generally not a good strategy
-            
-        elif action == 2:  # move_safe (random movement)
-            # Simple safe movement - random direction
-            dx = random.choice([-1, 0, 1])
-            dy = random.choice([-1, 0, 1])
-            new_col = max(0, min(self.board_size[0] - 1, ai_unit["col"] + dx))
-            new_row = max(0, min(self.board_size[1] - 1, ai_unit["row"] + dy))
-            
-            occupied = any(u["col"] == new_col and u["row"] == new_row and u["alive"] and u["id"] != ai_unit["id"] 
-                          for u in self.units)
-            if not occupied:
-                ai_unit["col"] = new_col
-                ai_unit["row"] = new_row
-            reward = 0.05
-            
-        elif action == 3:  # shoot_closest
-            if enemies and ai_unit["is_ranged"]:
-                closest = min(enemies, key=lambda e: self._get_distance(ai_unit, e))
-                reward = self._shoot_at_target(ai_unit, closest)
-            else:
-                reward = -0.2  # Penalty for invalid action
-                
-        elif action == 4:  # shoot_weakest
-            if enemies and ai_unit["is_ranged"]:
-                weakest = min(enemies, key=lambda e: e["cur_hp"])
-                reward = self._shoot_at_target(ai_unit, weakest)
-            else:
-                reward = -0.2
-                
-        elif action == 5:  # charge_closest (move toward and attack if adjacent)
-            if enemies:
-                closest = min(enemies, key=lambda e: self._get_distance(ai_unit, e))
-                self._move_toward_target(ai_unit, closest)
-                if self._get_distance(ai_unit, closest) == 1:
-                    reward = self._attack_adjacent(ai_unit)
-                else:
-                    reward = 0.1
-            else:
-                reward = -0.1
-                
-        elif action == 6:  # wait
-            reward = -0.5  # Strong penalty for waiting
-            
-        elif action == 7:  # attack_adjacent
-            reward = self._attack_adjacent(ai_unit)
-        
-        # Enemy turn (simple scripted behavior)
-        self._enemy_turn()
-        
-        # Check win conditions
-        ai_alive = len([u for u in self.units if u["player"] == 1 and u["alive"]])
-        enemy_alive = len([u for u in self.units if u["player"] == 0 and u["alive"]])
-        
-        if ai_alive == 0:
-            self.game_over = True
-            self.winner = 0
-            reward -= 5.0  # Big penalty for losing
-        elif enemy_alive == 0:
+        if not enemy_units:
             self.game_over = True
             self.winner = 1
-            reward += 10.0  # Big reward for winning
+            reward = 10
+            return self._get_obs(), reward, True, False, {"winner": 1}
         
-        # Turn limit check
+        # Simple action mapping
+        ai_unit = ai_units[0]  # Control first alive AI unit
+        
+        if action == 0:  # Move up
+            if ai_unit["row"] > 0:
+                ai_unit["row"] -= 1
+                reward += 0.1
+        elif action == 1:  # Move down
+            if ai_unit["row"] < self.board_size[1] - 1:
+                ai_unit["row"] += 1
+                reward += 0.1
+        elif action == 2:  # Move left
+            if ai_unit["col"] > 0:
+                ai_unit["col"] -= 1
+                reward += 0.1
+        elif action == 3:  # Move right
+            if ai_unit["col"] < self.board_size[0] - 1:
+                ai_unit["col"] += 1
+                reward += 0.1
+        elif action == 4:  # Attack nearest enemy
+            nearest_enemy = min(enemy_units, key=lambda e: self._get_distance(ai_unit, e))
+            if self._attack_target(ai_unit, nearest_enemy):
+                reward += 1.0
+                if not nearest_enemy["alive"]:
+                    reward += 5.0
+        elif action == 5:  # Move toward nearest enemy
+            nearest_enemy = min(enemy_units, key=lambda e: self._get_distance(ai_unit, e))
+            if self._move_toward_target(ai_unit, nearest_enemy):
+                reward += 0.2
+        elif action == 6:  # Defensive position
+            reward += 0.05
+        elif action == 7:  # Wait/do nothing
+            reward -= 0.1
+        
+        # Enemy AI (simple)
+        for enemy in enemy_units:
+            if not enemy["alive"]:
+                continue
+                
+            # Simple enemy behavior - move toward nearest AI unit
+            if ai_units:
+                nearest_ai = min(ai_units, key=lambda a: self._get_distance(enemy, a))
+                distance = self._get_distance(enemy, nearest_ai)
+                
+                if distance <= 1 and enemy["is_melee"]:
+                    # Melee attack
+                    if self._attack_target(enemy, nearest_ai):
+                        if not nearest_ai["alive"]:
+                            reward -= 5.0
+                elif distance <= enemy["rng_rng"] and enemy["is_ranged"]:
+                    # Ranged attack
+                    if self._attack_target(enemy, nearest_ai):
+                        if not nearest_ai["alive"]:
+                            reward -= 5.0
+                else:
+                    # Move toward target
+                    self._move_toward_target(enemy, nearest_ai)
+        
+        # Check win conditions again
+        ai_units = [u for u in self.units if u["player"] == 1 and u["alive"]]
+        enemy_units = [u for u in self.units if u["player"] == 0 and u["alive"]]
+        
+        if not ai_units:
+            self.game_over = True
+            self.winner = 0
+            reward -= 10
+        elif not enemy_units:
+            self.game_over = True
+            self.winner = 1
+            reward += 10
+        
+        # Turn limit
         self.current_turn += 1
         if self.current_turn >= self.max_turns:
             self.game_over = True
             self.winner = None  # Draw
-            reward -= 1.0  # Penalty for not winning quickly
+            reward -= 1
         
-        # Log this step
-        self.current_log.append({
+        # Log step
+        step_log = {
             "turn": self.current_turn,
-            "action": int(action),
-            "reward": float(reward),
-            "ai_units_alive": ai_alive,
-            "enemy_units_alive": enemy_alive,
+            "action": action,
+            "reward": reward,
+            "ai_units_alive": len(ai_units),
+            "enemy_units_alive": len(enemy_units),
             "game_over": self.game_over
-        })
+        }
+        self.current_log.append(step_log)
         
-        obs = self._get_obs()
-        return obs, reward, self.game_over, False, {"winner": self.winner}
+        # Log to replay if enabled
+        self.log_step_to_replay(action, reward)
+        
+        return self._get_obs(), reward, self.game_over, False, info
     
-    def _enemy_turn(self):
-        """Simple scripted enemy behavior."""
-        enemy_units = [u for u in self.units if u["player"] == 0 and u["alive"]]
-        ai_units = [u for u in self.units if u["player"] == 1 and u["alive"]]
+    def render(self, mode='human'):
+        """Render the environment (optional)."""
+        if mode == 'human':
+            # Simple text representation
+            print(f"\nTurn {self.current_turn} - Player {self.current_player}")
+            print("Board state:")
+            for unit in self.units:
+                if unit["alive"]:
+                    player_symbol = "AI" if unit["player"] == 1 else "EN"
+                    print(f"  {player_symbol}{unit['id']}: ({unit['col']}, {unit['row']}) HP:{unit['cur_hp']}/{unit['hp_max']}")
+            print(f"Game over: {self.game_over}, Winner: {self.winner}")
         
-        for enemy in enemy_units:
-            if not ai_units:
-                break
-                
-            # Simple AI: move toward closest AI unit and attack if possible
-            closest_ai = min(ai_units, key=lambda u: self._get_distance(enemy, u))
-            dist = self._get_distance(enemy, closest_ai)
-            
-            # Try to shoot if in range
-            if enemy["is_ranged"] and dist <= enemy["rng_rng"]:
-                damage = enemy["rng_dmg"]
-                closest_ai["cur_hp"] -= damage
-                if closest_ai["cur_hp"] <= 0:
-                    closest_ai["cur_hp"] = 0
-                    closest_ai["alive"] = False
-                    ai_units.remove(closest_ai)
-            # Try melee attack if adjacent
-            elif dist == 1:
-                damage = enemy["cc_dmg"]
-                closest_ai["cur_hp"] -= damage
-                if closest_ai["cur_hp"] <= 0:
-                    closest_ai["cur_hp"] = 0
-                    closest_ai["alive"] = False
-                    ai_units.remove(closest_ai)
-            # Otherwise move closer
-            else:
-                self._move_toward_target(enemy, closest_ai)
+        return None
     
     def close(self):
-        """Clean up."""
+        """Clean up environment resources."""
         pass
     
-    def did_win(self):
-        """Check if AI won."""
-        return self.winner == 1
-
-if __name__ == "__main__":
-    print("Testing improved W40KEnv...")
-    env = W40KEnv()
-    obs, _ = env.reset()
-    print(f"✓ Observation shape: {obs.shape}")
-    print(f"✓ Action space: {env.action_space}")
-    print(f"✓ Initial units: {len(env.units)}")
+    def save_episode_logs(self, filename=None):
+        """Save episode logs to file."""
+        if not filename:
+            os.makedirs("ai/event_log", exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"ai/event_log/episode_log_{timestamp}.json"
+        
+        if self.episode_logs:
+            import json
+            with open(filename, 'w') as f:
+                json.dump(self.episode_logs, f, indent=2)
+            print(f"Episode logs saved to {filename}")
+        
+        return filename
     
-    # Test a few actions
-    for i in range(10):
-        action = env.action_space.sample()
-        obs, reward, done, truncated, info = env.step(action)
-        ai_alive = len([u for u in env.units if u["player"] == 1 and u["alive"]])
-        enemy_alive = len([u for u in env.units if u["player"] == 0 and u["alive"]])
-        print(f"Step {i+1}: Action {action}, Reward {reward:.2f}, AI: {ai_alive}, Enemy: {enemy_alive}, Done: {done}")
-        if done:
-            print(f"Game ended! Winner: {info['winner']}")
-            break
+    def get_episode_stats(self):
+        """Get statistics from logged episodes."""
+        if not self.episode_logs:
+            return {}
+        
+        rewards = [ep[1] for ep in self.episode_logs]
+        return {
+            "episodes": len(self.episode_logs),
+            "avg_reward": sum(rewards) / len(rewards),
+            "best_reward": max(rewards),
+            "worst_reward": min(rewards)
+        }
     
-    env.close()
-    print("✓ Test completed successfully!")
+    def enable_replay_logging(self, replay_file=None):
+        """Enable replay logging for this episode."""
+        try:
+            from datetime import datetime
+            import json
+            
+            if not replay_file:
+                os.makedirs("ai/event_log", exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+                replay_file = f"ai/event_log/game_replay_{timestamp}.json"
+            
+            self.replay_file = replay_file
+            self.replay_data = {
+                "metadata": {
+                    "timestamp": datetime.now().isoformat(),
+                    "total_timesteps": 0,
+                    "episode_reward": 0
+                },
+                "events": [],
+                "web_compatible": True,
+                "features": ["unit_positions", "hp_tracking", "movement", "combat"]
+            }
+            
+            # Log initial state
+            initial_event = {
+                "turn": 0,
+                "action": None,
+                "reward": 0,
+                "ai_units_alive": len([u for u in self.units if u["player"] == 1 and u["alive"]]),
+                "enemy_units_alive": len([u for u in self.units if u["player"] == 0 and u["alive"]]),
+                "game_over": False,
+                "units": [
+                    {
+                        "id": unit["id"],
+                        "type": unit["unit_type"],
+                        "player": unit["player"],
+                        "col": unit["col"],
+                        "row": unit["row"],
+                        "HP_MAX": unit["hp_max"],
+                        "CUR_HP": unit["cur_hp"],
+                        "alive": unit["alive"]
+                    }
+                    for unit in self.units
+                ]
+            }
+            self.replay_data["events"].append(initial_event)
+            self.replay_logging_enabled = True
+            
+        except Exception as e:
+            print(f"Warning: Could not enable replay logging: {e}")
+            self.replay_logging_enabled = False
+    
+    def finalize_replay_logging(self):
+        """Finalize and save replay data."""
+        if not hasattr(self, 'replay_logging_enabled') or not self.replay_logging_enabled:
+            return
+        
+        try:
+            import json
+            
+            # Calculate final metadata
+            if self.current_log:
+                total_reward = sum(step.get('reward', 0) for step in self.current_log)
+                self.replay_data["metadata"]["episode_reward"] = total_reward
+                self.replay_data["metadata"]["total_timesteps"] = len(self.current_log)
+                self.replay_data["metadata"]["final_turn"] = self.current_turn
+                
+                # Add game summary
+                self.replay_data["game_summary"] = {
+                    "final_reward": total_reward,
+                    "total_turns": self.current_turn,
+                    "game_result": "ai_win" if self.winner == 1 else "ai_lose" if self.winner == 0 else "draw"
+                }
+            
+            # Save to file
+            with open(self.replay_file, 'w', encoding='utf-8') as f:
+                json.dump(self.replay_data, f, indent=2)
+            
+            self.replay_logging_enabled = False
+            
+        except Exception as e:
+            print(f"Warning: Could not save replay data: {e}")
+    
+    def log_step_to_replay(self, action, reward):
+        """Log a step to the replay data."""
+        if not hasattr(self, 'replay_logging_enabled') or not self.replay_logging_enabled:
+            return
+        
+        try:
+            step_event = {
+                "turn": self.current_turn,
+                "action": int(action) if action is not None else None,
+                "reward": float(reward),
+                "ai_units_alive": len([u for u in self.units if u["player"] == 1 and u["alive"]]),
+                "enemy_units_alive": len([u for u in self.units if u["player"] == 0 and u["alive"]]),
+                "game_over": self.game_over,
+                "units": [
+                    {
+                        "id": unit["id"],
+                        "type": unit["unit_type"],
+                        "player": unit["player"],
+                        "col": unit["col"],
+                        "row": unit["row"],
+                        "HP_MAX": unit["hp_max"],
+                        "CUR_HP": unit["cur_hp"],
+                        "alive": unit["alive"]
+                    }
+                    for unit in self.units
+                ]
+            }
+            
+            if self.game_over:
+                step_event["winner"] = self.winner
+            
+            self.replay_data["events"].append(step_event)
+            
+        except Exception as e:
+            print(f"Warning: Could not log replay step: {e}")
+    
+    def get_best_worst_episodes(self):
+        """Get best and worst episodes from logs."""
+        if not self.episode_logs:
+            return None, None
+        
+        best_episode = max(self.episode_logs, key=lambda x: x[1])
+        worst_episode = min(self.episode_logs, key=lambda x: x[1])
+        
+        return best_episode, worst_episode
