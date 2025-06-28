@@ -3,16 +3,16 @@
     "version": "1.0",
     "format": "web_compatible",
     "game_type": "wh40k_tactics",
-    "created": "2025-06-28T04:49:45.562116",
-    "episode_reward": -17.900000000000002,
-    "total_events": 13,
+    "created": "2025-06-28T04:58:26.378219",
+    "episode_reward": -11.649999999999999,
+    "total_events": 22,
     "source": "training"
   },
   "events": [
     {
       "turn": 1,
       "type": "ai_action",
-      "timestamp": "2025-06-28T04:49:45.562116",
+      "timestamp": "2025-06-28T04:58:26.378219",
       "action": {
         "type": "game_action",
         "action_id": 
