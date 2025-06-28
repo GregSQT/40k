@@ -1,0 +1,56 @@
+{
+  "default": {
+    "cols": 24,
+    "rows": 18,
+    "hex_radius": 24,
+    "margin": 32,
+    "colors": {
+      "background": "0x002200",
+      "cell_even": "0x002200",
+      "cell_odd": "0x001a00",
+      "cell_border": "0x00ff00",
+      "player_0": "0x244488",
+      "player_1": "0x882222",
+      "hp_full": "0x36e36b",
+      "hp_damaged": "0x444444",
+      "highlight": "0x80ff80",
+      "current_unit": "0xffd700"
+    }
+  },
+  "small": {
+    "cols": 12,
+    "rows": 9,
+    "hex_radius": 20,
+    "margin": 24,
+    "colors": {
+      "background": "0x002200",
+      "cell_even": "0x002200",
+      "cell_odd": "0x001a00",
+      "cell_border": "0x00ff00",
+      "player_0": "0x244488",
+      "player_1": "0x882222",
+      "hp_full": "0x36e36b",
+      "hp_damaged": "0x444444",
+      "highlight": "0x80ff80",
+      "current_unit": "0xffd700"
+    }
+  },
+  "large": {
+    "cols": 36,
+    "rows": 27,
+    "hex_radius": 20,
+    "margin": 40,
+    "colors": {
+      "background": "0x002200",
+      "cell_even": "0x002200",
+      "cell_odd": "0x001a00",
+      "cell_border": "0x00ff00",
+      "player_0": "0x244488",
+      "player_1": "0x882222",
+      "hp_full": "0x36e36b",
+      "hp_damaged": "0x444444",
+      "highlight": "0x80ff80",
+      "current_unit": "0xffd700"
+    }
+  }
+}

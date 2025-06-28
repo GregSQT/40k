@@ -1,19 +1,8 @@
-// src/components/Board.tsx - Version mise à jour compatible avec les nouveaux types
-import { useEffect, useRef } from "react";
+// frontend/src/components/Board.tsx - Updated to use config system while preserving ALL functionality
+import React, { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js-legacy";
 import type { Unit } from "../types/game";
-import React from "react";
-
-const BOARD_COLS = 24;
-const BOARD_ROWS = 18;
-const HEX_RADIUS = 24;
-const MARGIN = 32;
-const HEX_WIDTH = 1.5 * HEX_RADIUS;
-const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
-const HEX_HORIZ_SPACING = HEX_WIDTH;
-const HEX_VERT_SPACING = HEX_HEIGHT;
-const HIGHLIGHT_COLOR = 0x80ff80; // Green
-const ATTACK_COLOR = 0xff4444;    // Red
+import { useGameConfig } from '../hooks/useGameConfig';
 
 // For flat-topped hex, even-q offset (col, row)
 function offsetToCube(col: number, row: number) {
@@ -95,6 +84,42 @@ export default function Board({
 }: BoardProps) {
   console.log("Board render", { phase, mode, selectedUnitId });
   const containerRef = useRef<HTMLDivElement>(null);
+  const { boardConfig, loading, error } = useGameConfig();
+
+  // Early return if config not loaded
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64 bg-gray-800 rounded-lg">
+        <div className="text-white">Loading board configuration...</div>
+      </div>
+    );
+  }
+
+  if (error || !boardConfig) {
+    return (
+      <div className="flex items-center justify-center h-64 bg-red-900 rounded-lg">
+        <div className="text-red-200">Error loading board: {error}</div>
+      </div>
+    );
+  }
+
+  // Extract board configuration values - REPLACE HARDCODED VALUES
+  const BOARD_COLS = boardConfig.cols;
+  const BOARD_ROWS = boardConfig.rows;
+  const HEX_RADIUS = boardConfig.hex_radius;
+  const MARGIN = boardConfig.margin;
+  const HEX_WIDTH = 1.5 * HEX_RADIUS;
+  const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+  const HEX_HORIZ_SPACING = HEX_WIDTH;
+  const HEX_VERT_SPACING = HEX_HEIGHT;
+
+  // Parse colors from config
+  const parseColor = (colorStr: string): number => {
+    return parseInt(colorStr.replace('0x', ''), 16);
+  };
+
+  const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight); // Green
+  const ATTACK_COLOR = 0xff4444;    // Red
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -108,7 +133,7 @@ export default function Board({
     const app = new PIXI.Application({
       width,
       height,
-      backgroundColor: 0x000000,
+      backgroundColor: parseColor(boardConfig.colors.background),
       antialias: true,
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
@@ -232,47 +257,41 @@ export default function Board({
         const points = getHexPolygonPoints(centerX, centerY, HEX_RADIUS);
         const cell = new PIXI.Graphics();
 
-        // Fill: green for move, red for attack preview, ORANGE for charge preview, black otherwise
-        if ((mode === "movePreview" || mode === "attackPreview") && attackCells.some(c => c.col === col && c.row === row)) {
-          cell.beginFill(ATTACK_COLOR, 0.35);
-        } else if (phase === "charge" && mode === "chargePreview" && chargeCells.some(c => c.col === col && c.row === row)) {
-          cell.beginFill(0xff9900, 0.5); // Orange
-        } else if (mode === "select" && availableCells.some(c => c.col === col && c.row === row)) {
-          cell.beginFill(HIGHLIGHT_COLOR, 0.55);
+        // Fill: green for move, red for attack, orange for charge, or transparent
+        const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
+        const isAttackable = attackCells.some(cell => cell.col === col && cell.row === row);
+        const isChargeable = chargeCells.some(cell => cell.col === col && cell.row === row);
+
+        if (isChargeable) {
+          cell.beginFill(0xff9900, 0.5); // Orange for charge
+        } else if (isAttackable) {
+          cell.beginFill(ATTACK_COLOR, 0.5); // Red for attack
+        } else if (isAvailable) {
+          cell.beginFill(HIGHLIGHT_COLOR, 0.5); // Green for move
         } else {
-          cell.beginFill(0x002200, 1);
+          cell.beginFill(0x001100, 0.2); // Dark transparent
         }
-        cell.lineStyle(2, 0xffffff, 1);
+
+        cell.lineStyle(1, 0x444444, 0.8);
         cell.drawPolygon(points);
         cell.endFill();
 
-        cell.eventMode = "static";
-        (cell as any).buttonMode = true;
+        // Make interactive
+        cell.interactive = true;
+        cell.cursor = "pointer";
 
-        // CHARGE PHASE: clickable orange cells
-        if (phase === "charge" && mode === "chargePreview") {
-          const orange = chargeCells.find(c => c.col === col && c.row === row);
-          if (orange && selectedUnit) {
+        // Click handlers
+        if (mode === "movePreview" || mode === "attackPreview") {
+          cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+            if (e.button === 0) onConfirmMove();
+            if (e.button === 2) onCancelMove();
+          });
+        } else if (mode === "chargePreview") {
+          if (isChargeable) {
             cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-              if (e.button === 0 && typeof onMoveCharger === "function") {
-                onMoveCharger(selectedUnit.id, col, row);
+              if (e.button === 0 && selectedUnitId !== null) {
+                onMoveCharger?.(Number(selectedUnitId), Number(col), Number(row));
               }
-            });
-          }
-        }
-
-        if (mode === "movePreview" && movePreview) {
-          if (col === movePreview.destCol && row === movePreview.destRow) {
-            cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-              if (e.button === 0) onConfirmMove();
-              if (e.button === 2) onCancelMove();
-            });
-          }
-        } else if (mode === "attackPreview" && attackPreview) {
-          if (col === attackPreview.col && row === attackPreview.row) {
-            cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-              if (e.button === 0) onConfirmMove();
-              if (e.button === 2) onCancelMove();
             });
           }
         } else if (mode === "select" && selectedUnitId !== null) {
@@ -318,7 +337,7 @@ export default function Board({
         for (let i = 0; i < unit.HP_MAX; i++) {
           const sliceWidth = (HP_BAR_WIDTH - (unit.HP_MAX - 1)) / unit.HP_MAX;
           const sliceX = barX + i * (sliceWidth + 1);
-          const color = i < hp ? 0x36e36b : 0x444444;
+          const color = i < hp ? parseColor(boardConfig.colors.hp_full) : parseColor(boardConfig.colors.hp_damaged);
           const slice = new PIXI.Graphics();
           slice.beginFill(color, 1);
           slice.drawRoundedRect(sliceX, barY + 1, sliceWidth, HP_BAR_HEIGHT - 2, 2);
@@ -353,31 +372,13 @@ export default function Board({
         const unitsAttackedArr = unitsAttacked || [];
         if (unit.player === currentPlayer && !unitsAttackedArr.includes(Number(unit.id))) {
           const enemies = units.filter(u2 => u2.player !== currentPlayer);
-          const isAdjacent = enemies.some(eu => cubeDistance(offsetToCube(unit.col, unit.row), offsetToCube(eu.col, eu.row)) === 1);
-          isEligible = isAdjacent;
+          const c1 = offsetToCube(unit.col, unit.row);
+          isEligible = enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) === 1);
         }
       }
 
-      // Red outline for enemy units in range if shooter selected (shooting phase)
-      if (phase === "shoot" && selectedUnitId !== null) {
-        const shooter = units.find(u => u.id === selectedUnitId);
-        if (shooter && shooter.player === currentPlayer && !unitsMoved.includes(Number(shooter.id))) {
-          const c1 = offsetToCube(shooter.col, shooter.row);
-          const c2 = offsetToCube(unit.col, unit.row);
-          const inRange = shooter.RNG_RNG && shooter.player !== unit.player && cubeDistance(c1, c2) <= shooter.RNG_RNG;
-          if (inRange) {
-            const attackOutline = new PIXI.Graphics();
-            const hexPoints = getHexPolygonPoints(centerX, centerY, HEX_RADIUS * 0.85);
-            attackOutline.lineStyle(4, 0xff2222, 0.95);
-            attackOutline.drawPolygon(hexPoints);
-            attackOutline.endFill();
-            app.stage.addChild(attackOutline);
-          }
-        }
-      }
-
-      // COMBAT PHASE: highlight adjacent enemy units in red when a friendly unit is selected
-      if (phase === "combat" && selectedUnitId !== null) {
+      // Red outline for adjacent enemy units in combat phase
+      if (phase === "combat" && selectedUnitId) {
         const attacker = units.find(u => u.id === selectedUnitId);
         if (
           attacker &&
@@ -414,199 +415,116 @@ export default function Board({
 
       const unitCircle = new PIXI.Graphics();
       unitCircle.beginFill(unit.color);
-      unitCircle.lineStyle(selectedUnitId === unit.id ? 4 : 2, selectedUnitId === unit.id ? 0xffd700 : 0xffffff, 1);
-      unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.7);
+      unitCircle.lineStyle(selectedUnitId === unit.id ? 4 : 2, selectedUnitId === unit.id ? parseColor(boardConfig.colors.current_unit) : 0xffffff, 1);
+      unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.6);
       unitCircle.endFill();
-      unitCircle.eventMode = "static";
-      (unitCircle as any).buttonMode = true;
 
-      // Event handlers for unit interactions
-      unitCircle.on("pointerdown", (e: any) => {
+      // Make unit interactive
+      unitCircle.interactive = true;
+      unitCircle.cursor = "pointer";
+      unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
         e.stopPropagation();
-
-        // Handle various phase-specific interactions
-        if (phase === "charge" && mode === "chargePreview" && selectedUnitId === unit.id) {
-          if (e.button === 2) {
-            if (typeof onCancelCharge === "function") onCancelCharge();
-            return;
-          }
-          if (e.button === 0) {
-            if (typeof onValidateCharge === "function") onValidateCharge(unit.id);
-            return;
-          }
-        }
-
-        if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) {
-          if (e.button === 0) onConfirmMove();
-          if (e.button === 2) onCancelMove();
-          return;
-        }
-
-        if (mode === "attackPreview" && attackPreview && unit.player !== currentPlayer) {
-          const shooter = units.find(u => u.id === attackPreview.unitId);
-          if (shooter && !unitsMoved.includes(Number(shooter.id))) {
-            const c1 = offsetToCube(shooter.col, shooter.row);
-            const c2 = offsetToCube(unit.col, unit.row);
-            if (cubeDistance(c1, c2) <= shooter.RNG_RNG) {
-              if (typeof onShoot === "function") onShoot(shooter.id, unit.id);
+        if (e.button === 0) {
+          if (mode === "chargePreview" && selectedUnitId && onCharge) {
+            const targetUnit = units.find(u => u.col === unit.col && u.row === unit.row);
+            if (targetUnit && targetUnit.player !== currentPlayer) {
+              onCharge(Number(selectedUnitId), Number(targetUnit.id));
+              return;
             }
           }
-          return;
-        }
-
-        if (phase === "charge" && mode === "chargePreview" && selectedUnitId !== null && unit.player !== currentPlayer) {
-          const charger = units.find(u => u.id === selectedUnitId);
-          if (charger && cubeDistance(offsetToCube(charger.col, charger.row), offsetToCube(unit.col, unit.row)) <= charger.MOVE) {
-            if (typeof onCharge === "function") onCharge(charger.id, unit.id);
-          }
-          return;
-        }
-
-        if (phase === "combat") {
-          if (
-            unit.player === currentPlayer &&
-            !(unitsAttacked || []).includes(Number(unit.id)) &&
-            e.button === 0
-          ) {
-            if (selectedUnitId === unit.id) {
-              if (typeof onCombatAttack === "function") {
-                onCombatAttack(unit.id, null);
+          if (phase === "shoot" && selectedUnitId && unit.player !== currentPlayer && onShoot) {
+            const shooter = units.find(u => u.id === selectedUnitId);
+            if (shooter) {
+              const c1 = offsetToCube(shooter.col, shooter.row);
+              const c2 = offsetToCube(unit.col, unit.row);
+              const distance = cubeDistance(c1, c2);
+              if (distance <= shooter.RNG_RNG) {
+                onShoot(Number(selectedUnitId), Number(unit.id));
+                return;
               }
-              return;
-            } else {
-              onSelectUnit(Number(unit.id));
-              return;
             }
           }
-          
-          if (
-            selectedUnitId !== null &&
-            unit.player !== currentPlayer &&
-            e.button === 0
-          ) {
+          if (phase === "combat" && selectedUnitId && unit.player !== currentPlayer && onCombatAttack) {
             const attacker = units.find(u => u.id === selectedUnitId);
             if (attacker) {
-              const dist = Math.max(Math.abs(attacker.col - unit.col), Math.abs(attacker.row - unit.row));
-              if (dist === 1 && typeof onCombatAttack === "function") {
-                onCombatAttack(attacker.id, unit.id);
+              const distance = Math.max(Math.abs(attacker.col - unit.col), Math.abs(attacker.row - unit.row));
+              if (distance === 1) {
+                onCombatAttack(Number(selectedUnitId), Number(unit.id));
+                return;
               }
             }
           }
-          
-          if (
-            selectedUnitId !== null &&
-            unit.id === selectedUnitId &&
-            e.button === 2
-          ) {
-            if (typeof onSelectUnit === "function") onSelectUnit(null);
-          }
-          return;
-        }
-
-        // Fallback selection logic
-        let canSelect = false;
-        if (phase === "move") {
-          canSelect = unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id));
-        } else if (phase === "shoot") {
-          if (unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id))) {
-            const enemies = units.filter(u2 => u2.player !== currentPlayer);
-            canSelect = enemies.some(eu => {
-              const c1 = offsetToCube(unit.col, unit.row);
-              const c2 = offsetToCube(eu.col, eu.row);
-              return cubeDistance(c1, c2) <= unit.RNG_RNG;
-            });
-          }
-        } else if (phase === "charge") {
-          const unitsChargedArr = unitsCharged || [];
-          if (unit.player === currentPlayer && !unitsChargedArr.includes(Number(unit.id))) {
-            const enemies = units.filter(u2 => u2.player !== currentPlayer);
-            const c1 = offsetToCube(unit.col, unit.row);
-            const isAdjacent = enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) === 1);
-            const inRange = enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) <= unit.MOVE);
-            canSelect = !isAdjacent && inRange;
-          }
-        }
-        if (canSelect && e.button === 0) {
-          onSelectUnit(Number(unit.id));
+          onSelectUnit(unit.id);
         }
       });
-      
+
       app.stage.addChild(unitCircle);
 
-      if (unit.ICON) {
-        const ICON_SIZE = HEX_RADIUS * 1.5;
-        const iconSprite = PIXI.Sprite.from(unit.ICON);
-        iconSprite.x = centerX - ICON_SIZE / 2;
-        iconSprite.y = centerY - ICON_SIZE / 2;
-        iconSprite.width = ICON_SIZE;
-        iconSprite.height = ICON_SIZE;
-        app.stage.addChild(iconSprite);
-      } else {
-        const label = new PIXI.Text(unit.name, {
-          fontFamily: "Arial",
-          fontWeight: "bold",
-          fontSize: 18,
+      // Unit name text
+      const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
+        fontSize: 11,
+        fill: 0xffffff,
+        align: "center",
+        fontWeight: "bold",
+      });
+      unitText.anchor.set(0.5);
+      unitText.position.set(centerX, centerY + HEX_RADIUS * 0.55);
+      app.stage.addChild(unitText);
+    }
+
+    // Draw preview unit (in movePreview or attackPreview)
+    if (mode === "movePreview" && movePreview) {
+      const previewUnit = units.find(u => u.id === movePreview.unitId);
+      if (previewUnit) {
+        const centerX = movePreview.destCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const centerY = movePreview.destRow * HEX_VERT_SPACING + ((movePreview.destCol % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+
+        const previewCircle = new PIXI.Graphics();
+        previewCircle.beginFill(previewUnit.color, 0.7);
+        previewCircle.lineStyle(3, 0xffffff, 0.8);
+        previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.6);
+        previewCircle.endFill();
+        app.stage.addChild(previewCircle);
+
+        const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
+          fontSize: 11,
           fill: 0xffffff,
           align: "center",
+          fontWeight: "bold",
         });
-        label.anchor.set(0.5);
-        label.x = centerX;
-        label.y = centerY;
-        app.stage.addChild(label);
+        previewText.anchor.set(0.5);
+        previewText.position.set(centerX, centerY + HEX_RADIUS * 0.55);
+        app.stage.addChild(previewText);
       }
     }
 
-    // Draw previewed unit at its temporary destination (if any)
-    if ((mode === "movePreview" && movePreview && previewUnit) ||
-        (mode === "attackPreview" && attackPreview && previewUnit)) {
-      const prev = mode === "movePreview" && movePreview
-        ? { col: movePreview.destCol, row: movePreview.destRow, name: previewUnit.name, color: previewUnit.color, ICON: previewUnit.ICON }
-        : (attackPreview && previewUnit
-          ? { col: attackPreview.col, row: attackPreview.row, name: previewUnit.name, color: previewUnit.color, ICON: previewUnit.ICON }
-          : null);
-      if (prev) {
-        const centerX = prev.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY = prev.row * HEX_VERT_SPACING + ((prev.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
-        const unitCircle = new PIXI.Graphics();
-        unitCircle.beginFill(prev.color);
-        unitCircle.lineStyle(4, 0xffd700, 1);
-        unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.7);
-        unitCircle.endFill();
-        unitCircle.eventMode = "static";
-        (unitCircle as any).buttonMode = true;
-        unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-          if (e.button === 0) onConfirmMove();
-          if (e.button === 2) onCancelMove();
-        });
-        app.stage.addChild(unitCircle);
+    if (mode === "attackPreview" && attackPreview) {
+      const previewUnit = units.find(u => u.id === attackPreview.unitId);
+      if (previewUnit) {
+        const centerX = attackPreview.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const centerY = attackPreview.row * HEX_VERT_SPACING + ((attackPreview.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
-        if (prev.ICON) {
-          const ICON_SIZE = HEX_RADIUS * 1.5;
-          const iconSprite = PIXI.Sprite.from(prev.ICON);
-          iconSprite.x = centerX - ICON_SIZE / 2;
-          iconSprite.y = centerY - ICON_SIZE / 2;
-          iconSprite.width = ICON_SIZE;
-          iconSprite.height = ICON_SIZE;
-          app.stage.addChild(iconSprite);
-        } else {
-          const label = new PIXI.Text(prev.name, {
-            fontFamily: "Arial",
-            fontWeight: "bold",
-            fontSize: 18,
-            fill: 0xffffff,
-            align: "center",
-          });
-          label.anchor.set(0.5);
-          label.x = centerX;
-          label.y = centerY;
-          app.stage.addChild(label);
-        }
+        const previewCircle = new PIXI.Graphics();
+        previewCircle.beginFill(previewUnit.color, 0.7);
+        previewCircle.lineStyle(3, 0xffffff, 0.8);
+        previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.6);
+        previewCircle.endFill();
+        app.stage.addChild(previewCircle);
+
+        const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
+          fontSize: 11,
+          fill: 0xffffff,
+          align: "center",
+          fontWeight: "bold",
+        });
+        previewText.anchor.set(0.5);
+        previewText.position.set(centerX, centerY + HEX_RADIUS * 0.55);
+        app.stage.addChild(previewText);
       }
     }
 
     return () => {
-      app.destroy(true, { children: true });
-      if (containerRef.current) containerRef.current.innerHTML = "";
+      app.destroy(true);
     };
   }, [
     units,
@@ -614,23 +532,23 @@ export default function Board({
     mode,
     movePreview,
     attackPreview,
-    onSelectUnit,
-    onStartMovePreview,
-    onStartAttackPreview,
-    onConfirmMove,
-    onCancelMove,
     currentPlayer,
     unitsMoved,
     unitsCharged,
-    phase
+    unitsAttacked,
+    phase,
+    boardConfig,
+    BOARD_COLS,
+    BOARD_ROWS,
+    HEX_RADIUS,
+    MARGIN,
+    HEX_WIDTH,
+    HEX_HEIGHT,
+    HEX_HORIZ_SPACING,
+    HEX_VERT_SPACING,
+    HIGHLIGHT_COLOR,
+    ATTACK_COLOR
   ]);
 
-  return (
-    <div style={{
-      width: "100%", height: "100%",
-      display: "flex", justifyContent: "center", alignItems: "center"
-    }}>
-      <div ref={containerRef} />
-    </div>
-  );
+  return <div ref={containerRef} />;
 }

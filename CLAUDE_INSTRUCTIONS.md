@@ -1,4 +1,4 @@
-# Claude Development Requirements - ALWAYS FOLLOW
+# Development Requirements - ALWAYS FOLLOW
 
 ## Core Environment
 - PowerShell for prompts, TypeScript/React for scripts

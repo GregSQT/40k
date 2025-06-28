@@ -23,6 +23,7 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 backup.log
+tsconfig.tsbuildinfo
 
 # Runtime data
 pids/
