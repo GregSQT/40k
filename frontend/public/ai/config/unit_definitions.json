@@ -1,0 +1,46 @@
+﻿{
+    "AssaultIntercessor":  {
+                               "is_melee":  true,
+                               "description":  "Close combat specialist Space Marine",
+                               "ranged_damage":  1,
+                               "is_ranged":  false,
+                               "cost":  120,
+                               "melee_damage":  2,
+                               "hp_max":  4,
+                               "move":  6,
+                               "ranged_range":  4
+                           },
+    "Intercessor":  {
+                        "is_melee":  false,
+                        "description":  "Standard Space Marine with bolt rifle",
+                        "ranged_damage":  2,
+                        "is_ranged":  true,
+                        "cost":  100,
+                        "melee_damage":  1,
+                        "hp_max":  3,
+                        "move":  4,
+                        "ranged_range":  8
+                    },
+    "Scout":  {
+                  "is_melee":  false,
+                  "description":  "Fast reconnaissance unit",
+                  "ranged_damage":  1,
+                  "is_ranged":  true,
+                  "cost":  80,
+                  "melee_damage":  1,
+                  "hp_max":  2,
+                  "move":  5,
+                  "ranged_range":  10
+              },
+    "Terminator":  {
+                       "is_melee":  true,
+                       "description":  "Heavy armored elite unit",
+                       "ranged_damage":  3,
+                       "is_ranged":  true,
+                       "cost":  200,
+                       "melee_damage":  3,
+                       "hp_max":  5,
+                       "move":  3,
+                       "ranged_range":  6
+                   }
+}
