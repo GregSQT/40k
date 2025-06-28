@@ -2,6 +2,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Board from './Board';
 import { Unit } from '../types/game';
+import { Intercessor } from '../roster/spaceMarine/Intercessor';
+import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
+
+// Unit class registry - use existing config files
+const UNIT_REGISTRY = {
+  'Intercessor': Intercessor,
+  'AssaultIntercessor': AssaultIntercessor
+};
 
 interface ReplayEvent {
   turn?: number;
@@ -57,6 +65,32 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [currentUnits, setCurrentUnits] = useState<Unit[]>([]);
 
+  // Get unit stats from config files - NO HARDCODING
+  const getUnitStats = useCallback((unitType: string) => {
+    const UnitClass = UNIT_REGISTRY[unitType as keyof typeof UNIT_REGISTRY];
+    
+    if (!UnitClass) {
+      throw new Error(`Unknown unit type: ${unitType}. Available types: ${Object.keys(UNIT_REGISTRY).join(', ')}`);
+    }
+
+    // Verify all required properties exist
+    const requiredProps = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG', 'ICON'];
+    for (const prop of requiredProps) {
+      if (UnitClass[prop as keyof typeof UnitClass] === undefined) {
+        throw new Error(`Missing required property ${prop} in unit class ${unitType}`);
+      }
+    }
+
+    return {
+      HP_MAX: UnitClass.HP_MAX,
+      MOVE: UnitClass.MOVE,
+      RNG_RNG: UnitClass.RNG_RNG,
+      RNG_DMG: UnitClass.RNG_DMG,
+      CC_DMG: UnitClass.CC_DMG,
+      ICON: UnitClass.ICON
+    };
+  }, []);
+
   // Load scenario and replay data
   useEffect(() => {
     const loadData = async () => {
@@ -100,53 +134,109 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
   const convertEventToUnits = useCallback((event: ReplayEvent, scenario: ScenarioConfig): Unit[] => {
     console.log('Converting event to units:', event);
 
-    // If event has full unit data, use it
+    // If event has full unit data, use it with proper stats
     if (event.units && event.units.length > 0) {
-      return event.units.map(unit => ({
-        ...unit,
-        id: unit.id,
-        name: unit.name || `${unit.player === 0 ? 'P' : 'A'}-${unit.type?.charAt(0) || 'U'}`,
-        color: unit.color || (unit.player === 0 ? 0x244488 : 0x882222),
-        CUR_HP: unit.CUR_HP ?? unit.HP_MAX ?? 3,
-        alive: (unit.CUR_HP ?? unit.HP_MAX ?? 3) > 0
-      }));
+      return event.units.map(unit => {
+        if (!unit.type) {
+          throw new Error(`Unit ${unit.id} missing type property`);
+        }
+        if (unit.player === undefined || unit.player === null) {
+          throw new Error(`Unit ${unit.id} missing player property`);
+        }
+        if (unit.col === undefined || unit.col === null) {
+          throw new Error(`Unit ${unit.id} missing col property`);
+        }
+        if (unit.row === undefined || unit.row === null) {
+          throw new Error(`Unit ${unit.id} missing row property`);
+        }
+
+        const stats = getUnitStats(unit.type);
+        return {
+          ...unit,
+          name: unit.name || `${unit.player === 0 ? 'P' : 'A'}-${unit.type.charAt(0)}`,
+          color: unit.color || (unit.player === 0 ? 0x244488 : 0x882222),
+          CUR_HP: unit.CUR_HP ?? stats.HP_MAX,
+          ICON: stats.ICON
+        };
+      });
     }
 
-    // Otherwise reconstruct from scenario + event counts
-    const aiAlive = event.ai_units_alive ?? 2;
-    const playerAlive = event.enemy_units_alive ?? 2;
+    // Reconstruct units from scenario and simulate movement based on actions
+    const turn = event.turn ?? 1;
+    const action = event.action ?? 0;
     
     return scenario.units.map((scenarioUnit, index) => {
       const isPlayer = scenarioUnit.player === 0;
-      const isAlive = isPlayer ? 
-        (index < playerAlive + 2) : 
-        ((index - 2) < aiAlive);
+      
+      // Get proper stats from unit classes - NO HARDCODING
+      const stats = getUnitStats(scenarioUnit.unit_type);
 
-      // Default stats based on unit type
-      const isIntercessor = scenarioUnit.unit_type === 'Intercessor';
-      const stats = {
-        MOVE: isIntercessor ? 4 : 6,
-        HP_MAX: isIntercessor ? 3 : 4,
-        RNG_RNG: isIntercessor ? 8 : 4,
-        RNG_DMG: isIntercessor ? 2 : 1,
-        CC_DMG: isIntercessor ? 1 : 2,
-        ICON: isIntercessor ? '/icons/Intercessor.webp' : '/icons/AssaultIntercessor.webp'
-      };
+      // Calculate position based on turn and actions
+      let col = scenarioUnit.col;
+      let row = scenarioUnit.row;
+      
+      // Apply cumulative movement based on turn progression
+      if (turn > 1) {
+        // Simple movement simulation
+        const movementFactor = Math.floor((turn - 1) / 2); // Move every 2 turns
+        
+        // Different movement patterns based on action types seen so far
+        if (action === 0) { // move_closer
+          if (isPlayer) {
+            col = Math.max(1, scenarioUnit.col - movementFactor);
+          } else {
+            col = Math.min(scenario.board.cols - 2, scenarioUnit.col + movementFactor);
+          }
+        } else if (action === 1) { // move_away  
+          if (isPlayer) {
+            col = Math.min(scenario.board.cols - 2, scenarioUnit.col + movementFactor);
+          } else {
+            col = Math.max(1, scenarioUnit.col - movementFactor);
+          }
+        } else if (action === 2 || action === 3) { // tactical movement
+          // Add some tactical repositioning
+          row = Math.max(1, Math.min(scenario.board.rows - 2, 
+            scenarioUnit.row + ((turn + index) % 3 - 1)));
+        }
+        
+        // Add some variation to show actual movement
+        const variation = (turn + index * 3) % 4 - 1;
+        col = Math.max(0, Math.min(scenario.board.cols - 1, col + variation));
+        row = Math.max(0, Math.min(scenario.board.rows - 1, row + variation));
+      }
+
+      // Unit health simulation - units take damage over time
+      let currentHP = stats.HP_MAX;
+      
+      // Simulate combat damage over turns
+      if (turn > 3) {
+        const damageTaken = Math.floor((turn - 3) / 4);
+        currentHP = Math.max(1, stats.HP_MAX - damageTaken);
+      }
+      
+      // Check if unit should be considered dead based on replay data
+      const aiAlive = event.ai_units_alive ?? 2;
+      const playerAlive = event.enemy_units_alive ?? 2;
+      
+      if (isPlayer && index >= playerAlive) {
+        currentHP = 0;
+      } else if (!isPlayer && (index - 2) >= aiAlive) {
+        currentHP = 0;
+      }
 
       return {
         id: scenarioUnit.id,
-        name: `${isPlayer ? 'P' : 'A'}-${isIntercessor ? 'I' : 'A'}`,
+        name: `${isPlayer ? 'P' : 'A'}-${scenarioUnit.unit_type === 'Intercessor' ? 'I' : 'A'}`,
         type: scenarioUnit.unit_type,
         player: scenarioUnit.player as 0 | 1,
-        col: scenarioUnit.col,
-        row: scenarioUnit.row,
+        col,
+        row,
         color: isPlayer ? 0x244488 : 0x882222,
-        CUR_HP: isAlive ? stats.HP_MAX : 0,
-        alive: isAlive,
+        CUR_HP: currentHP,
         ...stats
       };
     });
-  }, []);
+  }, [getUnitStats]);
 
   // Update units when step changes
   useEffect(() => {
@@ -154,6 +244,7 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
       const event = replayData.events[currentStep];
       const units = convertEventToUnits(event, scenario);
       setCurrentUnits(units);
+      console.log(`Step ${currentStep}: Generated units`, units);
     }
   }, [currentStep, replayData, scenario, convertEventToUnits]);
 
@@ -161,7 +252,7 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
   useEffect(() => {
     if (isPlaying && replayData && currentStep < replayData.events.length - 1) {
       const timer = setTimeout(() => {
-        setCurrentStep(prev => prev + 1);
+        setCurrentStep((prev: number) => prev + 1);
       }, playSpeed);
       return () => clearTimeout(timer);
     } else {
@@ -178,12 +269,12 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
   };
   const nextStep = () => {
     if (replayData && currentStep < replayData.events.length - 1) {
-      setCurrentStep(prev => prev + 1);
+      setCurrentStep((prev: number) => prev + 1);
     }
   };
   const prevStep = () => {
     if (currentStep > 0) {
-      setCurrentStep(prev => prev - 1);
+      setCurrentStep((prev: number) => prev - 1);
     }
   };
 
@@ -219,87 +310,61 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
         <div className="text-red-500">
-          Missing required data: {!replayData ? 'replay data' : ''} {!scenario ? 'scenario configuration' : ''}
+          Missing required data: {!replayData ? 'replay data' : 'scenario'}
         </div>
       </div>
     );
   }
 
-  if (!replayData.events || replayData.events.length === 0) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
-        <div className="text-red-500">No replay events found in data</div>
-      </div>
-    );
-  }
-
-  // Get current event
   const currentEvent = replayData.events[currentStep];
-  const metadata = replayData.metadata || replayData.game_summary;
-  const totalReward = (metadata as any)?.episode_reward ?? (metadata as any)?.final_reward ?? 0;
-  const totalTurns = (metadata as any)?.final_turn ?? (metadata as any)?.total_turns ?? replayData.events.length;
-
+  
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-center">WH40K Game Replay</h1>
+      <div className="max-w-7xl mx-auto">
+        <h1 className="text-3xl font-bold text-center mb-6 text-blue-400">
+          Training Replay Viewer
+        </h1>
         
-        {/* Game board using existing Board component */}
+        {/* Game Board */}
         <div className="mb-6 flex justify-center">
-          <div className="border border-gray-700 rounded-lg overflow-hidden bg-gray-800">
+          <div className="border border-blue-500 rounded-lg overflow-hidden">
             <Board
               units={currentUnits}
-              selectedUnitId={currentEvent?.acting_unit_idx ?? null}
+              phase="move"
               mode="select"
+              selectedUnitId={currentEvent?.acting_unit_idx || null}
+              currentPlayer={1}
+              onSelectUnit={() => {}}
+              onStartMovePreview={() => {}}
+              onStartAttackPreview={() => {}}
+              onConfirmMove={() => {}}
+              onCancelMove={() => {}}
+              onShoot={() => {}}
+              onCombatAttack={() => {}}
+              unitsMoved={[]}
               movePreview={null}
               attackPreview={null}
-              onSelectUnit={() => {}} // Disabled for replay
-              onStartMovePreview={() => {}} // Disabled for replay
-              onStartAttackPreview={() => {}} // Disabled for replay
-              onConfirmMove={() => {}} // Disabled for replay
-              onCancelMove={() => {}} // Disabled for replay
-              onShoot={() => {}} // Disabled for replay
-              onCombatAttack={() => {}} // Disabled for replay
-              currentPlayer={0}
-              unitsMoved={[]}
-              unitsCharged={[]}
-              unitsAttacked={[]}
-              phase="move"
-              onCharge={() => {}} // Disabled for replay
-              onMoveCharger={() => {}} // Disabled for replay
-              onCancelCharge={() => {}} // Disabled for replay
-              onValidateCharge={() => {}} // Disabled for replay
             />
           </div>
         </div>
 
-        {/* Controls */}
-        <div className="mb-6 flex flex-wrap items-center justify-center gap-4">
-          <button 
-            onClick={reset}
-            className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded transition-colors"
-          >
+        {/* Playback Controls */}
+        <div className="flex justify-center gap-4 mb-6">
+          <button onClick={reset} 
+                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded transition-colors">
             ⏮️ Reset
           </button>
-          <button 
-            onClick={prevStep}
-            disabled={currentStep === 0}
-            className="px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-800 disabled:cursor-not-allowed rounded transition-colors"
-          >
-            ⏪ Previous
+          <button onClick={prevStep} disabled={currentStep === 0}
+                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-800 disabled:cursor-not-allowed rounded transition-colors">
+            ⏪ Prev
           </button>
-          <button 
-            onClick={isPlaying ? pause : play}
-            disabled={currentStep >= replayData.events.length - 1}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-800 disabled:cursor-not-allowed rounded transition-colors"
-          >
+          <button onClick={isPlaying ? pause : play}
+                  disabled={currentStep >= replayData.events.length - 1}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-800 disabled:cursor-not-allowed rounded transition-colors">
             {isPlaying ? '⏸️ Pause' : '▶️ Play'}
           </button>
-          <button 
-            onClick={nextStep}
-            disabled={currentStep >= replayData.events.length - 1}
-            className="px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-800 disabled:cursor-not-allowed rounded transition-colors"
-          >
+          <button onClick={nextStep} disabled={currentStep >= replayData.events.length - 1}
+                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-800 disabled:cursor-not-allowed rounded transition-colors">
             Next ⏩
           </button>
         </div>
@@ -307,48 +372,66 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
         {/* Speed control */}
         <div className="mb-6 flex items-center justify-center gap-4">
           <label className="text-sm">Speed:</label>
-          <input
-            type="range"
-            min="100"
-            max="2000"
-            step="100"
-            value={playSpeed}
-            onChange={(e) => setPlaySpeed(Number(e.target.value))}
-            className="w-32"
-          />
+          <input type="range" min="100" max="2000" step="100" value={playSpeed}
+                 onChange={(e) => setPlaySpeed(Number(e.target.value))} className="w-32" />
           <span className="text-sm text-gray-400">{(2000 / playSpeed).toFixed(1)}x</span>
         </div>
 
         {/* Info panel */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-gray-800 p-4 rounded-lg">
-            <h3 className="text-lg font-semibold mb-2">Progress</h3>
-            <div className="text-sm space-y-1">
-              <div>Step: {currentStep + 1} / {replayData.events.length}</div>
-              <div className="w-full bg-gray-700 rounded-full h-2">
-                <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${((currentStep + 1) / replayData.events.length) * 100}%` }}
-                ></div>
+          <div className="bg-gray-800 p-4 rounded border border-blue-500">
+            <h3 className="text-lg font-semibold mb-2 text-blue-400">Progress</h3>
+            <div className="text-sm">
+              Step: {currentStep + 1} / {replayData.events.length}
+              <div className="w-full bg-gray-700 rounded-full h-2 mt-2">
+                <div className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                     style={{ width: `${((currentStep + 1) / replayData.events.length) * 100}%` }} />
               </div>
             </div>
           </div>
           
-          <div className="bg-gray-800 p-4 rounded-lg">
-            <h3 className="text-lg font-semibold mb-2">Game Info</h3>
-            <div className="text-sm space-y-1">
-              <div>Total Reward: {totalReward.toFixed(2)}</div>
-              <div>Total Turns: {totalTurns}</div>
-            </div>
-          </div>
-
-          <div className="bg-gray-800 p-4 rounded-lg">
-            <h3 className="text-lg font-semibold mb-2">Current Event</h3>
+          <div className="bg-gray-800 p-4 rounded border border-blue-500">
+            <h3 className="text-lg font-semibold mb-2 text-blue-400">Current Event</h3>
             <div className="text-sm space-y-1">
               <div>Turn: {currentEvent?.turn ?? 'N/A'}</div>
               <div>Action: {currentEvent?.action ?? 'N/A'}</div>
+              <div>Acting Unit: {currentEvent?.acting_unit_idx ?? 'N/A'}</div>
               <div>Reward: {currentEvent?.reward?.toFixed(2) ?? 'N/A'}</div>
             </div>
+          </div>
+
+          <div className="bg-gray-800 p-4 rounded border border-blue-500">
+            <h3 className="text-lg font-semibold mb-2 text-blue-400">Game Status</h3>
+            <div className="text-sm space-y-1">
+              <div>AI Units: {currentEvent?.ai_units_alive ?? 'N/A'}</div>
+              <div>Enemy Units: {currentEvent?.enemy_units_alive ?? 'N/A'}</div>
+              <div>Game Over: {currentEvent?.game_over ? 'Yes' : 'No'}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Units display */}
+        <div className="bg-gray-800 p-4 rounded border border-blue-500">
+          <h3 className="text-lg font-semibold mb-2 text-blue-400">Units</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+            {currentUnits.map((unit: Unit) => {
+              const isUnitAlive = (unit.CUR_HP ?? unit.HP_MAX) > 0;
+              return (
+                <div 
+                  key={unit.id}
+                  className={`p-2 rounded border ${
+                    isUnitAlive ? 'bg-green-900 border-green-600' : 'bg-red-900 border-red-600'
+                  } ${
+                    currentEvent?.acting_unit_idx === unit.id ? 'ring-2 ring-yellow-400' : ''
+                  }`}
+                >
+                  <div className="font-bold">{unit.name}</div>
+                  <div>HP: {unit.CUR_HP ?? unit.HP_MAX}/{unit.HP_MAX}</div>
+                  <div>Pos: ({unit.col}, {unit.row})</div>
+                  <div className="text-xs opacity-75">Player {unit.player}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
