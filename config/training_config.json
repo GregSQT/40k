@@ -1,7 +1,7 @@
 {
   "default": {
     "description": "Optimized parameters for complex reward learning",
-    "total_timesteps": 10000,
+    "total_timesteps": 2000000,
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
