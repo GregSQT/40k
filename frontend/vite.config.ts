@@ -11,6 +11,12 @@ const __dirname = dirname(__filename);
 
 export default defineConfig({
   plugins: [react()],
+  publicDir: 'public',
+  server: {
+fs: {
+      allow: ['..'] // Allow serving files from parent directory
+    }
+  },
   resolve: {
     alias: {
     '@': path.resolve(__dirname, 'src'),
@@ -20,6 +26,7 @@ export default defineConfig({
     '@images': path.resolve(__dirname, '../src/images'),
     '@ai': path.resolve(__dirname, '../ai'),
     "@config": path.resolve(__dirname, "../config"),
+    '/config': path.resolve(__dirname, '../config'),
     },
   },
 });

@@ -1,6 +1,11 @@
 // frontend/src/hooks/useGameConfig.ts
 import { useState, useEffect } from 'react';
 
+const [boardResponse, gameResponse] = await Promise.all([
+  fetch('/config/board_config.json'),
+  fetch('/config/game_config.json')
+]);
+
 interface DisplayConfig {
   resolution?: "auto" | number;
   autoDensity?: boolean;
