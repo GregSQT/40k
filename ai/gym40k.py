@@ -13,6 +13,14 @@ import re
 import random
 import copy
 from datetime import datetime
+import sys
+from pathlib import Path
+
+script_dir = Path(__file__).parent
+project_root = script_dir.parent
+sys.path.insert(0, str(project_root))
+
+from config_loader import get_config_loader
 
 class W40KEnv(gym.Env):
     """Complete W40K environment with full game mechanics and unit loading from TypeScript files."""
