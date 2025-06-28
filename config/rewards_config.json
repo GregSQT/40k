@@ -1,5 +1,5 @@
 {
-  "original": {
+  "default": {
     "description": "Your original sophisticated reward system",
     "SpaceMarineRanged": {
       "move_close": 0.2,

@@ -36,22 +36,49 @@ interface BoardConfig {
     hp_damaged: string;
     highlight: string;
     current_unit: string;
-    // ✅ NEW COLORS FROM CONFIG
     eligible?: string;
     attack?: string;
     charge?: string;
   };
-  // ✅ NEW DISPLAY CONFIG SECTION
   display?: DisplayConfig;
 }
 
-interface GameConfig {
-  boardConfig: BoardConfig | null;
-  loading: boolean;
-  error: string | null;
+interface GameRules {
+  max_turns: number;
+  turn_limit_penalty: number;
+  max_units_per_player: number;
+  board_size: [number, number];
 }
 
-// ✅ UPDATED Fallback board configuration with new properties
+interface GameConfig {
+  game_rules: GameRules;
+  gameplay: {
+    phase_order: string[];
+    simultaneous_actions: boolean;
+    auto_end_turn: boolean;
+  };
+  ai_behavior: {
+    timeout_ms: number;
+    retries: number;
+    fallback_action: string;
+  };
+  scoring: {
+    win_bonus: number;
+    lose_penalty: number;
+    survival_bonus_per_turn: number;
+  };
+}
+
+interface ExtendedGameConfig {
+  boardConfig: BoardConfig | null;
+  gameConfig: GameConfig | null;
+  loading: boolean;
+  error: string | null;
+  maxTurns: number;
+  boardSize: [number, number];
+  turnPenalty: number;
+}
+
 const FALLBACK_BOARD_CONFIG: BoardConfig = {
   cols: 24,
   rows: 18,
@@ -68,12 +95,10 @@ const FALLBACK_BOARD_CONFIG: BoardConfig = {
     hp_damaged: "0x444444",
     highlight: "0x80ff80",
     current_unit: "0xffd700",
-    // ✅ NEW FALLBACK COLORS
     eligible: "0x00ff00",
     attack: "0xff4444",
     charge: "0xff9900"
   },
-  // ✅ NEW FALLBACK DISPLAY CONFIG
   display: {
     resolution: "auto",
     autoDensity: true,
@@ -94,8 +119,33 @@ const FALLBACK_BOARD_CONFIG: BoardConfig = {
   }
 };
 
-export const useGameConfig = (boardConfigName: string = "default"): GameConfig => {
+const FALLBACK_GAME_CONFIG: GameConfig = {
+  game_rules: {
+    max_turns: 100,
+    turn_limit_penalty: -1,
+    max_units_per_player: 4,
+    board_size: [24, 18]
+  },
+  gameplay: {
+    phase_order: ["move", "shoot", "charge", "combat"],
+    simultaneous_actions: false,
+    auto_end_turn: true
+  },
+  ai_behavior: {
+    timeout_ms: 5000,
+    retries: 3,
+    fallback_action: "wait"
+  },
+  scoring: {
+    win_bonus: 1000,
+    lose_penalty: -1000,
+    survival_bonus_per_turn: 1
+  }
+};
+
+export const useGameConfig = (boardConfigName: string = "default"): ExtendedGameConfig => {
   const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
+  const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -104,36 +154,48 @@ export const useGameConfig = (boardConfigName: string = "default"): GameConfig =
       try {
         setLoading(true);
         setError(null);
-        
-        // Only load board config - unit definitions come from TypeScript classes
-        const boardResponse = await fetch(`/ai/config/board_config.json`);
-        
+
+        const [boardResponse, gameResponse] = await Promise.all([
+          fetch('/ai/config/board_config.json'),
+          fetch('/ai/config/game_config.json')
+        ]);
+
         if (!boardResponse.ok) {
           throw new Error(`Board config HTTP ${boardResponse.status}: ${boardResponse.statusText}`);
         }
-        
-        const boardResponseText = await boardResponse.text();
-        
-        // Validate JSON before parsing
+
+        if (!gameResponse.ok) {
+          throw new Error(`Game config HTTP ${gameResponse.status}: ${gameResponse.statusText}`);
+        }
+
+        const [boardResponseText, gameResponseText] = await Promise.all([
+          boardResponse.text(),
+          gameResponse.text()
+        ]);
+
         if (!boardResponseText.trim()) {
           throw new Error('Board config file is empty');
         }
-        
-        let boardData;
+
+        if (!gameResponseText.trim()) {
+          throw new Error('Game config file is empty');
+        }
+
+        let boardData, gameData;
         try {
           boardData = JSON.parse(boardResponseText);
+          gameData = JSON.parse(gameResponseText);
         } catch (parseError) {
-          throw new Error(`Invalid JSON in board config: ${parseError}`);
+          throw new Error(`Invalid JSON in config files: ${parseError}`);
         }
-        
+
         if (!boardData[boardConfigName]) {
           console.warn(`Board config '${boardConfigName}' not found, available configs:`, Object.keys(boardData));
           throw new Error(`Board config '${boardConfigName}' not found`);
         }
-        
-        // ✅ MERGE CONFIG WITH FALLBACKS for backward compatibility
+
         const configData = boardData[boardConfigName];
-        const mergedConfig: BoardConfig = {
+        const mergedBoardConfig: BoardConfig = {
           ...FALLBACK_BOARD_CONFIG,
           ...configData,
           colors: {
@@ -145,18 +207,19 @@ export const useGameConfig = (boardConfigName: string = "default"): GameConfig =
             ...configData.display
           }
         };
-        
-        setBoardConfig(mergedConfig);
+
+        setBoardConfig(mergedBoardConfig);
+        setGameConfig(gameData);
 
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to load configuration';
         setError(errorMessage);
         console.error('Game config loading error:', err);
-        
-        // Use fallback configuration
-        console.log('Using fallback board configuration');
+
+        console.log('Using fallback configurations');
         setBoardConfig(FALLBACK_BOARD_CONFIG);
-        
+        setGameConfig(FALLBACK_GAME_CONFIG);
+
       } finally {
         setLoading(false);
       }
@@ -165,7 +228,19 @@ export const useGameConfig = (boardConfigName: string = "default"): GameConfig =
     loadConfigs();
   }, [boardConfigName]);
 
-  return { boardConfig, loading, error };
+  const maxTurns = gameConfig?.game_rules.max_turns ?? 100;
+  const boardSize: [number, number] = gameConfig?.game_rules.board_size ?? [24, 18];
+  const turnPenalty = gameConfig?.game_rules.turn_limit_penalty ?? -1;
+
+  return {
+    boardConfig,
+    gameConfig,
+    loading,
+    error,
+    maxTurns,
+    boardSize,
+    turnPenalty
+  };
 };
 
 export default useGameConfig;

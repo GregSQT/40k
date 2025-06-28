@@ -9,18 +9,13 @@
     "scenarios": "config/scenarios.json",
     "rewards": "config/rewards_config.json",
     "training": "config/training_config.json",
+    "game_config": "config/game_config.json",
     "tensorboard": "./tensorboard/"
   },
   "defaults": {
     "scenario": "default",
     "training_config": "default",
-    "rewards_config": "original"
-  },
-  "game": {
-    "board_size": [
-      24,
-      18
-    ],
-    "max_turns": 100
+    "rewards_config": "default",
+    "game_config": "default"
   }
 }
