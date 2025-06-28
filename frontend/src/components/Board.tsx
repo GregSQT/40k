@@ -1,6 +1,6 @@
 // src/components/Board.tsx - Version mise à jour compatible avec les nouveaux types
 import { useEffect, useRef } from "react";
-import * as PIXI from "pixi.js";
+import * as PIXI from "pixi.js-legacy";
 import type { Unit } from "../types/game";
 import React from "react";
 
@@ -114,7 +114,7 @@ export default function Board({
       autoDensity: true,
       forceCanvas: true, // 🔥 FORCE Canvas mode - NO WebGL!
     });
-    
+
     containerRef.current.appendChild(app.view as unknown as HTMLCanvasElement);
     if (app.view && app.view.style) {
       app.view.style.width = `${width}px`;

@@ -1,6 +1,6 @@
 // frontend/src/components/GameReplayViewer.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import * as PIXI from 'pixi.js';
+import * as PIXI from "pixi.js-legacy";
 import { Intercessor } from '../roster/spaceMarine/Intercessor';
 import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
 
