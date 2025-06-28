@@ -320,26 +320,25 @@ class W40KEnv(gym.Env):
         unit["row"] = new_row
 
     def _attack_target(self, attacker, target):
-        """Attack target with ranged weapon."""
+        """Attack target with ranged weapon - FIXED to prevent overkill."""
         if not target or not target["alive"]:
             return 0.0
         
-        # Find enemies in range
-        targets = []
-        for enemy in [target]:
-            dist = abs(attacker["col"] - enemy["col"]) + abs(attacker["row"] - enemy["row"])
-            if dist <= attacker["rng_rng"]:
-                targets.append((dist, enemy))
+        # Calculate distance
+        dist = abs(attacker["col"] - target["col"]) + abs(attacker["row"] - target["row"])
+        weapon_range = attacker.get("rng_rng", 4)
         
-        if targets:
-            # Attack nearest
-            _, target = min(targets)
-            damage = attacker["rng_dmg"]
-            target["cur_hp"] -= damage
+        # Check if target is in range
+        if dist <= weapon_range:
+            base_damage = attacker.get("rng_dmg", 1)
+            # CRITICAL FIX: Prevent overkill damage
+            actual_damage = min(base_damage, target["cur_hp"])
+            target["cur_hp"] -= actual_damage
             
             reward = 1.0  # Base attack reward
             
             if target["cur_hp"] <= 0:
+                target["cur_hp"] = 0  # Ensure HP doesn't go negative
                 target["alive"] = False
                 reward += 5.0  # Bonus for kill
             
@@ -445,24 +444,54 @@ class W40KEnv(gym.Env):
                 else:
                     reward -= 0.1
         
-        # Enemy AI - simple behavior
+        # Enemy AI - BALANCED behavior (max 1 enemy action per turn)
+        enemy_actions_this_turn = 0
+        max_enemy_actions = 1  # CRITICAL: Limit to 1 enemy action per turn
+        
         for enemy in enemies:
-            if not enemy["alive"]:
+            if not enemy["alive"] or enemy_actions_this_turn >= max_enemy_actions:
                 continue
+                
+            if not ai_units:  # No AI units left
+                break
                 
             nearest_ai = min(ai_units, key=lambda u: abs(enemy["col"] - u["col"]) + abs(enemy["row"] - u["row"]) if u["alive"] else float('inf'))
             
             if nearest_ai and nearest_ai["alive"]:
                 dist = abs(enemy["col"] - nearest_ai["col"]) + abs(enemy["row"] - nearest_ai["row"])
                 
-                if dist <= enemy["rng_rng"] and enemy["is_ranged"]:
-                    # Ranged attack
-                    if self._attack_target(enemy, nearest_ai):
-                        if not nearest_ai["alive"]:
-                            reward -= 5.0
-                else:
-                    # Move toward target
+                # FIXED: Limit enemy range and damage
+                enemy_range = min(enemy.get("rng_rng", 4), 6)  # Max range 6
+                enemy_damage = min(enemy.get("rng_dmg", 1), 2)  # Max damage 2
+                
+                if dist <= enemy_range and enemy.get("is_ranged", True):
+                    # Ranged attack with damage limits
+                    actual_damage = min(enemy_damage, nearest_ai["cur_hp"])
+                    nearest_ai["cur_hp"] -= actual_damage
+                    
+                    if nearest_ai["cur_hp"] <= 0:
+                        nearest_ai["cur_hp"] = 0
+                        nearest_ai["alive"] = False
+                        reward -= 2.0  # Reduced penalty
+                    
+                    enemy_actions_this_turn += 1
+                    # Debug: print(f"Enemy {enemy.get('id', '?')} shoots AI {nearest_ai.get('id', '?')} for {actual_damage}")
+                    
+                elif dist > 1:  # Move closer if not adjacent
                     self._move_toward_target(enemy, nearest_ai)
+                    enemy_actions_this_turn += 1
+                    
+                else:  # Melee attack if adjacent
+                    melee_damage = min(enemy.get("cc_dmg", 1), 1)  # Max melee damage 1
+                    actual_damage = min(melee_damage, nearest_ai["cur_hp"])
+                    nearest_ai["cur_hp"] -= actual_damage
+                    
+                    if nearest_ai["cur_hp"] <= 0:
+                        nearest_ai["cur_hp"] = 0
+                        nearest_ai["alive"] = False
+                        reward -= 2.0
+                    
+                    enemy_actions_this_turn += 1
         
         # Check win conditions again
         ai_units = [u for u in self.units if u["player"] == 1 and u["alive"]]

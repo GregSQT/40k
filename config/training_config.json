@@ -1,7 +1,7 @@
 {
   "default": {
     "description": "Optimized parameters for complex reward learning",
-    "total_timesteps": 2000000,
+    "total_timesteps": 1000000,
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
@@ -81,6 +81,23 @@
       "target_update_interval": 500,
       "exploration_fraction": 0.3,
       "exploration_final_eps": 0.05,
+      "tensorboard_log": "./tensorboard/"
+    }
+  },
+  "emergency": {
+    "description": "Emergency config for broken training recovery",
+    "total_timesteps": 100000,
+    "model_params": {
+      "policy": "MlpPolicy",
+      "verbose": 1,
+      "buffer_size": 25000,
+      "learning_rate": 0.001,
+      "learning_starts": 2000,
+      "batch_size": 64,
+      "train_freq": 4,
+      "target_update_interval": 1000,
+      "exploration_fraction": 0.5,
+      "exploration_final_eps": 0.1,
       "tensorboard_log": "./tensorboard/"
     }
   }

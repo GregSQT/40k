@@ -184,5 +184,58 @@
       "atk_wasted_m": -0.8,
       "wait": -0.9
     }
+  },
+  "emergency": {
+    "description": "Emergency simplified rewards for learning",
+    "SpaceMarineRanged": {
+      "move_close": 0.1,
+      "move_away": 0.0,
+      "move_to_safe": 0.1,
+      "move_to_rng": 0.2,
+      "move_to_charge": 0.0,
+      "move_to_rng_charge": 0.1,
+      "ranged_attack": 0.3,
+      "enemy_killed_r": 2.0,
+      "enemy_killed_lowests_hp_r": 2.5,
+      "enemy_killed_no_overkill_r": 3.0,
+      "charge_success": 0.2,
+      "being_charged": -0.5,
+      "attack": 0.3,
+      "enemy_killed_m": 2.0,
+      "enemy_killed_lowests_hp_m": 2.5,
+      "enemy_killed_no_overkill_m": 3.0,
+      "loose_hp": -0.5,
+      "killed_in_melee": -3.0,
+      "win": 10.0,
+      "lose": -10.0,
+      "atk_wasted_r": -0.3,
+      "atk_wasted_m": -0.3,
+      "wait": -0.5
+    },
+    "SpaceMarineMelee": {
+      "move_close": 0.2,
+      "move_away": -0.2,
+      "move_to_safe": 0.1,
+      "move_to_rng": 0.1,
+      "move_to_charge": 0.3,
+      "move_to_rng_charge": 0.4,
+      "ranged_attack": 0.2,
+      "enemy_killed_r": 2.0,
+      "enemy_killed_lowests_hp_r": 2.5,
+      "enemy_killed_no_overkill_r": 3.0,
+      "charge_success": 0.5,
+      "being_charged": -0.5,
+      "attack": 0.4,
+      "enemy_killed_m": 2.5,
+      "enemy_killed_lowests_hp_m": 3.0,
+      "enemy_killed_no_overkill_m": 3.5,
+      "loose_hp": -0.5,
+      "killed_in_melee": -3.0,
+      "win": 10.0,
+      "lose": -10.0,
+      "atk_wasted_r": -0.3,
+      "atk_wasted_m": -0.3,
+      "wait": -0.5
+    }
   }
 }

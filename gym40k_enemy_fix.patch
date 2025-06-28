@@ -1,0 +1,152 @@
+# CRITICAL FIX for gym40k.py - Enemy AI is overpowered
+# 
+# PROBLEM: Enemy AI is killing all player units on turn 1
+# CAUSE: Enemies have unlimited range and/or too much damage
+# 
+# FIND THIS SECTION in gym40k.py (around line with "Enemy AI - simple behavior"):
+
+# ========== FIND AND REPLACE ==========
+
+# OLD CODE (BROKEN):
+        # Enemy AI - simple behavior
+        for enemy in enemies:
+            if not enemy["alive"]:
+                continue
+                
+            nearest_ai = min(ai_units, key=lambda u: abs(enemy["col"] - u["col"]) + abs(enemy["row"] - u["row"]) if u["alive"] else float('inf'))
+            
+            if nearest_ai and nearest_ai["alive"]:
+                dist = abs(enemy["col"] - nearest_ai["col"]) + abs(enemy["row"] - nearest_ai["row"])
+                
+                if dist <= enemy["rng_rng"] and enemy["is_ranged"]:
+                    # Ranged attack
+                    if self._attack_target(enemy, nearest_ai):
+                        if not nearest_ai["alive"]:
+                            reward -= 5.0
+                else:
+                    # Move toward target
+                    self._move_toward_target(enemy, nearest_ai)
+
+# NEW CODE (FIXED):
+        # Enemy AI - balanced behavior (LIMITED ACTIONS PER TURN)
+        enemy_actions_this_turn = 0
+        max_enemy_actions = 1  # Limit enemies to 1 action per turn total
+        
+        for enemy in enemies:
+            if not enemy["alive"] or enemy_actions_this_turn >= max_enemy_actions:
+                continue
+                
+            if not ai_units:  # No AI units left
+                break
+                
+            nearest_ai = min(ai_units, key=lambda u: abs(enemy["col"] - u["col"]) + abs(enemy["row"] - u["row"]) if u["alive"] else float('inf'))
+            
+            if nearest_ai and nearest_ai["alive"]:
+                dist = abs(enemy["col"] - nearest_ai["col"]) + abs(enemy["row"] - nearest_ai["row"])
+                
+                # FIXED: Check if enemy has ranged weapon and is in range
+                enemy_range = enemy.get("rng_rng", 4)  # Default range 4
+                enemy_damage = enemy.get("rng_dmg", 1)  # Default damage 1
+                
+                if dist <= enemy_range and enemy.get("is_ranged", True):
+                    # Ranged attack with damage limits
+                    damage = min(enemy_damage, nearest_ai["cur_hp"])  # Prevent overkill
+                    nearest_ai["cur_hp"] -= damage
+                    
+                    if nearest_ai["cur_hp"] <= 0:
+                        nearest_ai["cur_hp"] = 0
+                        nearest_ai["alive"] = False
+                        reward -= 2.0  # Penalty for losing unit
+                    
+                    enemy_actions_this_turn += 1
+                    print(f"DEBUG: Enemy {enemy.get('id', '?')} attacks AI {nearest_ai.get('id', '?')} for {damage} damage")
+                    
+                elif dist > 1:  # Move closer if not adjacent
+                    self._move_toward_target(enemy, nearest_ai)
+                    enemy_actions_this_turn += 1
+                    print(f"DEBUG: Enemy {enemy.get('id', '?')} moves toward AI {nearest_ai.get('id', '?')}")
+                else:
+                    # Melee attack if adjacent
+                    melee_damage = enemy.get("cc_dmg", 1)
+                    damage = min(melee_damage, nearest_ai["cur_hp"])
+                    nearest_ai["cur_hp"] -= damage
+                    
+                    if nearest_ai["cur_hp"] <= 0:
+                        nearest_ai["cur_hp"] = 0
+                        nearest_ai["alive"] = False
+                        reward -= 2.0
+                    
+                    enemy_actions_this_turn += 1
+                    print(f"DEBUG: Enemy {enemy.get('id', '?')} melee attacks AI {nearest_ai.get('id', '?')} for {damage} damage")
+
+# ========== ADDITIONAL FIX ==========
+
+# ALSO FIND AND FIX the _attack_target method:
+
+# OLD _attack_target (BROKEN):
+    def _attack_target(self, attacker, target):
+        """Attack target with ranged weapon."""
+        if not target or not target["alive"]:
+            return 0.0
+        
+        # Find enemies in range
+        targets = []
+        for enemy in [target]:
+            dist = abs(attacker["col"] - enemy["col"]) + abs(attacker["row"] - enemy["row"])
+            if dist <= attacker["rng_rng"]:
+                targets.append((dist, enemy))
+        
+        if targets:
+            # Attack nearest
+            _, target = min(targets)
+            damage = attacker["rng_dmg"]
+            target["cur_hp"] -= damage
+            
+            reward = 1.0  # Base attack reward
+            
+            if target["cur_hp"] <= 0:
+                target["alive"] = False
+                reward += 5.0  # Bonus for kill
+            
+            return reward
+        
+        return -0.1  # Penalty for failed attack
+
+# NEW _attack_target (FIXED):
+    def _attack_target(self, attacker, target):
+        """Attack target with ranged weapon - FIXED VERSION."""
+        if not target or not target["alive"]:
+            return 0.0
+        
+        # Calculate distance
+        dist = abs(attacker["col"] - target["col"]) + abs(attacker["row"] - target["row"])
+        weapon_range = attacker.get("rng_rng", 4)
+        
+        # Check if target is in range
+        if dist <= weapon_range:
+            damage = attacker.get("rng_dmg", 1)
+            # CRITICAL FIX: Prevent overkill damage
+            actual_damage = min(damage, target["cur_hp"])
+            target["cur_hp"] -= actual_damage
+            
+            reward = 1.0  # Base attack reward
+            
+            if target["cur_hp"] <= 0:
+                target["cur_hp"] = 0  # Ensure HP doesn't go negative
+                target["alive"] = False
+                reward += 5.0  # Bonus for kill
+            
+            print(f"DEBUG: Attack - {actual_damage} damage, target HP: {target['cur_hp']}")
+            return reward
+        
+        return -0.1  # Penalty for failed attack
+
+# ========== HOW TO APPLY ==========
+# 1. Open ai/gym40k.py
+# 2. Find the "Enemy AI - simple behavior" section
+# 3. Replace with the NEW CODE above
+# 4. Find the "_attack_target" method
+# 5. Replace with the NEW _attack_target above
+# 6. Save and test
+
+print("Apply these fixes to ai/gym40k.py to balance enemy AI")
