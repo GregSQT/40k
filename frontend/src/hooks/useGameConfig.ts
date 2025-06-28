@@ -1,6 +1,25 @@
 // frontend/src/hooks/useGameConfig.ts
 import { useState, useEffect } from 'react';
 
+interface DisplayConfig {
+  resolution?: "auto" | number;
+  autoDensity?: boolean;
+  antialias?: boolean;
+  forceCanvas?: boolean;
+  icon_scale?: number;
+  eligible_outline_width?: number;
+  eligible_outline_alpha?: number;
+  hp_bar_width_ratio?: number;
+  hp_bar_height?: number;
+  hp_bar_y_offset_ratio?: number;
+  unit_circle_radius_ratio?: number;
+  unit_text_size?: number;
+  selected_border_width?: number;
+  charge_target_border_width?: number;
+  default_border_width?: number;
+  canvas_border?: string;
+}
+
 interface BoardConfig {
   cols: number;
   rows: number;
@@ -17,7 +36,13 @@ interface BoardConfig {
     hp_damaged: string;
     highlight: string;
     current_unit: string;
+    // ✅ NEW COLORS FROM CONFIG
+    eligible?: string;
+    attack?: string;
+    charge?: string;
   };
+  // ✅ NEW DISPLAY CONFIG SECTION
+  display?: DisplayConfig;
 }
 
 interface GameConfig {
@@ -26,7 +51,7 @@ interface GameConfig {
   error: string | null;
 }
 
-// Fallback board configuration
+// ✅ UPDATED Fallback board configuration with new properties
 const FALLBACK_BOARD_CONFIG: BoardConfig = {
   cols: 24,
   rows: 18,
@@ -42,7 +67,30 @@ const FALLBACK_BOARD_CONFIG: BoardConfig = {
     hp_full: "0x36e36b",
     hp_damaged: "0x444444",
     highlight: "0x80ff80",
-    current_unit: "0xffd700"
+    current_unit: "0xffd700",
+    // ✅ NEW FALLBACK COLORS
+    eligible: "0x00ff00",
+    attack: "0xff4444",
+    charge: "0xff9900"
+  },
+  // ✅ NEW FALLBACK DISPLAY CONFIG
+  display: {
+    resolution: "auto",
+    autoDensity: true,
+    antialias: true,
+    forceCanvas: true,
+    icon_scale: 1.2,
+    eligible_outline_width: 3,
+    eligible_outline_alpha: 0.8,
+    hp_bar_width_ratio: 1.4,
+    hp_bar_height: 7,
+    hp_bar_y_offset_ratio: 0.85,
+    unit_circle_radius_ratio: 0.6,
+    unit_text_size: 10,
+    selected_border_width: 4,
+    charge_target_border_width: 3,
+    default_border_width: 2,
+    canvas_border: "1px solid #333"
   }
 };
 
@@ -83,7 +131,22 @@ export const useGameConfig = (boardConfigName: string = "default"): GameConfig =
           throw new Error(`Board config '${boardConfigName}' not found`);
         }
         
-        setBoardConfig(boardData[boardConfigName]);
+        // ✅ MERGE CONFIG WITH FALLBACKS for backward compatibility
+        const configData = boardData[boardConfigName];
+        const mergedConfig: BoardConfig = {
+          ...FALLBACK_BOARD_CONFIG,
+          ...configData,
+          colors: {
+            ...FALLBACK_BOARD_CONFIG.colors,
+            ...configData.colors
+          },
+          display: {
+            ...FALLBACK_BOARD_CONFIG.display,
+            ...configData.display
+          }
+        };
+        
+        setBoardConfig(mergedConfig);
 
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to load configuration';

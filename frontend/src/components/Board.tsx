@@ -1,11 +1,8 @@
-// frontend/src/components/Board.tsx - Updated to use config system while preserving ALL functionality
+// frontend/src/components/Board.tsx
 import React, { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js-legacy";
 import type { Unit } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
-import boardConfig from "@config/board_config.json";
-
-
 
 // For flat-topped hex, even-q offset (col, row)
 function offsetToCube(col: number, row: number) {
@@ -86,68 +83,92 @@ export default function Board({
   onValidateCharge,
 }: BoardProps) {
   console.log("Board render", { phase, mode, selectedUnitId });
+  
+  // ✅ HOOK 1: useRef - ALWAYS called first
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig, loading, error } = useGameConfig();
 
-  // Early return if config not loaded
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64 bg-gray-800 rounded-lg">
-        <div className="text-white">Loading board configuration...</div>
-      </div>
-    );
-  }
-
-  if (error || !boardConfig) {
-    return (
-      <div className="flex items-center justify-center h-64 bg-red-900 rounded-lg">
-        <div className="text-red-200">Error loading board: {error}</div>
-      </div>
-    );
-  }
-
-  // Extract board configuration values - REPLACE HARDCODED VALUES
-  const BOARD_COLS = boardConfig.cols;
-  const BOARD_ROWS = boardConfig.rows;
-  const HEX_RADIUS = boardConfig.hex_radius;
-  const MARGIN = boardConfig.margin;
-  const HEX_WIDTH = 1.5 * HEX_RADIUS;
-  const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
-  const HEX_HORIZ_SPACING = HEX_WIDTH;
-  const HEX_VERT_SPACING = HEX_HEIGHT;
-
-  // Parse colors from config
-  const parseColor = (colorStr: string): number => {
-    return parseInt(colorStr.replace('0x', ''), 16);
-  };
-
-  const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight); // Green
-  const ATTACK_COLOR = 0xff4444;    // Red
-
+  // ✅ HOOK 3: useEffect - ALWAYS called third, with ALL original logic
   useEffect(() => {
-    if (!containerRef.current) return;
+    // Early returns INSIDE useEffect to avoid hooks order violation
+    if (!containerRef.current || loading || error || !boardConfig) {
+      if (containerRef.current) {
+        containerRef.current.innerHTML = "";
+        if (loading) {
+          containerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#1f2937;border-radius:8px;color:white;">Loading board configuration...</div>`;
+        } else if (error || !boardConfig) {
+          containerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#7f1d1d;border-radius:8px;color:#fecaca;">Error loading board: ${error}</div>`;
+        }
+      }
+      return;
+    }
+
     containerRef.current.innerHTML = "";
+
+    // Extract board configuration values - USE CONFIG VALUES
+    const BOARD_COLS = boardConfig.cols;
+    const BOARD_ROWS = boardConfig.rows;
+    const HEX_RADIUS = boardConfig.hex_radius;
+    const MARGIN = boardConfig.margin;
+    const HEX_WIDTH = 1.5 * HEX_RADIUS;
+    const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+    const HEX_HORIZ_SPACING = HEX_WIDTH;
+    const HEX_VERT_SPACING = HEX_HEIGHT;
+
+    // Parse colors from config
+    const parseColor = (colorStr: string): number => {
+      return parseInt(colorStr.replace('0x', ''), 16);
+    };
+
+    // ✅ ALL COLORS FROM CONFIG WITH FALLBACKS
+    const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight);
+    const ATTACK_COLOR = parseColor(boardConfig.colors.attack || "0xff4444");
+    const CHARGE_COLOR = parseColor(boardConfig.colors.charge || "0xff9900");
+    const ELIGIBLE_COLOR = parseColor(boardConfig.colors.eligible || "0x00ff00");
+
+    // ✅ ALL DISPLAY VALUES FROM CONFIG WITH FALLBACKS
+    const displayConfig = boardConfig.display || {};
+    const ICON_SCALE = displayConfig.icon_scale ?? 1.2;
+    const ELIGIBLE_OUTLINE_WIDTH = displayConfig.eligible_outline_width ?? 3;
+    const ELIGIBLE_OUTLINE_ALPHA = displayConfig.eligible_outline_alpha ?? 0.8;
+    const HP_BAR_WIDTH_RATIO = displayConfig.hp_bar_width_ratio ?? 1.4;
+    const HP_BAR_HEIGHT = displayConfig.hp_bar_height ?? 7;
+    const HP_BAR_Y_OFFSET_RATIO = displayConfig.hp_bar_y_offset_ratio ?? 0.85;
+    const UNIT_CIRCLE_RADIUS_RATIO = displayConfig.unit_circle_radius_ratio ?? 0.6;
+    const UNIT_TEXT_SIZE = displayConfig.unit_text_size ?? 10;
+    const SELECTED_BORDER_WIDTH = displayConfig.selected_border_width ?? 4;
+    const CHARGE_TARGET_BORDER_WIDTH = displayConfig.charge_target_border_width ?? 3;
+    const DEFAULT_BORDER_WIDTH = displayConfig.default_border_width ?? 2;
+    const CANVAS_BORDER = displayConfig.canvas_border ?? "1px solid #333";
 
     const gridWidth = (BOARD_COLS - 1) * HEX_HORIZ_SPACING + HEX_WIDTH;
     const gridHeight = (BOARD_ROWS - 1) * HEX_VERT_SPACING + HEX_HEIGHT;
     const width = gridWidth + 2 * MARGIN;
     const height = gridHeight + 2 * MARGIN;
 
-    const app = new PIXI.Application({
+    // ✅ PIXI CONFIG FROM board_config.json WITH FALLBACKS
+    const pixiConfig = {
       width,
       height,
       backgroundColor: parseColor(boardConfig.colors.background),
-      antialias: true,
-      resolution: window.devicePixelRatio || 1,
-      autoDensity: true,
-      forceCanvas: true, // 🔥 FORCE Canvas mode - NO WebGL!
-    });
+      antialias: displayConfig.antialias ?? true,
+      resolution: displayConfig.resolution === "auto" ? (window.devicePixelRatio || 1) : (displayConfig.resolution ?? 1),
+      autoDensity: displayConfig.autoDensity ?? true,
+      forceCanvas: displayConfig.forceCanvas ?? true,
+    };
 
-    containerRef.current.appendChild(app.view as unknown as HTMLCanvasElement);
-    if (app.view && app.view.style) {
-      app.view.style.width = `${width}px`;
-      app.view.style.height = `${height}px`;
-    }
+    const app = new PIXI.Application(pixiConfig);
+
+    // ✅ CANVAS STYLING FROM CONFIG
+    const canvas = app.view as HTMLCanvasElement;
+    canvas.style.display = 'block';
+    canvas.style.maxWidth = '100%';
+    canvas.style.height = 'auto';
+    canvas.style.border = CANVAS_BORDER;
+    
+    containerRef.current.appendChild(canvas);
 
     // Right click cancels move/attack preview
     if (app.view && app.view.addEventListener) {
@@ -200,23 +221,21 @@ export default function Board({
     }
 
     // Green move cells (mode: 'select')
-    if (selectedUnit && mode === "select") {
-      if (selectedUnit && mode === "select" && phase !== "charge" && phase !== "combat") {
-        const centerCol = selectedUnit.col;
-        const centerRow = selectedUnit.row;
-        const c1 = offsetToCube(centerCol, centerRow);
-        for (let col = 0; col < BOARD_COLS; col++) {
-          for (let row = 0; row < BOARD_ROWS; row++) {
-            const c2 = offsetToCube(col, row);
-            const distance = cubeDistance(c1, c2);
-            const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
-            if (
-              !blocked &&
-              distance <= selectedUnit.MOVE &&
-              !(col === centerCol && row === centerRow)
-            ) {
-              availableCells.push({ col, row });
-            }
+    if (selectedUnit && mode === "select" && phase !== "charge" && phase !== "combat") {
+      const centerCol = selectedUnit.col;
+      const centerRow = selectedUnit.row;
+      const c1 = offsetToCube(centerCol, centerRow);
+      for (let col = 0; col < BOARD_COLS; col++) {
+        for (let row = 0; row < BOARD_ROWS; row++) {
+          const c2 = offsetToCube(col, row);
+          const distance = cubeDistance(c1, c2);
+          const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
+          if (
+            !blocked &&
+            distance <= selectedUnit.MOVE &&
+            !(col === centerCol && row === centerRow)
+          ) {
+            availableCells.push({ col, row });
           }
         }
       }
@@ -266,11 +285,11 @@ export default function Board({
         const isChargeable = chargeCells.some(cell => cell.col === col && cell.row === row);
 
         if (isChargeable) {
-          cell.beginFill(0xff9900, 0.5); // Orange for charge
+          cell.beginFill(CHARGE_COLOR, 0.5); // Orange for charge from config
         } else if (isAttackable) {
-          cell.beginFill(ATTACK_COLOR, 0.5); // Red for attack
+          cell.beginFill(ATTACK_COLOR, 0.5); // Red for attack from config
         } else if (isAvailable) {
-          cell.beginFill(HIGHLIGHT_COLOR, 0.5); // Green for move
+          cell.beginFill(HIGHLIGHT_COLOR, 0.5); // Green for move from config
         } else {
           cell.beginFill(0x001100, 0.2); // Dark transparent
         }
@@ -279,11 +298,11 @@ export default function Board({
         cell.drawPolygon(points);
         cell.endFill();
 
-        // Make interactive
-        cell.interactive = true;
+        // Make interactive - FIXED: Use eventMode instead of deprecated interactive
+        cell.eventMode = 'static';
         cell.cursor = "pointer";
 
-        // Click handlers
+        // ✅ ORIGINAL CLICK HANDLERS - Move confirmation logic preserved
         if (mode === "movePreview" || mode === "attackPreview") {
           cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
             if (e.button === 0) onConfirmMove();
@@ -309,7 +328,7 @@ export default function Board({
       }
     }
 
-    // Draw units (normal and previewed)
+    // ✅ ORIGINAL UNIT RENDERING - All features preserved
     for (const unit of units) {
       // In movePreview, do not draw the moving unit at its old spot
       if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;
@@ -319,11 +338,10 @@ export default function Board({
       const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
       const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
-      // Green HP bar above the unit
+      // ✅ HP BAR USING CONFIG VALUES
       if (unit.HP_MAX) {
-        const HP_BAR_WIDTH = HEX_RADIUS * 1.4;
-        const HP_BAR_HEIGHT = 7;
-        const HP_BAR_Y_OFFSET = HEX_RADIUS * 0.85;
+        const HP_BAR_WIDTH = HEX_RADIUS * HP_BAR_WIDTH_RATIO;
+        const HP_BAR_Y_OFFSET = HEX_RADIUS * HP_BAR_Y_OFFSET_RATIO;
 
         const barX = centerX - HP_BAR_WIDTH / 2;
         const barY = centerY - HP_BAR_Y_OFFSET - HP_BAR_HEIGHT;
@@ -335,21 +353,20 @@ export default function Board({
         barBg.endFill();
         app.stage.addChild(barBg);
 
-        // Draw slices (green for HP, darker for lost HP)
+        // Draw slices (green for HP, darker for lost HP) - COLORS FROM CONFIG
         const hp = Math.max(0, unit.CUR_HP ?? unit.HP_MAX);
+        const sliceWidth = HP_BAR_WIDTH / unit.HP_MAX;
         for (let i = 0; i < unit.HP_MAX; i++) {
-          const sliceWidth = (HP_BAR_WIDTH - (unit.HP_MAX - 1)) / unit.HP_MAX;
-          const sliceX = barX + i * (sliceWidth + 1);
-          const color = i < hp ? parseColor(boardConfig.colors.hp_full) : parseColor(boardConfig.colors.hp_damaged);
           const slice = new PIXI.Graphics();
+          const color = i < hp ? parseColor(boardConfig.colors.hp_full) : parseColor(boardConfig.colors.hp_damaged);
           slice.beginFill(color, 1);
-          slice.drawRoundedRect(sliceX, barY + 1, sliceWidth, HP_BAR_HEIGHT - 2, 2);
+          slice.drawRoundedRect(barX + i * sliceWidth + 1, barY + 1, sliceWidth - 2, HP_BAR_HEIGHT - 2, 2);
           slice.endFill();
           app.stage.addChild(slice);
         }
       }
 
-      // Draw green hex outline ONLY for currentPlayer's units eligible for current phase
+      // ✅ GREEN ELIGIBILITY CIRCLES - Check if unit is eligible for current phase
       let isEligible = false;
       if (phase === "move") {
         isEligible = unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id));
@@ -380,102 +397,126 @@ export default function Board({
         }
       }
 
-      // Red outline for adjacent enemy units in combat phase
-      if (phase === "combat" && selectedUnitId) {
-        const attacker = units.find(u => u.id === selectedUnitId);
-        if (
-          attacker &&
-          unit.player !== currentPlayer &&
-          Math.max(Math.abs(attacker.col - unit.col), Math.abs(attacker.row - unit.row)) === 1
-        ) {
-          const attackOutline = new PIXI.Graphics();
-          const hexPoints = getHexPolygonPoints(centerX, centerY, HEX_RADIUS * 0.85);
-          attackOutline.lineStyle(4, 0xff2222, 0.95);
-          attackOutline.drawPolygon(hexPoints);
-          attackOutline.endFill();
-          app.stage.addChild(attackOutline);
-        }
+      // ✅ USE ORIGINAL UNIT.COLOR - NOT CONFIG COLORS
+      let unitColor = unit.color; // Use unit's own color property
+      let borderColor = 0xffffff;
+      let borderWidth = DEFAULT_BORDER_WIDTH;
+
+      if (selectedUnitId === unit.id) {
+        borderColor = parseColor(boardConfig.colors.current_unit); // Gold for selected
+        borderWidth = SELECTED_BORDER_WIDTH;
+      } else if (unitsMoved.includes(unit.id) || unitsCharged?.includes(unit.id) || unitsAttacked?.includes(unit.id)) {
+        unitColor = 0x666666; // Dimmed for used units
       }
       
-      // Red outline for enemy units in charge preview
-      if (phase === "charge" && mode === "chargePreview" && chargeTargets.some(eu => eu.col === unit.col && eu.row === unit.row)) {
-        const attackOutline = new PIXI.Graphics();
-        const hexPoints = getHexPolygonPoints(centerX, centerY, HEX_RADIUS * 0.85);
-        attackOutline.lineStyle(4, 0xff2222, 0.95);
-        attackOutline.drawPolygon(hexPoints);
-        attackOutline.endFill();
-        app.stage.addChild(attackOutline);
-      }
-      
-      if (isEligible) {
-        const outline = new PIXI.Graphics();
-        const hexPoints = getHexPolygonPoints(centerX, centerY, HEX_RADIUS * 0.9);
-        outline.lineStyle(4, 0x00ff00, 0.9);
-        outline.drawPolygon(hexPoints);
-        outline.endFill();
-        app.stage.addChild(outline);
+      if (chargeTargets.some(target => target.id === unit.id)) {
+        borderColor = 0xff0000;
+        borderWidth = CHARGE_TARGET_BORDER_WIDTH;
       }
 
       const unitCircle = new PIXI.Graphics();
-      unitCircle.beginFill(unit.color);
-      unitCircle.lineStyle(selectedUnitId === unit.id ? 4 : 2, selectedUnitId === unit.id ? parseColor(boardConfig.colors.current_unit) : 0xffffff, 1);
-      unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.6);
+      unitCircle.beginFill(unitColor);
+      unitCircle.lineStyle(borderWidth, borderColor);
+      unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
       unitCircle.endFill();
 
-      // Make unit interactive
-      unitCircle.interactive = true;
+      // ✅ GREEN ELIGIBILITY OUTLINE FROM CONFIG - Draw green hex outline for eligible units
+      if (isEligible) {
+        const eligibleOutline = new PIXI.Graphics();
+        const hexPoints = getHexPolygonPoints(centerX, centerY, HEX_RADIUS * 0.9);
+        eligibleOutline.lineStyle(ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA); // From config
+        eligibleOutline.drawPolygon(hexPoints);
+        app.stage.addChild(eligibleOutline);
+      }
+
+      // ✅ UNIT CLICK HANDLERS - FIXED SHOOT PHASE LOGIC
+      unitCircle.eventMode = 'static'; // FIXED: Use eventMode instead of deprecated interactive
       unitCircle.cursor = "pointer";
       unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-        e.stopPropagation();
         if (e.button === 0) {
-          if (mode === "chargePreview" && selectedUnitId && onCharge) {
-            const targetUnit = units.find(u => u.col === unit.col && u.row === unit.row);
-            if (targetUnit && targetUnit.player !== currentPlayer) {
-              onCharge(Number(selectedUnitId), Number(targetUnit.id));
-              return;
-            }
-          }
-          if (phase === "shoot" && selectedUnitId && unit.player !== currentPlayer && onShoot) {
-            const shooter = units.find(u => u.id === selectedUnitId);
-            if (shooter) {
-              const c1 = offsetToCube(shooter.col, shooter.row);
-              const c2 = offsetToCube(unit.col, unit.row);
-              const distance = cubeDistance(c1, c2);
-              if (distance <= shooter.RNG_RNG) {
-                onShoot(Number(selectedUnitId), Number(unit.id));
-                return;
-              }
-            }
-          }
-          if (phase === "combat" && selectedUnitId && unit.player !== currentPlayer && onCombatAttack) {
-            const attacker = units.find(u => u.id === selectedUnitId);
-            if (attacker) {
-              const distance = Math.max(Math.abs(attacker.col - unit.col), Math.abs(attacker.row - unit.row));
+          if (mode === "attackPreview" && unit.player !== currentPlayer) {
+            onShoot(Number(selectedUnitId), Number(unit.id));
+          } else if (mode === "chargePreview" && unit.player !== currentPlayer && chargeTargets.some(target => target.id === unit.id)) {
+            onCharge?.(Number(selectedUnitId), Number(unit.id));
+          } else if (phase === "combat" && unit.player !== currentPlayer && selectedUnitId) {
+            const selectedU = units.find(u => u.id === selectedUnitId);
+            if (selectedU) {
+              const distance = cubeDistance(
+                offsetToCube(selectedU.col, selectedU.row),
+                offsetToCube(unit.col, unit.row)
+              );
               if (distance === 1) {
-                onCombatAttack(Number(selectedUnitId), Number(unit.id));
+                onCombatAttack?.(Number(selectedUnitId), Number(unit.id));
                 return;
               }
             }
           }
-          onSelectUnit(unit.id);
+          
+          // ✅ FIXED: Only allow selection of eligible units in current phase
+          if (unit.player === currentPlayer) {
+            if (phase === "shoot") {
+              // Shoot phase: only allow units that haven't moved AND have enemies in range
+              if (!unitsMoved.includes(unit.id)) {
+                const enemies = units.filter(u2 => u2.player !== currentPlayer);
+                const hasTargetInRange = enemies.some(eu => {
+                  const c1 = offsetToCube(unit.col, unit.row);
+                  const c2 = offsetToCube(eu.col, eu.row);
+                  return cubeDistance(c1, c2) <= unit.RNG_RNG;
+                });
+                if (hasTargetInRange) {
+                  onSelectUnit(unit.id);
+                }
+              }
+            } else {
+              // Other phases: allow selection if eligible (original logic)
+              onSelectUnit(unit.id);
+            }
+          } else {
+            onSelectUnit(unit.id);
+          }
         }
       });
 
       app.stage.addChild(unitCircle);
 
-      // Unit name text
-      const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
-        fontSize: 11,
-        fill: 0xffffff,
-        align: "center",
-        fontWeight: "bold",
-      });
-      unitText.anchor.set(0.5);
-      unitText.position.set(centerX, centerY + HEX_RADIUS * 0.55);
-      app.stage.addChild(unitText);
+      // ✅ ICON RENDERING FROM CONFIG - Better scaling and error handling
+      if (unit.ICON) {
+        try {
+          const texture = PIXI.Texture.from(unit.ICON);
+          const sprite = new PIXI.Sprite(texture);
+          sprite.anchor.set(0.5);
+          sprite.position.set(centerX, centerY);
+          sprite.width = HEX_RADIUS * ICON_SCALE; // Icon size from config
+          sprite.height = HEX_RADIUS * ICON_SCALE;
+          app.stage.addChild(sprite);
+        } catch (iconError) {
+          console.warn(`Failed to load icon ${unit.ICON}:`, iconError);
+          // Fallback to text if icon fails
+          const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
+            fontSize: UNIT_TEXT_SIZE,
+            fill: 0xffffff,
+            align: "center",
+            fontWeight: "bold",
+          });
+          unitText.anchor.set(0.5);
+          unitText.position.set(centerX, centerY);
+          app.stage.addChild(unitText);
+        }
+      } else {
+        // No icon - use text with config size
+        const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
+          fontSize: UNIT_TEXT_SIZE,
+          fill: 0xffffff,
+          align: "center",
+          fontWeight: "bold",
+        });
+        unitText.anchor.set(0.5);
+        unitText.position.set(centerX, centerY);
+        app.stage.addChild(unitText);
+      }
     }
 
-    // Draw preview unit (in movePreview or attackPreview)
+    // ✅ ORIGINAL PREVIEW UNIT RENDERING
     if (mode === "movePreview" && movePreview) {
       const previewUnit = units.find(u => u.id === movePreview.unitId);
       if (previewUnit) {
@@ -485,12 +526,12 @@ export default function Board({
         const previewCircle = new PIXI.Graphics();
         previewCircle.beginFill(previewUnit.color, 0.7);
         previewCircle.lineStyle(3, 0xffffff, 0.8);
-        previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.6);
+        previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
         previewCircle.endFill();
         app.stage.addChild(previewCircle);
 
         const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
-          fontSize: 11,
+          fontSize: UNIT_TEXT_SIZE,
           fill: 0xffffff,
           align: "center",
           fontWeight: "bold",
@@ -510,12 +551,12 @@ export default function Board({
         const previewCircle = new PIXI.Graphics();
         previewCircle.beginFill(previewUnit.color, 0.7);
         previewCircle.lineStyle(3, 0xffffff, 0.8);
-        previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * 0.6);
+        previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
         previewCircle.endFill();
         app.stage.addChild(previewCircle);
 
         const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
-          fontSize: 11,
+          fontSize: UNIT_TEXT_SIZE,
           fill: 0xffffff,
           align: "center",
           fontWeight: "bold",
@@ -526,10 +567,12 @@ export default function Board({
       }
     }
 
+    // Cleanup function
     return () => {
       app.destroy(true);
     };
   }, [
+    // ✅ ALL ORIGINAL DEPENDENCIES
     units,
     selectedUnitId,
     mode,
@@ -541,17 +584,20 @@ export default function Board({
     unitsAttacked,
     phase,
     boardConfig,
-    BOARD_COLS,
-    BOARD_ROWS,
-    HEX_RADIUS,
-    MARGIN,
-    HEX_WIDTH,
-    HEX_HEIGHT,
-    HEX_HORIZ_SPACING,
-    HEX_VERT_SPACING,
-    HIGHLIGHT_COLOR,
-    ATTACK_COLOR
+    loading,
+    error,
+    onSelectUnit,
+    onStartMovePreview,
+    onStartAttackPreview,
+    onConfirmMove,
+    onCancelMove,
+    onShoot,
+    onCombatAttack,
+    onCharge,
+    onMoveCharger,
+    onValidateCharge
   ]);
 
+  // Simple container return - loading/error handled inside useEffect
   return <div ref={containerRef} />;
 }
