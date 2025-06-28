@@ -8,12 +8,23 @@ import shutil
 import subprocess
 import glob
 from datetime import datetime
+import numpy as np
 
 # Fix import paths
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 sys.path.insert(0, script_dir)
 sys.path.insert(0, project_root)
+
+# helper to serialize numpy types in replay logs
+def numpy_encoder(o):
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, np.floating):
+        return float(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
 
 # Try to import web replay logger
 try:
@@ -435,10 +446,12 @@ def save_training_logs_with_replay(env):
     worst_replay_file = os.path.join(event_log_dir, "train_worst_game_replay.json")
     
     with open(best_replay_file, "w", encoding="utf-8") as f:
-        json.dump(best_web_replay, f, indent=2)
+        # use our numpy_encoder to handle int64, arrays, etc.
+        json.dump(best_web_replay, f, indent=2, default=numpy_encoder)
     
     with open(worst_replay_file, "w", encoding="utf-8") as f:
-        json.dump(worst_web_replay, f, indent=2)
+        # use our numpy_encoder to handle int64, arrays, etc.
+        json.dump(worst_web_replay, f, indent=2, default=numpy_encoder)
     
     print(f"   Best web replay: {best_replay_file}")
     print(f"   Worst web replay: {worst_replay_file}")

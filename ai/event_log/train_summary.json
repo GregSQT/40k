@@ -1,0 +1,21 @@
+{
+  "timestamp": "2025-06-28T05:06:10.744883",
+  "total_episodes": 10,
+  "best_reward": -11.75,
+  "worst_reward": -18.650000000000002,
+  "average_reward": -12.804999999999998,
+  "files": {
+    "best_replay": "train_best_game_replay.json",
+    "worst_replay": "train_worst_game_replay.json"
+  },
+  "replay_type": "web_compatible_direct",
+  "web_compatible": true,
+  "output_location": "ai/event_log",
+  "features": [
+    "Direct web compatibility",
+    "Correct file location (ai/event_log)",
+    "Standard filename (train_best_game_replay.json)",
+    "No conversion needed",
+    "Frontend ready"
+  ]
+}
