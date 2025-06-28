@@ -3,6 +3,9 @@ import React, { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js-legacy";
 import type { Unit } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
+import boardConfig from "@config/board_config.json";
+
+
 
 // For flat-topped hex, even-q offset (col, row)
 function offsetToCube(col: number, row: number) {
