@@ -13,7 +13,7 @@ export default defineConfig({
   plugins: [react()],
   publicDir: 'public',
   server: {
-fs: {
+    fs: {
       allow: ['..'] // Allow serving files from parent directory
     }
   },
@@ -26,7 +26,6 @@ fs: {
     '@images': path.resolve(__dirname, '../src/images'),
     '@ai': path.resolve(__dirname, '../ai'),
     "@config": path.resolve(__dirname, "../config"),
-    '/config': path.resolve(__dirname, '../config'),
     },
   },
 });
