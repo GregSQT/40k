@@ -703,9 +703,9 @@ def main():
         print(f"   Action space: {env.action_space}")
         
         # Set up model path
-        models_dir = "ai/models/current"
-        os.makedirs(models_dir, exist_ok=True)
-        model_path = os.path.join(models_dir, "model.zip")
+        from config_loader import get_model_path
+        model_path = get_model_path()
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
         
         # Handle resume logic
         if resume is None:

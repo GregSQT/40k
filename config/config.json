@@ -6,6 +6,7 @@
   },
   "paths": {
     "ai_models": "ai/",
+    "model_file": "ai/models/current/model.zip",
     "scenarios": "config/scenarios.json",
     "rewards": "config/rewards_config.json",
     "training": "config/training_config.json",

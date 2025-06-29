@@ -1,0 +1,905 @@
+import React, { useState, useEffect, useCallback } from 'react';
+
+// Define types inline to avoid external dependencies
+interface Unit {
+  id: number;
+  name: string;
+  type: string;
+  player: 0 | 1;
+  col: number;
+  row: number;
+  color: number;
+  MOVE: number;
+  HP_MAX: number;
+  CUR_HP?: number;
+  RNG_RNG: number;
+  RNG_DMG: number;
+  CC_DMG: number;
+  ICON: string;
+}
+
+interface ReplayEvent {
+  turn: number;
+  action: number;
+  reward: number;
+  ai_units_alive: number;
+  enemy_units_alive: number;
+  game_over: boolean;
+  units?: Unit[];
+  acting_unit_idx?: number;
+}
+
+// Action mapping for display
+const ACTION_NAMES: { [key: number]: string } = {
+  0: "Move Closer",
+  1: "Move Away", 
+  2: "Move to Safety",
+  3: "Shoot Closest",
+  4: "Shoot Weakest",
+  5: "Charge Closest",
+  6: "Wait",
+  7: "Attack Adjacent"
+};
+
+// Default unit positions matching WH40K game setup
+const DEFAULT_POSITIONS: { [key: number]: { col: number; row: number } } = {
+  0: { col: 23, row: 12 }, // P-I (Player Intercessor)
+  1: { col: 1, row: 12 },  // P-A (Player Assault Intercessor)
+  2: { col: 0, row: 5 },   // A-I (AI Intercessor)
+  3: { col: 22, row: 3 }   // A-A (AI Assault Intercessor)
+};
+
+// PixiJS Board component that renders the hexagonal battlefield
+const GameBoard: React.FC<{
+  units: Unit[];
+  selectedUnitId: number | null;
+  currentStep: number;
+  totalSteps: number;
+}> = ({ units, selectedUnitId, currentStep, totalSteps }) => {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!containerRef.current) return;
+    
+    // Clear previous content
+    containerRef.current.innerHTML = '';
+    
+    // Check if PixiJS is available
+    const PIXI = (window as any).PIXI;
+    if (!PIXI) {
+      containerRef.current.innerHTML = `
+        <div style="color: #ff4444; padding: 40px; text-align: center; background: rgba(0,0,0,0.8); border-radius: 8px;">
+          <h3>PixiJS Required</h3>
+          <p>Please include PixiJS in your project to render the game board.</p>
+          <p>Add this to your HTML head:</p>
+          <code style="background: #333; padding: 10px; display: block; margin: 10px 0; border-radius: 4px;">
+            &lt;script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.2/pixi.min.js"&gt;&lt;/script&gt;
+          </code>
+        </div>
+      `;
+      return;
+    }
+
+    // Game board configuration
+    const BOARD_COLS = 24;
+    const BOARD_ROWS = 18;
+    const HEX_RADIUS = 20;
+    const MARGIN = 30;
+    const HEX_WIDTH = 1.5 * HEX_RADIUS;
+    const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+    const HEX_HORIZ_SPACING = HEX_WIDTH;
+    const HEX_VERT_SPACING = HEX_HEIGHT;
+
+    const gridWidth = (BOARD_COLS - 1) * HEX_HORIZ_SPACING + HEX_WIDTH;
+    const gridHeight = (BOARD_ROWS - 1) * HEX_VERT_SPACING + HEX_HEIGHT;
+    const width = Math.min(gridWidth + 2 * MARGIN, window.innerWidth - 40);
+    const height = Math.min(gridHeight + 2 * MARGIN, window.innerHeight - 300);
+    
+    // Scale to fit if needed
+    const scale = Math.min(width / (gridWidth + 2 * MARGIN), height / (gridHeight + 2 * MARGIN), 1);
+
+    const app = new PIXI.Application({
+      width: width,
+      height: height,
+      backgroundColor: 0x001100,
+      antialias: true,
+      resolution: window.devicePixelRatio || 1,
+      autoDensity: true,
+    });
+
+    containerRef.current.appendChild(app.view);
+    
+    // Apply scaling if needed
+    if (scale < 1) {
+      app.stage.scale.set(scale);
+    }
+
+    // Helper functions
+    function getHexCenter(col: number, row: number) {
+      const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+      const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+      return { x: centerX, y: centerY };
+    }
+
+    function getHexPolygonPoints(cx: number, cy: number, size: number) {
+      const points = [];
+      for (let i = 0; i < 6; i++) {
+        const angle_deg = 60 * i;
+        const angle_rad = Math.PI / 180 * angle_deg;
+        points.push(cx + size * Math.cos(angle_rad));
+        points.push(cy + size * Math.sin(angle_rad));
+      }
+      return points;
+    }
+
+    // Draw hex grid
+    for (let col = 0; col < BOARD_COLS; col++) {
+      for (let row = 0; row < BOARD_ROWS; row++) {
+        const center = getHexCenter(col, row);
+        const points = getHexPolygonPoints(center.x, center.y, HEX_RADIUS);
+        
+        const cell = new PIXI.Graphics();
+        cell.lineStyle(1, 0x00ff00, 0.3);
+        cell.beginFill((col + row) % 2 === 0 ? 0x002200 : 0x001a00, 0.2);
+        cell.drawPolygon(points);
+        cell.endFill();
+        
+        app.stage.addChild(cell);
+      }
+    }
+
+    // Draw units
+    units.forEach((unit: Unit) => {
+      const center = getHexCenter(unit.col, unit.row);
+      const isAlive = (unit.CUR_HP ?? unit.HP_MAX) > 0;
+      const isSelected = unit.id === selectedUnitId;
+      
+      // Determine unit color
+      let unitColor = 0x666666; // Default for destroyed
+      if (isAlive) {
+        if (isSelected) {
+          unitColor = 0xffd700; // Gold for selected
+        } else if (unit.player === 0) {
+          unitColor = 0x4488ff; // Blue for player
+        } else {
+          unitColor = 0xff4444; // Red for AI
+        }
+      }
+
+      // Add glow effect for selected unit
+      if (isSelected && isAlive) {
+        const glow = new PIXI.Graphics();
+        glow.lineStyle(6, 0xffd700, 0.6);
+        glow.drawCircle(center.x, center.y, HEX_RADIUS * 0.9);
+        app.stage.addChild(glow);
+        
+        // Pulsing animation
+        let time = 0;
+        const animate = () => {
+          time += 0.1;
+          glow.alpha = 0.3 + Math.sin(time) * 0.3;
+          requestAnimationFrame(animate);
+        };
+        animate();
+      }
+
+      // Unit circle
+      const unitCircle = new PIXI.Graphics();
+      unitCircle.beginFill(unitColor);
+      unitCircle.drawCircle(center.x, center.y, HEX_RADIUS * 0.65);
+      unitCircle.endFill();
+      
+      // Unit border
+      unitCircle.lineStyle(2, 0xffffff, isAlive ? 0.9 : 0.4);
+      unitCircle.drawCircle(center.x, center.y, HEX_RADIUS * 0.65);
+      
+      app.stage.addChild(unitCircle);
+
+      // Unit label
+      const label = new PIXI.Text(unit.name || unit.id.toString(), {
+        fontFamily: 'Arial Black',
+        fontSize: 10,
+        fill: 0xffffff,
+        align: 'center',
+        fontWeight: 'bold'
+      });
+      label.anchor.set(0.5);
+      label.x = center.x;
+      label.y = center.y;
+      app.stage.addChild(label);
+
+      // HP bar
+      const currentHP = unit.CUR_HP ?? unit.HP_MAX;
+      const maxHP = unit.HP_MAX;
+      if (maxHP > 0) {
+        const barWidth = HEX_RADIUS * 1.3;
+        const barHeight = 4;
+        const barY = center.y + HEX_RADIUS * 0.9;
+        
+        // HP background
+        const hpBg = new PIXI.Graphics();
+        hpBg.beginFill(0x333333);
+        hpBg.drawRect(center.x - barWidth/2, barY, barWidth, barHeight);
+        hpBg.endFill();
+        app.stage.addChild(hpBg);
+        
+        // HP fill
+        if (currentHP > 0) {
+          const hpRatio = currentHP / maxHP;
+          const hpColor = hpRatio > 0.6 ? 0x00ff00 : hpRatio > 0.3 ? 0xffaa00 : 0xff0000;
+          
+          const hpFill = new PIXI.Graphics();
+          hpFill.beginFill(hpColor);
+          hpFill.drawRect(center.x - barWidth/2, barY, barWidth * hpRatio, barHeight);
+          hpFill.endFill();
+          app.stage.addChild(hpFill);
+        }
+      }
+    });
+
+    // Add turn indicator
+    const turnText = new PIXI.Text(`TURN ${currentStep + 1}/${totalSteps}`, {
+      fontFamily: 'Arial Black',
+      fontSize: 16,
+      fill: 0x00ff00,
+      align: 'center',
+      fontWeight: 'bold'
+    });
+    turnText.x = 20;
+    turnText.y = 20;
+    app.stage.addChild(turnText);
+
+    // Cleanup function
+    return () => {
+      app.destroy(true);
+    };
+  }, [units, selectedUnitId, currentStep, totalSteps]);
+
+  return (
+    <div 
+      ref={containerRef} 
+      style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center',
+        minHeight: '400px',
+        background: 'radial-gradient(circle at center, #002200 0%, #001100 70%, #000000 100%)',
+        borderRadius: '8px',
+        border: '2px solid #00ff00'
+      }} 
+    />
+  );
+};
+
+interface ReplayViewerProps {
+  eventLog?: ReplayEvent[];
+  autoPlay?: boolean;
+  stepDelay?: number;
+}
+
+const ReplayViewer: React.FC<ReplayViewerProps> = ({ 
+  eventLog, 
+  autoPlay = false, 
+  stepDelay = 1000 
+}) => {
+  const [currentStep, setCurrentStep] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(autoPlay);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [replayData, setReplayData] = useState<ReplayEvent[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+
+  // Sample data if no eventLog provided
+  const sampleData: ReplayEvent[] = [
+    { turn: 1, action: 5, reward: 0.1, ai_units_alive: 2, enemy_units_alive: 2, game_over: false },
+    { turn: 2, action: 2, reward: 0.05, ai_units_alive: 2, enemy_units_alive: 2, game_over: false },
+    { turn: 3, action: 6, reward: -0.5, ai_units_alive: 2, enemy_units_alive: 2, game_over: false },
+    { turn: 4, action: 0, reward: 0.1, ai_units_alive: 2, enemy_units_alive: 2, game_over: false },
+    { turn: 5, action: 2, reward: 0.05, ai_units_alive: 2, enemy_units_alive: 2, game_over: false },
+    { turn: 6, action: 5, reward: 0.1, ai_units_alive: 2, enemy_units_alive: 2, game_over: false },
+    { turn: 7, action: 4, reward: 0.0, ai_units_alive: 2, enemy_units_alive: 2, game_over: false },
+    { turn: 8, action: 5, reward: 0.1, ai_units_alive: 2, enemy_units_alive: 2, game_over: false },
+    { turn: 9, action: 3, reward: 1.0, ai_units_alive: 2, enemy_units_alive: 2, game_over: false },
+    { turn: 10, action: 1, reward: -0.05, ai_units_alive: 1, enemy_units_alive: 2, game_over: false },
+    { turn: 11, action: 3, reward: 3.0, ai_units_alive: 1, enemy_units_alive: 1, game_over: false },
+    { turn: 12, action: 2, reward: 0.05, ai_units_alive: 1, enemy_units_alive: 1, game_over: false },
+    { turn: 13, action: 0, reward: 0.1, ai_units_alive: 1, enemy_units_alive: 1, game_over: false },
+    { turn: 14, action: 5, reward: 0.1, ai_units_alive: 1, enemy_units_alive: 1, game_over: false },
+    { turn: 15, action: 0, reward: 0.1, ai_units_alive: 1, enemy_units_alive: 1, game_over: false },
+    { turn: 16, action: 2, reward: 0.05, ai_units_alive: 1, enemy_units_alive: 1, game_over: false },
+    { turn: 17, action: 0, reward: 0.1, ai_units_alive: 1, enemy_units_alive: 1, game_over: false },
+    { turn: 18, action: 6, reward: -5.5, ai_units_alive: 0, enemy_units_alive: 1, game_over: true }
+  ];
+
+  // Initialize replay data
+  useEffect(() => {
+    setReplayData(eventLog || sampleData);
+    setCurrentStep(0);
+  }, [eventLog]);
+
+  // Create units based on current event
+  const createUnitsFromEvent = useCallback((event: ReplayEvent): Unit[] => {
+    if (event.units && Array.isArray(event.units)) {
+      // If full unit data is available, use it
+      return event.units.map(unit => ({
+        ...unit,
+        CUR_HP: unit.CUR_HP ?? unit.HP_MAX
+      }));
+    }
+
+    // Otherwise, create units based on alive counts and default positions
+    const units: Unit[] = [];
+    const aiAlive = event.ai_units_alive || 0;
+    const playerAlive = event.enemy_units_alive || 0;
+
+    // Create AI units (player 1, red)
+    for (let i = 0; i < 2; i++) {
+      const defaultPos = DEFAULT_POSITIONS[i + 2] || { col: 0, row: 0 };
+      units.push({
+        id: i + 2,
+        name: `A-${i === 0 ? 'I' : 'A'}`,
+        type: i === 0 ? 'Intercessor' : 'AssaultIntercessor',
+        player: 1,
+        col: defaultPos.col,
+        row: defaultPos.row,
+        color: i === 0 ? 0x882222 : 0x6633cc,
+        MOVE: i === 0 ? 4 : 6,
+        HP_MAX: i === 0 ? 3 : 4,
+        CUR_HP: i < aiAlive ? (i === 0 ? 3 : 4) : 0,
+        RNG_RNG: i === 0 ? 8 : 4,
+        RNG_DMG: i === 0 ? 2 : 1,
+        CC_DMG: i === 0 ? 1 : 2,
+        ICON: i === 0 ? '/icons/Intercessor.webp' : '/icons/AssaultIntercessor.webp'
+      });
+    }
+
+    // Create Player units (player 0, blue)
+    for (let i = 0; i < 2; i++) {
+      const defaultPos = DEFAULT_POSITIONS[i] || { col: 0, row: 0 };
+      units.push({
+        id: i,
+        name: `P-${i === 0 ? 'I' : 'A'}`,
+        type: i === 0 ? 'Intercessor' : 'AssaultIntercessor',
+        player: 0,
+        col: defaultPos.col,
+        row: defaultPos.row,
+        color: i === 0 ? 0x244488 : 0xff3333,
+        MOVE: i === 0 ? 4 : 6,
+        HP_MAX: i === 0 ? 3 : 4,
+        CUR_HP: i < playerAlive ? (i === 0 ? 3 : 4) : 0,
+        RNG_RNG: i === 0 ? 8 : 4,
+        RNG_DMG: i === 0 ? 2 : 1,
+        CC_DMG: i === 0 ? 1 : 2,
+        ICON: i === 0 ? '/icons/Intercessor.webp' : '/icons/AssaultIntercessor.webp'
+      });
+    }
+
+    return units;
+  }, []);
+
+  // Update units when step changes
+  useEffect(() => {
+    if (replayData.length > 0 && currentStep < replayData.length) {
+      const event = replayData[currentStep];
+      setUnits(createUnitsFromEvent(event));
+    }
+  }, [currentStep, replayData, createUnitsFromEvent]);
+
+  // Auto-play logic
+  useEffect(() => {
+    if (!isPlaying || currentStep >= replayData.length - 1) return;
+    
+    const timer = setTimeout(() => {
+      setCurrentStep(prev => Math.min(prev + 1, replayData.length - 1));
+    }, stepDelay / playbackSpeed);
+
+    return () => clearTimeout(timer);
+  }, [isPlaying, currentStep, replayData.length, stepDelay, playbackSpeed]);
+
+  // Control functions
+  const togglePlayPause = () => setIsPlaying(!isPlaying);
+  const nextStep = () => setCurrentStep(prev => Math.min(prev + 1, replayData.length - 1));
+  const previousStep = () => setCurrentStep(prev => Math.max(prev - 1, 0));
+  const resetReplay = () => {
+    setCurrentStep(0);
+    setIsPlaying(false);
+  };
+
+  const loadReplayFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = JSON.parse(e.target?.result as string);
+          setReplayData(Array.isArray(data) ? data : [data]);
+          setCurrentStep(0);
+          setIsPlaying(false);
+        } catch (error) {
+          alert('Error parsing JSON file: ' + (error as Error).message);
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  if (replayData.length === 0) {
+    return (
+      <div style={{ 
+        padding: '40px', 
+        textAlign: 'center',
+        background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%)',
+        color: '#00ff00',
+        borderRadius: '8px'
+      }}>
+        <h3>Loading WH40K Replay Data...</h3>
+        <div style={{ margin: '20px 0' }}>
+          <input 
+            type="file" 
+            accept=".json" 
+            onChange={loadReplayFile}
+            style={{ 
+              background: '#002200', 
+              color: '#00ff00', 
+              border: '1px solid #00ff00', 
+              padding: '10px',
+              borderRadius: '4px'
+            }} 
+          />
+        </div>
+        <p>Upload a replay JSON file or the sample data will load automatically</p>
+      </div>
+    );
+  }
+
+  const currentEvent = replayData[currentStep];
+  const selectedUnitId = currentEvent.acting_unit_idx ?? null;
+
+  return (
+    <div style={{ 
+      fontFamily: 'Courier New, monospace', 
+      background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%)',
+      color: '#00ff00',
+      minHeight: '100vh',
+      padding: '20px'
+    }}>
+      {/* Header */}
+      <div style={{ 
+        textAlign: 'center', 
+        marginBottom: '20px',
+        padding: '15px',
+        background: 'rgba(0, 0, 0, 0.8)',
+        borderRadius: '8px',
+        border: '2px solid #00ff00'
+      }}>
+        <h1 style={{ 
+          margin: '0 0 10px 0', 
+          color: '#ffd700', 
+          fontSize: '2em',
+          textShadow: '0 0 10px #ffd700'
+        }}>
+          ⚔️ WH40K AI Battle Replay ⚔️
+        </h1>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', alignItems: 'center' }}>
+          <input 
+            type="file" 
+            accept=".json" 
+            onChange={loadReplayFile} 
+            style={{ 
+              background: '#002200', 
+              color: '#00ff00', 
+              border: '1px solid #00ff00', 
+              padding: '8px 12px',
+              borderRadius: '4px',
+              fontSize: '12px'
+            }} 
+          />
+          <span style={{ fontSize: '12px', color: '#888' }}>
+            Upload your replay JSON file
+          </span>
+        </div>
+      </div>
+
+      {/* Game Info HUD */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', 
+        gap: '15px', 
+        marginBottom: '20px',
+        padding: '15px',
+        background: 'rgba(0, 34, 0, 0.6)',
+        borderRadius: '8px',
+        border: '1px solid rgba(0, 255, 0, 0.3)'
+      }}>
+        <div style={{ 
+          padding: '12px', 
+          background: 'rgba(36, 68, 136, 0.3)', 
+          borderRadius: '6px', 
+          borderLeft: '4px solid #ffd700' 
+        }}>
+          <div style={{ fontSize: '0.8em', color: '#aaa', marginBottom: '4px' }}>Turn</div>
+          <div style={{ fontSize: '1.4em', fontWeight: 'bold', color: '#00ff00' }}>
+            {currentEvent.turn}
+          </div>
+        </div>
+        
+        <div style={{ 
+          padding: '12px', 
+          background: 'rgba(36, 68, 136, 0.3)', 
+          borderRadius: '6px', 
+          borderLeft: '4px solid #ffd700' 
+        }}>
+          <div style={{ fontSize: '0.8em', color: '#aaa', marginBottom: '4px' }}>Action</div>
+          <div style={{ fontSize: '1.1em', fontWeight: 'bold', color: '#00ff00' }}>
+            {ACTION_NAMES[currentEvent.action] || `Action ${currentEvent.action}`}
+          </div>
+        </div>
+        
+        <div style={{ 
+          padding: '12px', 
+          background: 'rgba(36, 68, 136, 0.3)', 
+          borderRadius: '6px', 
+          borderLeft: '4px solid #ffd700' 
+        }}>
+          <div style={{ fontSize: '0.8em', color: '#aaa', marginBottom: '4px' }}>Reward</div>
+          <div style={{ 
+            fontSize: '1.4em', 
+            fontWeight: 'bold',
+            color: currentEvent.reward > 0 ? '#4ade80' : currentEvent.reward < 0 ? '#f87171' : '#ffff00'
+          }}>
+            {currentEvent.reward?.toFixed(2) || '0.00'}
+          </div>
+        </div>
+        
+        <div style={{ 
+          padding: '12px', 
+          background: 'rgba(36, 68, 136, 0.3)', 
+          borderRadius: '6px', 
+          borderLeft: '4px solid #4488ff' 
+        }}>
+          <div style={{ fontSize: '0.8em', color: '#aaa', marginBottom: '4px' }}>Player Units</div>
+          <div style={{ fontSize: '1.4em', fontWeight: 'bold', color: '#4488ff' }}>
+            {currentEvent.enemy_units_alive}
+          </div>
+        </div>
+        
+        <div style={{ 
+          padding: '12px', 
+          background: 'rgba(36, 68, 136, 0.3)', 
+          borderRadius: '6px', 
+          borderLeft: '4px solid #ff4444' 
+        }}>
+          <div style={{ fontSize: '0.8em', color: '#aaa', marginBottom: '4px' }}>AI Units</div>
+          <div style={{ fontSize: '1.4em', fontWeight: 'bold', color: '#ff4444' }}>
+            {currentEvent.ai_units_alive}
+          </div>
+        </div>
+        
+        <div style={{ 
+          padding: '12px', 
+          background: 'rgba(36, 68, 136, 0.3)', 
+          borderRadius: '6px', 
+          borderLeft: '4px solid #ffd700' 
+        }}>
+          <div style={{ fontSize: '0.8em', color: '#aaa', marginBottom: '4px' }}>Progress</div>
+          <div style={{ fontSize: '1.2em', fontWeight: 'bold', color: '#00ff00' }}>
+            {currentStep + 1} / {replayData.length}
+          </div>
+        </div>
+      </div>
+
+      {/* Game Board */}
+      <div style={{ 
+        marginBottom: '20px',
+        position: 'relative'
+      }}>
+        <GameBoard 
+          units={units}
+          selectedUnitId={selectedUnitId}
+          currentStep={currentStep}
+          totalSteps={replayData.length}
+        />
+        
+        {/* Game Over Overlay */}
+        {currentEvent.game_over && (
+          <div style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            background: 'rgba(255, 0, 0, 0.95)',
+            color: 'white',
+            padding: '30px 50px',
+            borderRadius: '12px',
+            fontSize: '28px',
+            fontWeight: 'bold',
+            textAlign: 'center',
+            border: '4px solid #ff0000',
+            boxShadow: '0 0 30px rgba(255, 0, 0, 0.8)',
+            zIndex: 1000,
+            animation: 'pulse 2s infinite'
+          }}>
+            🔴 GAME OVER 🔴
+            <div style={{ fontSize: '16px', marginTop: '10px', fontWeight: 'normal' }}>
+              Battle concluded on turn {currentEvent.turn}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Controls */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center',
+        gap: '15px',
+        padding: '20px',
+        background: 'rgba(0, 0, 0, 0.8)',
+        borderRadius: '8px',
+        border: '1px solid rgba(0, 255, 0, 0.3)',
+        flexWrap: 'wrap'
+      }}>
+        <button 
+          onClick={togglePlayPause}
+          style={{
+            background: isPlaying 
+              ? 'linear-gradient(145deg, #ff9900, #cc7700)' 
+              : 'linear-gradient(145deg, #00ff00, #00cc00)',
+            color: '#000',
+            border: 'none',
+            padding: '12px 24px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
+            transition: 'all 0.3s ease',
+            boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)'
+          }}
+        >
+          {isPlaying ? '⏸️ PAUSE' : '▶️ PLAY'}
+        </button>
+        
+        <button 
+          onClick={previousStep} 
+          disabled={currentStep === 0}
+          style={{ 
+            background: currentStep === 0 ? '#333' : 'linear-gradient(145deg, #244488, #1a3366)', 
+            color: currentStep === 0 ? '#666' : '#fff', 
+            border: 'none', 
+            padding: '10px 20px', 
+            borderRadius: '6px', 
+            cursor: currentStep === 0 ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit',
+            fontSize: '12px',
+            textTransform: 'uppercase',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          ⏮️ PREV
+        </button>
+        
+        <button 
+          onClick={nextStep} 
+          disabled={currentStep === replayData.length - 1}
+          style={{ 
+            background: currentStep === replayData.length - 1 ? '#333' : 'linear-gradient(145deg, #244488, #1a3366)', 
+            color: currentStep === replayData.length - 1 ? '#666' : '#fff', 
+            border: 'none', 
+            padding: '10px 20px', 
+            borderRadius: '6px', 
+            cursor: currentStep === replayData.length - 1 ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit',
+            fontSize: '12px',
+            textTransform: 'uppercase',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          ⏭️ NEXT
+        </button>
+        
+        <button 
+          onClick={resetReplay}
+          style={{ 
+            background: 'linear-gradient(145deg, #882222, #661111)', 
+            color: '#fff', 
+            border: 'none', 
+            padding: '10px 20px', 
+            borderRadius: '6px', 
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: '12px',
+            textTransform: 'uppercase',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          ⏹️ RESET
+        </button>
+
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '10px', 
+          marginLeft: '20px',
+          padding: '8px 16px',
+          background: 'rgba(0, 255, 0, 0.1)',
+          borderRadius: '6px',
+          border: '1px solid rgba(0, 255, 0, 0.3)'
+        }}>
+          <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#00ff00' }}>SPEED:</span>
+          <input 
+            type="range" 
+            min="0.2" 
+            max="3" 
+            step="0.2" 
+            value={playbackSpeed} 
+            onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+            style={{ 
+              width: '100px',
+              height: '4px',
+              background: '#333',
+              borderRadius: '2px',
+              outline: 'none',
+              appearance: 'none'
+            }}
+          />
+          <span style={{ 
+            fontSize: '12px', 
+            fontWeight: 'bold', 
+            color: '#ffd700',
+            minWidth: '40px'
+          }}>
+            {playbackSpeed.toFixed(1)}x
+          </span>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        gap: '30px', 
+        marginTop: '20px',
+        fontSize: '14px',
+        padding: '15px',
+        background: 'rgba(0, 0, 0, 0.6)',
+        borderRadius: '8px',
+        flexWrap: 'wrap'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ 
+            width: '16px', 
+            height: '16px', 
+            background: '#4488ff', 
+            borderRadius: '50%',
+            border: '2px solid #fff'
+          }}></div>
+          <span style={{ fontWeight: 'bold' }}>Player Units</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ 
+            width: '16px', 
+            height: '16px', 
+            background: '#ff4444', 
+            borderRadius: '50%',
+            border: '2px solid #fff'
+          }}></div>
+          <span style={{ fontWeight: 'bold' }}>AI Units</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ 
+            width: '16px', 
+            height: '16px', 
+            background: '#ffd700', 
+            borderRadius: '50%',
+            border: '2px solid #fff',
+            boxShadow: '0 0 8px #ffd700'
+          }}></div>
+          <span style={{ fontWeight: 'bold' }}>Active Unit</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ 
+            width: '16px', 
+            height: '16px', 
+            background: '#666666', 
+            borderRadius: '50%',
+            border: '2px solid #fff'
+          }}></div>
+          <span style={{ fontWeight: 'bold' }}>Destroyed</span>
+        </div>
+      </div>
+
+      {/* Action History */}
+      <div style={{ 
+        marginTop: '20px',
+        padding: '15px',
+        background: 'rgba(0, 0, 0, 0.6)',
+        borderRadius: '8px',
+        border: '1px solid rgba(0, 255, 0, 0.3)'
+      }}>
+        <h3 style={{ 
+          margin: '0 0 15px 0', 
+          color: '#ffd700', 
+          fontSize: '1.2em',
+          textAlign: 'center'
+        }}>
+          📋 Current Action
+        </h3>
+        <div style={{ 
+          textAlign: 'center',
+          fontSize: '16px',
+          lineHeight: '1.5'
+        }}>
+          <div style={{ marginBottom: '8px' }}>
+            <strong style={{ color: '#00ff00' }}>
+              {ACTION_NAMES[currentEvent.action] || `Unknown Action ${currentEvent.action}`}
+            </strong>
+          </div>
+          <div style={{ 
+            color: currentEvent.reward > 0 ? '#4ade80' : currentEvent.reward < 0 ? '#f87171' : '#ffff00',
+            fontSize: '14px'
+          }}>
+            Reward: <strong>{currentEvent.reward?.toFixed(2) || '0.00'}</strong>
+          </div>
+          {currentEvent.game_over && (
+            <div style={{ 
+              marginTop: '10px',
+              color: '#ff4444',
+              fontWeight: 'bold',
+              fontSize: '16px'
+            }}>
+              🚨 BATTLE CONCLUDED 🚨
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Keyboard Shortcuts Info */}
+      <div style={{ 
+        marginTop: '20px',
+        padding: '10px',
+        background: 'rgba(0, 0, 0, 0.4)',
+        borderRadius: '6px',
+        fontSize: '12px',
+        textAlign: 'center',
+        color: '#888'
+      }}>
+        <strong>Keyboard Shortcuts:</strong> 
+        <span style={{ margin: '0 15px' }}>SPACE = Play/Pause</span>
+        <span style={{ margin: '0 15px' }}>← → = Navigate</span>
+        <span style={{ margin: '0 15px' }}>R = Reset</span>
+      </div>
+
+      {/* Add keyboard event listeners */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+            document.addEventListener('keydown', function(e) {
+              switch(e.code) {
+                case 'Space':
+                  e.preventDefault();
+                  // Trigger play/pause
+                  break;
+                case 'ArrowLeft':
+                  e.preventDefault();
+                  // Trigger previous step
+                  break;
+                case 'ArrowRight':
+                  e.preventDefault();
+                  // Trigger next step
+                  break;
+                case 'KeyR':
+                  e.preventDefault();
+                  // Trigger reset
+                  break;
+              }
+            });
+          `
+        }}
+      />
+    </div>
+  );
+};
+
+export default ReplayViewer;

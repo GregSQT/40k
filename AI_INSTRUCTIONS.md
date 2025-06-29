@@ -56,7 +56,7 @@ You are thoughtful, give nuanced answers, and are brilliant at reasoning. You ca
 - Frontend components use /ai/ prefix for public file access
 - Config files are in config/ directory, not ai/config/
 - Event logs go to ai/event_log/ directory
-- Model files save to ai/model.zip (never change this path)
+- Model files save to path defined in config/config.json (use get_model_path() from config_loader)
 - Tensorboard logs to ./tensorboard/ from root
 
 ## Code Quality Requirements

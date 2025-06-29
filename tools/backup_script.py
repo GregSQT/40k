@@ -8,7 +8,7 @@ import json
 ###########################################################################################
 ### VERSION
 ###########################################################################################
-version = "v7"
+version = "v2"
 
 # 1. Try to load config.json (if it exists)
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
@@ -24,60 +24,64 @@ else:
     DEST_ROOT = os.environ.get("DEST_ROOT", os.path.join(ROOT, "versions", version))
     files_to_copy = [
         # Root config files
-        "package.json",
-        "tsconfig.json", 
-        "tsconfig.base.json",
+        #"package.json",
+        #"tsconfig.json", 
+        #"tsconfig.base.json",
         
         # Frontend files
-        "frontend/tsconfig.json",
-        "frontend/vite.config.ts",
-        "frontend/package.json",
+        #"frontend/tsconfig.json",
+        #"frontend/vite.config.ts",
+        #"frontend/package.json",
         
         # Frontend source
-        "frontend/src/App.tsx",
-        "frontend/src/routes.tsx", 
-        "frontend/src/main.tsx",
+        #"frontend/src/App.tsx",
+        #"frontend/src/routes.tsx", 
+        #"frontend/src/main.tsx",
         
         # AI integration
-        "frontend/src/ai/ai.ts",
+        #"frontend/src/ai/ai.ts",
         
         # Pages
-        "frontend/src/pages/HomePage.tsx",
-        "frontend/src/pages/ReplayPage.tsx", 
-        "frontend/src/pages/GamePage.tsx",
+        #"frontend/src/pages/HomePage.tsx",
+        #"frontend/src/pages/ReplayPage.tsx", 
+        #"frontend/src/pages/GamePage.tsx",
         
         # Components
-        "frontend/src/components/Board.tsx",
-        "frontend/src/components/UnitSelector.tsx",
-        "frontend/src/components/ReplayViewer.tsx",
-        "frontend/src/components/LoadReplayButton.tsx",
+        #"frontend/src/components/Board.tsx",
+        #"frontend/src/components/UnitSelector.tsx",
+        #"frontend/src/components/ReplayViewer.tsx",
+        #"frontend/src/components/LoadReplayButton.tsx",
         
         # Data
-        "frontend/src/data/Units.ts",
-        "frontend/src/data/UnitFactory.ts",
-        "frontend/src/data/Scenario.ts",
+        #"frontend/src/data/Units.ts",
+        #"frontend/src/data/UnitFactory.ts",
+        #"frontend/src/data/Scenario.ts",
         
         # Roster (now in frontend/src)
-        "frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
-        "frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts", 
-        "frontend/src/roster/spaceMarine/Intercessor.ts",
-        "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
-        "frontend/src/roster/exportRewards.js",
-        
+        #"frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
+        #"frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts", 
+        #"frontend/src/roster/spaceMarine/Intercessor.ts",
+        #"frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
+        #"frontend/src/roster/exportRewards.js",
+
+        # tools
+        "tools/backup_script.py",
+
         # AI backend
-        "ai/agent.py",
-        "ai/api.py", 
         "ai/evaluate.py",
         "ai/gym40k.py",
-        "ai/model.py",
-        "ai/env_registration.py",
-        "ai/state.py",
-        "ai/test.py",
-        "ai/train.py", 
-        "ai/utils.py",
+        "ai/train.py",
+        "ai/scenario.json",
+        "ai/generate_scenario.py",
+        "ai/web_replay_logger.py",
+
+        
+
+        # config
+        "config/training_config.json",
         
         # Tools
-        "tools/generate_scenario.py",
+        #"tools/generate_scenario.py",
     ]
 
 logfile = os.path.join(DEST_ROOT, "backup.log")
@@ -108,3 +112,9 @@ with open(logfile, "a", encoding="utf-8") as log:
 
 print(f"Backup complete. Success: {ok_count} | Failed: {fail_count}")
 print(f"Log written to: {logfile}")
+
+# Zip the backup folder
+zip_path = shutil.make_archive(DEST_ROOT, 'zip', DEST_ROOT)
+print(f"Zipped backup folder to: {zip_path}")
+with open(logfile, "a", encoding="utf-8") as log:
+    log.write(f"Zipped backup folder to: {zip_path}\n")

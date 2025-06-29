@@ -279,7 +279,8 @@ def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Evaluate W40K AI with web-compatible replay logging")
     parser.add_argument("--episodes", type=int, default=100, help="Number of evaluation episodes")
-    parser.add_argument("--model-path", type=str, default="ai/model.zip", help="Model path to evaluate")
+    from config_loader import get_model_path
+    parser.add_argument("--model-path", type=str, default=get_model_path(), help="Model path to evaluate")    
     return parser.parse_args()
 
 def main():

@@ -17,9 +17,12 @@ def setup_imports():
     
     return DQN, W40KEnv
 
+from config_loader import get_model_path
+
 def test_model(episodes=5):
     """Test the trained model."""
-    if not os.path.exists("model.zip"):
+    model_path = get_model_path()
+    if not os.path.exists(model_path):
         print("No model found. Train first: python train.py")
         return False
     
@@ -33,7 +36,7 @@ def test_model(episodes=5):
         return False
     
     env = W40KEnv()
-    model = DQN.load("model.zip")
+    model = DQN.load(model_path)
     
     wins = 0
     rewards = []

@@ -78,6 +78,15 @@ class ConfigLoader:
         game_config = self.get_game_config()
         return game_config["game_rules"]["turn_limit_penalty"]
     
+    def get_model_path(self) -> str:
+        """Get the model file path."""
+        try:
+            config = self.load_config("config")
+            return config["paths"]["model_file"]
+        except (KeyError, FileNotFoundError):
+            # Fallback to default if not configured
+            return "ai/models/current/model.zip"
+    
     def get_training_config(self) -> Dict[str, Any]:
         """Get training configuration."""
         return self.load_config("training_config")
@@ -115,6 +124,10 @@ def get_board_size() -> tuple[int, int]:
 def get_turn_limit_penalty() -> float:
     """Convenience function to get turn limit penalty."""
     return get_config_loader().get_turn_limit_penalty()
+
+def get_model_path() -> str:
+    """Convenience function to get model path."""
+    return get_config_loader().get_model_path()
 
 # Example usage:
 if __name__ == "__main__":
