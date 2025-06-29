@@ -133,6 +133,8 @@ def parse_args():
         if arg.lower() == "--resume":
             resume = True
         elif arg.lower() == "--new":
+            print("🧹 --NEW: Cleaning all previous training data...")
+            clean_all_previous_models()
             resume = False
         elif arg.lower() == "--debug":
             debug = True
@@ -188,8 +190,8 @@ def backup_current_model():
         
         # Keep only last 5 backups
         backups = sorted(glob.glob(os.path.join(backup_dir, "model_backup_*.zip")))
-        if len(backups) > 5:
-            for old_backup in backups[:-5]:
+        if len(backups) > 2:
+            for old_backup in backups[:-2]:
                 os.remove(old_backup)
                 print(f"Removed old backup: {old_backup}")
 
@@ -237,6 +239,44 @@ def ensure_scenario():
                 print("Created default scenario")
         except Exception as e:
             print(f"Scenario generation failed: {e}")
+
+def clean_all_previous_models():
+    """Delete ALL previous training data when starting completely fresh."""
+    paths_to_clean = [
+        "ai/model.zip",                          # Legacy model location
+        "ai/models/current/model.zip",           # Current model
+        "ai/models/backups/",                    # All backups
+        "tensorboard/",                          # Training logs
+        "ai/event_log/train_*.json",            # Training replays
+    ]
+    
+    cleaned_count = 0
+    for path in paths_to_clean:
+        if "*" in path:
+            for file_path in glob.glob(path):
+                if os.path.exists(file_path):
+                    if os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                    else:
+                        os.remove(file_path)
+                    cleaned_count += 1
+                    print(f"🗑️  Deleted: {file_path}")
+        else:
+            if os.path.exists(path):
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+                cleaned_count += 1
+                print(f"🗑️  Deleted: {path}")
+    
+    if cleaned_count > 0:
+        print(f"✅ Cleaned {cleaned_count} previous training files")
+    else:
+        print("ℹ️  No previous files to clean")
+
+def ensure_scenario():
+    """Ensure scenario.json exists."""
 
 def run_training_episode_with_replay(model, env):
     """Run a single training episode with full replay logging."""
