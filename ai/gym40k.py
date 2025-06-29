@@ -358,6 +358,22 @@ class W40KEnv(gym.Env):
     
     def step(self, action):
         """Execute one step in the environment."""
+        print(f"🎮 TURN {self.current_turn}: AI takes action {action}")
+        
+        # Debug: Show unit status BEFORE action
+        ai_units_before = [u for u in self.units if u["player"] == 1 and u["alive"]]
+        enemy_units_before = [u for u in self.units if u["player"] == 0 and u["alive"]]
+        print(f"   BEFORE: AI units: {len(ai_units_before)}, Enemy units: {len(enemy_units_before)}")
+        
+        # DEBUG: Log what action is being taken
+        ACTION_NAMES = {
+            0: "Move Closer", 1: "Move Away", 2: "Move to Safety",
+            3: "Shoot Closest", 4: "Shoot Weakest", 5: "Charge Closest",
+            6: "Wait", 7: "Attack Adjacent"
+        }
+        action_int = int(action) if hasattr(action, 'item') else action
+        print(f"   ACTION: {ACTION_NAMES.get(action_int, f'Unknown({action_int})')}")
+        
         if self.game_over:
             return self._get_obs(), 0.0, True, False, self._get_info()
         
@@ -527,6 +543,20 @@ class W40KEnv(gym.Env):
         
         # Log to replay if enabled
         self.log_step_to_replay(action, reward)
+        
+        # Debug: Show unit status AFTER action
+        ai_units_after = [u for u in self.units if u["player"] == 1 and u["alive"]]
+        enemy_units_after = [u for u in self.units if u["player"] == 0 and u["alive"]]
+        print(f"   AFTER:  AI units: {len(ai_units_after)}, Enemy units: {len(enemy_units_after)}")
+        
+        # DEBUG: If units died, show which ones
+        if len(ai_units_before) != len(ai_units_after):
+            dead_ai = [u for u in ai_units_before if not u["alive"]]
+            print(f"   💀 AI UNITS DIED: {[u.get('id', '?') for u in dead_ai]}")
+        
+        if len(enemy_units_before) != len(enemy_units_after):
+            dead_enemies = [u for u in enemy_units_before if not u["alive"]]
+            print(f"   💀 ENEMY UNITS DIED: {[u.get('id', '?') for u in dead_enemies]}")
         
         info = self._get_info()
         return self._get_obs(), reward, self.game_over, False, info
