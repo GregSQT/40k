@@ -1,7 +1,7 @@
 # ai/gym40k.py
 #!/usr/bin/env python3
 """
-ai/gym40k.py - COMPLETE W40K environment that loads unit stats from TypeScript files
+ai/gym40k.py - Phase-based W40K environment following AI_GAME_OVERVIEW.md specifications
 """
 
 import gymnasium as gym
@@ -23,18 +23,36 @@ sys.path.insert(0, str(project_root))
 from config_loader import get_config_loader
 
 class W40KEnv(gym.Env):
-    """Complete W40K environment with full game mechanics and unit loading from TypeScript files."""
+    """Phase-based W40K environment following AI_GAME_OVERVIEW.md specifications exactly."""
 
-    def __init__(self):
+    def __init__(self, rewards_config="phase_based"):
         super().__init__()
         
         # Load configuration
         self.config = get_config_loader()
         
+        # Load rewards configuration
+        self.rewards_config_name = rewards_config
+        self.rewards_config = None
+        self._load_rewards_config()
+        
         # Load unit definitions from TypeScript files
         self.unit_definitions = self._load_unit_definitions()
         
-        # Load scenario - ONLY position and player data
+        # Game state
+        self.current_phase = "move"  # move, shoot, charge, combat
+        self.current_player = 1  # 1 = AI, 0 = enemy/human
+        self.current_turn = 0
+        self.max_turns = self.config.get_max_turns()
+        self.turn_limit_penalty = self.config.get_turn_limit_penalty()
+        self.board_size = self.config.get_board_size()
+        self.game_over = False
+        self.winner = None
+        
+        # Phase tracking - units that have acted in current phase
+        self.phase_acted_units = set()
+        
+        # Load scenario
         scenario_path = os.path.join(os.path.dirname(__file__), "scenario.json")
         if os.path.exists(scenario_path):
             try:
@@ -52,970 +70,1010 @@ class W40KEnv(gym.Env):
                 else:
                     raise ValueError(f"Scenario data must be list or dict, got {type(scenario_data)}")
                     
-                # Validate that we have units data
-                if not scenario_units:
-                    raise ValueError("No units found in scenario data")
-                    
-                # Validate ONLY position/player fields - stats come from unit files
-                required_fields = ["id", "unit_type", "player", "col", "row"]
-                
-                for i, unit_data in enumerate(scenario_units):
-                    if not isinstance(unit_data, dict):
-                        raise ValueError(f"Unit {i} is not a dictionary: {type(unit_data)} - {unit_data}")
-                        
-                    # Check required position fields only
-                    for field in required_fields:
-                        if field not in unit_data:
-                            raise ValueError(f"Unit {i} missing required field '{field}'. Position fields required: {required_fields}")
-                
-                # Combine scenario position data with unit stats from TypeScript files
-                complete_units = []
+                # Initialize units from scenario
+                self.units = []
                 for unit_data in scenario_units:
+                    # Get unit stats from definitions
                     unit_type = unit_data["unit_type"]
-                    
                     if unit_type not in self.unit_definitions:
-                        raise ValueError(f"Unknown unit type: {unit_type}. Available types: {list(self.unit_definitions.keys())}")
+                        raise ValueError(f"Unknown unit type: {unit_type}")
                     
-                    unit_stats = self.unit_definitions[unit_type]
-                    
-                    # Combine position data with stats
-                    complete_unit = {
+                    # Merge scenario position data with unit definition stats
+                    unit = copy.deepcopy(self.unit_definitions[unit_type])
+                    unit.update({
                         "id": unit_data["id"],
-                        "unit_type": unit_type,
                         "player": unit_data["player"],
                         "col": unit_data["col"],
                         "row": unit_data["row"],
-                        # Stats from TypeScript files
-                        "hp_max": unit_stats["HP_MAX"],
-                        "cur_hp": unit_stats["HP_MAX"],  # Start at full health
-                        "move": unit_stats["MOVE"],
-                        "rng_rng": unit_stats["RNG_RNG"],
-                        "rng_dmg": unit_stats["RNG_DMG"],
-                        "cc_dmg": unit_stats["CC_DMG"],
-                        "is_ranged": unit_stats.get("is_ranged", True),
-                        "is_melee": unit_stats.get("is_melee", False),
-                        "alive": True
-                    }
-                    complete_units.append(complete_unit)
-                
-                print(f"✅ Loaded scenario with {len(complete_units)} units")
-                
-            except (json.JSONDecodeError, ValueError) as e:
-                raise RuntimeError(f"Error loading scenario from {scenario_path}: {e}")
+                        "alive": True,
+                        "cur_hp": unit["hp_max"],
+                        # Phase tracking
+                        "has_moved": False,
+                        "has_shot": False,
+                        "has_charged": False,
+                        "has_attacked": False
+                    })
+                    self.units.append(unit)
+                    
+            except Exception as e:
+                raise RuntimeError(f"Failed to load scenario: {e}")
         else:
-            raise FileNotFoundError(f"Scenario file not found at {scenario_path}")
+            raise FileNotFoundError(f"Scenario file not found: {scenario_path}")
         
-        # Initialize units
-        self.initial_units = complete_units
-        self.units = []
-        self.reset_units()
+        # AI vs Human distinction
+        self.ai_units = [u for u in self.units if u["player"] == 1]
+        self.enemy_units = [u for u in self.units if u["player"] == 0]
         
-        # Game settings from config
-        board_size = self.config.get_board_size()
-        self.board_size = board_size
-        self.max_turns = self.config.get_max_turns()
-        self.turn_limit_penalty = self.config.get_turn_limit_penalty()
-        self.current_turn = 0
-        self.current_player = 1  # AI is player 1
-        self.game_over = False
-        self.winner = None
+        # Action space: one action per unit per phase
+        # Actions: unit_id, action_type, target (optional)
+        self.max_units = len(self.ai_units)
         
-        # RL spaces
-        self.observation_space = spaces.Box(
-            low=0, high=max(self.board_size[0], self.board_size[1], 10), 
-            shape=(28,), dtype=np.float32
-        )
+        # Action encoding:
+        # 0-7: Unit actions for first unit
+        # 8-15: Unit actions for second unit, etc.
+        # Actions per unit: [move_north, move_south, move_east, move_west, shoot_target, charge_target, attack_target, wait]
+        self.action_space = spaces.Discrete(self.max_units * 8)
         
-        self.action_space = spaces.Discrete(8)
+        # Observation space: board state + unit states + phase info
+        # For each AI unit: [col, row, hp_ratio, has_moved, has_shot, has_charged, has_attacked]
+        # For each enemy unit: [col, row, hp_ratio, alive]
+        # Phase encoding: [is_move_phase, is_shoot_phase, is_charge_phase, is_combat_phase]
+        obs_size = (self.max_units * 7) + (len(self.enemy_units) * 4) + 4
+        self.observation_space = spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         
-        # Episode tracking
-        self.episode_logs = []
-        self.current_log = []
-        
-        # Replay logging
-        self.replay_logging_enabled = False
-        self.replay_data = {}
-        self.replay_file = None
+        # Replay tracking
+        self.replay_data = []
+        self.save_replay = True
 
     def _load_unit_definitions(self):
-        """Load unit definitions from TypeScript files."""
-        unit_definitions = {}
+        """Load unit definitions from TypeScript files exactly like the original."""
+        definitions = {}
         
-        # Define unit file paths
-        unit_files = {
-            "Intercessor": "frontend/src/roster/spaceMarine/Intercessor.ts",
-            "AssaultIntercessor": "frontend/src/roster/spaceMarine/AssaultIntercessor.ts"
-        }
+        # Define path to the TypeScript unit files
+        frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "src")
+        roster_dir = os.path.join(frontend_dir, "roster", "spaceMarine")
         
-        for unit_type, file_path in unit_files.items():
-            # Get project root directory
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(script_dir)
-            full_path = os.path.join(project_root, file_path)
-            
-            if os.path.exists(full_path):
-                stats = self._extract_unit_stats_from_ts(full_path, unit_type)
-                if stats:
-                    unit_definitions[unit_type] = stats
-                    print(f"✅ Loaded {unit_type} stats from {file_path}")
-                else:
-                    print(f"⚠️  Failed to parse {unit_type} from {file_path}")
-            else:
-                print(f"⚠️  Unit file not found: {full_path}")
-        
-        # Fallback definitions if files not found
-        if not unit_definitions:
-            print("⚠️  No unit files found, using fallback definitions")
-            unit_definitions = {
+        if not os.path.exists(roster_dir):
+            # Fallback unit definitions
+            print(f"⚠️ TypeScript unit files not found at {roster_dir}, using fallback definitions")
+            return {
                 "Intercessor": {
-                    "HP_MAX": 3, "MOVE": 4, "RNG_RNG": 8, "RNG_DMG": 2, "CC_DMG": 1,
+                    "unit_type": "Intercessor",
+                    "hp_max": 3, "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1,
                     "is_ranged": True, "is_melee": False
                 },
                 "AssaultIntercessor": {
-                    "HP_MAX": 4, "MOVE": 6, "RNG_RNG": 4, "RNG_DMG": 1, "CC_DMG": 2,
+                    "unit_type": "AssaultIntercessor", 
+                    "hp_max": 4, "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2,
                     "is_ranged": False, "is_melee": True
                 }
             }
         
-        return unit_definitions
-
-    def _extract_unit_stats_from_ts(self, file_path, unit_type):
-        """Extract unit stats from TypeScript file."""
+        # Load from TypeScript files
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            
-            stats = {}
-            
-            # Extract static properties using regex
-            patterns = {
-                "HP_MAX": r'static\s+HP_MAX\s*=\s*(\d+)',
-                "MOVE": r'static\s+MOVE\s*=\s*(\d+)',
-                "RNG_RNG": r'static\s+RNG_RNG\s*=\s*(\d+)',
-                "RNG_DMG": r'static\s+RNG_DMG\s*=\s*(\d+)',
-                "CC_DMG": r'static\s+CC_DMG\s*=\s*(\d+)'
-            }
-            
-            for stat_name, pattern in patterns.items():
-                match = re.search(pattern, content)
-                if match:
-                    stats[stat_name] = int(match.group(1))
-                else:
-                    # Set defaults based on unit type
-                    if unit_type == "Intercessor":
-                        defaults = {"HP_MAX": 3, "MOVE": 4, "RNG_RNG": 8, "RNG_DMG": 2, "CC_DMG": 1}
-                    elif unit_type == "AssaultIntercessor":
-                        defaults = {"HP_MAX": 4, "MOVE": 6, "RNG_RNG": 4, "RNG_DMG": 1, "CC_DMG": 2}
-                    else:
-                        defaults = {"HP_MAX": 3, "MOVE": 4, "RNG_RNG": 6, "RNG_DMG": 1, "CC_DMG": 1}
+            for filename in os.listdir(roster_dir):
+                if filename.endswith('.ts') and not filename.startswith('index'):
+                    file_path = os.path.join(roster_dir, filename)
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
                     
-                    stats[stat_name] = defaults.get(stat_name, 1)
+                    # Extract unit data using regex
+                    unit_match = re.search(r'export const (\w+):\s*Unit\s*=\s*{([^}]+)}', content, re.DOTALL)
+                    if unit_match:
+                        unit_name = unit_match.group(1)
+                        unit_body = unit_match.group(2)
+                        
+                        # Parse unit properties
+                        unit_data = {"unit_type": unit_name}
+                        
+                        # Extract numeric properties
+                        for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg']:
+                            prop_match = re.search(rf'{prop}:\s*(\d+)', unit_body)
+                            if prop_match:
+                                unit_data[prop] = int(prop_match.group(1))
+                        
+                        # Extract boolean properties
+                        for prop in ['is_ranged', 'is_melee']:
+                            prop_match = re.search(rf'{prop}:\s*(true|false)', unit_body)
+                            if prop_match:
+                                unit_data[prop] = prop_match.group(1) == 'true'
+                        
+                        definitions[unit_name] = unit_data
             
-            # Determine unit capabilities based on parent class
-            if "SpaceMarineRangedUnit" in content:
-                stats["is_ranged"] = True
-                stats["is_melee"] = False
-            elif "SpaceMarineMeleeUnit" in content:
-                stats["is_ranged"] = False
-                stats["is_melee"] = True
-            else:
-                # Default based on unit type
-                if unit_type == "Intercessor":
-                    stats["is_ranged"] = True
-                    stats["is_melee"] = False
-                elif unit_type == "AssaultIntercessor":
-                    stats["is_ranged"] = False
-                    stats["is_melee"] = True
-                else:
-                    stats["is_ranged"] = True
-                    stats["is_melee"] = False
-            
-            return stats
+            print(f"✅ Loaded {len(definitions)} unit definitions from TypeScript")
+            return definitions
+
+    def _load_rewards_config(self):
+        """Load rewards configuration using config_loader."""
+        try:
+            self.rewards_config = self.config.load_rewards_config(self.rewards_config_name)
+            print(f"✅ Loaded rewards config: {self.rewards_config_name}")
+        except Exception as e:
+            print(f"⚠️ Failed to load rewards config: {e}")
+            self.rewards_config = self._get_default_rewards()
+
+    def _get_default_rewards(self):
+        """Get default rewards if config loading fails."""
+        return {
+            "SpaceMarineRanged": {
+                "move_close": 0.2, "move_to_rng": 0.8, "ranged_attack": 1.0,
+                "enemy_killed_r": 5.0, "shoot_priority_1": 2.0, "shoot_priority_2": 1.5,
+                "shoot_priority_3": 1.0, "charge_success": 0.5, "attack": 1.0,
+                "enemy_killed_m": 5.0, "win": 10.0, "lose": -10.0, "wait": -0.05
+            },
+            "SpaceMarineMelee": {
+                "move_close": 0.3, "move_to_charge": 0.8, "charge_success": 1.5,
+                "charge_priority_1": 2.0, "charge_priority_2": 1.5, "charge_priority_3": 1.0,
+                "attack": 1.0, "enemy_killed_m": 5.0, "attack_priority_1": 2.0,
+                "attack_priority_2": 1.5, "win": 10.0, "lose": -10.0, "wait": -0.05
+            }
+        }
+
+    def _get_unit_reward_config(self, unit):
+        """Get reward configuration for specific unit type."""
+        if unit.get("is_ranged", False):
+            return self.rewards_config.get("SpaceMarineRanged", {})
+        else:
+            return self.rewards_config.get("SpaceMarineMelee", {})
             
         except Exception as e:
-            print(f"⚠️  Error parsing {file_path}: {e}")
-            return None
+            print(f"⚠️ Error loading TypeScript units: {e}, using fallback")
+            return {
+                "Intercessor": {
+                    "unit_type": "Intercessor",
+                    "hp_max": 3, "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1,
+                    "is_ranged": True, "is_melee": False
+                },
+                "AssaultIntercessor": {
+                    "unit_type": "AssaultIntercessor", 
+                    "hp_max": 4, "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2,
+                    "is_ranged": False, "is_melee": True
+                }
+            }
 
-    def reset_units(self):
-        """Reset units to initial state."""
-        self.units = []
-        for unit in self.initial_units:
-            new_unit = copy.deepcopy(unit)
-            new_unit["cur_hp"] = unit["hp_max"]
-            new_unit["alive"] = True
-            self.units.append(new_unit)
-
-    def reset(self, *, seed=None, options=None):
-        """Reset the environment."""
+    def reset(self, seed=None, options=None):
+        """Reset environment to initial state."""
         super().reset(seed=seed)
         
-        self.current_turn = 0
-        self.current_player = 1  # AI goes first
+        # Reset game state
+        self.current_phase = "move"
+        self.current_player = 1  # AI starts
+        self.current_turn = 1
         self.game_over = False
         self.winner = None
+        self.phase_acted_units = set()
         
         # Reset units
-        self.reset_units()
+        scenario_path = os.path.join(os.path.dirname(__file__), "scenario.json")
+        with open(scenario_path, 'r') as f:
+            scenario_data = json.load(f)
+            
+        if isinstance(scenario_data, list):
+            scenario_units = scenario_data
+        elif isinstance(scenario_data, dict):
+            scenario_units = scenario_data.get("units", list(scenario_data.values()))
         
-        # Reset episode tracking
-        self.current_log = []
+        self.units = []
+        for unit_data in scenario_units:
+            unit_type = unit_data["unit_type"]
+            unit = copy.deepcopy(self.unit_definitions[unit_type])
+            unit.update({
+                "id": unit_data["id"],
+                "player": unit_data["player"],
+                "col": unit_data["col"],
+                "row": unit_data["row"],
+                "alive": True,
+                "cur_hp": unit["hp_max"],
+                "has_moved": False,
+                "has_shot": False,
+                "has_charged": False,
+                "has_attacked": False
+            })
+            self.units.append(unit)
         
-        # Enable replay logging for training
-        self.enable_replay_logging("ai/episode_replay.json")
+        # Update unit lists
+        self.ai_units = [u for u in self.units if u["player"] == 1 and u["alive"]]
+        self.enemy_units = [u for u in self.units if u["player"] == 0 and u["alive"]]
+        
+        # Reset replay
+        self.replay_data = []
         
         return self._get_obs(), self._get_info()
 
     def _get_obs(self):
-        """Get current observation."""
-        obs = np.zeros(28, dtype=np.float32)
+        """Get current observation following phase-based structure."""
+        obs = []
         
-        # Normalize board positions
-        max_pos = max(self.board_size)
+        # AI units data (fixed size, pad with zeros if needed)
+        ai_units_alive = [u for u in self.ai_units if u["alive"]]
+        for i in range(self.max_units):
+            if i < len(ai_units_alive):
+                unit = ai_units_alive[i]
+                obs.extend([
+                    unit["col"] / self.board_size[0],  # normalized position
+                    unit["row"] / self.board_size[1],
+                    unit["cur_hp"] / unit["hp_max"],   # hp ratio
+                    float(unit["has_moved"]),          # phase state
+                    float(unit["has_shot"]),
+                    float(unit["has_charged"]),
+                    float(unit["has_attacked"])
+                ])
+            else:
+                obs.extend([0.0] * 7)  # padding for missing units
         
-        # AI unit observations (first 14 values)
-        ai_units = [u for u in self.units if u["player"] == 1 and u["alive"]]
-        for i, unit in enumerate(ai_units[:2]):  # Max 2 AI units
-            base_idx = i * 7
-            obs[base_idx] = unit["col"] / max_pos
-            obs[base_idx + 1] = unit["row"] / max_pos
-            obs[base_idx + 2] = unit["cur_hp"] / unit["hp_max"]
-            obs[base_idx + 3] = unit["move"] / 10.0
-            obs[base_idx + 4] = unit["rng_rng"] / 12.0
-            obs[base_idx + 5] = unit["rng_dmg"] / 5.0
-            obs[base_idx + 6] = unit["cc_dmg"] / 5.0
+        # Enemy units data
+        enemy_units_alive = [u for u in self.enemy_units if u["alive"]]
+        for unit in enemy_units_alive:
+            obs.extend([
+                unit["col"] / self.board_size[0],
+                unit["row"] / self.board_size[1],
+                unit["cur_hp"] / unit["hp_max"],
+                1.0  # alive
+            ])
+        # Pad for missing enemies
+        for i in range(len(enemy_units_alive), len(self.enemy_units)):
+            obs.extend([0.0] * 4)
         
-        # Enemy unit observations (next 14 values)
-        enemy_units = [u for u in self.units if u["player"] == 0 and u["alive"]]
-        for i, unit in enumerate(enemy_units[:2]):  # Max 2 enemy units
-            base_idx = 14 + i * 7
-            obs[base_idx] = unit["col"] / max_pos
-            obs[base_idx + 1] = unit["row"] / max_pos
-            obs[base_idx + 2] = unit["cur_hp"] / unit["hp_max"]
-            obs[base_idx + 3] = unit["move"] / 10.0
-            obs[base_idx + 4] = unit["rng_rng"] / 12.0
-            obs[base_idx + 5] = unit["rng_dmg"] / 5.0
-            obs[base_idx + 6] = unit["cc_dmg"] / 5.0
+        # Phase encoding
+        phase_encoding = [0.0, 0.0, 0.0, 0.0]
+        if self.current_phase == "move":
+            phase_encoding[0] = 1.0
+        elif self.current_phase == "shoot":
+            phase_encoding[1] = 1.0
+        elif self.current_phase == "charge":
+            phase_encoding[2] = 1.0
+        elif self.current_phase == "combat":
+            phase_encoding[3] = 1.0
+        obs.extend(phase_encoding)
         
-        return obs
+        return np.array(obs, dtype=np.float32)
 
-    def _move_toward_target(self, unit, target):
-        """Move unit toward target."""
-        if not target or not target["alive"]:
-            return
+    def _get_eligible_units(self):
+        """Get units eligible to act in current phase following AI_GAME_OVERVIEW.md rules."""
+        eligible = []
+        ai_units_alive = [u for u in self.ai_units if u["alive"]]
         
-        # Calculate direction
+        for unit in ai_units_alive:
+            if self.current_phase == "move":
+                if not unit["has_moved"]:
+                    eligible.append(unit)
+            elif self.current_phase == "shoot":
+                if not unit["has_shot"] and self._has_enemies_in_range(unit):
+                    eligible.append(unit)
+            elif self.current_phase == "charge":
+                if not unit["has_charged"] and self._can_charge(unit):
+                    eligible.append(unit)
+            elif self.current_phase == "combat":
+                if not unit["has_attacked"] and self._has_adjacent_enemies(unit):
+                    eligible.append(unit)
+        
+        return eligible
+
+    def _has_enemies_in_range(self, unit):
+        """Check if unit has enemies within shooting range."""
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if dist <= unit["rng_rng"]:
+                    return True
+        return False
+
+    def _can_charge(self, unit):
+        """Check if unit can charge (enemy within move range, not adjacent)."""
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if dist <= unit["move"] and dist > 1:  # Can reach but not adjacent
+                    return True
+        return False
+
+    def _has_adjacent_enemies(self, unit):
+        """Check if unit has adjacent enemies for combat."""
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if dist <= 1:
+                    return True
+        return False
+
+    def step(self, action):
+        """Execute one step following phase-based AI behavior from AI_GAME_OVERVIEW.md."""
+        if self.game_over:
+            return self._get_obs(), 0.0, True, False, self._get_info()
+        
+        # Get eligible units for current phase
+        eligible_units = self._get_eligible_units()
+        
+        if not eligible_units:
+            # No eligible units, advance phase
+            self._advance_phase()
+            return self._get_obs(), 0.0, False, False, self._get_info()
+        
+        # Decode action
+        unit_idx = action // 8
+        action_type = action % 8
+        
+        if unit_idx >= len(eligible_units):
+            # Invalid unit, small penalty
+            return self._get_obs(), -0.1, False, False, self._get_info()
+        
+        unit = eligible_units[unit_idx]
+        reward = self._execute_action(unit, action_type)
+        
+        # Game outcome rewards
+        unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
+        
+        if not any(u["alive"] for u in self.ai_units):
+            self.game_over = True
+            self.winner = 0
+            reward += unit_rewards.get("lose", -10.0)
+        elif not any(u["alive"] for u in self.enemy_units):
+            self.game_over = True
+            self.winner = 1
+            reward += unit_rewards.get("win", 10.0)
+        elif self.current_turn >= self.max_turns:
+            self.game_over = True
+            self.winner = None
+            reward += self.turn_limit_penalty
+        
+        # Save replay data
+        if self.save_replay:
+            self._record_action(unit, action_type, reward)
+        
+        return self._get_obs(), reward, self.game_over, False, self._get_info()
+
+    def _execute_action(self, unit, action_type):
+        """Execute action following AI_GAME_OVERVIEW.md specifications."""
+        reward = 0.0
+        
+        if self.current_phase == "move":
+            return self._execute_move_action(unit, action_type)
+        elif self.current_phase == "shoot":
+            return self._execute_shoot_action(unit, action_type)
+        elif self.current_phase == "charge":
+            return self._execute_charge_action(unit, action_type)
+        elif self.current_phase == "combat":
+            return self._execute_combat_action(unit, action_type)
+        
+        return reward
+
+    def _execute_move_action(self, unit, action_type):
+        """Execute movement following AI_GAME_OVERVIEW.md: move to position, mark as moved."""
+        unit_rewards = self._get_unit_reward_config(unit)
+        reward = 0.0
+        
+        old_col, old_row = unit["col"], unit["row"]
+        
+        if action_type == 0:  # Move North
+            new_row = max(0, unit["row"] - unit["move"])
+            unit["row"] = new_row
+        elif action_type == 1:  # Move South
+            new_row = min(self.board_size[1] - 1, unit["row"] + unit["move"])
+            unit["row"] = new_row
+        elif action_type == 2:  # Move East
+            new_col = min(self.board_size[0] - 1, unit["col"] + unit["move"])
+            unit["col"] = new_col
+        elif action_type == 3:  # Move West
+            new_col = max(0, unit["col"] - unit["move"])
+            unit["col"] = new_col
+        elif action_type == 4:  # Wait
+            reward = unit_rewards.get("wait", -0.05)
+        else:
+            reward = unit_rewards.get("invalid_action", -0.1)
+        
+        unit["has_moved"] = True
+        
+        # Movement rewards based on tactical positioning
+        if old_col != unit["col"] or old_row != unit["row"]:
+            nearest_enemy = self._get_nearest_enemy(unit)
+            if nearest_enemy:
+                new_dist = abs(unit["col"] - nearest_enemy["col"]) + abs(unit["row"] - nearest_enemy["row"])
+                
+                if unit["is_ranged"]:
+                    # Ranged units want to be at optimal range
+                    optimal_range = unit["rng_rng"] - 1
+                    if new_dist == optimal_range:
+                        reward += unit_rewards.get("move_to_rng", 0.8)
+                    elif new_dist < optimal_range:
+                        reward += unit_rewards.get("move_close", 0.2)
+                    else:
+                        reward += unit_rewards.get("move_away", 0.1)
+                else:
+                    # Melee units want to get closer for charging
+                    if new_dist <= unit["move"]:
+                        reward += unit_rewards.get("move_to_charge", 0.8)
+                    else:
+                        reward += unit_rewards.get("move_close", 0.3)
+        
+        return reward
+
+    def _was_lowest_hp_target(self, target, target_list):
+        """Check if target was the lowest HP among the target list."""
+        for other_target in target_list:
+            if other_target != target and other_target["cur_hp"] < target["cur_hp"]:
+                return False
+        return True
+
+    def _execute_shoot_action(self, unit, action_type):
+        """Execute shooting following AI_GAME_OVERVIEW.md priority system."""
+        unit_rewards = self._get_unit_reward_config(unit)
+        reward = 0.0
+        
+        if action_type >= 4:
+            unit["has_shot"] = True
+            return unit_rewards.get("wait", -0.05)
+        
+        # Find targets following AI_GAME_OVERVIEW.md priority order
+        targets = self._get_shooting_targets(unit)
+        
+        if action_type < len(targets):
+            target = targets[action_type]
+            priority = action_type + 1  # Priority 1, 2, 3
+            
+            # Base shooting reward
+            reward = unit_rewards.get("ranged_attack", 1.0)
+            
+            # Priority bonuses
+            if priority == 1:
+                reward += unit_rewards.get("shoot_priority_1", 2.0)
+            elif priority == 2:
+                reward += unit_rewards.get("shoot_priority_2", 1.5)
+            elif priority == 3:
+                reward += unit_rewards.get("shoot_priority_3", 1.0)
+            
+            # Execute shooting
+            damage = unit["rng_dmg"]
+            old_hp = target["cur_hp"]
+            target["cur_hp"] = max(0, target["cur_hp"] - damage)
+            
+            # Kill bonuses
+            if target["cur_hp"] <= 0:
+                target["alive"] = False
+                reward += unit_rewards.get("enemy_killed_r", 5.0)
+                
+                # No overkill bonus
+                if old_hp == damage:
+                    reward += unit_rewards.get("enemy_killed_no_overkill_r", 7.0) - unit_rewards.get("enemy_killed_r", 5.0)
+                
+                # Lowest HP bonus
+                if self._was_lowest_hp_target(target, targets):
+                    reward += unit_rewards.get("enemy_killed_lowests_hp_r", 6.0) - unit_rewards.get("enemy_killed_r", 5.0)
+        
+        elif action_type == 3 or not targets:  # Wait or no targets
+            reward = unit_rewards.get("wait", -0.05)
+        else:
+            reward = unit_rewards.get("invalid_action", -0.1)
+        
+        unit["has_shot"] = True
+        return reward
+
+    def _execute_charge_action(self, unit, action_type):
+        """Execute charge following AI_GAME_OVERVIEW.md charge priority."""
+        unit_rewards = self._get_unit_reward_config(unit)
+        reward = 0.0
+        
+        if action_type >= 4:
+            unit["has_charged"] = True
+            return unit_rewards.get("wait", -0.05)
+        
+        # Find charge targets following AI_GAME_OVERVIEW.md priority
+        targets = self._get_charge_targets(unit)
+        
+        if action_type < len(targets):
+            target = targets[action_type]
+            priority = action_type + 1  # Priority 1, 2, 3
+            
+            # Base charge reward
+            reward = unit_rewards.get("charge_success", 1.5)
+            
+            # Priority bonuses
+            if priority == 1:
+                reward += unit_rewards.get("charge_priority_1", 2.0)
+            elif priority == 2:
+                reward += unit_rewards.get("charge_priority_2", 1.5)
+            elif priority == 3:
+                reward += unit_rewards.get("charge_priority_3", 1.0)
+            
+            # Execute charge (move adjacent)
+            self._charge_at_target(unit, target)
+            
+        elif action_type == 3 or not targets:  # Wait
+            reward = unit_rewards.get("wait", -0.05)
+        else:
+            reward = unit_rewards.get("invalid_action", -0.1)
+        
+        unit["has_charged"] = True
+        return reward
+
+    def _execute_combat_action(self, unit, action_type):
+        """Execute combat following AI_GAME_OVERVIEW.md combat priority."""
+        unit_rewards = self._get_unit_reward_config(unit)
+        reward = 0.0
+        
+        if action_type >= 3:
+            unit["has_attacked"] = True
+            return unit_rewards.get("wait", -0.05)
+        
+        # Find combat targets following AI_GAME_OVERVIEW.md priority
+        targets = self._get_combat_targets(unit)
+        
+        if action_type < len(targets):
+            target = targets[action_type]
+            priority = action_type + 1  # Priority 1, 2
+            
+            # Base attack reward
+            reward = unit_rewards.get("attack", 1.0)
+            
+            # Priority bonuses
+            if priority == 1:
+                reward += unit_rewards.get("attack_priority_1", 2.0)
+            elif priority == 2:
+                reward += unit_rewards.get("attack_priority_2", 1.5)
+            
+            # Execute attack
+            damage = unit["cc_dmg"]
+            old_hp = target["cur_hp"]
+            target["cur_hp"] = max(0, target["cur_hp"] - damage)
+            
+            # Kill bonuses
+            if target["cur_hp"] <= 0:
+                target["alive"] = False
+                reward += unit_rewards.get("enemy_killed_m", 5.0)
+                
+                # No overkill bonus
+                if old_hp == damage:
+                    reward += unit_rewards.get("enemy_killed_no_overkill_m", 7.0) - unit_rewards.get("enemy_killed_m", 5.0)
+                
+                # Lowest HP bonus
+                if self._was_lowest_hp_target(target, targets):
+                    reward += unit_rewards.get("enemy_killed_lowests_hp_m", 6.0) - unit_rewards.get("enemy_killed_m", 5.0)
+        
+        elif action_type == 2 or not targets:  # Wait
+            reward = unit_rewards.get("wait", -0.05)
+        else:
+            reward = unit_rewards.get("invalid_action", -0.1)
+        
+        unit["has_attacked"] = True
+        return reward
+
+    def _get_shooting_targets(self, unit):
+        """Get shooting targets in AI_GAME_OVERVIEW.md priority order."""
+        targets = []
+        in_range_enemies = []
+        
+        # Find enemies in range
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if dist <= unit["rng_rng"]:
+                    in_range_enemies.append(enemy)
+        
+        if not in_range_enemies:
+            return targets
+        
+        # Priority 1: Enemy with highest threat that melee can charge but won't kill in 1 phase
+        for enemy in in_range_enemies:
+            threat_score = max(enemy.get("rng_dmg", 0), enemy.get("cc_dmg", 0))
+            can_be_charged = self._can_melee_units_charge(enemy)
+            wont_be_killed_melee = enemy["cur_hp"] > max([u.get("cc_dmg", 0) for u in self.ai_units if u["alive"] and not u["is_ranged"]], default=0)
+            
+            if can_be_charged and wont_be_killed_melee:
+                targets.append(enemy)
+        
+        # Priority 2: Enemy with highest threat that can be killed in 1 shooting phase
+        for enemy in in_range_enemies:
+            if enemy not in targets and enemy["cur_hp"] <= unit["rng_dmg"]:
+                targets.append(enemy)
+        
+        # Priority 3: Enemy with highest threat and lowest HP that can be killed in 1 phase
+        remaining = [e for e in in_range_enemies if e not in targets and e["cur_hp"] <= unit["rng_dmg"]]
+        remaining.sort(key=lambda e: (max(e.get("rng_dmg", 0), e.get("cc_dmg", 0)), -e["cur_hp"]), reverse=True)
+        targets.extend(remaining)
+        
+        return targets[:3]  # Return top 3 priorities
+
+    def _get_charge_targets(self, unit):
+        """Get charge targets in AI_GAME_OVERVIEW.md priority order."""
+        targets = []
+        chargeable_enemies = []
+        
+        # Find enemies within charge range (move distance) but not adjacent
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if 1 < dist <= unit["move"]:  # Can charge (not adjacent, within move)
+                    chargeable_enemies.append(enemy)
+        
+        if not chargeable_enemies:
+            return targets
+        
+        if unit["is_melee"]:
+            # Melee unit charge priorities
+            # Priority 1: Can kill in 1 melee phase
+            for enemy in chargeable_enemies:
+                threat_score = max(enemy.get("rng_dmg", 0), enemy.get("cc_dmg", 0))
+                if enemy["cur_hp"] <= unit["cc_dmg"]:
+                    targets.append(enemy)
+            
+            # Priority 2: Highest threat, lowest HP, HP >= unit's CC_DMG
+            for enemy in chargeable_enemies:
+                if enemy not in targets and enemy["cur_hp"] >= unit["cc_dmg"]:
+                    targets.append(enemy)
+            
+            # Priority 3: Highest threat, lowest HP
+            remaining = [e for e in chargeable_enemies if e not in targets]
+            remaining.sort(key=lambda e: (max(e.get("rng_dmg", 0), e.get("cc_dmg", 0)), -e["cur_hp"]), reverse=True)
+            targets.extend(remaining)
+        else:
+            # Ranged unit charge priorities (different from melee)
+            # Priority 1: Highest threat, highest HP, can kill in 1 melee phase
+            for enemy in chargeable_enemies:
+                if enemy["cur_hp"] <= unit["cc_dmg"]:
+                    targets.append(enemy)
+        
+        return targets[:3]
+
+    def _get_combat_targets(self, unit):
+        """Get combat targets in AI_GAME_OVERVIEW.md priority order."""
+        targets = []
+        adjacent_enemies = []
+        
+        # Find adjacent enemies
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if dist <= 1:
+                    adjacent_enemies.append(enemy)
+        
+        if not adjacent_enemies:
+            return targets
+        
+        # Priority 1: Can kill in 1 melee phase
+        for enemy in adjacent_enemies:
+            if enemy["cur_hp"] <= unit["cc_dmg"]:
+                targets.append(enemy)
+        
+        # Priority 2: Highest threat, lowest HP
+        remaining = [e for e in adjacent_enemies if e not in targets]
+        remaining.sort(key=lambda e: (max(e.get("rng_dmg", 0), e.get("cc_dmg", 0)), -e["cur_hp"]), reverse=True)
+        targets.extend(remaining)
+        
+        return targets[:2]
+
+    def _can_melee_units_charge(self, enemy):
+        """Check if any of our melee units can charge this enemy."""
+        for unit in self.ai_units:
+            if unit["alive"] and not unit["is_ranged"] and not unit["has_charged"]:
+                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if 1 < dist <= unit["move"]:
+                    return True
+        return False
+
+    def _get_nearest_enemy(self, unit):
+        """Get nearest alive enemy."""
+        nearest = None
+        min_dist = float('inf')
+        
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest = enemy
+        
+        return nearest
+
+    def _shoot_at_target(self, unit, target):
+        """Shoot at target and return reward."""
+        if not target["alive"]:
+            return -0.5
+        
+        damage = unit["rng_dmg"]
+        old_hp = target["cur_hp"]
+        target["cur_hp"] = max(0, target["cur_hp"] - damage)
+        
+        reward = 1.0  # Base shooting reward
+        
+        if target["cur_hp"] <= 0:
+            target["alive"] = False
+            reward += 5.0  # Kill bonus
+            
+            # Bonus for no overkill
+            if old_hp == damage:
+                reward += 1.0
+        
+        return reward
+
+    def _charge_at_target(self, unit, target):
+        """Charge at target (move adjacent)."""
+        if not target["alive"]:
+            return -0.5
+        
+        # Move unit adjacent to target
         dx = target["col"] - unit["col"]
         dy = target["row"] - unit["row"]
         
-        # Normalize and apply movement
-        dist = max(abs(dx), abs(dy), 1)
-        move_x = min(unit["move"], abs(dx)) * (1 if dx > 0 else -1 if dx < 0 else 0)
-        move_y = min(unit["move"], abs(dy)) * (1 if dy > 0 else -1 if dy < 0 else 0)
+        # Find adjacent position
+        if abs(dx) > abs(dy):
+            new_col = target["col"] - (1 if dx > 0 else -1)
+            new_row = target["row"]
+        else:
+            new_col = target["col"]
+            new_row = target["row"] - (1 if dy > 0 else -1)
         
-        # Update position with bounds checking
-        new_col = max(0, min(self.board_size[0] - 1, unit["col"] + move_x))
-        new_row = max(0, min(self.board_size[1] - 1, unit["row"] + move_y))
+        # Ensure within bounds
+        new_col = max(0, min(self.board_size[0] - 1, new_col))
+        new_row = max(0, min(self.board_size[1] - 1, new_row))
         
         unit["col"] = new_col
         unit["row"] = new_row
+        
+        return 0.5  # Charge reward
 
-    def _attack_target(self, attacker, target):
-        """Attack target with ranged weapon - FIXED to prevent overkill."""
-        if not target or not target["alive"]:
-            return 0.0
+    def _attack_target(self, unit, target):
+        """Attack adjacent target in melee combat."""
+        if not target["alive"]:
+            return -0.5
         
-        # Calculate distance
-        dist = abs(attacker["col"] - target["col"]) + abs(attacker["row"] - target["row"])
-        weapon_range = attacker.get("rng_rng", 4)
+        # Check if actually adjacent
+        dist = abs(unit["col"] - target["col"]) + abs(unit["row"] - target["row"])
+        if dist > 1:
+            return -0.3  # Not adjacent penalty
         
-        # Check if target is in range
-        if dist <= weapon_range:
-            base_damage = attacker.get("rng_dmg", 1)
-            # CRITICAL FIX: Prevent overkill damage
-            actual_damage = min(base_damage, target["cur_hp"])
-            target["cur_hp"] -= actual_damage
-            
-            reward = 1.0  # Base attack reward
-            
-            if target["cur_hp"] <= 0:
-                target["cur_hp"] = 0  # Ensure HP doesn't go negative
-                target["alive"] = False
-                reward += 5.0  # Bonus for kill
-            
-            return reward
+        damage = unit["cc_dmg"]
+        old_hp = target["cur_hp"]
+        target["cur_hp"] = max(0, target["cur_hp"] - damage)
         
-        return -0.1  # Penalty for failed attack
-    
+        reward = 1.0  # Base attack reward
+        
+        if target["cur_hp"] <= 0:
+            target["alive"] = False
+            reward += 5.0  # Kill bonus
+            
+            # Bonus for no overkill
+            if old_hp == damage:
+                reward += 1.0
+        
+        return reward
+
+    def _advance_phase(self):
+        """Advance to next phase following AI_GAME_OVERVIEW.md sequence."""
+        if self.current_phase == "move":
+            self.current_phase = "shoot"
+            # Reset phase flags for all AI units
+            for unit in self.ai_units:
+                unit["has_shot"] = False
+        elif self.current_phase == "shoot":
+            self.current_phase = "charge"
+            # Reset charge flags
+            for unit in self.ai_units:
+                unit["has_charged"] = False
+        elif self.current_phase == "charge":
+            self.current_phase = "combat"
+            # Reset attack flags
+            for unit in self.ai_units:
+                unit["has_attacked"] = False
+        elif self.current_phase == "combat":
+            # End of AI turn, switch to enemy turn (simulated)
+            self._execute_enemy_turn()
+            # Start new AI turn
+            self.current_phase = "move"
+            self.current_turn += 1
+            # Reset all phase flags for new turn
+            for unit in self.ai_units:
+                unit["has_moved"] = False
+                unit["has_shot"] = False
+                unit["has_charged"] = False
+                unit["has_attacked"] = False
+
+    def _execute_enemy_turn(self):
+        """Execute enemy turn using scripted behavior as mentioned in AI_GAME_OVERVIEW.md."""
+        # Simple scripted enemy behavior for training
+        enemy_units_alive = [u for u in self.enemy_units if u["alive"]]
+        
+        for enemy in enemy_units_alive:
+            # Enemy behavior: move towards nearest AI unit and attack if possible
+            nearest_ai = self._get_nearest_ai_unit(enemy)
+            if not nearest_ai:
+                continue
+            
+            # Move phase: move towards nearest AI unit
+            dx = nearest_ai["col"] - enemy["col"]
+            dy = nearest_ai["row"] - enemy["row"]
+            
+            if abs(dx) + abs(dy) > 1:  # Not adjacent, move closer
+                move_x = min(enemy["move"], abs(dx)) * (1 if dx > 0 else -1 if dx < 0 else 0)
+                move_y = min(enemy["move"] - abs(move_x), abs(dy)) * (1 if dy > 0 else -1 if dy < 0 else 0)
+                
+                new_col = max(0, min(self.board_size[0] - 1, enemy["col"] + move_x))
+                new_row = max(0, min(self.board_size[1] - 1, enemy["row"] + move_y))
+                
+                enemy["col"] = new_col
+                enemy["row"] = new_row
+            
+            # Shooting phase: shoot if in range
+            dist = abs(enemy["col"] - nearest_ai["col"]) + abs(enemy["row"] - nearest_ai["row"])
+            if dist <= enemy.get("rng_rng", 4) and enemy.get("rng_dmg", 0) > 0:
+                damage = enemy["rng_dmg"]
+                nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
+                if nearest_ai["cur_hp"] <= 0:
+                    nearest_ai["alive"] = False
+            
+            # Combat phase: attack if adjacent
+            elif dist <= 1 and enemy.get("cc_dmg", 0) > 0:
+                damage = enemy["cc_dmg"]
+                nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
+                if nearest_ai["cur_hp"] <= 0:
+                    nearest_ai["alive"] = False
+        
+        # Update AI units list
+        self.ai_units = [u for u in self.units if u["player"] == 1]
+
+    def _get_nearest_ai_unit(self, enemy):
+        """Get nearest alive AI unit for enemy targeting."""
+        nearest = None
+        min_dist = float('inf')
+        
+        for unit in self.ai_units:
+            if unit["alive"]:
+                dist = abs(enemy["col"] - unit["col"]) + abs(enemy["row"] - unit["row"])
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest = unit
+        
+        return nearest
+
+    def _record_action(self, unit, action_type, reward):
+        """Record action for replay system."""
+        action_data = {
+            "turn": self.current_turn,
+            "phase": self.current_phase,
+            "player": unit["player"],
+            "unit_id": unit["id"],
+            "unit_type": unit["unit_type"],
+            "action_type": action_type,
+            "position": [unit["col"], unit["row"]],
+            "hp": unit["cur_hp"],
+            "reward": reward,
+            "timestamp": datetime.now().isoformat()
+        }
+        self.replay_data.append(action_data)
+
     def _get_info(self):
         """Get environment info."""
         return {
             "turn": self.current_turn,
+            "phase": self.current_phase,
             "game_over": self.game_over,
             "winner": self.winner,
-            "ai_units_alive": len([u for u in self.units if u["player"] == 1 and u["alive"]]),
-            "enemy_units_alive": len([u for u in self.units if u["player"] == 0 and u["alive"]])
+            "ai_units_alive": len([u for u in self.ai_units if u["alive"]]),
+            "enemy_units_alive": len([u for u in self.enemy_units if u["alive"]]),
+            "eligible_units": len(self._get_eligible_units())
         }
-    
-    def step(self, action):
-        """Execute one step in the environment."""
-        print(f"🎮 TURN {self.current_turn}: AI takes action {action}")
-        
-        # Debug: Show unit status BEFORE action
-        ai_units_before = [u for u in self.units if u["player"] == 1 and u["alive"]]
-        enemy_units_before = [u for u in self.units if u["player"] == 0 and u["alive"]]
-        print(f"   BEFORE: AI units: {len(ai_units_before)}, Enemy units: {len(enemy_units_before)}")
-        
-        # DEBUG: Log what action is being taken
-        ACTION_NAMES = {
-            0: "Move Closer", 1: "Move Away", 2: "Move to Safety",
-            3: "Shoot Closest", 4: "Shoot Weakest", 5: "Charge Closest",
-            6: "Wait", 7: "Attack Adjacent"
-        }
-        action_int = int(action) if hasattr(action, 'item') else action
-        print(f"   ACTION: {ACTION_NAMES.get(action_int, f'Unknown({action_int})')}")
-        
-        if self.game_over:
-            return self._get_obs(), 0.0, True, False, self._get_info()
-        
-        reward = 0.0
-        
-        # Get AI units
-        ai_units = [u for u in self.units if u["player"] == 1 and u["alive"]]
-        enemies = [u for u in self.units if u["player"] == 0 and u["alive"]]
-        
-        if not ai_units:
-            self.game_over = True
-            self.winner = 0
-            return self._get_obs(), -10.0, True, False, self._get_info()
-        
-        if not enemies:
-            self.game_over = True
-            self.winner = 1
-            return self._get_obs(), 10.0, True, False, self._get_info()
-        
-        # Execute action for first AI unit
-        if ai_units:
-            unit = ai_units[0]
-            nearest_enemy = min(enemies, key=lambda e: abs(unit["col"] - e["col"]) + abs(unit["row"] - e["row"]))
-            
-            if action == 0:  # Move closer
-                self._move_toward_target(unit, nearest_enemy)
-                reward += 0.1
-            elif action == 1:  # Move away
-                # Move in opposite direction
-                if nearest_enemy:
-                    dx = unit["col"] - nearest_enemy["col"]
-                    dy = unit["row"] - nearest_enemy["row"]
-                    move_x = min(unit["move"], 2) * (1 if dx > 0 else -1)
-                    move_y = min(unit["move"], 2) * (1 if dy > 0 else -1)
-                    unit["col"] = max(0, min(self.board_size[0] - 1, unit["col"] + move_x))
-                    unit["row"] = max(0, min(self.board_size[1] - 1, unit["row"] + move_y))
-                reward -= 0.1
-            elif action == 2:  # Move to safe position
-                # Move to corner
-                target_col = 0 if unit["col"] < self.board_size[0] // 2 else self.board_size[0] - 1
-                target_row = 0 if unit["row"] < self.board_size[1] // 2 else self.board_size[1] - 1
-                dx = target_col - unit["col"]
-                dy = target_row - unit["row"]
-                move_x = min(unit["move"], abs(dx)) * (1 if dx > 0 else -1 if dx < 0 else 0)
-                move_y = min(unit["move"], abs(dy)) * (1 if dy > 0 else -1 if dy < 0 else 0)
-                unit["col"] = max(0, min(self.board_size[0] - 1, unit["col"] + move_x))
-                unit["row"] = max(0, min(self.board_size[1] - 1, unit["row"] + move_y))
-            elif action == 3:  # Shoot closest
-                reward += self._attack_target(unit, nearest_enemy)
-            elif action == 4:  # Shoot weakest
-                weakest = min(enemies, key=lambda e: e["cur_hp"])
-                reward += self._attack_target(unit, weakest)
-            elif action == 5:  # Charge closest
-                if nearest_enemy:
-                    self._move_toward_target(unit, nearest_enemy)
-                    # Check if in melee range
-                    dist = abs(unit["col"] - nearest_enemy["col"]) + abs(unit["row"] - nearest_enemy["row"])
-                    if dist <= 1:
-                        # Melee attack
-                        damage = unit["cc_dmg"]
-                        nearest_enemy["cur_hp"] -= damage
-                        reward += 1.0
-                        if nearest_enemy["cur_hp"] <= 0:
-                            nearest_enemy["alive"] = False
-                            reward += 5.0
-            elif action == 6:  # Wait
-                reward -= 0.05
-            elif action == 7:  # Attack adjacent
-                # Find adjacent enemies
-                adjacent_enemies = []
-                for enemy in enemies:
-                    dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                    if dist <= 1:
-                        adjacent_enemies.append(enemy)
-                
-                if adjacent_enemies:
-                    target = adjacent_enemies[0]
-                    damage = unit["cc_dmg"]
-                    target["cur_hp"] -= damage
-                    reward += 1.0
-                    if target["cur_hp"] <= 0:
-                        target["alive"] = False
-                        reward += 5.0
-                else:
-                    reward -= 0.1
-        
-        # Enemy AI - BALANCED behavior (max 1 enemy action per turn)
-        enemy_actions_this_turn = 0
-        max_enemy_actions = 1  # CRITICAL: Limit to 1 enemy action per turn
-        
-        for enemy in enemies:
-            if not enemy["alive"] or enemy_actions_this_turn >= max_enemy_actions:
-                continue
-                
-            if not ai_units:  # No AI units left
-                break
-                
-            nearest_ai = min(ai_units, key=lambda u: abs(enemy["col"] - u["col"]) + abs(enemy["row"] - u["row"]) if u["alive"] else float('inf'))
-            
-            if nearest_ai and nearest_ai["alive"]:
-                dist = abs(enemy["col"] - nearest_ai["col"]) + abs(enemy["row"] - nearest_ai["row"])
-                
-                # FIXED: Limit enemy range and damage
-                enemy_range = min(enemy.get("rng_rng", 4), 6)  # Max range 6
-                enemy_damage = min(enemy.get("rng_dmg", 1), 2)  # Max damage 2
-                
-                if dist <= enemy_range and enemy.get("is_ranged", True):
-                    # Ranged attack with damage limits
-                    actual_damage = min(enemy_damage, nearest_ai["cur_hp"])
-                    nearest_ai["cur_hp"] -= actual_damage
-                    
-                    if nearest_ai["cur_hp"] <= 0:
-                        nearest_ai["cur_hp"] = 0
-                        nearest_ai["alive"] = False
-                        reward -= 2.0  # Reduced penalty
-                    
-                    enemy_actions_this_turn += 1
-                    # Debug: print(f"Enemy {enemy.get('id', '?')} shoots AI {nearest_ai.get('id', '?')} for {actual_damage}")
-                    
-                elif dist > 1:  # Move closer if not adjacent
-                    self._move_toward_target(enemy, nearest_ai)
-                    enemy_actions_this_turn += 1
-                    
-                else:  # Melee attack if adjacent
-                    melee_damage = min(enemy.get("cc_dmg", 1), 1)  # Max melee damage 1
-                    actual_damage = min(melee_damage, nearest_ai["cur_hp"])
-                    nearest_ai["cur_hp"] -= actual_damage
-                    
-                    if nearest_ai["cur_hp"] <= 0:
-                        nearest_ai["cur_hp"] = 0
-                        nearest_ai["alive"] = False
-                        reward -= 2.0
-                    
-                    enemy_actions_this_turn += 1
-        
-        # Check win conditions again
-        ai_units = [u for u in self.units if u["player"] == 1 and u["alive"]]
-        enemy_units = [u for u in self.units if u["player"] == 0 and u["alive"]]
-        
-        if not ai_units:
-            self.game_over = True
-            self.winner = 0
-            reward -= 10
-        elif not enemy_units:
-            self.game_over = True
-            self.winner = 1
-            reward += 10
-        
-        # Turn limit
-        self.current_turn += 1
-        if self.current_turn >= self.max_turns:
-            self.game_over = True
-            if not self.winner:
-                self.winner = 1 if len(ai_units) > len(enemy_units) else 0 if len(enemy_units) > len(ai_units) else None
-            reward += self.turn_limit_penalty
-        
-        # Log step
-        step_log = {
-            "turn": self.current_turn,
-            "action": action,
-            "reward": reward,
-            "ai_units_alive": len(ai_units),
-            "enemy_units_alive": len(enemy_units),
-            "game_over": self.game_over
-        }
-        self.current_log.append(step_log)
-        
-        # Log to replay if enabled
-        self.log_step_to_replay(action, reward)
-        
-        # Debug: Show unit status AFTER action
-        ai_units_after = [u for u in self.units if u["player"] == 1 and u["alive"]]
-        enemy_units_after = [u for u in self.units if u["player"] == 0 and u["alive"]]
-        print(f"   AFTER:  AI units: {len(ai_units_after)}, Enemy units: {len(enemy_units_after)}")
-        
-        # DEBUG: If units died, show which ones
-        if len(ai_units_before) != len(ai_units_after):
-            dead_ai = [u for u in ai_units_before if not u["alive"]]
-            print(f"   💀 AI UNITS DIED: {[u.get('id', '?') for u in dead_ai]}")
-        
-        if len(enemy_units_before) != len(enemy_units_after):
-            dead_enemies = [u for u in enemy_units_before if not u["alive"]]
-            print(f"   💀 ENEMY UNITS DIED: {[u.get('id', '?') for u in dead_enemies]}")
-        
-        info = self._get_info()
-        return self._get_obs(), reward, self.game_over, False, info
-    
-    def render(self, mode='human'):
-        """Render the environment (optional)."""
-        if mode == 'human':
-            # Simple text representation
-            print(f"\nTurn {self.current_turn} - Player {self.current_player}")
-            print("Board state:")
-            for unit in self.units:
-                if unit["alive"]:
-                    player_symbol = "AI" if unit["player"] == 1 else "EN"
-                    print(f"  {player_symbol}{unit['id']}: ({unit['col']}, {unit['row']}) HP:{unit['cur_hp']}/{unit['hp_max']}")
-            print(f"Game over: {self.game_over}, Winner: {self.winner}")
-        
-        return None
-    
-    def close(self):
-        """Clean up environment resources."""
-        pass
-    
-    def save_episode_logs(self, filename=None):
-        """Save episode logs to file."""
-        if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"ai/episode_log_{timestamp}.json"
-        
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        
-        episode_data = {
-            "timestamp": datetime.now().isoformat(),
-            "total_turns": self.current_turn,
-            "winner": self.winner,
-            "final_reward": sum(log["reward"] for log in self.current_log),
-            "events": self.current_log
-        }
-        
-        with open(filename, 'w') as f:
-            json.dump(episode_data, f, indent=2)
-        
-        print(f"Episode logs saved to {filename}")
-        return filename
-
-    def enable_replay_logging(self, filename):
-        """Enable replay logging to specified file."""
-        self.replay_logging_enabled = True
-        self.replay_file = filename
-        self.replay_data = {
-            "metadata": {
-                "timestamp": datetime.now().isoformat(),
-                "board_size": self.board_size,
-                "max_turns": self.max_turns,
-                "initial_units": len(self.initial_units)
-            },
-            "events": []
-        }
-
-    def log_step_to_replay(self, action, reward):
-        """Log current step to replay data."""
-        if not self.replay_logging_enabled:
-            return
-        
-        step_data = {
-            "turn": self.current_turn,
-            "action": action,
-            "reward": reward,
-            "units": [
-                {
-                    "id": unit["id"],
-                    "type": unit["unit_type"],
-                    "player": unit["player"],
-                    "col": unit["col"],
-                    "row": unit["row"],
-                    "cur_hp": unit["cur_hp"],
-                    "hp_max": unit["hp_max"],
-                    "alive": unit["alive"]
-                }
-                for unit in self.units
-            ],
-            "game_over": self.game_over,
-            "winner": self.winner
-        }
-        
-        self.replay_data["events"].append(step_data)
-    
-    def save_replay(self):
-        """Save replay data to file."""
-        if not self.replay_logging_enabled or not self.replay_file:
-            return
-        
-        # Add final metadata
-        self.replay_data["metadata"]["total_turns"] = self.current_turn
-        self.replay_data["metadata"]["winner"] = self.winner
-        self.replay_data["metadata"]["total_reward"] = sum(
-            event["reward"] for event in self.replay_data["events"]
-        )
-        
-        os.makedirs(os.path.dirname(self.replay_file), exist_ok=True)
-        
-        with open(self.replay_file, 'w') as f:
-            json.dump(self.replay_data, f, indent=2)
-        
-        print(f"Replay saved to {self.replay_file}")
-
-    def export_state(self, format="json"):
-        """Export current game state in specified format."""
-        state = {
-            "game_info": {
-                "turn": self.current_turn,
-                "current_player": self.current_player,
-                "game_over": self.game_over,
-                "winner": self.winner,
-                "max_turns": self.max_turns
-            },
-            "board": {
-                "width": self.board_size[0],
-                "height": self.board_size[1]
-            },
-            "units": []
-        }
-        
-        for unit in self.units:
-            unit_data = {
-                "id": unit["id"],
-                "type": unit["unit_type"],
-                "player": unit["player"],
-                "position": {
-                    "col": unit["col"],
-                    "row": unit["row"]
-                },
-                "health": {
-                    "current": unit["cur_hp"],
-                    "max": unit["hp_max"]
-                },
-                "stats": {
-                    "move": unit["move"],
-                    "rng_rng": unit["rng_rng"],
-                    "rng_dmg": unit["rng_dmg"],
-                    "cc_dmg": unit["cc_dmg"]
-                },
-                "capabilities": {
-                    "is_ranged": unit["is_ranged"],
-                    "is_melee": unit["is_melee"]
-                },
-                "alive": unit["alive"]
-            }
-            state["units"].append(unit_data)
-        
-        if format.lower() == "json":
-            return json.dumps(state, indent=2)
-        elif format.lower() == "dict":
-            return state
-        else:
-            raise ValueError(f"Unsupported export format: {format}")
-
-    def import_state(self, state_data, format="json"):
-        """Import game state from specified format."""
-        if format.lower() == "json":
-            if isinstance(state_data, str):
-                state = json.loads(state_data)
-            else:
-                state = state_data
-        elif format.lower() == "dict":
-            state = state_data
-        else:
-            raise ValueError(f"Unsupported import format: {format}")
-        
-        # Import game info
-        if "game_info" in state:
-            game_info = state["game_info"]
-            self.current_turn = game_info.get("turn", 0)
-            self.current_player = game_info.get("current_player", 1)
-            self.game_over = game_info.get("game_over", False)
-            self.winner = game_info.get("winner", None)
-        
-        # Import board size
-        if "board" in state:
-            board = state["board"]
-            self.board_size = (board["width"], board["height"])
-        
-        # Import units
-        if "units" in state:
-            self.units = []
-            for unit_data in state["units"]:
-                unit = {
-                    "id": unit_data["id"],
-                    "unit_type": unit_data["type"],
-                    "player": unit_data["player"],
-                    "col": unit_data["position"]["col"],
-                    "row": unit_data["position"]["row"],
-                    "cur_hp": unit_data["health"]["current"],
-                    "hp_max": unit_data["health"]["max"],
-                    "move": unit_data["stats"]["move"],
-                    "rng_rng": unit_data["stats"]["rng_rng"],
-                    "rng_dmg": unit_data["stats"]["rng_dmg"],
-                    "cc_dmg": unit_data["stats"]["cc_dmg"],
-                    "is_ranged": unit_data["capabilities"]["is_ranged"],
-                    "is_melee": unit_data["capabilities"]["is_melee"],
-                    "alive": unit_data["alive"]
-                }
-                self.units.append(unit)
-        
-        return True
-
-    def get_scenario_json_state(self):
-        """Get current state as scenario.json format for frontend compatibility."""
-        scenario_state = {
-            "board": {
-                "cols": self.board_size[0],
-                "rows": self.board_size[1],
-                "hex_radius": 24,
-                "margin": 32
-            },
-            "colors": {
-                "background": "0x002200",
-                "cell_even": "0x002200",
-                "cell_odd": "0x001a00",
-                "cell_border": "0x00ff00",
-                "player_0": "0x244488",
-                "player_1": "0x882222",
-                "hp_full": "0x36e36b",
-                "hp_damaged": "0x444444",
-                "highlight": "0x80ff80",
-                "current_unit": "0xffd700"
-            },
-            "units": []
-        }
-        
-        for unit in self.units:
-            unit_state = {
-                "id": unit["id"],
-                "unit_type": unit["unit_type"],
-                "player": unit["player"],
-                "col": unit["col"],
-                "row": unit["row"],
-                "alive": unit["alive"],
-                "current_hp": unit["cur_hp"],
-                "max_hp": unit["hp_max"]
-            }
-            scenario_state["units"].append(unit_state)
-        
-        return scenario_state
-
-    def create_web_replay_event(self, action, reward):
-        """Create web-compatible replay event for frontend consumption."""
-        # Determine phase based on action
-        phase_mapping = {
-            0: "move", 1: "move", 2: "move",  # Movement actions
-            3: "shoot", 4: "shoot",           # Shooting actions
-            5: "charge",                      # Charging
-            7: "combat",                      # Combat
-            6: "move"                         # Wait/end turn
-        }
-        
-        phase = phase_mapping.get(action, "move")
-        
-        # Action names for display
-        action_names = {
-            0: "move_closer",
-            1: "move_away", 
-            2: "move_to_safe",
-            3: "shoot_closest",
-            4: "shoot_weakest",
-            5: "charge_closest",
-            6: "wait",
-            7: "attack_adjacent"
-        }
-        
-        # Create web format event
-        web_event = {
-            "turn": self.current_turn,
-            "phase": phase,
-            "acting_unit_idx": 0,  # Assume first AI unit for simplicity
-            "target_unit_idx": None,
-            "event_flags": {
-                "action_name": action_names.get(action, f"action_{action}"),
-                "action_id": action,
-                "reward": reward,
-                "ai_units_alive": len([u for u in self.units if u["player"] == 1 and u["alive"]]),
-                "enemy_units_alive": len([u for u in self.units if u["player"] == 0 and u["alive"]])
-            },
-            "unit_stats": {},
-            "units": []
-        }
-        
-        # Add unit data in web format
-        for unit in self.units:
-            web_unit = {
-                "id": unit["id"],
-                "name": f"{'P' if unit['player'] == 0 else 'A'}-{unit['unit_type'][0]}",
-                "type": unit["unit_type"],
-                "player": unit["player"],
-                "col": unit["col"],
-                "row": unit["row"],
-                "color": 0x244488 if unit["player"] == 0 else 0x882222,
-                "CUR_HP": unit["cur_hp"],
-                "HP_MAX": unit["hp_max"],
-                "MOVE": unit["move"],
-                "RNG_RNG": unit["rng_rng"],
-                "RNG_DMG": unit["rng_dmg"],
-                "CC_DMG": unit["cc_dmg"],
-                "ICON": unit["unit_type"][0],
-                "alive": unit["alive"]
-            }
-            web_event["units"].append(web_unit)
-        
-        return web_event
 
     def save_web_compatible_replay(self, filename=None):
-        """Save replay in web-compatible format for frontend consumption."""
+        """Save replay in web-compatible format."""
         if filename is None:
-            filename = "ai/event_log/train_best_game_replay.json"
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"ai/event_log/phase_based_replay_{timestamp}.json"
         
+        # Ensure directory exists
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         
-        # Convert replay events to web format
-        web_events = []
-        
-        for i, event in enumerate(self.replay_data.get("events", [])):
-            web_event = self.create_web_replay_event(
-                event.get("action", 0),
-                event.get("reward", 0)
-            )
-            web_events.append(web_event)
-        
-        # Create web-compatible replay structure
-        web_replay = {
-            "metadata": {
-                "timestamp": datetime.now().isoformat(),
-                "total_reward": sum(event.get("reward", 0) for event in self.replay_data.get("events", [])),
+        replay_structure = {
+            "game_info": {
+                "scenario": "phase_based_training",
+                "ai_behavior": "phase_based_following_AI_GAME_OVERVIEW",
                 "total_turns": self.current_turn,
-                "episode_reward": sum(event.get("reward", 0) for event in self.replay_data.get("events", [])),
-                "final_turn": self.current_turn
+                "winner": self.winner,
+                "ai_units_final": len([u for u in self.ai_units if u["alive"]]),
+                "enemy_units_final": len([u for u in self.enemy_units if u["alive"]])
             },
-            "game_summary": {
-                "final_reward": sum(event.get("reward", 0) for event in self.replay_data.get("events", [])),
-                "total_turns": self.current_turn,
-                "game_result": "win" if self.winner == 1 else "loss" if self.winner == 0 else "draw"
+            "initial_state": {
+                "units": [
+                    {
+                        "id": u["id"],
+                        "unit_type": u["unit_type"],
+                        "player": u["player"],
+                        "col": u["col"],
+                        "row": u["row"],
+                        "hp_max": u["hp_max"],
+                        "move": u["move"],
+                        "rng_rng": u["rng_rng"],
+                        "rng_dmg": u["rng_dmg"],
+                        "cc_dmg": u["cc_dmg"],
+                        "is_ranged": u["is_ranged"],
+                        "is_melee": u["is_melee"]
+                    }
+                    for u in self.units
+                ],
+                "board_size": list(self.board_size)
             },
-            "events": web_events,
-            "web_compatible": True,
-            "features": ["unit_movement", "combat", "rewards"]
+            "actions": self.replay_data
         }
         
         with open(filename, 'w') as f:
-            json.dump(web_replay, f, indent=2)
+            json.dump(replay_structure, f, indent=2)
         
-        print(f"Web-compatible replay saved to {filename}")
+        print(f"✅ Phase-based replay saved: {filename}")
         return filename
 
-    def get_action_space_info(self):
-        """Get information about the action space for documentation."""
-        return {
-            "action_count": 8,
-            "actions": {
-                0: {"name": "move_closer", "description": "Move toward nearest enemy"},
-                1: {"name": "move_away", "description": "Move away from nearest enemy"},
-                2: {"name": "move_to_safe", "description": "Move to safe position (corner)"},
-                3: {"name": "shoot_closest", "description": "Shoot at closest enemy"},
-                4: {"name": "shoot_weakest", "description": "Shoot at weakest enemy"},
-                5: {"name": "charge_closest", "description": "Charge and melee attack closest enemy"},
-                6: {"name": "wait", "description": "Do nothing (small penalty)"},
-                7: {"name": "attack_adjacent", "description": "Melee attack adjacent enemy"}
-            }
-        }
+    def render(self, mode='human'):
+        """Render current state for debugging."""
+        if mode == 'human':
+            print(f"\n=== TURN {self.current_turn} - PHASE: {self.current_phase.upper()} ===")
+            
+            # Show board state
+            board = [['.' for _ in range(self.board_size[0])] for _ in range(self.board_size[1])]
+            
+            for unit in self.units:
+                if unit["alive"]:
+                    symbol = 'A' if unit["player"] == 1 else 'E'
+                    if unit["col"] < len(board[0]) and unit["row"] < len(board):
+                        board[unit["row"]][unit["col"]] = symbol
+            
+            for row in board:
+                print(' '.join(row))
+            
+            print(f"\nAI Units: {len([u for u in self.ai_units if u['alive']])}")
+            print(f"Enemy Units: {len([u for u in self.enemy_units if u['alive']])}")
+            print(f"Eligible Units: {len(self._get_eligible_units())}")
 
-    def get_observation_space_info(self):
-        """Get information about the observation space for documentation."""
-        return {
-            "observation_size": 28,
-            "structure": {
-                "ai_units": {
-                    "range": "0-13",
-                    "description": "AI unit data (2 units × 7 values each)",
-                    "values": ["col_normalized", "row_normalized", "hp_ratio", "move_normalized", "range_normalized", "ranged_damage_normalized", "melee_damage_normalized"]
-                },
-                "enemy_units": {
-                    "range": "14-27", 
-                    "description": "Enemy unit data (2 units × 7 values each)",
-                    "values": ["col_normalized", "row_normalized", "hp_ratio", "move_normalized", "range_normalized", "ranged_damage_normalized", "melee_damage_normalized"]
-                }
-            },
-            "normalization": {
-                "positions": "divided by max(board_width, board_height)",
-                "hp": "current_hp / max_hp",
-                "stats": "divided by reasonable max values (move/10, range/12, damage/5)"
-            }
-        }
-
-    def get_environment_info(self):
-        """Get comprehensive environment information for debugging."""
-        return {
-            "environment": "W40K Tactical Combat",
-            "version": "1.0",
-            "config_source": "config/game_config.json",
-            "board_size": self.board_size,
-            "max_turns": self.max_turns,
-            "turn_penalty": self.turn_limit_penalty,
-            "unit_count": len(self.units),
-            "ai_units": len([u for u in self.units if u["player"] == 1]),
-            "enemy_units": len([u for u in self.units if u["player"] == 0]),
-            "current_turn": self.current_turn,
-            "game_over": self.game_over,
-            "winner": self.winner,
-            "action_space": self.get_action_space_info(),
-            "observation_space": self.get_observation_space_info(),
-            "unit_types": list(self.unit_definitions.keys())
-        }
+    def close(self):
+        """Clean up environment."""
+        if self.save_replay and self.replay_data:
+            self.save_web_compatible_replay()
 
 # Register environment with gymnasium
 def register_environment():
-    """Register the W40K environment with gymnasium."""
+    """Register the phase-based W40K environment with gymnasium."""
     try:
         import gymnasium as gym
         gym.register(
-            id='W40K-v0',
+            id='W40K-Phases-v0',
             entry_point='ai.gym40k:W40KEnv',
         )
-        print("✅ W40K environment registered with gymnasium")
+        print("✅ W40K Phase-based environment registered with gymnasium")
     except Exception as e:
-        print(f"⚠️  Failed to register environment: {e}")
+        print(f"⚠️  Failed to register phase-based environment: {e}")
 
 if __name__ == "__main__":
     # Test environment creation and basic functionality
-    print("🎮 Testing W40K Environment")
-    print("=" * 40)
+    print("🎮 Testing W40K Phase-Based Environment")
+    print("=" * 50)
     
     try:
         # Create environment
-        env = W40KEnv()
-        print("✅ Environment created successfully")
-        
-        # Print environment info
-        info = env.get_environment_info()
-        print(f"📊 Environment Info:")
-        print(f"   Board size: {info['board_size']}")
-        print(f"   Max turns: {info['max_turns']}")
-        print(f"   Turn penalty: {info['turn_penalty']}")
-        print(f"   Units: {info['unit_count']} ({info['ai_units']} AI, {info['enemy_units']} enemy)")
-        print(f"   Unit types: {info['unit_types']}")
+        env = W40KPhasesEnv()
+        print("✅ Phase-based environment created successfully")
         
         # Test reset
         obs, info = env.reset()
         print(f"✅ Environment reset - observation shape: {obs.shape}")
+        print(f"   Game info: Turn {info['turn']}, Phase {info['phase']}")
+        print(f"   Units: {info['ai_units_alive']} AI, {info['enemy_units_alive']} enemy")
+        print(f"   Eligible units: {info['eligible_units']}")
         
-        # Test a few steps
-        print("🎯 Testing actions...")
-        for action in range(3):
+        # Test a few steps in different phases
+        print("\n🎯 Testing phase-based actions...")
+        for step in range(10):
+            eligible = len(env._get_eligible_units())
+            if eligible == 0:
+                print(f"   Step {step}: No eligible units, phase will advance")
+            
+            action = env.action_space.sample()
             obs, reward, done, truncated, info = env.step(action)
-            print(f"   Action {action}: reward={reward:.2f}, done={done}, units_alive={info['ai_units_alive']}")
+            print(f"   Step {step}: Phase {info['phase']}, Reward {reward:.2f}, Eligible {info['eligible_units']}")
+            
             if done:
+                print(f"   Game ended! Winner: {info['winner']}")
                 break
         
         # Test replay saving
-        env.save_web_compatible_replay("ai/test_replay.json")
-        print("✅ Test replay saved")
+        env.save_web_compatible_replay("ai/test_phase_replay.json")
+        print("✅ Test phase-based replay saved")
         
-        print("🎉 All tests passed!")
+        print("🎉 All phase-based tests passed!")
         
     except Exception as e:
         print(f"❌ Test failed: {e}")
