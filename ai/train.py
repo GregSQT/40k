@@ -174,8 +174,12 @@ def setup_imports():
             gym_path = os.path.join(script_dir, "gym40k.py")
             if os.path.exists(gym_path):
                 spec = importlib.util.spec_from_file_location("gym40k", gym_path)
-                gym_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(gym_module)
+                if spec is not None and spec.loader is not None:
+                    gym_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(gym_module)
+                    W40KEnv = gym_module.W40KEnv
+                else:
+                    raise ImportError("Could not create module spec for gym40k.py")
                 W40KEnv = gym_module.W40KEnv
             else:
                 raise ImportError("Could not find gym40k.py")
