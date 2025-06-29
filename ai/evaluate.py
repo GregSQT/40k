@@ -13,9 +13,24 @@ from datetime import datetime
 from stable_baselines3 import DQN
 from typing import Dict, List, Any
 
-# Import the web replay logger
-from ai.web_replay_logger import WebReplayIntegration
-from ai.gym40k import W40KEnv
+# Fix import paths - Add both script dir and project root
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, script_dir)
+sys.path.insert(0, project_root)
+
+# Import the web replay logger with fallback
+try:
+    from web_replay_logger import WebReplayIntegration
+except ImportError:
+    from ai.web_replay_logger import WebReplayIntegration
+
+# Import gym40k with fallback  
+try:
+    from gym40k import W40KEnv
+except ImportError:
+    from ai.gym40k import W40KEnv
+
 
 def setup_evaluation_environment():
     """Set up the environment for evaluation with web-compatible replay logging."""
