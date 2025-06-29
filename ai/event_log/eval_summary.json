@@ -1,0 +1,30 @@
+{
+  "model_path": "ai/model.zip",
+  "timestamp": "2025-06-29T04:51:26.083400",
+  "episodes": 100,
+  "wins": 0,
+  "losses": 100,
+  "draws": 0,
+  "win_rate": 0.0,
+  "avg_reward": -15.099999999999982,
+  "avg_steps": 11.0,
+  "best_reward": -15.1,
+  "worst_reward": -15.1,
+  "files": {
+    "best_replay": "eval_best_web_replay.json",
+    "worst_replay": "eval_worst_web_replay.json"
+  },
+  "replay_type": "web_compatible_direct",
+  "web_compatible": true,
+  "features": [
+    "Direct web compatibility",
+    "Complete unit positions",
+    "HP tracking",
+    "Movement visualization",
+    "Combat events",
+    "Turn-by-turn progression",
+    "Deterministic AI evaluation",
+    "No conversion needed"
+  ],
+  "note": "All replays generated directly in web-compatible format"
+}

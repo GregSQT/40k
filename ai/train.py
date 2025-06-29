@@ -11,6 +11,49 @@ from datetime import datetime
 import numpy as np
 import time
 
+from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.monitor import Monitor
+
+# Custom callback to update progress bars – chunked SB3 training loop
+class ProgressBarCallback(BaseCallback):
+    def __init__(self, progress_tracker, update_interval=1000):
+        super().__init__()
+        self.progress_tracker = progress_tracker
+        self.update_interval = update_interval
+        self.last_display_time = 0
+        self.chunk_offset = 0
+        self.last_ep_count = 0
+
+    def set_chunk_offset(self, offset):
+        """Set the offset for the current chunk"""
+        self.chunk_offset = offset
+
+    def _on_step(self) -> bool:
+        # Total timesteps so far
+        total = self.chunk_offset + self.num_timesteps
+        self.progress_tracker.update_timesteps(total)
+        # Detect episode completions from SB3 'infos' and update reward bar
+        infos = self.locals.get('infos', [])
+        for info in infos:
+            ep = info.get('episode')
+            if isinstance(ep, dict) and 'r' in ep:
+                self.progress_tracker.update_reward(ep['r'])
+                # Refresh display immediately on new reward
+                self._update_display()
+        # Periodic redraw (one update per bar column)
+        interval = max(1, int(self.progress_tracker.total_timesteps / self.progress_tracker.bar_width))
+        if self.num_timesteps % interval == 0:
+            self._update_display()
+        return True
+
+    def _update_display(self):
+        # Clear two lines then redraw
+        print('\r' + ' ' * 120, end='')
+        print('\r\033[1A' + ' ' * 120, end='')
+        print('\r', end='')
+        print(self.progress_tracker.draw_timesteps_bar())
+        print(self.progress_tracker.draw_reward_bar(), end='', flush=True)
+
 # Progress tracking class
 class ProgressTracker:
     def __init__(self, total_timesteps, bar_width=50):
@@ -53,7 +96,7 @@ class ProgressTracker:
     def draw_reward_bar(self):
         if self.min_reward == float('inf') or self.max_reward == float('-inf'):
             bar = '░' * self.bar_width
-            return f"Reward: |{bar}| No data yet"
+            return f"Reward:  |{bar}| No data yet"
         elif self.max_reward == self.min_reward:
             mid_pos = self.bar_width // 2
             bar = '░' * mid_pos + '●' + '░' * (self.bar_width - mid_pos - 1)
@@ -436,47 +479,16 @@ def enhanced_training_with_replay(model, total_timesteps, replay_interval=10000)
         episodes_captured = 0
         current_step = 0
 
-        # Initialize progress tracker
+        # Initialize progress tracker and SB3 callback
         progress_tracker = ProgressTracker(total_timesteps)
-        print(f"\n{progress_tracker.draw_timesteps_bar()}")
-        print(f"{progress_tracker.draw_reward_bar()}")
-        
-        while current_step < total_timesteps:
-            if current_step % replay_interval == 0 and current_step > 0:
-                # Capture a replay episode
-                print(f"Capturing replay at step {current_step}")
-                
-                # Run episode with replay
-                episode_reward, episode_steps, replay_file = run_training_episode_with_replay(model, model.env)
-                
-                if replay_file:
-                    episode_replays.append(replay_file)
-                    episode_rewards.append(episode_reward)
-                    episodes_captured += 1
-                
-                # Update progress tracking
-                progress_tracker.update_reward(episode_reward)
-                progress_tracker.update_timesteps(current_step + episode_steps)
-                print(f"\n{progress_tracker.draw_timesteps_bar()}")
-                print(f"{progress_tracker.draw_reward_bar()}")
-                
-                current_step += episode_steps
-            else:
-                # Regular training step
-                remaining_steps = min(1000, total_timesteps - current_step)
-                model.learn(total_timesteps=remaining_steps)
-                current_step += remaining_steps
-
-                # Update timesteps progress every 5k steps
-                if current_step % 5000 == 0:
-                    progress_tracker.update_timesteps(current_step)
-                    print(f"\r{progress_tracker.draw_timesteps_bar()}", end="", flush=True)
-        
-        # Final training if needed
-        if current_step < total_timesteps:
-            model.learn(total_timesteps=total_timesteps - current_step)
-        
-        print(f"Training completed with {episodes_captured} replays captured")
+        callback = ProgressBarCallback(progress_tracker, update_interval=replay_interval)
+        # Print the empty bars at 0/total
+        print(progress_tracker.draw_timesteps_bar())
+        print(progress_tracker.draw_reward_bar(), end='', flush=True)
+        # Let SB3.handle the loop and update our bars via the callback
+        model.learn(total_timesteps=total_timesteps, callback=callback)
+        # Summary of replays captured
+        print(f"\nTraining completed with {episodes_captured} replays captured")
         
         # Select best and worst replays
         if episode_replays and episode_rewards:
@@ -673,7 +685,10 @@ def main():
         
         # Create environment
         print("Creating environment...")
-        env = W40KEnv()
+        # Instantiate the W40K environment (no Unicode ellipsis!)
+        raw_env = W40KEnv()
+        # Monitor will push episode‐end infos into ep_info_buffer
+        env = Monitor(raw_env)
         
         # Validate environment
         try:
