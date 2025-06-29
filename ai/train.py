@@ -9,6 +9,66 @@ import subprocess
 import glob
 from datetime import datetime
 import numpy as np
+import time
+
+# Progress tracking class
+class ProgressTracker:
+    def __init__(self, total_timesteps, bar_width=50):
+        self.total_timesteps = total_timesteps
+        self.bar_width = bar_width
+        self.current_timesteps = 0
+        self.min_reward = float('inf')
+        self.max_reward = float('-inf')
+        self.current_reward = 0.0
+        self.episode_count = 0
+        self.start_time = time.time()
+        
+    def update_timesteps(self, timesteps):
+        self.current_timesteps = min(timesteps, self.total_timesteps)
+        
+    def update_reward(self, reward):
+        self.current_reward = reward
+        self.min_reward = min(self.min_reward, reward)
+        self.max_reward = max(self.max_reward, reward)
+        self.episode_count += 1
+        
+    def draw_timesteps_bar(self):
+        if self.total_timesteps == 0:
+            progress = 0.0
+        else:
+            progress = self.current_timesteps / self.total_timesteps
+        
+        filled_length = int(self.bar_width * progress)
+        bar = '█' * filled_length + '░' * (self.bar_width - filled_length)
+        
+        elapsed_time = time.time() - self.start_time
+        if progress > 0:
+            eta_seconds = (elapsed_time / progress) * (1 - progress)
+            eta_str = f" ETA: {int(eta_seconds//3600):02d}:{int((eta_seconds%3600)//60):02d}:{int(eta_seconds%60):02d}"
+        else:
+            eta_str = " ETA: --:--:--"
+        
+        return f"Timesteps: |{bar}| {self.current_timesteps:,}/{self.total_timesteps:,} ({progress*100:.1f}%){eta_str}"
+    
+    def draw_reward_bar(self):
+        if self.min_reward == float('inf') or self.max_reward == float('-inf'):
+            bar = '░' * self.bar_width
+            return f"Reward: |{bar}| No data yet"
+        elif self.max_reward == self.min_reward:
+            mid_pos = self.bar_width // 2
+            bar = '░' * mid_pos + '●' + '░' * (self.bar_width - mid_pos - 1)
+            return f"Reward: |{bar}| {self.current_reward:.2f} (constant)"
+        else:
+            reward_range = self.max_reward - self.min_reward
+            progress = (self.current_reward - self.min_reward) / reward_range if reward_range > 0 else 0.5
+            progress = max(0.0, min(1.0, progress))
+            
+            bar_chars = ['░'] * self.bar_width
+            position = int(progress * (self.bar_width - 1))
+            bar_chars[position] = '●'
+            bar = ''.join(bar_chars)
+            
+            return f"Reward: |{bar}| {self.current_reward:.2f} (min:{self.min_reward:.2f}, max:{self.max_reward:.2f})"
 
 # Fix import paths
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -371,6 +431,11 @@ def enhanced_training_with_replay(model, total_timesteps, replay_interval=10000)
         episode_rewards = []
         episodes_captured = 0
         current_step = 0
+
+        # Initialize progress tracker
+        progress_tracker = ProgressTracker(total_timesteps)
+        print(f"\n{progress_tracker.draw_timesteps_bar()}")
+        print(f"{progress_tracker.draw_reward_bar()}")
         
         while current_step < total_timesteps:
             if current_step % replay_interval == 0 and current_step > 0:
@@ -385,12 +450,23 @@ def enhanced_training_with_replay(model, total_timesteps, replay_interval=10000)
                     episode_rewards.append(episode_reward)
                     episodes_captured += 1
                 
+                # Update progress tracking
+                progress_tracker.update_reward(episode_reward)
+                progress_tracker.update_timesteps(current_step + episode_steps)
+                print(f"\n{progress_tracker.draw_timesteps_bar()}")
+                print(f"{progress_tracker.draw_reward_bar()}")
+                
                 current_step += episode_steps
             else:
                 # Regular training step
                 remaining_steps = min(1000, total_timesteps - current_step)
                 model.learn(total_timesteps=remaining_steps)
                 current_step += remaining_steps
+
+                # Update timesteps progress every 5k steps
+                if current_step % 5000 == 0:
+                    progress_tracker.update_timesteps(current_step)
+                    print(f"\r{progress_tracker.draw_timesteps_bar()}", end="", flush=True)
         
         # Final training if needed
         if current_step < total_timesteps:
