@@ -95,8 +95,11 @@ def diagnose_environment():
     env.close()
     return True
 
-def diagnose_model_behavior(model_path="ai/model.zip"):
+def diagnose_model_behavior(model_path=None):
     """Diagnose model behavior in detail."""
+    if model_path is None:
+        from config_loader import get_model_path
+        model_path = get_model_path()
     print("\n🤖 MODEL BEHAVIOR DIAGNOSIS")
     print("=" * 50)
     
@@ -187,12 +190,12 @@ def diagnose_model_behavior(model_path="ai/model.zip"):
     return True
 
 def diagnose_training_data():
-    """Check training configuration and data."""
     print("\n📚 TRAINING DATA DIAGNOSIS")
     print("=" * 50)
     
     # Check if model exists and get info
-    model_path = "ai/model.zip"
+    from config_loader import get_model_path
+    model_path = get_model_path()
     if os.path.exists(model_path):
         print(f"✓ Model file found: {model_path}")
         file_size = os.path.getsize(model_path)

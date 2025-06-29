@@ -284,11 +284,11 @@ def parse_args():
 
 def backup_current_model():
     """Create backup before training."""
-    models_dir = "ai/models/current"
+    from config_loader import get_model_path
+    model_path = get_model_path()
+    models_dir = os.path.dirname(model_path)
     backup_dir = "ai/models/backups"
     os.makedirs(backup_dir, exist_ok=True)
-    
-    model_path = os.path.join(models_dir, "model.zip")
     if os.path.exists(model_path):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_path = os.path.join(backup_dir, f"model_backup_{timestamp}.zip")
