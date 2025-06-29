@@ -150,38 +150,37 @@ class W40KEnv(gym.Env):
             }
         
         # Load from TypeScript files
-        try:
-            for filename in os.listdir(roster_dir):
-                if filename.endswith('.ts') and not filename.startswith('index'):
-                    file_path = os.path.join(roster_dir, filename)
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
+        for filename in os.listdir(roster_dir):
+            if filename.endswith('.ts') and not filename.startswith('index'):
+                file_path = os.path.join(roster_dir, filename)
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Extract unit data using regex
+                unit_match = re.search(r'export const (\w+):\s*Unit\s*=\s*{([^}]+)}', content, re.DOTALL)
+                if unit_match:
+                    unit_name = unit_match.group(1)
+                    unit_body = unit_match.group(2)
                     
-                    # Extract unit data using regex
-                    unit_match = re.search(r'export const (\w+):\s*Unit\s*=\s*{([^}]+)}', content, re.DOTALL)
-                    if unit_match:
-                        unit_name = unit_match.group(1)
-                        unit_body = unit_match.group(2)
-                        
-                        # Parse unit properties
-                        unit_data = {"unit_type": unit_name}
-                        
-                        # Extract numeric properties
-                        for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg']:
-                            prop_match = re.search(rf'{prop}:\s*(\d+)', unit_body)
-                            if prop_match:
-                                unit_data[prop] = int(prop_match.group(1))
-                        
-                        # Extract boolean properties
-                        for prop in ['is_ranged', 'is_melee']:
-                            prop_match = re.search(rf'{prop}:\s*(true|false)', unit_body)
-                            if prop_match:
-                                unit_data[prop] = prop_match.group(1) == 'true'
-                        
-                        definitions[unit_name] = unit_data
-            
-            print(f"✅ Loaded {len(definitions)} unit definitions from TypeScript")
-            return definitions
+                    # Parse unit properties
+                    unit_data = {"unit_type": unit_name}
+                    
+                    # Extract numeric properties
+                    for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg']:
+                        prop_match = re.search(rf'{prop}:\s*(\d+)', unit_body)
+                        if prop_match:
+                            unit_data[prop] = int(prop_match.group(1))
+                    
+                    # Extract boolean properties
+                    for prop in ['is_ranged', 'is_melee']:
+                        prop_match = re.search(rf'{prop}:\s*(true|false)', unit_body)
+                        if prop_match:
+                            unit_data[prop] = prop_match.group(1) == 'true'
+                    
+                    definitions[unit_name] = unit_data
+        
+        print(f"✅ Loaded {len(definitions)} unit definitions from TypeScript")
+        return definitions
 
     def _load_rewards_config(self):
         """Load rewards configuration using config_loader."""
@@ -216,20 +215,6 @@ class W40KEnv(gym.Env):
         else:
             return self.rewards_config.get("SpaceMarineMelee", {})
             
-        except Exception as e:
-            print(f"⚠️ Error loading TypeScript units: {e}, using fallback")
-            return {
-                "Intercessor": {
-                    "unit_type": "Intercessor",
-                    "hp_max": 3, "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1,
-                    "is_ranged": True, "is_melee": False
-                },
-                "AssaultIntercessor": {
-                    "unit_type": "AssaultIntercessor", 
-                    "hp_max": 4, "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2,
-                    "is_ranged": False, "is_melee": True
-                }
-            }
 
     def reset(self, seed=None, options=None):
         """Reset environment to initial state."""
@@ -1044,7 +1029,7 @@ if __name__ == "__main__":
     
     try:
         # Create environment
-        env = W40KPhasesEnv()
+        env = W40KEnv()
         print("✅ Phase-based environment created successfully")
         
         # Test reset
