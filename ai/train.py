@@ -50,6 +50,12 @@ def create_model(config, training_config_name="default", rewards_config_name="ph
     register_environment()
     
     # Create environment with specified rewards config
+    # ensure scenario.json exists in config/
+    from config_loader import get_config_loader
+    cfg = get_config_loader()
+    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+    if not os.path.isfile(scenario_file):
+        raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
     env = W40KEnv(rewards_config=rewards_config_name)
     env = Monitor(env)
     
@@ -192,7 +198,8 @@ def test_trained_model(model, num_episodes=5):
 
 def ensure_scenario():
     """Ensure scenario.json exists."""
-    scenario_path = os.path.join(script_dir, "scenario.json")
+    # write into <project_root>/config/scenario.json
+    scenario_path = os.path.join(project_root, "config", "scenario.json")
     if not os.path.exists(scenario_path):
         print("⚠️ scenario.json not found - creating default from AI_GAME_OVERVIEW.md specs...")
         # Create scenario following the frontend structure

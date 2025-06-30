@@ -95,6 +95,23 @@ class ConfigLoader:
         """Get rewards configuration."""
         return self.load_config("rewards_config")
     
+    # ─── Alias methods for named config loading ─────────────────────────
+    def load_training_config(self, name: str = "default") -> Dict[str, Any]:
+        """Load a named training configuration from training_config.json."""
+        configs = self.load_config("training_config")
+        try:
+            return configs[name]
+        except KeyError:
+            raise KeyError(f"Training config '{name}' not found in training_config.json")
+
+    def load_rewards_config(self, name: str = "phase_based") -> Dict[str, Any]:
+        """Load a named rewards configuration from rewards_config.json."""
+        configs = self.load_config("rewards_config")
+        try:
+            return configs[name]
+        except KeyError:
+            raise KeyError(f"Rewards config '{name}' not found in rewards_config.json")
+    
     def get_board_config(self) -> Dict[str, Any]:
         """Get board configuration."""
         return self.load_config("board_config")

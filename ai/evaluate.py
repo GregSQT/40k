@@ -19,6 +19,24 @@ sys.path.insert(0, project_root)
 from stable_baselines3 import DQN
 from config_loader import get_config_loader
 
+def decode_action(env, obs, action):
+    """
+    Given the env, the last observation, and a FlatDiscrete action,
+    return (unit_idx, action_type, is_ranged).
+    """
+    max_actions = env.max_units * env.max_actions_per_unit  # gym40k: max_units*8
+    # Phase doesn’t affect decoding – the same split is used each phase
+    unit_idx    = action // env.max_actions_per_unit
+    action_type = action %  env.max_actions_per_unit
+
+    # Grab that unit’s state from obs (gym40k packs per-unit arrays in obs['unit_states'])
+    unit_state = obs['unit_states'][unit_idx]
+    # In our env, a ranged unit has rng_rng > 0
+    is_ranged = unit_state['rng_rng'] > 0
+
+    return unit_idx, action_type, is_ranged
+
+
 def setup_imports():
     """Set up import paths and return required modules."""
     try:
@@ -76,10 +94,16 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=50, de
     print("   - Sequential turn structure (move → shoot → charge → combat)")
     print("   - Ranged units act first in shooting phase")
     print("   - Priority targeting system implementation")
-    print("=" * 70)
-    
+
+    # ─── Aggregate tactical-metrics counters ───
+    total_priority_actions   = 0
+    correct_priority_actions = 0
+
     for episode in range(num_episodes):
         obs, info = env.reset()
+        # ─── Per-episode compliance trackers ───
+        episode_compliant = True
+        ranged_shot_done  = False
         episode_reward = 0
         game_length = 0
         phase_rewards = {'move': 0, 'shoot': 0, 'charge': 0, 'combat': 0}
@@ -103,11 +127,33 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=50, de
             episode_reward += reward
             game_length += 1
             phase_rewards[current_phase] += reward
-            
-            # Track AI_GAME_OVERVIEW.md compliance
+
+            # ─── Decode and check tactical compliance ───
+            unit_idx, action_type, is_ranged = decode_action(env, obs, action)
+            # Get this phase’s target list
             if current_phase == "shoot":
-                # Check if ranged units are acting first (this would need env support)
-                results['tactical_metrics']['ranged_first_compliance'] += 1
+                targets = env._get_shooting_targets(env.ai_units[unit_idx])
+            elif current_phase == "charge":
+                targets = env._get_charge_targets(env.ai_units[unit_idx])
+            elif current_phase == "combat":
+                targets = env._get_combat_targets(env.ai_units[unit_idx])
+            else:
+                targets = []
+
+            # Priority-targeting accuracy
+            if action_type < len(targets):
+                total_priority_actions   += 1
+                if action_type == 0:
+                    correct_priority_actions += 1
+
+            # Ranged-first compliance (only in shoot phase)
+            if current_phase == "shoot" and action_type < len(targets):
+                if is_ranged:
+                    ranged_shot_done = True
+                else:
+                    # melee fired before any ranged
+                    if not ranged_shot_done:
+                        episode_compliant = False
             
             done = terminated or truncated
         
@@ -136,6 +182,9 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=50, de
         # Track unit casualties
         results['tactical_metrics']['units_killed'] += (initial_enemy_units - final_enemy_units)
         results['tactical_metrics']['units_lost'] += (initial_ai_units - final_ai_units)
+        # ─── Episode-level ranged-first compliance ───
+        if episode_compliant:
+            results['tactical_metrics']['ranged_first_compliance'] += 1
         
         if verbose and (episode + 1) % 10 == 0:
             print(f"Episode {episode + 1:3d}: {outcome:4s} | "
@@ -187,6 +236,16 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=50, de
     print(f"Kill/Death Ratio: {kill_ratio:.2f}")
     print(f"Units Killed:     {results['tactical_metrics']['units_killed']}")
     print(f"Units Lost:       {results['tactical_metrics']['units_lost']}")
+
+    # ─── Overall compliance rates ───
+    rfc = results['tactical_metrics']['ranged_first_compliance'] / num_episodes
+    print(f"🎯 Ranged-first compliance: {rfc:.1%} "
+          f"({results['tactical_metrics']['ranged_first_compliance']}/{num_episodes})")
+
+    pta = (correct_priority_actions / total_priority_actions
+           if total_priority_actions else 0.0)
+    print(f"🎯 Priority-target accuracy: {pta:.1%} "
+          f"({correct_priority_actions}/{total_priority_actions})")
     
     # Performance assessment following AI_GAME_OVERVIEW.md
     print("\n🎯 AI_GAME_OVERVIEW.md COMPLIANCE ASSESSMENT")

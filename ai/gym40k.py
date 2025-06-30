@@ -52,8 +52,9 @@ class W40KEnv(gym.Env):
         # Phase tracking - units that have acted in current phase
         self.phase_acted_units = set()
         
-        # Load scenario
-        scenario_path = os.path.join(os.path.dirname(__file__), "scenario.json")
+        # Load 
+        # load scenario from <project_root>/config/scenario.json
+        scenario_path = os.path.join(str(project_root), "config", "scenario.json")
         if os.path.exists(scenario_path):
             try:
                 with open(scenario_path, 'r') as f:
@@ -229,7 +230,8 @@ class W40KEnv(gym.Env):
         self.phase_acted_units = set()
         
         # Reset units
-        scenario_path = os.path.join(os.path.dirname(__file__), "scenario.json")
+        # load from central config directory
+        scenario_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "scenario.json")
         with open(scenario_path, 'r') as f:
             scenario_data = json.load(f)
             
@@ -491,7 +493,11 @@ class W40KEnv(gym.Env):
         # Find targets following AI_GAME_OVERVIEW.md priority order
         targets = self._get_shooting_targets(unit)
         
-        if action_type < len(targets):
+        # ─── treat any out-of-bounds index as wait ───
+        if action_type < 0:
+            # truly invalid
+            reward = unit_rewards.get("invalid_action", -0.1)
+        elif action_type < len(targets):
             target = targets[action_type]
             priority = action_type + 1  # Priority 1, 2, 3
             
@@ -524,10 +530,9 @@ class W40KEnv(gym.Env):
                 if self._was_lowest_hp_target(target, targets):
                     reward += unit_rewards.get("enemy_killed_lowests_hp_r", 6.0) - unit_rewards.get("enemy_killed_r", 5.0)
         
-        elif action_type == 3 or not targets:  # Wait or no targets
-            reward = unit_rewards.get("wait", -0.05)
         else:
-            reward = unit_rewards.get("invalid_action", -0.1)
+            # any index ≥ len(targets) → wait
+            reward = unit_rewards.get("wait", -0.05)
         
         unit["has_shot"] = True
         return reward
@@ -544,7 +549,10 @@ class W40KEnv(gym.Env):
         # Find charge targets following AI_GAME_OVERVIEW.md priority
         targets = self._get_charge_targets(unit)
         
-        if action_type < len(targets):
+         # ─── out-of-range → wait; only <0 is invalid ───
+        if action_type < 0:
+            reward = unit_rewards.get("invalid_action", -0.1)
+        elif action_type < len(targets):
             target = targets[action_type]
             priority = action_type + 1  # Priority 1, 2, 3
             
@@ -562,10 +570,8 @@ class W40KEnv(gym.Env):
             # Execute charge (move adjacent)
             self._charge_at_target(unit, target)
             
-        elif action_type == 3 or not targets:  # Wait
-            reward = unit_rewards.get("wait", -0.05)
         else:
-            reward = unit_rewards.get("invalid_action", -0.1)
+            reward = unit_rewards.get("wait", -0.05)
         
         unit["has_charged"] = True
         return reward
@@ -582,7 +588,10 @@ class W40KEnv(gym.Env):
         # Find combat targets following AI_GAME_OVERVIEW.md priority
         targets = self._get_combat_targets(unit)
         
-        if action_type < len(targets):
+        # ─── same bounds‐check here ───
+        if action_type < 0:
+            reward = unit_rewards.get("invalid_action", -0.1)
+        elif action_type < len(targets):
             target = targets[action_type]
             priority = action_type + 1  # Priority 1, 2
             
@@ -613,10 +622,8 @@ class W40KEnv(gym.Env):
                 if self._was_lowest_hp_target(target, targets):
                     reward += unit_rewards.get("enemy_killed_lowests_hp_m", 6.0) - unit_rewards.get("enemy_killed_m", 5.0)
         
-        elif action_type == 2 or not targets:  # Wait
-            reward = unit_rewards.get("wait", -0.05)
         else:
-            reward = unit_rewards.get("invalid_action", -0.1)
+            reward = unit_rewards.get("wait", -0.05)
         
         unit["has_attacked"] = True
         return reward
@@ -884,8 +891,22 @@ class W40KEnv(gym.Env):
                 if nearest_ai["cur_hp"] <= 0:
                     nearest_ai["alive"] = False
             
+            # ─── Charge phase: if not adjacent but within move range ───
+            elif dist > 1 and dist <= enemy["move"]:
+                # move adjacent to charge
+                dx = nearest_ai["col"] - enemy["col"]
+                dy = nearest_ai["row"] - enemy["row"]
+                if abs(dx) > abs(dy):
+                    step = 1 if dx > 0 else -1
+                    enemy["col"] += step
+                else:
+                    step = 1 if dy > 0 else -1
+                    enemy["row"] += step
+                # recompute distance
+                dist = abs(enemy["col"] - nearest_ai["col"]) + abs(enemy["row"] - nearest_ai["row"])
+    
             # Combat phase: attack if adjacent
-            elif dist <= 1 and enemy.get("cc_dmg", 0) > 0:
+            if dist <= 1 and enemy.get("cc_dmg", 0) > 0:
                 damage = enemy["cc_dmg"]
                 nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
                 if nearest_ai["cur_hp"] <= 0:

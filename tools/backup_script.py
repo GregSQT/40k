@@ -24,6 +24,7 @@ else:
     DEST_ROOT = os.environ.get("DEST_ROOT", os.path.join(ROOT, "versions", version))
     files_to_copy = [
         # Root config files
+        "config_loader.py",
         #"package.json",
         #"tsconfig.json", 
         #"tsconfig.base.json",
@@ -78,6 +79,11 @@ else:
         
 
         # config
+        "config/board_config.json",
+        "config/config.json",
+        "config/game_config.json",
+        "config/rewards_config.json",
+        "config/scenarios.json",
         "config/training_config.json",
         
         # Tools
