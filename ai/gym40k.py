@@ -447,6 +447,24 @@ class W40KEnv(gym.Env):
                     return True
         return False
 
+    def _has_enemies_in_shooting_range(self, unit):
+        """Check if unit has enemies within RNG_RNG shooting range per AI_GAME.md."""
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                distance = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if distance <= unit.get("rng_rng", 0):
+                    return True
+        return False
+
+    def _has_enemies_in_move_range(self, unit):
+        """Check if unit has enemies within MOVE range for charging per AI_GAME.md."""
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                distance = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if distance <= unit.get("move", 0):
+                    return True
+        return False
+
     def _execute_action_with_phase(self, unit, action_type):
         """Execute action with current phase context and AI_GAME.md tracking."""
         reward = 0.0
