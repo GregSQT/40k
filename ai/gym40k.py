@@ -115,11 +115,12 @@ class W40KEnv(gym.Env):
         # Actions per unit: [move_north, move_south, move_east, move_west, shoot_target, charge_target, attack_target, wait]
         self.action_space = spaces.Discrete(self.max_units * 8)
         
-        # Observation space: board state + unit states + phase info
-        # For each AI unit: [col, row, hp_ratio, has_moved, has_shot, has_charged, has_attacked]
-        # For each enemy unit: [col, row, hp_ratio, alive]
-        # Phase encoding: [is_move_phase, is_shoot_phase, is_charge_phase, is_combat_phase]
-        obs_size = (self.max_units * 7) + (len(self.enemy_units) * 4) + 4
+        # Fixed observation space: Always use consistent size regardless of actual unit count
+        # AI units (2 max): 2 * 7 = 14
+        # Enemy units (2 max): 2 * 4 = 8  
+        # Phase encoding: 4
+        # Total: 14 + 8 + 4 = 26
+        obs_size = 26
         self.observation_space = spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         
         # Replay tracking
@@ -152,33 +153,60 @@ class W40KEnv(gym.Env):
         
         # Load from TypeScript files
         for filename in os.listdir(roster_dir):
-            if filename.endswith('.ts') and not filename.startswith('index'):
+            if filename.endswith('.ts') and not filename.startswith('index') and 'Unit.ts' not in filename:
                 file_path = os.path.join(roster_dir, filename)
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 
-                # Extract unit data using regex
-                unit_match = re.search(r'export const (\w+):\s*Unit\s*=\s*{([^}]+)}', content, re.DOTALL)
-                if unit_match:
-                    unit_name = unit_match.group(1)
-                    unit_body = unit_match.group(2)
+                # Parse TypeScript class with static properties
+                class_match = re.search(r'export class (\w+)', content)
+                if class_match:
+                    unit_name = class_match.group(1)
                     
-                    # Parse unit properties
+                    # Parse static properties
                     unit_data = {"unit_type": unit_name}
                     
-                    # Extract numeric properties
-                    for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg']:
-                        prop_match = re.search(rf'{prop}:\s*(\d+)', unit_body)
-                        if prop_match:
-                            unit_data[prop] = int(prop_match.group(1))
+                    # Extract static numeric properties
+                    static_props = {'HP_MAX': 'hp_max', 'MOVE': 'move', 'RNG_RNG': 'rng_rng', 'RNG_DMG': 'rng_dmg', 'CC_DMG': 'cc_dmg'}
                     
-                    # Extract boolean properties
-                    for prop in ['is_ranged', 'is_melee']:
-                        prop_match = re.search(rf'{prop}:\s*(true|false)', unit_body)
+                    for ts_prop, py_prop in static_props.items():
+                        prop_match = re.search(rf'static {ts_prop}\s*=\s*(\d+)', content)
                         if prop_match:
-                            unit_data[prop] = prop_match.group(1) == 'true'
+                            unit_data[py_prop] = int(prop_match.group(1))
                     
-                    definitions[unit_name] = unit_data
+                    # Determine unit type from class hierarchy
+                    if 'SpaceMarineRangedUnit' in content:
+                        unit_data['is_ranged'] = True
+                        unit_data['is_melee'] = False
+                    elif 'SpaceMarineMeleeUnit' in content:
+                        unit_data['is_ranged'] = False
+                        unit_data['is_melee'] = True
+                    else:
+                        unit_data['is_ranged'] = unit_data.get('rng_rng', 0) > 1
+                        unit_data['is_melee'] = unit_data.get('cc_dmg', 0) > 0
+                    
+                    # Validate we got essential data
+                    if all(prop in unit_data for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg']):
+                        definitions[unit_name] = unit_data
+                    else:
+                        print(f"⚠️ Incomplete data for {unit_name}")
+                    
+                    # Determine unit type from class hierarchy
+                    if 'SpaceMarineRangedUnit' in content:
+                        unit_data['is_ranged'] = True
+                        unit_data['is_melee'] = False
+                    elif 'SpaceMarineMeleeUnit' in content:
+                        unit_data['is_ranged'] = False
+                        unit_data['is_melee'] = True
+                    else:
+                        unit_data['is_ranged'] = unit_data.get('rng_rng', 0) > 1
+                        unit_data['is_melee'] = unit_data.get('cc_dmg', 0) > 0
+                    
+                    # Validate we got essential data
+                    if all(prop in unit_data for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg']):
+                        definitions[unit_name] = unit_data
+                    else:
+                        print(f"⚠️ Incomplete data for {unit_name}")
         
         print(f"✅ Loaded {len(definitions)} unit definitions from TypeScript")
         return definitions

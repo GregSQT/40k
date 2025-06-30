@@ -127,7 +127,7 @@ def train_model(model, training_config, callbacks, model_path):
             total_timesteps=training_config['total_timesteps'],
             callback=callbacks,
             log_interval=100,
-            progress_bar=True
+            progress_bar=False
         )
         
         # Save final model
