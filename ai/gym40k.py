@@ -401,14 +401,15 @@ class W40KEnv(gym.Env):
 
     def step(self, action):
         """Execute one step following phase-based AI behavior from AI_GAME_OVERVIEW.md."""
+        # Increment step counter and check limit
+        self.step_count += 1
+        if self.step_count >= self.max_steps_per_episode:
+            # Episode too long, truncate it
+            self.game_over = True
+            self.winner = None
+            return self._get_obs(), -1.0, False, True, self._get_info()  # truncated=True
+        
         if self.game_over:
-            # Increment step counter and check limit
-            self.step_count += 1
-            if self.step_count >= self.max_steps_per_episode:
-                # Episode too long, truncate it
-                self.game_over = True
-                self.winner = None
-                return self._get_obs(), -1.0, False, True, self._get_info()  # truncated=True
             return self._get_obs(), 0.0, True, False, self._get_info()
         
         # Get eligible units for current phase

@@ -134,7 +134,7 @@ def train_model(model, training_config, callbacks, model_path):
             total_timesteps=training_config['total_timesteps'],
             callback=callbacks,
             log_interval=100,
-            progress_bar=False
+            progress_bar=True
         )
         
         # Save final model
@@ -287,6 +287,9 @@ def main():
             args.new, 
             args.append
         )
+
+        # Get model path for callbacks and training
+        model_path = config.get_model_path()
         
         # Setup callbacks
         callbacks = setup_callbacks(config, model_path, training_config, args.training_config)

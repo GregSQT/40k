@@ -2,7 +2,7 @@
   "default": {
     "description": "Optimized parameters for complex reward learning",
     "total_timesteps": 10000,
-    "max_steps_per_episode": 100,
+    "max_steps_per_episode": 50,
     "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
@@ -21,7 +21,7 @@
   "original": {
     "description": "Your original parameters from train.py",
     "total_timesteps": 10000,
-    "max_steps_per_episode": 100,
+    "max_steps_per_episode": 50,
     "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
@@ -40,7 +40,7 @@
   "conservative": {
     "description": "Conservative increase from original",
     "total_timesteps": 1000000,
-    "max_steps_per_episode": 100,
+    "max_steps_per_episode": 50,
     "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
@@ -59,7 +59,7 @@
   "aggressive": {
     "description": "Aggressive parameters for faster learning",
     "total_timesteps": 2000000,
-    "max_steps_per_episode": 100,
+    "max_steps_per_episode": 50,
     "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
@@ -78,7 +78,7 @@
   "debug": {
     "description": "Ultra minimal to force working",
     "total_timesteps": 100,
-    "max_steps_per_episode": 100,
+    "max_steps_per_episode": 50,
     "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
@@ -97,7 +97,7 @@
   "emergency": {
     "description": "Emergency config for broken training recovery",
     "total_timesteps": 100000,
-    "max_steps_per_episode": 100,
+    "max_steps_per_episode": 50,
     "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
