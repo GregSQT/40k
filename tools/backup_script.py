@@ -64,10 +64,7 @@ else:
         "frontend/src/roster/spaceMarine/Intercessor.ts",
         "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
         "frontend/src/roster/exportRewards.js",
-        
-        # Scripts
-        "scripts/exportUnits.ts",
-
+    
         # tools
         "tools/backup_script.py",
 
