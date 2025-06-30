@@ -87,13 +87,20 @@ def create_model(config, training_config_name="default", rewards_config_name="ph
     
     return model, env, training_config
 
-"""
-def setup_callbacks(config, model_path):
+def setup_callbacks(config, model_path, training_config):
     W40KEnv, _ = setup_imports()
     callbacks = []
     
     # Evaluation callback - test model periodically
     eval_env = Monitor(W40KEnv(rewards_config="phase_based"))
+    eval_freq = 10000
+    total_timesteps = training_config['total_timesteps']
+    
+    # VALIDATION: Prevent deadlock when eval_freq >= total_timesteps
+    if eval_freq >= total_timesteps:
+        raise ValueError(f"eval_freq ({eval_freq}) must be less than total_timesteps ({total_timesteps}). "
+                        f"This prevents evaluation callback deadlock. "
+                        f"Either increase total_timesteps or decrease eval_freq to {total_timesteps // 2}.")
     eval_callback = EvalCallback(
         eval_env,
         best_model_save_path=os.path.dirname(model_path),
@@ -114,11 +121,6 @@ def setup_callbacks(config, model_path):
     callbacks.append(checkpoint_callback)
     
     return callbacks
-"""
-def setup_callbacks(config, model_path):
-    """Setup training callbacks."""
-    # Disable callbacks that might cause hanging
-    return []
 
 def train_model(model, training_config, callbacks, model_path):
     """Execute the training process."""
@@ -288,7 +290,7 @@ def main():
         
         # Setup callbacks
         model_path = config.get_model_path()
-        callbacks = setup_callbacks(config, model_path)
+        callbacks = setup_callbacks(config, model_path, training_config)
         
         # Train model
         success = train_model(model, training_config, callbacks, model_path)
