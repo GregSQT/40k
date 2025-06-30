@@ -51,7 +51,11 @@ class W40KEnv(gym.Env):
         self.step_count = 0
         
         # Game state following AI_GAME.md exactly
-        self.phase_order = ["move", "shoot", "charge", "combat"]  # From AI_GAME.md spec
+        # Load phase order from config following AI_GAME.md - raise error if missing
+        game_config = self.config.get_game_config()
+        self.phase_order = game_config["gameplay"]["phase_order"]
+        
+        # Game state following AI_GAME.md exactly
         self.current_phase = "move"  # Always start with move phase
         self.current_player = 1  # 1 = AI, 0 = enemy/human
         self.game_over = False
@@ -267,17 +271,20 @@ class W40KEnv(gym.Env):
         """Reset environment to initial state."""
         super().reset(seed=seed)
 
-        # Reset episode tracking
-        self.episode_states = []
-        self.episode_step_count = 0
-        
         # Reset game state
-        self.current_phase = "move"
+        self.current_phase = "move"  # Always start with move per AI_GAME.md
         self.current_player = 1  # AI starts
         self.current_turn = 1
         self.game_over = False
         self.winner = None
         self.phase_acted_units = set()
+        
+        # Reset phase tracking for AI_GAME.md compliance
+        self.moved_units.clear()
+        self.shot_units.clear()
+        self.charged_units.clear()
+        self.attacked_units.clear()
+        
         # Reset step counter
         self.step_count = 0
         
@@ -364,9 +371,9 @@ class W40KEnv(gym.Env):
     def _get_eligible_units(self):
         """Get units eligible for current phase following AI_GAME.md rules exactly."""
         eligible = []
-        current_player_units = [u for u in self.units if u["player"] == self.current_player and u["alive"]]
+        ai_units_alive = [u for u in self.ai_units if u["alive"]]
         
-        for unit in current_player_units:
+        for unit in ai_units_alive:
             unit_id = unit["id"]
             
             if self.current_phase == "move":
@@ -376,15 +383,15 @@ class W40KEnv(gym.Env):
                     
             elif self.current_phase == "shoot":
                 # AI_GAME.md: Only units with enemies in RNG_RNG range and haven't shot yet
-                if (unit["is_ranged"] and unit_id not in self.shot_units and 
-                    self._has_enemies_in_range(unit, unit["rng_rng"])):
+                if (unit.get("is_ranged", False) and unit_id not in self.shot_units and 
+                    self._has_enemies_in_shooting_range(unit)):
                     eligible.append(unit)
                     
             elif self.current_phase == "charge":
                 # AI_GAME.md: No enemy adjacent, enemy within MOVE range, hasn't charged
                 if (unit_id not in self.charged_units and 
                     not self._has_adjacent_enemies(unit) and
-                    self._has_enemies_in_range(unit, unit["move"])):
+                    self._has_enemies_in_move_range(unit)):
                     eligible.append(unit)
                     
             elif self.current_phase == "combat":
@@ -422,18 +429,57 @@ class W40KEnv(gym.Env):
                     return True
         return False
 
+    def _has_enemies_in_shooting_range(self, unit):
+        """Check if unit has enemies within RNG_RNG shooting range per AI_GAME.md."""
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                distance = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if distance <= unit.get("rng_rng", 0):
+                    return True
+        return False
+
+    def _has_enemies_in_move_range(self, unit):
+        """Check if unit has enemies within MOVE range for charging per AI_GAME.md."""
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                distance = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                if distance <= unit.get("move", 0):
+                    return True
+        return False
+
     def _execute_action_with_phase(self, unit, action_type):
-        """Execute action with current phase context."""
+        """Execute action with current phase context and AI_GAME.md tracking."""
+        reward = 0.0
+        action_success = False
+        
         if self.current_phase == "move":
-            return self._execute_move_action(unit, action_type)
+            reward = self._execute_move_action(unit, action_type)
+            action_success = reward > 0
+            if action_success:
+                unit["has_moved"] = True
+                self.moved_units.add(unit["id"])  # AI_GAME.md tracking
         elif self.current_phase == "shoot":
-            return self._execute_shoot_action(unit, action_type)
+            reward = self._execute_shoot_action(unit, action_type)
+            action_success = reward > 0
+            if action_success:
+                unit["has_shot"] = True
+                self.shot_units.add(unit["id"])  # AI_GAME.md tracking
         elif self.current_phase == "charge":
-            return self._execute_charge_action(unit, action_type)
+            reward = self._execute_charge_action(unit, action_type)
+            action_success = reward > 0
+            if action_success:
+                unit["has_charged"] = True
+                self.charged_units.add(unit["id"])  # AI_GAME.md tracking
         elif self.current_phase == "combat":
-            return self._execute_combat_action(unit, action_type)
+            reward = self._execute_combat_action(unit, action_type)
+            action_success = reward > 0
+            if action_success:
+                unit["has_attacked"] = True
+                self.attacked_units.add(unit["id"])  # AI_GAME.md tracking
         else:
             return -0.1  # Invalid phase penalty
+        
+        return reward
         
     def step(self, action):
         """Execute one step in the environment."""
@@ -944,34 +990,37 @@ class W40KEnv(gym.Env):
         return nearest
 
     def _advance_phase(self):
-        """Advance to next phase following AI_GAME_OVERVIEW.md sequence."""
-        if self.current_phase == "move":
-            self.current_phase = "shoot"
-            # Reset phase flags for all AI units
-            for unit in self.ai_units:
-                unit["has_shot"] = False
-        elif self.current_phase == "shoot":
-            self.current_phase = "charge"
-            # Reset charge flags
-            for unit in self.ai_units:
-                unit["has_charged"] = False
-        elif self.current_phase == "charge":
-            self.current_phase = "combat"
-            # Reset attack flags
-            for unit in self.ai_units:
-                unit["has_attacked"] = False
-        elif self.current_phase == "combat":
-            # End of AI turn, switch to enemy turn (simulated)
-            self._execute_enemy_turn()
-            # Start new AI turn
-            self.current_phase = "move"
-            self.current_turn += 1
-            # Reset all phase flags for new turn
-            for unit in self.ai_units:
-                unit["has_moved"] = False
-                unit["has_shot"] = False
-                unit["has_charged"] = False
-                unit["has_attacked"] = False
+        """Advance to next phase following AI_GAME.md phase order exactly."""
+        current_phase_idx = self.phase_order.index(self.current_phase)
+        
+        if current_phase_idx < len(self.phase_order) - 1:
+            # Move to next phase
+            self.current_phase = self.phase_order[current_phase_idx + 1]
+        else:
+            # End of all phases - switch to other player
+            self.current_phase = self.phase_order[0]  # Reset to move phase
+            self.current_player = 1 - self.current_player
+            
+            # Reset phase tracking for new turn when back to AI player
+            if self.current_player == 1:  # AI player's turn
+                self.current_turn += 1
+                self.moved_units.clear()
+                self.shot_units.clear()
+                self.charged_units.clear()
+                self.attacked_units.clear()
+                
+                # Reset unit flags for compatibility
+                for unit in self.ai_units:
+                    unit["has_moved"] = False
+                    unit["has_shot"] = False
+                    unit["has_charged"] = False
+                    unit["has_attacked"] = False
+            else:
+                # Execute enemy turn when switching to enemy player
+                self._execute_enemy_turn()
+        
+        # Clear phase tracking for new phase
+        self.phase_acted_units.clear()
 
     def _execute_enemy_turn(self):
         """Execute enemy turn using scripted behavior as mentioned in AI_GAME_OVERVIEW.md."""
