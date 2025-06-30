@@ -93,7 +93,7 @@ def setup_callbacks(config, model_path, training_config):
     
     # Evaluation callback - test model periodically
     eval_env = Monitor(W40KEnv(rewards_config="phase_based"))
-    eval_freq = 10000
+    eval_freq=training_config['eval_freq']
     total_timesteps = training_config['total_timesteps']
     
     # VALIDATION: Prevent deadlock when eval_freq >= total_timesteps
