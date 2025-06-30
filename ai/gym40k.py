@@ -296,52 +296,46 @@ class W40KEnv(gym.Env):
         return self._get_obs(), self._get_info()
 
     def _get_obs(self):
-        """Get current observation following phase-based structure."""
-        obs = []
+        """Get current observation with fixed size (26 elements)."""
+        obs = np.zeros(26, dtype=np.float32)
         
-        # AI units data (fixed size, pad with zeros if needed)
+        # AI units (first 14 elements: 2 units × 7 values each)
         ai_units_alive = [u for u in self.ai_units if u["alive"]]
-        for i in range(self.max_units):
+        for i in range(2):  # Always 2 slots for AI units
             if i < len(ai_units_alive):
                 unit = ai_units_alive[i]
-                obs.extend([
-                    unit["col"] / self.board_size[0],  # normalized position
-                    unit["row"] / self.board_size[1],
-                    unit["cur_hp"] / unit["hp_max"],   # hp ratio
-                    float(unit["has_moved"]),          # phase state
-                    float(unit["has_shot"]),
-                    float(unit["has_charged"]),
-                    float(unit["has_attacked"])
-                ])
-            else:
-                obs.extend([0.0] * 7)  # padding for missing units
+                base_idx = i * 7
+                obs[base_idx] = unit["col"] / self.board_size[0]
+                obs[base_idx + 1] = unit["row"] / self.board_size[1]
+                obs[base_idx + 2] = unit["cur_hp"] / unit["hp_max"]
+                obs[base_idx + 3] = 1.0 if unit["has_moved"] else 0.0
+                obs[base_idx + 4] = 1.0 if unit["has_shot"] else 0.0
+                obs[base_idx + 5] = 1.0 if unit["has_charged"] else 0.0
+                obs[base_idx + 6] = 1.0 if unit["has_attacked"] else 0.0
         
-        # Enemy units data
+        # Enemy units (next 8 elements: 2 units × 4 values each)
         enemy_units_alive = [u for u in self.enemy_units if u["alive"]]
-        for unit in enemy_units_alive:
-            obs.extend([
-                unit["col"] / self.board_size[0],
-                unit["row"] / self.board_size[1],
-                unit["cur_hp"] / unit["hp_max"],
-                1.0  # alive
-            ])
-        # Pad for missing enemies
-        for i in range(len(enemy_units_alive), len(self.enemy_units)):
-            obs.extend([0.0] * 4)
+        for i in range(2):  # Always 2 slots for enemy units
+            if i < len(enemy_units_alive):
+                unit = enemy_units_alive[i]
+                base_idx = 14 + i * 4
+                obs[base_idx] = unit["col"] / self.board_size[0]
+                obs[base_idx + 1] = unit["row"] / self.board_size[1]
+                obs[base_idx + 2] = unit["cur_hp"] / unit["hp_max"]
+                obs[base_idx + 3] = 1.0  # alive
         
-        # Phase encoding
-        phase_encoding = [0.0, 0.0, 0.0, 0.0]
+        # Phase encoding (last 4 elements)
+        phase_idx = 22
         if self.current_phase == "move":
-            phase_encoding[0] = 1.0
+            obs[phase_idx] = 1.0
         elif self.current_phase == "shoot":
-            phase_encoding[1] = 1.0
+            obs[phase_idx + 1] = 1.0
         elif self.current_phase == "charge":
-            phase_encoding[2] = 1.0
+            obs[phase_idx + 2] = 1.0
         elif self.current_phase == "combat":
-            phase_encoding[3] = 1.0
-        obs.extend(phase_encoding)
+            obs[phase_idx + 3] = 1.0
         
-        return np.array(obs, dtype=np.float32)
+        return obs
 
     def _get_eligible_units(self):
         """Get units eligible to act in current phase following AI_GAME_OVERVIEW.md rules."""
@@ -855,6 +849,20 @@ class W40KEnv(gym.Env):
                 reward += 1.0
         
         return reward
+
+    def _get_nearest_ai_unit(self, enemy):
+        """Get nearest alive AI unit for enemy targeting."""
+        nearest = None
+        min_dist = float('inf')
+        
+        for unit in self.ai_units:
+            if unit["alive"]:
+                dist = abs(enemy["col"] - unit["col"]) + abs(enemy["row"] - unit["row"])
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest = unit
+        
+        return nearest
 
     def _advance_phase(self):
         """Advance to next phase following AI_GAME_OVERVIEW.md sequence."""
