@@ -1,20 +1,12 @@
-// constants/gameConfig.ts
-
-// Board Configuration
-export const BOARD_CONFIG = {
-  COLS: 24,
-  ROWS: 18,
-  HEX_RADIUS: 24,
-  MARGIN: 32,
-} as const;
+// frontend/src/constants/gameConfig.ts
 
 // Derived board calculations
-export const HEX_CONFIG = {
-  WIDTH: 1.5 * BOARD_CONFIG.HEX_RADIUS,
-  HEIGHT: Math.sqrt(3) * BOARD_CONFIG.HEX_RADIUS,
-  HORIZ_SPACING: 1.5 * BOARD_CONFIG.HEX_RADIUS,
-  VERT_SPACING: Math.sqrt(3) * BOARD_CONFIG.HEX_RADIUS,
-} as const;
+export const calculateHexConfig = (hexRadius: number) => ({
+  WIDTH: 1.5 * hexRadius,
+  HEIGHT: Math.sqrt(3) * hexRadius,
+  HORIZ_SPACING: 1.5 * hexRadius,
+  VERT_SPACING: Math.sqrt(3) * hexRadius,
+});
 
 // Colors
 export const COLORS = {
@@ -43,20 +35,14 @@ export const AI_CONFIG = {
   FALLBACK_TO_SKIP: true,
 } as const;
 
-// Phase Configuration
-export const PHASES = {
-  MOVE: 'move',
-  SHOOT: 'shoot', 
-  CHARGE: 'charge',
-  COMBAT: 'combat',
-} as const;
-
-export const PHASE_LABELS = {
-  [PHASES.MOVE]: 'Movement',
-  [PHASES.SHOOT]: 'Shooting',
-  [PHASES.CHARGE]: 'Charge',
-  [PHASES.COMBAT]: 'Combat',
-} as const;
+// Dynamic phase labels based on loaded config
+export const getPhaseLabelMap = (phases: string[]) => {
+  const labelMap: Record<string, string> = {};
+  phases.forEach(phase => {
+    labelMap[phase] = phase.charAt(0).toUpperCase() + phase.slice(1);
+  });
+  return labelMap;
+};
 
 // Player Configuration
 export const PLAYERS = {
@@ -154,14 +140,16 @@ export const DEV_CONFIG = {
   ENABLE_ERROR_REPORTING: process.env.NODE_ENV === 'production',
 } as const;
 
-// Type exports for better type safety
-export type GamePhase = typeof PHASES[keyof typeof PHASES];
+// Dynamic types based on loaded config
+export type GamePhase = string; // Dynamic from config
 export type GameMode = typeof MODES[keyof typeof MODES];
 export type PlayerId = typeof PLAYERS[keyof typeof PLAYERS];
 
-// Helper functions
-export const isValidPhase = (phase: string): phase is GamePhase => {
-  return Object.values(PHASES).includes(phase as GamePhase);
+// Helper functions with dynamic phase checking
+export const createPhaseValidator = (validPhases: string[]) => {
+  return (phase: string): phase is GamePhase => {
+    return validPhases.includes(phase);
+  };
 };
 
 export const isValidMode = (mode: string): mode is GameMode => {
@@ -172,13 +160,13 @@ export const isValidPlayerId = (id: number): id is PlayerId => {
   return Object.values(PLAYERS).includes(id as PlayerId);
 };
 
-// Configuration validator
-export const validateConfig = () => {
+// Dynamic configuration validator
+export const validateDynamicConfig = (boardConfig: any, gameConfig: any) => {
   const errors: string[] = [];
 
-  if (BOARD_CONFIG.COLS <= 0) errors.push('Board columns must be positive');
-  if (BOARD_CONFIG.ROWS <= 0) errors.push('Board rows must be positive');
-  if (BOARD_CONFIG.HEX_RADIUS <= 0) errors.push('Hex radius must be positive');
+  if (!boardConfig?.cols || boardConfig.cols <= 0) errors.push('Board columns must be positive');
+  if (!boardConfig?.rows || boardConfig.rows <= 0) errors.push('Board rows must be positive');
+  if (!boardConfig?.hex_radius || boardConfig.hex_radius <= 0) errors.push('Hex radius must be positive');
   if (TIMING.AI_ACTION_DELAY < 0) errors.push('AI action delay cannot be negative');
   if (AI_CONFIG.DEFAULT_RETRIES < 0) errors.push('AI retries cannot be negative');
 
@@ -188,13 +176,3 @@ export const validateConfig = () => {
 
   return true;
 };
-
-// Initialize configuration validation in development
-if (DEV_CONFIG.ENABLE_LOGGING) {
-  try {
-    validateConfig();
-    console.log('[Config] Configuration validation passed');
-  } catch (error) {
-    console.error('[Config] Configuration validation failed:', error);
-  }
-}

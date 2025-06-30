@@ -25,7 +25,7 @@ export type {
 } from './api';
 
 // Type guards
-export { isValidPhase, isValidMode, isValidPlayerId } from '../constants/gameConfig';
+export { isValidMode, isValidPlayerId, createPhaseValidator } from '../constants/gameConfig';
 
 // Re-export commonly used types for easier imports
 export type GameConfig = {

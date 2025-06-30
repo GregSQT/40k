@@ -79,70 +79,6 @@ interface ExtendedGameConfig {
   turnPenalty: number;
 }
 
-const FALLBACK_BOARD_CONFIG: BoardConfig = {
-  cols: 24,
-  rows: 18,
-  hex_radius: 24,
-  margin: 32,
-  colors: {
-    background: "0x002200",
-    cell_even: "0x002200", 
-    cell_odd: "0x001a00",
-    cell_border: "0x00ff00",
-    player_0: "0x244488",
-    player_1: "0x882222",
-    hp_full: "0x36e36b",
-    hp_damaged: "0x444444",
-    highlight: "0x80ff80",
-    current_unit: "0xffd700",
-    eligible: "0x00ff00",
-    attack: "0xff4444",
-    charge: "0xff9900"
-  },
-  display: {
-    resolution: "auto",
-    autoDensity: true,
-    antialias: true,
-    forceCanvas: true,
-    icon_scale: 1.2,
-    eligible_outline_width: 3,
-    eligible_outline_alpha: 0.8,
-    hp_bar_width_ratio: 1.4,
-    hp_bar_height: 7,
-    hp_bar_y_offset_ratio: 0.85,
-    unit_circle_radius_ratio: 0.6,
-    unit_text_size: 10,
-    selected_border_width: 4,
-    charge_target_border_width: 3,
-    default_border_width: 2,
-    canvas_border: "1px solid #333"
-  }
-};
-
-const FALLBACK_GAME_CONFIG: GameConfig = {
-  game_rules: {
-    max_turns: 100,
-    turn_limit_penalty: -1,
-    max_units_per_player: 4,
-    board_size: [24, 18]
-  },
-  gameplay: {
-    phase_order: ["move", "shoot", "charge", "combat"],
-    simultaneous_actions: false,
-    auto_end_turn: true
-  },
-  ai_behavior: {
-    timeout_ms: 5000,
-    retries: 3,
-    fallback_action: "wait"
-  },
-  scoring: {
-    win_bonus: 1000,
-    lose_penalty: -1000,
-    survival_bonus_per_turn: 1
-  }
-};
-
 export const useGameConfig = (boardConfigName: string = "default"): ExtendedGameConfig => {
   const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
   const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
@@ -195,18 +131,12 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
         }
 
         const configData = boardData[boardConfigName];
-        const mergedBoardConfig: BoardConfig = {
-          ...FALLBACK_BOARD_CONFIG,
-          ...configData,
-          colors: {
-            ...FALLBACK_BOARD_CONFIG.colors,
-            ...configData.colors
-          },
-          display: {
-            ...FALLBACK_BOARD_CONFIG.display,
-            ...configData.display
-          }
-        };
+        const mergedBoardConfig: BoardConfig = configData;
+
+        // Validate required properties
+        if (!configData.cols || !configData.rows || !configData.hex_radius) {
+          throw new Error(`Invalid board config: missing required properties`);
+        }
 
         setBoardConfig(mergedBoardConfig);
         setGameConfig(gameData);
