@@ -56,7 +56,7 @@ def create_model(config, training_config_name="default", rewards_config_name="ph
     scenario_file = os.path.join(cfg.config_dir, "scenario.json")
     if not os.path.isfile(scenario_file):
         raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
-    env = W40KEnv(rewards_config=rewards_config_name)
+    env = W40KEnv(rewards_config=rewards_config_name, training_config_name=training_config_name)
     env = Monitor(env)
     
     model_path = config.get_model_path()
@@ -87,12 +87,12 @@ def create_model(config, training_config_name="default", rewards_config_name="ph
     
     return model, env, training_config
 
-def setup_callbacks(config, model_path, training_config):
+def setup_callbacks(config, model_path, training_config, training_config_name="default"):
     W40KEnv, _ = setup_imports()
     callbacks = []
     
     # Evaluation callback - test model periodically
-    eval_env = Monitor(W40KEnv(rewards_config="phase_based"))
+    eval_env = Monitor(W40KEnv(rewards_config="phase_based", training_config_name=training_config_name))
     eval_freq=training_config['eval_freq']
     total_timesteps = training_config['total_timesteps']
     
@@ -289,8 +289,7 @@ def main():
         )
         
         # Setup callbacks
-        model_path = config.get_model_path()
-        callbacks = setup_callbacks(config, model_path, training_config)
+        callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
         
         # Train model
         success = train_model(model, training_config, callbacks, model_path)

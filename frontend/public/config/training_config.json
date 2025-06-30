@@ -2,11 +2,12 @@
   "default": {
     "description": "Optimized parameters for complex reward learning",
     "total_timesteps": 10000,
+    "max_steps_per_episode": 100,
+    "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 0,
       "buffer_size": 100000,
-      "eval_freq": 9999,
       "learning_rate": 0.0005,
       "learning_starts": 1000,
       "batch_size": 128,
@@ -20,11 +21,12 @@
   "original": {
     "description": "Your original parameters from train.py",
     "total_timesteps": 10000,
+    "max_steps_per_episode": 100,
+    "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
       "buffer_size": 10000,
-      "eval_freq": 9999,
       "learning_rate": 0.001,
       "learning_starts": 100,
       "batch_size": 64,
@@ -38,11 +40,12 @@
   "conservative": {
     "description": "Conservative increase from original",
     "total_timesteps": 1000000,
+    "max_steps_per_episode": 100,
+    "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
       "buffer_size": 50000,
-      "eval_freq": 9999,
       "learning_rate": 0.0007,
       "learning_starts": 2000,
       "batch_size": 128,
@@ -56,11 +59,12 @@
   "aggressive": {
     "description": "Aggressive parameters for faster learning",
     "total_timesteps": 2000000,
+    "max_steps_per_episode": 100,
+    "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
       "buffer_size": 200000,
-      "eval_freq": 9999,
       "learning_rate": 0.0003,
       "learning_starts": 10000,
       "batch_size": 256,
@@ -74,11 +78,12 @@
   "debug": {
     "description": "Ultra minimal to force working",
     "total_timesteps": 100,
+    "max_steps_per_episode": 100,
+    "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
       "buffer_size": 100,
-      "eval_freq": 9999,
       "learning_rate": 0.001,
       "learning_starts": 10,
       "batch_size": 8,
@@ -92,11 +97,12 @@
   "emergency": {
     "description": "Emergency config for broken training recovery",
     "total_timesteps": 100000,
+    "max_steps_per_episode": 100,
+    "eval_freq": 9999,
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
       "buffer_size": 25000,
-      "eval_freq": 9999,
       "learning_rate": 0.001,
       "learning_starts": 2000,
       "batch_size": 64,

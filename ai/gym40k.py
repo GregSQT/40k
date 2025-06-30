@@ -25,7 +25,7 @@ from config_loader import get_config_loader
 class W40KEnv(gym.Env):
     """Phase-based W40K environment following AI_GAME_OVERVIEW.md specifications exactly."""
 
-    def __init__(self, rewards_config="phase_based"):
+    def __init__(self, rewards_config="phase_based", training_config_name="default"):
         super().__init__()
         
         # Load configuration
@@ -38,16 +38,28 @@ class W40KEnv(gym.Env):
         
         # Load unit definitions from TypeScript files
         self.unit_definitions = self._load_unit_definitions()
+
+        # Load training configuration to get max_steps_per_episode
+        self.training_config_name = training_config_name
+        try:
+            training_config = self.config.load_training_config(training_config_name)
+            self.max_steps_per_episode = training_config.get("max_steps_per_episode", 100)
+        except:
+            self.max_steps_per_episode = 100  # Fallback default
+        
+        # Episode step counter to prevent infinite episodes
+        self.step_count = 0
         
         # Game state
         self.current_phase = "move"  # move, shoot, charge, combat
         self.current_player = 1  # 1 = AI, 0 = enemy/human
+        self.game_over = False
+        self.winner = None
+        self.phase_acted_units = set()
         self.current_turn = 0
         self.max_turns = self.config.get_max_turns()
         self.turn_limit_penalty = self.config.get_turn_limit_penalty()
         self.board_size = self.config.get_board_size()
-        self.game_over = False
-        self.winner = None
         
         # Phase tracking - units that have acted in current phase
         self.phase_acted_units = set()
@@ -256,6 +268,8 @@ class W40KEnv(gym.Env):
         self.game_over = False
         self.winner = None
         self.phase_acted_units = set()
+        # Reset step counter
+        self.step_count = 0
         
         # Reset units
         # load from central config directory
@@ -388,15 +402,36 @@ class W40KEnv(gym.Env):
     def step(self, action):
         """Execute one step following phase-based AI behavior from AI_GAME_OVERVIEW.md."""
         if self.game_over:
+            # Increment step counter and check limit
+            self.step_count += 1
+            if self.step_count >= self.max_steps_per_episode:
+                # Episode too long, truncate it
+                self.game_over = True
+                self.winner = None
+                return self._get_obs(), -1.0, False, True, self._get_info()  # truncated=True
             return self._get_obs(), 0.0, True, False, self._get_info()
         
         # Get eligible units for current phase
         eligible_units = self._get_eligible_units()
         
-        if not eligible_units:
-            # No eligible units, advance phase
+        # Keep advancing phases until we find eligible units or game ends
+        phase_advances = 0
+        max_phase_advances = 8  # Prevent infinite loops (2 full turns max)
+        
+        while not eligible_units and not self.game_over and phase_advances < max_phase_advances:
             self._advance_phase()
-            return self._get_obs(), 0.0, False, False, self._get_info()
+            eligible_units = self._get_eligible_units()
+            phase_advances += 1
+        
+        if phase_advances >= max_phase_advances:
+            # Emergency end game to prevent infinite loops
+            self.game_over = True
+            self.winner = None
+            return self._get_obs(), -10.0, True, False, self._get_info()
+        
+        if not eligible_units and not self.game_over:
+            # Still no eligible units, return small negative reward
+            return self._get_obs(), -0.1, False, False, self._get_info()
         
         # Decode action
         unit_idx = action // 8
