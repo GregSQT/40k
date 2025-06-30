@@ -68,16 +68,16 @@
     }
   },
   "debug": {
-    "description": "Quick training for testing",
+    "description": "Working configuration",
     "total_timesteps": 50000,
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
-      "buffer_size": 25000,
+      "buffer_size": 10000,
       "learning_rate": 0.001,
       "learning_starts": 1000,
       "batch_size": 64,
-      "train_freq": 2,
+      "train_freq": 4,
       "target_update_interval": 500,
       "exploration_fraction": 0.3,
       "exploration_final_eps": 0.05,

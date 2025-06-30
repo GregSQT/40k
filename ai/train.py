@@ -87,8 +87,8 @@ def create_model(config, training_config_name="default", rewards_config_name="ph
     
     return model, env, training_config
 
+"""
 def setup_callbacks(config, model_path):
-    """Setup training callbacks."""
     W40KEnv, _ = setup_imports()
     callbacks = []
     
@@ -114,6 +114,11 @@ def setup_callbacks(config, model_path):
     callbacks.append(checkpoint_callback)
     
     return callbacks
+"""
+def setup_callbacks(config, model_path):
+    """Setup training callbacks."""
+    # Disable callbacks that might cause hanging
+    return []
 
 def train_model(model, training_config, callbacks, model_path):
     """Execute the training process."""

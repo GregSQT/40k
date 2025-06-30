@@ -1035,7 +1035,7 @@ class W40KEnv(gym.Env):
         }
         
         with open(filename, 'w') as f:
-            json.dump(replay_structure, f, indent=2)
+            json.dump(replay_structure, f, indent=2, default=int)
         
         print(f"✅ Phase-based replay saved: {filename}")
         return filename
