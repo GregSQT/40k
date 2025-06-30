@@ -101,22 +101,28 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         raise ValueError(f"eval_freq ({eval_freq}) must be less than total_timesteps ({total_timesteps}). "
                         f"This prevents evaluation callback deadlock. "
                         f"Either increase total_timesteps or decrease eval_freq to {total_timesteps // 2}.")
+    
+    # Get callback parameters from config with defaults
+    callback_params = training_config.get("callback_params", {})
+    
     eval_callback = EvalCallback(
         eval_env,
         best_model_save_path=os.path.dirname(model_path),
         log_path=os.path.dirname(model_path),
-        eval_freq=10000,  # Evaluate every 10k steps
-        deterministic=True,
-        render=False,
-        n_eval_episodes=5
+        eval_freq=eval_freq,  # Use config value
+        deterministic=callback_params.get("eval_deterministic", True),
+        render=callback_params.get("eval_render", False),
+        n_eval_episodes=callback_params.get("n_eval_episodes", 5)
     )
     callbacks.append(eval_callback)
     
     # Checkpoint callback - save model periodically
+    # Use reasonable checkpoint frequency based on total timesteps and config
+    checkpoint_freq = callback_params.get("checkpoint_save_freq", min(total_timesteps // 4, 50000))
     checkpoint_callback = CheckpointCallback(
-        save_freq=50000,  # Save every 50k steps
+        save_freq=checkpoint_freq,
         save_path=os.path.dirname(model_path),
-        name_prefix="phase_model_checkpoint"
+        name_prefix=callback_params.get("checkpoint_name_prefix", "phase_model_checkpoint")
     )
     callbacks.append(checkpoint_callback)
     

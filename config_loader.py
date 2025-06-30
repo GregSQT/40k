@@ -85,11 +85,6 @@ class ConfigLoader:
             return config["paths"]["model_file"]
         except (KeyError, FileNotFoundError):
             raise FileNotFoundError("Model path not configured. Default path should be 'ai/models/current/model.zip'")
-
-    def get_model_path(self) -> str:
-        """Get the model file path - raises error if missing."""
-        # Model path is always 'ai/model.zip' per AI_INSTRUCTIONS.md
-        return "ai/model.zip"
     
     def get_phase_order(self) -> list[str]:
         """Get game phase order - raises error if missing."""
