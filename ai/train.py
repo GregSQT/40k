@@ -28,7 +28,7 @@ def setup_imports():
     """Set up import paths and return required modules."""
     try:
         # Import phase-based environment following AI_GAME_OVERVIEW.md
-        from gym40k import W40KEnv, register_environment
+        from ai.gym40k import W40KEnv, register_environment
         return W40KEnv, register_environment
     except ImportError as e:
         print(f"Import error: {e}")
@@ -93,7 +93,7 @@ def setup_callbacks(config, model_path):
     callbacks = []
     
     # Evaluation callback - test model periodically
-    eval_env = Monitor(W40KEnv())
+    eval_env = Monitor(W40KEnv(rewards_config="phase_based"))
     eval_callback = EvalCallback(
         eval_env,
         best_model_save_path=os.path.dirname(model_path),
