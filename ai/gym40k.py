@@ -50,8 +50,9 @@ class W40KEnv(gym.Env):
         # Episode step counter to prevent infinite episodes
         self.step_count = 0
         
-        # Game state
-        self.current_phase = "move"  # move, shoot, charge, combat
+        # Game state following AI_GAME.md exactly
+        self.phase_order = ["move", "shoot", "charge", "combat"]  # From AI_GAME.md spec
+        self.current_phase = "move"  # Always start with move phase
         self.current_player = 1  # 1 = AI, 0 = enemy/human
         self.game_over = False
         self.winner = None
@@ -59,6 +60,11 @@ class W40KEnv(gym.Env):
         self.current_turn = 0
         self.max_turns = self.config.get_max_turns()
         self.turn_limit_penalty = self.config.get_turn_limit_penalty()
+        # Phase-specific tracking following AI_GAME.md exactly
+        self.moved_units = set()     # Units that moved this turn
+        self.shot_units = set()      # Units that shot this turn  
+        self.charged_units = set()   # Units that charged this turn
+        self.attacked_units = set()  # Units that attacked this turn
         self.board_size = self.config.get_board_size()
         
         # Phase tracking - units that have acted in current phase
@@ -356,22 +362,35 @@ class W40KEnv(gym.Env):
         return obs
 
     def _get_eligible_units(self):
-        """Get units eligible to act in current phase following AI_GAME_OVERVIEW.md rules."""
+        """Get units eligible for current phase following AI_GAME.md rules exactly."""
         eligible = []
-        ai_units_alive = [u for u in self.ai_units if u["alive"]]
+        current_player_units = [u for u in self.units if u["player"] == self.current_player and u["alive"]]
         
-        for unit in ai_units_alive:
+        for unit in current_player_units:
+            unit_id = unit["id"]
+            
             if self.current_phase == "move":
-                if not unit["has_moved"]:
+                # AI_GAME.md: units that haven't moved are selectable (green outline)
+                if unit_id not in self.moved_units:
                     eligible.append(unit)
+                    
             elif self.current_phase == "shoot":
-                if not unit["has_shot"] and self._has_enemies_in_range(unit):
+                # AI_GAME.md: Only units with enemies in RNG_RNG range and haven't shot yet
+                if (unit["is_ranged"] and unit_id not in self.shot_units and 
+                    self._has_enemies_in_range(unit, unit["rng_rng"])):
                     eligible.append(unit)
+                    
             elif self.current_phase == "charge":
-                if not unit["has_charged"] and self._can_charge(unit):
+                # AI_GAME.md: No enemy adjacent, enemy within MOVE range, hasn't charged
+                if (unit_id not in self.charged_units and 
+                    not self._has_adjacent_enemies(unit) and
+                    self._has_enemies_in_range(unit, unit["move"])):
                     eligible.append(unit)
+                    
             elif self.current_phase == "combat":
-                if not unit["has_attacked"] and self._has_adjacent_enemies(unit):
+                # AI_GAME.md: Enemy adjacent, hasn't attacked this phase
+                if (unit_id not in self.attacked_units and 
+                    self._has_adjacent_enemies(unit)):
                     eligible.append(unit)
         
         return eligible
@@ -417,7 +436,11 @@ class W40KEnv(gym.Env):
             return -0.1  # Invalid phase penalty
         
     def step(self, action):
-        """Execute one step following phase-based AI behavior from AI_GAME_OVERVIEW.md."""
+        """Execute one step in the environment."""
+        
+        # Initialize reward variable
+        reward = 0.0
+        
         # Increment step counter and check limit
         self.step_count += 1
         
