@@ -79,14 +79,13 @@ class ConfigLoader:
         return game_config["game_rules"]["turn_limit_penalty"]
     
     def get_model_path(self) -> str:
-        """Get the model file path."""
+        """Get the model file path - raises error if missing."""
         try:
             config = self.load_config("config")
             return config["paths"]["model_file"]
         except (KeyError, FileNotFoundError):
-            # Fallback to default if not configured
-            return "ai/models/current/model.zip"
-    
+            raise FileNotFoundError("Model path not configured. Default path should be 'ai/models/current/model.zip'")
+        
     def get_training_config(self) -> Dict[str, Any]:
         """Get training configuration."""
         return self.load_config("training_config")
@@ -175,3 +174,53 @@ if __name__ == "__main__":
         
     except Exception as e:
         print(f"❌ Config loading failed: {e}")
+
+def get_phase_order(self) -> list[str]:
+    """Get game phase order - raises error if missing."""
+    game_config = self.get_game_config()
+    if "gameplay" not in game_config:
+        raise KeyError("Missing 'gameplay' section in game_config.json")
+    if "phase_order" not in game_config["gameplay"]:
+        raise KeyError("Missing 'phase_order' in gameplay section of game_config.json")
+    phase_order = game_config["gameplay"]["phase_order"]
+    if not phase_order:
+        raise ValueError("Phase order is empty in game_config.json")
+    return phase_order
+
+def get_max_steps_per_episode(self, training_config_name: str = "default") -> int:
+    """Get max steps per episode - raises error if missing."""
+    training_config = self.load_training_config(training_config_name)
+    if "max_steps_per_episode" not in training_config:
+        raise KeyError(f"max_steps_per_episode missing from training config '{training_config_name}'")
+    return training_config["max_steps_per_episode"]
+
+def get_reward_value(self, unit_type: str, action: str, rewards_config_name: str = "phase_based") -> float:
+    """Get specific reward value - raises error if missing."""
+    rewards_config = self.load_rewards_config(rewards_config_name)
+    
+    if unit_type not in rewards_config:
+        available_types = list(rewards_config.keys())
+        raise KeyError(f"Unit type '{unit_type}' not found in rewards config '{rewards_config_name}'. Available: {available_types}")
+    
+    unit_rewards = rewards_config[unit_type]
+    if action not in unit_rewards:
+        available_actions = list(unit_rewards.keys())
+        raise KeyError(f"Action '{action}' not found for unit '{unit_type}' in rewards config '{rewards_config_name}'. Available: {available_actions}")
+    
+    return unit_rewards[action]
+
+def get_ai_behavior_config(self) -> dict:
+    """Get AI behavior configuration with fallbacks."""
+    try:
+        game_config = self.get_game_config()
+        return game_config.get("ai_behavior", {
+            "timeout_ms": 5000,
+            "retries": 3,
+            "fallback_action": "wait"
+        })
+    except (KeyError, FileNotFoundError):
+        return {
+            "timeout_ms": 5000,
+            "retries": 3,
+            "fallback_action": "wait"
+        }

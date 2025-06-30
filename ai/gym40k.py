@@ -41,19 +41,15 @@ class W40KEnv(gym.Env):
 
         # Load training configuration to get max_steps_per_episode
         self.training_config_name = training_config_name
-        try:
-            training_config = self.config.load_training_config(training_config_name)
-            self.max_steps_per_episode = training_config.get("max_steps_per_episode", 100)
-        except:
-            self.max_steps_per_episode = 100  # Fallback default
+        training_config = self.config.load_training_config(training_config_name)
+        self.max_steps_per_episode = self.config.get_max_steps_per_episode(training_config_name)
         
         # Episode step counter to prevent infinite episodes
         self.step_count = 0
         
         # Game state following AI_GAME.md exactly
         # Load phase order from config following AI_GAME.md - raise error if missing
-        game_config = self.config.get_game_config()
-        self.phase_order = game_config["gameplay"]["phase_order"]
+        self.phase_order = self.config.get_phase_order()
         
         # Game state following AI_GAME.md exactly
         self.current_phase = "move"  # Always start with move phase
@@ -241,12 +237,7 @@ class W40KEnv(gym.Env):
 
     def _load_rewards_config(self):
         """Load rewards configuration using config_loader."""
-        try:
-            self.rewards_config = self.config.load_rewards_config(self.rewards_config_name)
-            print(f"✅ Loaded rewards config: {self.rewards_config_name}")
-        except Exception as e:
-            print(f"⚠️ Failed to load rewards config: {e}")
-            self.rewards_config = self._get_default_rewards()
+        self.rewards_config = self.config.load_rewards_config(self.rewards_config_name)
 
     def _get_default_rewards(self):
         """Get default rewards if config loading fails."""

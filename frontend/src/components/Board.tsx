@@ -93,15 +93,20 @@ export default function Board({
   // ✅ HOOK 3: useEffect - ALWAYS called third, with ALL original logic
   useEffect(() => {
     // Early returns INSIDE useEffect to avoid hooks order violation
-    if (!containerRef.current || loading || error || !boardConfig) {
-      if (containerRef.current) {
-        containerRef.current.innerHTML = "";
-        if (loading) {
-          containerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#1f2937;border-radius:8px;color:white;">Loading board configuration...</div>`;
-        } else if (error || !boardConfig) {
-          containerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#7f1d1d;border-radius:8px;color:#fecaca;">Error loading board: ${error}</div>`;
-        }
-      }
+    if (!containerRef.current) return;
+
+    if (loading) {
+      containerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#1f2937;border-radius:8px;color:white;">Loading board configuration...</div>`;
+      return;
+    }
+
+    if (error) {
+      containerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#7f1d1d;border-radius:8px;color:#fecaca;">Configuration Error: ${error}</div>`;
+      return;
+    }
+
+    if (!boardConfig) {
+      containerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#7f1d1d;border-radius:8px;color:#fecaca;">Board configuration not loaded</div>`;
       return;
     }
 

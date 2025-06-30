@@ -160,12 +160,12 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
           fetch('/config/game_config.json')
         ]);
 
-        if (!boardResponse.ok) {
-          throw new Error(`Board config HTTP ${boardResponse.status}: ${boardResponse.statusText}`);
+        if (!gameResponse.ok) {
+          throw new Error(`Game config missing: /config/game_config.json (HTTP ${gameResponse.status})`);
         }
 
-        if (!gameResponse.ok) {
-          throw new Error(`Game config HTTP ${gameResponse.status}: ${gameResponse.statusText}`);
+        if (!boardResponse.ok) {
+          throw new Error(`Board config missing: /config/board_config.json (HTTP ${boardResponse.status})`);
         }
 
         const [boardResponseText, gameResponseText] = await Promise.all([
