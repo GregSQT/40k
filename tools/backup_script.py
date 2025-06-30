@@ -54,16 +54,19 @@ else:
         #"frontend/src/components/LoadReplayButton.tsx",
         
         # Data
-        #"frontend/src/data/Units.ts",
-        #"frontend/src/data/UnitFactory.ts",
+        "frontend/src/data/Units.ts",
+        "frontend/src/data/UnitFactory.ts",
         #"frontend/src/data/Scenario.ts",
         
         # Roster (now in frontend/src)
-        #"frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
-        #"frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts", 
-        #"frontend/src/roster/spaceMarine/Intercessor.ts",
-        #"frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
-        #"frontend/src/roster/exportRewards.js",
+        "frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
+        "frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts", 
+        "frontend/src/roster/spaceMarine/Intercessor.ts",
+        "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
+        "frontend/src/roster/exportRewards.js",
+        
+        # Scripts
+        "scripts/exportUnits.ts",
 
         # tools
         "tools/backup_script.py",
@@ -83,7 +86,7 @@ else:
         "config/config.json",
         "config/game_config.json",
         "config/rewards_config.json",
-        "config/scenarios.json",
+        "config/scenario.json",
         "config/training_config.json",
         
         # Tools
