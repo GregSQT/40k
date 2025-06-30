@@ -216,9 +216,8 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
         setError(errorMessage);
         console.error('Game config loading error:', err);
 
-        console.log('Using fallback configurations');
-        setBoardConfig(FALLBACK_BOARD_CONFIG);
-        setGameConfig(FALLBACK_GAME_CONFIG);
+        setBoardConfig(null);
+        setGameConfig(null);
 
       } finally {
         setLoading(false);
