@@ -260,6 +260,10 @@ class W40KEnv(gym.Env):
     def reset(self, seed=None, options=None):
         """Reset environment to initial state."""
         super().reset(seed=seed)
+
+        # Reset episode tracking
+        self.episode_states = []
+        self.episode_step_count = 0
         
         # Reset game state
         self.current_phase = "move"
@@ -399,10 +403,26 @@ class W40KEnv(gym.Env):
                     return True
         return False
 
+    def _execute_action_with_phase(self, unit, action_type):
+        """Execute action with current phase context."""
+        if self.current_phase == "move":
+            return self._execute_move_action(unit, action_type)
+        elif self.current_phase == "shoot":
+            return self._execute_shoot_action(unit, action_type)
+        elif self.current_phase == "charge":
+            return self._execute_charge_action(unit, action_type)
+        elif self.current_phase == "combat":
+            return self._execute_combat_action(unit, action_type)
+        else:
+            return -0.1  # Invalid phase penalty
+        
     def step(self, action):
         """Execute one step following phase-based AI behavior from AI_GAME_OVERVIEW.md."""
         # Increment step counter and check limit
         self.step_count += 1
+        
+        # Capture state for replay system
+        self._capture_game_state(action, reward)
         if self.step_count >= self.max_steps_per_episode:
             # Episode too long, truncate it
             self.game_over = True
@@ -443,7 +463,7 @@ class W40KEnv(gym.Env):
             return self._get_obs(), -0.1, False, False, self._get_info()
         
         unit = eligible_units[unit_idx]
-        reward = self._execute_action(unit, action_type)
+        reward = self._execute_action_with_phase(unit, action_type)
         
         # Game outcome rewards
         unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
@@ -1096,6 +1116,39 @@ class W40KEnv(gym.Env):
             print(f"\nAI Units: {len([u for u in self.ai_units if u['alive']])}")
             print(f"Enemy Units: {len([u for u in self.enemy_units if u['alive']])}")
             print(f"Eligible Units: {len(self._get_eligible_units())}")
+
+    def _capture_game_state(self, action, reward):
+        """Capture current state for replay."""
+        try:
+            if not hasattr(self, 'episode_states'):
+                self.episode_states = []
+                
+            state = {
+                "turn": self.current_turn,
+                "phase": self.current_phase,
+                "action_id": int(action) if hasattr(action, '__int__') else action,
+                "reward": float(reward),
+                "game_over": self.game_over,
+                "units": []
+            }
+            
+            # Capture unit states
+            if hasattr(self, 'units') and self.units:
+                for i, unit in enumerate(self.units):
+                    if unit:
+                        unit_state = {
+                            "id": i,
+                            "player": unit.get('player', 0),
+                            "col": unit.get('col', 0),
+                            "row": unit.get('row', 0),
+                            "cur_hp": unit.get('cur_hp', unit.get('HP', 100)),
+                            "alive": unit.get('alive', True)
+                        }
+                        state["units"].append(unit_state)
+            
+            self.episode_states.append(state)
+        except Exception as e:
+            pass  # Don't break training if capture fails
 
     def close(self):
         """Clean up environment."""

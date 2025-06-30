@@ -269,6 +269,11 @@ def main():
         if args.test_only:
             # Load existing model for testing only
             model_path = config.get_model_path()
+            # Ensure model directory exists
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            print(f"📁 Model path: {model_path}")
+            
+            # Determine whether to create new model or load existing
             if not os.path.exists(model_path):
                 print(f"❌ Model not found: {model_path}")
                 return 1
