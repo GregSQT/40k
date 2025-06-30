@@ -103,6 +103,13 @@ class W40KEnv(gym.Env):
                     
                     # Merge scenario position data with unit definition stats
                     unit = copy.deepcopy(self.unit_definitions[unit_type])
+            
+                    # Validate required attributes - raise error if missing per AI_INSTRUCTIONS.md
+                    required_attrs = ["hp_max", "move", "rng_rng", "rng_dmg", "cc_dmg", "is_ranged", "is_melee"]
+                    for attr in required_attrs:
+                        if attr not in unit:
+                            raise KeyError(f"Unit definition for '{unit_type}' missing required attribute '{attr}'")
+                    
                     unit.update({
                         "id": unit_data["id"],
                         "player": unit_data["player"],
@@ -110,7 +117,6 @@ class W40KEnv(gym.Env):
                         "row": unit_data["row"],
                         "alive": True,
                         "cur_hp": unit["hp_max"],
-                        # Phase tracking
                         "has_moved": False,
                         "has_shot": False,
                         "has_charged": False,
@@ -407,7 +413,7 @@ class W40KEnv(gym.Env):
         for enemy in self.enemy_units:
             if enemy["alive"]:
                 dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                if dist <= unit["rng_rng"]:
+                if dist <= unit.get("rng_rng", 0):
                     return True
         return False
 
@@ -416,7 +422,7 @@ class W40KEnv(gym.Env):
         for enemy in self.enemy_units:
             if enemy["alive"]:
                 dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                if dist <= unit["move"] and dist > 1:  # Can reach but not adjacent
+                if dist <= unit.get("move", 0) and dist > 1:  # Can reach but not adjacent
                     return True
         return False
 
@@ -426,24 +432,6 @@ class W40KEnv(gym.Env):
             if enemy["alive"]:
                 dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
                 if dist <= 1:
-                    return True
-        return False
-
-    def _has_enemies_in_shooting_range(self, unit):
-        """Check if unit has enemies within RNG_RNG shooting range per AI_GAME.md."""
-        for enemy in self.enemy_units:
-            if enemy["alive"]:
-                distance = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                if distance <= unit.get("rng_rng", 0):
-                    return True
-        return False
-
-    def _has_enemies_in_move_range(self, unit):
-        """Check if unit has enemies within MOVE range for charging per AI_GAME.md."""
-        for enemy in self.enemy_units:
-            if enemy["alive"]:
-                distance = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                if distance <= unit.get("move", 0):
                     return True
         return False
 
