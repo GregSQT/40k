@@ -26,7 +26,7 @@ export const useAIPlayer = ({
 }: UseAIPlayerParams) => {
   const {
     actionDelay = 180,
-    retryAttempts = 3,
+    retryAttempts = 1,
     fallbackToSkip = true,
   } = config;
 
@@ -267,13 +267,14 @@ export const useAIPlayer = ({
 
       console.log(`[AI] Triggering AI turn for phase: ${phase}`);
       processAITurn();
-    }, 100); // 100ms delay for phase stability
+    }, 25); // 25ms delay for phase stability
 
     // Cleanup function
     return () => {
       clearTimeout(phaseStabilityDelay);
       abortAIProcessing();
     };
+    
   }, [enabled, currentPlayer, phase, units, unitsMoved, unitsCharged, unitsAttacked, processAITurn, getEligibleAIUnits, abortAIProcessing]);
 
   // Cleanup on unmount
