@@ -378,12 +378,14 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
 
   // Initialize PIXI application with WebGL protection
   useEffect(() => {
-    if (!boardRef.current || !scenario || appRef.current) return;
+    const initializeBoardAsync = async () => {
+      if (!boardRef.current || !scenario || appRef.current) return;
 
-    // Load board configuration following AI_INSTRUCTIONS.md - NO HARDCODED VALUES
-    const boardConfig = await fetch('/config/board_config.json')
-      .then(res => res.json())
-      .then(data => data.default);
+      try {
+        // Load board configuration following AI_INSTRUCTIONS.md - NO HARDCODED VALUES
+        const boardConfig = await fetch('/config/board_config.json')
+          .then(res => res.json())
+          .then(data => data.default);
     
     if (!boardConfig) {
       throw new Error('Board configuration not loaded - violates AI_INSTRUCTIONS.md');
@@ -459,7 +461,7 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
       }
       isWebGLLostRef.current = false;
     };
-  }, [scenario, replayData, convertUnits, drawBoard, isPixiAppValid]);
+  }, [scenario, replayData, convertUnits, drawBoard, createFallbackRenderer]);
 
   // Fallback renderer when PIXI fails
   const createFallbackRenderer = useCallback((width: number, height: number) => {
