@@ -380,14 +380,27 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
   useEffect(() => {
     if (!boardRef.current || !scenario || appRef.current) return;
 
+    // Load board configuration following AI_INSTRUCTIONS.md - NO HARDCODED VALUES
+    const boardConfig = await fetch('/config/board_config.json')
+      .then(res => res.json())
+      .then(data => data.default);
+    
+    if (!boardConfig) {
+      throw new Error('Board configuration not loaded - violates AI_INSTRUCTIONS.md');
+    }
+
     const { board } = scenario;
-    const HEX_WIDTH = 1.5 * board.hex_radius;
-    const HEX_HEIGHT = Math.sqrt(3) * board.hex_radius;
+    const BOARD_COLS = boardConfig.cols;
+    const BOARD_ROWS = boardConfig.rows;
+    const HEX_RADIUS = boardConfig.hex_radius;
+    const MARGIN = boardConfig.margin;
+    const HEX_WIDTH = 1.5 * HEX_RADIUS;
+    const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
     const HEX_HORIZ_SPACING = HEX_WIDTH;
     const HEX_VERT_SPACING = HEX_HEIGHT;
 
-    const boardWidth = board.cols * HEX_HORIZ_SPACING + board.margin * 2;
-    const boardHeight = board.rows * HEX_VERT_SPACING + board.margin * 2;
+    const boardWidth = BOARD_COLS * HEX_HORIZ_SPACING + MARGIN * 2;
+    const boardHeight = BOARD_ROWS * HEX_VERT_SPACING + MARGIN * 2;
 
     console.log('Creating PIXI application with size:', boardWidth, 'x', boardHeight);
 
@@ -489,12 +502,18 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
 
   // Update display when step changes (simplified for Canvas)
   useEffect(() => {
-    if (replayData && scenario && isPixiAppValid()) {
-      updateDisplay().catch(err => {
-        console.error('Error updating display:', err);
-        setError(err instanceof Error ? err.message : 'Unknown display error');
-      });
-    }
+    const handleDisplayUpdate = async () => {
+      if (replayData && scenario && isPixiAppValid()) {
+        try {
+          await updateDisplay();
+        } catch (err) {
+          console.error('Error updating display:', err);
+          setError(err instanceof Error ? err.message : 'Unknown display error');
+        }
+      }
+    };
+
+    handleDisplayUpdate();
   }, [currentStep, replayData, scenario, updateDisplay, isPixiAppValid]);
 
   // Auto-play functionality

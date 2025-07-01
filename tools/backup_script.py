@@ -40,20 +40,13 @@ else:
         "ai/scenario.json",
         "ai/state.py",
         "ai/train.py",
-        "ai/generate_scenario.py",
         "ai/web_replay_logger.py",
-
-        # ai/event_log    
-        "ai/event_log/train_best_game_replay.json",
-        "ai/event_log/phase_based_replay_*.json",
-        "ai/event_log/web_replay_*.json",
 
 ######################################################################################################
 ##### config files
 ######################################################################################################
         "config/board_config.json",    # Board Layout & Visualization
         "config/config.json",        # Master Configuration & Paths
-        "config/config_loader.py",  # Configuration Loader
         "config/game_config.json",   # Game Rules & Mechanics
         "config/rewards_config.json",  # Reward System Definitions
         "config/scenario.json",        # Game Scenarios
@@ -107,8 +100,7 @@ else:
 ######################################################################################################
 
         # Tools
-        "tools/backup_script.py",        # Project Versioning & Backup
-        "tools/generate_scenario.py"     # Scenario Generation Utilities
+        "tools/backup_script.py"         # Project Versioning & Backup
     ]
 
 logfile = os.path.join(DEST_ROOT, "backup.log")

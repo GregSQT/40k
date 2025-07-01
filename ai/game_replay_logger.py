@@ -334,12 +334,24 @@ class GameReplayIntegration:
         return env
     
     @staticmethod
-    def save_episode_replay(env, episode_reward: float, output_dir: str = "ai/event_log"):
-        """Save the replay for this episode."""
+    @staticmethod
+    def save_episode_replay(env, episode_reward: float, output_dir: str = "ai/event_log", is_best: bool = False):
+        """Save the replay for this episode following AI_INSTRUCTIONS.md naming."""
         if hasattr(env, 'replay_logger'):
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join(output_dir, f"game_replay_{timestamp}.json")
+            if is_best:
+                # Use required filename from AI_INSTRUCTIONS.md
+                filename = os.path.join(output_dir, "train_best_game_replay.json")
+            else:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = os.path.join(output_dir, f"game_replay_{timestamp}.json")
+            
             env.replay_logger.save_replay(filename, episode_reward)
+            
+            # Also save with legacy naming for compatibility
+            if is_best:
+                legacy_filename = os.path.join(output_dir, "train_best_event_log.json")
+                env.replay_logger.save_replay(legacy_filename, episode_reward)
+            
             return filename
         return None
 

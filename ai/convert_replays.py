@@ -109,6 +109,7 @@ class ReplayConverter:
         
         # File patterns to look for
         file_patterns = [
+            "train_best_game_replay.json",    # Primary required format from AI_INSTRUCTIONS.md
             "train_best_event_log.json",
             "train_worst_event_log.json",
             "eval_best_event_log.json", 

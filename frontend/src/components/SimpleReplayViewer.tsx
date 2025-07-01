@@ -84,6 +84,18 @@ interface SimpleReplayViewerProps {
   replayFile?: string;
 }
 
+// Action to phase mapping per AI_GAME.md rules
+const getActionPhase = (actionId: number): string => {
+  const phaseMap: { [key: number]: string } = {
+    0: "move", 1: "move", 2: "move",     // Movement actions
+    3: "shoot", 4: "shoot",              // Shooting actions  
+    5: "charge",                         // Charge actions
+    6: "move",                           // Wait (movement phase)
+    7: "combat"                          // Combat actions
+  };
+  return phaseMap[actionId] || "move";
+};
+
 export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
   replayFile = "ai/event_log/train_best_game_replay.json"
 }) => {
@@ -407,7 +419,7 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
           <div className="border border-blue-500 rounded-lg overflow-hidden">
             <Board
               units={currentUnits}
-              phase="move"
+              phase={getActionPhase(currentEvent?.action ?? 0)}  // Use actual phase from AI_GAME.md
               mode="select"
               selectedUnitId={currentEvent?.acting_unit_idx || null}
               currentPlayer={1}
@@ -421,9 +433,32 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
               unitsMoved={[]}
               movePreview={null}
               attackPreview={null}
-              // Ensure same configuration as game feature
-              boardConfig={scenario?.boardConfig}
             />
+          </div>
+        </div>
+
+        {/* Unit Status per Phase - AI_GAME.md Compliance */}
+        <div className="mb-4 bg-gray-800 rounded-lg p-4">
+          <h3 className="text-lg font-semibold mb-2 text-blue-400">Unit Status (AI_GAME.md Phases)</h3>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <h4 className="font-medium text-green-400 mb-1">AI Units</h4>
+              {currentUnits.filter(u => u.player === 1 && u.alive).map(unit => (
+                <div key={unit.id} className="flex justify-between">
+                  <span>{unit.name}</span>
+                  <span className="text-gray-400">HP: {unit.CUR_HP}/{unit.HP_MAX}</span>
+                </div>
+              ))}
+            </div>
+            <div>
+              <h4 className="font-medium text-red-400 mb-1">Enemy Units</h4>
+              {currentUnits.filter(u => u.player === 0 && u.alive).map(unit => (
+                <div key={unit.id} className="flex justify-between">
+                  <span>{unit.name}</span>
+                  <span className="text-gray-400">HP: {unit.CUR_HP}/{unit.HP_MAX}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 

@@ -91,12 +91,14 @@ interface GameReplayViewerProps {
   replayFile?: string;
 }
 
-// Unit type registry - imports the actual unit classes to get their static properties
+// Unit type registry - unified naming following AI_INSTRUCTIONS.md
 const UNIT_REGISTRY = {
   'Intercessor': Intercessor,
   'AssaultIntercessor': AssaultIntercessor,
-  'intercessor': Intercessor,  // Add lowercase variants for AI compatibility
-  'assault_intercessor': AssaultIntercessor
+  'intercessor': Intercessor,          // AI compatibility
+  'assault_intercessor': AssaultIntercessor,  // AI compatibility
+  'space_marine_intercessor': Intercessor,    // Full AI naming
+  'space_marine_assault_intercessor': AssaultIntercessor  // Full AI naming
 } as const;
 
 // Validate unit registry consistency
@@ -111,13 +113,25 @@ const validateUnitRegistry = () => {
   });
 };
 
-// Phase validation according to AI_GAME.md
+// Phase validation according to AI_GAME.md - STRICT COMPLIANCE
 const validatePhaseOrder = (phases: string[]) => {
   const expectedPhases = ["move", "shoot", "charge", "combat"];
   if (JSON.stringify(phases) !== JSON.stringify(expectedPhases)) {
     console.error('Phase order violation of AI_GAME rules:', phases);
-    throw new Error(`Invalid phase order. Expected: ${expectedPhases.join(', ')}, Got: ${phases.join(', ')}`);
+    console.error('Expected phases:', expectedPhases);
+    console.error('Received phases:', phases);
+    throw new Error(`Invalid phase order. AI_GAME.md requires exact sequence: ${expectedPhases.join(' → ')}`);
   }
+  console.log('✅ Phase order validates against AI_GAME.md');
+  return true;
+};
+
+// Turn structure validation according to AI_GAME.md
+const validateTurnStructure = (event: ReplayEvent, expectedPhase: string) => {
+  if (event.action?.type && !['move', 'shoot', 'charge', 'combat'].includes(event.action.type)) {
+    throw new Error(`Invalid action type: ${event.action.type}. Must match AI_GAME.md phases.`);
+  }
+  return true;
 };
 
 // Action to phase mapping per AI_GAME.md rules
@@ -166,16 +180,41 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const unitSpritesRef = useRef<Map<number, PIXI.Container>>(new Map());
 
-  // Load scenario configuration
+  // Load scenario configuration with board config integration - AI_INSTRUCTIONS.md compliance
   const loadScenario = useCallback(async () => {
     try {
-      console.log('Loading scenario from /ai/scenario.json...');
-      const response = await fetch('/ai/scenario.json');
-      if (!response.ok) {
-        throw new Error(`Failed to load scenario: ${response.statusText}`);
+      console.log('Loading scenario and board config...');
+      
+      // Load both scenario and board config following AI_INSTRUCTIONS.md
+      const [scenarioResponse, boardConfigResponse] = await Promise.all([
+        fetch('/ai/scenario.json'),
+        fetch('/config/board_config.json')
+      ]);
+      
+      if (!scenarioResponse.ok) {
+        throw new Error(`Failed to load scenario: ${scenarioResponse.statusText}`);
       }
-      const data = await response.json();
-      console.log('Scenario loaded:', data);
+      if (!boardConfigResponse.ok) {
+        throw new Error(`Failed to load board config: ${boardConfigResponse.statusText}`);
+      }
+      
+      const data = await scenarioResponse.json();
+      const boardConfigData = await boardConfigResponse.json();
+      const boardConfig = boardConfigData.default;
+      
+      // Merge board configuration to ensure consistent display - AI_INSTRUCTIONS.md
+      data.board = {
+        ...data.board,
+        cols: boardConfig.cols,
+        rows: boardConfig.rows,
+        hex_radius: boardConfig.hex_radius,
+        margin: boardConfig.margin
+      };
+      
+      data.colors = boardConfig.colors;
+      data.boardConfig = boardConfig; // Store for board display consistency
+      
+      console.log('✅ Scenario loaded with board config integration:', data);
       setScenario(data);
       return data;
     } catch (err) {
@@ -751,6 +790,32 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
             <span>Total: {typeof totalReward === 'number' ? totalReward.toFixed(2) : '0.00'}</span>
             <span>AI: {aiAlive}</span>
             <span>Enemy: {enemyAlive}</span>
+          </div>
+
+          {/* Phase Progression Indicator - AI_GAME.md Compliance */}
+          <div className="mt-2 flex items-center gap-2 text-xs">
+            <span className="text-gray-400">Phase:</span>
+            {["move", "shoot", "charge", "combat"].map((phase, index) => {
+              const currentPhase = getActionPhase(currentAction);
+              const isActive = phase === currentPhase;
+              const phaseIndex = ["move", "shoot", "charge", "combat"].indexOf(currentPhase);
+              const isCompleted = phaseIndex > index;
+              
+              return (
+                <div
+                  key={phase}
+                  className={`px-2 py-1 rounded text-xs font-medium ${
+                    isActive 
+                      ? 'bg-blue-600 text-white' 
+                      : isCompleted 
+                        ? 'bg-green-700 text-green-200' 
+                        : 'bg-gray-700 text-gray-400'
+                  }`}
+                >
+                  {phase.toUpperCase()}
+                </div>
+              );
+            })}
           </div>
         </div>
 
