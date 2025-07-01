@@ -17,14 +17,14 @@ export interface AIServiceConfig {
 export class AIService {
   private config: AIServiceConfig;
 
-  constructor(config: Partial<AIServiceConfig> = {}) {
-    this.config = {
-      baseUrl: 'http://localhost:8000',
-      timeout: 5000,
-      retries: 3,
-      ...config,
-    };
-  }
+constructor(config: Partial<AIServiceConfig> = {}) {
+  this.config = {
+    baseUrl: 'http://localhost:8000',
+    timeout: 1500,
+    retries: 2,
+    ...config,
+  };
+}
 
   async fetchAiAction(gameState: AIGameState): Promise<AIAction> {
     let lastError: Error | null = null;

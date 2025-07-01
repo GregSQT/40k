@@ -17,6 +17,14 @@ export default defineConfig({
       allow: ['..'] // Allow serving files from parent directory
     }
   },
+  build: {
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        sourcemapBaseUrl: 'http://localhost:5173/'
+      }
+    }
+  },
   resolve: {
     alias: {
     '@': path.resolve(__dirname, 'src'),

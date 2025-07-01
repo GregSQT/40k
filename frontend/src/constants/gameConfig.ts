@@ -22,7 +22,7 @@ export const COLORS = {
 
 // Game Timing
 export const TIMING = {
-  PHASE_TRANSITION_DELAY: 300,
+  PHASE_TRANSITION_DELAY: 2000,
   AI_ACTION_DELAY: 180,
   ANIMATION_DURATION: 250,
 } as const;

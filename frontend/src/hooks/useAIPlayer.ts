@@ -1,4 +1,4 @@
-// hooks/useAIPlayer.ts
+// frontend/src/hooks/useAIPlayer.ts
 import { useEffect, useRef, useCallback } from 'react';
 import { GameState, AIGameState, UnitId } from '../types/game';
 import { aiService, AIServiceError } from '../services/aiService';
@@ -251,17 +251,27 @@ export const useAIPlayer = ({
       return;
     }
 
-    // Check if there are eligible units for this phase
-    const eligibleUnits = getEligibleAIUnits();
-    if (eligibleUnits.length === 0) {
-      return;
-    }
+    // ==================== PHASE STABILITY CHECK ====================
+    // Add small delay to ensure phase is stable before processing
+    const phaseStabilityDelay = setTimeout(() => {
+      // Double-check if we should still process (phase might have changed)
+      if (!enabled || currentPlayer !== 1 || isProcessingRef.current) {
+        return;
+      }
 
-    console.log(`[AI] Triggering AI turn for phase: ${phase}`);
-    processAITurn();
+      // Check if there are eligible units for this phase
+      const eligibleUnits = getEligibleAIUnits();
+      if (eligibleUnits.length === 0) {
+        return;
+      }
+
+      console.log(`[AI] Triggering AI turn for phase: ${phase}`);
+      processAITurn();
+    }, 100); // 100ms delay for phase stability
 
     // Cleanup function
     return () => {
+      clearTimeout(phaseStabilityDelay);
       abortAIProcessing();
     };
   }, [enabled, currentPlayer, phase, units, unitsMoved, unitsCharged, unitsAttacked, processAITurn, getEligibleAIUnits, abortAIProcessing]);
