@@ -421,6 +421,8 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
               unitsMoved={[]}
               movePreview={null}
               attackPreview={null}
+              // Ensure same configuration as game feature
+              boardConfig={scenario?.boardConfig}
             />
           </div>
         </div>

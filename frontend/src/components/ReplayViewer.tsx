@@ -94,7 +94,42 @@ interface GameReplayViewerProps {
 // Unit type registry - imports the actual unit classes to get their static properties
 const UNIT_REGISTRY = {
   'Intercessor': Intercessor,
-  'AssaultIntercessor': AssaultIntercessor
+  'AssaultIntercessor': AssaultIntercessor,
+  'intercessor': Intercessor,  // Add lowercase variants for AI compatibility
+  'assault_intercessor': AssaultIntercessor
+} as const;
+
+// Validate unit registry consistency
+const validateUnitRegistry = () => {
+  const requiredProps = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG', 'ICON'];
+  Object.entries(UNIT_REGISTRY).forEach(([unitType, UnitClass]) => {
+    requiredProps.forEach(prop => {
+      if (UnitClass[prop as keyof typeof UnitClass] === undefined) {
+        throw new Error(`Unit ${unitType} missing required property: ${prop}`);
+      }
+    });
+  });
+};
+
+// Phase validation according to AI_GAME.md
+const validatePhaseOrder = (phases: string[]) => {
+  const expectedPhases = ["move", "shoot", "charge", "combat"];
+  if (JSON.stringify(phases) !== JSON.stringify(expectedPhases)) {
+    console.error('Phase order violation of AI_GAME rules:', phases);
+    throw new Error(`Invalid phase order. Expected: ${expectedPhases.join(', ')}, Got: ${phases.join(', ')}`);
+  }
+};
+
+// Action to phase mapping per AI_GAME.md rules
+const getActionPhase = (actionId: number): string => {
+  const phaseMap: { [key: number]: string } = {
+    0: "move", 1: "move", 2: "move",     // Movement actions
+    3: "shoot", 4: "shoot",              // Shooting actions  
+    5: "charge",                         // Charge actions
+    6: "move",                           // Wait (movement phase)
+    7: "combat"                          // Combat actions
+  };
+  return phaseMap[actionId] || "move";
 };
 
 // Action mapping for display
@@ -112,6 +147,10 @@ const ACTION_NAMES: { [key: number]: string } = {
 export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({ 
   replayFile = 'ai/event_log/train_best_game_replay.json' 
 }) => {
+  // Validate environment setup
+  useEffect(() => {
+    validateUnitRegistry();
+  }, []);
   const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
   const [replayData, setReplayData] = useState<ReplayData | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
@@ -171,6 +210,16 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
       try {
         setLoading(true);
         setError(null);
+        
+        // Validate unit registry first
+        validateUnitRegistry();
+        
+        // Load game configuration for phase validation
+        const gameConfigResponse = await fetch('/config/game_config.json');
+        if (gameConfigResponse.ok) {
+          const gameConfigData = await gameConfigResponse.json();
+          validatePhaseOrder(gameConfigData.gameplay?.phase_order || []);
+        }
         
         await loadScenario();
         await loadReplayData();

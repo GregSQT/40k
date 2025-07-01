@@ -25,68 +25,90 @@ else:
     files_to_copy = [
         # Root config files
         "config_loader.py",
-        #"package.json",
-        #"tsconfig.json", 
-        #"tsconfig.base.json",
-        
-        # Frontend files
-        #"frontend/tsconfig.json",
-        #"frontend/vite.config.ts",
-        #"frontend/package.json",
-        
-        # Frontend source
-        #"frontend/src/App.tsx",
-        #"frontend/src/routes.tsx", 
-        #"frontend/src/main.tsx",
-        
-        # AI integration
-        #"frontend/src/ai/ai.ts",
-        
-        # Pages
-        #"frontend/src/pages/HomePage.tsx",
-        #"frontend/src/pages/ReplayPage.tsx", 
-        #"frontend/src/pages/GamePage.tsx",
-        
-        # Components
-        #"frontend/src/components/Board.tsx",
-        #"frontend/src/components/UnitSelector.tsx",
-        #"frontend/src/components/ReplayViewer.tsx",
-        #"frontend/src/components/LoadReplayButton.tsx",
-        
-        # Data
-        "frontend/src/data/Units.ts",
-        "frontend/src/data/UnitFactory.ts",
-        #"frontend/src/data/Scenario.ts",
-        
-        # Roster (now in frontend/src)
-        "frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
-        "frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts", 
-        "frontend/src/roster/spaceMarine/Intercessor.ts",
-        "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
-    
-        # tools
-        "tools/backup_script.py",
 
-        # AI backend
+######################################################################################################
+##### ai files
+######################################################################################################
+
+    ### ai
+        "ai/api.py",
+        "ai/diagnose.py",
         "ai/evaluate.py",
+        "ai/generate_scenario.py",
         "ai/gym40k.py",
-        "ai/train.py",
+        "ai/reward_mapper.py",
         "ai/scenario.json",
+        "ai/state.py",
+        "ai/train.py",
         "ai/generate_scenario.py",
         "ai/web_replay_logger.py",
 
-        
+        # ai/event_log    
+        "ai/event_log/train_best_game_replay.json",
+        "ai/event_log/phase_based_replay_*.json",
+        "ai/event_log/web_replay_*.json",
 
-        # config
-        "config/board_config.json",
-        "config/config.json",
-        "config/game_config.json",
-        "config/rewards_config.json",
-        "config/scenario.json",
-        "config/training_config.json",
-        
+######################################################################################################
+##### config files
+######################################################################################################
+        "config/board_config.json",    # Board Layout & Visualization
+        "config/config.json",        # Master Configuration & Paths
+        "config/config_loader.py",  # Configuration Loader
+        "config/game_config.json",   # Game Rules & Mechanics
+        "config/rewards_config.json",  # Reward System Definitions
+        "config/scenario.json",        # Game Scenarios
+        "config/training_config.json", # AI Training Parameters
+        "config/unit_definitions.json", # Unit Stats & Abilities
+
+######################################################################################################
+##### Frontend files
+######################################################################################################
+
+    ### frontend
+        "frontend/package.json",  # Node.js dependencies
+        "frontend/tsconfig.json",
+        "frontend/vite.config.ts",
+
+    ### frontend/src
+
+        # frontend/src
+        "frontend/src/App.tsx",
+        "frontend/src/main.tsx",
+        "frontend/src/routes.tsx",
+
+        # frontend/src/ai
+        "frontend/src/ai/ai.ts",
+
+        # Frontend/src/components
+        "frontend/src/components/Board.tsx",
+        "frontend/src/components/UnitSelector.tsx",
+        "frontend/src/components/ReplayViewer.tsx",
+        "frontend/src/components/SimpleReplayViewer.tsx",
+        "frontend/src/components/LoadReplayButton.tsx",
+
+        # Frontend/src/data
+        "frontend/src/data/Units.ts",
+        "frontend/src/data/UnitFactory.ts",
+        "frontend/src/data/Scenario.ts",
+
+        # Frontend/src/pages
+        "frontend/src/pages/HomePage.tsx",
+        "frontend/src/pages/GamePage.tsx",
+        "frontend/src/pages/ReplayPage.tsx",
+
+        # Frontend/src/roster/spaceMarine
+        "frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
+        "frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts",
+        "frontend/src/roster/spaceMarine/Intercessor.ts",
+        "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
+
+######################################################################################################
+##### tools files
+######################################################################################################
+
         # Tools
-        #"tools/generate_scenario.py",
+        "tools/backup_script.py",        # Project Versioning & Backup
+        "tools/generate_scenario.py"     # Scenario Generation Utilities
     ]
 
 logfile = os.path.join(DEST_ROOT, "backup.log")
