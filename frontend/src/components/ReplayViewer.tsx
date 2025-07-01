@@ -334,8 +334,9 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
           hexGraphics.name = 'hex';
           
           // Hex background
-          hexGraphics.beginFill(scenario.colors.hex_default);
-          hexGraphics.lineStyle(1, scenario.colors.hex_border);
+          const isEven = (col + row) % 2 === 0;
+          hexGraphics.beginFill(isEven ? scenario.colors.cell_even : scenario.colors.cell_odd);
+          hexGraphics.lineStyle(1, scenario.colors.cell_border);
           hexGraphics.drawPolygon(getHexPolygonPoints(scenario.board.hex_radius));
           hexGraphics.endFill();
           
@@ -381,14 +382,17 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
         unitContainer.addChild(unitGraphics);
         
         // Unit icon text
-        const iconText = new PIXI.Text(unit.ICON, {
-          fontFamily: 'Arial',
-          fontSize: 24,
-          fill: 0xffffff,
-          align: 'center'
-        });
-        iconText.anchor.set(0.5);
-        unitContainer.addChild(iconText);
+        const iconTexture = PIXI.Texture.from(unit.ICON);
+        const iconSprite = new PIXI.Sprite(iconTexture);
+        iconSprite.anchor.set(0.5);
+        // Scale sprite to fit inside the hex cell
+        const maxDim = Math.max(iconTexture.width, iconTexture.height);
+        const scale = (scenario.board.hex_radius * 1.2) / maxDim;
+        iconSprite.scale.set(scale, scale);
+        unitContainer.addChild(iconSprite);
+        unitContainer.addChild(iconSprite);
+        // Draw HP bar (background + green foreground)
+        
         
         // HP text with null safety
         const currentHP = unit.CUR_HP ?? unit.HP_MAX;

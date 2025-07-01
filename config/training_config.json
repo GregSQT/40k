@@ -30,7 +30,7 @@
   
   "default": {
     "description": "GPU-optimized parameters for complex reward learning",
-    "total_timesteps": 500000,
+    "total_timesteps": 100000,
     "max_steps_per_episode": 200,
     "eval_freq": 5000,
     "callback_params": {
