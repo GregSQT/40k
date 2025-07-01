@@ -23,6 +23,35 @@ from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
 from config_loader import get_config_loader
+import torch
+
+def check_gpu_availability():
+    """Check and display GPU availability for training."""
+    print("\n🔍 GPU AVAILABILITY CHECK")
+    print("=" * 30)
+    
+    if torch.cuda.is_available():
+        device_count = torch.cuda.device_count()
+        current_device = torch.cuda.current_device()
+        device_name = torch.cuda.get_device_name(current_device)
+        memory_gb = torch.cuda.get_device_properties(current_device).total_memory / 1024**3
+        
+        print(f"✅ CUDA Available: YES")
+        print(f"📊 GPU Devices: {device_count}")
+        print(f"🎯 Current Device: {current_device} ({device_name})")
+        print(f"💾 GPU Memory: {memory_gb:.1f} GB")
+        print(f"🚀 PyTorch CUDA Version: {torch.version.cuda}")
+        
+        # Force PyTorch to use GPU for Stable-Baselines3
+        torch.cuda.set_device(current_device)
+        
+        return True
+    else:
+        print(f"❌ CUDA Available: NO")
+        print(f"⚠️  Training will use CPU (much slower)")
+        print(f"💡 Install CUDA-enabled PyTorch: pip install torch --index-url https://download.pytorch.org/whl/cu118")
+        
+        return False
 
 def setup_imports():
     """Set up import paths and return required modules."""
@@ -38,6 +67,9 @@ def setup_imports():
 def create_model(config, training_config_name="default", rewards_config_name="phase_based", new_model=False, append_training=False):
     """Create or load DQN model with configuration following AI_INSTRUCTIONS.md."""
     print(f"🤖 Creating/loading model with training config: {training_config_name}, rewards config: {rewards_config_name}")
+    
+    # Check GPU availability
+    gpu_available = check_gpu_availability()
     
     # Load training configuration from config files (not script parameters)
     training_config = config.load_training_config(training_config_name)
@@ -61,14 +93,18 @@ def create_model(config, training_config_name="default", rewards_config_name="ph
     
     model_path = config.get_model_path()
     
+    # Set device for model creation
+    device = "cuda" if gpu_available else "cpu"
+    model_params["device"] = device
+    
     # Determine whether to create new model or load existing
     if new_model or not os.path.exists(model_path):
-        print("🆕 Creating new model...")
+        print(f"🆕 Creating new model on {device.upper()}...")
         model = DQN(env=env, **model_params)
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
-            model = DQN.load(model_path, env=env)
+            model = DQN.load(model_path, env=env, device=device)
             # Update any model parameters that might have changed
             model.tensorboard_log = model_params.get("tensorboard_log", "./tensorboard/")
             model.verbose = model_params.get("verbose", 1)
@@ -79,7 +115,7 @@ def create_model(config, training_config_name="default", rewards_config_name="ph
     else:
         print(f"📁 Loading existing model: {model_path}")
         try:
-            model = DQN.load(model_path, env=env)
+            model = DQN.load(model_path, env=env, device=device)
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")

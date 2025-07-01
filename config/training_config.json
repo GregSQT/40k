@@ -1,35 +1,22 @@
 {
-  "default": {
+  "training_parameters": {
     "description": "Optimized parameters for complex reward learning",
-    
     "_training_duration_comments": {
       "total_timesteps": "Total number of environment steps to train for (1M steps = substantial learning)",
       "max_steps_per_episode": "Maximum steps before episode is truncated (prevents infinite games)",
       "eval_freq": "How often to evaluate model performance (every 10k steps = 100 evaluations total)"
     },
-    "total_timesteps": 50000,
-    "max_steps_per_episode": 200,
-    "eval_freq": 10000,
-    
     "_callback_comments": {
       "eval_deterministic": "Use deterministic policy during evaluation (no random exploration)",
       "eval_render": "Don't render visual output during evaluation (faster evaluation)",
       "n_eval_episodes": "Number of episodes to run per evaluation (5 episodes for statistical reliability)",
       "checkpoint_save_freq": "Save model checkpoint every 25k steps (4 checkpoints per 100k steps)",
       "checkpoint_name_prefix": "Filename prefix for saved checkpoints"
-    },
-    "callback_params": {
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 5,
-      "checkpoint_save_freq": 25000,
-      "checkpoint_name_prefix": "phase_model_checkpoint"
-    },
-    
+    },    
     "_model_params_comments": {
       "policy": "Multi-Layer Perceptron policy (standard fully-connected neural network)",
       "verbose": "Logging level (0=silent, 1=info, 2=debug)",
-      "buffer_size": "Size of replay buffer (stores 50k past experiences for learning)",
+      "buffer_size": "Size of replay buffer (stores 100k past experiences for learning)",
       "learning_starts": "Steps of pure exploration before learning begins (fills buffer first)",
       "batch_size": "Number of experiences sampled per learning update (larger = more stable)",
       "learning_rate": "How fast the neural network learns (0.0005 = conservative, stable learning)",
@@ -38,22 +25,35 @@
       "exploration_fraction": "Fraction of training with decaying exploration (40% of 1M = 400k steps)",
       "exploration_final_eps": "Final exploration rate after decay (3% random actions at end)",
       "tensorboard_log": "Directory to save training metrics for visualization"
-    },
-    "model_params": {
-      "policy": "MlpPolicy",
-      "verbose": 0,
-      "buffer_size": 50000,
-      "learning_rate": 0.0005,
-      "learning_starts": 2000,
-      "batch_size": 128,
-      "train_freq": 2,
-      "target_update_interval": 750,
-      "exploration_fraction": 0.4,
-      "exploration_final_eps": 0.03,
-      "tensorboard_log": "./tensorboard/"
     }
   },
   
+  "default": {
+    "description": "GPU-optimized parameters for complex reward learning",
+    "total_timesteps": 500000,
+    "max_steps_per_episode": 200,
+    "eval_freq": 5000,
+    "callback_params": {
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 10,
+      "checkpoint_save_freq": 25000,
+      "checkpoint_name_prefix": "default_model_checkpoint"
+    },
+    "model_params": {
+      "policy": "MlpPolicy",
+      "verbose": 1,
+      "buffer_size": 100000,
+      "learning_rate": 0.0003,
+      "learning_starts": 5000,
+      "batch_size": 256,
+      "train_freq": 1,
+      "target_update_interval": 1000,
+      "exploration_fraction": 0.3,
+      "exploration_final_eps": 0.02,
+      "tensorboard_log": "./tensorboard/"
+    }
+  },
 
 
   "conservative": {

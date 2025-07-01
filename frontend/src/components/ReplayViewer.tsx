@@ -18,7 +18,7 @@ interface ScenarioConfig {
     margin: number;
   };
   colors: {
-    [key: string]: string;
+    [key: string]: number;
   };
   units: Array<{
     id: number;
@@ -214,30 +214,44 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
     };
   }, []);
 
-  // Load scenario configuration with board config integration - AI_INSTRUCTIONS.md compliance
-  const loadScenario = useCallback(async () => {
+  // Load scenario configuration with board config integration
+  const loadScenario = useCallback(async (): Promise<ScenarioConfig> => {
     try {
       console.log('Loading scenario and board config...');
-      
-      // Load the single, unified scenario file (board + colors + units)
+
+      // 1) Fetch the unified scenario JSON (board + colors + units)
       const scenarioResponse = await fetch('/config/scenario.json');
-      
       if (!scenarioResponse.ok) {
         throw new Error(`Failed to load scenario: ${scenarioResponse.statusText}`);
       }
-      
-      // parse the scenario JSON
-     const scenarioData = await scenarioResponse.json();
-     // scenarioData now has { board, colors, units }
-     const unifiedScenario: ScenarioConfig = {
-       board:  scenarioData.board,
-       colors: scenarioData.colors,
-       units:  scenarioData.units
-     };
+
+      // 2) Parse it
+      // force TS to know colors are hex‐strings
+      const scenarioData = await scenarioResponse.json() as {
+        board: ScenarioConfig['board'];
+        colors: Record<string, string>;
+        units: ScenarioConfig['units'];
+      };
+
+      // 3) Convert each hex string ("0xRRGGBB") into a Number
+      const numericColors: Record<string, number> = {};
+      Object.entries(scenarioData.colors).forEach(([key, hexValue]) => {
+        const hexStr = (hexValue as string).replace(/^0x/, '');
+        const n = parseInt(hexStr, 16);
+        numericColors[key] = isNaN(n) ? 0x000000 : n;
+      });
+
+      // 4) Build the ScenarioConfig the viewer expects
+      const unifiedScenario: ScenarioConfig = {
+        board:  scenarioData.board,
+        colors: numericColors,    // now a map of colorName → 0xRRGGBB numbers
+        units:  scenarioData.units
+      };
 
       console.log('✅ Scenario loaded');
       setScenario(unifiedScenario);
       return unifiedScenario;
+
     } catch (err) {
       console.error('Error loading scenario:', err);
       throw err;
@@ -320,8 +334,8 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
           hexGraphics.name = 'hex';
           
           // Hex background
-          hexGraphics.beginFill(parseInt(scenario.colors.hex_default));
-          hexGraphics.lineStyle(1, parseInt(scenario.colors.hex_border));
+          hexGraphics.beginFill(scenario.colors.hex_default);
+          hexGraphics.lineStyle(1, scenario.colors.hex_border);
           hexGraphics.drawPolygon(getHexPolygonPoints(scenario.board.hex_radius));
           hexGraphics.endFill();
           
@@ -412,7 +426,7 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
       const app = new PIXI.Application({
         width: scenario.board.cols * scenario.board.hex_radius * 1.5 + scenario.board.margin * 2,
         height: scenario.board.rows * scenario.board.hex_radius * 1.75 + scenario.board.margin * 2,
-        backgroundColor: parseInt(scenario.colors.board_bg),
+        backgroundColor: scenario.colors.board_bg,
         antialias: true,
         forceCanvas: true, // Always use Canvas renderer, never WebGL
       });
