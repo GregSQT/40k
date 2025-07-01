@@ -1,79 +1,237 @@
-# Project Structure
+# WH40K Tactics RL - Project Structure Documentation
 
 ## Overview
-This is a Warhammer 40k tactical game with AI opponents, built with React/TypeScript frontend and Python AI backend.
+A sophisticated Warhammer 40k tactical game with AI opponents, featuring a React/TypeScript frontend, Python AI backend, and comprehensive configuration system.
 
-## Directory Structure
+## 📁 Root Directory Structure
 
 ```
 wh40k-tactics/
-├── frontend/                    # React/TypeScript frontend
-│   ├── src/
-│   │   ├── components/          # React components
-│   │   ├── pages/              # Page components
-│   │   ├── data/               # Game data & factories
-│   │   ├── roster/             # Unit definitions
-│   │   │   └── spaceMarine/    # Space Marine units
-│   │   └── ai/                 # Frontend AI integration
-│   ├── dist/                   # Frontend build output
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── vite.config.ts
-├── ai/                         # Python AI backend
-│   ├── agent.py               # AI agent implementation
-│   ├── api.py                 # API endpoints
-│   ├── gym40k.py             # Gymnasium environment
-│   ├── model.py              # Neural network models
-│   └── ...
-├── tools/                      # Development tools
-│   ├── backup_script.py       # Project backup utility
-│   └── generate_scenario.py   # Scenario generation
-├── docs/                       # Documentation
-└── README.md
+├── 📂 frontend/                    # React/TypeScript Frontend Application
+├── 📂 ai/                          # Python AI Backend & Training
+├── 📂 config/                      # Configuration Files (JSON)
+├── 📂 tools/                       # Development & Utility Scripts
+├── 📂 docs/                        # Project Documentation
+├── 📂 tensorboard/                 # Training Metrics (Git Ignored)
+├── 📂 versions/                    # Backup Versions (Git Ignored)
+├── 📄 config_loader.py             # Central Configuration Management
+├── 📄 tsconfig.json                # TypeScript Root Configuration
+├── 📄 .gitignore                   # Git Ignore Rules
+└── 📄 AI_INSTRUCTIONS.md           # AI Development Guidelines
 ```
 
-## Key Components
+## 🎮 Frontend (`/frontend/`)
 
-### Frontend (`/frontend/src/`)
-- **components/**: Reusable React components (Board, UnitSelector, etc.)
-- **pages/**: Main application pages (HomePage, GamePage, ReplayPage)
-- **data/**: Game logic and data management
-- **roster/**: Unit definitions and stats
-- **ai/**: Frontend integration with AI backend
+### Core Structure
+```
+frontend/
+├── 📂 src/                         # TypeScript Source Code
+│   ├── 📂 components/              # Reusable React Components
+│   │   ├── 📄 Board.tsx            # Game Board Rendering (PIXI.js)
+│   │   ├── 📄 UnitSelector.tsx     # Unit Selection Interface
+│   │   ├── 📄 ReplayViewer.tsx     # Game Replay Viewer
+│   │   ├── 📄 SimpleReplayViewer.tsx # Simplified Replay Component
+│   │   └── 📄 LoadReplayButton.tsx # Replay Loading Interface
+│   │
+│   ├── 📂 pages/                   # Main Application Pages
+│   │   ├── 📄 HomePage.tsx         # Landing Page
+│   │   ├── 📄 GamePage.tsx         # Live Game Interface
+│   │   └── 📄 ReplayPage.tsx       # Replay Analysis Page
+│   │
+│   ├── 📂 data/                    # Game Logic & Data Management
+│   │   ├── 📄 Units.ts             # Unit Type Definitions
+│   │   ├── 📄 UnitFactory.ts       # Unit Creation Logic
+│   │   └── 📄 Scenario.ts          # Game Scenario Management
+│   │
+│   ├── 📂 roster/spaceMarine/      # Unit Definitions & Stats
+│   │   ├── 📄 SpaceMarineRangedUnit.ts    # Base Ranged Unit
+│   │   ├── 📄 SpaceMarineMeleeUnit.ts     # Base Melee Unit
+│   │   ├── 📄 Intercessor.ts             # Ranged Infantry
+│   │   └── 📄 AssaultIntercessor.ts      # Melee Infantry
+│   │
+│   ├── 📂 ai/                      # Frontend AI Integration
+│   │   └── 📄 ai.ts                # AI Backend Communication
+│   │
+│   ├── 📄 App.tsx                  # Main Application Component
+│   ├── 📄 main.tsx                 # Application Entry Point
+│   └── 📄 routes.tsx               # Application Routing
+│
+├── 📂 public/                      # Static Assets & Public Config
+│   ├── 📂 ai/config/               # AI Config Access (copied from /config/)
+│   └── 📂 ai/event_log/            # Replay Files (copied from /ai/event_log/)
+│
+├── 📂 dist/                        # Build Output (Git Ignored)
+├── 📄 package.json                 # Node.js Dependencies
+├── 📄 tsconfig.json                # TypeScript Configuration
+└── 📄 vite.config.ts               # Vite Build Configuration
+```
 
-### AI Backend (`/ai/`)
-- **agent.py**: Main AI agent logic
-- **gym40k.py**: Gymnasium environment for training
-- **api.py**: FastAPI endpoints for frontend communication
-- **model.py**: Neural network architectures
+### Key Features
+- **PIXI.js Canvas Rendering**: High-performance hexagonal board visualization
+- **Replay System**: Sophisticated game replay analysis with step-by-step navigation
+- **TypeScript Strict Mode**: Full type safety and error prevention
+- **Modular Architecture**: Clean separation of concerns with reusable components
 
-### Development Tools (`/tools/`)
-- **backup_script.py**: Project versioning and backup
-- **generate_scenario.py**: Scenario generation utilities
+## 🤖 AI Backend (`/ai/`)
 
-## Build Commands
+### Core Structure
+```
+ai/
+├── 📄 gym40k.py                    # Gymnasium Environment (Main)
+├── 📄 train.py                     # Training Script (Main)
+├── 📄 evaluate.py                  # Model Evaluation (Main)
+├── 📄 api.py                       # FastAPI Backend Server
+├── 📄 state.py                     # Game State Management
+├── 📄 diagnose.py                  # Training Diagnostics
+├── 📄 reward_mapper.py             # Reward System Implementation
+├── 📄 web_replay_logger.py         # Replay Generation System
+├── 📄 generate_scenario.py         # Scenario Creation Utilities
+├── 📄 scenario.json                # Current Game Scenario
+├── 📂 event_log/                   # Training & Game Logs (Git Ignored)
+│   ├── 📄 train_best_game_replay.json      # Best Training Game
+│   ├── 📄 phase_based_replay_*.json        # Phase-based Replays
+│   └── 📄 web_replay_*.json                # Web-compatible Replays
+├── 📂 models/                      # Trained AI Models (Git Ignored)
+│   ├── 📂 current/                 # Current Production Model
+│   └── 📂 backups/                 # Model Checkpoints
+└── 📄 xxx                          # Legacy/Test Files
+```
 
+### Key Components
+- **DQN Implementation**: Deep Q-Network with experience replay
+- **Phase-based Gameplay**: Implements Warhammer 40k turn structure
+- **Sophisticated Reward System**: Complex tactical behavior reinforcement
+- **Comprehensive Logging**: Detailed training metrics and game replays
+
+## ⚙️ Configuration System (`/config/`)
+
+### Structure
+```
+config/
+├── 📄 config.json                  # Master Configuration & Paths
+├── 📄 game_config.json             # Game Rules & Mechanics
+├── 📄 training_config.json         # AI Training Parameters
+├── 📄 rewards_config.json          # Reward System Definitions
+├── 📄 board_config.json            # Board Layout & Visualization
+├── 📄 scenario.json                # Game Scenarios
+└── 📄 unit_definitions.json        # Unit Stats & Abilities
+```
+
+### Configuration Profiles
+- **Multiple Training Configs**: debug, default, conservative, aggressive, emergency
+- **Multiple Reward Systems**: simplified, balanced, phase_based, original
+- **Flexible Game Rules**: Customizable turn limits, board sizes, victory conditions
+
+## 🛠️ Development Tools (`/tools/`)
+
+### Structure
+```
+tools/
+├── 📄 backup_script.py             # Project Versioning & Backup
+└── 📄 generate_scenario.py         # Scenario Generation Utilities
+```
+
+### PowerShell Scripts
+```
+├── 📄 ps.ps1                       # Utility Scripts (Various)
+└── 📄 copy_missing_config.ps1      # Config File Management
+```
+
+## 📊 Build & Path Configuration
+
+### TypeScript Path Aliases
+```typescript
+// Configured in tsconfig.json and vite.config.ts
+"@/" → "frontend/src/"
+"@components/" → "frontend/src/components/"
+"@data/" → "frontend/src/data/"
+"@roster/" → "frontend/src/roster/"
+"@pages/" → "frontend/src/pages/"
+"@ai/" → "ai/"
+"@config/" → "config/"
+```
+
+### File System Rules (Critical)
+- **AI Scripts**: Always run from project root directory
+- **Frontend Access**: Uses `/ai/` prefix for public file access
+- **Config Location**: All configs in `/config/` directory (not `/ai/config/`)
+- **Event Logs**: Generated in `/ai/event_log/`
+- **Model Storage**: Defined in `config/config.json` → `ai/models/current/model.zip`
+- **Tensorboard**: Logs to `./tensorboard/` from root
+
+## 🏗️ Build Commands
+
+### Frontend Development
 ```bash
-# Frontend development
 cd frontend
-npm run dev
-
-# Frontend build
-cd frontend
-npm run build
-
-# AI backend
-cd ai
-python api.py
+npm install                         # Install dependencies
+npm run dev                         # Development server
+npm run build                       # Production build
 ```
 
-## Path Aliases
+### AI Training
+```bash
+# From project root
+python ai/train.py                  # Default training
+python ai/train.py --training-config conservative --rewards-config balanced
+python ai/evaluate.py               # Model evaluation
+python ai/diagnose.py               # Training diagnostics
+```
 
-TypeScript path aliases are configured for cleaner imports:
+### Tensorboard Monitoring
+```bash
+tensorboard --logdir ./tensorboard/
+```
 
-- `@/` → `frontend/src/`
-- `@components/` → `frontend/src/components/`
-- `@data/` → `frontend/src/data/`
-- `@roster/` → `frontend/src/roster/`
-- `@pages/` → `frontend/src/pages/`
-- `@ai/` → `ai/`
+## 📋 Git Ignore Strategy
+
+### Ignored Directories (Large Files)
+- `node_modules/` - Node.js dependencies (hundreds of MB)
+- `ai/models/` - Trained AI models (multiple MB each)
+- `tensorboard/` - Training logs (hundreds of MB)
+- `ai/event_log/` - Game replay logs (can be large)
+- `dist/` - Frontend build output
+- `versions/` - Backup directories
+
+### Preserved Files
+- All configuration JSON files
+- Source code (TypeScript, Python)
+- Package.json files
+- Documentation
+
+## 🔄 Data Flow Architecture
+
+### Training Pipeline
+1. **Config Loading** → `config_loader.py` centralizes all configuration
+2. **Environment Setup** → `gym40k.py` creates Gymnasium environment
+3. **Model Training** → `train.py` executes DQN training
+4. **Replay Generation** → `web_replay_logger.py` captures game data
+5. **Evaluation** → `evaluate.py` tests model performance
+
+### Frontend Integration
+1. **Build Process** → Vite compiles TypeScript to JavaScript
+2. **Config Access** → Frontend loads configs from `/public/ai/config/`
+3. **Replay Loading** → Direct file access to replay JSON files
+4. **AI Communication** → FastAPI backend for live AI games
+
+## 🎯 Key Design Principles
+
+### Modularity
+- Clear separation between frontend, backend, and configuration
+- Reusable components with well-defined interfaces
+- Plugin-style reward systems and training configurations
+
+### Configuration-Driven
+- No hardcoded parameters in training scripts
+- JSON-based configuration with validation
+- Multiple profiles for different use cases
+
+### Performance-Oriented
+- PIXI.js for high-performance rendering
+- Efficient replay system with minimal memory usage
+- Optimized AI training with experience replay
+
+### Development-Friendly
+- Comprehensive error handling and diagnostics
+- Detailed logging and monitoring
+- Automated backup and versioning systems
