@@ -192,6 +192,19 @@ export default function Board({
     // Charge preview: chargeCells & targets
     let chargeCells: { col: number; row: number }[] = [];
     let chargeTargets: Unit[] = [];
+
+    // Combat preview: combatTargets for red outline on adjacent enemies
+    let combatTargets: Unit[] = [];
+    if (phase === "combat" && selectedUnit) {
+      const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
+      
+      // Red outline: all enemy units that are adjacent to the selected unit (distance = 1)
+      combatTargets = units.filter(u =>
+        u.player !== selectedUnit.player &&
+        cubeDistance(c1, offsetToCube(u.col, u.row)) === 1
+      );
+    }
+
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
 
@@ -414,10 +427,15 @@ export default function Board({
         unitColor = 0x666666; // Dimmed for used units
       }
       
+      // ==================== RED OUTLINE LOGIC ====================
       if (chargeTargets.some(target => target.id === unit.id)) {
         borderColor = 0xff0000;
         borderWidth = CHARGE_TARGET_BORDER_WIDTH;
+      } else if (combatTargets.some(target => target.id === unit.id)) {
+        borderColor = 0xff0000; // Red outline for combat targets per AI_GAME.md
+        borderWidth = CHARGE_TARGET_BORDER_WIDTH;
       }
+      // ==================== END RED OUTLINE LOGIC ====================
 
       const unitCircle = new PIXI.Graphics();
       unitCircle.beginFill(unitColor);
