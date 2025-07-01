@@ -3,9 +3,18 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from ai.agent import RLAgent
+from config_loader import get_config_loader
 
 app = FastAPI()
-agent = RLAgent(model_path="ai/model.zip")  # make sure this exists!
+# Load configuration
+config_loader = get_config_loader()
+model_path = config_loader.get_model_path()
+agent = RLAgent(model_path=model_path)
+
+# Load API configuration
+api_config = config_loader.get_game_config().get("api", {})
+api_prefix = api_config.get("prefix", "/ai")
+action_endpoint = api_config.get("action_endpoint", "/action")
 
 class Unit(BaseModel):
     id: int
@@ -24,22 +33,22 @@ class State(BaseModel):
 class AIRequest(BaseModel):
     state: State
 
-@app.post("/ai/action")
+@app.post(f"{api_prefix}{action_endpoint}")
 async def ai_action(request: AIRequest):
     # Convert pydantic object to dict, flatten units for RL agent
     state_dict = request.state.dict()
     action = agent.predict(state_dict)
     # Map numeric action to game command
-    # Example: 0 = move_toward, 1 = move_away, 2 = shoot_closest, etc.
-    action_map = [
-        "move_toward_closest", 
-        "move_away_closest", 
-        "move_to_rng_rng", 
-        "shoot_closest", 
-        "shoot_lowest_hp", 
-        "charge_closest", 
-        "charge_lowest_hp", 
-        "attack_lowest_hp"
-    ]
-    action_name = action_map[action] if action < len(action_map) else "end_turn"
+    def get_action_map():
+        """Get action mapping from config files instead of hardcoding."""
+        rewards_config = config_loader.get_rewards_config()
+        first_unit_type = list(rewards_config.keys())[0]
+        return list(rewards_config[first_unit_type].keys())
+
+    # Load action mapping from config
+    action_map = get_action_map()
+    if isinstance(action, int) and 0 <= action < len(action_map):
+        action_name = action_map[action]
+    else:
+        action_name = "end_turn"
     return {"action": action_name}

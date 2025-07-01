@@ -14,5 +14,10 @@
     "timeout_ms": 5000,
     "retries": 3,
     "fallback_action": "wait"
+  },
+  "api": {
+    "prefix": "/ai",
+    "action_endpoint": "/action",
+    "actions_endpoint": "/actions"
   }
 }
