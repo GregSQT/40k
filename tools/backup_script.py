@@ -88,6 +88,13 @@ else:
         "frontend/src/data/UnitFactory.ts",
         "frontend/src/data/Scenario.ts",
 
+        # Frontend/src/hooks
+        "frontend/src/hooks/useAIPlayer.ts",
+        "frontend/src/hooks/useGameActions.ts",
+        "frontend/src/hooks/useGameConfig.ts",
+        "frontend/src/hooks/useGameState.ts",
+        "frontend/src/hooks/usePhaseTransition.ts",
+
         # Frontend/src/pages
         "frontend/src/pages/HomePage.tsx",
         "frontend/src/pages/GamePage.tsx",
@@ -98,6 +105,9 @@ else:
         "frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts",
         "frontend/src/roster/spaceMarine/Intercessor.ts",
         "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
+
+        # Frontend/src/services
+        "frontend/src/services/aiService.ts",
 
 ######################################################################################################
 ##### tools files

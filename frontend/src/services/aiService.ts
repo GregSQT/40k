@@ -1,4 +1,4 @@
-// services/aiService.ts
+// fron,tend/src/services/aiService.ts
 import { AIGameState, AIAction } from '../types/game';
 
 export class AIServiceError extends Error {
@@ -20,7 +20,7 @@ export class AIService {
 constructor(config: Partial<AIServiceConfig> = {}) {
   this.config = {
     baseUrl: 'http://localhost:8000',
-    timeout: 1500,
+    timeout: 5000,
     retries: 2,
     ...config,
   };
@@ -36,14 +36,17 @@ constructor(config: Partial<AIServiceConfig> = {}) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
 
-        const response = await fetch(`${this.config.baseUrl}/ai/action`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state: { units: gameState.units } }),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
+        let response: Response;
+        try {
+          response = await fetch(`${this.config.baseUrl}/ai/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: { units: gameState.units } }),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
