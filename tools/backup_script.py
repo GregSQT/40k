@@ -82,6 +82,7 @@ else:
         "frontend/src/components/UnitSelector.tsx",
         "frontend/src/components/ReplayViewer.tsx",
         "frontend/src/components/LoadReplayButton.tsx",
+        "frontend/src/components/GameReplayViewer.tsx",
 
         # Frontend/src/data
         "frontend/src/data/Units.ts",
