@@ -24,15 +24,19 @@ def decode_action(env, obs, action):
     Given the env, the last observation, and a FlatDiscrete action,
     return (unit_idx, action_type, is_ranged).
     """
-    max_actions = env.max_units * env.max_actions_per_unit  # gym40k: max_units*8
-    # Phase doesn’t affect decoding – the same split is used each phase
-    unit_idx    = action // env.max_actions_per_unit
-    action_type = action %  env.max_actions_per_unit
+    max_actions_per_unit = 8  # gym40k uses 8 actions per unit
+    unit_idx = action // max_actions_per_unit
+    action_type = action % max_actions_per_unit
 
-    # Grab that unit’s state from obs (gym40k packs per-unit arrays in obs['unit_states'])
-    unit_state = obs['unit_states'][unit_idx]
-    # In our env, a ranged unit has rng_rng > 0
-    is_ranged = unit_state['rng_rng'] > 0
+    # Get eligible units for current phase
+    eligible_units = env._get_eligible_units()
+    
+    # Check if unit_idx is valid
+    if unit_idx < len(eligible_units):
+        unit = eligible_units[unit_idx]
+        is_ranged = unit.get("rng_rng", 0) > 1  # Ranged if shooting range > 1
+    else:
+        is_ranged = False  # Invalid unit index
 
     return unit_idx, action_type, is_ranged
 
@@ -130,13 +134,18 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=50, de
 
             # ─── Decode and check tactical compliance ───
             unit_idx, action_type, is_ranged = decode_action(env, obs, action)
-            # Get this phase’s target list
-            if current_phase == "shoot":
-                targets = env._get_shooting_targets(env.ai_units[unit_idx])
-            elif current_phase == "charge":
-                targets = env._get_charge_targets(env.ai_units[unit_idx])
-            elif current_phase == "combat":
-                targets = env._get_combat_targets(env.ai_units[unit_idx])
+            # Get this phase's target list
+            eligible_units = env._get_eligible_units()
+            if unit_idx < len(eligible_units):
+                unit = eligible_units[unit_idx]
+                if current_phase == "shoot":
+                    targets = env._get_shooting_targets(unit)
+                elif current_phase == "charge":
+                    targets = env._get_charge_targets(unit)
+                elif current_phase == "combat":
+                    targets = env._get_combat_targets(unit)
+                else:
+                    targets = []
             else:
                 targets = []
 
