@@ -219,38 +219,25 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
     try {
       console.log('Loading scenario and board config...');
       
-      // Load both scenario and board config following AI_INSTRUCTIONS.md
-      const [scenarioResponse, boardConfigResponse] = await Promise.all([
-        fetch('/ai/scenario.json'),
-        fetch('/config/board_config.json')
-      ]);
+      // Load the single, unified scenario file (board + colors + units)
+      const scenarioResponse = await fetch('/config/scenario.json');
       
       if (!scenarioResponse.ok) {
         throw new Error(`Failed to load scenario: ${scenarioResponse.statusText}`);
       }
-      if (!boardConfigResponse.ok) {
-        throw new Error(`Failed to load board config: ${boardConfigResponse.statusText}`);
-      }
       
-      const data = await scenarioResponse.json();
-      const boardConfigData = await boardConfigResponse.json();
-      const boardConfig = boardConfigData.default;
-      
-      // Merge board configuration to ensure consistent display - AI_INSTRUCTIONS.md
-      data.board = {
-        ...data.board,
-        cols: boardConfig.cols,
-        rows: boardConfig.rows,
-        hex_radius: boardConfig.hex_radius,
-        margin: boardConfig.margin
-      };
-      
-      data.colors = boardConfig.colors;
-      data.boardConfig = boardConfig; // Store for board display consistency
-      
-      console.log('✅ Scenario loaded with board config integration');
-      setScenario(data);
-      return data;
+      // parse the scenario JSON
+     const scenarioData = await scenarioResponse.json();
+     // scenarioData now has { board, colors, units }
+     const unifiedScenario: ScenarioConfig = {
+       board:  scenarioData.board,
+       colors: scenarioData.colors,
+       units:  scenarioData.units
+     };
+
+      console.log('✅ Scenario loaded');
+      setScenario(unifiedScenario);
+      return unifiedScenario;
     } catch (err) {
       console.error('Error loading scenario:', err);
       throw err;

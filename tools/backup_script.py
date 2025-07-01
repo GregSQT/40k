@@ -23,6 +23,11 @@ else:
     ROOT = os.environ.get("PROJECT_ROOT", r"E:\Dropbox\Informatique\Holberton\40k")
     DEST_ROOT = os.environ.get("DEST_ROOT", os.path.join(ROOT, "versions", version))
     files_to_copy = [
+
+######################################################################################################
+##### root files
+######################################################################################################
+
         # Root config files
         "config_loader.py",
 
@@ -76,7 +81,6 @@ else:
         "frontend/src/components/Board.tsx",
         "frontend/src/components/UnitSelector.tsx",
         "frontend/src/components/ReplayViewer.tsx",
-        "frontend/src/components/SimpleReplayViewer.tsx",
         "frontend/src/components/LoadReplayButton.tsx",
 
         # Frontend/src/data
