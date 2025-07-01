@@ -5,10 +5,24 @@ import { Unit } from '../types/game';
 import { Intercessor } from '../roster/spaceMarine/Intercessor';
 import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
 
-// Unit class registry - use existing config files
+// Unit class registry - use same registry as main game
 const UNIT_REGISTRY = {
   'Intercessor': Intercessor,
-  'AssaultIntercessor': AssaultIntercessor
+  'AssaultIntercessor': AssaultIntercessor,
+  'intercessor': Intercessor,  // Add lowercase variants for AI compatibility
+  'assault_intercessor': AssaultIntercessor
+} as const;
+
+// Validate unit registry matches AI expectations
+const validateUnitRegistry = () => {
+  const requiredProps = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG', 'ICON'];
+  Object.entries(UNIT_REGISTRY).forEach(([unitType, UnitClass]) => {
+    requiredProps.forEach(prop => {
+      if (UnitClass[prop as keyof typeof UnitClass] === undefined) {
+        throw new Error(`Unit ${unitType} missing required property: ${prop}`);
+      }
+    });
+  });
 };
 
 interface ReplayEvent {
@@ -47,6 +61,23 @@ interface ScenarioConfig {
     col: number;
     row: number;
   }>;
+  // Add support for board config validation
+  boardConfig?: {
+    cols: number;
+    rows: number;
+    hex_radius: number;
+    margin: number;
+    colors: Record<string, string>;
+  };
+  gameConfig?: {
+    game_rules: {
+      max_turns: number;
+      board_size: [number, number];
+    };
+    gameplay: {
+      phase_order: string[];
+    };
+  };
 }
 
 interface SimpleReplayViewerProps {
@@ -98,6 +129,30 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
         setLoading(true);
         setError(null);
         
+        // Load board configuration first (same as game feature)
+        console.log('Loading board config...');
+        const boardConfigResponse = await fetch('/ai/config/board_config.json');
+        if (!boardConfigResponse.ok) {
+          throw new Error(`Failed to load board config: ${boardConfigResponse.statusText}`);
+        }
+        const boardConfigData = await boardConfigResponse.json();
+        const boardConfig = boardConfigData.default || boardConfigData.small;
+        
+        // Load game configuration for phase order
+        console.log('Loading game config...');
+        const gameConfigResponse = await fetch('/config/game_config.json');
+        if (!gameConfigResponse.ok) {
+          throw new Error(`Failed to load game config: ${gameConfigResponse.statusText}`);
+        }
+        const gameConfigData = await gameConfigResponse.json();
+        
+        // Validate phase order from AI_GAME rules
+        const expectedPhases = ["move", "shoot", "charge", "combat"];
+        const configPhases = gameConfigData.gameplay?.phase_order || [];
+        if (JSON.stringify(configPhases) !== JSON.stringify(expectedPhases)) {
+          console.warn('Phase order mismatch with AI_GAME rules:', configPhases);
+        }
+        
         // Load scenario
         console.log('Loading scenario from /ai/scenario.json...');
         const scenarioResponse = await fetch('/ai/scenario.json');
@@ -105,16 +160,38 @@ export const SimpleReplayViewer: React.FC<SimpleReplayViewerProps> = ({
           throw new Error(`Failed to load scenario: ${scenarioResponse.statusText}`);
         }
         const scenarioData = await scenarioResponse.json();
-        setScenario(scenarioData);
-        console.log('Scenario loaded:', scenarioData);
         
-        // Load replay data
+        // Merge board and game config with scenario
+        const enhancedScenario = {
+          ...scenarioData,
+          boardConfig: boardConfig,
+          gameConfig: gameConfigData
+        };
+        
+        setScenario(enhancedScenario);
+        console.log('Scenario loaded:', enhancedScenario);
+        
+        // Load replay data - validate file exists per AI_INSTRUCTIONS
         console.log(`Loading replay from /${replayFile}...`);
         const replayResponse = await fetch(`/${replayFile}`);
         if (!replayResponse.ok) {
+          if (replayResponse.status === 404) {
+            throw new Error(`Replay file not found: ${replayFile}. Ensure ai\\event_log\\train_best_game_replay.json exists.`);
+          }
           throw new Error(`Failed to load replay file: ${replayResponse.statusText}`);
         }
+        
         const data = await replayResponse.json();
+        
+        // Validate replay data structure
+        if (!data.events || !Array.isArray(data.events)) {
+          throw new Error('Invalid replay format: missing events array');
+        }
+        
+        if (data.events.length === 0) {
+          throw new Error('Empty replay file - no events to display');
+        }
+        
         setReplayData(data);
         setCurrentStep(0);
         console.log('Replay data loaded:', data);
