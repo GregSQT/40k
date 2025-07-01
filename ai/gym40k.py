@@ -493,7 +493,7 @@ class W40KEnv(gym.Env):
             # Episode too long, truncate it
             self.game_over = True
             self.winner = None
-            return self._get_obs(), -1.0, False, True, self._get_info()  # truncated=True
+            return self._get_obs(), -0.1, False, True, self._get_info()  # truncated=True
         
         if self.game_over:
             return self._get_obs(), 0.0, True, False, self._get_info()
