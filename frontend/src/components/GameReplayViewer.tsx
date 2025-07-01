@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as PIXI from "pixi.js-legacy";
 import { Intercessor } from '../roster/spaceMarine/Intercessor';
 import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
+import { useGameConfig } from '../hooks/useGameConfig';
 
 interface ScenarioConfig {
   board: {
@@ -77,6 +78,9 @@ interface GameReplayViewerProps {
 export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
   replayFile = "ai/event_log/train_best_game_replay.json"
 }) => {
+  // ✅ USE SAME CONFIG AS GAME FEATURE - MUST BE DECLARED BEFORE USE
+  const { boardConfig, loading: configLoading, error: configError } = useGameConfig();
+  
   const [replayData, setReplayData] = useState<ReplayData | null>(null);
   const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
@@ -346,6 +350,18 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
   // Load replay data
   useEffect(() => {
     const loadReplayData = async () => {
+      if (configLoading) return;
+      
+      if (configError) {
+        setError(`Board configuration error: ${configError}`);
+        return;
+      }
+
+      if (!boardConfig) {
+        setError('Board configuration not loaded - violates AI_INSTRUCTIONS.md');
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
@@ -374,7 +390,7 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
     };
 
     loadReplayData();
-  }, [replayFile, loadScenario]);
+  }, [replayFile, loadScenario, boardConfig, configLoading, configError]);
 
   // Initialize PIXI application with WebGL protection
   useEffect(() => {
@@ -382,20 +398,15 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
       if (!boardRef.current || !scenario || appRef.current) return;
 
       try {
-        // Load board configuration following AI_INSTRUCTIONS.md - NO HARDCODED VALUES
-        const boardConfig = await fetch('/config/board_config.json')
-          .then(res => res.json())
-          .then(data => data.default);
-    
-    if (!boardConfig) {
-      throw new Error('Board configuration not loaded - violates AI_INSTRUCTIONS.md');
-    }
+        // ✅ USE CONFIG FROM HOOK - NO FETCH NEEDED
+        if (!boardConfig) {
+          throw new Error('Board configuration not loaded - violates AI_INSTRUCTIONS.md');
+        }
 
-    const { board } = scenario;
-    const BOARD_COLS = boardConfig.cols;
-    const BOARD_ROWS = boardConfig.rows;
-    const HEX_RADIUS = boardConfig.hex_radius;
-    const MARGIN = boardConfig.margin;
+        const BOARD_COLS = boardConfig.cols;
+        const BOARD_ROWS = boardConfig.rows;
+        const HEX_RADIUS = boardConfig.hex_radius;
+        const MARGIN = boardConfig.margin;
     const HEX_WIDTH = 1.5 * HEX_RADIUS;
     const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
     const HEX_HORIZ_SPACING = HEX_WIDTH;
@@ -407,16 +418,24 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
     console.log('Creating PIXI application with size:', boardWidth, 'x', boardHeight);
 
     try {
-      // Force Canvas renderer to avoid WebGL instability
-      const app = new PIXI.Application({
+      // Parse colors from config
+      const parseColor = (colorStr: string): number => {
+        return parseInt(colorStr.replace('0x', ''), 16);
+      };
+
+      // ✅ PIXI CONFIG FROM board_config.json WITH FALLBACKS
+      const displayConfig = boardConfig.display || {};
+      const pixiConfig = {
         width: boardWidth,
         height: boardHeight,
-        backgroundColor: parseInt(scenario.colors.board_bg),
-        antialias: true,
-        resolution: window.devicePixelRatio || 1,
-        autoDensity: true,
-        forceCanvas: true // Force Canvas rendering instead of WebGL
-      });
+        backgroundColor: parseColor(boardConfig.colors.background),
+        antialias: displayConfig.antialias ?? true,
+        resolution: displayConfig.resolution === "auto" ? (window.devicePixelRatio || 1) : (displayConfig.resolution ?? 1),
+        autoDensity: displayConfig.autoDensity ?? true,
+        forceCanvas: displayConfig.forceCanvas ?? true,
+      };
+
+      const app = new PIXI.Application(pixiConfig);
 
       console.log('PIXI application created with Canvas renderer');
 
