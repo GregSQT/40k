@@ -626,151 +626,107 @@ class W40KEnv(gym.Env):
         return True
 
     def _execute_shoot_action(self, unit, action_type):
-        """Execute shooting following AI_GAME_OVERVIEW.md priority system."""
+        """Execute shooting: only action_type==4 fires at the highest‐priority target."""
         unit_rewards = self._get_unit_reward_config(unit)
-        reward = 0.0
-        
-        if action_type >= 4:
+
+        # Only code 4 shoots; 7 is wait; everything else is invalid.
+        if action_type == 4:
+            targets = self._get_shooting_targets(unit)
+            if targets:
+                target = targets[0]
+                damage = unit["rng_dmg"]
+                old_hp = target["cur_hp"]
+                target["cur_hp"] = max(0, old_hp - damage)
+
+                # Base ranged‐attack reward
+                reward = unit_rewards.get("ranged_attack", 1.0)
+
+                # Kill bonuses
+                if target["cur_hp"] <= 0:
+                    target["alive"] = False
+                    reward += unit_rewards.get("enemy_killed_r", 5.0)
+                    if old_hp == damage:
+                        reward += unit_rewards.get("enemy_killed_no_overkill_r", 7.0) - unit_rewards.get("enemy_killed_r", 5.0)
+                    if self._was_lowest_hp_target(target, targets):
+                        reward += unit_rewards.get("enemy_killed_lowests_hp_r", 6.0) - unit_rewards.get("enemy_killed_r", 5.0)
+            else:
+                reward = unit_rewards.get("wait", -0.05)
+
+            unit["has_shot"] = True
+            self.shot_units.add(unit["id"])
+            return reward
+
+        elif action_type == 7:
             unit["has_shot"] = True
             return unit_rewards.get("wait", -0.05)
-        
-        # Find targets following AI_GAME_OVERVIEW.md priority order
-        targets = self._get_shooting_targets(unit)
-        
-        # ─── treat any out-of-bounds index as wait ───
-        if action_type < 0:
-            # truly invalid
-            reward = unit_rewards.get("invalid_action", -0.1)
-        elif action_type < len(targets):
-            target = targets[action_type]
-            priority = action_type + 1  # Priority 1, 2, 3
-            
-            # Base shooting reward
-            reward = unit_rewards.get("ranged_attack", 1.0)
-            
-            # Priority bonuses
-            if priority == 1:
-                reward += unit_rewards.get("shoot_priority_1", 2.0)
-            elif priority == 2:
-                reward += unit_rewards.get("shoot_priority_2", 1.5)
-            elif priority == 3:
-                reward += unit_rewards.get("shoot_priority_3", 1.0)
-            
-            # Execute shooting
-            damage = unit["rng_dmg"]
-            old_hp = target["cur_hp"]
-            target["cur_hp"] = max(0, target["cur_hp"] - damage)
-            
-            # Kill bonuses
-            if target["cur_hp"] <= 0:
-                target["alive"] = False
-                reward += unit_rewards.get("enemy_killed_r", 5.0)
-                
-                # No overkill bonus
-                if old_hp == damage:
-                    reward += unit_rewards.get("enemy_killed_no_overkill_r", 7.0) - unit_rewards.get("enemy_killed_r", 5.0)
-                
-                # Lowest HP bonus
-                if self._was_lowest_hp_target(target, targets):
-                    reward += unit_rewards.get("enemy_killed_lowests_hp_r", 6.0) - unit_rewards.get("enemy_killed_r", 5.0)
-        
+
         else:
-            # any index ≥ len(targets) → wait
-            reward = unit_rewards.get("wait", -0.05)
-        
-        unit["has_shot"] = True
-        return reward
+            unit["has_shot"] = True
+            return unit_rewards.get("invalid_action", -0.1)
 
     def _execute_charge_action(self, unit, action_type):
-        """Execute charge following AI_GAME_OVERVIEW.md charge priority."""
+        """Execute charge: only action_type==5 charges the highest‐priority target."""
         unit_rewards = self._get_unit_reward_config(unit)
-        reward = 0.0
-        
-        if action_type >= 4:
+
+        # Only code 5 charges; 7 is wait; everything else is invalid.
+        if action_type == 5:
+            targets = self._get_charge_targets(unit)
+            if targets:
+                target = targets[0]
+                unit["col"], unit["row"] = target["col"], target["row"]
+
+                reward = unit_rewards.get("charge_success", 1.5)
+                reward += unit_rewards.get("charge_priority_1", 2.0)
+            else:
+                reward = unit_rewards.get("wait", -0.05)
+
+            unit["has_charged"] = True
+            self.charged_units.add(unit["id"])
+            return reward
+
+        elif action_type == 7:
             unit["has_charged"] = True
             return unit_rewards.get("wait", -0.05)
-        
-        # Find charge targets following AI_GAME_OVERVIEW.md priority
-        targets = self._get_charge_targets(unit)
-        
-         # ─── out-of-range → wait; only <0 is invalid ───
-        if action_type < 0:
-            reward = unit_rewards.get("invalid_action", -0.1)
-        elif action_type < len(targets):
-            target = targets[action_type]
-            priority = action_type + 1  # Priority 1, 2, 3
-            
-            # Base charge reward
-            reward = unit_rewards.get("charge_success", 1.5)
-            
-            # Priority bonuses
-            if priority == 1:
-                reward += unit_rewards.get("charge_priority_1", 2.0)
-            elif priority == 2:
-                reward += unit_rewards.get("charge_priority_2", 1.5)
-            elif priority == 3:
-                reward += unit_rewards.get("charge_priority_3", 1.0)
-            
-            # Execute charge (move adjacent)
-            self._charge_at_target(unit, target)
-            
+
         else:
-            reward = unit_rewards.get("wait", -0.05)
-        
-        unit["has_charged"] = True
-        return reward
+            unit["has_charged"] = True
+            return unit_rewards.get("invalid_action", -0.1)
 
     def _execute_combat_action(self, unit, action_type):
-        """Execute combat following AI_GAME_OVERVIEW.md combat priority."""
+        """Execute melee attack: only action_type==6 swings at the top target."""
         unit_rewards = self._get_unit_reward_config(unit)
-        reward = 0.0
-        
-        if action_type >= 3:
+
+        # Only code 6 attacks; 7 is wait; everything else is invalid.
+        if action_type == 6:
+            targets = self._get_combat_targets(unit)
+            if targets:
+                target = targets[0]
+                damage = unit["cc_dmg"]
+                old_hp = target["cur_hp"]
+                target["cur_hp"] = max(0, old_hp - damage)
+
+                reward = unit_rewards.get("attack", 1.0)
+                if target["cur_hp"] <= 0:
+                    target["alive"] = False
+                    reward += unit_rewards.get("enemy_killed_m", 8.0)
+                    if old_hp == damage:
+                        reward += unit_rewards.get("enemy_killed_no_overkill_m", 10.0) - unit_rewards.get("enemy_killed_m", 8.0)
+                    if self._was_lowest_hp_target(target, targets):
+                        reward += unit_rewards.get("enemy_killed_lowests_hp_m", 9.0) - unit_rewards.get("enemy_killed_m", 8.0)
+            else:
+                reward = unit_rewards.get("wait", -0.05)
+
+            unit["has_attacked"] = True
+            self.attacked_units.add(unit["id"])
+            return reward
+
+        elif action_type == 7:
             unit["has_attacked"] = True
             return unit_rewards.get("wait", -0.05)
-        
-        # Find combat targets following AI_GAME_OVERVIEW.md priority
-        targets = self._get_combat_targets(unit)
-        
-        # ─── same bounds‐check here ───
-        if action_type < 0:
-            reward = unit_rewards.get("invalid_action", -0.1)
-        elif action_type < len(targets):
-            target = targets[action_type]
-            priority = action_type + 1  # Priority 1, 2
-            
-            # Base attack reward
-            reward = unit_rewards.get("attack", 1.0)
-            
-            # Priority bonuses
-            if priority == 1:
-                reward += unit_rewards.get("attack_priority_1", 2.0)
-            elif priority == 2:
-                reward += unit_rewards.get("attack_priority_2", 1.5)
-            
-            # Execute attack
-            damage = unit["cc_dmg"]
-            old_hp = target["cur_hp"]
-            target["cur_hp"] = max(0, target["cur_hp"] - damage)
-            
-            # Kill bonuses
-            if target["cur_hp"] <= 0:
-                target["alive"] = False
-                reward += unit_rewards.get("enemy_killed_m", 5.0)
-                
-                # No overkill bonus
-                if old_hp == damage:
-                    reward += unit_rewards.get("enemy_killed_no_overkill_m", 7.0) - unit_rewards.get("enemy_killed_m", 5.0)
-                
-                # Lowest HP bonus
-                if self._was_lowest_hp_target(target, targets):
-                    reward += unit_rewards.get("enemy_killed_lowests_hp_m", 6.0) - unit_rewards.get("enemy_killed_m", 5.0)
-        
+
         else:
-            reward = unit_rewards.get("wait", -0.05)
-        
-        unit["has_attacked"] = True
-        return reward
+            unit["has_attacked"] = True
+            return unit_rewards.get("invalid_action", -0.1)
 
     def _get_shooting_targets(self, unit):
         """Get shooting targets in AI_GAME_OVERVIEW.md priority order."""
