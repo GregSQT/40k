@@ -269,8 +269,13 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
       };
 
       console.log('✅ Unified scenario loaded with board config');
+      console.log('🎨 DEBUG - Scenario colors:', unifiedScenario.colors);
+      console.log('🎨 DEBUG - Background color:', unifiedScenario.colors.background);
+      console.log('🎨 DEBUG - Cell even:', unifiedScenario.colors.cell_even);
+      console.log('🎨 DEBUG - Cell odd:', unifiedScenario.colors.cell_odd);
+      console.log('🎨 DEBUG - Original boardConfig colors:', boardConfig?.colors);
       setScenario(unifiedScenario);
-      return unifiedScenario;
+      return unifiedScenario;;
 
     } catch (err) {
       console.error('Error loading unified scenario:', err);

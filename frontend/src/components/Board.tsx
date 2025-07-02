@@ -132,6 +132,13 @@ export default function Board({
     const ATTACK_COLOR = parseColor(boardConfig.colors.attack || "0xff4444");
     const CHARGE_COLOR = parseColor(boardConfig.colors.charge || "0xff9900");
     const ELIGIBLE_COLOR = parseColor(boardConfig.colors.eligible || "0x00ff00");
+    console.log('🎨 BOARD.TSX DEBUG - Board colors:', {
+      background: parseColor(boardConfig.colors.background),
+      cell_even: parseColor(boardConfig.colors.cell_even),
+      cell_odd: parseColor(boardConfig.colors.cell_odd),
+      highlight: HIGHLIGHT_COLOR,
+      attack: ATTACK_COLOR
+    });
 
     // ✅ ALL DISPLAY VALUES FROM CONFIG WITH FALLBACKS
     const displayConfig = boardConfig.display || {};
