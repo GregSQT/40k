@@ -160,7 +160,7 @@ const validateTurnStructure = (event: ReplayEvent, expectedPhase: string, validP
 };
 
 export const ReplayBoard: React.FC<ReplayBoardProps> = ({ 
-  replayFile = 'ai/event_log/train_best_game_replay.json',
+  replayFile,
   currentStep = 0,
   onUnitsLoaded,
   onEventChange,
@@ -196,10 +196,12 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
           if (defaultConfig?.replay_config?.default_file) {
             setConfigReplayFile(defaultConfig.replay_config.default_file);
           } else {
-            throw new Error('No replay config found in training_config.json');
+            const errorMessage = errorMessages?.no_replay_config || 'No replay config found in training_config.json';
+            throw new Error(errorMessage);
           }
         } else {
-          throw new Error('Failed to load training_config.json');
+          const errorMessage = errorMessages?.config_load_failed || 'Failed to load training_config.json';
+          throw new Error(errorMessage);
         }
       } catch (err) {
         console.error('Error loading replay file from config:', err);
@@ -500,9 +502,9 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
       <div className="flex items-center justify-center h-96 bg-gray-900 text-white rounded-lg">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <div className="text-lg">Loading replay...</div>
+          <div className="text-lg">{errorMessages?.loading_replay || 'Loading replay...'}</div>
           <div className="text-sm text-gray-400 mt-2">
-            Loading scenario and replay data...
+            {errorMessages?.loading_scenario || 'Loading scenario and replay data...'}
           </div>
         </div>
       </div>
@@ -514,7 +516,7 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
     return (
       <div className="flex items-center justify-center h-96 bg-red-900 text-white rounded-lg">
         <div className="text-center">
-          <div className="text-xl mb-4">⚠️ Error Loading Replay</div>
+          <div className="text-xl mb-4">⚠️ {errorMessages?.error_loading_replay || 'Error Loading Replay'}</div>
           <div className="text-sm bg-red-800 p-4 rounded max-w-md">
             {error}
           </div>
@@ -522,7 +524,7 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
             onClick={() => window.location.reload()}
             className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-500 rounded transition-colors"
           >
-            Retry
+            {errorMessages?.retry_button || 'Retry'}
           </button>
         </div>
       </div>
@@ -534,9 +536,9 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
     return (
       <div className="flex items-center justify-center h-96 bg-gray-900 text-white rounded-lg">
         <div className="text-center">
-          <div className="text-xl mb-4">📄 No Replay Data</div>
+          <div className="text-xl mb-4">📄 {errorMessages?.no_replay_data || 'No Replay Data'}</div>
           <div className="text-sm text-gray-400">
-            No replay data available to display
+            {errorMessages?.no_replay_data_desc || 'No replay data available to display'}
           </div>
         </div>
       </div>
