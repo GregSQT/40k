@@ -1,22 +1,4 @@
 {
-  "board": {
-    "cols": 24,
-    "rows": 18,
-    "hex_radius": 24,
-    "margin": 32
-  },
-  "colors": {
-    "board_bg": "0x002200",
-    "cell_even": "0x002200",
-    "cell_odd": "0x001a00",
-    "cell_border": "0x00ff00",
-    "player_0": "0x244488",
-    "player_1": "0x882222",
-    "hp_full": "0x36e36b",
-    "hp_damaged": "0x444444",
-    "highlight": "0x80ff80",
-    "current_unit": "0xffd700"
-  },
   "units": [
     {
       "id": 1,

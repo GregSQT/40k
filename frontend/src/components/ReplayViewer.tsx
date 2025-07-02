@@ -4,6 +4,7 @@ import * as PIXI from "pixi.js-legacy";
 import { Unit } from '../types/game';
 import { Intercessor } from '../roster/spaceMarine/Intercessor';
 import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
+import { useGameConfig } from '../hooks/useGameConfig';
 
 // Extended Unit interface for replay viewer with alive property
 interface ReplayUnit extends Unit {
@@ -143,6 +144,8 @@ const validateTurnStructure = (event: ReplayEvent, expectedPhase: string, validP
 export const ReplayViewer: React.FC<ReplayViewerProps> = ({ 
   replayFile = 'ai/event_log/train_best_game_replay.json' 
 }) => {
+  // Use same config hook as Board.tsx
+  const { boardConfig, loading: configLoading, error: configError } = useGameConfig();
   // All hooks must be at the top level of the component
   const [actionDefinitions, setActionDefinitions] = useState<{[key: string]: {name: string, phase: string, type: string}} | null>(null);
   const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
@@ -222,49 +225,58 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
     };
   }, []);
 
-  // Load scenario configuration with board config integration
+  // Load scenario using unified config system like Board.tsx
   const loadScenario = useCallback(async (): Promise<ScenarioConfig> => {
     try {
-      console.log('Loading scenario and board config...');
+      console.log('Loading scenario with unified board config...');
 
-      // 1) Fetch the unified scenario JSON (board + colors + units)
+      // Wait for board config to load first
+      if (!boardConfig) {
+        throw new Error('Board configuration not loaded');
+      }
+
+      // Load scenario units from /config/scenario.json
       const scenarioResponse = await fetch('/config/scenario.json');
       if (!scenarioResponse.ok) {
         throw new Error(`Failed to load scenario: ${scenarioResponse.statusText}`);
       }
 
-      // 2) Parse it
-      // force TS to know colors are hex‐strings
       const scenarioData = await scenarioResponse.json() as {
-        board: ScenarioConfig['board'];
-        colors: Record<string, string>;
         units: ScenarioConfig['units'];
       };
 
-      // 3) Convert each hex string ("0xRRGGBB") into a Number
-      const numericColors: Record<string, number> = {};
-      Object.entries(scenarioData.colors).forEach(([key, hexValue]) => {
-        const hexStr = (hexValue as string).replace(/^0x/, '');
-        const n = parseInt(hexStr, 16);
-        numericColors[key] = isNaN(n) ? 0x000000 : n;
-      });
-
-      // 4) Build the ScenarioConfig the viewer expects
+      // Build unified scenario using board config + scenario units
       const unifiedScenario: ScenarioConfig = {
-        board:  scenarioData.board,
-        colors: numericColors,    // now a map of colorName → 0xRRGGBB numbers
-        units:  scenarioData.units
+        board: {
+          cols: boardConfig.cols,
+          rows: boardConfig.rows,
+          hex_radius: boardConfig.hex_radius,
+          margin: boardConfig.margin
+        },
+        colors: {
+          background: parseInt(boardConfig.colors.background.replace('0x', ''), 16),
+          cell_even: parseInt(boardConfig.colors.cell_even.replace('0x', ''), 16),
+          cell_odd: parseInt(boardConfig.colors.cell_odd.replace('0x', ''), 16),
+          cell_border: parseInt(boardConfig.colors.cell_border.replace('0x', ''), 16),
+          player_0: parseInt(boardConfig.colors.player_0.replace('0x', ''), 16),
+          player_1: parseInt(boardConfig.colors.player_1.replace('0x', ''), 16),
+          hp_full: parseInt(boardConfig.colors.hp_full.replace('0x', ''), 16),
+          hp_damaged: parseInt(boardConfig.colors.hp_damaged.replace('0x', ''), 16),
+          highlight: parseInt(boardConfig.colors.highlight.replace('0x', ''), 16),
+          current_unit: parseInt(boardConfig.colors.current_unit.replace('0x', ''), 16)
+        },
+        units: scenarioData.units
       };
 
-      console.log('✅ Scenario loaded');
+      console.log('✅ Unified scenario loaded with board config');
       setScenario(unifiedScenario);
       return unifiedScenario;
 
     } catch (err) {
-      console.error('Error loading scenario:', err);
+      console.error('Error loading unified scenario:', err);
       throw err;
     }
-  }, []);
+  }, [boardConfig]);
 
   // Convert replay events to unit objects
   const convertUnits = useCallback((event: ReplayEvent): ReplayUnit[] => {
@@ -557,6 +569,20 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
       try {
         setLoading(true);
         setError(null);
+
+        // Wait for config to load first
+        if (configLoading) {
+          console.log('⏳ Waiting for configuration to load...');
+          return;
+        }
+
+        if (configError) {
+          throw new Error(`Configuration error: ${configError}`);
+        }
+
+        if (!boardConfig) {
+          throw new Error('Board configuration not available');
+        }
         
         console.log('Loading scenario...');
         await loadScenario();
@@ -587,7 +613,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
     };
 
     loadData();
-  }, [replayFile, loadScenario]);
+  }, [replayFile, loadScenario, boardConfig, configLoading, configError]);
 
   // Auto-play functionality
   useEffect(() => {
