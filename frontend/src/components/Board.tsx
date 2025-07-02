@@ -3,6 +3,7 @@ import React, { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js-legacy";
 import type { Unit } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
+import { ReplayData, ReplayEvent, ReplayUnit } from '../types/replay';
 
 // For flat-topped hex, even-q offset (col, row)
 function offsetToCube(col: number, row: number) {
@@ -36,9 +37,14 @@ function getHexPolygonPoints(cx: number, cy: number, size: number) {
 type Mode = "select" | "movePreview" | "attackPreview" | "chargePreview" | "replay";
 
 type BoardProps = {
-  units: Unit[];
+  units: Unit[] | ReplayUnit[];
   selectedUnitId?: number | null;
   mode?: Mode;
+  // Replay Mode Props
+  isReplayMode?: boolean;
+  replayData?: ReplayData | null;
+  currentStep?: number;
+  actingUnitId?: number | null;
   movePreview?: { unitId: number; destCol: number; destRow: number } | null;
   attackPreview?: { unitId: number; col: number; row: number } | null;
   onSelectUnit?: (id: number | string | null) => void;
@@ -63,6 +69,11 @@ export default function Board({
   units,
   selectedUnitId = null,
   mode = "select",
+  // Replay Mode Props  
+  isReplayMode = false,
+  replayData = null,
+  currentStep = 0,
+  actingUnitId = null,
   movePreview = null,
   attackPreview = null,
   onSelectUnit = () => {},
@@ -112,6 +123,18 @@ export default function Board({
 
     containerRef.current.innerHTML = "";
 
+    // Process units for replay mode if needed
+    let processedUnits = units;
+    if (isReplayMode && replayData && currentStep < replayData.events.length) {
+      const currentEvent = replayData.events[currentStep];
+      if (currentEvent && currentEvent.units) {
+        // Convert replay event units to display units
+        processedUnits = currentEvent.units.map((unit: any) => ({
+          ...unit,
+          alive: unit.alive !== false
+        }));
+      }
+    }
     // Extract board configuration values - USE CONFIG VALUES
     const BOARD_COLS = boardConfig.cols;
     const BOARD_ROWS = boardConfig.rows;
@@ -349,7 +372,7 @@ export default function Board({
     }
 
     // ✅ ORIGINAL UNIT RENDERING - All features preserved
-    for (const unit of units) {
+    for (const unit of processedUnits) {
       // In movePreview, do not draw the moving unit at its old spot
       if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;
       // In attackPreview, do not draw the unit at its old spot if it's attackPreview
@@ -503,7 +526,13 @@ export default function Board({
           }
         });
       }
-      app.stage.addChild(unitCircle);
+      // Add replay-specific highlighting for acting unit
+      if (isReplayMode && actingUnitId === unit.id) {
+        const actingUnitHighlight = new PIXI.Graphics();
+        actingUnitHighlight.lineStyle(SELECTED_BORDER_WIDTH + 2, 0xFFFF00, 1); // Yellow highlight for acting unit
+        actingUnitHighlight.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO + 2);
+        app.stage.addChild(actingUnitHighlight);
+      }
 
       // ✅ ICON RENDERING FROM CONFIG - Better scaling and error handling
       if (unit.ICON) {
@@ -602,6 +631,11 @@ export default function Board({
     units,
     selectedUnitId,
     mode,
+    // Replay Dependencies
+    isReplayMode,
+    replayData,
+    currentStep,
+    actingUnitId,
     movePreview,
     attackPreview,
     currentPlayer,

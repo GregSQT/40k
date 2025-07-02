@@ -52,6 +52,13 @@
       "exploration_fraction": 0.3,
       "exploration_final_eps": 0.02,
       "tensorboard_log": "./tensorboard/"
+      },
+    "replay_config": {
+      "default_file": "ai/event_log/train_best_game_replay.json",
+      "backup_files": [
+        "ai/event_log/phase_based_replay_latest.json",
+        "ai/event_log/web_replay_latest.json"
+      ]
     }
   },
 
@@ -80,6 +87,13 @@
       "exploration_fraction": 0.4,
       "exploration_final_eps": 0.03,
       "tensorboard_log": "./tensorboard/"
+      },
+    "replay_config": {
+      "default_file": "ai/event_log/train_best_game_replay.json",
+      "backup_files": [
+        "ai/event_log/phase_based_replay_latest.json",
+        "ai/event_log/web_replay_latest.json"
+      ]
     }
   },
 
@@ -108,6 +122,13 @@
       "exploration_fraction": 0.2,
       "exploration_final_eps": 0.01,
       "tensorboard_log": "./tensorboard/"
+      },
+    "replay_config": {
+      "default_file": "ai/event_log/train_best_game_replay.json",
+      "backup_files": [
+        "ai/event_log/phase_based_replay_latest.json",
+        "ai/event_log/web_replay_latest.json"
+      ]
     }
   },
 
@@ -136,6 +157,13 @@
       "exploration_fraction": 0.1,
       "exploration_final_eps": 0.1,
       "tensorboard_log": "./tensorboard/"
+      },
+    "replay_config": {
+      "default_file": "ai/event_log/train_best_game_replay.json",
+      "backup_files": [
+        "ai/event_log/phase_based_replay_latest.json",
+        "ai/event_log/web_replay_latest.json"
+      ]
     }
   },
 
@@ -164,6 +192,13 @@
       "exploration_fraction": 0.5,
       "exploration_final_eps": 0.1,
       "tensorboard_log": "./tensorboard/"
+      },
+    "replay_config": {
+      "default_file": "ai/event_log/train_best_game_replay.json",
+      "backup_files": [
+        "ai/event_log/phase_based_replay_latest.json",
+        "ai/event_log/web_replay_latest.json"
+      ]
     }
   },
 
@@ -191,6 +226,13 @@
       "exploration_fraction": 0.3,
       "exploration_final_eps": 0.02,
       "tensorboard_log": "./tensorboard/"
+      },
+    "replay_config": {
+      "default_file": "ai/event_log/train_best_game_replay.json",
+      "backup_files": [
+        "ai/event_log/phase_based_replay_latest.json",
+        "ai/event_log/web_replay_latest.json"
+      ]
     }
   }
 }
