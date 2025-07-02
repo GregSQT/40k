@@ -79,9 +79,12 @@ else:
 
         # Frontend/src/components
         "frontend/src/components/Board.tsx",
-        "frontend/src/components/UnitSelector.tsx",
+        "frontend/src/components/ErrorBoundary.tsx",
+        "frontend/src/components/GameBoard.tsx",
+        "frontend/src/components/GameController.tsx",
+        "frontend/src/components/GameStatus.tsx",
         "frontend/src/components/ReplayViewer.tsx",
-        "frontend/src/components/LoadReplayButton.tsx",
+        "frontend/src/components/UnitSelector.tsx",
 
         # Frontend/src/data
         "frontend/src/data/Units.ts",

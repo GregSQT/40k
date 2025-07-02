@@ -140,48 +140,48 @@ const validateTurnStructure = (event: ReplayEvent, expectedPhase: string, validP
   return true;
 };
 
-// Load action definitions from config - NO HARDCODING
-const [actionDefinitions, setActionDefinitions] = useState<{[key: string]: {name: string, phase: string, type: string}} | null>(null);
-
-// Load action definitions from config file
-useEffect(() => {
-  const loadActionDefinitions = async () => {
-    try {
-      const response = await fetch('/config/action_definitions.json');
-      if (!response.ok) throw new Error('Failed to load action definitions');
-      const data = await response.json();
-      setActionDefinitions(data.action_mappings);
-    } catch (err) {
-      console.error('Error loading action definitions:', err);
-      throw new Error('Failed to load action definitions from config');
-    }
-  };
-  loadActionDefinitions();
-}, []);
-
-// Action to phase mapping loaded from config
-const getActionPhase = (actionId: number): string => {
-  if (!actionDefinitions) return "move";
-  const actionDef = actionDefinitions[actionId.toString()];
-  return actionDef?.phase || "move";
-};
-
-// Action names loaded from config
-const getActionName = (actionId: number): string => {
-  if (!actionDefinitions) return `Action ${actionId}`;
-  const actionDef = actionDefinitions[actionId.toString()];
-  return actionDef?.name || `Action ${actionId}`;
-};
-
 export const ReplayViewer: React.FC<ReplayViewerProps> = ({ 
   replayFile = 'ai/event_log/train_best_game_replay.json' 
 }) => {
+  // All hooks must be at the top level of the component
+  const [actionDefinitions, setActionDefinitions] = useState<{[key: string]: {name: string, phase: string, type: string}} | null>(null);
+  const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
+  // ... other existing useState calls
+
   // Validate environment setup
   useEffect(() => {
     validateUnitRegistry();
   }, []);
 
-  const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
+  // Load action definitions from config file
+  useEffect(() => {
+    const loadActionDefinitions = async () => {
+      try {
+        const response = await fetch('/config/action_definitions.json');
+        if (!response.ok) throw new Error('Failed to load action definitions');
+        const data = await response.json();
+        setActionDefinitions(data.action_mappings);
+      } catch (err) {
+        console.error('Error loading action definitions:', err);
+        throw new Error('Failed to load action definitions from config');
+      }
+    };
+    loadActionDefinitions();
+  }, []);
+
+  // Action to phase mapping loaded from config
+  const getActionPhase = (actionId: number): string => {
+    if (!actionDefinitions) return "move";
+    const actionDef = actionDefinitions[actionId.toString()];
+    return actionDef?.phase || "move";
+  };
+
+  // Action names loaded from config
+  const getActionName = (actionId: number): string => {
+    if (!actionDefinitions) return `Action ${actionId}`;
+    const actionDef = actionDefinitions[actionId.toString()];
+    return actionDef?.name || `Action ${actionId}`;
+  };
   const [replayData, setReplayData] = useState<ReplayData | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
