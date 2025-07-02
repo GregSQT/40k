@@ -33,26 +33,26 @@ function getHexPolygonPoints(cx: number, cy: number, size: number) {
   return Array.from({ length: 6 }, (_, i) => hexCorner(cx, cy, size, i)).flat();
 }
 
-type Mode = "select" | "movePreview" | "attackPreview" | "chargePreview";
+type Mode = "select" | "movePreview" | "attackPreview" | "chargePreview" | "replay";
 
 type BoardProps = {
   units: Unit[];
-  selectedUnitId: number | null;
-  mode: Mode;
-  movePreview: { unitId: number; destCol: number; destRow: number } | null;
-  attackPreview: { unitId: number; col: number; row: number } | null;
-  onSelectUnit: (id: number | string | null) => void;
-  onStartMovePreview: (unitId: number | string, col: number | string, row: number | string) => void;
-  onStartAttackPreview: (unitId: number, col: number, row: number) => void;
-  onConfirmMove: () => void;
-  onCancelMove: () => void;
-  onShoot: (shooterId: number, targetId: number) => void;
+  selectedUnitId?: number | null;
+  mode?: Mode;
+  movePreview?: { unitId: number; destCol: number; destRow: number } | null;
+  attackPreview?: { unitId: number; col: number; row: number } | null;
+  onSelectUnit?: (id: number | string | null) => void;
+  onStartMovePreview?: (unitId: number | string, col: number | string, row: number | string) => void;
+  onStartAttackPreview?: (unitId: number, col: number, row: number) => void;
+  onConfirmMove?: () => void;
+  onCancelMove?: () => void;
+  onShoot?: (shooterId: number, targetId: number) => void;
   onCombatAttack?: (attackerId: number, targetId: number | null) => void;
-  currentPlayer: 0 | 1;
-  unitsMoved: number[];
+  currentPlayer?: 0 | 1;
+  unitsMoved?: number[];
   unitsCharged?: number[];
   unitsAttacked?: number[];
-  phase: "move" | "shoot" | "charge" | "combat";
+  phase?: "move" | "shoot" | "charge" | "combat";
   onCharge?: (chargerId: number, targetId: number) => void;
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
   onCancelCharge?: () => void;
@@ -61,26 +61,26 @@ type BoardProps = {
 
 export default function Board({
   units,
-  selectedUnitId,
-  mode,
-  movePreview,
-  attackPreview,
-  onSelectUnit,
-  onStartMovePreview,
-  onStartAttackPreview,
-  onConfirmMove,
-  onCancelMove,
-  currentPlayer,
-  unitsMoved,
-  phase,
-  onShoot,
-  onCombatAttack,
-  onCharge,
-  unitsCharged,
-  unitsAttacked,
-  onMoveCharger,
-  onCancelCharge,
-  onValidateCharge,
+  selectedUnitId = null,
+  mode = "select",
+  movePreview = null,
+  attackPreview = null,
+  onSelectUnit = () => {},
+  onStartMovePreview = () => {},
+  onStartAttackPreview = () => {},
+  onConfirmMove = () => {},
+  onCancelMove = () => {},
+  currentPlayer = 0,
+  unitsMoved = [],
+  phase = "move",
+  onShoot = () => {},
+  onCombatAttack = () => {},
+  onCharge = () => {},
+  unitsCharged = [],
+  unitsAttacked = [],
+  onMoveCharger = () => {},
+  onCancelCharge = () => {},
+  onValidateCharge = () => {},
 }: BoardProps) {
   console.log("Board render", { phase, mode, selectedUnitId });
   
@@ -132,13 +132,6 @@ export default function Board({
     const ATTACK_COLOR = parseColor(boardConfig.colors.attack || "0xff4444");
     const CHARGE_COLOR = parseColor(boardConfig.colors.charge || "0xff9900");
     const ELIGIBLE_COLOR = parseColor(boardConfig.colors.eligible || "0x00ff00");
-    console.log('🎨 BOARD.TSX DEBUG - Board colors:', {
-      background: parseColor(boardConfig.colors.background),
-      cell_even: parseColor(boardConfig.colors.cell_even),
-      cell_odd: parseColor(boardConfig.colors.cell_odd),
-      highlight: HIGHLIGHT_COLOR,
-      attack: ATTACK_COLOR
-    });
 
     // ✅ ALL DISPLAY VALUES FROM CONFIG WITH FALLBACKS
     const displayConfig = boardConfig.display || {};
@@ -328,26 +321,28 @@ export default function Board({
         cell.cursor = "pointer";
 
         // ✅ ORIGINAL CLICK HANDLERS - Move confirmation logic preserved
-        if (mode === "movePreview" || mode === "attackPreview") {
-          cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-            if (e.button === 0) onConfirmMove();
-            if (e.button === 2) onCancelMove();
-          });
-        } else if (mode === "chargePreview") {
-          if (isChargeable) {
+        if (mode !== "replay") {
+          if (mode === "movePreview" || mode === "attackPreview") {
             cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-              if (e.button === 0 && selectedUnitId !== null) {
-                onMoveCharger?.(Number(selectedUnitId), Number(col), Number(row));
+              if (e.button === 0) onConfirmMove();
+              if (e.button === 2) onCancelMove();
+            });
+          } else if (mode === "chargePreview") {
+            if (isChargeable) {
+              cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+                if (e.button === 0 && selectedUnitId !== null) {
+                  onMoveCharger?.(Number(selectedUnitId), Number(col), Number(row));
+                }
+              });
+            }
+          } else if (mode === "select" && selectedUnitId !== null) {
+            const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
+            cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+              if (e.button === 0 && isAvailable) {
+                onStartMovePreview(Number(selectedUnitId), Number(col), Number(row));
               }
             });
           }
-        } else if (mode === "select" && selectedUnitId !== null) {
-          const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
-          cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-            if (e.button === 0 && isAvailable) {
-              onStartMovePreview(Number(selectedUnitId), Number(col), Number(row));
-            }
-          });
         }
         app.stage.addChild(cell);
       }
@@ -460,53 +455,54 @@ export default function Board({
       }
 
       // ✅ UNIT CLICK HANDLERS - FIXED SHOOT PHASE LOGIC
-      unitCircle.eventMode = 'static'; // FIXED: Use eventMode instead of deprecated interactive
-      unitCircle.cursor = "pointer";
-      unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-        if (e.button === 0) {
-          if (mode === "attackPreview" && unit.player !== currentPlayer) {
-            onShoot(Number(selectedUnitId), Number(unit.id));
-          } else if (mode === "chargePreview" && unit.player !== currentPlayer && chargeTargets.some(target => target.id === unit.id)) {
-            onCharge?.(Number(selectedUnitId), Number(unit.id));
-          } else if (phase === "combat" && unit.player !== currentPlayer && selectedUnitId) {
-            const selectedU = units.find(u => u.id === selectedUnitId);
-            if (selectedU) {
-              const distance = cubeDistance(
-                offsetToCube(selectedU.col, selectedU.row),
-                offsetToCube(unit.col, unit.row)
-              );
-              if (distance === 1) {
-                onCombatAttack?.(Number(selectedUnitId), Number(unit.id));
-                return;
-              }
-            }
-          }
-          
-          // ✅ FIXED: Only allow selection of eligible units in current phase
-          if (unit.player === currentPlayer) {
-            if (phase === "shoot") {
-              // Shoot phase: only allow units that haven't moved AND have enemies in range
-              if (!unitsMoved.includes(unit.id)) {
-                const enemies = units.filter(u2 => u2.player !== currentPlayer);
-                const hasTargetInRange = enemies.some(eu => {
-                  const c1 = offsetToCube(unit.col, unit.row);
-                  const c2 = offsetToCube(eu.col, eu.row);
-                  return cubeDistance(c1, c2) <= unit.RNG_RNG;
-                });
-                if (hasTargetInRange) {
-                  onSelectUnit(unit.id);
+      if (mode !== "replay") {
+        unitCircle.eventMode = 'static'; // FIXED: Use eventMode instead of deprecated interactive
+        unitCircle.cursor = "pointer";
+        unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+          if (e.button === 0) {
+            if (mode === "attackPreview" && unit.player !== currentPlayer) {
+              onShoot(Number(selectedUnitId), Number(unit.id));
+            } else if (mode === "chargePreview" && unit.player !== currentPlayer && chargeTargets.some(target => target.id === unit.id)) {
+              onCharge?.(Number(selectedUnitId), Number(unit.id));
+            } else if (phase === "combat" && unit.player !== currentPlayer && selectedUnitId) {
+              const selectedU = units.find(u => u.id === selectedUnitId);
+              if (selectedU) {
+                const distance = cubeDistance(
+                  offsetToCube(selectedU.col, selectedU.row),
+                  offsetToCube(unit.col, unit.row)
+                );
+                if (distance === 1) {
+                  onCombatAttack?.(Number(selectedUnitId), Number(unit.id));
+                  return;
                 }
               }
+            }
+            
+            // ✅ FIXED: Only allow selection of eligible units in current phase
+            if (unit.player === currentPlayer) {
+              if (phase === "shoot") {
+                // Shoot phase: only allow units that haven't moved AND have enemies in range
+                if (!unitsMoved.includes(unit.id)) {
+                  const enemies = units.filter(u2 => u2.player !== currentPlayer);
+                  const hasTargetInRange = enemies.some(eu => {
+                    const c1 = offsetToCube(unit.col, unit.row);
+                    const c2 = offsetToCube(eu.col, eu.row);
+                    return cubeDistance(c1, c2) <= unit.RNG_RNG;
+                  });
+                  if (hasTargetInRange) {
+                    onSelectUnit(unit.id);
+                  }
+                }
+              } else {
+                // Other phases: allow selection if eligible (original logic)
+                onSelectUnit(unit.id);
+              }
             } else {
-              // Other phases: allow selection if eligible (original logic)
               onSelectUnit(unit.id);
             }
-          } else {
-            onSelectUnit(unit.id);
           }
-        }
-      });
-
+        });
+      }
       app.stage.addChild(unitCircle);
 
       // ✅ ICON RENDERING FROM CONFIG - Better scaling and error handling
