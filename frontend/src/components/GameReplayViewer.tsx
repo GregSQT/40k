@@ -438,7 +438,7 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
         console.log('Drawing initial board with replay data');
         const initialEvent = replayData.events[0];
         const initialUnits = convertUnits(initialEvent);
-        drawBoard(initialUnits).catch(err => {
+        drawBoard(initialUnits).catch((err: unknown) => {
           console.error('Error drawing initial board:', err);
           setError(err instanceof Error ? err.message : 'Unknown board drawing error');
         });
@@ -446,9 +446,18 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
 
     } catch (initError) {
       console.error('Failed to initialize PIXI application:', initError);
-      // Create fallback HTML rendering
-      createFallbackRenderer(boardWidth, boardHeight);
+      // Create fallback HTML rendering if boardRef exists
+      if (boardRef.current) {
+        boardRef.current.innerHTML = '<div style="padding: 20px; color: white;">Failed to initialize Canvas</div>';
+      }
     }
+    } catch (configError) {
+      console.error('Configuration error:', configError);
+      setError('Failed to load board configuration');
+    }
+    };
+
+    initializeBoardAsync();
 
     return () => {
       if (appRef.current) {
@@ -461,7 +470,7 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
       }
       isWebGLLostRef.current = false;
     };
-  }, [scenario, replayData, convertUnits, drawBoard, createFallbackRenderer]);
+  }, [scenario, replayData, convertUnits, drawBoard]);
 
   // Fallback renderer when PIXI fails
   const createFallbackRenderer = useCallback((width: number, height: number) => {
