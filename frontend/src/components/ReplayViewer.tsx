@@ -91,7 +91,7 @@ interface ReplayData {
   features?: string[];
 }
 
-interface GameReplayViewerProps {
+interface ReplayViewerProps {
   replayFile?: string;
 }
 
@@ -165,7 +165,7 @@ const ACTION_NAMES: { [key: number]: string } = {
   7: "Attack Adjacent"
 };
 
-export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({ 
+export const ReplayViewer: React.FC<ReplayViewerProps> = ({ 
   replayFile = 'ai/event_log/train_best_game_replay.json' 
 }) => {
   // Validate environment setup
@@ -1048,7 +1048,7 @@ export const GameReplayViewer: React.FC<GameReplayViewerProps> = ({
 };
 
 // Named export for compatibility
-export const ReplayViewer = GameReplayViewer;
+export const ReplayViewer = ReplayViewer;
 
 // Default export for the replay viewer
-export default GameReplayViewer;
+export default ReplayViewer;
