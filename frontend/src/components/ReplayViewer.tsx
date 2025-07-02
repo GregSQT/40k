@@ -117,52 +117,60 @@ const validateUnitRegistry = () => {
   });
 };
 
-// Phase validation according to AI_GAME.md - STRICT COMPLIANCE
-const validatePhaseOrder = (phases: string[]) => {
-  const expectedPhases = ["move", "shoot", "charge", "combat"];
-  if (JSON.stringify(phases) !== JSON.stringify(expectedPhases)) {
+// Phase validation according to AI_GAME.md - LOAD FROM CONFIG
+const validatePhaseOrder = (phases: string[], configPhases: string[]) => {
+  if (JSON.stringify(phases) !== JSON.stringify(configPhases)) {
     console.error('Phase order violation of AI_GAME rules:', phases);
-    console.error('Expected phases:', expectedPhases);
+    console.error('Expected phases:', configPhases);
     console.error('Received phases:', phases);
-    throw new Error(`Invalid phase order. AI_GAME.md requires exact sequence: ${expectedPhases.join(' → ')}`);
+    throw new Error(`Invalid phase order. AI_GAME.md requires exact sequence: ${configPhases.join(' → ')}`);
   }
   console.log('✅ Phase order validates against AI_GAME.md');
   return true;
 };
 
 // Turn structure validation according to AI_GAME.md
-const validateTurnStructure = (event: ReplayEvent, expectedPhase: string) => {
+const validateTurnStructure = (event: ReplayEvent, expectedPhase: string, validPhases: string[]) => {
   // Handle different action formats
   const actionType = typeof event.action === 'object' && event.action?.type ? event.action.type : undefined;
   
-  if (actionType && !['move', 'shoot', 'charge', 'combat'].includes(actionType)) {
-    throw new Error(`Invalid action type: ${actionType}. Must match AI_GAME.md phases.`);
+  if (actionType && validPhases && !validPhases.includes(actionType)) {
+    throw new Error(`Invalid action type: ${actionType}. Must match config phases: ${validPhases.join(', ')}`);
   }
   return true;
 };
 
-// Action to phase mapping per AI_GAME.md rules
-const getActionPhase = (actionId: number): string => {
-  const phaseMap: { [key: number]: string } = {
-    0: "move", 1: "move", 2: "move",     // Movement actions
-    3: "shoot", 4: "shoot",              // Shooting actions  
-    5: "charge",                         // Charge actions
-    6: "move",                           // Wait (movement phase)
-    7: "combat"                          // Combat actions
+// Load action definitions from config - NO HARDCODING
+const [actionDefinitions, setActionDefinitions] = useState<{[key: string]: {name: string, phase: string, type: string}} | null>(null);
+
+// Load action definitions from config file
+useEffect(() => {
+  const loadActionDefinitions = async () => {
+    try {
+      const response = await fetch('/config/action_definitions.json');
+      if (!response.ok) throw new Error('Failed to load action definitions');
+      const data = await response.json();
+      setActionDefinitions(data.action_mappings);
+    } catch (err) {
+      console.error('Error loading action definitions:', err);
+      throw new Error('Failed to load action definitions from config');
+    }
   };
-  return phaseMap[actionId] || "move";
+  loadActionDefinitions();
+}, []);
+
+// Action to phase mapping loaded from config
+const getActionPhase = (actionId: number): string => {
+  if (!actionDefinitions) return "move";
+  const actionDef = actionDefinitions[actionId.toString()];
+  return actionDef?.phase || "move";
 };
 
-// Action mapping for display
-const ACTION_NAMES: { [key: number]: string } = {
-  0: "Move Closer",
-  1: "Move Away", 
-  2: "Move to Safety",
-  3: "Shoot Closest",
-  4: "Shoot Weakest",
-  5: "Charge Closest",
-  6: "Wait",
-  7: "Attack Adjacent"
+// Action names loaded from config
+const getActionName = (actionId: number): string => {
+  if (!actionDefinitions) return `Action ${actionId}`;
+  const actionDef = actionDefinitions[actionId.toString()];
+  return actionDef?.name || `Action ${actionId}`;
 };
 
 export const ReplayViewer: React.FC<ReplayViewerProps> = ({ 
@@ -869,7 +877,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Action:</span>
-                  <span>{ACTION_NAMES[currentAction] || `Unknown (${currentAction})`}</span>
+                  <span>{getActionName(currentAction)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Phase:</span>
@@ -973,19 +981,24 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         </div>
 
         {/* Action Legend */}
-        <div className="mt-6 bg-gray-800 p-4 rounded-lg">
-          <h3 className="text-lg font-semibold mb-3">Action Legend</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-            {Object.entries(ACTION_NAMES).map(([id, name]) => (
-              <div 
-                key={id} 
-                className={`p-2 rounded ${currentAction === parseInt(id) ? 'bg-blue-900 border border-blue-500' : 'bg-gray-700'}`}
-              >
-                <span className="text-gray-400">{id}:</span> {name}
-              </div>
-            ))}
+          <div className="mt-6 bg-gray-800 p-4 rounded-lg">
+            <h3 className="text-lg font-semibold mb-3">Action Legend</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+              {actionDefinitions ? Object.entries(actionDefinitions).map(([id, actionDef]) => (
+                <div 
+                  key={id} 
+                  className={`p-2 rounded ${currentAction === parseInt(id) ?
+                    'bg-blue-600 text-white' 
+                    : 'bg-gray-700 text-gray-400'
+                  }`}
+                >
+                  <span className="text-gray-400">{id}:</span> {actionDef.name}
+                </div>
+              )) : (
+                <div className="text-gray-500">Loading actions...</div>
+              )}
+            </div>
           </div>
-        </div>
 
         {/* Technical Info */}
         <div className="mt-6 bg-gray-800 p-4 rounded-lg">
@@ -1046,9 +1059,6 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
     </div>
   );
 };
-
-// Named export for compatibility
-export const ReplayViewer = ReplayViewer;
 
 // Default export for the replay viewer
 export default ReplayViewer;
