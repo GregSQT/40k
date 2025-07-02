@@ -357,7 +357,6 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
           const isEven = (col + row) % 2 === 0;
           hexGraphics.beginFill(isEven ? scenario.colors.cell_even : scenario.colors.cell_odd);
           hexGraphics.lineStyle(1, scenario.colors.cell_border);
-          hexGraphics.lineStyle(1, scenario.colors.cell_border);
           hexGraphics.drawPolygon(getHexPolygonPoints(scenario.board.hex_radius));
           hexGraphics.endFill();
           
@@ -420,7 +419,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         const hpText = new PIXI.Text(`${currentHP}/${unit.HP_MAX}`, {
           fontFamily: 'Arial',
           fontSize: 12,
-          fill: currentHP <= unit.HP_MAX * 0.3 ? 0xff4444 : 0x44ff44,
+          fill: currentHP <= unit.HP_MAX * 0.3 ? scenario.colors.hp_damaged : scenario.colors.hp_full,
           align: 'center'
         });
         hpText.anchor.set(0.5);
@@ -528,7 +527,9 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
                   top: `${(unit.row / scenario.board.rows) * 100}%`,
                   width: '30px',
                   height: '30px',
-                  backgroundColor: unit.player === 0 ? '#4444ff' : '#ff4444',
+                  backgroundColor: unit.player === 0 ? 
+                    `#${scenario.colors.player_0.toString(16).padStart(6, '0')}` : 
+                    `#${scenario.colors.player_1.toString(16).padStart(6, '0')}`,
                   transform: 'translate(-50%, -50%)'
                 }}
                 title={`${unit.name} (${unit.CUR_HP ?? unit.HP_MAX}/${unit.HP_MAX} HP)`}
