@@ -300,7 +300,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         player: unitDef.player as 0 | 1,
         col: unitDef.col,
         row: unitDef.row,
-        color: unitDef.player === 0 ? 0x4444ff : 0xff4444,
+        color: unitDef.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1,
         MOVE: stats.MOVE,
         HP_MAX: stats.HP_MAX,
         CUR_HP: stats.HP_MAX,
@@ -357,6 +357,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
           const isEven = (col + row) % 2 === 0;
           hexGraphics.beginFill(isEven ? scenario.colors.cell_even : scenario.colors.cell_odd);
           hexGraphics.lineStyle(1, scenario.colors.cell_border);
+          hexGraphics.lineStyle(1, scenario.colors.cell_border);
           hexGraphics.drawPolygon(getHexPolygonPoints(scenario.board.hex_radius));
           hexGraphics.endFill();
           
@@ -393,7 +394,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         // Unit background circle
         const unitGraphics = new PIXI.Graphics();
         const isActive = activeUnitId !== undefined && unit.id === activeUnitId;
-        const unitColor = isActive ? 0xffff00 : unit.color;
+        const unitColor = isActive ? scenario.colors.current_unit : unit.color;
         
         unitGraphics.beginFill(unitColor);
         unitGraphics.lineStyle(2, 0x000000);
@@ -450,7 +451,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
       const app = new PIXI.Application({
         width: scenario.board.cols * scenario.board.hex_radius * 1.5 + scenario.board.margin * 2,
         height: scenario.board.rows * scenario.board.hex_radius * 1.75 + scenario.board.margin * 2,
-        backgroundColor: scenario.colors.board_bg,
+        backgroundColor: scenario.colors.background,
         antialias: true,
         forceCanvas: true, // Always use Canvas renderer, never WebGL
       });
