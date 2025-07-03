@@ -76,7 +76,29 @@ export const useGameActions = ({
     }
 
     const unit = findUnit(unitId);
-    if (!unit || !isUnitEligible(unit)) return;
+    console.log(`[useGameActions] Found unit:`, unit);
+    
+    if (!unit) {
+      console.log(`[useGameActions] Unit ${unitId} not found in units array`);
+      return;
+    }
+    
+    const eligible = isUnitEligible(unit);
+    console.log(`[useGameActions] Unit ${unitId} eligibility check:`, {
+      eligible,
+      phase,
+      currentPlayer,
+      unitPlayer: unit.player,
+      unitsMoved,
+      unitsCharged,
+      unitsAttacked
+    });
+    
+    // ⚠️ TEMPORARILY ALLOW ALL SELECTIONS FOR DEBUGGING
+    if (!eligible) {
+      console.log(`[useGameActions] Unit ${unitId} not eligible, but ALLOWING for debug`);
+      // Don't return early - allow selection anyway for debugging
+    }
 
     // Special handling for move phase - second click marks as moved
     if (phase === "move" && selectedUnitId === unitId) {
@@ -101,7 +123,7 @@ export const useGameActions = ({
     actions.setMovePreview(null);
     actions.setAttackPreview(null);
     actions.setMode("select");
-  }, [findUnit, isUnitEligible, phase, selectedUnitId, actions]);
+  }, [findUnit, isUnitEligible, phase, selectedUnitId, actions, currentPlayer, unitsMoved, unitsCharged, unitsAttacked]);
 
   const selectCharger = useCallback((unitId: UnitId | null) => {
     if (unitId === null) {

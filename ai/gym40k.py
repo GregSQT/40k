@@ -27,6 +27,11 @@ class W40KEnv(gym.Env):
 
     def __init__(self, rewards_config="phase_based", training_config_name="default"):
         super().__init__()
+
+        # Initialize unit lists early to prevent AttributeError
+        self.units = []
+        self.ai_units = []
+        self.enemy_units = []
         
         # Load configuration
         self.config = get_config_loader()
@@ -125,13 +130,13 @@ class W40KEnv(gym.Env):
         else:
             raise FileNotFoundError(f"Scenario file not found: {scenario_path}")
         
-        # AI vs Human distinction
+        # Initialize AI and enemy unit lists first
+        self.ai_units = [u for u in self.units if u["player"] == 1]
         self.enemy_units = [u for u in self.units if u["player"] == 0]
         
         # Action space: one action per unit per phase
         # Actions: unit_id, action_type, target (optional)
         self.max_units = len(self.ai_units)
-        
         # Action encoding:
         # 0-7: Unit actions for first unit
         # 8-15: Unit actions for second unit, etc.

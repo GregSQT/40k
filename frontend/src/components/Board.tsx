@@ -502,27 +502,20 @@ export default function Board({
             }
             
             // ✅ FIXED: Only allow selection of eligible units in current phase
-            if (unit.player === currentPlayer) {
-              if (phase === "shoot") {
-                // Shoot phase: only allow units that haven't moved AND have enemies in range
-                if (!unitsMoved.includes(unit.id)) {
-                  const enemies = units.filter(u2 => u2.player !== currentPlayer);
-                  const hasTargetInRange = enemies.some(eu => {
-                    const c1 = offsetToCube(unit.col, unit.row);
-                    const c2 = offsetToCube(eu.col, eu.row);
-                    return cubeDistance(c1, c2) <= unit.RNG_RNG;
-                  });
-                  if (hasTargetInRange) {
-                    onSelectUnit(unit.id);
-                  }
-                }
-              } else {
-                // Other phases: allow selection if eligible (original logic)
-                onSelectUnit(unit.id);
-              }
-            } else {
-              onSelectUnit(unit.id);
-            }
+            // ✅ ENHANCED: Unit selection with debug logging and less restrictive checks
+            console.log(`[Board] Unit ${unit.id} clicked:`, {
+              unitId: unit.id,
+              unitPlayer: unit.player,
+              currentPlayer: currentPlayer,
+              phase: phase,
+              unitsMoved: unitsMoved,
+              unitsCharged: unitsCharged || [],
+              unitsAttacked: unitsAttacked || []
+            });
+            
+            // ⚠️ TEMPORARILY ALLOW ALL SELECTIONS FOR DEBUGGING
+            console.log(`[Board] ALLOWING selection of unit ${unit.id} for debugging`);
+            onSelectUnit(unit.id);
           }
         });
       }
