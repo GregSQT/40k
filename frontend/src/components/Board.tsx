@@ -568,9 +568,13 @@ export default function Board({
               unitsAttacked: unitsAttacked || []
             });
             
-            // ⚠️ TEMPORARILY ALLOW ALL SELECTIONS FOR DEBUGGING
-            console.log(`[Board] ALLOWING selection of unit ${unit.id} for debugging`);
-            onSelectUnit(unit.id);
+            // ✅ FIXED: Ensure onSelectUnit callback exists before calling
+            if (onSelectUnit && typeof onSelectUnit === 'function') {
+              console.log(`[Board] Calling onSelectUnit(${unit.id})`);
+              onSelectUnit(unit.id);
+            } else {
+              console.error(`[Board] onSelectUnit is not a function:`, onSelectUnit);
+            }
           }
         });
       }
