@@ -15,7 +15,7 @@ def diagnose_timeout_issue():
     print("=" * 50)
     
     register_environment()
-    env = W40KEnv(rewards_config="phase_based", training_config_name="default")
+    env = W40KEnv(rewards_config="default", training_config_name="default")
     model = DQN.load("ai/models/current/model.zip", env=env)
     
     obs, info = env.reset()
