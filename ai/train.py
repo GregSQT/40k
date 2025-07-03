@@ -279,6 +279,8 @@ def main():
     parser = argparse.ArgumentParser(description="Train W40K AI following AI_GAME_OVERVIEW.md specifications")
     parser.add_argument("--training-config", default="default", 
                        help="Training configuration to use from config/training_config.json")
+    parser.add_argument("--rewards-config", default="default", 
+                       help="Rewards configuration to use from config/rewards_config.json")
     parser.add_argument("--new", action="store_true", 
                        help="Force creation of new model")
     parser.add_argument("--append", action="store_true", 

@@ -332,7 +332,7 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate W40K AI following AI_GAME_OVERVIEW.md specifications")
     parser.add_argument("--model", default=None,
                        help="Path to model file (default: use config path)")
-    parser.add_argument("--rewards-config", default="phase_based",
+    parser.add_argument("--rewards-config", default="default",
                        help="Rewards configuration to use for evaluation")
     parser.add_argument("--episodes", type=int, default=50,
                        help="Number of evaluation episodes")

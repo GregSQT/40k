@@ -25,7 +25,7 @@ from config_loader import get_config_loader
 class W40KEnv(gym.Env):
     """Phase-based W40K environment following AI_GAME_OVERVIEW.md specifications exactly."""
 
-    def __init__(self, rewards_config="phase_based", training_config_name="default"):
+    def __init__(self, rewards_config="default", training_config_name="default"):
         super().__init__()
 
         # Initialize unit lists early to prevent AttributeError

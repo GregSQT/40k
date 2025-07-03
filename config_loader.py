@@ -105,7 +105,7 @@ class ConfigLoader:
             raise KeyError(f"max_steps_per_episode missing from training config '{training_config_name}'")
         return training_config["max_steps_per_episode"]
 
-    def get_reward_value(self, unit_type: str, action: str, rewards_config_name: str = "phase_based") -> float:
+    def get_reward_value(self, unit_type: str, action: str, rewards_config_name: str = "default") -> float:
         """Get specific reward value - raises error if missing."""
         rewards_config = self.load_rewards_config(rewards_config_name)
         
@@ -137,7 +137,7 @@ class ConfigLoader:
         except KeyError:
             raise KeyError(f"Training config '{name}' not found in training_config.json")
 
-    def load_rewards_config(self, name: str = "phase_based") -> Dict[str, Any]:
+    def load_rewards_config(self, name: str = "default") -> Dict[str, Any]:
         """Load a named rewards configuration from rewards_config.json."""
         configs = self.load_config("rewards_config")
         try:
