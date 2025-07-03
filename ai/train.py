@@ -64,7 +64,7 @@ def setup_imports():
         print("Please ensure gym40k.py exists and is properly configured")
         sys.exit(1)
 
-def create_model(config, training_config_name="default", rewards_config_name="phase_based", new_model=False, append_training=False):
+def create_model(config, training_config_name="default", rewards_config_name="default", new_model=False, append_training=False):
     """Create or load DQN model with configuration following AI_INSTRUCTIONS.md."""
     print(f"🤖 Creating/loading model with training config: {training_config_name}, rewards config: {rewards_config_name}")
     
@@ -128,7 +128,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     callbacks = []
     
     # Evaluation callback - test model periodically
-    eval_env = Monitor(W40KEnv(rewards_config="phase_based", training_config_name=training_config_name))
+    eval_env = Monitor(W40KEnv(rewards_config="default", training_config_name=training_config_name))
     eval_freq=training_config['eval_freq']
     total_timesteps = training_config['total_timesteps']
     
@@ -158,7 +158,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     checkpoint_callback = CheckpointCallback(
         save_freq=checkpoint_freq,
         save_path=os.path.dirname(model_path),
-        name_prefix=callback_params.get("checkpoint_name_prefix", "phase_model_checkpoint")
+        name_prefix=callback_params.get("checkpoint_name_prefix", "default_model_checkpoint")
     )
     callbacks.append(checkpoint_callback)
     
@@ -166,7 +166,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
 
 def train_model(model, training_config, callbacks, model_path):
     """Execute the training process."""
-    print("🚀 Starting phase-based training following AI_GAME_OVERVIEW.md...")
+    print("🚀 Starting default training following AI_GAME_OVERVIEW.md...")
     print(f"   Total timesteps: {training_config['total_timesteps']:,}")
     print(f"   Model will be saved to: {model_path}")
     
@@ -279,8 +279,6 @@ def main():
     parser = argparse.ArgumentParser(description="Train W40K AI following AI_GAME_OVERVIEW.md specifications")
     parser.add_argument("--training-config", default="default", 
                        help="Training configuration to use from config/training_config.json")
-    parser.add_argument("--rewards-config", default="phase_based",
-                       help="Rewards configuration to use from config/rewards_config.json")
     parser.add_argument("--new", action="store_true", 
                        help="Force creation of new model")
     parser.add_argument("--append", action="store_true", 
