@@ -31,7 +31,7 @@
   "default": {
   "description": "Balanced training for active AI learning",
   "total_timesteps": 100000,
-  "max_steps_per_episode": 100,
+  "max_steps_per_episode": 500,
   "eval_freq": 10000,
   "callback_params": {
     "eval_deterministic": true,

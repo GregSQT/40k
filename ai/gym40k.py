@@ -505,7 +505,7 @@ class W40KEnv(gym.Env):
         
         # Keep advancing phases until we find eligible units or game ends
         phase_advances = 0
-        max_phase_advances = 8  # Prevent infinite loops (2 full turns max)
+        max_phase_advances = 16  # Prevent infinite loops (2 full turns max)
         
         while not eligible_units and not self.game_over and phase_advances < max_phase_advances:
             self._advance_phase()
@@ -517,7 +517,7 @@ class W40KEnv(gym.Env):
             self.game_over = True
             self.winner = None
             unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
-            return self._get_obs(), unit_rewards.get("lose"), True, False, self._get_info()
+            return self._get_obs(), unit_rewards.get("wait", -0.1), True, False, self._get_info()
         
         if not eligible_units and not self.game_over:
             # Still no eligible units, return small negative reward

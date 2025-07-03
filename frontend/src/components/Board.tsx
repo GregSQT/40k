@@ -206,6 +206,10 @@ export default function Board({
     
     const app = new PIXI.Application(pixiConfig);
     
+    // CRITICAL FIX: Enable events at application level for PIXI v7+
+    app.stage.eventMode = 'static';
+    app.stage.hitArea = app.screen;
+    
     // ⚠️ DEBUG: Log PIXI app creation result
     console.log(`[Board] PIXI app created successfully:`, app);
     console.log(`[Board] App stage:`, app.stage);
