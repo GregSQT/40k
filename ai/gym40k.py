@@ -126,7 +126,6 @@ class W40KEnv(gym.Env):
             raise FileNotFoundError(f"Scenario file not found: {scenario_path}")
         
         # AI vs Human distinction
-        self.ai_units = [u for u in self.units if u["player"] == 1]
         self.enemy_units = [u for u in self.units if u["player"] == 0]
         
         # Action space: one action per unit per phase
@@ -977,57 +976,59 @@ class W40KEnv(gym.Env):
 
     def _execute_enemy_turn(self):
         """Execute enemy turn using scripted behavior as mentioned in AI_GAME_OVERVIEW.md."""
-        # Simple scripted enemy behavior for training
+        # BALANCED scripted enemy behavior for training - LIMITED ACTIONS
         enemy_units_alive = [u for u in self.enemy_units if u["alive"]]
         
+        # Limit total enemy actions per turn to prevent overwhelming AI
+        max_enemy_actions = min(2, len(enemy_units_alive))  # Max 2 actions total
+        enemy_actions_taken = 0
+        
         for enemy in enemy_units_alive:
-            # Enemy behavior: move towards nearest AI unit and attack if possible
+            if enemy_actions_taken >= max_enemy_actions:
+                break  # Limit enemy actions to give AI a chance
+                
             nearest_ai = self._get_nearest_ai_unit(enemy)
             if not nearest_ai:
                 continue
             
-            # Move phase: move towards nearest AI unit
-            dx = nearest_ai["col"] - enemy["col"]
-            dy = nearest_ai["row"] - enemy["row"]
-            
-            if abs(dx) + abs(dy) > 1:  # Not adjacent, move closer
-                move_x = min(enemy["move"], abs(dx)) * (1 if dx > 0 else -1 if dx < 0 else 0)
-                move_y = min(enemy["move"] - abs(move_x), abs(dy)) * (1 if dy > 0 else -1 if dy < 0 else 0)
-                
-                new_col = max(0, min(self.board_size[0] - 1, enemy["col"] + move_x))
-                new_row = max(0, min(self.board_size[1] - 1, enemy["row"] + move_y))
-                
-                enemy["col"] = new_col
-                enemy["row"] = new_row
-            
-            # Shooting phase: shoot if in range
             dist = abs(enemy["col"] - nearest_ai["col"]) + abs(enemy["row"] - nearest_ai["row"])
+            
+            # BALANCED: Only ONE action per enemy per turn
+            action_taken = False
+            
+            # Priority 1: Shoot if in range (instead of moving closer)
             if dist <= enemy.get("rng_rng", 4) and enemy.get("rng_dmg", 0) > 0:
-                damage = enemy["rng_dmg"]
+                damage = min(enemy["rng_dmg"], nearest_ai["cur_hp"])  # Prevent overkill
                 nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
                 if nearest_ai["cur_hp"] <= 0:
                     nearest_ai["alive"] = False
-            
-            # ─── Charge phase: if not adjacent but within move range ───
-            elif dist > 1 and dist <= enemy["move"]:
-                # move adjacent to charge
+                action_taken = True
+                
+            # Priority 2: Melee attack if adjacent
+            elif dist <= 1 and enemy.get("cc_dmg", 0) > 0:
+                damage = min(enemy["cc_dmg"], nearest_ai["cur_hp"])  # Prevent overkill
+                nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
+                if nearest_ai["cur_hp"] <= 0:
+                    nearest_ai["alive"] = False
+                action_taken = True
+                
+            # Priority 3: Move closer (only if can't attack)
+            elif dist > 1:
+                # Limited movement: only 1-2 hexes max
+                move_distance = min(2, enemy.get("move", 1))
                 dx = nearest_ai["col"] - enemy["col"]
                 dy = nearest_ai["row"] - enemy["row"]
+                
                 if abs(dx) > abs(dy):
-                    step = 1 if dx > 0 else -1
-                    enemy["col"] += step
+                    step = min(move_distance, abs(dx)) * (1 if dx > 0 else -1)
+                    enemy["col"] = max(0, min(self.board_size[0] - 1, enemy["col"] + step))
                 else:
-                    step = 1 if dy > 0 else -1
-                    enemy["row"] += step
-                # recompute distance
-                dist = abs(enemy["col"] - nearest_ai["col"]) + abs(enemy["row"] - nearest_ai["row"])
-    
-            # Combat phase: attack if adjacent
-            if dist <= 1 and enemy.get("cc_dmg", 0) > 0:
-                damage = enemy["cc_dmg"]
-                nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
-                if nearest_ai["cur_hp"] <= 0:
-                    nearest_ai["alive"] = False
+                    step = min(move_distance, abs(dy)) * (1 if dy > 0 else -1)
+                    enemy["row"] = max(0, min(self.board_size[1] - 1, enemy["row"] + step))
+                action_taken = True
+            
+            if action_taken:
+                enemy_actions_taken += 1
         
         # Update AI units list
         self.ai_units = [u for u in self.units if u["player"] == 1]

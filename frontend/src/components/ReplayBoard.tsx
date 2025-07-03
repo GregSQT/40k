@@ -6,6 +6,39 @@ import { Intercessor } from '../roster/spaceMarine/Intercessor';
 import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
 import { useGameConfig } from '../hooks/useGameConfig';
 
+// Error Boundary Component for ReplayBoard
+const ReplayErrorBoundary: React.FC<{children: React.ReactNode}> = ({ children }) => {
+  const [hasError, setHasError] = useState(false);
+  
+  useEffect(() => {
+    const handleError = () => setHasError(true);
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleError);
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleError);
+    };
+  }, []);
+  
+  if (hasError) {
+    return (
+      <div className="flex items-center justify-center h-96 bg-red-900 text-white rounded-lg">
+        <div className="text-center">
+          <div className="text-xl mb-4">⚠️ Replay Error</div>
+          <button 
+            onClick={() => {setHasError(false); window.location.reload();}} 
+            className="px-4 py-2 bg-red-600 rounded hover:bg-red-500 transition-colors"
+          >
+            Reload Component
+          </button>
+        </div>
+      </div>
+    );
+  }
+  
+  return <>{children}</>;
+};
+
 // Use ReplayViewer interfaces exactly - NO local interface redefinition
 interface ReplayUnit extends Unit {
   alive?: boolean;
@@ -104,15 +137,19 @@ interface ReplayBoardProps {
 }
 
 // Unit registry loaded from config - NO HARDCODING
-const buildUnitRegistry = (unitDefinitions: any) => {
-  const registry: Record<string, any> = {};
+const buildUnitRegistry = (unitDefinitions: {units: Record<string, {class_name: string}>}) => {
+  const registry: Record<string, typeof Intercessor | typeof AssaultIntercessor> = {};
   
   // Build registry from config
-  Object.entries(unitDefinitions.units || {}).forEach(([unitType, definition]: [string, any]) => {
-    if (definition.class_name === 'Intercessor') {
-      registry[unitType] = Intercessor;
-    } else if (definition.class_name === 'AssaultIntercessor') {
-      registry[unitType] = AssaultIntercessor;
+  const classMapping: Record<string, typeof Intercessor | typeof AssaultIntercessor> = {
+    'Intercessor': Intercessor,
+    'AssaultIntercessor': AssaultIntercessor
+  };
+  
+  Object.entries(unitDefinitions.units || {}).forEach(([unitType, definition]: [string, {class_name: string}]) => {
+    const UnitClass = classMapping[definition.class_name];
+    if (UnitClass) {
+      registry[unitType] = UnitClass;
     }
   });
   
@@ -120,7 +157,7 @@ const buildUnitRegistry = (unitDefinitions: any) => {
 };
 
 // Validate unit registry consistency from config
-const validateUnitRegistry = (unitDefinitions: any, errorMessages: any) => {
+const validateUnitRegistry = (unitDefinitions: {units: Record<string, {class_name: string}>, required_properties: string[]}, errorMessages: Record<string, string>) => {
   if (!unitDefinitions || !errorMessages) return;
   
   const unitRegistry = buildUnitRegistry(unitDefinitions);
@@ -175,8 +212,8 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
   // State management
   const [actionDefinitions, setActionDefinitions] = useState<{[key: string]: {name: string, phase: string, type: string}} | null>(null);
   const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
-  const [unitDefinitions, setUnitDefinitions] = useState<any>(null);
-  const [errorMessages, setErrorMessages] = useState<any>(null);
+  const [unitDefinitions, setUnitDefinitions] = useState<{units: Record<string, {class_name: string}>, required_properties: string[]} | null>(null);
+  const [errorMessages, setErrorMessages] = useState<Record<string, string> | null>(null);
   const [replayData, setReplayData] = useState<ReplayData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -496,6 +533,20 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
     loadData();
   }, [effectiveReplayFile, loadScenario, boardConfig, configLoading, configError, onDataLoaded, onError, onLoading]);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Generic cleanup for any canvas elements
+      const canvasElements = document.querySelectorAll('canvas');
+      canvasElements.forEach(canvas => {
+        // Cleanup any event listeners or memory leaks
+        if (canvas.parentElement && canvas.dataset.cleanup === 'replay') {
+          canvas.remove();
+        }
+      });
+    };
+  }, []);
+
   // Loading state
   if (loading) {
     return (
@@ -545,6 +596,7 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
     );
   }
 
+  
   // Calculate acting unit ID from current event
   const actingUnitId = currentEvent?.acting_unit_idx ?? null;
 
@@ -582,4 +634,11 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
   );
 };
 
-export default ReplayBoard;
+// Wrap ReplayBoard with Error Boundary
+const ReplayBoardWithErrorBoundary: React.FC<ReplayBoardProps> = (props) => (
+  <ReplayErrorBoundary>
+    <ReplayBoard {...props} />
+  </ReplayErrorBoundary>
+);
+
+export default ReplayBoardWithErrorBoundary;

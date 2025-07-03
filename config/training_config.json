@@ -29,29 +29,29 @@
   },
   
   "default": {
-    "description": "GPU-optimized parameters for complex reward learning",
-    "total_timesteps": 100000,
-    "max_steps_per_episode": 200,
-    "eval_freq": 5000,
-    "callback_params": {
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 10,
-      "checkpoint_save_freq": 25000,
-      "checkpoint_name_prefix": "default_model_checkpoint"
+  "description": "Balanced training for active AI learning",
+  "total_timesteps": 500000,
+  "max_steps_per_episode": 300,
+  "eval_freq": 10000,
+  "callback_params": {
+    "eval_deterministic": true,
+    "eval_render": false,
+    "n_eval_episodes": 10,
+    "checkpoint_save_freq": 50000,
+    "checkpoint_name_prefix": "balanced_model_checkpoint"
     },
     "model_params": {
-      "policy": "MlpPolicy",
-      "verbose": 1,
-      "buffer_size": 100000,
-      "learning_rate": 0.0003,
-      "learning_starts": 5000,
-      "batch_size": 256,
-      "train_freq": 1,
-      "target_update_interval": 1000,
-      "exploration_fraction": 0.3,
-      "exploration_final_eps": 0.02,
-      "tensorboard_log": "./tensorboard/"
+    "policy": "MlpPolicy",
+    "verbose": 1,
+    "buffer_size": 200000,
+    "learning_rate": 0.0005,
+    "learning_starts": 10000,
+    "batch_size": 128,
+    "train_freq": 1,
+    "target_update_interval": 1000,
+    "exploration_fraction": 0.5,
+    "exploration_final_eps": 0.05,
+    "tensorboard_log": "./tensorboard/"
       },
     "replay_config": {
       "default_file": "ai/event_log/train_best_game_replay.json",
