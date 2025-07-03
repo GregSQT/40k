@@ -244,21 +244,8 @@ class W40KEnv(gym.Env):
         self.rewards_config = self.config.load_rewards_config(self.rewards_config_name)
 
     def _get_default_rewards(self):
-        """Get default rewards if config loading fails."""
-        return {
-            "SpaceMarineRanged": {
-                "move_close": 0.2, "move_to_rng": 0.8, "ranged_attack": 1.0,
-                "enemy_killed_r": 5.0, "shoot_priority_1": 2.0, "shoot_priority_2": 1.5,
-                "shoot_priority_3": 1.0, "charge_success": 0.5, "attack": 1.0,
-                "enemy_killed_m": 5.0, "win": 10.0, "lose": -10.0, "wait": -0.05
-            },
-            "SpaceMarineMelee": {
-                "move_close": 0.3, "move_to_charge": 0.8, "charge_success": 1.5,
-                "charge_priority_1": 2.0, "charge_priority_2": 1.5, "charge_priority_3": 1.0,
-                "attack": 1.0, "enemy_killed_m": 5.0, "attack_priority_1": 2.0,
-                "attack_priority_2": 1.5, "win": 10.0, "lose": -10.0, "wait": -0.05
-            }
-        }
+        """Removed following AI_INSTRUCTIONS.md - all rewards must come from config files."""
+        raise FileNotFoundError("Rewards configuration not found. AI_INSTRUCTIONS.md requires all rewards come from config files.")
 
     def _get_unit_reward_config(self, unit):
         """Get reward configuration for specific unit type."""
@@ -450,7 +437,18 @@ class W40KEnv(gym.Env):
 
     def _execute_action_with_phase(self, unit, action_type):
         """Execute action with current phase context and AI_GAME.md tracking."""
-        reward = 0.0
+        unit_rewards = self._get_unit_reward_config(unit)
+        
+        # Validate action_type is allowed in current phase following AI_GAME.md
+        if self.current_phase == "move" and action_type not in [0, 1, 2, 3, 7]:
+            return unit_rewards.get("wait")  # Invalid action penalty
+        elif self.current_phase == "shoot" and action_type not in [4, 7]:
+            return unit_rewards.get("wait")  # Invalid action penalty
+        elif self.current_phase == "charge" and action_type not in [5, 7]:
+            return unit_rewards.get("wait")  # Invalid action penalty
+        elif self.current_phase == "combat" and action_type not in [6, 7]:
+            return unit_rewards.get("wait")  # Invalid action penalty
+        
         action_success = False
         
         if self.current_phase == "move":
@@ -497,8 +495,8 @@ class W40KEnv(gym.Env):
             # Episode too long, truncate it
             self.game_over = True
             self.winner = None
-            return self._get_obs(), -0.1, False, True, self._get_info()  # truncated=True
-        
+            unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
+            return self._get_obs(), unit_rewards.get("wait"), False, True, self._get_info()  # truncated=True
         if self.game_over:
             return self._get_obs(), 0.0, True, False, self._get_info()
         
@@ -518,11 +516,13 @@ class W40KEnv(gym.Env):
             # Emergency end game to prevent infinite loops
             self.game_over = True
             self.winner = None
-            return self._get_obs(), -10.0, True, False, self._get_info()
+            unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
+            return self._get_obs(), unit_rewards.get("lose"), True, False, self._get_info()
         
         if not eligible_units and not self.game_over:
             # Still no eligible units, return small negative reward
-            return self._get_obs(), -0.1, False, False, self._get_info()
+            unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
+            return self._get_obs(), unit_rewards.get("wait"), False, False, self._get_info()
         
         # Decode action
         unit_idx = action // 8
@@ -530,7 +530,8 @@ class W40KEnv(gym.Env):
         
         if unit_idx >= len(eligible_units):
             # Invalid unit, small penalty
-            return self._get_obs(), -0.1, False, False, self._get_info()
+            unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
+            return self._get_obs(), unit_rewards.get("wait"), False, False, self._get_info()
         
         unit = eligible_units[unit_idx]
         reward = self._execute_action_with_phase(unit, action_type)
@@ -541,11 +542,11 @@ class W40KEnv(gym.Env):
         if not any(u["alive"] for u in self.ai_units):
             self.game_over = True
             self.winner = 0
-            reward += unit_rewards.get("lose", -10.0)
+            reward += unit_rewards.get("lose")
         elif not any(u["alive"] for u in self.enemy_units):
             self.game_over = True
             self.winner = 1
-            reward += unit_rewards.get("win", 10.0)
+            reward += unit_rewards.get("win")
         elif self.current_turn >= self.max_turns:
             self.game_over = True
             self.winner = None
@@ -573,28 +574,32 @@ class W40KEnv(gym.Env):
         return reward
 
     def _execute_move_action(self, unit, action_type):
-        """Execute movement following AI_GAME_OVERVIEW.md: move to position, mark as moved."""
+        """Execute movement following AI_GAME.md: only movement actions allowed."""
         unit_rewards = self._get_unit_reward_config(unit)
-        reward = 0.0
         
         old_col, old_row = unit["col"], unit["row"]
         
         if action_type == 0:  # Move North
             new_row = max(0, unit["row"] - unit["move"])
             unit["row"] = new_row
+            reward = 0.0  # Base movement reward
         elif action_type == 1:  # Move South
             new_row = min(self.board_size[1] - 1, unit["row"] + unit["move"])
             unit["row"] = new_row
+            reward = 0.0  # Base movement reward
         elif action_type == 2:  # Move East
             new_col = min(self.board_size[0] - 1, unit["col"] + unit["move"])
             unit["col"] = new_col
+            reward = 0.0  # Base movement reward
         elif action_type == 3:  # Move West
             new_col = max(0, unit["col"] - unit["move"])
             unit["col"] = new_col
-        elif action_type == 4:  # Wait
-            reward = unit_rewards.get("wait", -0.05)
-        else:
-            reward = unit_rewards.get("invalid_action", -0.1)
+            reward = 0.0  # Base movement reward
+        elif action_type == 7:  # Wait (universal)
+            reward = unit_rewards.get("wait")
+            unit["has_moved"] = True
+            return reward
+        # Note: action_type validation now handled by _execute_action_with_phase
         
         unit["has_moved"] = True
         
@@ -608,17 +613,17 @@ class W40KEnv(gym.Env):
                     # Ranged units want to be at optimal range
                     optimal_range = unit["rng_rng"] - 1
                     if new_dist == optimal_range:
-                        reward += unit_rewards.get("move_to_rng", 0.8)
+                        reward += unit_rewards.get("move_to_rng")
                     elif new_dist < optimal_range:
-                        reward += unit_rewards.get("move_close", 0.2)
+                        reward += unit_rewards.get("move_close")
                     else:
-                        reward += unit_rewards.get("move_away", 0.1)
+                        reward += unit_rewards.get("move_away")
                 else:
                     # Melee units want to get closer for charging
                     if new_dist <= unit["move"]:
-                        reward += unit_rewards.get("move_to_charge", 0.8)
+                        reward += unit_rewards.get("move_to_charge")
                     else:
-                        reward += unit_rewards.get("move_close", 0.3)
+                        reward += unit_rewards.get("move_close")
         
         return reward
 
@@ -630,10 +635,10 @@ class W40KEnv(gym.Env):
         return True
 
     def _execute_shoot_action(self, unit, action_type):
-        """Execute shooting: only action_type==4 fires at the highest‐priority target."""
+        """Execute shooting: only action_type==4 shoots following AI_GAME.md."""
         unit_rewards = self._get_unit_reward_config(unit)
 
-        # Only code 4 shoots; 7 is wait; everything else is invalid.
+        # Only action 4 shoots in shoot phase; action 7 waits
         if action_type == 4:
             targets = self._get_shooting_targets(unit)
             if targets:
@@ -643,18 +648,19 @@ class W40KEnv(gym.Env):
                 target["cur_hp"] = max(0, old_hp - damage)
 
                 # Base ranged‐attack reward
-                reward = unit_rewards.get("ranged_attack", 1.0)
+                # Base ranged‐attack reward
+                reward = unit_rewards.get("ranged_attack")
 
                 # Kill bonuses
                 if target["cur_hp"] <= 0:
                     target["alive"] = False
-                    reward += unit_rewards.get("enemy_killed_r", 5.0)
+                    reward += unit_rewards.get("enemy_killed_r")
                     if old_hp == damage:
-                        reward += unit_rewards.get("enemy_killed_no_overkill_r", 7.0) - unit_rewards.get("enemy_killed_r", 5.0)
+                        reward += unit_rewards.get("enemy_killed_no_overkill_r") - unit_rewards.get("enemy_killed_r")
                     if self._was_lowest_hp_target(target, targets):
-                        reward += unit_rewards.get("enemy_killed_lowests_hp_r", 6.0) - unit_rewards.get("enemy_killed_r", 5.0)
+                        reward += unit_rewards.get("enemy_killed_lowests_hp_r") - unit_rewards.get("enemy_killed_r")
             else:
-                reward = unit_rewards.get("wait", -0.05)
+                reward = unit_rewards.get("wait")
 
             unit["has_shot"] = True
             self.shot_units.add(unit["id"])
@@ -662,27 +668,26 @@ class W40KEnv(gym.Env):
 
         elif action_type == 7:
             unit["has_shot"] = True
-            return unit_rewards.get("wait", -0.05)
+            return unit_rewards.get("wait")
 
         else:
             unit["has_shot"] = True
-            return unit_rewards.get("invalid_action", -0.1)
+            return unit_rewards.get("wait")
 
     def _execute_charge_action(self, unit, action_type):
-        """Execute charge: only action_type==5 charges the highest‐priority target."""
+        """Execute charge: only action_type==5 charges following AI_GAME.md."""
         unit_rewards = self._get_unit_reward_config(unit)
 
-        # Only code 5 charges; 7 is wait; everything else is invalid.
+        # Only action 5 charges in charge phase; action 7 waits
         if action_type == 5:
             targets = self._get_charge_targets(unit)
             if targets:
                 target = targets[0]
                 unit["col"], unit["row"] = target["col"], target["row"]
 
-                reward = unit_rewards.get("charge_success", 1.5)
-                reward += unit_rewards.get("charge_priority_1", 2.0)
+                reward = unit_rewards.get("charge_success")
             else:
-                reward = unit_rewards.get("wait", -0.05)
+                reward = unit_rewards.get("wait")
 
             unit["has_charged"] = True
             self.charged_units.add(unit["id"])
@@ -690,17 +695,17 @@ class W40KEnv(gym.Env):
 
         elif action_type == 7:
             unit["has_charged"] = True
-            return unit_rewards.get("wait", -0.05)
+            return unit_rewards.get("wait")
 
         else:
             unit["has_charged"] = True
-            return unit_rewards.get("invalid_action", -0.1)
+            return unit_rewards.get("wait")
 
     def _execute_combat_action(self, unit, action_type):
-        """Execute melee attack: only action_type==6 swings at the top target."""
+        """Execute melee attack: only action_type==6 attacks following AI_GAME.md."""
         unit_rewards = self._get_unit_reward_config(unit)
 
-        # Only code 6 attacks; 7 is wait; everything else is invalid.
+        # Only action 6 attacks in combat phase; action 7 waits
         if action_type == 6:
             targets = self._get_combat_targets(unit)
             if targets:
@@ -709,16 +714,16 @@ class W40KEnv(gym.Env):
                 old_hp = target["cur_hp"]
                 target["cur_hp"] = max(0, old_hp - damage)
 
-                reward = unit_rewards.get("attack", 1.0)
+                reward = unit_rewards.get("attack")
                 if target["cur_hp"] <= 0:
                     target["alive"] = False
-                    reward += unit_rewards.get("enemy_killed_m", 8.0)
+                    reward += unit_rewards.get("enemy_killed_m")
                     if old_hp == damage:
-                        reward += unit_rewards.get("enemy_killed_no_overkill_m", 10.0) - unit_rewards.get("enemy_killed_m", 8.0)
+                        reward += unit_rewards.get("enemy_killed_no_overkill_m") - unit_rewards.get("enemy_killed_m")
                     if self._was_lowest_hp_target(target, targets):
-                        reward += unit_rewards.get("enemy_killed_lowests_hp_m", 9.0) - unit_rewards.get("enemy_killed_m", 8.0)
+                        reward += unit_rewards.get("enemy_killed_lowests_hp_m") - unit_rewards.get("enemy_killed_m")
             else:
-                reward = unit_rewards.get("wait", -0.05)
+                reward = unit_rewards.get("wait")
 
             unit["has_attacked"] = True
             self.attacked_units.add(unit["id"])
@@ -726,11 +731,11 @@ class W40KEnv(gym.Env):
 
         elif action_type == 7:
             unit["has_attacked"] = True
-            return unit_rewards.get("wait", -0.05)
+            return unit_rewards.get("wait")
 
         else:
             unit["has_attacked"] = True
-            return unit_rewards.get("invalid_action", -0.1)
+            return unit_rewards.get("wait")
 
     def _get_shooting_targets(self, unit):
         """Get shooting targets in AI_GAME_OVERVIEW.md priority order."""

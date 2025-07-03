@@ -217,6 +217,8 @@ export default function Board({
     canvas.style.maxWidth = '100%';
     canvas.style.height = 'auto';
     canvas.style.border = CANVAS_BORDER;
+    canvas.style.pointerEvents = 'auto';
+    canvas.style.touchAction = 'manipulation';
     
     containerRef.current.appendChild(canvas);
     
@@ -514,6 +516,7 @@ export default function Board({
       // ✅ ENHANCED UNIT CLICK HANDLERS - Added debugging for PIXI events
       if (mode !== "replay") {
         unitCircle.eventMode = 'static'; // FIXED: Use eventMode instead of deprecated interactive
+        unitCircle.interactive = true; // CRITICAL: Also set interactive for older PIXI compatibility
         unitCircle.cursor = "pointer";
         
         // ⚠️ DEBUG: Test if PIXI events are working at all
