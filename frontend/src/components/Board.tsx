@@ -122,6 +122,14 @@ export default function Board({
     }
 
     containerRef.current.innerHTML = "";
+    
+    // ⚠️ DEBUG: Check container state
+    console.log(`[Board] Container element:`, containerRef.current);
+    console.log(`[Board] Container dimensions:`, {
+      width: containerRef.current.clientWidth,
+      height: containerRef.current.clientHeight,
+      boundingRect: containerRef.current.getBoundingClientRect()
+    });
 
     // Process units for replay mode if needed
     let processedUnits = units;
@@ -187,7 +195,21 @@ export default function Board({
       forceCanvas: displayConfig.forceCanvas ?? true,
     };
 
+    // ⚠️ DEBUG: Log PIXI setup before creation
+    console.log(`[Board] Creating PIXI app with config:`, pixiConfig);
+    console.log(`[Board] Container element:`, containerRef.current);
+    console.log(`[Board] Container dimensions:`, {
+      width: containerRef.current.clientWidth,
+      height: containerRef.current.clientHeight,
+      boundingRect: containerRef.current.getBoundingClientRect()
+    });
+    
     const app = new PIXI.Application(pixiConfig);
+    
+    // ⚠️ DEBUG: Log PIXI app creation result
+    console.log(`[Board] PIXI app created successfully:`, app);
+    console.log(`[Board] App stage:`, app.stage);
+    console.log(`[Board] App view:`, app.view);
 
     // ✅ CANVAS STYLING FROM CONFIG
     const canvas = app.view as HTMLCanvasElement;
@@ -197,6 +219,17 @@ export default function Board({
     canvas.style.border = CANVAS_BORDER;
     
     containerRef.current.appendChild(canvas);
+    
+    // ⚠️ DEBUG: Verify canvas was appended successfully
+    console.log(`[Board] Canvas appended to container`);
+    console.log(`[Board] Canvas element:`, canvas);
+    console.log(`[Board] Canvas style:`, {
+      display: canvas.style.display,
+      width: canvas.style.width,
+      height: canvas.style.height,
+      border: canvas.style.border
+    });
+    console.log(`[Board] Container children count:`, containerRef.current.children.length);
 
     // Right click cancels move/attack preview
     if (app.view && app.view.addEventListener) {
@@ -477,12 +510,27 @@ export default function Board({
         app.stage.addChild(eligibleOutline);
       }
 
-      // ✅ UNIT CLICK HANDLERS - FIXED SHOOT PHASE LOGIC
+      // ✅ ENHANCED UNIT CLICK HANDLERS - Added debugging for PIXI events
+      // ✅ ENHANCED UNIT CLICK HANDLERS - Added debugging for PIXI events
       if (mode !== "replay") {
         unitCircle.eventMode = 'static'; // FIXED: Use eventMode instead of deprecated interactive
         unitCircle.cursor = "pointer";
+        
+        // ⚠️ DEBUG: Test if PIXI events are working at all
+        console.log(`[Board] Setting up click handler for unit ${unit.id} at (${centerX}, ${centerY})`);
+        console.log(`[Board] Unit circle eventMode:`, unitCircle.eventMode);
+        console.log(`[Board] Unit circle interactive:`, unitCircle.eventMode === 'static');
+        
+        // ⚠️ DEBUG: Test if PIXI events are working at all
+        console.log(`[Board] Setting up click handler for unit ${unit.id}`);
+        console.log(`[Board] Unit circle eventMode:`, unitCircle.eventMode);
+        console.log(`[Board] Unit circle cursor:`, unitCircle.cursor);
         unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+          console.log(`[Board] ⚡ PIXI CLICK EVENT FIRED! Unit: ${unit.id}, Button: ${e.button}, Mode: ${mode}`);
+          console.log(`[Board] Event details:`, e);
+          
           if (e.button === 0) {
+            console.log(`[Board] Left click detected on unit ${unit.id}`);
             if (mode === "attackPreview" && unit.player !== currentPlayer) {
               onShoot(Number(selectedUnitId), Number(unit.id));
             } else if (mode === "chargePreview" && unit.player !== currentPlayer && chargeTargets.some(target => target.id === unit.id)) {
