@@ -106,6 +106,8 @@ export default function Board({
     // Early returns INSIDE useEffect to avoid hooks order violation
     if (!containerRef.current) return;
 
+    const gridCells: PIXI.Graphics[] = [];
+
     if (loading) {
       containerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#1f2937;border-radius:8px;color:white;">Loading board configuration...</div>`;
       return;
@@ -406,11 +408,15 @@ export default function Board({
             });
           }
         }
-        app.stage.addChild(cell);
+        // Don't add cell to stage yet - store for later
+        gridCells.push(cell);
       }
     }
 
-    // ✅ ORIGINAL UNIT RENDERING - All features preserved
+    // ✅ ADD GRID CELLS FIRST (before units)
+    gridCells.forEach(cell => app.stage.addChild(cell));
+
+    // ✅ ORIGINAL UNIT RENDERING - All features preserved  
     for (const unit of processedUnits) {
       // In movePreview, do not draw the moving unit at its old spot
       if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;

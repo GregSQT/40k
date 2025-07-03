@@ -453,9 +453,9 @@ class W40KEnv(gym.Env):
         
         if self.current_phase == "move":
             reward = self._execute_move_action(unit, action_type)
-            action_success = reward > 0
-            if action_success:
-                unit["has_moved"] = True
+            # ✅ FIXED: Move action handles has_moved internally based on success
+            # Only add to moved_units if unit was actually marked as moved
+            if unit.get("has_moved", False):
                 self.moved_units.add(unit["id"])  # AI_GAME.md tracking
         elif self.current_phase == "shoot":
             reward = self._execute_shoot_action(unit, action_type)
@@ -582,48 +582,55 @@ class W40KEnv(gym.Env):
         if action_type == 0:  # Move North
             new_row = max(0, unit["row"] - unit["move"])
             unit["row"] = new_row
-            reward = 0.0  # Base movement reward
         elif action_type == 1:  # Move South
             new_row = min(self.board_size[1] - 1, unit["row"] + unit["move"])
             unit["row"] = new_row
-            reward = 0.0  # Base movement reward
         elif action_type == 2:  # Move East
             new_col = min(self.board_size[0] - 1, unit["col"] + unit["move"])
             unit["col"] = new_col
-            reward = 0.0  # Base movement reward
         elif action_type == 3:  # Move West
             new_col = max(0, unit["col"] - unit["move"])
             unit["col"] = new_col
-            reward = 0.0  # Base movement reward
-        elif action_type == 7:  # Wait (universal)
+        elif action_type == 7:  # Wait (universal - second click behavior)
             reward = unit_rewards.get("wait")
             unit["has_moved"] = True
             return reward
-        # Note: action_type validation now handled by _execute_action_with_phase
+        else:
+            # Invalid action type in move phase
+            return unit_rewards.get("wait")  # Penalty for invalid action
         
+        # ✅ CRITICAL FIX: Check if movement actually occurred
+        movement_occurred = (old_col != unit["col"]) or (old_row != unit["row"])
+        
+        if not movement_occurred:
+            # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
+            reward = unit_rewards.get("wait")  # Negative penalty for invalid move
+            # DON'T mark as moved - let unit try again or wait
+            return reward
+        
+        # ✅ SUCCESSFUL MOVE: Mark unit as moved and calculate rewards
         unit["has_moved"] = True
         
-        # Movement rewards based on tactical positioning
-        if old_col != unit["col"] or old_row != unit["row"]:
-            nearest_enemy = self._get_nearest_enemy(unit)
-            if nearest_enemy:
-                new_dist = abs(unit["col"] - nearest_enemy["col"]) + abs(unit["row"] - nearest_enemy["row"])
-                
-                if unit["is_ranged"]:
-                    # Ranged units want to be at optimal range
-                    optimal_range = unit["rng_rng"] - 1
-                    if new_dist == optimal_range:
-                        reward += unit_rewards.get("move_to_rng")
-                    elif new_dist < optimal_range:
-                        reward += unit_rewards.get("move_close")
-                    else:
-                        reward += unit_rewards.get("move_away")
+        # Movement rewards based on tactical positioning (only for successful moves)
+        nearest_enemy = self._get_nearest_enemy(unit)
+        if nearest_enemy:
+            new_dist = abs(unit["col"] - nearest_enemy["col"]) + abs(unit["row"] - nearest_enemy["row"])
+            
+            if unit["is_ranged"]:
+                # Ranged units want to be at optimal range
+                optimal_range = unit["rng_rng"] - 1
+                if new_dist == optimal_range:
+                    reward += unit_rewards.get("move_to_rng")
+                elif new_dist < optimal_range:
+                    reward += unit_rewards.get("move_close")
                 else:
-                    # Melee units want to get closer for charging
-                    if new_dist <= unit["move"]:
-                        reward += unit_rewards.get("move_to_charge")
-                    else:
-                        reward += unit_rewards.get("move_close")
+                    reward += unit_rewards.get("move_away")
+            else:
+                # Melee units want to get closer for charging
+                if new_dist <= unit["move"]:
+                    reward += unit_rewards.get("move_to_charge")
+                else:
+                    reward += unit_rewards.get("move_close")
         
         return reward
 
@@ -633,6 +640,270 @@ class W40KEnv(gym.Env):
             if other_target != target and other_target["cur_hp"] < target["cur_hp"]:
                 return False
         return True
+
+    def _execute_move_action(self, unit, action_type):
+        """Execute movement following AI_GAME.md: only movement actions allowed."""
+        unit_rewards = self._get_unit_reward_config(unit)
+        
+        old_col, old_row = unit["col"], unit["row"]
+        
+        if action_type == 0:  # Move North
+            new_row = max(0, unit["row"] - unit["move"])
+            unit["row"] = new_row
+        elif action_type == 1:  # Move South
+            new_row = min(self.board_size[1] - 1, unit["row"] + unit["move"])
+            unit["row"] = new_row
+        elif action_type == 2:  # Move East
+            new_col = min(self.board_size[0] - 1, unit["col"] + unit["move"])
+            unit["col"] = new_col
+        elif action_type == 3:  # Move West
+            new_col = max(0, unit["col"] - unit["move"])
+            unit["col"] = new_col
+        elif action_type == 7:  # Wait (universal - second click behavior)
+            reward = unit_rewards.get("wait")
+            unit["has_moved"] = True
+            return reward
+        else:
+            # Invalid action type in move phase
+            return unit_rewards.get("wait")  # Penalty for invalid action
+        
+        # ✅ CRITICAL FIX: Check if movement actually occurred
+        movement_occurred = (old_col != unit["col"]) or (old_row != unit["row"])
+        
+        if not movement_occurred:
+            # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
+            reward = unit_rewards.get("wait")  # Negative penalty for invalid move
+            # DON'T mark as moved - let unit try again or wait
+            return reward
+        
+        # ✅ SUCCESSFUL MOVE: Mark unit as moved and calculate rewards
+        unit["has_moved"] = True
+        
+        # Movement rewards based on tactical positioning (only for successful moves)
+        nearest_enemy = self._get_nearest_enemy(unit)
+        if nearest_enemy:
+            new_dist = abs(unit["col"] - nearest_enemy["col"]) + abs(unit["row"] - nearest_enemy["row"])
+            
+            if unit["is_ranged"]:
+                # Ranged units want to be at optimal range
+                optimal_range = unit["rng_rng"] - 1
+                if new_dist == optimal_range:
+                    reward = unit_rewards.get("move_to_rng")
+                elif new_dist < optimal_range:
+                    reward = unit_rewards.get("move_close")
+                else:
+                    reward = unit_rewards.get("move_away")
+            else:
+                # Melee units want to get closer for charging
+                if new_dist <= unit["move"]:
+                    reward = unit_rewards.get("move_to_charge")
+                else:
+                    reward = unit_rewards.get("move_close")
+        else:
+            # No enemies found, small positive reward for any movement
+            reward = unit_rewards.get("move_close", 0.1)
+        
+        return reward
+
+    def _execute_move_action(self, unit, action_type):
+        """Execute movement following AI_GAME.md: only movement actions allowed."""
+        unit_rewards = self._get_unit_reward_config(unit)
+        
+        old_col, old_row = unit["col"], unit["row"]
+        
+        if action_type == 0:  # Move North
+            new_row = max(0, unit["row"] - unit["move"])
+            unit["row"] = new_row
+        elif action_type == 1:  # Move South
+            new_row = min(self.board_size[1] - 1, unit["row"] + unit["move"])
+            unit["row"] = new_row
+        elif action_type == 2:  # Move East
+            new_col = min(self.board_size[0] - 1, unit["col"] + unit["move"])
+            unit["col"] = new_col
+        elif action_type == 3:  # Move West
+            new_col = max(0, unit["col"] - unit["move"])
+            unit["col"] = new_col
+        elif action_type == 7:  # Wait (universal - second click behavior)
+            reward = unit_rewards.get("wait")
+            unit["has_moved"] = True
+            return reward
+        else:
+            # Invalid action type in move phase
+            return unit_rewards.get("wait")  # Penalty for invalid action
+        
+        # ✅ CRITICAL FIX: Check if movement actually occurred
+        movement_occurred = (old_col != unit["col"]) or (old_row != unit["row"])
+        
+        if not movement_occurred:
+            # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
+            reward = unit_rewards.get("wait")  # Negative penalty for invalid move
+            # DON'T mark as moved - let unit try again or wait
+            return reward
+        
+        # ✅ SUCCESSFUL MOVE: Mark unit as moved and calculate rewards
+        unit["has_moved"] = True
+        
+        # Movement rewards based on tactical positioning (only for successful moves)
+        nearest_enemy = self._get_nearest_enemy(unit)
+        if nearest_enemy:
+            new_dist = abs(unit["col"] - nearest_enemy["col"]) + abs(unit["row"] - nearest_enemy["row"])
+            
+            if unit["is_ranged"]:
+                # Ranged units want to be at optimal range
+                optimal_range = unit["rng_rng"] - 1
+                if new_dist == optimal_range:
+                    reward = unit_rewards.get("move_to_rng")
+                elif new_dist < optimal_range:
+                    reward = unit_rewards.get("move_close")
+                else:
+                    reward = unit_rewards.get("move_away")
+            else:
+                # Melee units want to get closer for charging
+                if new_dist <= unit["move"]:
+                    reward = unit_rewards.get("move_to_charge")
+                else:
+                    reward = unit_rewards.get("move_close")
+        else:
+            # No enemies found, small positive reward for any movement
+            reward = unit_rewards.get("move_close", 0.1)
+        
+        return reward
+
+    def _execute_move_action(self, unit, action_type):
+        """Execute movement following AI_GAME.md: only movement actions allowed."""
+        unit_rewards = self._get_unit_reward_config(unit)
+        
+        old_col, old_row = unit["col"], unit["row"]
+        
+        if action_type == 0:  # Move North
+            new_row = max(0, unit["row"] - unit["move"])
+            unit["row"] = new_row
+        elif action_type == 1:  # Move South
+            new_row = min(self.board_size[1] - 1, unit["row"] + unit["move"])
+            unit["row"] = new_row
+        elif action_type == 2:  # Move East
+            new_col = min(self.board_size[0] - 1, unit["col"] + unit["move"])
+            unit["col"] = new_col
+        elif action_type == 3:  # Move West
+            new_col = max(0, unit["col"] - unit["move"])
+            unit["col"] = new_col
+        elif action_type == 7:  # Wait (universal - second click behavior)
+            reward = unit_rewards.get("wait")
+            unit["has_moved"] = True
+            return reward
+        else:
+            # Invalid action type in move phase
+            return unit_rewards.get("wait")  # Penalty for invalid action
+        
+        # ✅ CRITICAL FIX: Check if movement actually occurred
+        movement_occurred = (old_col != unit["col"]) or (old_row != unit["row"])
+        
+        if not movement_occurred:
+            # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
+            reward = unit_rewards.get("wait")  # Negative penalty for invalid move
+            # DON'T mark as moved - let unit try again or wait
+            return reward
+        
+        # ✅ SUCCESSFUL MOVE: Mark unit as moved and calculate rewards
+        unit["has_moved"] = True
+        
+        # Movement rewards based on tactical positioning (only for successful moves)
+        nearest_enemy = self._get_nearest_enemy(unit)
+        if nearest_enemy:
+            new_dist = abs(unit["col"] - nearest_enemy["col"]) + abs(unit["row"] - nearest_enemy["row"])
+            
+            if unit["is_ranged"]:
+                # Ranged units want to be at optimal range
+                optimal_range = unit["rng_rng"] - 1
+                if new_dist == optimal_range:
+                    reward = unit_rewards.get("move_to_rng")
+                elif new_dist < optimal_range:
+                    reward = unit_rewards.get("move_close")
+                else:
+                    reward = unit_rewards.get("move_away")
+            else:
+                # Melee units want to get closer for charging
+                if new_dist <= unit["move"]:
+                    reward = unit_rewards.get("move_to_charge")
+                else:
+                    reward = unit_rewards.get("move_close")
+        else:
+            # No enemies found, small positive reward for any movement
+            reward = unit_rewards.get("move_close", 0.1)
+        
+        return reward
+
+    def _execute_move_action(self, unit, action_type):
+        """Execute movement following AI_GAME.md: only movement actions allowed."""
+        unit_rewards = self._get_unit_reward_config(unit)
+        
+        old_col, old_row = unit["col"], unit["row"]
+        
+        if action_type == 0:  # Move North
+            new_row = max(0, unit["row"] - unit["move"])
+            unit["row"] = new_row
+        elif action_type == 1:  # Move South
+            new_row = min(self.board_size[1] - 1, unit["row"] + unit["move"])
+            unit["row"] = new_row
+        elif action_type == 2:  # Move East
+            new_col = min(self.board_size[0] - 1, unit["col"] + unit["move"])
+            unit["col"] = new_col
+        elif action_type == 3:  # Move West
+            new_col = max(0, unit["col"] - unit["move"])
+            unit["col"] = new_col
+        elif action_type == 7:  # Wait (universal - second click behavior)
+            reward = unit_rewards.get("wait")
+            unit["has_moved"] = True
+            return reward
+        else:
+            # Invalid action type in move phase
+            return unit_rewards.get("wait")  # Penalty for invalid action
+        
+        # ✅ CRITICAL FIX: Check if movement actually occurred
+        movement_occurred = (old_col != unit["col"]) or (old_row != unit["row"])
+        
+        if not movement_occurred:
+            # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
+            reward = unit_rewards.get("wait")  # Negative penalty for invalid move
+            # DON'T mark as moved - let unit try again or wait
+            return reward
+        
+        # ✅ SUCCESSFUL MOVE: Mark unit as moved and calculate rewards
+        unit["has_moved"] = True
+        
+        # Movement rewards based on tactical positioning (only for successful moves)
+        nearest_enemy = self._get_nearest_enemy(unit)
+        if nearest_enemy:
+            new_dist = abs(unit["col"] - nearest_enemy["col"]) + abs(unit["row"] - nearest_enemy["row"])
+            
+            if unit["is_ranged"]:
+                # Ranged units want to be at optimal range
+                optimal_range = unit["rng_rng"] - 1
+                if new_dist == optimal_range:
+                    reward = unit_rewards.get("move_to_rng")
+                elif new_dist < optimal_range:
+                    reward = unit_rewards.get("move_close")
+                else:
+                    reward = unit_rewards.get("move_away")
+            else:
+                # Melee units want to get closer for charging
+                if new_dist <= unit["move"]:
+                    reward = unit_rewards.get("move_to_charge")
+                else:
+                    reward = unit_rewards.get("move_close")
+        else:
+            # No enemies found, small positive reward for any movement
+            reward = unit_rewards.get("move_close", 0.1)
+        
+        return reward
+
+    def _check_unit_second_click(self, unit, action_type):
+        """Handle second click on unit = wait/end activation following AI_GAME.md."""
+        # This method can be expanded for human player interface
+        # For AI training, action_type 7 serves this purpose
+        unit_rewards = self._get_unit_reward_config(unit)
+        unit["has_moved"] = True
+        return unit_rewards.get("wait")
 
     def _execute_shoot_action(self, unit, action_type):
         """Execute shooting: only action_type==4 shoots following AI_GAME.md."""
