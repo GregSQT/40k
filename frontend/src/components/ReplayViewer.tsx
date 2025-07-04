@@ -47,25 +47,25 @@ interface ScenarioConfig {
 }
 
 interface ReplayEvent {
-  turn?: number;
-  type?: string;
-  timestamp?: string;
-  action?: {
-    type?: string;
-    action_id?: number;
-    reward?: number;
-  } | number; // Support both object and number formats
+  turn: number;
+  phase?: string;
+  current_phase?: string;
+  action?: any;
+  units?: Array<{
+    id: number;
+    player: number;
+    unit_type: string;
+    col: number;
+    row: number;
+    alive: boolean;
+    cur_hp: number;
+  }>;
   game_state?: {
-    turn?: number;
+    turn: number;
     ai_units_alive?: number;
     enemy_units_alive?: number;
     game_over?: boolean;
   };
-  units?: {
-    ai_count?: number;
-    enemy_count?: number;
-  };
-  // Legacy format support
   acting_unit_idx?: number;
   ai_units_alive?: number;
   enemy_units_alive?: number;
@@ -96,15 +96,61 @@ interface ReplayViewerProps {
   replayFile?: string;
 }
 
-// Unit type registry - unified naming following AI_INSTRUCTIONS.md
-const UNIT_REGISTRY = {
-  'Intercessor': Intercessor,
-  'AssaultIntercessor': AssaultIntercessor,
-  'intercessor': Intercessor,          // AI compatibility
-  'assault_intercessor': AssaultIntercessor,  // AI compatibility
-  'space_marine_intercessor': Intercessor,    // Full AI naming
-  'space_marine_assault_intercessor': AssaultIntercessor  // Full AI naming
-} as const;
+// Config-driven unit registry - AI_INSTRUCTIONS.md compliance
+const buildConfigUnitRegistry = async () => {
+  try {
+    // Load unit definitions from config - AI_INSTRUCTIONS.md compliance
+    const unitDefinitionsResponse = await fetch('/config/unit_definitions.json');
+    if (!unitDefinitionsResponse.ok) {
+      throw new Error(`Failed to load unit_definitions.json: ${unitDefinitionsResponse.status}`);
+    }
+    const unitDefinitions = await unitDefinitionsResponse.json();
+    
+    const registry: Record<string, typeof Intercessor | typeof AssaultIntercessor> = {};
+    
+    // TypeScript class mapping
+    const classMapping: Record<string, typeof Intercessor | typeof AssaultIntercessor> = {
+      'Intercessor': Intercessor,
+      'AssaultIntercessor': AssaultIntercessor
+    };
+    
+    // Build registry from config - single canonical name per unit
+    Object.entries(unitDefinitions.units || {}).forEach(([configName, definition]: [string, any]) => {
+      const UnitClass = classMapping[definition.class_name];
+      if (UnitClass) {
+        registry[configName] = UnitClass;
+        
+        // AI_INSTRUCTIONS.md: Validate required properties
+        const requiredProps = unitDefinitions.required_properties || ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG', 'ICON'];
+        requiredProps.forEach((prop: string) => {
+          if (UnitClass[prop as keyof typeof UnitClass] === undefined) {
+            throw new Error(`AI_INSTRUCTIONS.md violation: Unit ${configName} missing required property: ${prop}`);
+          }
+        });
+      } else {
+        console.warn(`⚠️ Unknown unit class: ${definition.class_name} for unit ${configName}`);
+      }
+    });
+    
+    console.log(`✅ Loaded ${Object.keys(registry).length} unit types from config`);
+    return registry;
+  } catch (error) {
+    throw new Error(`AI_INSTRUCTIONS.md violation: Failed to load unit registry from config: ${error}`);
+  }
+};
+
+// Initialize config-driven registry
+let UNIT_REGISTRY: Record<string, typeof Intercessor | typeof AssaultIntercessor> = {};
+
+// Load registry on component mount
+const initializeUnitRegistry = async () => {
+  try {
+    UNIT_REGISTRY = await buildConfigUnitRegistry();
+  } catch (error) {
+    console.error('Failed to initialize unit registry:', error);
+    throw error;
+  }
+};
 
 // Validate unit registry consistency
 const validateUnitRegistry = () => {
@@ -118,15 +164,59 @@ const validateUnitRegistry = () => {
   });
 };
 
-// Phase validation according to AI_GAME.md - LOAD FROM CONFIG
+// Enhanced phase validation according to AI_GAME.md - STRICT CONFIG ONLY
 const validatePhaseOrder = (phases: string[], configPhases: string[]) => {
+  // AI_INSTRUCTIONS.md: No hardcoded fallbacks allowed
+  if (!configPhases || configPhases.length === 0) {
+    throw new Error('CRITICAL: Phase order not loaded from config. AI_INSTRUCTIONS.md violation - must use config files only.');
+  }
+  
+  // AI_GAME.md: Exact sequence enforcement
+  const expectedSequence = configPhases.join(' → ');
   if (JSON.stringify(phases) !== JSON.stringify(configPhases)) {
-    console.error('Phase order violation of AI_GAME rules:', phases);
-    console.error('Expected phases:', configPhases);
-    console.error('Received phases:', phases);
-    throw new Error(`Invalid phase order. AI_GAME.md requires exact sequence: ${configPhases.join(' → ')}`);
+    console.error('🚨 Phase order violation of AI_GAME.md rules:', phases);
+    console.error('📋 Expected phases:', configPhases);
+    console.error('❌ Received phases:', phases);
+    throw new Error(`Invalid phase order. AI_GAME.md requires exact sequence: ${expectedSequence}`);
   }
   console.log('✅ Phase order validates against AI_GAME.md');
+  return true;
+};
+
+// AI_GAME.md behavioral compliance validation
+const validatePhaseBehavior = (event: ReplayEvent, phaseConfig: any) => {
+  const phase = event.phase || event.current_phase || 'move';
+  const actionType = typeof event.action === 'object' && event.action?.type ? event.action.type : undefined;
+  
+  // AI_GAME.md: Strict phase action validation
+  switch(phase) {
+    case 'move':
+      // AI_GAME.md: "The only available action in this phase is moving"
+      if (actionType && !['move', 'skip_move', 'pass_move'].includes(actionType)) {
+        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in movement phase. Only movement actions allowed.`);
+      }
+      break;
+    case 'shoot':
+      // AI_GAME.md: "The only available action in this phase is shooting"
+      if (actionType && !['shoot', 'skip_shoot', 'pass_shoot'].includes(actionType)) {
+        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in shooting phase. Only shooting actions allowed.`);
+      }
+      break;
+    case 'charge':
+      // AI_GAME.md: Charge phase validation
+      if (actionType && !['charge', 'skip_charge', 'pass_charge'].includes(actionType)) {
+        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in charge phase. Only charge actions allowed.`);
+      }
+      break;
+    case 'combat':
+      // AI_GAME.md: "The only available action in this phase is attacking"  
+      if (actionType && !['attack', 'skip_attack', 'pass_attack'].includes(actionType)) {
+        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in combat phase. Only attack actions allowed.`);
+      }
+      break;
+    default:
+      throw new Error(`AI_GAME.md violation: Unknown phase '${phase}'. Must be one of: move, shoot, charge, combat`);
+  }
   return true;
 };
 

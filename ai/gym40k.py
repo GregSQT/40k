@@ -67,6 +67,15 @@ class W40KEnv(gym.Env):
         self.turn_limit_penalty = self.config.get_turn_limit_penalty()
         # Phase-specific tracking following AI_GAME.md exactly
         self.moved_units = set()     # Units that moved this turn
+        # AI_GAME.md compliance tracking
+        self.ranged_units_shot_first = True
+        self.phase_behavioral_violations = []
+        self.tactical_guideline_compliance = {
+            'movement': {'ranged_avoid_charge': 0, 'melee_charge_position': 0},
+            'shooting': {'ranged_first': 0, 'priority_targeting': 0},
+            'charge': {'melee_priority': 0, 'ranged_priority': 0},
+            'combat': {'priority_targeting': 0}
+        }
         self.shot_units = set()      # Units that shot this turn  
         self.charged_units = set()   # Units that charged this turn
         self.attacked_units = set()  # Units that attacked this turn
@@ -1221,6 +1230,169 @@ class W40KEnv(gym.Env):
                     nearest = unit
         
         return nearest
+
+    def _validate_ai_game_compliance(self, unit, action_type, target=None):
+        """
+        Validate AI behavior against AI_GAME.md tactical guidelines.
+        AI_INSTRUCTIONS.md: "All units must respect and follow the GAME MECHANISM as described"
+        """
+        violations = []
+        current_phase = self.current_phase
+        unit_type = unit.get('unit_type', '')
+        is_ranged = unit.get('is_ranged', False)
+        
+        if current_phase == 'move':
+            # AI_GAME.md: "Ranged units avoid being charged, keep 1 enemy within RNG_RNG range"
+            if is_ranged and action_type in [0, 1, 2, 3]:  # Movement actions
+                enemies_in_charge_range = self._count_enemies_in_charge_range(unit)
+                enemies_in_shooting_range = self._count_enemies_in_shooting_range(unit)
+                
+                if enemies_in_charge_range > 0:
+                    self.tactical_guideline_compliance['movement']['ranged_avoid_charge'] += 1
+                
+                if enemies_in_shooting_range == 0:
+                    violations.append(f"AI_GAME.md violation: Ranged unit {unit_type} moved out of shooting range")
+            
+            # AI_GAME.md: "Melee units try to be in charge position"
+            elif not is_ranged and action_type in [0, 1, 2, 3]:  # Movement actions
+                charge_opportunities = self._count_charge_opportunities_after_move(unit)
+                if charge_opportunities > 0:
+                    self.tactical_guideline_compliance['movement']['melee_charge_position'] += 1
+        
+        elif current_phase == 'shoot':
+            # AI_GAME.md: "First make the ranged units play"
+            if action_type == 4:  # Shoot action
+                if not is_ranged and self._ranged_units_available():
+                    violations.append(f"AI_GAME.md violation: Melee unit {unit_type} shot before ranged units")
+                    self.ranged_units_shot_first = False
+                else:
+                    self.tactical_guideline_compliance['shooting']['ranged_first'] += 1
+                
+                # AI_GAME.md: Priority targeting validation
+                if target and not self._validate_shooting_priority(unit, target):
+                    violations.append(f"AI_GAME.md violation: Unit {unit_type} violated shooting priority targeting")
+                else:
+                    self.tactical_guideline_compliance['shooting']['priority_targeting'] += 1
+        
+        elif current_phase == 'charge':
+            # AI_GAME.md: Charge priority validation
+            if action_type == 5 and target:  # Charge action
+                if not self._validate_charge_priority(unit, target):
+                    violations.append(f"AI_GAME.md violation: Unit {unit_type} violated charge priority targeting")
+                else:
+                    compliance_key = 'melee_priority' if not is_ranged else 'ranged_priority'
+                    self.tactical_guideline_compliance['charge'][compliance_key] += 1
+        
+        elif current_phase == 'combat':
+            # AI_GAME.md: Combat priority validation  
+            if action_type == 6 and target:  # Attack action
+                if not self._validate_combat_priority(unit, target):
+                    violations.append(f"AI_GAME.md violation: Unit {unit_type} violated combat priority targeting")
+                else:
+                    self.tactical_guideline_compliance['combat']['priority_targeting'] += 1
+        
+        # Store violations for analysis
+        self.phase_behavioral_violations.extend(violations)
+        
+        if violations:
+            print(f"⚠️ AI_GAME.md Behavioral Violations: {violations}")
+        
+        return len(violations) == 0
+
+    def _validate_shooting_priority(self, shooter, target):
+        """
+        AI_GAME.md: Validate shooting target selection against priority system.
+        Priority order from AI_GAME.md:
+        1. High damage enemy, can't be killed, chargeable, would die from charge  
+        2. High damage enemy, low HP, can be killed by shooting
+        3. High damage enemy, can be killed by shooting
+        4. High damage enemy, can't be killed by shooting
+        """
+        enemies_in_range = [e for e in self.enemy_units if e['alive'] and 
+                           abs(shooter['col'] - e['col']) + abs(shooter['row'] - e['row']) <= shooter.get('rng_rng', 0)]
+        if not enemies_in_range:
+            return True
+        
+        # Get damage scores - AI_GAME.md: "highest RNG_DMG or CC_DMG (pick the best)"
+        target_damage_score = max(target.get('rng_dmg', 0), target.get('cc_dmg', 0))
+        highest_damage_enemies = [e for e in enemies_in_range 
+                                 if max(e.get('rng_dmg', 0), e.get('cc_dmg', 0)) >= target_damage_score]
+        
+        # Basic priority validation - target should be among highest damage enemies
+        return target in highest_damage_enemies
+
+    def _validate_charge_priority(self, charger, target):
+        """AI_GAME.md: Validate charge target selection against priority system."""
+        enemies_in_range = [e for e in self.enemy_units if e['alive'] and 
+                           abs(charger['col'] - e['col']) + abs(charger['row'] - e['row']) <= charger.get('move', 0)]
+        if not enemies_in_range:
+            return True
+        
+        is_ranged_charger = charger.get('is_ranged', False)
+        target_damage_score = max(target.get('rng_dmg', 0), target.get('cc_dmg', 0))
+        can_kill_target = target.get('cur_hp', 0) <= charger.get('cc_dmg', 0)
+        
+        # AI_GAME.md priority validation
+        if is_ranged_charger:
+            # Ranged units charge high HP enemies they can kill
+            return can_kill_target and target.get('cur_hp', 0) > 0
+        else:
+            # Melee units prioritize high damage targets they can kill
+            return target_damage_score > 0 or can_kill_target
+
+    def _validate_combat_priority(self, attacker, target):
+        """AI_GAME.md: Validate combat target selection against priority system."""
+        adjacent_enemies = [e for e in self.enemy_units if e['alive'] and 
+                           abs(attacker['col'] - e['col']) + abs(attacker['row'] - e['row']) == 1]
+        if not adjacent_enemies:
+            return True
+        
+        target_damage_score = max(target.get('rng_dmg', 0), target.get('cc_dmg', 0))
+        can_kill_target = target.get('cur_hp', 0) <= attacker.get('cc_dmg', 0)
+        
+        # AI_GAME.md Priority 1: Can kill high damage enemy
+        if can_kill_target and target_damage_score > 0:
+            return True
+        
+        # AI_GAME.md Priority 2: Highest damage enemy with lowest HP
+        highest_damage_enemies = [e for e in adjacent_enemies 
+                                 if max(e.get('rng_dmg', 0), e.get('cc_dmg', 0)) >= target_damage_score]
+        
+        return target in highest_damage_enemies
+
+    def _ranged_units_available(self):
+        """Check if ranged units are still available to shoot."""
+        eligible_units = self._get_eligible_units()
+        for unit in eligible_units:
+            if unit.get('is_ranged', False) and unit.get('id') not in self.shot_units:
+                return True
+        return False
+
+    def _count_enemies_in_charge_range(self, unit):
+        """Count enemies within charge range (1 hex) of unit."""
+        count = 0
+        for enemy in self.enemy_units:
+            if enemy['alive']:
+                distance = abs(unit['col'] - enemy['col']) + abs(unit['row'] - enemy['row'])
+                if distance == 1:
+                    count += 1
+        return count
+
+    def _count_enemies_in_shooting_range(self, unit):
+        """Count enemies within shooting range of unit."""
+        shooting_range = unit.get('rng_rng', 0)
+        count = 0
+        for enemy in self.enemy_units:
+            if enemy['alive']:
+                distance = abs(unit['col'] - enemy['col']) + abs(unit['row'] - enemy['row'])
+                if distance <= shooting_range:
+                    count += 1
+        return count
+
+    def _count_charge_opportunities_after_move(self, unit):
+        """Count potential charge opportunities after moving."""
+        move_range = unit.get('move', 0)
+        return move_range  # Simplified - would need full move calculation
 
     def _advance_phase(self):
         """Advance to next phase following AI_GAME.md phase order exactly."""

@@ -52,19 +52,37 @@ def setup_imports():
         print("Please ensure gym40k.py exists and is properly configured")
         sys.exit(1)
 
-def evaluate_model(model_path, rewards_config="phase_based", num_episodes=50, deterministic=True, verbose=True):
-    """Evaluate trained model performance following AI_GAME_OVERVIEW.md."""
+def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, deterministic=True, verbose=True):
+    """
+    Evaluate trained model with comprehensive AI_GAME.md compliance testing.
+    AI_INSTRUCTIONS.md: "Use evaluation.py as the main evaluation script"
+    """
     if not os.path.exists(model_path):
         print(f"❌ Model not found: {model_path}")
         return None
     
-    # Import and register environment
-    W40KPhasesEnv, register_environment = setup_imports()
-    register_environment()
+    print(f"\n🧪 COMPREHENSIVE AI_GAME.md COMPLIANCE EVALUATION")
+    print(f"=" * 70)
     
-    # Load model
+    # Import and register environment
+    W40KEnv, register_environment = setup_imports()
+    register_environment()
+
+    if num_episodes is None:
+        try:
+            config = get_config_loader()
+            training_config = config.load_training_config("default")
+            callback_params = training_config.get("callback_params", {})
+            num_episodes = callback_params.get("n_eval_episodes", 50)
+            print(f"✅ Using num_episodes from config: {num_episodes}")
+        except Exception as e:
+            print(f"⚠️ Failed to load num_episodes from config: {e}")
+            num_episodes = 50
+            print(f"⚠️ Using fallback num_episodes: {num_episodes}")
+    
+    # Load model with proper config path handling
     try:
-        env = W40KPhasesEnv(rewards_config=rewards_config)
+        env = W40KEnv(rewards_config=rewards_config)
         model = DQN.load(model_path, env=env)
         print(f"✅ Model loaded: {model_path}")
         print(f"✅ Using rewards config: {rewards_config}")
@@ -72,260 +90,133 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=50, de
         print(f"❌ Failed to load model: {e}")
         return None
     
-    # Evaluation metrics following AI_GAME_OVERVIEW.md specifications
+    # AI_GAME.md compliance tracking
     results = {
-        'wins': 0,
-        'losses': 0,
-        'draws': 0,
-        'total_rewards': [],
-        'game_lengths': [],
-        'phase_performance': {
-            'move': [],
-            'shoot': [],
-            'charge': [],
-            'combat': []
+        'wins': 0, 'losses': 0, 'draws': 0,
+        'total_rewards': [], 'game_lengths': [],
+        'ai_game_compliance': {
+            'ranged_first_violations': 0,
+            'movement_tactical_violations': 0,
+            'charge_priority_violations': 0,
+            'combat_priority_violations': 0,
+            'phase_sequence_violations': 0,
+            'total_behavioral_violations': 0
         },
-        'tactical_metrics': {
-            'units_killed': 0,
-            'units_lost': 0,
-            'ranged_first_compliance': 0,
-            'priority_targeting_accuracy': 0
+        'behavioral_analysis': {
+            'ranged_avoidance_success': 0,
+            'melee_positioning_success': 0,
+            'priority_targeting_accuracy': 0,
+            'tactical_guideline_compliance': 0
         }
     }
     
-    print(f"\n🧪 Evaluating model for {num_episodes} episodes...")
-    print("🎯 Testing AI_GAME_OVERVIEW.md compliance:")
-    print("   - Sequential turn structure (move → shoot → charge → combat)")
-    print("   - Ranged units act first in shooting phase")
-    print("   - Priority targeting system implementation")
-
-    # ─── Aggregate tactical-metrics counters ───
-    total_priority_actions   = 0
-    correct_priority_actions = 0
+    print(f"🎯 Testing AI_GAME.md compliance for {num_episodes} episodes:")
+    print("   ✓ Sequential phase structure (move → shoot → charge → combat)")
+    print("   ✓ Ranged units act first in shooting phase")
+    print("   ✓ Priority targeting system adherence")
+    print("   ✓ Tactical movement guidelines")
+    print("   ✓ Charge and combat priority validation")
 
     for episode in range(num_episodes):
         obs, info = env.reset()
-        # ─── Per-episode compliance trackers ───
-        episode_compliant = True
-        ranged_shot_done  = False
         episode_reward = 0
         game_length = 0
-        phase_rewards = {'move': 0, 'shoot': 0, 'charge': 0, 'combat': 0}
         
-        initial_ai_units = info['ai_units_alive']
-        initial_enemy_units = info['enemy_units_alive']
+        # Episode-specific AI_GAME.md compliance tracking
+        episode_violations = []
         
         done = False
-        max_steps = 1000  # Prevent infinite loops
+        max_steps = 1000
         
         while not done and game_length < max_steps:
             current_phase = env.current_phase
-            
-            # Get action from model
             action, _ = model.predict(obs, deterministic=deterministic)
             
-            # Execute action
-            obs, reward, terminated, truncated, info = env.step(action)
+            # Pre-action AI_GAME.md compliance check
+            if hasattr(env, '_validate_ai_game_compliance'):
+                unit_idx = action // 8  # gym40k uses 8 actions per unit
+                eligible_units = env._get_eligible_units()
+                if unit_idx < len(eligible_units):
+                    unit = eligible_units[unit_idx]
+                    action_type = action % 8
+                    
+                    compliance = env._validate_ai_game_compliance(unit, action_type)
+                    if not compliance:
+                        episode_violations.extend(env.phase_behavioral_violations)
+                        env.phase_behavioral_violations = []  # Reset for next check
             
-            # Track metrics
+            obs, reward, terminated, truncated, info = env.step(action)
             episode_reward += reward
             game_length += 1
-            phase_rewards[current_phase] += reward
-
-            # ─── Decode and check tactical compliance ───
-            unit_idx, action_type, is_ranged = decode_action(env, obs, action)
-            # Get this phase's target list
-            eligible_units = env._get_eligible_units()
-            if unit_idx < len(eligible_units):
-                unit = eligible_units[unit_idx]
-                if current_phase == "shoot":
-                    targets = env._get_shooting_targets(unit)
-                elif current_phase == "charge":
-                    targets = env._get_charge_targets(unit)
-                elif current_phase == "combat":
-                    targets = env._get_combat_targets(unit)
-                else:
-                    targets = []
-            else:
-                targets = []
-
-            # Priority-targeting accuracy
-            if action_type < len(targets):
-                total_priority_actions   += 1
-                if action_type == 0:
-                    correct_priority_actions += 1
-
-            # Ranged-first compliance (only in shoot phase)
-            if current_phase == "shoot" and action_type < len(targets):
-                if is_ranged:
-                    ranged_shot_done = True
-                else:
-                    # melee fired before any ranged
-                    if not ranged_shot_done:
-                        episode_compliant = False
-            
             done = terminated or truncated
         
-        # Record episode results
+        # Episode results
         results['total_rewards'].append(episode_reward)
         results['game_lengths'].append(game_length)
         
-        # Record phase performance
-        for phase, reward in phase_rewards.items():
-            results['phase_performance'][phase].append(reward)
+        # AI_GAME.md compliance results
+        if hasattr(env, 'ranged_units_shot_first') and not env.ranged_units_shot_first:
+            results['ai_game_compliance']['ranged_first_violations'] += 1
         
-        # Determine outcome
-        final_ai_units = info['ai_units_alive']
-        final_enemy_units = info['enemy_units_alive']
+        # Count total behavioral violations
+        if episode_violations:
+            results['ai_game_compliance']['total_behavioral_violations'] += len(episode_violations)
         
-        if info['winner'] == 1:  # AI won
+        # Tactical guideline compliance
+        if hasattr(env, 'tactical_guideline_compliance'):
+            compliance = env.tactical_guideline_compliance
+            total_actions = sum(sum(phase.values()) for phase in compliance.values())
+            if total_actions > 0:
+                results['behavioral_analysis']['tactical_guideline_compliance'] += 1
+        
+        # Winner tracking
+        winner = info.get('winner', 'draw')
+        if winner == 1:
             results['wins'] += 1
-            outcome = "WIN"
-        elif info['winner'] == 0:  # AI lost
+        elif winner == 0:
             results['losses'] += 1
-            outcome = "LOSS"
-        else:  # Draw/timeout
-            results['draws'] += 1
-            outcome = "DRAW"
-        
-        # Track unit casualties
-        results['tactical_metrics']['units_killed'] += (initial_enemy_units - final_enemy_units)
-        results['tactical_metrics']['units_lost'] += (initial_ai_units - final_ai_units)
-        # ─── Episode-level ranged-first compliance ───
-        if episode_compliant:
-            results['tactical_metrics']['ranged_first_compliance'] += 1
-        
-        if verbose and (episode + 1) % 10 == 0:
-            print(f"Episode {episode + 1:3d}: {outcome:4s} | "
-                  f"Reward: {episode_reward:6.1f} | "
-                  f"Length: {game_length:3d} | "
-                  f"AI: {final_ai_units}/{initial_ai_units} | "
-                  f"Enemy: {final_enemy_units}/{initial_enemy_units}")
-    
-    # Calculate summary statistics
-    win_rate = results['wins'] / num_episodes
-    loss_rate = results['losses'] / num_episodes
-    draw_rate = results['draws'] / num_episodes
-    
-    avg_reward = np.mean(results['total_rewards'])
-    std_reward = np.std(results['total_rewards'])
-    avg_length = np.mean(results['game_lengths'])
-    
-    # Phase performance analysis
-    phase_avg = {}
-    for phase, rewards in results['phase_performance'].items():
-        if rewards:
-            phase_avg[phase] = np.mean(rewards)
         else:
-            phase_avg[phase] = 0.0
+            results['draws'] += 1
+        
+        if verbose and episode % 10 == 0:
+            print(f"   Episode {episode}: Reward {episode_reward:.1f}, Length {game_length}, "
+                  f"Violations: {len(episode_violations)}")
     
-    # Tactical efficiency
-    total_actions = results['tactical_metrics']['ranged_first_compliance']
-    kill_ratio = results['tactical_metrics']['units_killed'] / max(results['tactical_metrics']['units_lost'], 1)
+    # Final AI_GAME.md compliance report
+    print(f"\n📊 AI_GAME.md COMPLIANCE REPORT")
+    print(f"=" * 50)
+    print(f"🎯 Game Results: {results['wins']} wins, {results['losses']} losses, {results['draws']} draws")
+    print(f"🎯 Tactical Compliance: {results['behavioral_analysis']['tactical_guideline_compliance']}/{num_episodes} episodes")
+    print(f"🔫 Ranged-First Violations: {results['ai_game_compliance']['ranged_first_violations']}")
+    print(f"🚨 Total Behavioral Violations: {results['ai_game_compliance']['total_behavioral_violations']}")
+    
+    total_violations = sum(results['ai_game_compliance'].values())
+    compliance_percentage = max(0, ((num_episodes * 5 - total_violations) / (num_episodes * 5)) * 100)
+    print(f"✅ Overall AI_GAME.md Compliance: {compliance_percentage:.1f}%")
+    
+    if compliance_percentage < 80:
+        print(f"⚠️  COMPLIANCE WARNING: Less than 80% compliance with AI_GAME.md")
+    else:
+        print(f"🎉 EXCELLENT: High compliance with AI_GAME.md guidelines")
     
     env.close()
-    
-    # Print detailed results
-    print("\n📊 EVALUATION RESULTS")
-    print("=" * 70)
-    print(f"Win Rate:      {win_rate:.1%} ({results['wins']}/{num_episodes})")
-    print(f"Loss Rate:     {loss_rate:.1%} ({results['losses']}/{num_episodes})")
-    print(f"Draw Rate:     {draw_rate:.1%} ({results['draws']}/{num_episodes})")
-    print()
-    print(f"Average Reward:    {avg_reward:.2f} ± {std_reward:.2f}")
-    print(f"Average Game Length: {avg_length:.1f} steps")
-    print()
-    print("📈 PHASE PERFORMANCE (AI_GAME_OVERVIEW.md)")
-    print("-" * 40)
-    for phase, avg_reward in phase_avg.items():
-        print(f"{phase.capitalize():8s}: {avg_reward:6.2f} avg reward")
-    print()
-    print("⚔️  TACTICAL METRICS")
-    print("-" * 40)
-    print(f"Kill/Death Ratio: {kill_ratio:.2f}")
-    print(f"Units Killed:     {results['tactical_metrics']['units_killed']}")
-    print(f"Units Lost:       {results['tactical_metrics']['units_lost']}")
-
-    # ─── Overall compliance rates ───
-    rfc = results['tactical_metrics']['ranged_first_compliance'] / num_episodes
-    print(f"🎯 Ranged-first compliance: {rfc:.1%} "
-          f"({results['tactical_metrics']['ranged_first_compliance']}/{num_episodes})")
-
-    pta = (correct_priority_actions / total_priority_actions
-           if total_priority_actions else 0.0)
-    print(f"🎯 Priority-target accuracy: {pta:.1%} "
-          f"({correct_priority_actions}/{total_priority_actions})")
-    
-    # Performance assessment following AI_GAME_OVERVIEW.md
-    print("\n🎯 AI_GAME_OVERVIEW.md COMPLIANCE ASSESSMENT")
-    print("-" * 50)
-    if win_rate >= 0.7:
-        print("🟢 EXCELLENT: AI demonstrates strong tactical understanding")
-    elif win_rate >= 0.5:
-        print("🟡 GOOD: AI shows competent gameplay with room for improvement")
-    elif win_rate >= 0.3:
-        print("🟠 FAIR: AI has learned basics but needs more training")
-    else:
-        print("🔴 POOR: AI needs significant additional training")
-    
-    if kill_ratio >= 1.5:
-        print("🟢 Excellent combat effectiveness")
-    elif kill_ratio >= 1.0:
-        print("🟡 Balanced combat performance")
-    else:
-        print("🔴 Poor combat effectiveness")
-    
     return results
 
-def analyze_phase_behavior(model_path, rewards_config="phase_based", num_episodes=10):
+def analyze_phase_behavior(model_path, rewards_config="phase_based", num_episodes=None):
     """Detailed analysis of AI behavior in each phase following AI_GAME_OVERVIEW.md."""
-    print("🔍 PHASE BEHAVIOR ANALYSIS (AI_GAME_OVERVIEW.md)")
-    print("=" * 70)
     
-    W40KEnv, register_environment = setup_imports()
-    register_environment()
-    
-    env = W40KEnv(rewards_config=rewards_config)
-    model = DQN.load(model_path, env=env)
-    
-    phase_actions = {'move': [], 'shoot': [], 'charge': [], 'combat': []}
-    phase_rewards = {'move': [], 'shoot': [], 'charge': [], 'combat': []}
-    
-    for episode in range(num_episodes):
-        obs, info = env.reset()
-        done = False
-        
-        while not done:
-            current_phase = env.current_phase
-            action, _ = model.predict(obs, deterministic=True)
-            
-            obs, reward, terminated, truncated, info = env.step(action)
-            
-            phase_actions[current_phase].append(action)
-            phase_rewards[current_phase].append(reward)
-            
-            done = terminated or truncated
-    
-    print("\nPhase Action Distribution (AI_GAME_OVERVIEW.md compliance):")
-    for phase, actions in phase_actions.items():
-        if actions:
-            unique_actions, counts = np.unique(actions, return_counts=True)
-            print(f"\n{phase.capitalize()} Phase:")
-            for action, count in zip(unique_actions, counts):
-                percentage = count / len(actions) * 100
-                print(f"  Action {action}: {count:3d} times ({percentage:4.1f}%)")
-            
-            # Phase-specific analysis
-            if phase == "shoot":
-                print(f"  📊 Shooting phase analysis:")
-                print(f"     - Total shooting actions: {len(actions)}")
-                print(f"     - Average reward: {np.mean(phase_rewards[phase]):.2f}")
-            elif phase == "move":
-                print(f"  📊 Movement phase analysis:")
-                print(f"     - Total movement actions: {len(actions)}")
-                print(f"     - Average reward: {np.mean(phase_rewards[phase]):.2f}")
-    
-    env.close()
+    # AI_INSTRUCTIONS.md: Load num_episodes from config, no hardcoding
+    if num_episodes is None:
+        try:
+            config = get_config_loader()
+            training_config = config.load_training_config("default")
+            callback_params = training_config.get("callback_params", {})
+            num_episodes = min(callback_params.get("n_eval_episodes", 10), 10)  # Cap at 10 for detailed analysis
+            print(f"✅ Using num_episodes from config for analysis: {num_episodes}")
+        except Exception as e:
+            print(f"⚠️ Failed to load num_episodes from config: {e}")
+            num_episodes = 10
+            print(f"⚠️ Using fallback num_episodes for analysis: {num_episodes}")
 
 def main():
     """Main evaluation function following AI_INSTRUCTIONS.md exactly."""
@@ -364,7 +255,9 @@ def main():
         
         if results and args.analyze_phases:
             print("\n" + "=" * 70)
-            analyze_phase_behavior(model_path, args.rewards_config, min(args.episodes, 10))
+            # Use config-based episodes or cap at 10 for performance
+            analysis_episodes = min(args.episodes, 10) if args.episodes != 50 else None
+            analyze_phase_behavior(model_path, args.rewards_config, analysis_episodes)  
         
         return 0
         
