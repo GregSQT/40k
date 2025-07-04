@@ -422,6 +422,9 @@ export default function Board({
         barBg.drawRoundedRect(barX, barY, HP_BAR_WIDTH, HP_BAR_HEIGHT, 3);
         barBg.endFill();
         app.stage.addChild(barBg);
+        
+        // Calculate current HP first
+        const hp = Math.max(0, unit.CUR_HP ?? unit.HP_MAX);
 
         // ✅ ENHANCED HP BAR FOR SHOOTING TARGETS
         const isShootingTarget = shootingTarget && unit.id === shootingTarget.id;
@@ -441,7 +444,7 @@ export default function Board({
           
           // Alternate between current and future HP
           const futureHP = Math.max(0, (unit.CUR_HP ?? unit.HP_MAX) - selectedUnit.RNG_DMG);
-          displayHP = hpAnimationStateRef.current ? futureHP : hp;
+          displayHP = hpAnimationStateRef.current ? futureHP : (unit.CUR_HP ?? unit.HP_MAX);
           
           // Enhanced background for shooting targets
           const enhancedBarBg = new PIXI.Graphics();
@@ -702,10 +705,9 @@ export default function Board({
     onCombatAttack,
     onCharge,
     onMoveCharger,
-    onValidateCharge,
-    // Add shooting preview dependencies  
-    shootingTarget,
-    hpAnimationStateRef.current
+    onValidateCharge
+    // Note: shootingTarget is computed inside useEffect, not a dependency
+    // hpAnimationStateRef.current changes don't need to trigger re-render
   ]);
 
   // Simple container return - loading/error handled inside useEffect
