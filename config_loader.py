@@ -79,12 +79,13 @@ class ConfigLoader:
         return game_config["game_rules"]["turn_limit_penalty"]
     
     def get_model_path(self) -> str:
-        """Get the model file path - raises error if missing."""
+        """Get the model file path - AI_INSTRUCTIONS.md compliance."""
         try:
             config = self.load_config("config")
             return config["paths"]["model_file"]
         except (KeyError, FileNotFoundError):
-            raise FileNotFoundError("Model path not configured. Default path should be 'ai/models/current/model.zip'")
+            # AI_INSTRUCTIONS.md: No hardcoded fallbacks allowed
+            raise FileNotFoundError("AI_INSTRUCTIONS.md violation: Model path not configured in config/config.json. Must define paths.model_file")
     
     def get_phase_order(self) -> list[str]:
         """Get game phase order - raises error if missing."""

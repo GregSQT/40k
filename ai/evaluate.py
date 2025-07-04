@@ -44,12 +44,12 @@ def decode_action(env, obs, action):
 def setup_imports():
     """Set up import paths and return required modules."""
     try:
-        # Import phase-based environment following AI_GAME_OVERVIEW.md
+        # AI_INSTRUCTIONS.md: Import from gym40k.py in ai/ subdirectory
         from gym40k import W40KEnv, register_environment
         return W40KEnv, register_environment
     except ImportError as e:
         print(f"Import error: {e}")
-        print("Please ensure gym40k.py exists and is properly configured")
+        print("AI_INSTRUCTIONS.md: Please ensure gym40k.py exists in ai/ directory and is properly configured")
         sys.exit(1)
 
 def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, deterministic=True, verbose=True):
@@ -90,7 +90,7 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, 
         print(f"❌ Failed to load model: {e}")
         return None
     
-    # AI_GAME.md compliance tracking
+    # AI_GAME.md compliance tracking - Enhanced
     results = {
         'wins': 0, 'losses': 0, 'draws': 0,
         'total_rewards': [], 'game_lengths': [],
@@ -100,13 +100,15 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, 
             'charge_priority_violations': 0,
             'combat_priority_violations': 0,
             'phase_sequence_violations': 0,
+            'phase_action_violations': 0,  # NEW: Track phase action enforcement
             'total_behavioral_violations': 0
         },
         'behavioral_analysis': {
             'ranged_avoidance_success': 0,
             'melee_positioning_success': 0,
             'priority_targeting_accuracy': 0,
-            'tactical_guideline_compliance': 0
+            'tactical_guideline_compliance': 0,
+            'action_masking_applied': 0  # NEW: Track when actions were masked
         }
     }
     
@@ -124,6 +126,8 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, 
         
         # Episode-specific AI_GAME.md compliance tracking
         episode_violations = []
+        phase_action_violations = 0
+        action_masking_count = 0
         
         done = False
         max_steps = 1000
@@ -131,6 +135,12 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, 
         while not done and game_length < max_steps:
             current_phase = env.current_phase
             action, _ = model.predict(obs, deterministic=deterministic)
+            
+            # Track phase action compliance before step
+            original_action_type = action % 8
+            expected_actions = env._get_valid_actions_for_phase(None, current_phase) if hasattr(env, '_get_valid_actions_for_phase') else []
+            if expected_actions and original_action_type not in expected_actions:
+                phase_action_violations += 1
             
             # Pre-action AI_GAME.md compliance check
             if hasattr(env, '_validate_ai_game_compliance'):
@@ -158,6 +168,18 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, 
         if hasattr(env, 'ranged_units_shot_first') and not env.ranged_units_shot_first:
             results['ai_game_compliance']['ranged_first_violations'] += 1
         
+        # Extract winner information BEFORE using it
+        winner = info.get('winner', 'draw') if info else getattr(env, 'winner', 'draw')
+        
+        # Ensure winner is properly typed for comparisons
+        if isinstance(winner, str):
+            if winner == 'ai':
+                winner = 1
+            elif winner == 'player' or winner == 'enemy':
+                winner = 0
+            else:  # 'draw' or unknown
+                winner = None
+        
         # Count total behavioral violations
         if episode_violations:
             results['ai_game_compliance']['total_behavioral_violations'] += len(episode_violations)
@@ -169,14 +191,32 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, 
             if total_actions > 0:
                 results['behavioral_analysis']['tactical_guideline_compliance'] += 1
         
-        # Winner tracking
-        winner = info.get('winner', 'draw')
+        # Winner tracking - Fix undefined variable
+        winner = info.get('winner', 'draw') if 'winner' in info else getattr(env, 'winner', 'draw')
+        
+        # AI_GAME.md compliance tracking for this episode
+        if hasattr(env, 'phase_behavioral_violations'):
+            env_violations = len(env.phase_behavioral_violations)
+            results['ai_game_compliance']['total_behavioral_violations'] += env_violations
+            env.phase_behavioral_violations.clear()  # Reset for next episode
+        
+        # Game outcome tracking
         if winner == 1:
             results['wins'] += 1
         elif winner == 0:
             results['losses'] += 1
         else:
             results['draws'] += 1
+        
+        # AI_GAME.md compliance tracking for this episode
+        results['ai_game_compliance']['phase_action_violations'] += phase_action_violations
+        results['behavioral_analysis']['action_masking_applied'] += action_masking_count
+        
+        # Track behavioral violations from environment
+        if hasattr(env, 'phase_behavioral_violations'):
+            env_violations = len(env.phase_behavioral_violations)
+            results['ai_game_compliance']['total_behavioral_violations'] += env_violations
+            env.phase_behavioral_violations.clear()  # Reset for next episode
         
         if verbose and episode % 10 == 0:
             print(f"   Episode {episode}: Reward {episode_reward:.1f}, Length {game_length}, "

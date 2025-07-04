@@ -56,12 +56,12 @@ def check_gpu_availability():
 def setup_imports():
     """Set up import paths and return required modules."""
     try:
-        # Import phase-based environment following AI_GAME_OVERVIEW.md
-        from ai.gym40k import W40KEnv, register_environment
+        # AI_INSTRUCTIONS.md: Import from gym40k.py in ai/ subdirectory
+        from gym40k import W40KEnv, register_environment
         return W40KEnv, register_environment
     except ImportError as e:
         print(f"Import error: {e}")
-        print("Please ensure gym40k.py exists and is properly configured")
+        print("AI_INSTRUCTIONS.md: Please ensure gym40k.py exists in ai/ directory and is properly configured")
         sys.exit(1)
 
 def create_model(config, training_config_name="default", rewards_config_name="default", new_model=False, append_training=False):

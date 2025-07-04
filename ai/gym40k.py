@@ -448,15 +448,27 @@ class W40KEnv(gym.Env):
         """Execute action with current phase context and AI_GAME.md tracking."""
         unit_rewards = self._get_unit_reward_config(unit)
         
-        # Validate action_type is allowed in current phase following AI_GAME.md
-        if self.current_phase == "move" and action_type not in [0, 1, 2, 3, 7]:
-            return unit_rewards.get("wait")  # Invalid action penalty
-        elif self.current_phase == "shoot" and action_type not in [4, 7]:
-            return unit_rewards.get("wait")  # Invalid action penalty
-        elif self.current_phase == "charge" and action_type not in [5, 7]:
-            return unit_rewards.get("wait")  # Invalid action penalty
-        elif self.current_phase == "combat" and action_type not in [6, 7]:
-            return unit_rewards.get("wait")  # Invalid action penalty
+        # AI_GAME.md: Strict phase action enforcement - Limit available actions
+        if self.current_phase == "move" and action_type not in [0, 1, 2, 3]:
+            # AI_GAME.md: "The only available action in this phase is moving"
+            # Force action to be movement (default to action 0)
+            action_type = 0
+            print(f"🔒 AI_GAME.md: Limiting action to movement in move phase")
+        elif self.current_phase == "shoot" and action_type != 4:
+            # AI_GAME.md: "The only available action in this phase is shooting"
+            # Force action to be shooting
+            action_type = 4
+            print(f"🔒 AI_GAME.md: Limiting action to shooting in shoot phase")
+        elif self.current_phase == "charge" and action_type != 5:
+            # AI_GAME.md: Charge phase restriction
+            # Force action to be charging
+            action_type = 5
+            print(f"🔒 AI_GAME.md: Limiting action to charging in charge phase")
+        elif self.current_phase == "combat" and action_type != 6:
+            # AI_GAME.md: "The only available action in this phase is attacking"
+            # Force action to be attacking
+            action_type = 6
+            print(f"🔒 AI_GAME.md: Limiting action to attacking in combat phase")
         
         action_success = False
         
@@ -498,6 +510,23 @@ class W40KEnv(gym.Env):
         # Increment step counter and check limit
         self.step_count += 1
         
+        # AI_GAME.md: Enforce ranged-first shooting rule BEFORE action execution
+        if self.current_phase == "shoot":
+            unit_idx = action // 8
+            action_type = action % 8
+            
+            if action_type == 4 and unit_idx < len(self._get_eligible_units()):  # Shoot action
+                eligible_units = self._get_eligible_units()
+                acting_unit = eligible_units[unit_idx]
+                is_ranged = self._is_ranged_unit(acting_unit)
+                
+                # Check if melee unit trying to shoot before all ranged units
+                if not is_ranged and self._ranged_units_available():
+                    violation_msg = f"AI_GAME.md violation: Melee unit {acting_unit.get('unit_type', 'unknown')} shooting before ranged units complete"
+                    self.phase_behavioral_violations.append(violation_msg)
+                    reward -= 50  # Severe penalty for violating ranged-first rule
+                    print(f"⚠️ {violation_msg}")
+
         # Capture state for replay system
         self._capture_game_state(action, reward)
         if self.step_count >= self.max_steps_per_episode:
@@ -532,6 +561,9 @@ class W40KEnv(gym.Env):
             # Still no eligible units, return small negative reward
             unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
             return self._get_obs(), unit_rewards.get("wait"), False, False, self._get_info()
+        
+        # Apply AI_GAME.md action masking before processing
+        action = self._mask_invalid_actions(action, None)
         
         # Decode action
         unit_idx = action // 8
@@ -1144,6 +1176,36 @@ class W40KEnv(gym.Env):
         
         return nearest
 
+    def _get_valid_actions_for_phase(self, unit, current_phase):
+        """Get valid action types for current phase following AI_GAME.md."""
+        # AI_GAME.md: Phase-specific action restrictions
+        if current_phase == "move":
+            return [0, 1, 2, 3]  # Only movement actions
+        elif current_phase == "shoot":
+            return [4]  # Only shooting action
+        elif current_phase == "charge":
+            return [5]  # Only charge action
+        elif current_phase == "combat":
+            return [6]  # Only attack action
+        else:
+            return []  # No valid actions for unknown phase
+    
+    def _mask_invalid_actions(self, action, unit):
+        """Mask invalid actions based on current phase and return valid action."""
+        unit_idx = action // 8
+        action_type = action % 8
+        
+        valid_actions = self._get_valid_actions_for_phase(unit, self.current_phase)
+        
+        if action_type not in valid_actions and valid_actions:
+            # Force to first valid action for current phase
+            new_action_type = valid_actions[0]
+            new_action = unit_idx * 8 + new_action_type
+            print(f"🔒 AI_GAME.md: Masked action {action_type} → {new_action_type} in {self.current_phase} phase")
+            return new_action
+        
+        return action
+
     def _shoot_at_target(self, unit, target):
         """Shoot at target and return reward."""
         if not target["alive"]:
@@ -1190,6 +1252,34 @@ class W40KEnv(gym.Env):
         unit["row"] = new_row
         
         return 0.5  # Charge reward
+
+    def _is_ranged_unit(self, unit):
+        """Check if unit is ranged based on unit definitions."""
+        unit_type = unit.get("unit_type", "")
+        unit_def = self.unit_definitions.get(unit_type, {})
+        # Ranged units have shooting range > 1
+        return unit_def.get("RNG_RNG", 0) > 1
+
+    def _ranged_units_available(self):
+        """Check if any ranged units can still shoot this phase."""
+        for unit in self.ai_units:
+            if (unit.get("alive", True) and 
+                not unit.get("has_shot", False) and 
+                self._is_ranged_unit(unit) and
+                self._has_shooting_targets(unit)):
+                return True
+        return False
+
+    def _has_shooting_targets(self, unit):
+        """Check if unit has valid shooting targets."""
+        unit_type = unit.get("unit_type", "")
+        unit_range = self.unit_definitions.get(unit_type, {}).get("RNG_RNG", 0)
+        for enemy in self.enemy_units:
+            if enemy.get("alive", True):
+                distance = self._calculate_distance(unit, enemy)
+                if distance <= unit_range:
+                    return True
+        return False
 
     def _attack_target(self, unit, target):
         """Attack adjacent target in melee combat."""
@@ -1517,15 +1607,15 @@ class W40KEnv(gym.Env):
         self.replay_data.append(action_data)
 
     def _get_info(self):
-        """Get environment info."""
+        """Get info dictionary for step return."""
         return {
-            "turn": self.current_turn,
-            "phase": self.current_phase,
+            "current_phase": self.current_phase,
+            "current_player": self.current_player,
+            "current_turn": self.current_turn,
             "game_over": self.game_over,
-            "winner": self.winner,
-            "ai_units_alive": len([u for u in self.ai_units if u["alive"]]),
-            "enemy_units_alive": len([u for u in self.enemy_units if u["alive"]]),
-            "eligible_units": len(self._get_eligible_units())
+            "winner": self.winner,  # ADD THIS LINE
+            "ai_units_alive": len([u for u in self.ai_units if u.get("alive", True)]),
+            "enemy_units_alive": len([u for u in self.enemy_units if u.get("alive", True)])
         }
 
     def save_web_compatible_replay(self, filename=None):
