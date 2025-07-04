@@ -177,6 +177,22 @@ export default function Board({
 
     const app = new PIXI.Application(pixiConfig);
 
+    // ✅ ANIMATION EVENT LISTENER FOR HP BAR UPDATES
+    const forceUpdateHandler = () => {
+      // This will trigger a re-render of the entire useEffect
+      if (containerRef.current && shootingTargetRef.current) {
+        // Small trick to force useEffect re-run without changing dependencies
+        containerRef.current.style.opacity = '0.99';
+        setTimeout(() => {
+          if (containerRef.current) {
+            containerRef.current.style.opacity = '1';
+          }
+        }, 1);
+      }
+    };
+    
+    window.addEventListener('forceUpdate', forceUpdateHandler);
+
     // ✅ CANVAS STYLING FROM CONFIG
     const canvas = app.view as HTMLCanvasElement;
     canvas.style.display = 'block';
@@ -242,14 +258,12 @@ export default function Board({
           clearInterval(animationIntervalRef.current);
         }
         
-        // Start HP animation for shooting target  
+        // Start HP animation for shooting target
         animationIntervalRef.current = setInterval(() => {
           hpAnimationStateRef.current = !hpAnimationStateRef.current;
-          // Force re-render by triggering useEffect dependencies
-          if (containerRef.current) {
-            const currentContent = containerRef.current.innerHTML;
-            containerRef.current.innerHTML = currentContent;
-          }
+          // Force re-render by creating a new state change
+          const event = new CustomEvent('forceUpdate');
+          window.dispatchEvent(event);
         }, 1000);
       }
     } else {
@@ -331,8 +345,8 @@ export default function Board({
       attackFromRow = attackPreview.row;
     }
 
-    // Only show red attack hexes during movePreview, not during shooting target selection
-    if (previewUnit && attackFromCol !== null && attackFromRow !== null && phase !== "shoot") {
+    // Show red attack hexes for shooter selection, but not when target is already selected
+    if (previewUnit && attackFromCol !== null && attackFromRow !== null && !(phase === "shoot" && shootingTarget)) {
       const centerCube = offsetToCube(attackFromCol, attackFromRow);
       const range = previewUnit.RNG_RNG;
       for (let col = 0; col < BOARD_COLS; col++) {
@@ -684,6 +698,8 @@ export default function Board({
         clearInterval(animationIntervalRef.current);
         animationIntervalRef.current = null;
       }
+      // Remove event listener
+      window.removeEventListener('forceUpdate', forceUpdateHandler);
       app.destroy(true);
     };
   }, [
