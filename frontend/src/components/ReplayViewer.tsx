@@ -164,6 +164,43 @@ const validateUnitRegistry = () => {
   });
 };
 
+// AI_GAME.md behavioral compliance validation
+const validatePhaseBehavior = (event: ReplayEvent, phaseConfig: any) => {
+  const phase = event.phase || event.current_phase || 'move';
+  const actionType = typeof event.action === 'object' && event.action?.type ? event.action.type : undefined;
+  
+  // AI_GAME.md: Strict phase action validation
+  switch(phase) {
+    case 'move':
+      // AI_GAME.md: "The only available action in this phase is moving"
+      if (actionType && !['move', 'skip_move', 'pass_move'].includes(actionType)) {
+        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in movement phase. Only movement actions allowed.`);
+      }
+      break;
+    case 'shoot':
+      // AI_GAME.md: "The only available action in this phase is shooting"
+      if (actionType && !['shoot', 'skip_shoot', 'pass_shoot'].includes(actionType)) {
+        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in shooting phase. Only shooting actions allowed.`);
+      }
+      break;
+    case 'charge':
+      // AI_GAME.md: Charge phase validation
+      if (actionType && !['charge', 'skip_charge', 'pass_charge'].includes(actionType)) {
+        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in charge phase. Only charge actions allowed.`);
+      }
+      break;
+    case 'combat':
+      // AI_GAME.md: "The only available action in this phase is attacking"  
+      if (actionType && !['attack', 'skip_attack', 'pass_attack'].includes(actionType)) {
+        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in combat phase. Only attack actions allowed.`);
+      }
+      break;
+    default:
+      throw new Error(`AI_GAME.md violation: Unknown phase '${phase}'. Must be one of: move, shoot, charge, combat`);
+  }
+  return true;
+};
+
 // Enhanced phase validation according to AI_GAME.md - STRICT CONFIG ONLY
 const validatePhaseOrder = (phases: string[], configPhases: string[]) => {
   // AI_INSTRUCTIONS.md: No hardcoded fallbacks allowed
