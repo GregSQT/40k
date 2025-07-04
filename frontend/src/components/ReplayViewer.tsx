@@ -1081,11 +1081,11 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">AI Units:</span>
-                  <span>{currentEvent?.ai_units_alive ?? currentEvent?.units?.ai_count ?? 'N/A'}</span>
+                  <span>{currentEvent?.ai_units_alive ?? currentUnits.filter(u => u.player === 1).length ?? 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Enemy Units:</span>
-                  <span>{currentEvent?.enemy_units_alive ?? currentEvent?.units?.enemy_count ?? 'N/A'}</span>
+                  <span>{currentEvent?.enemy_units_alive ?? currentUnits.filter(u => u.player === 0).length ?? 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Game Over:</span>
