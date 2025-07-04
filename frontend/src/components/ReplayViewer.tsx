@@ -7,8 +7,24 @@ import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
 import { useGameConfig } from '../hooks/useGameConfig';
 
 // Extended Unit interface for replay viewer with alive property
-interface ReplayUnit extends Unit {
-  alive?: boolean;
+interface ReplayUnit {
+  id: number;
+  name: string;
+  type: string;
+  player: 0 | 1;
+  col: number;
+  row: number;
+  color: number;
+  MOVE: number;
+  HP_MAX: number;
+  CUR_HP: number;
+  cur_hp: number;
+  RNG_RNG: number;
+  RNG_DMG: number;
+  CC_DMG: number;
+  ICON: string;
+  alive: boolean;
+  unit_type: string;
 }
 
 interface ScenarioConfig {
@@ -164,11 +180,6 @@ const validateUnitRegistry = () => {
   });
 };
 
-// AI_GAME.md behavioral compliance validation
-const validatePhaseBehavior = (event: ReplayEvent, phaseConfig: any) => {
-  const phase = event.phase || event.current_phase || 'move';
-  const actionType = typeof event.action === 'object' && event.action?.type ? event.action.type : undefined;
-  
   // AI_GAME.md: Strict phase action validation
   switch(phase) {
     case 'move':
@@ -217,43 +228,6 @@ const validatePhaseOrder = (phases: string[], configPhases: string[]) => {
     throw new Error(`Invalid phase order. AI_GAME.md requires exact sequence: ${expectedSequence}`);
   }
   console.log('✅ Phase order validates against AI_GAME.md');
-  return true;
-};
-
-// AI_GAME.md behavioral compliance validation
-const validatePhaseBehavior = (event: ReplayEvent, phaseConfig: any) => {
-  const phase = event.phase || event.current_phase || 'move';
-  const actionType = typeof event.action === 'object' && event.action?.type ? event.action.type : undefined;
-  
-  // AI_GAME.md: Strict phase action validation
-  switch(phase) {
-    case 'move':
-      // AI_GAME.md: "The only available action in this phase is moving"
-      if (actionType && !['move', 'skip_move', 'pass_move'].includes(actionType)) {
-        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in movement phase. Only movement actions allowed.`);
-      }
-      break;
-    case 'shoot':
-      // AI_GAME.md: "The only available action in this phase is shooting"
-      if (actionType && !['shoot', 'skip_shoot', 'pass_shoot'].includes(actionType)) {
-        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in shooting phase. Only shooting actions allowed.`);
-      }
-      break;
-    case 'charge':
-      // AI_GAME.md: Charge phase validation
-      if (actionType && !['charge', 'skip_charge', 'pass_charge'].includes(actionType)) {
-        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in charge phase. Only charge actions allowed.`);
-      }
-      break;
-    case 'combat':
-      // AI_GAME.md: "The only available action in this phase is attacking"  
-      if (actionType && !['attack', 'skip_attack', 'pass_attack'].includes(actionType)) {
-        throw new Error(`AI_GAME.md violation: Invalid action '${actionType}' in combat phase. Only attack actions allowed.`);
-      }
-      break;
-    default:
-      throw new Error(`AI_GAME.md violation: Unknown phase '${phase}'. Must be one of: move, shoot, charge, combat`);
-  }
   return true;
 };
 
@@ -417,8 +391,23 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
     // Handle different event formats
     if (event.units && Array.isArray(event.units)) {
       return event.units.map(unit => ({
-        ...unit,
-        alive: unit.alive !== false && (unit.CUR_HP ?? unit.HP_MAX) > 0
+        id: unit.id,
+        name: unit.unit_type || 'Unknown',
+        type: unit.unit_type || 'Unknown',
+        player: unit.player as 0 | 1,
+        col: unit.col,
+        row: unit.row,
+        color: unit.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1,
+        MOVE: 6,
+        HP_MAX: 4,
+        CUR_HP: unit.cur_hp || 4,
+        cur_hp: unit.cur_hp || 4,
+        RNG_RNG: 4,
+        RNG_DMG: 1,
+        CC_DMG: 1,
+        ICON: '●',
+        alive: unit.alive !== false && unit.cur_hp > 0,
+        unit_type: unit.unit_type
       }));
     }
 
