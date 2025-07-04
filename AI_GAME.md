@@ -48,12 +48,15 @@ SHOOTING PHASE DEFINITION
 	- The board highlights the selected shooter.
 	- The hexes within the unit's RNG_RNG are highlighted in red.
 	- The enemy units in range are highlighted with a red outline/circle
-		- Left click on an enemy unit withing RNG_RNG range : The active unit shoot this enemy unit.
+		- 1st left lick on an enemy unit withing RNG_RNG range : the target unit's hp bar is temporarily displayed bigger, and alternates its value with its future value after the shoot.
+		For example, the target unit has CUR_HP = 4. If the RNG_DMG of the active unit is 1, the HP bar of the target will become bigger and switch every second from 4 CUR-HP to 3 CUR_HP
+		- Seconde Left click on an enemy unit withing RNG_RNG range : The active unit shoot this enemy unit.
 			- Reduce target enemy unit's CUR_HP by the active unit's RNG_DMG value
 			- Cancel colored cells, unselect the unit, end of this unit's activability for the phase
 		- Left click on the active unit : cancel the shoot, cancel colored cells, unselect the unit, end of this unit's activability for the phase
 		- Right click on the active unit : cancel the shoot, cancel colored cells, unselect the unit, the unit is still selectable
 		- Left click anywhere else on the board : Nothing happens
+
 
 CHARGE PHASE DEFINITION
 - The only available action in this phase is charge.

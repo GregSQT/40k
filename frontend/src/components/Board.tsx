@@ -89,6 +89,10 @@ export default function Board({
   
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig, loading, error } = useGameConfig();
+  // ✅ HOOK 2.5: Add shooting preview state management
+  const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const shootingTargetRef = useRef<number | null>(null);
+  const hpAnimationStateRef = useRef<boolean>(false); // false = current HP, true = future HP
 
   // ✅ HOOK 3: useEffect - ALWAYS called third, with ALL original logic
   useEffect(() => {
@@ -210,6 +214,47 @@ export default function Board({
         u.player !== selectedUnit.player &&
         cubeDistance(c1, offsetToCube(u.col, u.row)) === 1
       );
+    }
+
+    // ✅ SHOOTING PREVIEW: Identify selected shooting target
+    let shootingTarget: Unit | null = null;
+    if (phase === "shoot" && mode === "attackPreview" && selectedUnit && attackPreview) {
+      const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
+      
+      // Find enemy units within shooting range
+      const enemiesInRange = units.filter(u =>
+        u.player !== selectedUnit.player &&
+        cubeDistance(c1, offsetToCube(u.col, u.row)) <= selectedUnit.RNG_RNG
+      );
+      
+      // For shooting, the target is at the attack preview position
+      shootingTarget = enemiesInRange.find(u => 
+        u.col === attackPreview.col && u.row === attackPreview.row
+      ) || null;
+      
+      // Update animation target tracking
+      if (shootingTarget && shootingTargetRef.current !== shootingTarget.id) {
+        shootingTargetRef.current = shootingTarget.id;
+        hpAnimationStateRef.current = false;
+        
+        // Clear existing animation
+        if (animationIntervalRef.current) {
+          clearInterval(animationIntervalRef.current);
+        }
+        
+        // Start HP animation for shooting target
+        animationIntervalRef.current = setInterval(() => {
+          hpAnimationStateRef.current = !hpAnimationStateRef.current;
+          // Re-render will happen automatically due to interval
+        }, 1000);
+      }
+    } else {
+      // Clear animation when not in shooting preview
+      if (animationIntervalRef.current) {
+        clearInterval(animationIntervalRef.current);
+        animationIntervalRef.current = null;
+      }
+      shootingTargetRef.current = null;
     }
 
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
@@ -378,14 +423,41 @@ export default function Board({
         barBg.endFill();
         app.stage.addChild(barBg);
 
-        // Draw slices (green for HP, darker for lost HP) - COLORS FROM CONFIG
-        const hp = Math.max(0, unit.CUR_HP ?? unit.HP_MAX);
-        const sliceWidth = HP_BAR_WIDTH / unit.HP_MAX;
+        // ✅ ENHANCED HP BAR FOR SHOOTING TARGETS
+        const isShootingTarget = shootingTarget && unit.id === shootingTarget.id;
+        
+        let displayHP = hp;
+        let finalBarWidth = HP_BAR_WIDTH;
+        let finalBarHeight = HP_BAR_HEIGHT;
+        let finalBarX = barX;
+        let finalBarY = barY;
+        
+        if (isShootingTarget && selectedUnit) {
+          // Enhanced size and position for shooting targets
+          finalBarWidth = HP_BAR_WIDTH * 1.8;
+          finalBarHeight = HP_BAR_HEIGHT * 1.5;
+          finalBarX = centerX - finalBarWidth / 2;
+          finalBarY = centerY - HP_BAR_Y_OFFSET - finalBarHeight;
+          
+          // Alternate between current and future HP
+          const futureHP = Math.max(0, (unit.CUR_HP ?? unit.HP_MAX) - selectedUnit.RNG_DMG);
+          displayHP = hpAnimationStateRef.current ? futureHP : hp;
+          
+          // Enhanced background for shooting targets
+          const enhancedBarBg = new PIXI.Graphics();
+          enhancedBarBg.beginFill(0x222222, 1);
+          enhancedBarBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, 3);
+          enhancedBarBg.endFill();
+          app.stage.addChild(enhancedBarBg);
+        }
+        
+        // Draw HP slices with enhanced or normal size
+        const sliceWidth = finalBarWidth / unit.HP_MAX;
         for (let i = 0; i < unit.HP_MAX; i++) {
           const slice = new PIXI.Graphics();
-          const color = i < hp ? parseColor(boardConfig.colors.hp_full) : parseColor(boardConfig.colors.hp_damaged);
+          const color = i < displayHP ? parseColor(boardConfig.colors.hp_full) : parseColor(boardConfig.colors.hp_damaged);
           slice.beginFill(color, 1);
-          slice.drawRoundedRect(barX + i * sliceWidth + 1, barY + 1, sliceWidth - 2, HP_BAR_HEIGHT - 2, 2);
+          slice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
           slice.endFill();
           app.stage.addChild(slice);
         }
@@ -599,6 +671,11 @@ export default function Board({
 
     // Cleanup function
     return () => {
+      // Clear animation interval
+      if (animationIntervalRef.current) {
+        clearInterval(animationIntervalRef.current);
+        animationIntervalRef.current = null;
+      }
       app.destroy(true);
     };
   }, [
@@ -625,7 +702,10 @@ export default function Board({
     onCombatAttack,
     onCharge,
     onMoveCharger,
-    onValidateCharge
+    onValidateCharge,
+    // Add shooting preview dependencies  
+    shootingTarget,
+    hpAnimationStateRef.current
   ]);
 
   // Simple container return - loading/error handled inside useEffect
