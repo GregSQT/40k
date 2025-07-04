@@ -180,6 +180,11 @@ const validateUnitRegistry = () => {
   });
 };
 
+// AI_GAME.md behavioral compliance validation
+const validatePhaseBehavior = (event: ReplayEvent, phaseConfig: any) => {
+  const phase = event.phase || event.current_phase || 'move';
+  const actionType = typeof event.action === 'object' && event.action?.type ? event.action.type : undefined;
+  
   // AI_GAME.md: Strict phase action validation
   switch(phase) {
     case 'move':
@@ -422,14 +427,16 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         col: unitDef.col,
         row: unitDef.row,
         color: unitDef.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1,
-        MOVE: stats.MOVE,
-        HP_MAX: stats.HP_MAX,
-        CUR_HP: stats.HP_MAX,
-        RNG_RNG: stats.RNG_RNG,
-        RNG_DMG: stats.RNG_DMG,
-        CC_DMG: stats.CC_DMG,
-        ICON: stats.ICON,
-        alive: true
+        MOVE: stats?.MOVE || 6,
+        HP_MAX: stats?.HP_MAX || 4,
+        CUR_HP: stats?.HP_MAX || 4,
+        cur_hp: stats?.HP_MAX || 4,
+        RNG_RNG: stats?.RNG_RNG || 4,
+        RNG_DMG: stats?.RNG_DMG || 1,
+        CC_DMG: stats?.CC_DMG || 1,
+        ICON: stats?.ICON || '●',
+        alive: true,
+        unit_type: unitDef.unit_type
       };
     });
   }, [scenario, getUnitStats]);
