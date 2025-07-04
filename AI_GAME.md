@@ -15,8 +15,8 @@ When a unit's CUR_HP is reduced to 0, it is "dead" and can't be activated anymor
 TURN MECHANISM
 Here are the main rules of the game, and behaviour for the ai :
 Each player plays his turn, alternatively.
-Each turn is divided consecutive phases : move -> Shoot -> Charge -> Attack.
-At the end of a player's attack phase, his turn ends, and the turn of the other player begins with his movement phase.
+Each turn is divided consecutive phases : move -> Shoot -> Charge -> Combat
+At the end of a player's combay phase, his turn ends, and the turn of the other player begins with his movement phase.
 
 MOVEMENT PHASE DEFINITION
 - The only available action in this phase is moving.
@@ -76,13 +76,11 @@ CHARGE PHASE DEFINITION
 
 
 COMBAT PHASE DEFINITION
-- The only available action in this phase is charge.
-- No unit can charge more than once per charge phase.
+- The only available action in this phase is attack.
+- No unit can attack more than once per combat phase.
 - Highlight Eligible Units
 	- Only the active's player units having at least one enemy adjacent (distance = 1) and haven’t attacked yet are selectable (green outline).
 	- Units that cannot attack (no enemy unit adjacent, or it already attacked this phase) are not selectable.
-
-
 - The active player activates one of his activable unit to attack by left clicking on it.
 	- The board highlights the selected attacker.
 	- The enemy units adjacent to the active unit are highlighted with a red outline/circle
@@ -151,10 +149,10 @@ Ranged unit will charg in priority ordere :
 	- has the highest current HP 
 	- can be killed by the active unit in 1 melee phase
 
-ATTACK PHASE
+COMBAT PHASE
 A unit will attack in priority order :
 1 - the enemy unit with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
-	- can be killed by the active unit in 1 melee phase
+	- can be killed by the active unit in 1 combat phase
 2 - the enemy unit with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) The 'Enhance Prompt' button helps improve your prompt by providing additional context, clarification, or rephrasing. Try typing a prompt in here and clicking the button again to see how it works. @ @ @ @ @ @ @ @ @score and :
 	- if there is more than one, target the enemy unit having the less current HP
 
