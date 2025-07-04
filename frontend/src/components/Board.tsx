@@ -242,10 +242,14 @@ export default function Board({
           clearInterval(animationIntervalRef.current);
         }
         
-        // Start HP animation for shooting target
+        // Start HP animation for shooting target  
         animationIntervalRef.current = setInterval(() => {
           hpAnimationStateRef.current = !hpAnimationStateRef.current;
-          // Re-render will happen automatically due to interval
+          // Force re-render by triggering useEffect dependencies
+          if (containerRef.current) {
+            const currentContent = containerRef.current.innerHTML;
+            containerRef.current.innerHTML = currentContent;
+          }
         }, 1000);
       }
     } else {
@@ -327,7 +331,8 @@ export default function Board({
       attackFromRow = attackPreview.row;
     }
 
-    if (previewUnit && attackFromCol !== null && attackFromRow !== null) {
+    // Only show red attack hexes during movePreview, not during shooting target selection
+    if (previewUnit && attackFromCol !== null && attackFromRow !== null && phase !== "shoot") {
       const centerCube = offsetToCube(attackFromCol, attackFromRow);
       const range = previewUnit.RNG_RNG;
       for (let col = 0; col < BOARD_COLS; col++) {
