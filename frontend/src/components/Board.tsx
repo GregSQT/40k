@@ -1,5 +1,5 @@
 // frontend/src/components/Board.tsx
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js-legacy";
 import type { Unit } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
@@ -89,10 +89,10 @@ export default function Board({
   
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig, loading, error } = useGameConfig();
-  // ✅ HOOK 2.5: Add shooting preview state management
+  // ✅ HOOK 2.5: Add shooting preview state management with React state
+  const [hpAnimationState, setHpAnimationState] = useState<boolean>(false);
+  const [currentShootingTarget, setCurrentShootingTarget] = useState<number | null>(null);
   const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const shootingTargetRef = useRef<number | null>(null);
-  const hpAnimationStateRef = useRef<boolean>(false); // false = current HP, true = future HP
 
   // ✅ HOOK 3: useEffect - ALWAYS called third, with ALL original logic
   useEffect(() => {
@@ -177,22 +177,6 @@ export default function Board({
 
     const app = new PIXI.Application(pixiConfig);
 
-    // ✅ ANIMATION EVENT LISTENER FOR HP BAR UPDATES
-    const forceUpdateHandler = () => {
-      // This will trigger a re-render of the entire useEffect
-      if (containerRef.current && shootingTargetRef.current) {
-        // Small trick to force useEffect re-run without changing dependencies
-        containerRef.current.style.opacity = '0.99';
-        setTimeout(() => {
-          if (containerRef.current) {
-            containerRef.current.style.opacity = '1';
-          }
-        }, 1);
-      }
-    };
-    
-    window.addEventListener('forceUpdate', forceUpdateHandler);
-
     // ✅ CANVAS STYLING FROM CONFIG
     const canvas = app.view as HTMLCanvasElement;
     canvas.style.display = 'block';
@@ -249,9 +233,9 @@ export default function Board({
       ) || null;
       
       // Update animation target tracking
-      if (shootingTarget && shootingTargetRef.current !== shootingTarget.id) {
-        shootingTargetRef.current = shootingTarget.id;
-        hpAnimationStateRef.current = false;
+      if (shootingTarget && currentShootingTarget !== shootingTarget.id) {
+        setCurrentShootingTarget(shootingTarget.id);
+        setHpAnimationState(false);
         
         // Clear existing animation
         if (animationIntervalRef.current) {
@@ -260,10 +244,7 @@ export default function Board({
         
         // Start HP animation for shooting target
         animationIntervalRef.current = setInterval(() => {
-          hpAnimationStateRef.current = !hpAnimationStateRef.current;
-          // Force re-render by creating a new state change
-          const event = new CustomEvent('forceUpdate');
-          window.dispatchEvent(event);
+          setHpAnimationState(prev => !prev);
         }, 1000);
       }
     } else {
@@ -272,7 +253,7 @@ export default function Board({
         clearInterval(animationIntervalRef.current);
         animationIntervalRef.current = null;
       }
-      shootingTargetRef.current = null;
+      setCurrentShootingTarget(null);
     }
 
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
@@ -446,7 +427,7 @@ export default function Board({
         const hp = Math.max(0, unit.CUR_HP ?? unit.HP_MAX);
 
         // ✅ ENHANCED HP BAR FOR SHOOTING TARGETS
-        const isShootingTarget = shootingTarget && unit.id === shootingTarget.id;
+        const isShootingTarget = (shootingTarget && unit.id === shootingTarget.id) || (currentShootingTarget !== null && unit.id === currentShootingTarget);
         
         let displayHP = hp;
         let finalBarWidth = HP_BAR_WIDTH;
@@ -461,9 +442,9 @@ export default function Board({
           finalBarX = centerX - finalBarWidth / 2;
           finalBarY = centerY - HP_BAR_Y_OFFSET - finalBarHeight;
           
-          // Alternate between current and future HP
+          // Alternate between current and future HP using React state
           const futureHP = Math.max(0, (unit.CUR_HP ?? unit.HP_MAX) - selectedUnit.RNG_DMG);
-          displayHP = hpAnimationStateRef.current ? futureHP : (unit.CUR_HP ?? unit.HP_MAX);
+          displayHP = hpAnimationState ? futureHP : (unit.CUR_HP ?? unit.HP_MAX);
           
           // Enhanced background for shooting targets
           const enhancedBarBg = new PIXI.Graphics();
@@ -698,8 +679,6 @@ export default function Board({
         clearInterval(animationIntervalRef.current);
         animationIntervalRef.current = null;
       }
-      // Remove event listener
-      window.removeEventListener('forceUpdate', forceUpdateHandler);
       app.destroy(true);
     };
   }, [
@@ -726,9 +705,9 @@ export default function Board({
     onCombatAttack,
     onCharge,
     onMoveCharger,
-    onValidateCharge
-    // Note: shootingTarget is computed inside useEffect, not a dependency
-    // hpAnimationStateRef.current changes don't need to trigger re-render
+    onValidateCharge,
+    hpAnimationState,
+    currentShootingTarget
   ]);
 
   // Simple container return - loading/error handled inside useEffect
