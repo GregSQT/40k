@@ -321,9 +321,17 @@ export default function Board({
       attackFromCol = movePreview.destCol;
       attackFromRow = movePreview.destRow;
     } else if (mode === "attackPreview" && attackPreview) {
-      previewUnit = units.find(u => u.id === attackPreview.unitId);
-      attackFromCol = attackPreview.col;
-      attackFromRow = attackPreview.row;
+      // Only preview if you clicked YOUR shooter
+      const clickedUnit = units.find(u => u.id === attackPreview.unitId);
+      if (clickedUnit && clickedUnit.id === selectedUnitId) {
+        previewUnit   = clickedUnit;
+        attackFromCol = clickedUnit.col;
+        attackFromRow = clickedUnit.row;
+      } else {
+        previewUnit   = undefined;
+        attackFromCol = null;
+        attackFromRow = null;
+      }
     }
 
     // Show red attack hexes for shooter selection, but not when target is already selected

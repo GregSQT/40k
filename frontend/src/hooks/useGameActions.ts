@@ -111,10 +111,15 @@ export const useGameActions = ({
 
     // Special handling for shoot phase
     if (phase === "shoot") {
-      actions.setSelectedUnitId(unitId);
+      // Always show the attack preview…
       actions.setMovePreview(null);
       actions.setAttackPreview({ unitId, col: unit.col, row: unit.row });
       actions.setMode("attackPreview");
+
+      // …but only set the active shooter on the first click
+      if (selectedUnitId === null) {
+        actions.setSelectedUnitId(unitId);
+      }
       return;
     }
 
