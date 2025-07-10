@@ -342,6 +342,8 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const appRef = useRef<PIXI.Application | null>(null);
   const unitSpritesRef = useRef<Map<number, PIXI.Container>>(new Map());
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const initializingRef = useRef(false);
+
 
   // Get unit stats from config - STRICT AI_INSTRUCTIONS.md compliance
   const getUnitStats = useCallback((unitType: string) => {
@@ -688,11 +690,13 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   // Initialize PIXI application with Canvas renderer (no WebGL)
   useEffect(() => {
     if (!boardRef.current || !scenario || !replayData || useHtmlFallback) return;
+    
+    // Basic checks only
 
     try {
       // Calculate proper canvas dimensions
-      const canvasWidth = Math.min(800, scenario.board.cols * scenario.board.hex_radius * 1.5 + scenario.board.margin * 2);
-      const canvasHeight = Math.min(600, scenario.board.rows * scenario.board.hex_radius * 1.75 + scenario.board.margin * 2);
+      const canvasWidth = scenario.board.cols * scenario.board.hex_radius * 1.5 + scenario.board.margin * 2;
+      const canvasHeight = scenario.board.rows * scenario.board.hex_radius * 1.75 + scenario.board.margin * 2;
       
       // Always use Canvas renderer (no WebGL as per instructions)
       const app = new PIXI.Application({
@@ -716,9 +720,24 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
       boardRef.current.appendChild(canvas);
       appRef.current = app;
 
+      // Wait for stage to be ready before proceeding
+      if (!app.stage) {
+        console.warn('PIXI stage not ready, falling back to HTML');
+        setUseHtmlFallback(true);
+        setError(null);
+        return;
+      }
+
       // Draw initial board and units after a short delay to ensure proper mounting
       setTimeout(() => {
         try {
+          // Double-check stage is still available
+          if (!app.stage) {
+            console.warn('PIXI stage became null during initialization');
+            setUseHtmlFallback(true);
+            return;
+          }
+          
           drawBoard(app);
           const initialUnits = convertUnits(0);
           setCurrentUnits(initialUnits);
@@ -743,7 +762,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         appRef.current = null;
       }
     };
-  }, [scenario, replayData, convertUnits, drawBoard, drawUnits, useHtmlFallback]);
+  }, [scenario, replayData, useHtmlFallback]);
 
   // HTML Fallback Renderer using simplified HTML grid
   const renderHTMLBoard = useCallback(() => {
@@ -939,7 +958,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
     };
 
     loadData();
-  }, [replayFile, loadScenario, boardConfig, configLoading, configError]);
+  }, [replayFile, boardConfig, configLoading, configError]);
 
   // Auto-play functionality
   useEffect(() => {
