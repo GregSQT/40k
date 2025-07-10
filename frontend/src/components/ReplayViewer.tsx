@@ -1266,7 +1266,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold mb-2">WH40K Game Replay Viewer</h1>
+          <h1 className="text-3xl font-bold mb-2">🎮 WH40K Enhanced Replay Viewer</h1>
           <div className="text-gray-400 flex flex-wrap gap-4">
             <span>{useHtmlFallback ? '🔄 HTML Fallback Mode' : '🎮 PIXI.js Canvas Mode'}</span>
             <span>Step {currentStep + 1} of {replayData.events.length}</span>
@@ -1302,16 +1302,20 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         {/* Training Data Panel */}
         <TrainingDataPanel />
         
-        {/* Phase Progress Indicator - AI_GAME.md compliance */}
+        {/* Turn and Phase Progress */}
         <div className="mb-6 bg-gray-800 p-4 rounded-lg">
-          <h3 className="text-lg font-semibold mb-3">Turn {currentTurn} - Phase Progress</h3>
-          <div className="flex space-x-2">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">Turn {currentTurn} - Phase Progress</h2>
+            <div className="text-sm text-gray-400">Step {currentStep + 1} of {replayData.events.length}</div>
+          </div>
+          
+          <div className="flex gap-2 mb-3">
             {phases.map((phase, index) => {
               const isActive = index === currentPhaseIndex;
               const isCompleted = index < currentPhaseIndex;
               
               return (
-                <div
+                <div 
                   key={phase}
                   className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
                     isActive 
@@ -1328,29 +1332,331 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
           </div>
         </div>
 
-        {/* Game Board */}
-        <div className="flex flex-col lg:flex-row gap-6">
+        {/* Main Content Area */}
+        <div className="flex flex-col xl:flex-row gap-6 mb-6">
+          {/* Game Board Section */}
           <div className="flex-1">
-            {useHtmlFallback ? (
-              <div className="p-4 bg-gray-800 rounded-lg">
-                {renderHTMLBoard()}
-              </div>
-            ) : (
-              <div className="bg-gray-800 p-4 rounded-lg">
-                <div className="mb-2 text-sm text-green-400">
-                  🎮 PIXI.js Canvas Renderer Active
+            <div className="bg-gray-800 rounded-lg">
+              <div className="flex items-center justify-between p-4 border-b border-gray-700">
+                <h3 className="text-lg font-semibold">🎯 Game Board</h3>
+                <div className="text-sm">
+                  <span className="text-gray-400">Board: </span>
+                  <span className="text-green-400">{scenario.board.cols}×{scenario.board.rows} hexes</span>
+                  <span className="text-gray-400 ml-4">Units: </span>
+                  <span className="text-blue-400">{currentUnits.length} total</span>
                 </div>
-                <div 
-                  ref={boardRef} 
-                  className="border border-gray-700 rounded-lg overflow-hidden"
-                  style={{ minHeight: '400px' }}
-                />
               </div>
-            )}
+              <div className="p-4">
+                {useHtmlFallback ? (
+                  <div>
+                    {renderHTMLBoard()}
+                  </div>
+                ) : (
+                  <div>
+                    <div className="mb-2 text-sm text-green-400">
+                      🎮 PIXI.js Canvas Mode - {scenario.board.hex_radius}px radius
+                    </div>
+                    <div 
+                      ref={boardRef} 
+                      className="border border-gray-700 rounded-lg overflow-hidden"
+                      style={{ minHeight: '400px' }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* Controls Panel */}
-          <div className="lg:w-80 space-y-4">
+          {/* Right Side Panels */}
+          <div className="xl:w-96 space-y-4">
+            {/* Game Stats */}
+            <div className="bg-gray-800 rounded-lg">
+              <div className="flex items-center gap-2 p-4 border-b border-gray-700">
+                <span className="text-xl">📊</span>
+                <h3 className="text-lg font-semibold">Game Stats</h3>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Total Reward:</span>
+                  <span className={`font-mono ${totalReward >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {totalReward >= 0 ? '+' : ''}{totalReward.toFixed(1)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Player 1 Units:</span>
+                  <span className="text-blue-400">{currentUnits.filter(u => u.player === 0 && u.alive).length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Player 2 Units:</span>
+                  <span className="text-red-400">{currentUnits.filter(u => u.player === 1 && u.alive).length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Turns Elapsed:</span>
+                  <span className="text-yellow-400">{currentTurn}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Technical Info */}
+            <div className="bg-gray-800 rounded-lg">
+              <div className="flex items-center gap-2 p-4 border-b border-gray-700">
+                <span className="text-xl">🔧</span>
+                <h3 className="text-lg font-semibold">Technical Info</h3>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Renderer:</span>
+                  <span className={useHtmlFallback ? 'text-yellow-400' : 'text-green-400'}>
+                    {useHtmlFallback ? 'HTML Fallback' : 'PIXI.js Canvas'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Canvas Active:</span>
+                  <span className={appRef.current ? 'text-green-400' : 'text-red-400'}>
+                    {appRef.current ? 'Yes' : 'No'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Units Loaded:</span>
+                  <span className="text-blue-400">{currentUnits.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Features:</span>
+                  <span className="text-sm text-gray-300">{replayData.features?.join(', ') || 'web_compatible'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Timeline */}
+            <div className="bg-gray-800 rounded-lg">
+              <div className="flex items-center gap-2 p-4 border-b border-gray-700">
+                <span className="text-xl">📋</span>
+                <h3 className="text-lg font-semibold">Action Timeline</h3>
+              </div>
+              <div className="p-4">
+                <div className="space-y-2 max-h-32 overflow-y-auto">
+                  {replayData.events.slice(Math.max(0, currentStep - 3), currentStep + 1).map((event, idx) => {
+                    const eventIndex = Math.max(0, currentStep - 3) + idx;
+                    const isCurrent = eventIndex === currentStep;
+                    const eventAction = typeof event?.action === 'number' ? event.action : event?.action?.action_id ?? 0;
+                    const eventPhase = getActionPhase(eventAction);
+                    
+                    return (
+                      <div 
+                        key={eventIndex}
+                        className={`text-xs p-2 rounded ${
+                          isCurrent ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'
+                        }`}
+                      >
+                        <span className="text-gray-400">T{event.turn || 0}:</span> {eventPhase} phase active
+                        {event.unit_id && <span className="text-yellow-400"> - Unit {event.unit_id}</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Controls Section */}
+        <div className="bg-gray-800 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">⏯️ Playback Controls</h3>
+            <div className="text-sm text-gray-400">Phase: {currentPhase.toUpperCase()}</div>
+          </div>
+          
+          <div className="flex items-center gap-4 mb-4">
+            <button
+              onClick={reset}
+              className="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded transition-colors"
+              title="Reset to beginning"
+            >
+              ⏮️ First
+            </button>
+            
+            {replayData?.training_summary && (
+              <button
+                onClick={() => setShowTrainingData(!showTrainingData)}
+                className={`px-3 py-2 rounded transition-colors text-sm ${
+                  showTrainingData 
+                    ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                    : 'bg-gray-600 text-white hover:bg-gray-700'
+                }`}
+                title="Toggle training data display"
+              >
+                🧠 AI
+              </button>
+            )}
+            <button
+              onClick={prevStep}
+              disabled={currentStep === 0}
+              className="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded transition-colors disabled:opacity-50"
+              title="Previous step"
+            >
+              ⏪ Prev
+            </button>
+            <button
+              onClick={isPlaying ? pause : play}
+              disabled={currentStep >= replayData.events.length - 1}
+              className={`px-4 py-2 rounded transition-colors ${
+                isPlaying 
+                  ? 'bg-red-600 hover:bg-red-500' 
+                  : 'bg-green-600 hover:bg-green-500'
+              } disabled:opacity-50`}
+              title={isPlaying ? 'Pause' : 'Play'}
+            >
+              {isPlaying ? '⏸️ Pause' : '▶️ Play'}
+            </button>
+            <button
+              onClick={nextStep}
+              disabled={currentStep >= replayData.events.length - 1}
+              className="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded transition-colors disabled:opacity-50"
+              title="Next step"
+            >
+              ⏩ Next
+            </button>
+            <button
+              className="px-3 py-2 bg-orange-600 hover:bg-orange-500 rounded transition-colors"
+              title="Jump to end"
+              onClick={() => setCurrentStep(replayData.events.length - 1)}
+            >
+              ⏭️ Last
+            </button>
+            
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="text-sm text-gray-400">Speed:</span>
+              <input
+                type="range"
+                min="100"
+                max="3000"
+                step="100"
+                value={playSpeed}
+                onChange={(e) => setPlaySpeed(Number(e.target.value))}
+                className="w-20"
+              />
+              <span className="text-sm w-12 text-center">{((3000 - playSpeed + 100) / 100).toFixed(1)}x</span>
+            </div>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="relative">
+            <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
+              <span>Step {currentStep + 1} of {replayData.events.length}</span>
+              <span>{(((currentStep + 1) / replayData.events.length) * 100).toFixed(1)}%</span>
+            </div>
+            <div className="w-full bg-gray-700 rounded-full h-3 cursor-pointer"
+                 onClick={(e) => {
+                   const rect = e.currentTarget.getBoundingClientRect();
+                   const x = e.clientX - rect.left;
+                   const percentage = x / rect.width;
+                   const newStep = Math.floor(percentage * replayData.events.length);
+                   setCurrentStep(Math.max(0, Math.min(replayData.events.length - 1, newStep)));
+                 }}>
+              <div 
+                className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+                style={{ width: `${((currentStep + 1) / replayData.events.length) * 100}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Additional Enhanced Sections */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-6">
+          {/* AI Analysis */}
+          <div className="bg-gray-800 rounded-lg">
+            <div className="flex items-center gap-2 p-4 border-b border-gray-700">
+              <span className="text-xl">🤖</span>
+              <h3 className="text-lg font-semibold">AI Analysis</h3>
+            </div>
+            <div className="p-4">
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Exploration Rate:</span>
+                  <span className="text-yellow-400">{((getTrainingProgress()?.exploration_rate || 0) * 100).toFixed(1)}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Total Decisions:</span>
+                  <span className="text-blue-400">{getTrainingProgress()?.total_decisions || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Exploration:</span>
+                  <span className="text-purple-400">{getTrainingProgress()?.exploration_decisions || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Exploitation:</span>
+                  <span className="text-green-400">{getTrainingProgress()?.exploitation_decisions || 0}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Battle Log */}
+          <div className="bg-gray-800 rounded-lg">
+            <div className="flex items-center gap-2 p-4 border-b border-gray-700">
+              <span className="text-xl">⚔️</span>
+              <h3 className="text-lg font-semibold">Battle Log</h3>
+            </div>
+            <div className="p-4">
+              <div className="space-y-1 text-xs max-h-32 overflow-y-auto">
+                {replayData.events.slice(0, currentStep + 1).slice(-5).map((event, idx) => (
+                  <div key={idx} className="text-gray-300">
+                    <span className="text-gray-500">Turn {event.turn || 0}:</span> {getActionPhase(typeof event?.action === 'number' ? event.action : event?.action || 0)} phase active
+                    {event.reward && event.reward > 0 && <span className="text-green-400"> - Reward: +{event.reward.toFixed(1)}</span>}
+                    {event.reward && event.reward < 0 && <span className="text-red-400"> - Penalty: {event.reward.toFixed(1)}</span>}
+                    {event.acting_unit_idx && <span className="text-yellow-400"> - Unit {event.acting_unit_idx}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Unit Details */}
+          <div className="bg-gray-800 rounded-lg">
+            <div className="flex items-center gap-2 p-4 border-b border-gray-700">
+              <span className="text-xl">🎯</span>
+              <h3 className="text-lg font-semibold">Unit Details</h3>
+            </div>
+            <div className="p-4">
+              <div className="space-y-2 text-sm">
+                {currentEvent?.unit_id && (() => {
+                  const unit = currentUnits.find(u => u.id === currentEvent.unit_id);
+                  if (!unit) return <div className="text-gray-500">No unit selected</div>;
+                  return (
+                    <div className="space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Type:</span>
+                        <span className="text-white">{unit.unit_type}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">HP:</span>
+                        <span className="text-green-400">{unit.CUR_HP}/{unit.HP_MAX}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Player:</span>
+                        <span className={unit.player === 0 ? 'text-blue-400' : 'text-red-400'}>Player {unit.player + 1}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Position:</span>
+                        <span className="text-yellow-400">({unit.col}, {unit.row})</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Range:</span>
+                        <span className="text-purple-400">{unit.RNG_RNG} hexes</span>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-2">
+                        🛡️ In shooting range of {currentUnits.filter(u => u.player !== unit.player && u.alive && Math.abs(u.col - unit.col) + Math.abs(u.row - unit.row) <= unit.RNG_RNG).length} enemies
+                      </div>
+                    </div>
+                  );
+                })() || <div className="text-gray-500">No active unit</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Remove old controls panel structure */}
+        <div className="hidden">
             {/* Playback Controls */}
             <div className="bg-gray-800 p-4 rounded-lg">
               <h3 className="text-lg font-semibold mb-3">Playback Controls</h3>
