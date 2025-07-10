@@ -6,7 +6,7 @@
     "margin": 32,
     "colors": {
       "background": "0x002200",
-      "cell_even": "0x002200",
+      "cell_even": "0x002200", 
       "cell_odd": "0x001a00",
       "cell_border": "0x00ff00",
       "player_0": "0x244488",
@@ -45,7 +45,7 @@
     "margin": 24,
     "colors": {
       "background": "0x002200",
-      "cell_even": "0x002200",
+      "cell_even": "0x002200", 
       "cell_odd": "0x001a00",
       "cell_border": "0x00ff00",
       "player_0": "0x244488",

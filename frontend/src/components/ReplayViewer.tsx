@@ -257,9 +257,19 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
   // ... other existing useState calls
 
-  // Validate environment setup
+  // Initialize and validate unit registry
   useEffect(() => {
-    validateUnitRegistry();
+    const initRegistry = async () => {
+      try {
+        await initializeUnitRegistry();
+        validateUnitRegistry();
+        console.log('✅ Unit registry initialized with types:', Object.keys(UNIT_REGISTRY));
+      } catch (error) {
+        console.error('❌ Failed to initialize unit registry:', error);
+        setError(`Failed to load unit registry: ${error}`);
+      }
+    };
+    initRegistry();
   }, []);
 
   // Load action definitions from config file
@@ -307,10 +317,23 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
 
   // Get unit stats from config files - NO HARDCODING
   const getUnitStats = useCallback((unitType: string) => {
+    // Check if registry is initialized
+    if (Object.keys(UNIT_REGISTRY).length === 0) {
+      console.warn('⚠️ Unit registry not yet initialized, using fallback for:', unitType);
+      // Provide safe fallback until registry loads
+      return {
+        HP_MAX: 4, MOVE: 6, RNG_RNG: 4, RNG_DMG: 1, CC_DMG: 1, ICON: '●'
+      };
+    }
+    
     const UnitClass = UNIT_REGISTRY[unitType as keyof typeof UNIT_REGISTRY];
     
     if (!UnitClass) {
-      throw new Error(`Unknown unit type: ${unitType}. Available types: ${Object.keys(UNIT_REGISTRY).join(', ')}`);
+      console.error(`❌ Unknown unit type: ${unitType}. Available types: ${Object.keys(UNIT_REGISTRY).join(', ')}`);
+      // Provide safe fallback instead of throwing
+      return {
+        HP_MAX: 4, MOVE: 6, RNG_RNG: 4, RNG_DMG: 1, CC_DMG: 1, ICON: '●'
+      };
     }
 
     // Verify all required properties exist

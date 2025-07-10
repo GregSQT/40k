@@ -113,11 +113,12 @@ else:
         "frontend/src/services/aiService.ts",
 
 ######################################################################################################
-##### tools files
+##### scripts files
 ######################################################################################################
 
-        # Tools
-        "tools/backup_script.py"         # Project Versioning & Backup
+        # Scripts
+        "scripts/backup_script.py"         # Project Versioning & Backup
+        "scripts/copy-configs.js"          # Copy Config Files from Backend to Frontend
     ]
 
 logfile = os.path.join(DEST_ROOT, "backup.log")

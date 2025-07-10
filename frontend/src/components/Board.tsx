@@ -430,10 +430,13 @@ export default function Board({
         } else if (isAvailable) {
           cell.beginFill(HIGHLIGHT_COLOR, 0.5); // Green for move from config
         } else {
-          cell.beginFill(0x001100, 0.2); // Dark transparent
+          // Use config colors for normal hex cells
+          const isEven = (col + row) % 2 === 0;
+          const cellColor = isEven ? parseColor(boardConfig.colors.cell_even) : parseColor(boardConfig.colors.cell_odd);
+          cell.beginFill(cellColor, 1.0); // Use config cell colors
         }
 
-        cell.lineStyle(1, 0x444444, 0.8);
+        cell.lineStyle(1, parseColor(boardConfig.colors.cell_border), 0.8);
         cell.drawPolygon(points);
         cell.endFill();
 

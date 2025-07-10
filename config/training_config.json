@@ -10,7 +10,7 @@
       "eval_deterministic": "Use deterministic policy during evaluation (no random exploration)",
       "eval_render": "Don't render visual output during evaluation (faster evaluation)",
       "n_eval_episodes": "Number of episodes to run per evaluation (5 episodes for statistical reliability)",
-      "checkpoint_save_freq": "Save model checkpoint every 25k steps (4 checkpoints per 100k steps)",
+      "checkpoint_save_freq": "Save model checkpoint every 50k steps (2 checkpoints per 100k steps)",
       "checkpoint_name_prefix": "Filename prefix for saved checkpoints"
     },    
     "_model_params_comments": {
@@ -30,14 +30,14 @@
   
   "default": {
   "description": "Balanced training for active AI learning",
-  "total_timesteps": 100000,
+  "total_timesteps": 50000,
   "max_steps_per_episode": 200,
   "eval_freq": 10000,
   "callback_params": {
     "eval_deterministic": true,
     "eval_render": false,
     "n_eval_episodes": 10,
-    "checkpoint_save_freq": 50000,
+    "checkpoint_save_freq": 10000,
     "checkpoint_name_prefix": "balanced_model_checkpoint"
     },
     "model_params": {
