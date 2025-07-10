@@ -160,22 +160,9 @@ const buildConfigUnitRegistry = async () => {
       throw new Error(`Failed to load unit_definitions.json: ${unitDefinitionsResponse.status}`);
     }
     // strip UTF-16 BOM if present before JSON.parse
-    const raw = await unitDefinitionsResponse.text();
-    
-    // Check if file is empty or contains non-JSON content
-    if (!raw.trim()) {
-      throw new Error('unit_definitions.json is empty');
-    }
-    
-    const clean = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
-    let unitDefinitions;
-    
-    try {
-      unitDefinitions = JSON.parse(clean);
-    } catch (parseError) {
-      console.error('Raw file content:', raw.substring(0, 100) + '...');
-      throw new Error(`JSON parsing failed: ${parseError}. File may not be valid JSON.`);
-    }
+   const raw = await unitDefinitionsResponse.text();
+   const clean = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+   const unitDefinitions = JSON.parse(clean);
     
     const registry: Record<string, typeof Intercessor | typeof AssaultIntercessor> = {};
     
@@ -312,7 +299,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
   // ... other existing useState calls
 
-  // Initialize and validate unit registry
+  // Initialize and validate unit registry - STRICT per AI_INSTRUCTIONS.md
   useEffect(() => {
     const initRegistry = async () => {
       try {
@@ -321,8 +308,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         console.log('✅ Unit registry initialized with types:', Object.keys(UNIT_REGISTRY));
       } catch (error) {
         console.error('❌ Failed to initialize unit registry:', error);
-        console.warn('🔧 Using fallback TypeScript unit classes instead of config registry');
-        // Don't set error - allow fallback to TypeScript classes
+        setError(`AI_INSTRUCTIONS.md violation: Failed to load unit registry from config: ${error}`);
       }
     };
     initRegistry();
@@ -373,50 +359,24 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const unitSpritesRef = useRef<Map<number, PIXI.Container>>(new Map());
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Get unit stats from config files - NO HARDCODING
+  // Get unit stats from config - STRICT AI_INSTRUCTIONS.md compliance
   const getUnitStats = useCallback((unitType: string) => {
-    // Check if registry is initialized
+    // STRICT: Registry must be initialized from config
     if (Object.keys(UNIT_REGISTRY).length === 0) {
-      console.warn(`⚠️ Unit registry not loaded, using TypeScript classes for ${unitType}`);
-      // Use TypeScript classes directly when registry not available
-      if (unitType === 'Intercessor') {
-        return {
-          HP_MAX: Intercessor.HP_MAX,
-          MOVE: Intercessor.MOVE,
-          RNG_RNG: Intercessor.RNG_RNG,
-          RNG_DMG: Intercessor.RNG_DMG,
-          CC_DMG: Intercessor.CC_DMG,
-          ICON: Intercessor.ICON
-        };
-      } else if (unitType === 'AssaultIntercessor') {
-        return {
-          HP_MAX: AssaultIntercessor.HP_MAX,
-          MOVE: AssaultIntercessor.MOVE,
-          RNG_RNG: AssaultIntercessor.RNG_RNG,
-          RNG_DMG: AssaultIntercessor.RNG_DMG,
-          CC_DMG: AssaultIntercessor.CC_DMG,
-          ICON: AssaultIntercessor.ICON
-        };
-      } else {
-        throw new Error(`AI_INSTRUCTIONS.md violation: Unknown unit type: ${unitType}`);
-      }
+      throw new Error(`AI_INSTRUCTIONS.md violation: Unit registry not initialized from config. Cannot load unit: ${unitType}`);
     }
     
-    const UnitClass = UNIT_REGISTRY[unitType as keyof typeof UNIT_REGISTRY];
+    const UnitClass = UNIT_REGISTRY[unitType];
     
     if (!UnitClass) {
-      throw new Error(`AI_INSTRUCTIONS.md violation: Unknown unit type: ${unitType}`);
-      // Provide safe fallback instead of throwing
-      return {
-        HP_MAX: Intercessor.HP_MAX, MOVE: Intercessor.MOVE, RNG_RNG: Intercessor.RNG_RNG, RNG_DMG: Intercessor.RNG_DMG, CC_DMG: Intercessor.CC_DMG, ICON: Intercessor.ICON
-      };
+      throw new Error(`AI_INSTRUCTIONS.md violation: Unknown unit type '${unitType}' not found in config registry. Available units: ${Object.keys(UNIT_REGISTRY).join(', ')}`);
     }
 
     // Verify all required properties exist
     const requiredProps = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG', 'ICON'];
     for (const prop of requiredProps) {
       if (UnitClass[prop as keyof typeof UnitClass] === undefined) {
-        throw new Error(`Missing required property ${prop} in unit class ${unitType}`);
+        throw new Error(`AI_INSTRUCTIONS.md violation: Unit ${unitType} missing required property: ${prop}`);
       }
     }
 
