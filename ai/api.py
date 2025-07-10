@@ -1,11 +1,20 @@
-# ai/api.py
-
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from ai.agent import RLAgent
 from config_loader import get_config_loader
 
 app = FastAPI()
+
+# Add CORS middleware to allow frontend requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Frontend URLs
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["*"],
+)
+
 # Load configuration
 config_loader = get_config_loader()
 model_path = config_loader.get_model_path()
@@ -51,4 +60,12 @@ async def ai_action(request: AIRequest):
         action_name = action_map[action]
     else:
         action_name = "end_turn"
-    return {"action": action_name}
+    
+    # Get first unit ID from request for response
+    first_unit_id = request.state.units[0].id if request.state.units else 1
+    
+    return {
+        "action": action_name if action_name != "end_turn" else "skip",
+        "unitId": first_unit_id
+    }
+
