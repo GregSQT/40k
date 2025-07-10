@@ -92,6 +92,7 @@ export default function Board({
   // ✅ HOOK 2.5: Add shooting preview state management with React state
   const [hpAnimationState, setHpAnimationState] = useState<boolean>(false);
   const [currentShootingTarget, setCurrentShootingTarget] = useState<number | null>(null);
+  const [selectedShootingTarget, setSelectedShootingTarget] = useState<number | null>(null);
   const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // ✅ HOOK 3: useEffect - ALWAYS called third, with ALL original logic
@@ -227,10 +228,10 @@ export default function Board({
         cubeDistance(c1, offsetToCube(u.col, u.row)) <= selectedUnit.RNG_RNG
       );
       
-      // For shooting, the target is at the attack preview position
-      shootingTarget = enemiesInRange.find(u => 
-        u.col === attackPreview.col && u.row === attackPreview.row
-      ) || null;
+      // For shooting, use the selectedShootingTarget if set
+      if (selectedShootingTarget !== null) {
+        shootingTarget = enemiesInRange.find(u => u.id === selectedShootingTarget) || null;
+      }
       
       // Update animation target tracking
       if (shootingTarget && currentShootingTarget !== shootingTarget.id) {
@@ -245,7 +246,14 @@ export default function Board({
         // Start HP animation for shooting target
         animationIntervalRef.current = setInterval(() => {
           setHpAnimationState(prev => !prev);
-        }, 1000);
+        }, 500);
+      } else if (shootingTarget && currentShootingTarget === shootingTarget.id) {
+        // Keep animation running for the same target
+        if (!animationIntervalRef.current) {
+          animationIntervalRef.current = setInterval(() => {
+            setHpAnimationState(prev => !prev);
+          }, 500);
+        }
       }
     } else {
       // Clear animation when not in shooting preview
@@ -254,6 +262,7 @@ export default function Board({
         animationIntervalRef.current = null;
       }
       setCurrentShootingTarget(null);
+      setSelectedShootingTarget(null);
     }
 
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
@@ -451,8 +460,9 @@ export default function Board({
           finalBarY = centerY - HP_BAR_Y_OFFSET - finalBarHeight;
           
           // Alternate between current and future HP using React state
-          const futureHP = Math.max(0, (unit.CUR_HP ?? unit.HP_MAX) - selectedUnit.RNG_DMG);
-          displayHP = hpAnimationState ? futureHP : (unit.CUR_HP ?? unit.HP_MAX);
+          const currentHP = unit.CUR_HP ?? unit.HP_MAX;
+          const futureHP = Math.max(0, currentHP - (selectedUnit.RNG_DMG ?? 1));
+          displayHP = hpAnimationState ? futureHP : currentHP;
           
           // Enhanced background for shooting targets
           const enhancedBarBg = new PIXI.Graphics();
@@ -547,9 +557,40 @@ export default function Board({
       unitCircle.cursor = "pointer";
       unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
         if (e.button === 0) {
-          if (mode === "attackPreview" && unit.player !== currentPlayer) {
-            onShoot(Number(selectedUnitId), Number(unit.id));
-          } else if (mode === "chargePreview" && unit.player !== currentPlayer && chargeTargets.some(target => target.id === unit.id)) {
+          // Handle shooting phase with two-click behavior
+          if (mode === "attackPreview" && unit.player !== currentPlayer && phase === "shoot" && selectedUnit) {
+            const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
+            const c2 = offsetToCube(unit.col, unit.row);
+            const distance = cubeDistance(c1, c2);
+            
+            if (distance <= selectedUnit.RNG_RNG) {
+              if (selectedShootingTarget === unit.id) {
+                // Second click - actually shoot
+                onShoot(Number(selectedUnitId), Number(unit.id));
+                setSelectedShootingTarget(null);
+                // Clear animation immediately
+                if (animationIntervalRef.current) {
+                  clearInterval(animationIntervalRef.current);
+                  animationIntervalRef.current = null;
+                }
+                setCurrentShootingTarget(null);
+              } else {
+                // First click - select target and start HP animation
+                setSelectedShootingTarget(unit.id);
+              }
+              return;
+            }
+          }
+          
+          // Handle clicking on selected shooter to cancel
+          if (unit.id === selectedUnitId && phase === "shoot" && mode === "attackPreview") {
+            setSelectedShootingTarget(null);
+            onSelectUnit(null);
+            return;
+          }
+          
+          // Original handlers for other phases
+          if (mode === "chargePreview" && unit.player !== currentPlayer && chargeTargets.some(target => target.id === unit.id)) {
             onCharge?.(Number(selectedUnitId), Number(unit.id));
           } else if (phase === "combat" && unit.player !== currentPlayer && selectedUnitId) {
             const selectedU = units.find(u => u.id === selectedUnitId);
@@ -715,7 +756,8 @@ export default function Board({
     onMoveCharger,
     onValidateCharge,
     hpAnimationState,
-    currentShootingTarget
+    currentShootingTarget,
+    selectedShootingTarget
   ]);
 
   // Simple container return - loading/error handled inside useEffect
