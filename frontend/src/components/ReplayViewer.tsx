@@ -87,6 +87,11 @@ interface ReplayEvent {
   enemy_units_alive?: number;
   game_over?: boolean;
   reward?: number;
+  // Action-based replay properties
+  unit_id?: number;
+  position?: [number, number];
+  hp?: number;
+  player?: number;
 }
 
 interface ReplayData {
@@ -319,20 +324,38 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const getUnitStats = useCallback((unitType: string) => {
     // Check if registry is initialized
     if (Object.keys(UNIT_REGISTRY).length === 0) {
-      console.warn('⚠️ Unit registry not yet initialized, using fallback for:', unitType);
-      // Provide safe fallback until registry loads
-      return {
-        HP_MAX: 4, MOVE: 6, RNG_RNG: 4, RNG_DMG: 1, CC_DMG: 1, ICON: '●'
-      };
+      console.warn(`⚠️ Unit registry not loaded, using TypeScript classes for ${unitType}`);
+      // Use TypeScript classes directly when registry not available
+      if (unitType === 'Intercessor') {
+        return {
+          HP_MAX: Intercessor.HP_MAX,
+          MOVE: Intercessor.MOVE,
+          RNG_RNG: Intercessor.RNG_RNG,
+          RNG_DMG: Intercessor.RNG_DMG,
+          CC_DMG: Intercessor.CC_DMG,
+          ICON: Intercessor.ICON
+        };
+      } else if (unitType === 'AssaultIntercessor') {
+        return {
+          HP_MAX: AssaultIntercessor.HP_MAX,
+          MOVE: AssaultIntercessor.MOVE,
+          RNG_RNG: AssaultIntercessor.RNG_RNG,
+          RNG_DMG: AssaultIntercessor.RNG_DMG,
+          CC_DMG: AssaultIntercessor.CC_DMG,
+          ICON: AssaultIntercessor.ICON
+        };
+      } else {
+        throw new Error(`AI_INSTRUCTIONS.md violation: Unknown unit type: ${unitType}`);
+      }
     }
     
     const UnitClass = UNIT_REGISTRY[unitType as keyof typeof UNIT_REGISTRY];
     
     if (!UnitClass) {
-      console.error(`❌ Unknown unit type: ${unitType}. Available types: ${Object.keys(UNIT_REGISTRY).join(', ')}`);
+      throw new Error(`AI_INSTRUCTIONS.md violation: Unknown unit type: ${unitType}`);
       // Provide safe fallback instead of throwing
       return {
-        HP_MAX: 4, MOVE: 6, RNG_RNG: 4, RNG_DMG: 1, CC_DMG: 1, ICON: '●'
+        HP_MAX: Intercessor.HP_MAX, MOVE: Intercessor.MOVE, RNG_RNG: Intercessor.RNG_RNG, RNG_DMG: Intercessor.RNG_DMG, CC_DMG: Intercessor.CC_DMG, ICON: Intercessor.ICON
       };
     }
 
@@ -397,12 +420,6 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         units: scenarioData.units
       };
 
-      console.log('✅ Unified scenario loaded with board config');
-      console.log('🎨 DEBUG - Scenario colors:', unifiedScenario.colors);
-      console.log('🎨 DEBUG - Background color:', unifiedScenario.colors.background);
-      console.log('🎨 DEBUG - Cell even:', unifiedScenario.colors.cell_even);
-      console.log('🎨 DEBUG - Cell odd:', unifiedScenario.colors.cell_odd);
-      console.log('🎨 DEBUG - Original boardConfig colors:', boardConfig?.colors);
       setScenario(unifiedScenario);
       return unifiedScenario;;
 
@@ -413,35 +430,108 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   }, [boardConfig]);
 
   // Convert replay events to unit objects
-  const convertUnits = useCallback((event: ReplayEvent): ReplayUnit[] => {
-    if (!event || !scenario) return [];
+  const convertUnits = useCallback((currentStep: number): ReplayUnit[] => {
+    if (!scenario) return [];
 
-    // Handle different event formats
-    if (event.units && Array.isArray(event.units)) {
-      return event.units.map(unit => ({
-        id: unit.id,
-        name: unit.unit_type || 'Unknown',
-        type: unit.unit_type || 'Unknown',
-        player: unit.player as 0 | 1,
-        col: unit.col,
-        row: unit.row,
-        color: unit.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1,
-        MOVE: 6,
-        HP_MAX: 4,
-        CUR_HP: unit.cur_hp || 4,
-        cur_hp: unit.cur_hp || 4,
-        RNG_RNG: 4,
-        RNG_DMG: 1,
-        CC_DMG: 1,
-        ICON: '●',
-        alive: unit.alive !== false && unit.cur_hp > 0,
-        unit_type: unit.unit_type
-      }));
+    // Use initial units from scenario if no replay data yet
+    if (!replayData) {
+      return scenario.units.map((unitDef) => {
+        const stats = getUnitStats(unitDef.unit_type);
+        if (!stats) {
+          throw new Error(`AI_INSTRUCTIONS.md violation: Unit stats not found for ${unitDef.unit_type}`);
+        }
+        
+        return {
+          id: unitDef.id,
+          name: unitDef.unit_type,
+          type: unitDef.unit_type,
+          player: unitDef.player as 0 | 1,
+          col: unitDef.col,
+          row: unitDef.row,
+          color: unitDef.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1,
+          MOVE: stats.MOVE,
+          HP_MAX: stats.HP_MAX,
+          CUR_HP: stats.HP_MAX,
+          cur_hp: stats.HP_MAX,
+          RNG_RNG: stats.RNG_RNG,
+          RNG_DMG: stats.RNG_DMG,
+          CC_DMG: stats.CC_DMG,
+          ICON: stats.ICON,
+          alive: true,
+          unit_type: unitDef.unit_type
+        };
+      });
     }
 
-    // Generate units from scenario if no units in event
-    return scenario.units.map((unitDef, index) => {
+    // Handle current replay structure with events array
+    if (currentStep < replayData.events.length) {
+      const currentEvent = replayData.events[currentStep];
+      // Handle action-based events that only have unit updates
+      if (currentEvent) {
+        // Start with initial units from scenario
+        const unitStates = new Map<number, ReplayUnit>();
+        
+        scenario.units.forEach((unitDef) => {
+          const stats = getUnitStats(unitDef.unit_type);
+          if (!stats) {
+            throw new Error(`AI_INSTRUCTIONS.md violation: Unit stats not found for ${unitDef.unit_type}`);
+          }
+          
+          unitStates.set(unitDef.id, {
+            id: unitDef.id,
+            name: unitDef.unit_type,
+            type: unitDef.unit_type,
+            player: unitDef.player as 0 | 1,
+            col: unitDef.col,
+            row: unitDef.row,
+            color: unitDef.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1,
+            MOVE: stats.MOVE,
+            HP_MAX: stats.HP_MAX,
+            CUR_HP: stats.HP_MAX,
+            cur_hp: stats.HP_MAX,
+            RNG_RNG: stats.RNG_RNG,
+            RNG_DMG: stats.RNG_DMG,
+            CC_DMG: stats.CC_DMG,
+            ICON: stats.ICON,
+            alive: true,
+            unit_type: unitDef.unit_type
+          });
+        });
+
+        // Apply all actions up to current step
+        for (let i = 0; i <= currentStep && i < replayData.events.length; i++) {
+          const action = replayData.events[i];
+          const unitId = action.unit_id;
+          
+          if (unitId !== undefined && unitStates.has(unitId)) {
+            const unit = unitStates.get(unitId)!;
+            
+            // Update position if provided
+            if (action.position && action.position.length >= 2) {
+              unit.col = action.position[0];
+              unit.row = action.position[1];
+            }
+            
+            // Update HP if provided
+            if (action.hp !== undefined) {
+              unit.CUR_HP = Math.max(0, action.hp);
+              unit.cur_hp = unit.CUR_HP;
+              unit.alive = unit.CUR_HP > 0;
+            }
+          }
+        }
+
+        return Array.from(unitStates.values());
+      }
+    }
+
+    // Fallback to scenario units if event doesn't have units
+    return scenario.units.map((unitDef) => {
       const stats = getUnitStats(unitDef.unit_type);
+      if (!stats) {
+        throw new Error(`AI_INSTRUCTIONS.md violation: Unit stats not found for ${unitDef.unit_type}`);
+      }
+      
       return {
         id: unitDef.id,
         name: unitDef.unit_type,
@@ -450,19 +540,19 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         col: unitDef.col,
         row: unitDef.row,
         color: unitDef.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1,
-        MOVE: stats?.MOVE || 6,
-        HP_MAX: stats?.HP_MAX || 4,
-        CUR_HP: stats?.HP_MAX || 4,
-        cur_hp: stats?.HP_MAX || 4,
-        RNG_RNG: stats?.RNG_RNG || 4,
-        RNG_DMG: stats?.RNG_DMG || 1,
-        CC_DMG: stats?.CC_DMG || 1,
-        ICON: stats?.ICON || '●',
+        MOVE: stats.MOVE,
+        HP_MAX: stats.HP_MAX,
+        CUR_HP: stats.HP_MAX,
+        cur_hp: stats.HP_MAX,
+        RNG_RNG: stats.RNG_RNG,
+        RNG_DMG: stats.RNG_DMG,
+        CC_DMG: stats.CC_DMG,
+        ICON: stats.ICON,
         alive: true,
         unit_type: unitDef.unit_type
       };
     });
-  }, [scenario, getUnitStats]);
+  }, [replayData, scenario, getUnitStats]);
 
   // PIXI.js hex coordinate calculation
   const getHexCenter = useCallback((col: number, row: number): { x: number, y: number } => {
@@ -613,11 +703,9 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
       drawBoard(app);
       
       // Draw initial units
-      if (replayData.events[0]) {
-        const initialUnits = convertUnits(replayData.events[0]);
-        setCurrentUnits(initialUnits);
-        drawUnits(app, initialUnits);
-      }
+      const initialUnits = convertUnits(0);
+      setCurrentUnits(initialUnits);
+      drawUnits(app, initialUnits);
 
     } catch (err) {
       console.error('Error initializing PIXI Canvas:', err);
@@ -698,16 +786,17 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   useEffect(() => {
     if (!replayData || !scenario || currentStep >= replayData.events.length) return;
 
-    const currentEvent = replayData.events[currentStep];
-    if (!currentEvent) return;
-
-    const units = convertUnits(currentEvent);
+    const units = convertUnits(currentStep);
     setCurrentUnits(units);
 
     if (!useHtmlFallback && appRef.current) {
       try {
         drawBoard(appRef.current);
-        drawUnits(appRef.current, units, currentEvent.acting_unit_idx);
+        
+        const currentEvent = replayData.events[currentStep];
+        const activeUnitId = currentEvent?.acting_unit_idx;
+        
+        drawUnits(appRef.current, units, activeUnitId);
       } catch (err) {
         console.error('Error updating display:', err);
         console.log('Switching to HTML fallback due to display error');
@@ -751,6 +840,22 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         // Validate JSON structure
         if (!data.events || !Array.isArray(data.events)) {
           throw new Error('Invalid replay data: missing events array');
+        }
+        
+        // Handle both events and actions array formats
+        if (!data.events && data.actions) {
+          console.log('Converting actions to events format...');
+          data.events = data.actions.map((action: any, index: number) => ({
+            turn: action.turn,
+            phase: action.phase,
+            player: action.player,
+            unit_id: action.unit_id,
+            action: action.action_type,
+            position: action.position,
+            hp: action.hp,
+            reward: action.reward,
+            timestamp: action.timestamp
+          }));
         }
         
         console.log('Replay data loaded:', data);
