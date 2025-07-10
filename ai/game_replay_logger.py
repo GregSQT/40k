@@ -233,6 +233,38 @@ class GameReplayLogger:
         
         if self.phase_index == 0:  # Back to move phase
             self.current_turn += 1
+
+    def set_training_context(self, timestep: int, episode_num: int, model_info: Dict[str, Any]):
+        """Set current training context for this episode."""
+        self.training_context = {
+            "timestep": timestep,
+            "episode_num": episode_num,
+            "model_info": model_info,
+            "start_time": datetime.now().isoformat()
+        }
+
+    def capture_training_decision(self, action: int, q_values: np.ndarray = None, 
+                                epsilon: float = None, is_exploration: bool = False,
+                                model_confidence: float = None):
+        """Capture AI training decision context."""
+        decision_data = {
+            "timestep": getattr(self, 'training_context', {}).get('timestep', 0),
+            "action_chosen": action,
+            "is_exploration": is_exploration,
+            "epsilon": epsilon,
+            "model_confidence": model_confidence
+        }
+        
+        if q_values is not None:
+            decision_data["q_values"] = q_values.tolist() if hasattr(q_values, 'tolist') else list(q_values)
+            decision_data["best_q_value"] = float(np.max(q_values))
+            decision_data["action_q_value"] = float(q_values[action]) if action < len(q_values) else None
+        
+        # Add to current game state if exists
+        if self.game_states and len(self.game_states) > 0:
+            if "training_data" not in self.game_states[-1]:
+                self.game_states[-1]["training_data"] = {}
+            self.game_states[-1]["training_data"]["decision"] = decision_data
     
     def save_replay(self, filename: str, episode_reward: float = 0.0):
         """Save the complete game replay."""
@@ -242,9 +274,13 @@ class GameReplayLogger:
                 "total_states": len(self.game_states),
                 "final_turn": self.current_turn,
                 "episode_reward": episode_reward,
-                "duration_minutes": len(self.game_states) * 0.1  # Rough estimate
+                "duration_minutes": len(self.game_states) * 0.1,
+                "training_context": getattr(self, 'training_context', {}),
+                "format_version": "2.0",
+                "replay_type": "training_enhanced"
             },
-            "game_states": self.game_states
+            "game_states": self.game_states,
+            "training_summary": self._generate_training_summary()
         }
         
         # Ensure directory exists
@@ -257,6 +293,35 @@ class GameReplayLogger:
         print(f"   📊 {len(self.game_states)} game states captured")
         print(f"   🎮 {self.current_turn} turns played")
         print(f"   💯 Final reward: {episode_reward:.2f}")
+
+    def _generate_training_summary(self) -> Dict[str, Any]:
+        """Generate summary of training data from this episode."""
+        if not self.game_states:
+            return {}
+        
+        training_decisions = []
+        exploration_count = 0
+        total_decisions = 0
+        
+        for state in self.game_states:
+            if "training_data" in state and "decision" in state["training_data"]:
+                decision = state["training_data"]["decision"]
+                training_decisions.append(decision)
+                total_decisions += 1
+                if decision.get("is_exploration", False):
+                    exploration_count += 1
+        
+        return {
+            "total_decisions": total_decisions,
+            "exploration_decisions": exploration_count,
+            "exploitation_decisions": total_decisions - exploration_count,
+            "exploration_rate": exploration_count / total_decisions if total_decisions > 0 else 0,
+            "avg_model_confidence": np.mean([d.get("model_confidence", 0) for d in training_decisions if d.get("model_confidence") is not None]) if training_decisions else 0,
+            "timestep_range": {
+                "start": training_decisions[0].get("timestep", 0) if training_decisions else 0,
+                "end": training_decisions[-1].get("timestep", 0) if training_decisions else 0
+            }
+        }
     
     def get_summary(self) -> Dict[str, Any]:
         """Get a summary of the captured replay."""
@@ -289,6 +354,17 @@ class GameReplayIntegration:
         def enhanced_step(action):
             # Capture state before action
             pre_action_units = copy.deepcopy(env.units)
+            
+            # Capture training decision context if available
+            if hasattr(env, '_last_training_info'):
+                training_info = env._last_training_info
+                env.replay_logger.capture_training_decision(
+                    action=action,
+                    q_values=training_info.get('q_values'),
+                    epsilon=training_info.get('epsilon'),
+                    is_exploration=training_info.get('is_exploration', False),
+                    model_confidence=training_info.get('model_confidence')
+                )
             
             # Execute original step
             step_result = original_step(action)

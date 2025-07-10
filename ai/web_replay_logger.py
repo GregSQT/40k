@@ -192,9 +192,14 @@ class WebReplayLogger:
                 **self.game_metadata,
                 "episode_reward": episode_reward,
                 "total_events": len(self.web_events),
-                "final_turn": self.current_turn
+                "final_turn": self.current_turn,
+                "format_version": "2.0",
+                "replay_type": "web_enhanced",
+                "training_context": getattr(self, 'training_context', {}),
+                "web_compatible": True
             },
-            "events": self.web_events
+            "events": self.web_events,
+            "training_summary": self._generate_training_summary()
         }
         
         os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -206,7 +211,33 @@ class WebReplayLogger:
 
 
 class WebReplayIntegration:
-    """Integration helper."""
+    def set_training_context(self, timestep: int, episode_num: int, model_info: Dict[str, Any]):
+        """Set current training context for this episode."""
+        self.training_context = {
+            "timestep": timestep,
+            "episode_num": episode_num,
+            "model_info": model_info,
+            "start_time": datetime.now().isoformat()
+        }
+
+    def _generate_training_summary(self) -> Dict[str, Any]:
+        """Generate training summary from web events."""
+        exploration_count = 0
+        total_decisions = 0
+        
+        for event in self.web_events:
+            if event.get("event_flags", {}).get("action_id") is not None:
+                total_decisions += 1
+                if event.get("training_data", {}).get("is_exploration", False):
+                    exploration_count += 1
+        
+        return {
+            "total_decisions": total_decisions,
+            "exploration_decisions": exploration_count,
+            "exploitation_decisions": total_decisions - exploration_count,
+            "exploration_rate": exploration_count / total_decisions if total_decisions > 0 else 0,
+            "timestep_range": getattr(self, 'training_context', {})
+        }
     
     @staticmethod
     def enhance_training_env(env):

@@ -31,6 +31,19 @@ export interface ReplayEvent {
   timestamp?: string;
   event_flags?: Record<string, any>;
   unit_stats?: Record<string, any>;
+  training_data?: {
+    timestep?: number;
+    decision?: {
+      timestep: number;
+      action_chosen: number;
+      is_exploration: boolean;
+      epsilon?: number;
+      model_confidence?: number;
+      q_values?: number[];
+      best_q_value?: number;
+      action_q_value?: number;
+    };
+  };
 }
 
 export interface ReplayMetadata {
@@ -41,6 +54,15 @@ export interface ReplayMetadata {
   episode_reward?: number;
   total_events?: number;
   source?: string;
+  format_version?: string;
+  replay_type?: string;
+  training_context?: {
+    timestep?: number;
+    episode_num?: number;
+    model_info?: Record<string, any>;
+    start_time?: string;
+  };
+  web_compatible?: boolean;
 }
 
 export interface ReplayData {
@@ -53,6 +75,18 @@ export interface ReplayData {
   events: ReplayEvent[];
   web_compatible?: boolean;
   features?: string[];
+  training_summary?: {
+    total_decisions?: number;
+    exploration_decisions?: number;
+    exploitation_decisions?: number;
+    exploration_rate?: number;
+    avg_model_confidence?: number;
+    timestep_range?: {
+      start: number;
+      end: number;
+    };
+  };
+  game_states?: any[]; // For compatibility with game_replay_logger format
 }
 
 export interface ScenarioUnit {
