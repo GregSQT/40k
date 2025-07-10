@@ -117,7 +117,7 @@ else:
 ######################################################################################################
 
         # Scripts
-        "scripts/backup_script.py"         # Project Versioning & Backup
+        "scripts/backup_script.py",        # Project Versioning & Backup
         "scripts/copy-configs.js"          # Copy Config Files from Backend to Frontend
     ]
 

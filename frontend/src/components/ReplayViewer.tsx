@@ -125,7 +125,10 @@ const buildConfigUnitRegistry = async () => {
     if (!unitDefinitionsResponse.ok) {
       throw new Error(`Failed to load unit_definitions.json: ${unitDefinitionsResponse.status}`);
     }
-    const unitDefinitions = await unitDefinitionsResponse.json();
+    // strip UTF-16 BOM if present before JSON.parse
+   const raw = await unitDefinitionsResponse.text();
+   const clean = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+   const unitDefinitions = JSON.parse(clean);
     
     const registry: Record<string, typeof Intercessor | typeof AssaultIntercessor> = {};
     
@@ -837,9 +840,16 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         
         const data = await response.json();
         
-        // Validate JSON structure
+        // Validate JSON (support phase-based replays)
         if (!data.events || !Array.isArray(data.events)) {
-          throw new Error('Invalid replay data: missing events array');
+          if (Array.isArray(data.phases)) {
+            console.log('Flattening phases into events');
+            data.events = data.phases.flatMap((p: any) =>
+              Array.isArray(p.events) ? p.events : []
+            );
+          } else {
+            throw new Error('Invalid replay data: missing events array');
+          }
         }
         
         // Handle both events and actions array formats
