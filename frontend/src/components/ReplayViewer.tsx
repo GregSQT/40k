@@ -87,6 +87,12 @@ interface ReplayEvent {
   enemy_units_alive?: number;
   game_over?: boolean;
   reward?: number;
+  result?: {
+    damage?: number;
+    hp_remaining?: number;
+    unit_destroyed?: boolean;
+    moved_to?: [number, number];
+  };
   // Action-based replay properties
   unit_id?: number;
   position?: [number, number];
@@ -1940,7 +1946,6 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
           </div>
         )}
       </div>
-    </div>
   );
 };
 
