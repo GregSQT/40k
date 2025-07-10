@@ -94,6 +94,8 @@ export default function Board({
   const [currentShootingTarget, setCurrentShootingTarget] = useState<number | null>(null);
   const [selectedShootingTarget, setSelectedShootingTarget] = useState<number | null>(null);
   const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [currentCombatTarget, setCurrentCombatTarget] = useState<number | null>(null);
+  const [selectedCombatTarget, setSelectedCombatTarget] = useState<number | null>(null);
 
   // ✅ HOOK 3: useEffect - ALWAYS called third, with ALL original logic
   useEffect(() => {
@@ -263,6 +265,56 @@ export default function Board({
       }
       setCurrentShootingTarget(null);
       setSelectedShootingTarget(null);
+    }
+
+    // ✅ COMBAT PREVIEW: Identify selected combat target - using same pattern as shooting
+    let combatTarget: Unit | null = null;
+    if (phase === "combat" && selectedUnit) {
+      const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
+      
+      // Find enemy units within combat range (adjacent = distance 1)
+      const enemiesInRange = units.filter(u =>
+        u.player !== selectedUnit.player &&
+        cubeDistance(c1, offsetToCube(u.col, u.row)) === 1
+      );
+      
+      // For combat, use the selectedCombatTarget if set
+      if (selectedCombatTarget !== null) {
+        combatTarget = enemiesInRange.find(u => u.id === selectedCombatTarget) || null;
+      }
+      
+      // Update animation target tracking for combat
+      if (combatTarget && currentCombatTarget !== combatTarget.id) {
+        setCurrentCombatTarget(combatTarget.id);
+        setHpAnimationState(false);
+        
+        // Clear existing animation
+        if (animationIntervalRef.current) {
+          clearInterval(animationIntervalRef.current);
+        }
+        
+        // Start HP animation for combat target
+        animationIntervalRef.current = setInterval(() => {
+          setHpAnimationState(prev => !prev);
+        }, 500);
+      } else if (combatTarget && currentCombatTarget === combatTarget.id) {
+        // Keep animation running for the same target
+        if (!animationIntervalRef.current) {
+          animationIntervalRef.current = setInterval(() => {
+            setHpAnimationState(prev => !prev);
+          }, 500);
+        }
+      }
+    } else {
+      // Clear combat animation when not in combat preview
+      if (currentCombatTarget !== null) {
+        if (animationIntervalRef.current) {
+          clearInterval(animationIntervalRef.current);
+          animationIntervalRef.current = null;
+        }
+        setCurrentCombatTarget(null);
+        setSelectedCombatTarget(null);
+      }
     }
 
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
@@ -446,13 +498,16 @@ export default function Board({
         // ✅ ENHANCED HP BAR FOR SHOOTING TARGETS
         const isShootingTarget = (shootingTarget && unit.id === shootingTarget.id) || (currentShootingTarget !== null && unit.id === currentShootingTarget);
         
+        // ✅ ENHANCED HP BAR FOR COMBAT TARGETS - identical logic to shooting
+        const isCombatTarget = (combatTarget && unit.id === combatTarget.id) || (currentCombatTarget !== null && unit.id === currentCombatTarget);
+        
         let displayHP = hp;
         let finalBarWidth = HP_BAR_WIDTH;
         let finalBarHeight = HP_BAR_HEIGHT;
         let finalBarX = barX;
         let finalBarY = barY;
         
-        if (isShootingTarget && selectedUnit) {
+        if ((isShootingTarget || isCombatTarget) && selectedUnit) {
           // Enhanced size and position for shooting targets
           finalBarWidth = HP_BAR_WIDTH * 1.8;
           finalBarHeight = HP_BAR_HEIGHT * 1.5;
@@ -461,7 +516,15 @@ export default function Board({
           
           // Alternate between current and future HP using React state
           const currentHP = unit.CUR_HP ?? unit.HP_MAX;
-          const futureHP = Math.max(0, currentHP - (selectedUnit.RNG_DMG ?? 1));
+          let futureHP: number;
+          
+          if (isShootingTarget) {
+            futureHP = Math.max(0, currentHP - (selectedUnit.RNG_DMG ?? 1));
+          } else {
+            // isCombatTarget - use CC_DMG instead of RNG_DMG
+            futureHP = Math.max(0, currentHP - (selectedUnit.CC_DMG ?? 1));
+          }
+          
           displayHP = hpAnimationState ? futureHP : currentHP;
           
           // Enhanced background for shooting targets
@@ -582,9 +645,41 @@ export default function Board({
             }
           }
           
+          // Handle combat phase with two-click behavior - identical to shooting pattern
+          if (phase === "combat" && unit.player !== currentPlayer && selectedUnit) {
+            const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
+            const c2 = offsetToCube(unit.col, unit.row);
+            const distance = cubeDistance(c1, c2);
+            
+            if (distance === 1) {
+              if (selectedCombatTarget === unit.id) {
+                // Second click - actually attack
+                onCombatAttack?.(Number(selectedUnitId), Number(unit.id));
+                setSelectedCombatTarget(null);
+                // Clear animation immediately
+                if (animationIntervalRef.current) {
+                  clearInterval(animationIntervalRef.current);
+                  animationIntervalRef.current = null;
+                }
+                setCurrentCombatTarget(null);
+              } else {
+                // First click - select target and start HP animation
+                setSelectedCombatTarget(unit.id);
+              }
+              return;
+            }
+          }
+          
           // Handle clicking on selected shooter to cancel
           if (unit.id === selectedUnitId && phase === "shoot" && mode === "attackPreview") {
             setSelectedShootingTarget(null);
+            onSelectUnit(null);
+            return;
+          }
+          
+          // Handle clicking on selected attacker to cancel
+          if (unit.id === selectedUnitId && phase === "combat") {
+            setSelectedCombatTarget(null);
             onSelectUnit(null);
             return;
           }
@@ -757,7 +852,9 @@ export default function Board({
     onValidateCharge,
     hpAnimationState,
     currentShootingTarget,
-    selectedShootingTarget
+    selectedShootingTarget,
+    currentCombatTarget,
+    selectedCombatTarget
   ]);
 
   // Simple container return - loading/error handled inside useEffect
