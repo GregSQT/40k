@@ -67,6 +67,16 @@ else:
         "frontend/tsconfig.json",
         "frontend/vite.config.ts",
 
+    ### frontend/public/config
+        "frontend/public/config/action_definitions.json",  # Action Definitions
+        "frontend/public/config/board_config.json",  # Board Layout & Visualization
+        "frontend/public/config/config.json",  # Frontend Configuration
+        "frontend/public/config/game_config.json",  # Game Rules & Mechanics
+        "frontend/public/config/rewards_config.json",  # Reward System Definitions
+        "frontend/public/config/scenario.json",  # Game Scenarios
+        "frontend/public/config/training_config.json",  # AI Training Parameters
+        "frontend/public/config/unit_definitions.json",  # Unit Stats & Abilities
+
     ### frontend/src
 
         # frontend/src

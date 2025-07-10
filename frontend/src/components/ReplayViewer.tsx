@@ -92,6 +92,19 @@ interface ReplayEvent {
   position?: [number, number];
   hp?: number;
   player?: number;
+  training_data?: {
+    timestep?: number;
+    decision?: {
+      timestep: number;
+      action_chosen: number;
+      is_exploration: boolean;
+      epsilon?: number;
+      model_confidence?: number;
+      q_values?: number[];
+      best_q_value?: number;
+      action_q_value?: number;
+    };
+  };
 }
 
 interface ReplayData {
@@ -102,6 +115,15 @@ interface ReplayData {
     episode_reward?: number;
     final_turn?: number;
     total_events?: number;
+    format_version?: string;
+    replay_type?: string;
+    training_context?: {
+      timestep?: number;
+      episode_num?: number;
+      model_info?: Record<string, any>;
+      start_time?: string;
+    };
+    web_compatible?: boolean;
   };
   game_summary?: {
     final_reward?: number;
@@ -111,6 +133,18 @@ interface ReplayData {
   events: ReplayEvent[];
   web_compatible?: boolean;
   features?: string[];
+  training_summary?: {
+    total_decisions?: number;
+    exploration_decisions?: number;
+    exploitation_decisions?: number;
+    exploration_rate?: number;
+    avg_model_confidence?: number;
+    timestep_range?: {
+      start: number;
+      end: number;
+    };
+  };
+  game_states?: any[];
 }
 
 interface ReplayViewerProps {
@@ -126,9 +160,22 @@ const buildConfigUnitRegistry = async () => {
       throw new Error(`Failed to load unit_definitions.json: ${unitDefinitionsResponse.status}`);
     }
     // strip UTF-16 BOM if present before JSON.parse
-   const raw = await unitDefinitionsResponse.text();
-   const clean = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
-   const unitDefinitions = JSON.parse(clean);
+    const raw = await unitDefinitionsResponse.text();
+    
+    // Check if file is empty or contains non-JSON content
+    if (!raw.trim()) {
+      throw new Error('unit_definitions.json is empty');
+    }
+    
+    const clean = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+    let unitDefinitions;
+    
+    try {
+      unitDefinitions = JSON.parse(clean);
+    } catch (parseError) {
+      console.error('Raw file content:', raw.substring(0, 100) + '...');
+      throw new Error(`JSON parsing failed: ${parseError}. File may not be valid JSON.`);
+    }
     
     const registry: Record<string, typeof Intercessor | typeof AssaultIntercessor> = {};
     
@@ -274,7 +321,8 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
         console.log('✅ Unit registry initialized with types:', Object.keys(UNIT_REGISTRY));
       } catch (error) {
         console.error('❌ Failed to initialize unit registry:', error);
-        setError(`Failed to load unit registry: ${error}`);
+        console.warn('🔧 Using fallback TypeScript unit classes instead of config registry');
+        // Don't set error - allow fallback to TypeScript classes
       }
     };
     initRegistry();
@@ -317,6 +365,8 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [currentUnits, setCurrentUnits] = useState<ReplayUnit[]>([]);
   const [useHtmlFallback, setUseHtmlFallback] = useState(false);
+  const [showTrainingData, setShowTrainingData] = useState(true);
+  const [selectedTrainingMetric, setSelectedTrainingMetric] = useState<string>('overview');
   
   const boardRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<PIXI.Application | null>(null);
@@ -838,15 +888,26 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
           throw new Error(`Failed to load replay file: ${response.statusText}`);
         }
         
-        const data = await response.json();
+        let data = await response.json();
         
-        // Validate JSON (support phase-based replays)
+        // Validate JSON (support multiple replay formats)
         if (!data.events || !Array.isArray(data.events)) {
           if (Array.isArray(data.phases)) {
             console.log('Flattening phases into events');
             data.events = data.phases.flatMap((p: any) =>
               Array.isArray(p.events) ? p.events : []
             );
+          } else if (Array.isArray(data)) {
+            // Handle direct array format (like phase_based_replay_20250710_024121.json)
+            console.log('Converting direct array format to events');
+            const originalArray = data;
+            data = {
+              metadata: {
+                total_events: originalArray.length,
+                format: 'direct_array'
+              },
+              events: originalArray
+            };
           } else {
             throw new Error('Invalid replay data: missing events array');
           }
@@ -866,6 +927,19 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
             reward: action.reward,
             timestamp: action.timestamp
           }));
+        }
+
+        // Convert action-based events to proper ReplayEvent format
+        if (data.events && data.events.length > 0) {
+          const firstEvent = data.events[0];
+          if (firstEvent.action_type !== undefined) {
+            console.log('Converting action_type format to action format...');
+            data.events = data.events.map((event: any) => ({
+              ...event,
+              action: event.action_type || event.action,
+              acting_unit_idx: event.unit_id
+            }));
+          }
         }
         
         console.log('Replay data loaded:', data);
@@ -916,6 +990,184 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
     if (currentStep > 0) {
       setCurrentStep((prev: number) => prev - 1);
     }
+  };
+
+  // Training data processing
+  const getCurrentTrainingData = () => {
+    if (!replayData || !replayData.events || currentStep >= replayData.events.length) {
+      return null;
+    }
+    
+    const currentEvent = replayData.events[currentStep];
+    return currentEvent.training_data || null;
+  };
+
+  const getTrainingProgress = () => {
+    if (!replayData?.training_summary) return null;
+    
+    const summary = replayData.training_summary;
+    const currentTraining = getCurrentTrainingData();
+    const currentTimestep = currentTraining?.decision?.timestep || 0;
+    const timestepStart = summary.timestep_range?.start || 0;
+    const timestepEnd = summary.timestep_range?.end || 0;
+    const totalRange = timestepEnd - timestepStart || 1;
+    const currentProgress = currentTimestep - timestepStart;
+    
+    return {
+      ...summary,
+      current_timestep: currentTimestep,
+      progress_percentage: Math.min(100, (currentProgress / totalRange) * 100)
+    };
+  };
+
+  const formatQValues = (qValues: number[] | undefined) => {
+    if (!qValues) return 'N/A';
+    return qValues.map(val => val.toFixed(3)).join(', ');
+  };
+
+  // Training Data Display Component
+  const TrainingDataPanel = () => {
+    const trainingData = getCurrentTrainingData();
+    const trainingProgress = getTrainingProgress();
+    
+    if (!showTrainingData || !trainingData || !trainingData.decision) {
+      return null;
+    }
+
+    return (
+      <div className="bg-gray-800 rounded-lg p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-lg font-semibold text-white flex items-center">
+            🧠 Training Context
+          </h3>
+          <div className="flex space-x-2">
+            <select 
+              value={selectedTrainingMetric} 
+              onChange={(e) => setSelectedTrainingMetric(e.target.value)}
+              className="bg-gray-700 text-white text-sm rounded px-2 py-1"
+            >
+              <option value="overview">Overview</option>
+              <option value="decision">Decision Details</option>
+              <option value="qvalues">Q-Values</option>
+              <option value="progress">Training Progress</option>
+            </select>
+            <button
+              onClick={() => setShowTrainingData(false)}
+              className="text-gray-400 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {selectedTrainingMetric === 'overview' && trainingData.decision && (
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span className="text-gray-300">Timestep:</span>
+                <span className="text-white font-mono">{trainingData.decision.timestep}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">Action Type:</span>
+                <span className={`font-medium ${trainingData.decision.is_exploration ? 'text-yellow-400' : 'text-green-400'}`}>
+                  {trainingData.decision.is_exploration ? '🎲 Exploration' : '🎯 Exploitation'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">Epsilon:</span>
+                <span className="text-white font-mono">{trainingData.decision.epsilon?.toFixed(4) || 'N/A'}</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span className="text-gray-300">Action ID:</span>
+                <span className="text-white font-mono">{trainingData.decision.action_chosen}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">Confidence:</span>
+                <span className="text-white font-mono">{trainingData.decision.model_confidence?.toFixed(3) || 'N/A'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">Action Q-Value:</span>
+                <span className="text-white font-mono">{trainingData.decision.action_q_value?.toFixed(3) || 'N/A'}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {selectedTrainingMetric === 'decision' && trainingData.decision && (
+          <div className="space-y-3 text-sm">
+            <div className="bg-gray-700 rounded p-3">
+              <div className="text-gray-300 mb-2">Decision Analysis:</div>
+              <div className="text-white">
+                {trainingData.decision.is_exploration ? (
+                  <span>🎲 <strong>Exploration:</strong> AI chose random action for learning (ε={trainingData.decision.epsilon?.toFixed(4)})</span>
+                ) : (
+                  <span>🎯 <strong>Exploitation:</strong> AI chose best known action (Q={trainingData.decision.action_q_value?.toFixed(3)})</span>
+                )}
+              </div>
+            </div>
+            {trainingData.decision.q_values && (
+              <div className="bg-gray-700 rounded p-3">
+                <div className="text-gray-300 mb-2">Best Q-Value: {trainingData.decision.best_q_value?.toFixed(3)}</div>
+                <div className="text-gray-300 mb-2">Chosen Action Q-Value: {trainingData.decision.action_q_value?.toFixed(3)}</div>
+                <div className="text-gray-300 mb-1">Action Space Q-Values:</div>
+                <div className="text-white font-mono text-xs break-all">
+                  [{formatQValues(trainingData.decision.q_values)}]
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {selectedTrainingMetric === 'qvalues' && trainingData.decision?.q_values && (
+          <div className="space-y-3 text-sm">
+            <div className="grid grid-cols-1 gap-2">
+              {trainingData.decision.q_values.map((qval, idx) => (
+                <div key={idx} className="flex items-center space-x-2">
+                  <span className="text-gray-300 w-16">Action {idx}:</span>
+                  <div className="flex-1 bg-gray-700 rounded-full h-4 relative">
+                    <div 
+                      className={`h-4 rounded-full ${idx === (trainingData.decision?.action_chosen || 0) ? 'bg-yellow-500' : 'bg-blue-500'}`}
+                      style={{ width: `${Math.min(100, Math.max(0, (qval + 1) * 50))}%` }}
+                    ></div>
+                  </div>
+                  <span className="text-white font-mono w-20 text-right">{qval.toFixed(3)}</span>
+                  {idx === (trainingData.decision?.action_chosen || 0) && <span className="text-yellow-400">⭐</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {selectedTrainingMetric === 'progress' && trainingProgress && (
+          <div className="space-y-3 text-sm">
+            <div className="bg-gray-700 rounded p-3">
+              <div className="text-gray-300 mb-2">Episode Training Progress:</div>
+              <div className="w-full bg-gray-600 rounded-full h-3 mb-2">
+                <div 
+                  className="bg-green-500 h-3 rounded-full transition-all duration-300"
+                  style={{ width: `${trainingProgress.progress_percentage || 0}%` }}
+                ></div>
+              </div>
+              <div className="text-white text-xs">
+                Timestep {trainingProgress.current_timestep || 0} of {trainingProgress.timestep_range?.end || 0}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <div className="text-gray-300">Exploration Rate:</div>
+                <div className="text-yellow-400 font-mono">{((trainingProgress.exploration_rate || 0) * 100).toFixed(1)}%</div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-gray-300">Avg Confidence:</div>
+                <div className="text-green-400 font-mono">{trainingProgress.avg_model_confidence?.toFixed(3) || 'N/A'}</div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   // Force HTML fallback function
@@ -1044,6 +1296,9 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
           )}
         </div>
 
+        {/* Training Data Panel */}
+        <TrainingDataPanel />
+        
         {/* Phase Progress Indicator - AI_GAME.md compliance */}
         <div className="mb-6 bg-gray-800 p-4 rounded-lg">
           <h3 className="text-lg font-semibold mb-3">Turn {currentTurn} - Phase Progress</h3>
@@ -1105,6 +1360,20 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
                 >
                   ⏮️
                 </button>
+                
+                {replayData?.training_summary && (
+                  <button
+                    onClick={() => setShowTrainingData(!showTrainingData)}
+                    className={`px-3 py-2 rounded transition-colors text-sm ${
+                      showTrainingData 
+                        ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                        : 'bg-gray-600 text-white hover:bg-gray-700'
+                    }`}
+                    title="Toggle training data display"
+                  >
+                    🧠
+                  </button>
+                )}
                 <button
                   onClick={prevStep}
                   disabled={currentStep === 0}
@@ -1217,6 +1486,18 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
                   <span className="text-gray-400">Events:</span>
                   <span>{replayData.events.length}</span>
                 </div>
+                {replayData?.metadata?.training_context && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Episode #:</span>
+                      <span className="text-blue-400">{replayData.metadata.training_context.episode_num || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Training Type:</span>
+                      <span className="text-green-400">{replayData.metadata.replay_type || 'Standard'}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-400">AI Units:</span>
                   <span>{currentEvent?.ai_units_alive ?? currentUnits.filter(u => u.player === 1).length ?? 'N/A'}</span>
