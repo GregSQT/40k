@@ -1340,6 +1340,39 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
 
         {/* Main Content Area */}
         <div className="flex flex-col xl:flex-row gap-6 mb-6">
+          {/* Game Board Section */}
+          <div className="flex-1">
+            <div className="bg-gray-800 rounded-lg">
+              <div className="flex items-center justify-between p-4 border-b border-gray-700">
+                <h3 className="text-lg font-semibold">🎯 Game Board</h3>
+                <div className="text-sm">
+                  <span className="text-gray-400">Board: </span>
+                  <span className="text-green-400">{scenario.board.cols}×{scenario.board.rows} hexes</span>
+                  <span className="text-gray-400 ml-4">Units: </span>
+                  <span className="text-blue-400">{currentUnits.length} total</span>
+                </div>
+              </div>
+              <div className="p-4">
+                {useHtmlFallback ? (
+                  <div>
+                    {renderHTMLBoard()}
+                  </div>
+                ) : (
+                  <div>
+                    <div className="mb-2 text-sm text-green-400">
+                      🎮 PIXI.js Canvas Mode - {scenario.board.hex_radius}px radius
+                    </div>
+                    <div 
+                      ref={boardRef} 
+                      className="border border-gray-700 rounded-lg overflow-hidden"
+                      style={{ minHeight: '400px' }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Right Side Panels */}
           <div className="xl:w-96 space-y-4">
             {/* Game Stats */}
