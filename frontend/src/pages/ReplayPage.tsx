@@ -40,20 +40,6 @@ export const ReplayPage: React.FC = () => {
       } catch (err) {
         console.warn('Backend API unavailable, using fallback:', err);
         
-        // Fallback: Try to access the file directly (user must ensure it exists in public folder)
-        const fallbackFile = 'ai/event_log/phase_based_replay_20250710_024121.json';
-        
-        try {
-          const response = await fetch(`/${fallbackFile}`);
-          if (response.ok) {
-            console.log(`✅ Fallback: Found ${fallbackFile}`);
-            setReplayFile(fallbackFile);
-            return;
-          }
-        } catch (fallbackErr) {
-          console.error('Fallback failed:', fallbackErr);
-        }
-        
         setError('No replay files found. Please ensure training_replay_*.json files are available or backend API is running.');
       } finally {
         setLoading(false);
