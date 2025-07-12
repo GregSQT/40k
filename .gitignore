@@ -135,6 +135,7 @@ backup_*/
 versions/
 *.bak
 *.backup
+backup/
 
 # Scripts PowerShell temporaires
 ps.ps1
@@ -180,7 +181,6 @@ pids/
 *.rar
 *.7z
 !package.json
-backup/
 
 # Gros fichiers de données
 *.csv
