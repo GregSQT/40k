@@ -11,7 +11,7 @@ export const ReplayPage: React.FC = () => {
     const findLatestPhaseBasedReplay = async () => {
       try {
         setLoading(true);
-        console.log('🔍 Searching for latest phase_based_replay_*.json file...');
+        console.log('🔍 Searching for latest training_replay_*.json file...');
         
         // Call backend API to list files in ai/event_log/
         const response = await fetch('/api/replay-files');
@@ -22,9 +22,9 @@ export const ReplayPage: React.FC = () => {
         
         const files = await response.json();
         
-        // Find phase_based_replay_*.json files and get the latest
+        // Find training_replay_*.json files and get the latest
         const phaseReplays = files
-          .filter((file: string) => file.startsWith('phase_based_replay_') && file.endsWith('.json'))
+          .filter((file: string) => file.startsWith('training_replay_') && file.endsWith('.json'))
           .sort()
           .reverse(); // Get newest first (assuming timestamp in filename)
         
@@ -35,7 +35,7 @@ export const ReplayPage: React.FC = () => {
           return;
         }
         
-        throw new Error('No phase_based_replay_*.json files found');
+        throw new Error('No training_replay_*.json files found');
         
       } catch (err) {
         console.warn('Backend API unavailable, using fallback:', err);
@@ -54,7 +54,7 @@ export const ReplayPage: React.FC = () => {
           console.error('Fallback failed:', fallbackErr);
         }
         
-        setError('No replay files found. Please ensure phase_based_replay_*.json files are available or backend API is running.');
+        setError('No replay files found. Please ensure training_replay_*.json files are available or backend API is running.');
       } finally {
         setLoading(false);
       }
@@ -68,7 +68,7 @@ export const ReplayPage: React.FC = () => {
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-white text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <div>🔍 Finding latest phase_based_replay_*.json...</div>
+          <div>🔍 Finding latest training_replay_*.json...</div>
           <div className="text-sm text-gray-400 mt-2">Checking ai/event_log/ directory</div>
         </div>
       </div>
@@ -82,7 +82,7 @@ export const ReplayPage: React.FC = () => {
           <div className="text-red-500 text-xl mb-4">⚠️ No Replay Files</div>
           <div className="text-gray-300 mb-4">{error}</div>
           <div className="text-sm text-gray-400">
-            <div className="mb-2">Expected location: ai/event_log/phase_based_replay_*.json</div>
+            <div className="mb-2">Expected location: ai/event_log/training_replay_*.json</div>
             <div>Make sure training has generated replay files</div>
           </div>
         </div>
@@ -91,7 +91,7 @@ export const ReplayPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900">
+    <div className="h-screen bg-gray-900">
       <ReplayViewer replayFile={replayFile!} />
     </div>
   );

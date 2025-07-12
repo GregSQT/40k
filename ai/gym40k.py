@@ -524,8 +524,8 @@ class W40KEnv(gym.Env):
                 if not is_ranged and self._ranged_units_available():
                     violation_msg = f"AI_GAME.md violation: Melee unit {acting_unit.get('unit_type', 'unknown')} shooting before ranged units complete"
                     self.phase_behavioral_violations.append(violation_msg)
-                    reward -= 50  # Severe penalty for violating ranged-first rule
-                    print(f"⚠️ {violation_msg}")
+                    unit_rewards = self._get_unit_reward_config(acting_unit)
+                    reward += unit_rewards.get("ai_game_violation", unit_rewards.get("wait"))  # Scale wait penalty
 
         # Capture state for replay system
         self._capture_game_state(action, reward)
@@ -1201,7 +1201,6 @@ class W40KEnv(gym.Env):
             # Force to first valid action for current phase
             new_action_type = valid_actions[0]
             new_action = unit_idx * 8 + new_action_type
-            print(f"🔒 AI_GAME.md: Masked action {action_type} → {new_action_type} in {self.current_phase} phase")
             return new_action
         
         return action
@@ -1384,8 +1383,8 @@ class W40KEnv(gym.Env):
         # Store violations for analysis
         self.phase_behavioral_violations.extend(violations)
         
-        if violations:
-            print(f"⚠️ AI_GAME.md Behavioral Violations: {violations}")
+        #if violations:
+        #    print(f"⚠️ AI_GAME.md Behavioral Violations: {violations}")
         
         return len(violations) == 0
 
@@ -1486,6 +1485,10 @@ class W40KEnv(gym.Env):
 
     def _advance_phase(self):
         """Advance to next phase following AI_GAME.md phase order exactly."""
+        
+        # Apply phase-specific penalties before advancing
+        self._apply_phase_penalties()
+        
         current_phase_idx = self.phase_order.index(self.current_phase)
         
         if current_phase_idx < len(self.phase_order) - 1:
@@ -1516,6 +1519,38 @@ class W40KEnv(gym.Env):
         
         # Clear phase tracking for new phase
         self.phase_acted_units.clear()
+
+    def _apply_phase_penalties(self):
+        """Apply penalties for units that couldn't act in their optimal phase."""
+        ai_units_alive = [u for u in self.ai_units if u["alive"]]
+        
+        if self.current_phase == "shoot":
+            # Penalty for ranged units that couldn't shoot
+            for unit in ai_units_alive:
+                if (unit.get("is_ranged", False) and 
+                    unit["id"] not in self.shot_units and
+                    not self._has_enemies_in_shooting_range(unit)):
+                    
+                    unit_rewards = self._get_unit_reward_config(unit)
+                    penalty = unit_rewards.get("ranged_no_targets_penalty", -1.0)
+                    
+                    # Record penalty action for replay
+                    if self.save_replay:
+                        self._record_penalty_action(unit, "no_shooting_targets", penalty)
+        
+        elif self.current_phase == "combat":
+            # Penalty for melee units that couldn't fight
+            for unit in ai_units_alive:
+                if (not unit.get("is_ranged", False) and 
+                    unit["id"] not in self.attacked_units and
+                    not self._has_adjacent_enemies(unit)):
+                    
+                    unit_rewards = self._get_unit_reward_config(unit)
+                    penalty = unit_rewards.get("melee_no_targets_penalty", -1.5)
+                    
+                    # Record penalty action for replay
+                    if self.save_replay:
+                        self._record_penalty_action(unit, "no_combat_targets", penalty)
 
     def _execute_enemy_turn(self):
         """Execute enemy turn using scripted behavior as mentioned in AI_GAME_OVERVIEW.md."""
@@ -1606,6 +1641,25 @@ class W40KEnv(gym.Env):
         }
         self.replay_data.append(action_data)
 
+    def _record_penalty_action(self, unit, penalty_type, penalty_amount):
+        """Record penalty action for replay and analysis system."""
+        if self.save_replay:
+            penalty_data = {
+                "turn": self.current_turn,
+                "phase": self.current_phase,
+                "player": unit["player"],
+                "unit_id": unit["id"],
+                "unit_type": unit["unit_type"],
+                "penalty_type": penalty_type,
+                "penalty_amount": penalty_amount,
+                "position": [unit["col"], unit["row"]],
+                "hp": unit["cur_hp"],
+                "timestamp": datetime.now().isoformat()
+            }
+            # Add to main replay data with special marker
+            penalty_data["action_type"] = "penalty"
+            self.replay_data.append(penalty_data)
+
     def _get_info(self):
         """Get info dictionary for step return."""
         return {
@@ -1618,11 +1672,13 @@ class W40KEnv(gym.Env):
             "enemy_units_alive": len([u for u in self.enemy_units if u.get("alive", True)])
         }
 
+
     def save_web_compatible_replay(self, filename=None):
         """Save replay in web-compatible format."""
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"ai/event_log/phase_based_replay_{timestamp}.json"
+            #filename = f"ai/event_log/phase_based_replay_{timestamp}.json"
+            filename = f"ai/event_log/training_replay_{timestamp}.json"
         
         # Ensure directory exists
         os.makedirs(os.path.dirname(filename), exist_ok=True)

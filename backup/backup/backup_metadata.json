@@ -1,0 +1,546 @@
+{
+  "timestamp": "2025-07-13T00:11:38.983874",
+  "source_root": "E:\\Dropbox\\Informatique\\Holberton\\40k",
+  "backup_root": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup",
+  "files_copied": [
+    {
+      "file": "config_loader.py",
+      "backup_filename": "config_loader.py",
+      "size": 10957,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\config_loader.py",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\config_loader.py"
+    },
+    {
+      "file": "tsconfig.json",
+      "backup_filename": "tsconfig.json",
+      "size": 846,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\tsconfig.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\tsconfig.json"
+    },
+    {
+      "file": ".gitignore",
+      "backup_filename": ".gitignore",
+      "size": 8625,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\.gitignore",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\.gitignore"
+    },
+    {
+      "file": "AI_INSTRUCTIONS.md",
+      "backup_filename": "AI_INSTRUCTIONS.md",
+      "size": 4422,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\AI_INSTRUCTIONS.md",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\AI_INSTRUCTIONS.md"
+    },
+    {
+      "file": "ps.ps1",
+      "backup_filename": "ps.ps1",
+      "size": 2522,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\ps.ps1",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\ps.ps1"
+    },
+    {
+      "file": "ai/api.py",
+      "backup_filename": "api.py",
+      "size": 2171,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\ai/api.py",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\api.py"
+    },
+    {
+      "file": "ai/diagnose.py",
+      "backup_filename": "diagnose.py",
+      "size": 1685,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\ai/diagnose.py",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\diagnose.py"
+    },
+    {
+      "file": "ai/evaluate.py",
+      "backup_filename": "evaluate.py",
+      "size": 13548,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\ai/evaluate.py",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\evaluate.py"
+    },
+    {
+      "file": "ai/generate_scenario.py",
+      "backup_filename": "generate_scenario.py",
+      "size": 8195,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\ai/generate_scenario.py",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\generate_scenario.py"
+    },
+    {
+      "file": "ai/gym40k.py",
+      "backup_filename": "gym40k.py",
+      "size": 82810,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\ai/gym40k.py",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\gym40k.py"
+    },
+    {
+      "file": "ai/reward_mapper.py",
+      "backup_filename": "reward_mapper.py",
+      "size": 12734,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\ai/reward_mapper.py",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\reward_mapper.py"
+    },
+    {
+      "file": "ai/scenario.json",
+      "backup_filename": "scenario.json",
+      "size": 441,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\ai/scenario.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\scenario.json"
+    },
+    {
+      "file": "ai/state.py",
+      "backup_filename": "state.py",
+      "size": 285,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\ai/state.py",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\state.py"
+    },
+    {
+      "file": "ai/train.py",
+      "backup_filename": "train.py",
+      "size": 14648,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\ai/train.py",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\train.py"
+    },
+    {
+      "file": "ai/web_replay_logger.py",
+      "backup_filename": "web_replay_logger.py",
+      "size": 12304,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\ai/web_replay_logger.py",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\web_replay_logger.py"
+    },
+    {
+      "file": "config/config.json",
+      "backup_filename": "config.json",
+      "size": 617,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\config/config.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\config.json"
+    },
+    {
+      "file": "config/game_config.json",
+      "backup_filename": "game_config.json",
+      "size": 499,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\config/game_config.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\game_config.json"
+    },
+    {
+      "file": "config/training_config.json",
+      "backup_filename": "training_config.json",
+      "size": 8138,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\config/training_config.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\training_config.json"
+    },
+    {
+      "file": "config/rewards_config.json",
+      "backup_filename": "rewards_config.json",
+      "size": 3059,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\config/rewards_config.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\rewards_config.json"
+    },
+    {
+      "file": "config/board_config.json",
+      "backup_filename": "board_config.json",
+      "size": 3260,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\config/board_config.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\board_config.json"
+    },
+    {
+      "file": "config/scenario.json",
+      "backup_filename": "scenario_1.json",
+      "size": 516,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\config/scenario.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\scenario_1.json"
+    },
+    {
+      "file": "config/unit_definitions.json",
+      "backup_filename": "unit_definitions.json",
+      "size": 270,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\config/unit_definitions.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\unit_definitions.json"
+    },
+    {
+      "file": "config/action_definitions.json",
+      "backup_filename": "action_definitions.json",
+      "size": 297,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\config/action_definitions.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\action_definitions.json"
+    },
+    {
+      "file": "scripts/backup_script.py",
+      "backup_filename": "backup_script.py",
+      "size": 6737,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\scripts/backup_script.py",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\backup_script.py"
+    },
+    {
+      "file": "scripts/copy-configs.js",
+      "backup_filename": "copy-configs.js",
+      "size": 1640,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\scripts/copy-configs.js",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\copy-configs.js"
+    },
+    {
+      "file": "frontend/package.json",
+      "backup_filename": "package.json",
+      "size": 1016,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/package.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\package.json"
+    },
+    {
+      "file": "frontend/tsconfig.json",
+      "backup_filename": "tsconfig_1.json",
+      "size": 944,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/tsconfig.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\tsconfig_1.json"
+    },
+    {
+      "file": "frontend/vite.config.ts",
+      "backup_filename": "vite.config.ts",
+      "size": 2954,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/vite.config.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\vite.config.ts"
+    },
+    {
+      "file": "frontend/eslint.config.js",
+      "backup_filename": "eslint.config.js",
+      "size": 762,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/eslint.config.js",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\eslint.config.js"
+    },
+    {
+      "file": "frontend/public/config/config.json",
+      "backup_filename": "config_1.json",
+      "size": 617,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/public/config/config.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\config_1.json"
+    },
+    {
+      "file": "frontend/public/config/board_config.json",
+      "backup_filename": "board_config_1.json",
+      "size": 3260,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/public/config/board_config.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\board_config_1.json"
+    },
+    {
+      "file": "frontend/public/config/game_config.json",
+      "backup_filename": "game_config_1.json",
+      "size": 499,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/public/config/game_config.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\game_config_1.json"
+    },
+    {
+      "file": "frontend/public/config/scenario.json",
+      "backup_filename": "scenario_2.json",
+      "size": 516,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/public/config/scenario.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\scenario_2.json"
+    },
+    {
+      "file": "frontend/public/config/unit_definitions.json",
+      "backup_filename": "unit_definitions_1.json",
+      "size": 270,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/public/config/unit_definitions.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\unit_definitions_1.json"
+    },
+    {
+      "file": "frontend/public/config/action_definitions.json",
+      "backup_filename": "action_definitions_1.json",
+      "size": 297,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/public/config/action_definitions.json",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\action_definitions_1.json"
+    },
+    {
+      "file": "frontend/src/App.tsx",
+      "backup_filename": "App.tsx",
+      "size": 524,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/App.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\App.tsx"
+    },
+    {
+      "file": "frontend/src/main.tsx",
+      "backup_filename": "main.tsx",
+      "size": 196,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/main.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\main.tsx"
+    },
+    {
+      "file": "frontend/src/routes.tsx",
+      "backup_filename": "routes.tsx",
+      "size": 674,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/routes.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\routes.tsx"
+    },
+    {
+      "file": "frontend/src/App.css",
+      "backup_filename": "App.css",
+      "size": 9342,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/App.css",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\App.css"
+    },
+    {
+      "file": "frontend/src/index.css",
+      "backup_filename": "index.css",
+      "size": 370,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/index.css",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\index.css"
+    },
+    {
+      "file": "frontend/src/components/Board.tsx",
+      "backup_filename": "Board.tsx",
+      "size": 36686,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/components/Board.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\Board.tsx"
+    },
+    {
+      "file": "frontend/src/components/ErrorBoundary.tsx",
+      "backup_filename": "ErrorBoundary.tsx",
+      "size": 2366,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/components/ErrorBoundary.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\ErrorBoundary.tsx"
+    },
+    {
+      "file": "frontend/src/components/GameBoard.tsx",
+      "backup_filename": "GameBoard.tsx",
+      "size": 3041,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/components/GameBoard.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\GameBoard.tsx"
+    },
+    {
+      "file": "frontend/src/components/GameController.tsx",
+      "backup_filename": "GameController.tsx",
+      "size": 3846,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/components/GameController.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\GameController.tsx"
+    },
+    {
+      "file": "frontend/src/components/GameStatus.tsx",
+      "backup_filename": "GameStatus.tsx",
+      "size": 3526,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/components/GameStatus.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\GameStatus.tsx"
+    },
+    {
+      "file": "frontend/src/components/ReplayViewer.tsx",
+      "backup_filename": "ReplayViewer.tsx",
+      "size": 35928,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/components/ReplayViewer.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\ReplayViewer.tsx"
+    },
+    {
+      "file": "frontend/src/components/ReplayBoard.tsx",
+      "backup_filename": "ReplayBoard.tsx",
+      "size": 23639,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/components/ReplayBoard.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\ReplayBoard.tsx"
+    },
+    {
+      "file": "frontend/src/components/UnitSelector.tsx",
+      "backup_filename": "UnitSelector.tsx",
+      "size": 7719,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/components/UnitSelector.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\UnitSelector.tsx"
+    },
+    {
+      "file": "frontend/src/data/Units.ts",
+      "backup_filename": "Units.ts",
+      "size": 803,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/data/Units.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\Units.ts"
+    },
+    {
+      "file": "frontend/src/data/UnitFactory.ts",
+      "backup_filename": "UnitFactory.ts",
+      "size": 1670,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/data/UnitFactory.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\UnitFactory.ts"
+    },
+    {
+      "file": "frontend/src/data/Scenario.ts",
+      "backup_filename": "Scenario.ts",
+      "size": 1209,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/data/Scenario.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\Scenario.ts"
+    },
+    {
+      "file": "frontend/src/hooks/useAIPlayer.ts",
+      "backup_filename": "useAIPlayer.ts",
+      "size": 10155,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/hooks/useAIPlayer.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\useAIPlayer.ts"
+    },
+    {
+      "file": "frontend/src/hooks/useGameActions.ts",
+      "backup_filename": "useGameActions.ts",
+      "size": 9497,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/hooks/useGameActions.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\useGameActions.ts"
+    },
+    {
+      "file": "frontend/src/hooks/useGameConfig.ts",
+      "backup_filename": "useGameConfig.ts",
+      "size": 4895,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/hooks/useGameConfig.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\useGameConfig.ts"
+    },
+    {
+      "file": "frontend/src/hooks/useGameState.ts",
+      "backup_filename": "useGameState.ts",
+      "size": 4176,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/hooks/useGameState.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\useGameState.ts"
+    },
+    {
+      "file": "frontend/src/hooks/usePhaseTransition.ts",
+      "backup_filename": "usePhaseTransition.ts",
+      "size": 6706,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/hooks/usePhaseTransition.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\usePhaseTransition.ts"
+    },
+    {
+      "file": "frontend/src/pages/HomePage.tsx",
+      "backup_filename": "HomePage.tsx",
+      "size": 974,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/pages/HomePage.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\HomePage.tsx"
+    },
+    {
+      "file": "frontend/src/pages/GamePage.tsx",
+      "backup_filename": "GamePage.tsx",
+      "size": 156,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/pages/GamePage.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\GamePage.tsx"
+    },
+    {
+      "file": "frontend/src/pages/ReplayPage.tsx",
+      "backup_filename": "ReplayPage.tsx",
+      "size": 3711,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/pages/ReplayPage.tsx",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\ReplayPage.tsx"
+    },
+    {
+      "file": "frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts",
+      "backup_filename": "SpaceMarineRangedUnit.ts",
+      "size": 3105,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\SpaceMarineRangedUnit.ts"
+    },
+    {
+      "file": "frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
+      "backup_filename": "SpaceMarineMeleeUnit.ts",
+      "size": 3107,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\SpaceMarineMeleeUnit.ts"
+    },
+    {
+      "file": "frontend/src/roster/spaceMarine/Intercessor.ts",
+      "backup_filename": "Intercessor.ts",
+      "size": 1304,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/roster/spaceMarine/Intercessor.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\Intercessor.ts"
+    },
+    {
+      "file": "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
+      "backup_filename": "AssaultIntercessor.ts",
+      "size": 1333,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\AssaultIntercessor.ts"
+    },
+    {
+      "file": "frontend/src/services/aiService.ts",
+      "backup_filename": "aiService.ts",
+      "size": 3084,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/services/aiService.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\aiService.ts"
+    },
+    {
+      "file": "frontend/src/types/game.ts",
+      "backup_filename": "game.ts",
+      "size": 2100,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/types/game.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\game.ts"
+    },
+    {
+      "file": "frontend/src/constants/gameConfig.ts",
+      "backup_filename": "gameConfig.ts",
+      "size": 5306,
+      "src": "E:\\Dropbox\\Informatique\\Holberton\\40k\\frontend/src/constants/gameConfig.ts",
+      "dest": "E:\\Dropbox\\Informatique\\Holberton\\40k\\backup\\backup\\gameConfig.ts"
+    }
+  ],
+  "files_failed": [],
+  "total_size": 403509,
+  "file_mapping": {
+    "config_loader.py": "config_loader.py",
+    "tsconfig.json": "tsconfig.json",
+    ".gitignore": ".gitignore",
+    "AI_INSTRUCTIONS.md": "AI_INSTRUCTIONS.md",
+    "ps.ps1": "ps.ps1",
+    "ai/api.py": "api.py",
+    "ai/diagnose.py": "diagnose.py",
+    "ai/evaluate.py": "evaluate.py",
+    "ai/generate_scenario.py": "generate_scenario.py",
+    "ai/gym40k.py": "gym40k.py",
+    "ai/reward_mapper.py": "reward_mapper.py",
+    "ai/scenario.json": "scenario.json",
+    "ai/state.py": "state.py",
+    "ai/train.py": "train.py",
+    "ai/web_replay_logger.py": "web_replay_logger.py",
+    "config/config.json": "config.json",
+    "config/game_config.json": "game_config.json",
+    "config/training_config.json": "training_config.json",
+    "config/rewards_config.json": "rewards_config.json",
+    "config/board_config.json": "board_config.json",
+    "config/scenario.json": "scenario_1.json",
+    "config/unit_definitions.json": "unit_definitions.json",
+    "config/action_definitions.json": "action_definitions.json",
+    "scripts/backup_script.py": "backup_script.py",
+    "scripts/copy-configs.js": "copy-configs.js",
+    "frontend/package.json": "package.json",
+    "frontend/tsconfig.json": "tsconfig_1.json",
+    "frontend/vite.config.ts": "vite.config.ts",
+    "frontend/eslint.config.js": "eslint.config.js",
+    "frontend/public/config/config.json": "config_1.json",
+    "frontend/public/config/board_config.json": "board_config_1.json",
+    "frontend/public/config/game_config.json": "game_config_1.json",
+    "frontend/public/config/scenario.json": "scenario_2.json",
+    "frontend/public/config/unit_definitions.json": "unit_definitions_1.json",
+    "frontend/public/config/action_definitions.json": "action_definitions_1.json",
+    "frontend/src/App.tsx": "App.tsx",
+    "frontend/src/main.tsx": "main.tsx",
+    "frontend/src/routes.tsx": "routes.tsx",
+    "frontend/src/App.css": "App.css",
+    "frontend/src/index.css": "index.css",
+    "frontend/src/components/Board.tsx": "Board.tsx",
+    "frontend/src/components/ErrorBoundary.tsx": "ErrorBoundary.tsx",
+    "frontend/src/components/GameBoard.tsx": "GameBoard.tsx",
+    "frontend/src/components/GameController.tsx": "GameController.tsx",
+    "frontend/src/components/GameStatus.tsx": "GameStatus.tsx",
+    "frontend/src/components/ReplayViewer.tsx": "ReplayViewer.tsx",
+    "frontend/src/components/ReplayBoard.tsx": "ReplayBoard.tsx",
+    "frontend/src/components/UnitSelector.tsx": "UnitSelector.tsx",
+    "frontend/src/data/Units.ts": "Units.ts",
+    "frontend/src/data/UnitFactory.ts": "UnitFactory.ts",
+    "frontend/src/data/Scenario.ts": "Scenario.ts",
+    "frontend/src/hooks/useAIPlayer.ts": "useAIPlayer.ts",
+    "frontend/src/hooks/useGameActions.ts": "useGameActions.ts",
+    "frontend/src/hooks/useGameConfig.ts": "useGameConfig.ts",
+    "frontend/src/hooks/useGameState.ts": "useGameState.ts",
+    "frontend/src/hooks/usePhaseTransition.ts": "usePhaseTransition.ts",
+    "frontend/src/pages/HomePage.tsx": "HomePage.tsx",
+    "frontend/src/pages/GamePage.tsx": "GamePage.tsx",
+    "frontend/src/pages/ReplayPage.tsx": "ReplayPage.tsx",
+    "frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts": "SpaceMarineRangedUnit.ts",
+    "frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts": "SpaceMarineMeleeUnit.ts",
+    "frontend/src/roster/spaceMarine/Intercessor.ts": "Intercessor.ts",
+    "frontend/src/roster/spaceMarine/AssaultIntercessor.ts": "AssaultIntercessor.ts",
+    "frontend/src/services/aiService.ts": "aiService.ts",
+    "frontend/src/types/game.ts": "game.ts",
+    "frontend/src/constants/gameConfig.ts": "gameConfig.ts"
+  },
+  "summary": {
+    "total_files_attempted": 66,
+    "files_copied_count": 66,
+    "files_failed_count": 0,
+    "total_size_mb": 0.38,
+    "success_rate": 100.0
+  }
+}

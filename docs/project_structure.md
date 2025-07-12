@@ -10,12 +10,13 @@ wh40k-tactics/
 ├── 📂 frontend/                    # React/TypeScript Frontend Application
 ├── 📂 ai/                          # Python AI Backend & Training
 ├── 📂 config/                      # Configuration Files (JSON)
-├── 📂 tools/                       # Development & Utility Scripts
+├── 📂 scripts/                     # Development & Utility Scripts
 ├── 📂 docs/                        # Project Documentation
 ├── 📂 tensorboard/                 # Training Metrics (Git Ignored)
 ├── 📂 versions/                    # Backup Versions (Git Ignored)
 ├── 📄 config_loader.py             # Central Configuration Management
 ├── 📄 tsconfig.json                # TypeScript Root Configuration
+├── 📄 ps.ps1                       # PowerShell Utility Scripts
 ├── 📄 .gitignore                   # Git Ignore Rules
 └── 📄 AI_INSTRUCTIONS.md           # AI Development Guidelines
 ```
@@ -46,11 +47,22 @@ frontend/
 │   ├── 📂 roster/spaceMarine/      # Unit Definitions & Stats
 │   │   ├── 📄 SpaceMarineRangedUnit.ts    # Base Ranged Unit
 │   │   ├── 📄 SpaceMarineMeleeUnit.ts     # Base Melee Unit
-│   │   ├── 📄 Intercessor.ts             # Ranged Infantry
-│   │   └── 📄 AssaultIntercessor.ts      # Melee Infantry
+│   │   ├── 📄 Intercessor.ts              # Ranged Infantry
+│   │   └── 📄 AssaultIntercessor.ts       # Melee Infantry
 │   │
-│   ├── 📂 ai/                      # Frontend AI Integration
-│   │   └── 📄 ai.ts                # AI Backend Communication
+│   ├── 📂 hooks/                    # React Custom Hooks
+│   │   ├── 📄 useAIPlayer.ts        # AI Player Behavior & Actions
+│   │   ├── 📄 useGameActions.ts     # Game Action Handlers (Move/Attack/Charge)
+│   │   ├── 📄 useGameConfig.ts      # Configuration Loading (Board/Game Rules)
+│   │   ├── 📄 useGameState.ts       # Core Game State Management
+│   │   └── 📄 usePhaseTransition.ts # Automatic Phase Transitions
+│   │
+│   ├── 📂 services/                # Service Layer
+│   │   └── 📄 aiService.ts         # AI Backend Communication
+│   │
+│   ├── 📂 types/                   # TypeScript Type Definitions
+│   ├── 📂 utils/                   # Utility Functions
+│   ├── 📂 constants/               # Application Constants
 │   │
 │   ├── 📄 App.tsx                  # Main Application Component
 │   ├── 📄 main.tsx                 # Application Entry Point
@@ -114,7 +126,8 @@ config/
 ├── 📄 rewards_config.json          # Reward System Definitions
 ├── 📄 board_config.json            # Board Layout & Visualization
 ├── 📄 scenario.json                # Game Scenarios
-└── 📄 unit_definitions.json        # Unit Stats & Abilities
+├── 📄 unit_definitions.json        # Unit Stats & Abilities
+└── 📄 action_definitions.json      # Action System Definitions
 ```
 
 ### Configuration Profiles
@@ -122,19 +135,18 @@ config/
 - **Multiple Reward Systems**: simplified, balanced, phase_based, original
 - **Flexible Game Rules**: Customizable turn limits, board sizes, victory conditions
 
-## 🛠️ Development Tools (`/tools/`)
+## 🛠️ Development Scripts (`/scripts/`)
 
 ### Structure
 ```
-tools/
+scripts/
 ├── 📄 backup_script.py             # Project Versioning & Backup
-└── 📄 generate_scenario.py         # Scenario Generation Utilities
+└── 📄 copy-configs.js              # Config File Management
 ```
 
-### PowerShell Scripts
+### PowerShell Utilities
 ```
-├── 📄 ps.ps1                       # Utility Scripts (Various)
-└── 📄 copy_missing_config.ps1      # Config File Management
+📄 ps.ps1                           # PowerShell Utility Scripts (Project Root)
 ```
 
 ## 📊 Build & Path Configuration
@@ -147,6 +159,11 @@ tools/
 "@data/" → "frontend/src/data/"
 "@roster/" → "frontend/src/roster/"
 "@pages/" → "frontend/src/pages/"
+"@types/" → "frontend/src/types/"
+"@hooks/" → "frontend/src/hooks/"
+"@services/" → "frontend/src/services/"
+"@constants/" → "frontend/src/constants/"
+"@utils/" → "frontend/src/utils/"
 "@ai/" → "ai/"
 "@config/" → "config/"
 ```
@@ -156,7 +173,7 @@ tools/
 - **Frontend Access**: Uses `/ai/` prefix for public file access
 - **Config Location**: All configs in `/config/` directory (not `/ai/config/`)
 - **Event Logs**: Generated in `/ai/event_log/`
-- **Model Storage**: Defined in `config/config.json` → `ai/models/current/model.zip`
+- **Model Storage**: Use `get_model_path()` from `config_loader.py` (dynamic path from config)
 - **Tensorboard**: Logs to `./tensorboard/` from root
 
 ## 🏗️ Build Commands
@@ -176,6 +193,15 @@ python ai/train.py                  # Default training
 python ai/train.py --training-config conservative --rewards-config balanced
 python ai/evaluate.py               # Model evaluation
 python ai/diagnose.py               # Training diagnostics
+```
+
+### Configuration Management
+```bash
+# Copy config files to frontend
+node scripts/copy-configs.js
+
+# PowerShell utilities (from project root)
+.\ps.ps1
 ```
 
 ### Tensorboard Monitoring
@@ -214,6 +240,11 @@ tensorboard --logdir ./tensorboard/
 3. **Replay Loading** → Direct file access to replay JSON files
 4. **AI Communication** → FastAPI backend for live AI games
 
+### Configuration Synchronization
+1. **Backend Configs** → All master configs in `/config/` directory
+2. **Frontend Sync** → `scripts/copy-configs.js` copies to frontend public folder
+3. **Dynamic Paths** → `config_loader.py` provides centralized path management
+
 ## 🎯 Key Design Principles
 
 ### Modularity
@@ -225,6 +256,7 @@ tensorboard --logdir ./tensorboard/
 - No hardcoded parameters in training scripts
 - JSON-based configuration with validation
 - Multiple profiles for different use cases
+- Centralized path management via `config_loader.py`
 
 ### Performance-Oriented
 - PIXI.js for high-performance rendering
@@ -235,3 +267,28 @@ tensorboard --logdir ./tensorboard/
 - Comprehensive error handling and diagnostics
 - Detailed logging and monitoring
 - Automated backup and versioning systems
+- PowerShell utilities for Windows development
+
+## 🔧 Development Workflow
+
+### Configuration Updates
+1. Modify configs in `/config/` directory
+2. Run `node scripts/copy-configs.js` to sync to frontend
+3. Frontend automatically loads updated configs
+
+### Model Training
+1. Configure training parameters in `/config/training_config.json`
+2. Set reward system in `/config/rewards_config.json`
+3. Run training from project root: `python ai/train.py`
+4. Monitor with Tensorboard: `tensorboard --logdir ./tensorboard/`
+
+### Backup & Versioning
+1. Run `python scripts/backup_script.py` for project backup
+2. Automated zipping and version management
+3. Backups stored in `/versions/` directory (git ignored)
+
+### Frontend Development
+1. Configs automatically available at `/ai/config/` public path
+2. Replay files accessible at `/ai/event_log/` public path
+3. Hot reloading with Vite development server
+4. TypeScript strict mode with comprehensive path aliases

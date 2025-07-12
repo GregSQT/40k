@@ -1,0 +1,30 @@
+[
+  {
+    "id": 1,
+    "unit_type": "Intercessor",
+    "player": 0,
+    "col": 23,
+    "row": 12
+  },
+  {
+    "id": 2,
+    "unit_type": "AssaultIntercessor",
+    "player": 0,
+    "col": 1,
+    "row": 12
+  },
+  {
+    "id": 3,
+    "unit_type": "Intercessor",
+    "player": 1,
+    "col": 0,
+    "row": 5
+  },
+  {
+    "id": 4,
+    "unit_type": "AssaultIntercessor",
+    "player": 1,
+    "col": 22,
+    "row": 3
+  }
+]
