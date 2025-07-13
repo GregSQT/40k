@@ -104,6 +104,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const [battleLog, setBattleLog] = useState<ReplayEvent[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed, setPlaySpeed] = useState(1000); // ms per step
+  const [registryInitialized, setRegistryInitialized] = useState(false);
   
   // PIXI.js refs - AI_INSTRUCTIONS.md: Use PIXI.js Canvas
   const boardRef = useRef<HTMLDivElement>(null);
@@ -125,23 +126,50 @@ const ACTION_TYPE_MAPPING: Record<string, { name: string; type: string }> = {
   "7": { name: "Wait/End turn", type: "move" },
   "-1": { name: "Phase Penalty", type: "penalty" }
 };
-const UNIT_REGISTRY: Record<string, typeof Intercessor | typeof AssaultIntercessor> = {
-  'Intercessor': Intercessor,
-  'AssaultIntercessor': AssaultIntercessor
-};
+const UNIT_REGISTRY: Record<string, any> = {};
 
-// Initialize and validate unit registry
+// Dynamic unit registry initialization
 const initializeUnitRegistry = async () => {
-  // Validate required properties exist
-  const requiredProps = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG', 'ICON'];
-  Object.entries(UNIT_REGISTRY).forEach(([unitType, UnitClass]) => {
-    requiredProps.forEach(prop => {
-      if (UnitClass[prop as keyof typeof UnitClass] === undefined) {
-        throw new Error(`Unit ${unitType} missing required property: ${prop}`);
+  try {
+    // Load unit registry configuration
+    const registryResponse = await fetch('/config/unit_registry.json');
+    if (!registryResponse.ok) {
+      throw new Error(`Failed to load unit registry: ${registryResponse.statusText}`);
+    }
+    const unitConfig = await registryResponse.json();
+    
+    // Dynamically import each unit class
+    for (const [unitType, unitPath] of Object.entries(unitConfig.units)) {
+      try {
+        const module = await import(/* @vite-ignore */ `../roster/${unitPath}.ts`);
+        const UnitClass = module[unitType] || module.default;
+        
+        if (!UnitClass) {
+          throw new Error(`Unit class ${unitType} not found in ${unitPath}`);
+        }
+        
+        // Validate required properties
+        const requiredProps = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG', 'ICON'];
+        requiredProps.forEach(prop => {
+          if (UnitClass[prop] === undefined) {
+            throw new Error(`Unit ${unitType} missing required property: ${prop}`);
+          }
+        });
+        
+        UNIT_REGISTRY[unitType] = UnitClass;
+        console.log(`✅ Registered unit: ${unitType}`);
+        
+      } catch (importError) {
+        console.error(`❌ Failed to import unit ${unitType}:`, importError);
+        throw importError;
       }
-    });
-  });
-  console.log('✅ Unit registry initialized with types:', Object.keys(UNIT_REGISTRY));
+    }
+    
+    console.log('✅ Unit registry initialized with types:', Object.keys(UNIT_REGISTRY));
+  } catch (error) {
+    console.error('❌ Failed to initialize unit registry:', error);
+    throw error;
+  }
 };
 
 const validateUnitRegistry = () => {
@@ -157,6 +185,8 @@ const validateUnitRegistry = () => {
         await initializeUnitRegistry();
         validateUnitRegistry();
         console.log('✅ Unit registry initialized for replay');
+        // Trigger replay loading with registry state
+        setRegistryInitialized(true);
       } catch (error) {
         console.error('❌ Failed to initialize unit registry:', error);
         setError('Failed to initialize unit registry');
@@ -187,6 +217,12 @@ const validateUnitRegistry = () => {
       if (configError) {
         setError(`Config error: ${configError}`);
         setLoading(false);
+        return;
+      }
+      
+      // Wait for unit registry to be initialized before loading replay
+      if (!registryInitialized) {
+        console.log('⏳ Waiting for unit registry to initialize...');
         return;
       }
       
@@ -308,7 +344,7 @@ const validateUnitRegistry = () => {
     };
     
     loadReplayData();
-  }, [replayFile, configLoading, configError, getUnitStats]);
+  }, [replayFile, configLoading, configError, getUnitStats, registryInitialized]);
 
   // AI_INSTRUCTIONS.md: Same hex calculations as Board.tsx
   const getHexCenter = useCallback((col: number, row: number): { x: number, y: number } => {

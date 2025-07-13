@@ -15,6 +15,8 @@ from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 from collections import defaultdict
 
+units_per_player_setup = 2
+
 # Fix import paths - Add both script dir and project root
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
@@ -182,13 +184,13 @@ class ScenarioManager:
             board_size=board_size,
             agent_compositions={
                 # Mix different agent types
-                agent_key: self.unit_registry.get_units_for_model(agent_key)[:1] 
+                agent_key: self.unit_registry.get_units_for_model(agent_key)[:2] 
                 for agent_key in available_agents[:2]  # Use first 2 agents
             },
             unit_counts={},  # Will be populated dynamically
             deployment_zones={
-                0: [(i, board_size[1]//2-2) for i in range(4)],
-                1: [(board_size[0]-1-i, board_size[1]//2+2) for i in range(4)]
+                0: [(2, board_size[1]//2-2), (2, board_size[1]//2), (2, board_size[1]//2+2), (3, board_size[1]//2-1)],
+                1: [(board_size[0]-3, board_size[1]//2-2), (board_size[0]-3, board_size[1]//2), (board_size[0]-3, board_size[1]//2+2), (board_size[0]-4, board_size[1]//2-1)]
             },
             difficulty="hard",
             training_focus="mixed"
@@ -236,41 +238,44 @@ class ScenarioManager:
         scenario_units = []
         unit_id = 1
         
-        # Generate units for player 0
+        # Generate units for player 0 - Multiple units for better battles
         agent_0_units = self.unit_registry.get_units_for_model(player_0_agent)
         if not agent_0_units:
             raise ValueError(f"No units found for agent: {player_0_agent}")
         
-        deployment_0 = template.deployment_zones.get(0, [(0, 0)])
-        for i, pos in enumerate(deployment_0):
-            if i < len(agent_0_units):
-                unit_type = agent_0_units[i % len(agent_0_units)]
-                scenario_units.append({
-                    "id": unit_id,
-                    "unit_type": unit_type,
-                    "player": 0,
-                    "col": pos[0],
-                    "row": pos[1]
-                })
-                unit_id += 1
+        deployment_0 = template.deployment_zones.get(0, [(0, 0), (1, 0)])  # Ensure multiple positions
+        units_per_player = units_per_player_setup  # Deploy 2 units per player for better battles
         
-        # Generate units for player 1  
+        for i in range(units_per_player):
+            pos = deployment_0[i % len(deployment_0)]  # Cycle through positions
+            unit_type = agent_0_units[i % len(agent_0_units)]  # Cycle through unit types
+            scenario_units.append({
+                "id": unit_id,
+                "unit_type": unit_type,
+                "player": 0,
+                "col": pos[0],
+                "row": pos[1]
+            })
+            unit_id += 1
+        
+        # Generate units for player 1 - Multiple units for better battles
         agent_1_units = self.unit_registry.get_units_for_model(player_1_agent)
         if not agent_1_units:
             raise ValueError(f"No units found for agent: {player_1_agent}")
         
-        deployment_1 = template.deployment_zones.get(1, [(23, 17)])
-        for i, pos in enumerate(deployment_1):
-            if i < len(agent_1_units):
-                unit_type = agent_1_units[i % len(agent_1_units)]
-                scenario_units.append({
-                    "id": unit_id,
-                    "unit_type": unit_type,
-                    "player": 1,
-                    "col": pos[0],
-                    "row": pos[1]
-                })
-                unit_id += 1
+        deployment_1 = template.deployment_zones.get(1, [(23, 17), (22, 17)])  # Ensure multiple positions
+        
+        for i in range(units_per_player):
+            pos = deployment_1[i % len(deployment_1)]  # Cycle through positions
+            unit_type = agent_1_units[i % len(agent_1_units)]  # Cycle through unit types
+            scenario_units.append({
+                "id": unit_id,
+                "unit_type": unit_type,
+                "player": 1,
+                "col": pos[0],
+                "row": pos[1]
+            })
+            unit_id += 1
         
         # Create scenario metadata
         scenario = {

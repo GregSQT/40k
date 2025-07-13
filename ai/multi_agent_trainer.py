@@ -11,6 +11,7 @@ import json
 import time
 import threading
 import queue
+import glob
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any, Callable
 from dataclasses import dataclass, asdict
@@ -171,6 +172,9 @@ class MultiAgentTrainer:
         print(f"⚙️ Training config: {training_config_name}")
         print(f"🎯 Rewards config: {rewards_config_name}")
         
+        # Clean up previous session scenarios
+        self._cleanup_previous_session_scenarios()
+        
         # Generate balanced training rotation
         training_rotation = self.scenario_manager.get_balanced_training_rotation(total_episodes)
         
@@ -327,7 +331,8 @@ class MultiAgentTrainer:
             replay_file_saved = None
             try:
                 timestamp = time.strftime("%Y%m%d_%H%M%S") 
-                descriptive_filename = f"ai/event_log/training_{session.agent_key}_vs_{session.opponent_agent}_{timestamp}.json"
+                #descriptive_filename = f"ai/event_log/training_{session.agent_key}_vs_{session.opponent_agent}_{timestamp}.json"
+                descriptive_filename = f"ai/event_log/training_{session.agent_key}_vs_{session.opponent_agent}.json"
                 
                 # Access base environment through Monitor for replay saving
                 if hasattr(env, 'base_env') and hasattr(env.base_env, 'save_web_compatible_replay'):
@@ -384,7 +389,8 @@ class MultiAgentTrainer:
             try:
                 if 'env' in locals() and env:
                     timestamp = time.strftime("%Y%m%d_%H%M%S")
-                    failed_replay_filename = f"ai/event_log/failed_training_{session.agent_key}_vs_{session.opponent_agent}_{timestamp}.json"
+                    #failed_replay_filename = f"ai/event_log/failed_training_{session.agent_key}_vs_{session.opponent_agent}_{timestamp}.json"
+                    failed_replay_filename = f"ai/event_log/failed_training_{session.agent_key}_vs_{session.opponent_agent}.json"
                     
                     # Access base environment through Monitor for replay saving
                     if hasattr(env, 'base_env') and hasattr(env.base_env, 'save_web_compatible_replay'):
@@ -407,6 +413,33 @@ class MultiAgentTrainer:
                 "replay_file": replay_file_saved
             }
 
+    def _cleanup_previous_session_scenarios(self):
+        """Clean up all previous session scenario files before starting new training."""
+        session_scenarios_dir = os.path.join(self.config.config_dir, "session_scenarios")
+        
+        if not os.path.exists(session_scenarios_dir):
+            print("📁 No session scenarios directory found - nothing to clean")
+            return
+        
+        # Find all scenario_*.json files
+        pattern = os.path.join(session_scenarios_dir, "scenario_*.json")
+        session_files = glob.glob(pattern)
+        
+        if not session_files:
+            print("📁 No previous session scenarios found - starting clean")
+            return
+        
+        # Delete all found session scenario files
+        deleted_count = 0
+        for file_path in session_files:
+            try:
+                os.remove(file_path)
+                deleted_count += 1
+            except Exception as e:
+                print(f"⚠️ Failed to delete {file_path}: {e}")
+        
+        print(f"🗑️ Cleaned up {deleted_count} previous session scenario files")
+
     def _create_agent_model(self, agent_key: str, training_config_name: str,
                            rewards_config_name: str, scenario_path: str) -> Tuple[DQN, Any]:
         """Create or load DQN model for specific agent."""
@@ -420,11 +453,12 @@ class MultiAgentTrainer:
         training_config = self.config.load_training_config(training_config_name)
         model_params = training_config["model_params"]
         
-        # Create agent-specific environment  
+        # Create agent-specific environment with generated scenario
         base_env = W40KEnv(
             rewards_config=rewards_config_name,
             training_config_name=training_config_name,
-            controlled_agent=agent_key
+            controlled_agent=agent_key,
+            scenario_file=scenario_path
         )
         monitor_env = Monitor(base_env)
         
@@ -460,7 +494,15 @@ class MultiAgentTrainer:
         except ImportError:
             from ai.gym40k import W40KEnv
             
-        base_eval_env = W40KEnv(controlled_agent=session.agent_key)
+        # Use the same scenario file for evaluation as training
+        # Generate the scenario filename based on agent names and session ID
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        session_scenario_path = os.path.join(
+            self.config.config_dir, 
+            "session_scenarios", 
+            f"scenario_{session.agent_key}_vs_{session.opponent_agent}_{timestamp}.json"
+        )
+        base_eval_env = W40KEnv(controlled_agent=session.agent_key, scenario_file=session_scenario_path)
         monitor_eval_env = Monitor(base_eval_env)
         eval_env = ReplaySavingWrapper(monitor_eval_env)
         
@@ -551,10 +593,15 @@ class MultiAgentTrainer:
 
     def _save_session_scenario(self, session_id: str, scenario: Dict[str, Any]) -> str:
         """Save scenario for training session."""
+        # Extract agent names from scenario metadata
+        player_0_agent = scenario["metadata"]["player_0_agent"]
+        player_1_agent = scenario["metadata"]["player_1_agent"]
+        timestamp = scenario["metadata"]["generated_timestamp"]
+        
         session_scenario_path = os.path.join(
             self.config.config_dir, 
             "session_scenarios", 
-            f"scenario_session_{session_id}.json"
+            f"scenario_{player_1_agent}_vs_{player_0_agent}_{timestamp}.json"
         )
         
         os.makedirs(os.path.dirname(session_scenario_path), exist_ok=True)

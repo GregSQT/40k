@@ -224,8 +224,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     W40KEnv, _ = setup_imports()
     callbacks = []
     
-    # Evaluation callback - test model periodically
-    base_eval_env = W40KEnv(rewards_config="default", training_config_name=training_config_name)
+    # Evaluation callback - test model periodically (use default scenario for consistency)
+    base_eval_env = W40KEnv(rewards_config="default", training_config_name=training_config_name, scenario_file=None)
     eval_env = Monitor(base_eval_env)
     eval_env.unwrapped.base_env = base_eval_env
     eval_freq=training_config['eval_freq']
@@ -304,7 +304,7 @@ def test_trained_model(model, num_episodes=5):
     print(f"🧪 Testing trained model for {num_episodes} episodes...")
     
     W40KEnv, _ = setup_imports()
-    env = W40KEnv()
+    env = W40KEnv(scenario_file=None)  # Explicit use of default scenario
     wins = 0
     total_rewards = []
     
@@ -508,7 +508,7 @@ def main():
                 return 1
             
             W40KEnv, _ = setup_imports()
-            env = W40KEnv(rewards_config=args.rewards_config)
+            env = W40KEnv(rewards_config=args.rewards_config, scenario_file=None)  # Explicit use of default scenario
             model = DQN.load(model_path, env=env)
             test_trained_model(model, args.test_episodes)
             return 0

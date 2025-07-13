@@ -29,7 +29,7 @@ class W40KEnv(gym.Env):
     """Phase-based W40K environment following AI_GAME_OVERVIEW.md specifications exactly."""
 
     def __init__(self, rewards_config="default", training_config_name="default", 
-                 controlled_agent=None, active_agents=None):
+             controlled_agent=None, active_agents=None, scenario_file=None):
         super().__init__()
 
         # Multi-agent support
@@ -93,12 +93,18 @@ class W40KEnv(gym.Env):
         # Phase tracking - units that have acted in current phase
         self.phase_acted_units = set()
         
-        # Load 
-        # load scenario from <project_root>/config/scenario.json
-        scenario_path = os.path.join(str(project_root), "config", "scenario.json")
-        if os.path.exists(scenario_path):
+        # Load scenario from specified file - NO FALLBACKS ALLOWED
+        if scenario_file is None:
+            raise ValueError("scenario_file parameter is required - no fallbacks allowed per AI_INSTRUCTIONS.md")
+        
+        if not os.path.exists(scenario_file):
+            raise FileNotFoundError(f"Specified scenario file not found: {scenario_file}")
+        
+        self.scenario_path = scenario_file
+        print(f"✅ Using specified scenario: {scenario_file}")
+        if os.path.exists(self.scenario_path):
             try:
-                with open(scenario_path, 'r') as f:
+                with open(self.scenario_path, 'r') as f:
                     scenario_data = json.load(f)
                     
                 # Handle different JSON structures
@@ -153,7 +159,7 @@ class W40KEnv(gym.Env):
             except Exception as e:
                 raise RuntimeError(f"Failed to load scenario: {e}")
         else:
-            raise FileNotFoundError(f"Scenario file not found: {scenario_path}")
+            raise FileNotFoundError(f"Scenario file not found: {self.scenario_path}")
         
         # Initialize AI and enemy unit lists first
         self.ai_units = [u for u in self.units if u["player"] == 1]
@@ -186,87 +192,66 @@ class W40KEnv(gym.Env):
         
         # Define path to the TypeScript unit files
         frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "src")
-        roster_dir = os.path.join(frontend_dir, "roster", "spaceMarine")
+        roster_dir = os.path.join(frontend_dir, "roster")
         
         if not os.path.exists(roster_dir):
-            # Fallback unit definitions
-            print(f"⚠️ TypeScript unit files not found at {roster_dir}, using fallback definitions")
-            return {
-                "Intercessor": {
-                    "unit_type": "Intercessor",
-                    "hp_max": 3, "move": 4, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1,
-                    "is_ranged": True, "is_melee": False
-                },
-                "AssaultIntercessor": {
-                    "unit_type": "AssaultIntercessor", 
-                    "hp_max": 4, "move": 6, "rng_rng": 4, "rng_dmg": 1, "cc_dmg": 2,
-                    "is_ranged": False, "is_melee": True
-                }
-            }
+            raise FileNotFoundError(f"TypeScript unit files not found at {roster_dir}. Cannot load unit definitions without roster files.")
         
-        # Load from TypeScript files
-        for filename in os.listdir(roster_dir):
-            if filename.endswith('.ts') and not filename.startswith('index') and 'Unit.ts' not in filename:
-                file_path = os.path.join(roster_dir, filename)
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                # Parse TypeScript class with static properties
-                class_match = re.search(r'export class (\w+)', content)
-                if class_match:
-                    unit_name = class_match.group(1)
-                    
-                    # Parse static properties
-                    unit_data = {"unit_type": unit_name}
-                    
-                    # Extract static numeric properties
-                    static_props = {'HP_MAX': 'hp_max', 'MOVE': 'move', 'RNG_RNG': 'rng_rng', 'RNG_DMG': 'rng_dmg', 'CC_DMG': 'cc_dmg'}
-                    
-                    for ts_prop, py_prop in static_props.items():
-                        prop_match = re.search(rf'static {ts_prop}\s*=\s*(\d+)', content)
-                        if prop_match:
-                            unit_data[py_prop] = int(prop_match.group(1))
-                    
-                    # Extract ICON property
-                    icon_match = re.search(r'static ICON\s*=\s*["\']([^"\']+)["\']', content)
-                    if icon_match:
-                        unit_data['ICON'] = icon_match.group(1)
-                    else:
-                        unit_data['ICON'] = f"icons/{unit_name}.webp"  # Default fallback
-                    
-                    # Determine unit type from class hierarchy
-                    if 'SpaceMarineRangedUnit' in content:
-                        unit_data['is_ranged'] = True
-                        unit_data['is_melee'] = False
-                    elif 'SpaceMarineMeleeUnit' in content:
-                        unit_data['is_ranged'] = False
-                        unit_data['is_melee'] = True
-                    else:
-                        unit_data['is_ranged'] = unit_data.get('rng_rng', 0) > 1
-                        unit_data['is_melee'] = unit_data.get('cc_dmg', 0) > 0
-                    
-                    # Validate we got essential data
-                    if all(prop in unit_data for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg']):
-                        definitions[unit_name] = unit_data
-                    else:
-                        print(f"⚠️ Incomplete data for {unit_name}")
-                    
-                    # Determine unit type from class hierarchy
-                    if 'SpaceMarineRangedUnit' in content:
-                        unit_data['is_ranged'] = True
-                        unit_data['is_melee'] = False
-                    elif 'SpaceMarineMeleeUnit' in content:
-                        unit_data['is_ranged'] = False
-                        unit_data['is_melee'] = True
-                    else:
-                        unit_data['is_ranged'] = unit_data.get('rng_rng', 0) > 1
-                        unit_data['is_melee'] = unit_data.get('cc_dmg', 0) > 0
-                    
-                    # Validate we got essential data
-                    if all(prop in unit_data for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg']):
-                        definitions[unit_name] = unit_data
-                    else:
-                        print(f"⚠️ Incomplete data for {unit_name}")
+        # Load from TypeScript files - scan all faction directories
+        for faction_dir in os.listdir(roster_dir):
+            faction_path = os.path.join(roster_dir, faction_dir)
+            if os.path.isdir(faction_path) and not faction_dir.startswith('.'):
+                for filename in os.listdir(faction_path):
+                    if filename.endswith('.ts') and not filename.startswith('index') and 'Unit.ts' not in filename:
+                        file_path = os.path.join(faction_path, filename)
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        # Parse TypeScript class with static properties
+                        class_match = re.search(r'export class (\w+)', content)
+                        if class_match:
+                            unit_name = class_match.group(1)
+                            
+                            # Parse static properties
+                            unit_data = {"unit_type": unit_name}
+                            
+                            # Extract static numeric properties
+                            static_props = {'HP_MAX': 'hp_max', 'MOVE': 'move', 'RNG_RNG': 'rng_rng', 'RNG_DMG': 'rng_dmg', 'CC_DMG': 'cc_dmg'}
+                            
+                            for ts_prop, py_prop in static_props.items():
+                                prop_match = re.search(rf'static {ts_prop}\s*=\s*(\d+)', content)
+                                if prop_match:
+                                    unit_data[py_prop] = int(prop_match.group(1))
+                            
+                            # Extract ICON property
+                            icon_match = re.search(r'static ICON\s*=\s*["\']([^"\']+)["\']', content)
+                            if icon_match:
+                                unit_data['ICON'] = icon_match.group(1)
+                            else:
+                                unit_data['ICON'] = f"icons/{unit_name}.webp"  # Default fallback
+                            
+                            # Determine unit type from class hierarchy
+                            if 'SpaceMarineRangedUnit' in content:
+                                unit_data['is_ranged'] = True
+                                unit_data['is_melee'] = False
+                            elif 'SpaceMarineMeleeUnit' in content:
+                                unit_data['is_ranged'] = False
+                                unit_data['is_melee'] = True
+                            elif 'TyranidRangedUnit' in content:
+                                unit_data['is_ranged'] = True
+                                unit_data['is_melee'] = False
+                            elif 'TyranidMeleeUnit' in content:
+                                unit_data['is_ranged'] = False
+                                unit_data['is_melee'] = True
+                            else:
+                                unit_data['is_ranged'] = unit_data.get('rng_rng', 0) > 1
+                                unit_data['is_melee'] = unit_data.get('cc_dmg', 0) > 0
+                            
+                            # Validate we got essential data
+                            if all(prop in unit_data for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg']):
+                                definitions[unit_name] = unit_data
+                            else:
+                                print(f"⚠️ Incomplete data for {unit_name}")
         
         print(f"✅ Loaded {len(definitions)} unit definitions from TypeScript")
         return definitions
@@ -309,9 +294,8 @@ class W40KEnv(gym.Env):
         self.step_count = 0
         
         # Reset units
-        # load from central config directory
-        scenario_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "scenario.json")
-        with open(scenario_path, 'r') as f:
+        # Use stored scenario path (either specified or default)
+        with open(self.scenario_path, 'r') as f:
             scenario_data = json.load(f)
             
         if isinstance(scenario_data, list):
@@ -1509,7 +1493,8 @@ class W40KEnv(gym.Env):
                 agent_name = "unknown"
                 
             # Create descriptive filename
-            filename = f"ai/event_log/replay_{agent_name}_vs_bot_{timestamp}.json"
+            #filename = f"ai/event_log/replay_{agent_name}_vs_bot_{timestamp}.json"
+            filename = f"ai/event_log/replay_{agent_name}_vs_bot.json"
         
         # Ensure directory exists
         os.makedirs(os.path.dirname(filename), exist_ok=True)
