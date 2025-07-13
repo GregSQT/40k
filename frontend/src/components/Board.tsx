@@ -731,6 +731,9 @@ export default function Board({
 
       app.stage.addChild(unitCircle);
 
+      // Debug: Log what icon we're trying to load
+      console.log(`Unit ${unit.id} (player ${unit.player}, type ${unit.name}): ICON = ${unit.ICON}`);
+
       // ✅ ICON RENDERING FROM CONFIG - Better scaling and error handling
       if (unit.ICON) {
         try {

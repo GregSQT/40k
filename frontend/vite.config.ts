@@ -48,7 +48,7 @@ export default defineConfig({
             const eventLogDir = path.join(__dirname, '..', 'ai', 'event_log');
             const files = fs.readdirSync(eventLogDir);
             const replayFiles = files.filter(file => 
-              file.startsWith('phase_based_replay_') && file.endsWith('.json')
+              file.startsWith('training_replay_') && file.endsWith('.json')
             );
             res.setHeader('Content-Type', 'application/json');
             res.setHeader('Access-Control-Allow-Origin', '*');

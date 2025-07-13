@@ -1,0 +1,33 @@
+// frontend/src/roster/spaceMarine/CaptainGravis.ts
+
+import { TyranidMeleeUnit, REWARDS_MELEE } from "./TyranidMeleeUnit";
+
+export class Carnifex extends TyranidMeleeUnit {
+  static NAME = "Carnifex";
+  static MOVE = 4;                  // Move distance
+  static RNG_NB = 1;                // Range attack : number of attacks
+  static RNG_RNG = 6;               // Range attack : range
+  static RNG_ATK = 66;              // Range attack : pct success
+  static RNG_DMG = 2;               // Range attack : damages
+  static CC_NB = 2;                 // Melee attack : number of attacks
+  static CC_RNG = 1;                // Melee attack : range
+  static CC_ATK = 66;               // Melee attack : pct success
+  static CC_DMG = 4;                // Melee attack : damages
+  static HP_MAX = 10;                // Max hit points
+  static ARMOR_SAVE = 66;           // Save percentage common to most marines
+  // Others as needed
+
+  static ICON = "/icons/Carnifex.webp"; // Path relative to public folder
+  
+  static REWARDS = {
+    ...REWARDS_MELEE,
+    //move_to_rng: 0.8,    // Custom for Intercessor
+
+    // Others as needed
+  };
+
+  constructor(name: string, startPos: [number, number]) {
+    super(name, Carnifex.HP_MAX, startPos);
+  }
+}
+

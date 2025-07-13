@@ -1,0 +1,32 @@
+// frontend/src/roster/tyranid/Termagant.ts
+//
+import { TyranidRangedUnit, REWARDS_RANGED } from "./TyranidRangedUnit";
+
+export class Termagant extends TyranidRangedUnit {
+  static NAME = "Termagant";
+  static MOVE = 5;                  // Move distance
+  static RNG_NB = 1;                // Range attack : number of attacks
+  static RNG_RNG = 6;               // Range attack : range
+  static RNG_ATK = 66;              // Range attack : pct success
+  static RNG_DMG = 1;               // Range attack : damages
+  static CC_NB = 1;                 // Melee attack : number of attacks
+  static CC_RNG = 1;                // Melee attack : range
+  static CC_ATK = 50;               // Melee attack : pct success
+  static CC_DMG = 1;                // Melee attack : damages
+  static HP_MAX = 1;                // Max hit points
+  static ARMOR_SAVE = 66;           // Save percentage common to most marines
+  // Others as needed
+
+  static ICON = "/icons/Termagant.webp"; // Path relative to public folder
+  
+  static REWARDS = {
+      ...REWARDS_RANGED,
+    //move_to_rng: 0.8,    // Custom for Intercessor
+
+    // Others as needed
+  };
+
+  constructor(name: string, startPos: [number, number]) {
+    super(name, Termagant.HP_MAX, startPos);
+  }
+}

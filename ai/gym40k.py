@@ -120,6 +120,12 @@ class W40KEnv(gym.Env):
                         if attr not in unit:
                             raise KeyError(f"Unit definition for '{unit_type}' missing required attribute '{attr}'")
                     
+                    # Generic icon assignment: Bot space marines get red versions
+                    if unit_data["player"] == 0:  # Bot player
+                        icon_name = f"icons/{unit_type}_red.webp"
+                    else:  # AI player uses original icons
+                        icon_name = unit.get("ICON", f"icons/{unit_type}.webp")
+                    
                     unit.update({
                         "id": unit_data["id"],
                         "player": unit_data["player"],
@@ -130,7 +136,8 @@ class W40KEnv(gym.Env):
                         "has_moved": False,
                         "has_shot": False,
                         "has_charged": False,
-                        "has_attacked": False
+                        "has_attacked": False,
+                        "ICON": icon_name
                     })
                     self.units.append(unit)
                     
@@ -210,6 +217,13 @@ class W40KEnv(gym.Env):
                         prop_match = re.search(rf'static {ts_prop}\s*=\s*(\d+)', content)
                         if prop_match:
                             unit_data[py_prop] = int(prop_match.group(1))
+                    
+                    # Extract ICON property
+                    icon_match = re.search(r'static ICON\s*=\s*["\']([^"\']+)["\']', content)
+                    if icon_match:
+                        unit_data['ICON'] = icon_match.group(1)
+                    else:
+                        unit_data['ICON'] = f"icons/{unit_name}.webp"  # Default fallback
                     
                     # Determine unit type from class hierarchy
                     if 'SpaceMarineRangedUnit' in content:
@@ -300,6 +314,12 @@ class W40KEnv(gym.Env):
         for unit_data in scenario_units:
             unit_type = unit_data["unit_type"]
             unit = copy.deepcopy(self.unit_definitions[unit_type])
+            # Generic icon assignment: Bot space marines get red versions
+            if unit_data["player"] == 0:  # Bot player
+                icon_name = f"icons/{unit_type}_red.webp"
+            else:  # AI player uses original icons
+                icon_name = unit.get("ICON", f"icons/{unit_type}.webp")
+            
             unit.update({
                 "id": unit_data["id"],
                 "player": unit_data["player"],
@@ -310,7 +330,8 @@ class W40KEnv(gym.Env):
                 "has_moved": False,
                 "has_shot": False,
                 "has_charged": False,
-                "has_attacked": False
+                "has_attacked": False,
+                "ICON": icon_name
             })
             self.units.append(unit)
         
@@ -646,7 +667,9 @@ class W40KEnv(gym.Env):
         if not movement_occurred:
             # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
             reward = unit_rewards.get("wait")  # Negative penalty for invalid move
-            # DON'T mark as moved - let unit try again or wait
+            # ✅ CRITICAL FIX: Mark unit as moved to prevent infinite loops
+            unit["has_moved"] = True
+            self.moved_units.add(unit["id"])  # Also add to phase tracking
             return reward
         
         # ✅ SUCCESSFUL MOVE: Mark unit as moved and calculate rewards
@@ -714,7 +737,9 @@ class W40KEnv(gym.Env):
         if not movement_occurred:
             # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
             reward = unit_rewards.get("wait")  # Negative penalty for invalid move
-            # DON'T mark as moved - let unit try again or wait
+            # ✅ CRITICAL FIX: Mark unit as moved to prevent infinite loops
+            unit["has_moved"] = True
+            self.moved_units.add(unit["id"])  # Also add to phase tracking
             return reward
         
         # ✅ SUCCESSFUL MOVE: Mark unit as moved and calculate rewards
@@ -778,7 +803,9 @@ class W40KEnv(gym.Env):
         if not movement_occurred:
             # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
             reward = unit_rewards.get("wait")  # Negative penalty for invalid move
-            # DON'T mark as moved - let unit try again or wait
+            # ✅ CRITICAL FIX: Mark unit as moved to prevent infinite loops
+            unit["has_moved"] = True
+            self.moved_units.add(unit["id"])  # Also add to phase tracking
             return reward
         
         # ✅ SUCCESSFUL MOVE: Mark unit as moved and calculate rewards
@@ -842,7 +869,9 @@ class W40KEnv(gym.Env):
         if not movement_occurred:
             # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
             reward = unit_rewards.get("wait")  # Negative penalty for invalid move
-            # DON'T mark as moved - let unit try again or wait
+            # ✅ CRITICAL FIX: Mark unit as moved to prevent infinite loops
+            unit["has_moved"] = True
+            self.moved_units.add(unit["id"])  # Also add to phase tracking
             return reward
         
         # ✅ SUCCESSFUL MOVE: Mark unit as moved and calculate rewards
@@ -906,7 +935,9 @@ class W40KEnv(gym.Env):
         if not movement_occurred:
             # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
             reward = unit_rewards.get("wait")  # Negative penalty for invalid move
-            # DON'T mark as moved - let unit try again or wait
+            # ✅ CRITICAL FIX: Mark unit as moved to prevent infinite loops
+            unit["has_moved"] = True
+            self.moved_units.add(unit["id"])  # Also add to phase tracking
             return reward
         
         # ✅ SUCCESSFUL MOVE: Mark unit as moved and calculate rewards
@@ -1582,6 +1613,14 @@ class W40KEnv(gym.Env):
                     nearest_ai["alive"] = False
                 action_taken = True
                 
+                # Record bot melee attack action
+                if self.save_replay:
+                    self._record_action(enemy, 6, 0.0)  # action_type 6 = attack, reward 0 for bot
+                
+                # Record bot shooting action
+                if self.save_replay:
+                    self._record_action(enemy, 4, 0.0)  # action_type 4 = shoot, reward 0 for bot
+                
             # Priority 2: Melee attack if adjacent
             elif dist <= 1 and enemy.get("cc_dmg", 0) > 0:
                 damage = min(enemy["cc_dmg"], nearest_ai["cur_hp"])  # Prevent overkill
@@ -1589,6 +1628,10 @@ class W40KEnv(gym.Env):
                 if nearest_ai["cur_hp"] <= 0:
                     nearest_ai["alive"] = False
                 action_taken = True
+                
+                # Record bot melee attack action
+                if self.save_replay:
+                    self._record_action(enemy, 6, 0.0)  # action_type 6 = attack, reward 0 for bot
                 
             # Priority 3: Move closer (only if can't attack)
             elif dist > 1:
@@ -1604,6 +1647,15 @@ class W40KEnv(gym.Env):
                     step = min(move_distance, abs(dy)) * (1 if dy > 0 else -1)
                     enemy["row"] = max(0, min(self.board_size[1] - 1, enemy["row"] + step))
                 action_taken = True
+                
+                # Record bot movement action
+                if self.save_replay:
+                    # Determine movement direction for proper action_type
+                    if abs(dx) > abs(dy):
+                        action_type = 2 if dx > 0 else 3  # East or West
+                    else:
+                        action_type = 1 if dy > 0 else 0  # South or North
+                    self._record_action(enemy, action_type, 0.0)  # Movement with reward 0 for bot
             
             if action_taken:
                 enemy_actions_taken += 1
@@ -1657,7 +1709,8 @@ class W40KEnv(gym.Env):
                 "timestamp": datetime.now().isoformat()
             }
             # Add to main replay data with special marker
-            penalty_data["action_type"] = "penalty"
+            penalty_data["action_type"] = -1  # Use -1 for penalty actions to match ACTION_TYPE_MAPPING
+            penalty_data["reward"] = penalty_amount  # Also store as reward for consistent display
             self.replay_data.append(penalty_data)
 
     def _get_info(self):

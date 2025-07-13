@@ -117,13 +117,13 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
 
 // Action type mapping from the replay file format
 const ACTION_TYPE_MAPPING: Record<string, { name: string; type: string }> = {
-  "0": { name: "Move closer to enemy", type: "move" },
-  "1": { name: "Move away from enemy", type: "move" },
-  "2": { name: "Move to safe position", type: "move" },
-  "3": { name: "Shoot closest enemy", type: "shoot" },
-  "4": { name: "Shoot weakest enemy", type: "shoot" },
-  "5": { name: "Charge closest enemy", type: "charge" },
-  "6": { name: "Attack adjacent enemy", type: "combat" },
+  "0": { name: "Move North", type: "move" },
+  "1": { name: "Move South", type: "move" },
+  "2": { name: "Move East", type: "move" },
+  "3": { name: "Move West", type: "move" },
+  "4": { name: "Ranged Attack", type: "shoot" },
+  "5": { name: "Charge Enemy", type: "charge" },
+  "6": { name: "Melee Attack", type: "combat" },
   "7": { name: "Wait/End turn", type: "move" },
   "-1": { name: "Phase Penalty", type: "penalty" }
 };
@@ -180,7 +180,7 @@ const validateUnitRegistry = () => {
       RNG_RNG: UnitClass.RNG_RNG || 4,
       RNG_DMG: UnitClass.RNG_DMG || 1,
       CC_DMG: UnitClass.CC_DMG || 1,
-      ICON: UnitClass.ICON || unitType.substring(0, 2)
+      ICON: UnitClass.ICON || `icons/${unitType}.webp`
     };
   }, []);
   useEffect(() => {
@@ -267,7 +267,7 @@ const validateUnitRegistry = () => {
               RNG_RNG: stats.RNG_RNG,
               RNG_DMG: stats.RNG_DMG,
               CC_DMG: stats.CC_DMG,
-              ICON: stats.ICON
+              ICON: unit.player === 0 ? `icons/${unit.unit_type}_red.webp` : stats.ICON
             };
           });
           console.log('✅ Processed units:', processedUnits);
@@ -555,7 +555,7 @@ const validateUnitRegistry = () => {
           RNG_RNG: stats.RNG_RNG,
           RNG_DMG: stats.RNG_DMG,
           CC_DMG: stats.CC_DMG,
-          ICON: stats.ICON
+          ICON: unit.player === 0 ? `icons/${unit.unit_type}_red.webp` : stats.ICON
         };
       });
       
@@ -601,7 +601,7 @@ const validateUnitRegistry = () => {
         
         newBattleLog.push({
           ...event,
-          description: ACTION_TYPE_MAPPING[(event as any).action_type]?.name || `Action ${(event as any).action_type} by unit ${(event as any).unit_id}`,
+          description: `${(event as any).player === 1 ? 'AI' : 'Bot'}: ${ACTION_TYPE_MAPPING[(event as any).action_type]?.name || `Action ${(event as any).action_type}`}`,
           action: {
             type: ACTION_TYPE_MAPPING[(event as any).action_type]?.type || 'unknown',
             unit_id: (event as any).unit_id,
@@ -739,7 +739,7 @@ const validateUnitRegistry = () => {
   return (
     <div className="h-screen bg-gray-100" style={{display: 'flex'}}>
       {/* Left Column: Game Board */}
-      <div className="flex flex-col overflow-hidden bg-white" style={{flex: '0 0 auto', width: 'calc(100vw - 240px)', maxWidth: '800px'}}>
+      <div className="flex flex-col overflow-hidden bg-white" style={{flex: '0 0 auto', width: 'calc(100vw - 450px)', maxWidth: '800px'}}>
         {/* Top Section: Turn and Phase Progress */}
         <div className="bg-white p-4 border-b shadow-sm">
           <div className="flex items-center justify-between mb-3">
@@ -837,7 +837,7 @@ const validateUnitRegistry = () => {
       </div>
       
         {/* Right Column: Battle Log - Clean dedicated column */}
-        <div className="flex flex-col bg-gray-700 text-white" style={{width: '350px', flexShrink: 0}}>
+        <div className="flex flex-col bg-gray-700 text-white" style={{width: '450px', flexShrink: 0}}>
           {/* Header - Dark style matching image */}
           <div className="p-3 bg-gray-800 border-b border-gray-600">
             <h3 className="text-lg font-semibold flex items-center">
@@ -887,16 +887,18 @@ const validateUnitRegistry = () => {
                           <td className="p-1 text-gray-300 text-center">{(event as any).unit_id}</td>
                           <td className="p-1 text-gray-300">{(event as any).unit_type}</td>
                           <td className="p-1 text-gray-300 text-right">
-                            {(event as any).reward !== undefined ? (
-                              <span className={(event as any).reward >= 0 ? 'text-green-400' : 'text-red-400'}>
-                                {(event as any).reward >= 0 ? '+' : ''}{(event as any).reward?.toFixed(1)}
+                            {((event as any).reward !== undefined || (event as any).penalty_amount !== undefined) ? (
+                              <span className={((event as any).reward || (event as any).penalty_amount || 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                {((event as any).reward || (event as any).penalty_amount || 0) >= 0 ? '+' : ''}{((event as any).reward || (event as any).penalty_amount || 0)?.toFixed(1)}
                               </span>
                             ) : (
                               <span className="text-gray-500">-</span>
                             )}
                           </td>
                           <td className="p-1 text-gray-300" style={{width: '600px', minWidth: '200px'}}>
-                            <div className="text-white" style={{wordWrap: 'break-word'}}>{event.description}</div>
+                            <div className="text-white" style={{wordWrap: 'break-word'}}>
+                              {event.description || (event as any).penalty_type || `Action ${(event as any).action_type} by unit ${(event as any).unit_id}`}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -910,11 +912,14 @@ const validateUnitRegistry = () => {
           {/* Game Info Footer */}
           {replayData && (
             <div className="p-3 border-t border-gray-600 bg-gray-800">
-              <div className="grid grid-cols-2 gap-2 text-xs text-gray-300">
+              <div className="grid grid-cols-2 gap-2 text-xs text-gray-300 mb-2">
                 <div>Winner: Player {replayData.game_info?.winner}</div>
                 <div>Total Turns: {replayData.game_info?.total_turns}</div>
                 <div>AI Units: {replayData.game_info?.ai_units_final}</div>
                 <div>Enemy Units: {replayData.game_info?.enemy_units_final}</div>
+              </div>
+              <div className="text-xs text-gray-400 pt-2 border-t border-gray-700 whitespace-nowrap overflow-hidden text-ellipsis">
+                Log file: {replayFile}
               </div>
             </div>
           )}
