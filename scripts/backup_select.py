@@ -88,7 +88,15 @@ else:
         "frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
         "frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts",
         "frontend/src/roster/spaceMarine/Intercessor.ts",
-        "frontend/src/roster/spaceMarine/AssaultIntercessor.ts"
+        "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
+        "frontend/src/roster/spaceMarine/CaptainGravis.ts",
+
+        # Frontend/src/roster/tyranid
+        "frontend/src/roster/tyranid/TyranidMeleeUnit.ts",
+        "frontend/src/roster/tyranid/TyranidRangedUnit.ts",
+        "frontend/src/roster/tyranid/Termagant.ts",
+        "frontend/src/roster/tyranid/Hormagaunt.ts",
+        "frontend/src/roster/tyranid/Carnifex.ts"
     ]
 
 logfile = os.path.join(DEST_ROOT, "backup.log")
