@@ -4,83 +4,126 @@ import { ReplayViewer } from '../components/ReplayViewer';
 
 export const ReplayPage: React.FC = () => {
   const [replayFile, setReplayFile] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(true);
+  const [selectedFileName, setSelectedFileName] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  React.useEffect(() => {
-    const findLatestPhaseBasedReplay = async () => {
-      try {
-        setLoading(true);
-        console.log('🔍 Searching for latest training_replay_*.json file...');
-        
-        // Call backend API to list files in ai/event_log/
-        const response = await fetch('/api/replay-files');
-        
-        if (!response.ok) {
-          throw new Error(`API not available: ${response.status}. Using direct file access fallback.`);
-        }
-        
-        const files = await response.json();
-        
-        // Find training_replay_*.json files and get the latest
-        const phaseReplays = files
-          .filter((file: string) => file.startsWith('training_replay_') && file.endsWith('.json'))
-          .sort()
-          .reverse(); // Get newest first (assuming timestamp in filename)
-        
-        if (phaseReplays.length > 0) {
-          const latestFile = `ai/event_log/${phaseReplays[0]}`;
-          console.log(`✅ Found latest phase-based replay: ${latestFile}`);
-          setReplayFile(latestFile);
-          return;
-        }
-        
-        throw new Error('No training_replay_*.json files found');
-        
-      } catch (err) {
-        console.warn('Backend API unavailable, using fallback:', err);
-        
-        setError('No replay files found. Please ensure training_replay_*.json files are available or backend API is running.');
-      } finally {
-        setLoading(false);
+  // Handle file selection from Windows explorer
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (!file.name.endsWith('.json')) {
+        setError('Please select a JSON file');
+        return;
       }
-    };
 
-    findLatestPhaseBasedReplay();
-  }, []);
+      // Check if it's a replay file based on naming patterns
+      const isReplayFile = file.name.startsWith('training_replay_') ||
+                          file.name.startsWith('phase_based_replay_') ||
+                          file.name.includes('_vs_') ||
+                          file.name.startsWith('replay_') ||
+                          file.name.startsWith('training_');
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <div>🔍 Finding latest training_replay_*.json...</div>
-          <div className="text-sm text-gray-400 mt-2">Checking ai/event_log/ directory</div>
-        </div>
-      </div>
-    );
-  }
+      if (!isReplayFile) {
+        setError('Please select a valid replay JSON file');
+        return;
+      }
 
-  if (error) {
+      // Create file URL for local file access
+      const fileUrl = URL.createObjectURL(file);
+      setReplayFile(fileUrl);
+      setSelectedFileName(file.name);
+      setError(null);
+      console.log(`✅ Selected replay file: ${file.name}`);
+    }
+  };
+
+  // Open file browser
+  const openFileBrowser = () => {
+    fileInputRef.current?.click();
+  };
+
+  if (error && !replayFile) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-white text-center max-w-md">
-          <div className="text-red-500 text-xl mb-4">⚠️ No Replay Files</div>
+          <div className="text-red-500 text-xl mb-4">⚠️ File Selection Error</div>
           <div className="text-gray-300 mb-4">{error}</div>
-          <div className="text-sm text-gray-400">
-            <div className="mb-2">Expected location: ai/event_log/training_replay_*.json</div>
-            <div>Make sure training has generated replay files</div>
-          </div>
+          <button
+            onClick={openFileBrowser}
+            className="px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+          >
+            Browse for Replay Files
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen bg-gray-900">
-      <ReplayViewer replayFile={replayFile!} />
+    <div className="h-screen bg-gray-900 flex flex-col">
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        onChange={handleFileSelect}
+        style={{ display: 'none' }}
+      />
+
+      {/* File Selection Header */}
+      <div className="bg-gray-800 border-b border-gray-700 p-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold text-white">Replay Viewer</h1>
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={openFileBrowser}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+            >
+              Browse Files
+            </button>
+          </div>
+        </div>
+
+        {/* Current File Info */}
+        {selectedFileName && (
+          <div className="mt-2 text-sm text-gray-400">
+            Current file: {selectedFileName}
+          </div>
+        )}
+
+        {/* Error Display */}
+        {error && replayFile && (
+          <div className="mt-2 text-sm text-red-400">
+            {error}
+          </div>
+        )}
+      </div>
+
+      {/* Replay Viewer or Instructions */}
+      <div className="flex-1">
+        {replayFile ? (
+          <ReplayViewer replayFile={replayFile} />
+        ) : (
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center text-gray-400">
+              <div className="text-xl mb-4">No replay file selected</div>
+              <button
+                onClick={openFileBrowser}
+                className="px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+              >
+                Browse for Replay Files
+              </button>
+              <div className="text-sm mt-4">
+                <div>Select JSON files from ai/Event_log/ directory</div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
-};
+}
 
 export default ReplayPage;

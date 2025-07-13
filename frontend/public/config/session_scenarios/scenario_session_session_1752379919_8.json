@@ -1,0 +1,30 @@
+{
+  "metadata": {
+    "template": "balanced_2v2",
+    "player_0_agent": "Tyranid_Ranged",
+    "player_1_agent": "SpaceMarine_Ranged",
+    "board_size": [
+      24,
+      15
+    ],
+    "difficulty": "medium",
+    "training_focus": "balanced",
+    "generated_timestamp": "20250713_061159"
+  },
+  "units": [
+    {
+      "id": 1,
+      "unit_type": "Termagant",
+      "player": 0,
+      "col": 0,
+      "row": 0
+    },
+    {
+      "id": 2,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 23,
+      "row": 17
+    }
+  ]
+}

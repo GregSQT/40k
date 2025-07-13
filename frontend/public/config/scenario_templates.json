@@ -1,0 +1,56 @@
+{
+  "balanced_2v2": {
+    "description": "Balanced 2v2 scenario for multi-agent training",
+    "board_size": [24, 15],
+    "positions": {
+      "player_0": [
+        {"col": 1, "row": 7},
+        {"col": 1, "row": 8}
+      ],
+      "player_1": [
+        {"col": 22, "row": 7},
+        {"col": 22, "row": 8}
+      ]
+    },
+    "unit_composition": {
+      "ranged": 1,
+      "melee": 1
+    }
+  },
+  "ranged_focus": {
+    "description": "Ranged-focused scenario for tactical training",
+    "board_size": [24, 15],
+    "positions": {
+      "player_0": [
+        {"col": 2, "row": 6},
+        {"col": 2, "row": 9}
+      ],
+      "player_1": [
+        {"col": 21, "row": 6},
+        {"col": 21, "row": 9}
+      ]
+    },
+    "unit_composition": {
+      "ranged": 2,
+      "melee": 0
+    }
+  },
+  "melee_focus": {
+    "description": "Melee-focused scenario for close combat training",
+    "board_size": [24, 15],
+    "positions": {
+      "player_0": [
+        {"col": 5, "row": 7},
+        {"col": 5, "row": 8}
+      ],
+      "player_1": [
+        {"col": 18, "row": 7},
+        {"col": 18, "row": 8}
+      ]
+    },
+    "unit_composition": {
+      "ranged": 0,
+      "melee": 2
+    }
+  }
+}

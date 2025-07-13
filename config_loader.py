@@ -62,6 +62,10 @@ class ConfigLoader:
         """Get game configuration."""
         return self.load_config("game_config")
     
+    def get_models_dir(self) -> str:
+        """Get models directory path."""
+        return os.path.join(self.root_path, "models")
+    
     def get_max_turns(self) -> int:
         """Get maximum number of turns per game."""
         game_config = self.get_game_config()

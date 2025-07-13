@@ -18,12 +18,42 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 sys.path.insert(0, script_dir)
 sys.path.insert(0, project_root)
+from ai.unit_registry import UnitRegistry
+sys.path.insert(0, project_root)
 
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
+# Multi-agent orchestration imports
+from ai.scenario_manager import ScenarioManager
+from ai.multi_agent_trainer import MultiAgentTrainer
 from config_loader import get_config_loader
 import torch
+
+class ReplaySavingWrapper:
+    """Wrapper to handle replay saving for Monitor-wrapped environments."""
+    
+    def __init__(self, monitor_env):
+        self.monitor_env = monitor_env
+        self.base_env = getattr(monitor_env.unwrapped, 'base_env', monitor_env.unwrapped)
+    
+    def save_web_compatible_replay(self, filename=None):
+        """Save replay using the base environment's method."""
+        if hasattr(self.base_env, 'save_web_compatible_replay'):
+            return self.base_env.save_web_compatible_replay(filename)
+        else:
+            print("⚠️ Base environment doesn't support replay saving")
+            return None
+    
+    def get_replay_data(self):
+        """Get replay data from base environment."""
+        if hasattr(self.base_env, 'replay_data'):
+            return self.base_env.replay_data
+        return []
+    
+    def __getattr__(self, name):
+        """Delegate all other attributes to the monitor environment."""
+        return getattr(self.monitor_env, name)
 
 def check_gpu_availability():
     """Check and display GPU availability for training."""
@@ -88,8 +118,11 @@ def create_model(config, training_config_name="default", rewards_config_name="de
     scenario_file = os.path.join(cfg.config_dir, "scenario.json")
     if not os.path.isfile(scenario_file):
         raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
-    env = W40KEnv(rewards_config=rewards_config_name, training_config_name=training_config_name)
-    env = Monitor(env)
+    base_env = W40KEnv(rewards_config=rewards_config_name, training_config_name=training_config_name)
+    env = Monitor(base_env)
+    
+    # Store reference to base environment for replay access
+    env.unwrapped.base_env = base_env
     
     model_path = config.get_model_path()
     
@@ -123,12 +156,78 @@ def create_model(config, training_config_name="default", rewards_config_name="de
     
     return model, env, training_config
 
+def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default", 
+                            agent_key=None, new_model=False, append_training=False):
+    """Create or load DQN model for specific agent with configuration following AI_INSTRUCTIONS.md."""
+    print(f"🤖 Creating/loading model for agent: {agent_key}")
+    
+    # Check GPU availability
+    gpu_available = check_gpu_availability()
+    
+    # Load training configuration from config files (not script parameters)
+    training_config = config.load_training_config(training_config_name)
+    model_params = training_config["model_params"]
+    
+    # Import environment
+    W40KEnv, register_environment = setup_imports()
+    
+    # Register environment
+    register_environment()
+    
+    # Create agent-specific environment
+    from config_loader import get_config_loader
+    cfg = get_config_loader()
+    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+    if not os.path.isfile(scenario_file):
+        raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
+    base_env = W40KEnv(rewards_config=rewards_config_name, 
+                      training_config_name=training_config_name,
+                      controlled_agent=agent_key)
+    env = Monitor(base_env)
+    
+    # Store reference to base environment for replay access
+    env.unwrapped.base_env = base_env
+    
+    # Agent-specific model path
+    model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
+    
+    # Set device for model creation
+    device = "cuda" if gpu_available else "cpu"
+    model_params["device"] = device
+    
+    # Determine whether to create new model or load existing
+    if new_model or not os.path.exists(model_path):
+        print(f"🆕 Creating new model for {agent_key} on {device.upper()}...")
+        model = DQN(env=env, **model_params)
+    elif append_training:
+        print(f"📁 Loading existing model for continued training: {model_path}")
+        try:
+            model = DQN.load(model_path, env=env, device=device)
+            model.tensorboard_log = model_params.get("tensorboard_log", "./tensorboard/")
+            model.verbose = model_params.get("verbose", 1)
+        except Exception as e:
+            print(f"⚠️ Failed to load model: {e}")
+            print("🆕 Creating new model instead...")
+            model = DQN(env=env, **model_params)
+    else:
+        print(f"📁 Loading existing model: {model_path}")
+        try:
+            model = DQN.load(model_path, env=env, device=device)
+        except Exception as e:
+            print(f"⚠️ Failed to load model: {e}")
+            print("🆕 Creating new model instead...")
+            model = DQN(env=env, **model_params)
+    
+    return model, env, training_config, model_path
+
 def setup_callbacks(config, model_path, training_config, training_config_name="default"):
     W40KEnv, _ = setup_imports()
     callbacks = []
     
     # Evaluation callback - test model periodically
-    eval_env = Monitor(W40KEnv(rewards_config="default", training_config_name=training_config_name))
+    base_eval_env = W40KEnv(rewards_config="default", training_config_name=training_config_name)
+    eval_env = Monitor(base_eval_env)
+    eval_env.unwrapped.base_env = base_eval_env
     eval_freq=training_config['eval_freq']
     total_timesteps = training_config['total_timesteps']
     
@@ -245,6 +344,64 @@ def test_trained_model(model, num_episodes=5):
     env.close()
     return win_rate, avg_reward
 
+def test_scenario_manager_integration():
+    """Test scenario manager integration."""
+    print("🧪 Testing Scenario Manager Integration")
+    print("=" * 50)
+    
+    try:
+        config = get_config_loader()
+        
+        # Test scenario manager
+        scenario_manager = ScenarioManager(config)
+        print(f"✅ ScenarioManager initialized with {len(scenario_manager.get_available_templates())} templates")
+        
+        # Test unit registry integration
+        unit_registry = UnitRegistry()
+        agents = unit_registry.get_required_models()
+        print(f"✅ UnitRegistry found {len(agents)} agents: {agents}")
+        
+        # Test scenario generation
+        if len(agents) >= 2:
+            template_name = scenario_manager.get_available_templates()[0]
+            scenario = scenario_manager.generate_training_scenario(
+                template_name, agents[0], agents[1]
+            )
+            print(f"✅ Generated scenario with {len(scenario['units'])} units")
+        
+        # Test training rotation
+        rotation = scenario_manager.get_balanced_training_rotation(100)
+        print(f"✅ Generated training rotation with {len(rotation)} matchups")
+        
+        print("🎉 Scenario manager integration tests passed!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Integration test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def start_multi_agent_orchestration(config, total_episodes: int, training_config_name: str = "default",
+                                   rewards_config_name: str = "default", max_concurrent: int = None):
+    """Start multi-agent orchestration training."""
+    print("🎮 Starting Multi-Agent Orchestration Training")
+    
+    try:
+        trainer = MultiAgentTrainer(config, max_concurrent_sessions=max_concurrent)
+        results = trainer.start_balanced_training(
+            total_episodes=total_episodes,
+            training_config_name=training_config_name,
+            rewards_config_name=rewards_config_name
+        )
+        
+        print(f"✅ Orchestration completed: {results['total_matchups']} matchups")
+        return results
+        
+    except Exception as e:
+        print(f"❌ Orchestration failed: {e}")
+        return None
+
 def ensure_scenario():
     """Ensure scenario.json exists."""
     # write into <project_root>/config/scenario.json
@@ -289,6 +446,18 @@ def main():
                        help="Only test existing model, don't train")
     parser.add_argument("--test-episodes", type=int, default=10, 
                        help="Number of episodes for testing")
+    parser.add_argument("--multi-agent", action="store_true",
+                       help="Use multi-agent training system")
+    parser.add_argument("--agent", type=str, default=None,
+                       help="Train specific agent (e.g., 'SpaceMarine_Ranged')")
+    parser.add_argument("--orchestrate", action="store_true",
+                       help="Start balanced multi-agent orchestration training")
+    parser.add_argument("--total-episodes", type=int, default=1000,
+                       help="Total episodes for multi-agent orchestration")
+    parser.add_argument("--max-concurrent", type=int, default=None,
+                       help="Maximum concurrent training sessions")
+    parser.add_argument("--test-integration", action="store_true",
+                       help="Test scenario manager integration")
     
     args = parser.parse_args()
     
@@ -299,6 +468,8 @@ def main():
     print(f"New model: {args.new}")
     print(f"Append training: {args.append}")
     print(f"Test only: {args.test_only}")
+    print(f"Multi-agent: {args.multi_agent}")
+    print(f"Orchestrate: {args.orchestrate}")
     print()
     
     try:
@@ -308,6 +479,22 @@ def main():
         # Ensure scenario exists
         ensure_scenario()
         
+        # Test integration if requested
+        if args.test_integration:
+            success = test_scenario_manager_integration()
+            return 0 if success else 1
+        
+        # Multi-agent orchestration mode
+        if args.orchestrate:
+            results = start_multi_agent_orchestration(
+                config=config,
+                total_episodes=args.total_episodes,
+                training_config_name=args.training_config,
+                rewards_config_name=args.rewards_config,
+                max_concurrent=args.max_concurrent
+            )
+            return 0 if results else 1
+
         if args.test_only:
             # Load existing model for testing only
             model_path = config.get_model_path()

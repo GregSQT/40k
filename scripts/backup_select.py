@@ -25,14 +25,23 @@ else:
     files_to_copy = [
 
 ######################################################################################################
+##### root files
+######################################################################################################
+
+        "config_loader.py",
+
+######################################################################################################
 ##### ai files
 ######################################################################################################
 
     ### ai
         "ai/evaluate.py",
         "ai/gym40k.py",
+        "ai/multi_agent_trainer.py",
         "ai/scenario.json",
+        "ai/scenario_manager.py",
         "ai/train.py",
+        "ai/unit_registry.py",
 
 ######################################################################################################
 ##### config files
@@ -42,6 +51,7 @@ else:
         "config/game_config.json",   # Game Rules & Mechanics
         "config/rewards_config.json",  # Reward System Definitions
         "config/scenario.json",        # Game Scenarios
+        "config/scenario_templates.json",
         "config/training_config.json", # AI Training Parameters
         "config/unit_definitions.json", # Unit Stats & Abilities
 

@@ -2,8 +2,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as PIXI from 'pixi.js-legacy';
 import { useGameConfig } from '../hooks/useGameConfig';
-import { Intercessor } from '../roster/spaceMarine/Intercessor';
-import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
 import type { Unit } from '../types/game';
 
 // AI_GAME.md: Strict type definitions following game mechanisms
@@ -171,16 +169,16 @@ const validateUnitRegistry = () => {
   const getUnitStats = useCallback((unitType: string) => {
     const UnitClass = UNIT_REGISTRY[unitType];
     if (!UnitClass) {
-      throw new Error(`Unknown unit type: ${unitType}`);
+      throw new Error(`Unknown unit type: ${unitType}. Available types: ${Object.keys(UNIT_REGISTRY).join(', ')}`);
     }
     
     return {
-      MOVE: UnitClass.MOVE || 6,
-      HP_MAX: UnitClass.HP_MAX || 4,
-      RNG_RNG: UnitClass.RNG_RNG || 4,
-      RNG_DMG: UnitClass.RNG_DMG || 1,
-      CC_DMG: UnitClass.CC_DMG || 1,
-      ICON: UnitClass.ICON || `icons/${unitType}.webp`
+      MOVE: UnitClass.MOVE,
+      HP_MAX: UnitClass.HP_MAX,
+      RNG_RNG: UnitClass.RNG_RNG,
+      RNG_DMG: UnitClass.RNG_DMG,
+      CC_DMG: UnitClass.CC_DMG,
+      ICON: UnitClass.ICON
     };
   }, []);
   useEffect(() => {
@@ -191,6 +189,12 @@ const validateUnitRegistry = () => {
         setLoading(false);
         return;
       }
+      
+      // Reset state when file changes
+      setCurrentStep(0);
+      setBattleLog([]);
+      setCurrentEvent(null);
+      console.log(`🔄 Loading new replay file: ${replayFile}`);
       
       try {
         setLoading(true);
@@ -223,12 +227,27 @@ const validateUnitRegistry = () => {
         }
         setScenario(scenarioData);
         
-        // Load replay file
-        const replayResponse = await fetch(`/${replayFile}`);
-        if (!replayResponse.ok) {
-          throw new Error(`Failed to load replay file: ${replayResponse.statusText}`);
+        // Load replay file - handle both blob URLs and file paths
+        let replay;
+        if (replayFile.startsWith('blob:')) {
+          // Handle blob URL from file selection
+          console.log('🔄 Loading blob URL:', replayFile);
+          const replayResponse = await fetch(replayFile);
+          if (!replayResponse.ok) {
+            throw new Error(`Failed to load replay file: ${replayResponse.statusText}`);
+          }
+          const text = await replayResponse.text();
+          console.log('📦 Raw blob text (first 200 chars):', text.substring(0, 200));
+          replay = JSON.parse(text);
+        } else {
+          // Handle regular file path
+          console.log('🔄 Loading file path:', replayFile);
+          const replayResponse = await fetch(`/${replayFile}`);
+          if (!replayResponse.ok) {
+            throw new Error(`Failed to load replay file: ${replayResponse.statusText}`);
+          }
+          replay = await replayResponse.json();
         }
-        const replay = await replayResponse.json();
         
         console.log('📦 Raw replay data:', replay);
         console.log('📦 Initial state units:', replay.initial_state?.units);
@@ -267,7 +286,7 @@ const validateUnitRegistry = () => {
               RNG_RNG: stats.RNG_RNG,
               RNG_DMG: stats.RNG_DMG,
               CC_DMG: stats.CC_DMG,
-              ICON: unit.player === 0 ? `icons/${unit.unit_type}_red.webp` : stats.ICON
+              ICON: `icons/${unit.unit_type}${unit.player === 0 ? '_red' : ''}.webp`
             };
           });
           console.log('✅ Processed units:', processedUnits);
@@ -289,7 +308,7 @@ const validateUnitRegistry = () => {
     };
     
     loadReplayData();
-  }, [replayFile, configLoading, configError]);
+  }, [replayFile, configLoading, configError, getUnitStats]);
 
   // AI_INSTRUCTIONS.md: Same hex calculations as Board.tsx
   const getHexCenter = useCallback((col: number, row: number): { x: number, y: number } => {
@@ -386,9 +405,10 @@ const validateUnitRegistry = () => {
             app.stage.addChild(sprite);
           } catch (iconError) {
             console.warn(`Failed to load icon ${unit.ICON}:`, iconError);
-            // Fallback to text if icon fails
-            const unitText = new PIXI.Text(unit.unit_type.substring(0, 2) || `U${unit.id}`, {
-              fontSize: 10,
+            // Fallback to text if icon fails - show unit type clearly
+            const displayText = unit.unit_type.length > 8 ? unit.unit_type.substring(0, 8) : unit.unit_type;
+            const unitText = new PIXI.Text(displayText, {
+              fontSize: 8,
               fill: 0xffffff,
               align: "center",
               fontWeight: "bold",
@@ -399,8 +419,9 @@ const validateUnitRegistry = () => {
           }
         } else {
           // No icon - use text fallback
-          const unitText = new PIXI.Text(unit.unit_type.substring(0, 2) || `U${unit.id}`, {
-            fontSize: 10,
+          const displayText = unit.unit_type.length > 8 ? unit.unit_type.substring(0, 8) : unit.unit_type;
+          const unitText = new PIXI.Text(displayText, {
+            fontSize: 8,
             fill: 0xffffff,
             align: "center",
             fontWeight: "bold",
@@ -743,9 +764,14 @@ const validateUnitRegistry = () => {
         {/* Top Section: Turn and Phase Progress */}
         <div className="bg-white p-4 border-b shadow-sm">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">
-              Turn {getCurrentTurn()} - Phase Progress
-            </h2>
+            <div>
+              <h2 className="text-lg font-semibold">
+                Turn {getCurrentTurn()} - Phase Progress
+              </h2>
+              <div className="text-xs text-gray-500 mt-1">
+                {replayFile?.split('/').pop()?.replace('.json', '') || 'Unknown replay'}
+              </div>
+            </div>
             <div className="text-sm text-gray-600">
               Step {currentStep + 1} of {replayData?.actions.length || 0}
             </div>

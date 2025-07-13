@@ -1,0 +1,579 @@
+# ai/scenario_manager.py
+#!/usr/bin/env python3
+"""
+ai/scenario_manager.py - Dynamic Scenario Generation & Balancing for Multi-Agent Training
+Following AI_INSTRUCTIONS.md requirements - zero hardcoding, config-driven design
+"""
+
+import os
+import sys
+import json
+import random
+import copy
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional, Any
+from dataclasses import dataclass
+from collections import defaultdict
+
+# Fix import paths - Add both script dir and project root
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, script_dir)
+sys.path.insert(0, project_root)
+
+from ai.unit_registry import UnitRegistry
+from config_loader import get_config_loader
+
+@dataclass
+class ScenarioTemplate:
+    """Represents a scenario template configuration."""
+    name: str
+    description: str
+    board_size: Tuple[int, int]
+    agent_compositions: Dict[str, List[str]]  # agent_key -> list of unit_types
+    unit_counts: Dict[str, int]  # unit_type -> count
+    deployment_zones: Dict[int, List[Tuple[int, int]]]  # player -> [(col, row), ...]
+    difficulty: str
+    training_focus: str  # 'solo', 'cross_faction', 'mixed', 'balanced'
+
+@dataclass
+class TrainingMatchup:
+    """Represents a specific training matchup between agents."""
+    player_0_agent: str
+    player_1_agent: str
+    scenario_template: str
+    expected_duration: int  # estimated episodes
+    priority: float  # training priority weight
+
+class ScenarioManager:
+    """
+    Dynamic scenario generation and balancing for multi-agent training.
+    Follows AI_INSTRUCTIONS.md: Zero hardcoding, config-driven, uses Unit Registry.
+    """
+    
+    def __init__(self, config_loader=None):
+        """Initialize scenario manager with dynamic agent discovery."""
+        self.config = config_loader or get_config_loader()
+        self.unit_registry = UnitRegistry()
+        
+        # Load scenario templates from config
+        self.scenario_templates = self._load_scenario_templates()
+        
+        # Dynamic agent discovery
+        self.available_agents = self.unit_registry.get_required_models()
+        
+        # Training state tracking
+        self.training_history = defaultdict(list)  # agent -> [training_sessions]
+        self.matchup_statistics = defaultdict(dict)  # (agent1, agent2) -> stats
+        self.current_training_cycle = 0
+        
+        print(f"✅ Scenario Manager initialized with {len(self.available_agents)} agents")
+        print(f"📋 Available agents: {self.available_agents}")
+        print(f"🎯 Loaded {len(self.scenario_templates)} scenario templates")
+
+    def _load_scenario_templates(self) -> Dict[str, ScenarioTemplate]:
+        """Load scenario templates from config file."""
+        templates = {}
+        
+        # Load from config/scenario_templates.json
+        template_file = os.path.join(self.config.config_dir, "scenario_templates.json")
+        
+        if os.path.exists(template_file):
+            try:
+                with open(template_file, 'r') as f:
+                    template_data = json.load(f)
+                
+                for name, data in template_data.items():
+                    templates[name] = ScenarioTemplate(
+                        name=name,
+                        description=data.get("description", ""),
+                        board_size=tuple(data.get("board_size", [24, 18])),
+                        agent_compositions=data.get("agent_compositions", {}),
+                        unit_counts=data.get("unit_counts", {}),
+                        deployment_zones=data.get("deployment_zones", {}),
+                        difficulty=data.get("difficulty", "medium"),
+                        training_focus=data.get("training_focus", "balanced")
+                    )
+                    
+                print(f"✅ Loaded scenario templates from {template_file}")
+                
+            except Exception as e:
+                print(f"⚠️ Failed to load scenario templates: {e}")
+                # Create default templates
+                templates = self._create_default_templates()
+        else:
+            print(f"⚠️ Scenario templates not found at {template_file}")
+            # Create default templates and save them
+            templates = self._create_default_templates()
+            self._save_scenario_templates(templates, template_file)
+        
+        return templates
+
+    def _create_default_templates(self) -> Dict[str, ScenarioTemplate]:
+        """Create default scenario templates based on available agents."""
+        templates = {}
+        
+        # Get board size from config
+        board_size = self.config.get_board_size()
+        
+        # Get available agents from unit registry directly
+        available_agents = self.unit_registry.get_required_models()
+        
+        # Solo training templates - one agent type vs scripted bot
+        for agent_key in available_agents:
+            agent_units = self.unit_registry.get_units_for_model(agent_key)
+            if agent_units:
+                primary_unit = agent_units[0]  # Use first unit as primary
+                
+                templates[f"solo_{agent_key.lower()}"] = ScenarioTemplate(
+                    name=f"solo_{agent_key.lower()}",
+                    description=f"Solo training for {agent_key} agent",
+                    board_size=board_size,
+                    agent_compositions={agent_key: [primary_unit]},
+                    unit_counts={primary_unit: 2},
+                    deployment_zones={
+                        0: [(0, board_size[1]//2-1), (0, board_size[1]//2+1)],  # Bot side
+                        1: [(board_size[0]-1, board_size[1]//2-1), (board_size[0]-1, board_size[1]//2+1)]  # AI side
+                    },
+                    difficulty="easy",
+                    training_focus="solo"
+                )
+        
+        # Cross-faction balanced templates
+        faction_agents = defaultdict(list)
+        for agent_key in available_agents:
+            faction = agent_key.split('_')[0]  # Extract faction from agent key
+            faction_agents[faction].append(agent_key)
+        
+        # Create cross-faction matchups
+        factions = list(faction_agents.keys())
+        for i, faction1 in enumerate(factions):
+            for faction2 in factions[i+1:]:
+                for agent1 in faction_agents[faction1]:
+                    for agent2 in faction_agents[faction2]:
+                        template_name = f"cross_{agent1.lower()}_vs_{agent2.lower()}"
+                        
+                        # Get representative units
+                        units1 = self.unit_registry.get_units_for_model(agent1)
+                        units2 = self.unit_registry.get_units_for_model(agent2)
+                        
+                        if units1 and units2:
+                            templates[template_name] = ScenarioTemplate(
+                                name=template_name,
+                                description=f"Cross-faction training: {agent1} vs {agent2}",
+                                board_size=board_size,
+                                agent_compositions={
+                                    agent1: [units1[0]],
+                                    agent2: [units2[0]]
+                                },
+                                unit_counts={units1[0]: 2, units2[0]: 2},
+                                deployment_zones={
+                                    0: [(1, board_size[1]//2-1), (1, board_size[1]//2+1)],
+                                    1: [(board_size[0]-2, board_size[1]//2-1), (board_size[0]-2, board_size[1]//2+1)]
+                                },
+                                difficulty="medium",
+                                training_focus="cross_faction"
+                            )
+        
+        # Mixed composition templates - multiple agents per side
+        templates["mixed_balanced"] = ScenarioTemplate(
+            name="mixed_balanced",
+            description="Balanced mixed composition training",
+            board_size=board_size,
+            agent_compositions={
+                # Mix different agent types
+                agent_key: self.unit_registry.get_units_for_model(agent_key)[:1] 
+                for agent_key in available_agents[:2]  # Use first 2 agents
+            },
+            unit_counts={},  # Will be populated dynamically
+            deployment_zones={
+                0: [(i, board_size[1]//2-2) for i in range(4)],
+                1: [(board_size[0]-1-i, board_size[1]//2+2) for i in range(4)]
+            },
+            difficulty="hard",
+            training_focus="mixed"
+        )
+        
+        return templates
+
+    def _save_scenario_templates(self, templates: Dict[str, ScenarioTemplate], filepath: str):
+        """Save scenario templates to config file."""
+        try:
+            # Convert templates to JSON-serializable format
+            template_data = {}
+            for name, template in templates.items():
+                template_data[name] = {
+                    "description": template.description,
+                    "board_size": list(template.board_size),
+                    "agent_compositions": template.agent_compositions,
+                    "unit_counts": template.unit_counts,
+                    "deployment_zones": {str(k): v for k, v in template.deployment_zones.items()},
+                    "difficulty": template.difficulty,
+                    "training_focus": template.training_focus
+                }
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            
+            with open(filepath, 'w') as f:
+                json.dump(template_data, f, indent=2)
+            
+            print(f"✅ Saved scenario templates to {filepath}")
+            
+        except Exception as e:
+            print(f"❌ Failed to save scenario templates: {e}")
+
+    def generate_training_scenario(self, template_name: str, player_0_agent: str, 
+                                 player_1_agent: str) -> Dict[str, Any]:
+        """
+        Generate a specific training scenario from template.
+        Returns scenario.json compatible format.
+        """
+        if template_name not in self.scenario_templates:
+            raise ValueError(f"Unknown scenario template: {template_name}")
+        
+        template = self.scenario_templates[template_name]
+        scenario_units = []
+        unit_id = 1
+        
+        # Generate units for player 0
+        agent_0_units = self.unit_registry.get_units_for_model(player_0_agent)
+        if not agent_0_units:
+            raise ValueError(f"No units found for agent: {player_0_agent}")
+        
+        deployment_0 = template.deployment_zones.get(0, [(0, 0)])
+        for i, pos in enumerate(deployment_0):
+            if i < len(agent_0_units):
+                unit_type = agent_0_units[i % len(agent_0_units)]
+                scenario_units.append({
+                    "id": unit_id,
+                    "unit_type": unit_type,
+                    "player": 0,
+                    "col": pos[0],
+                    "row": pos[1]
+                })
+                unit_id += 1
+        
+        # Generate units for player 1  
+        agent_1_units = self.unit_registry.get_units_for_model(player_1_agent)
+        if not agent_1_units:
+            raise ValueError(f"No units found for agent: {player_1_agent}")
+        
+        deployment_1 = template.deployment_zones.get(1, [(23, 17)])
+        for i, pos in enumerate(deployment_1):
+            if i < len(agent_1_units):
+                unit_type = agent_1_units[i % len(agent_1_units)]
+                scenario_units.append({
+                    "id": unit_id,
+                    "unit_type": unit_type,
+                    "player": 1,
+                    "col": pos[0],
+                    "row": pos[1]
+                })
+                unit_id += 1
+        
+        # Create scenario metadata
+        scenario = {
+            "metadata": {
+                "template": template_name,
+                "player_0_agent": player_0_agent,
+                "player_1_agent": player_1_agent,
+                "board_size": list(template.board_size),
+                "difficulty": template.difficulty,
+                "training_focus": template.training_focus,
+                "generated_timestamp": self._get_timestamp()
+            },
+            "units": scenario_units
+        }
+        
+        return scenario
+
+    def get_balanced_training_rotation(self, total_episodes: int) -> List[TrainingMatchup]:
+        """
+        Generate balanced training rotation ensuring each agent gets equal experience.
+        Returns list of training matchups with episode allocation.
+        """
+        matchups = []
+        
+        # Calculate balanced allocation
+        num_agents = len(self.available_agents)
+        if num_agents < 2:
+            print("⚠️ Need at least 2 agents for training rotation")
+            return matchups
+        
+        # Episodes per agent pair
+        episodes_per_pair = total_episodes // (num_agents * (num_agents - 1))
+        remaining_episodes = total_episodes % (num_agents * (num_agents - 1))
+        
+        # Generate all possible matchups
+        for i, agent1 in enumerate(self.available_agents):
+            for j, agent2 in enumerate(self.available_agents):
+                if i != j:  # Don't match agent against itself
+                    
+                    # Select appropriate scenario template
+                    template_name = self._select_scenario_template(agent1, agent2)
+                    
+                    # Calculate priority based on training history
+                    priority = self._calculate_training_priority(agent1, agent2)
+                    
+                    # Allocate episodes
+                    allocated_episodes = episodes_per_pair
+                    if remaining_episodes > 0:
+                        allocated_episodes += 1
+                        remaining_episodes -= 1
+                    
+                    matchups.append(TrainingMatchup(
+                        player_0_agent=agent1,
+                        player_1_agent=agent2,
+                        scenario_template=template_name,
+                        expected_duration=allocated_episodes,
+                        priority=priority
+                    ))
+        
+        # Sort by priority (highest first)
+        matchups.sort(key=lambda m: m.priority, reverse=True)
+        
+        print(f"🎯 Generated {len(matchups)} training matchups for {total_episodes} episodes")
+        print(f"📊 Episodes per matchup: {episodes_per_pair}")
+        
+        return matchups
+
+    def _select_scenario_template(self, agent1: str, agent2: str) -> str:
+        """Select appropriate scenario template for agent matchup."""
+        
+        # Extract faction information
+        faction1 = agent1.split('_')[0]
+        faction2 = agent2.split('_')[0]
+        
+        # Cross-faction training
+        if faction1 != faction2:
+            cross_template = f"cross_{agent1.lower()}_vs_{agent2.lower()}"
+            if cross_template in self.scenario_templates:
+                return cross_template
+            # Fallback to reverse
+            reverse_template = f"cross_{agent2.lower()}_vs_{agent1.lower()}"
+            if reverse_template in self.scenario_templates:
+                return reverse_template
+        
+        # Same faction - use balanced template
+        if "mixed_balanced" in self.scenario_templates:
+            return "mixed_balanced"
+        
+        # Ultimate fallback - use any available template
+        return list(self.scenario_templates.keys())[0]
+
+    def _calculate_training_priority(self, agent1: str, agent2: str) -> float:
+        """Calculate training priority for agent matchup based on history."""
+        
+        # Base priority
+        priority = 1.0
+        
+        # Check training history balance
+        history_key = (agent1, agent2)
+        reverse_key = (agent2, agent1)
+        
+        history_count = len(self.training_history.get(history_key, []))
+        reverse_count = len(self.training_history.get(reverse_key, []))
+        total_history = history_count + reverse_count
+        
+        # Prioritize less-trained matchups
+        if total_history == 0:
+            priority += 2.0  # High priority for new matchups
+        else:
+            priority += max(0, 1.0 - (total_history / 10.0))  # Decrease as history grows
+        
+        # Cross-faction training gets slight priority
+        faction1 = agent1.split('_')[0]
+        faction2 = agent2.split('_')[0]
+        if faction1 != faction2:
+            priority += 0.5
+        
+        return priority
+
+    def update_training_history(self, agent1: str, agent2: str, episodes_completed: int, 
+                              win_rate: float, avg_reward: float):
+        """Update training history for matchup."""
+        history_entry = {
+            "timestamp": self._get_timestamp(),
+            "episodes": episodes_completed,
+            "win_rate": win_rate,
+            "avg_reward": avg_reward,
+            "cycle": self.current_training_cycle
+        }
+        
+        matchup_key = (agent1, agent2)
+        self.training_history[matchup_key].append(history_entry)
+        
+        # Update statistics
+        if matchup_key not in self.matchup_statistics:
+            self.matchup_statistics[matchup_key] = {
+                "total_episodes": 0,
+                "total_sessions": 0,
+                "avg_win_rate": 0.0,
+                "avg_reward": 0.0
+            }
+        
+        stats = self.matchup_statistics[matchup_key]
+        stats["total_episodes"] += episodes_completed
+        stats["total_sessions"] += 1
+        
+        # Update running averages
+        sessions = stats["total_sessions"]
+        stats["avg_win_rate"] = ((stats["avg_win_rate"] * (sessions - 1)) + win_rate) / sessions
+        stats["avg_reward"] = ((stats["avg_reward"] * (sessions - 1)) + avg_reward) / sessions
+
+    def get_training_progress_report(self) -> Dict[str, Any]:
+        """Generate comprehensive training progress report."""
+        
+        report = {
+            "overview": {
+                "available_agents": len(self.available_agents),
+                "scenario_templates": len(self.scenario_templates),
+                "training_cycles": self.current_training_cycle,
+                "total_matchups": len(self.matchup_statistics)
+            },
+            "agent_progress": {},
+            "matchup_statistics": dict(self.matchup_statistics),
+            "balance_analysis": self._analyze_training_balance()
+        }
+        
+        # Individual agent progress
+        for agent in self.available_agents:
+            agent_stats = {
+                "total_episodes": 0,
+                "win_rate": 0.0,
+                "avg_reward": 0.0,
+                "matchups_trained": 0
+            }
+            
+            # Aggregate stats for this agent
+            matchup_count = 0
+            total_win_rate = 0.0
+            total_reward = 0.0
+            
+            for (a1, a2), stats in self.matchup_statistics.items():
+                if a1 == agent or a2 == agent:
+                    agent_stats["total_episodes"] += stats["total_episodes"]
+                    total_win_rate += stats["avg_win_rate"] if a1 == agent else (1.0 - stats["avg_win_rate"])
+                    total_reward += stats["avg_reward"]
+                    matchup_count += 1
+            
+            if matchup_count > 0:
+                agent_stats["win_rate"] = total_win_rate / matchup_count
+                agent_stats["avg_reward"] = total_reward / matchup_count
+                agent_stats["matchups_trained"] = matchup_count
+            
+            report["agent_progress"][agent] = agent_stats
+        
+        return report
+
+    def _analyze_training_balance(self) -> Dict[str, Any]:
+        """Analyze training balance across agents and factions."""
+        
+        balance_analysis = {
+            "episode_distribution": {},
+            "faction_balance": {},
+            "recommendations": []
+        }
+        
+        # Episode distribution per agent
+        for agent in self.available_agents:
+            total_episodes = 0
+            for (a1, a2), stats in self.matchup_statistics.items():
+                if a1 == agent or a2 == agent:
+                    total_episodes += stats["total_episodes"]
+            balance_analysis["episode_distribution"][agent] = total_episodes
+        
+        # Faction balance analysis
+        faction_episodes = defaultdict(int)
+        for agent in self.available_agents:
+            faction = agent.split('_')[0]
+            faction_episodes[faction] += balance_analysis["episode_distribution"].get(agent, 0)
+        
+        balance_analysis["faction_balance"] = dict(faction_episodes)
+        
+        # Generate recommendations
+        episode_values = list(balance_analysis["episode_distribution"].values())
+        if episode_values:
+            min_episodes = min(episode_values)
+            max_episodes = max(episode_values)
+            
+            if max_episodes > min_episodes * 1.5:  # Imbalance threshold
+                balance_analysis["recommendations"].append(
+                    "Training imbalance detected - consider prioritizing under-trained agents"
+                )
+        
+        return balance_analysis
+
+    def save_scenario_to_file(self, scenario: Dict[str, Any], filepath: str = None) -> str:
+        """Save generated scenario to file."""
+        if filepath is None:
+            timestamp = self._get_timestamp()
+            filepath = os.path.join(self.config.config_dir, f"scenario_generated_{timestamp}.json")
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        with open(filepath, 'w') as f:
+            json.dump(scenario, f, indent=2)
+        
+        print(f"✅ Scenario saved to {filepath}")
+        return filepath
+
+    def _get_timestamp(self) -> str:
+        """Get current timestamp string."""
+        from datetime import datetime
+        return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def get_available_templates(self) -> List[str]:
+        """Get list of available scenario template names."""
+        return list(self.scenario_templates.keys())
+
+    def get_template_info(self, template_name: str) -> Optional[ScenarioTemplate]:
+        """Get detailed information about a scenario template."""
+        return self.scenario_templates.get(template_name)
+
+# Test and validation functions
+def test_scenario_manager():
+    """Test scenario manager functionality."""
+    print("🧪 Testing Scenario Manager")
+    print("=" * 50)
+    
+    try:
+        # Initialize manager
+        manager = ScenarioManager()
+        
+        # Test template loading
+        templates = manager.get_available_templates()
+        print(f"✅ Templates loaded: {len(templates)}")
+        
+        # Test scenario generation
+        if len(manager.available_agents) >= 2:
+            agent1 = manager.available_agents[0]
+            agent2 = manager.available_agents[1]
+            
+            scenario = manager.generate_training_scenario(
+                templates[0], agent1, agent2
+            )
+            print(f"✅ Generated scenario with {len(scenario['units'])} units")
+            
+            # Test rotation generation
+            rotation = manager.get_balanced_training_rotation(100)
+            print(f"✅ Generated rotation with {len(rotation)} matchups")
+            
+            # Test progress tracking
+            manager.update_training_history(agent1, agent2, 10, 0.6, 15.5)
+            report = manager.get_training_progress_report()
+            print(f"✅ Progress report generated: {len(report['agent_progress'])} agents")
+        
+        print("🎉 All scenario manager tests passed!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+if __name__ == "__main__":
+    test_scenario_manager()
