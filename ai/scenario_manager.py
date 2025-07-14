@@ -514,7 +514,9 @@ class ScenarioManager:
         """Save generated scenario to file."""
         if filepath is None:
             timestamp = self._get_timestamp()
-            filepath = os.path.join(self.config.config_dir, f"scenario_generated_{timestamp}.json")
+            # Move to ai/session_scenarios/ directory
+            ai_scenarios_dir = os.path.join(os.path.dirname(self.config.config_dir), "ai", "session_scenarios")
+            filepath = os.path.join(ai_scenarios_dir, f"scenario_generated_{timestamp}.json")
         
         # Ensure directory exists
         os.makedirs(os.path.dirname(filepath), exist_ok=True)

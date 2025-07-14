@@ -114,6 +114,7 @@ ai/temp/
 config.local.json
 config/local/
 ai/scenario_local.json
+ai/session_scenarios/
 
 # ╔═════════════════════════════════════════════════════════════════════════════╗
 # ║                           FICHIERS TEMPORAIRES                             ║

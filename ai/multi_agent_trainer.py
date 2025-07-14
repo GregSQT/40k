@@ -12,6 +12,7 @@ import time
 import threading
 import queue
 import glob
+from tqdm import tqdm
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any, Callable
 from dataclasses import dataclass, asdict
@@ -31,7 +32,7 @@ from config_loader import get_config_loader
 
 # Import training components
 from stable_baselines3 import DQN
-from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
+from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
 from stable_baselines3.common.monitor import Monitor
 import gymnasium as gym
 
@@ -129,6 +130,12 @@ class MultiAgentTrainer:
         self.training_log = []
         self.performance_history = defaultdict(list)
         
+        # Simple progress tracking with slowest agent monitoring
+        self.total_sessions = 0
+        self.completed_sessions = 0
+        self.session_progress = {}  # Track progress of each active session
+        self.progress_lock = threading.Lock()
+        
         # Load training configuration
         self.training_config = self.config.load_training_config("default")
         self.rewards_config = self.config.load_rewards_config("default")
@@ -181,6 +188,10 @@ class MultiAgentTrainer:
         if not training_rotation:
             raise ValueError("No training rotation generated - need at least 2 agents")
         
+        # Calculate episodes per pair
+        num_agents = len(self.unit_registry.get_all_model_keys())
+        episodes_per_pair = total_episodes // (num_agents * (num_agents - 1))
+        
         # Execute training rotation
         orchestration_results = {
             "total_matchups": len(training_rotation),
@@ -193,12 +204,37 @@ class MultiAgentTrainer:
         
         print(f"🔄 Executing {len(training_rotation)} training matchups...")
         
+        # Load training config to show timesteps info
+        training_config = self.config.load_training_config(training_config_name)
+        timesteps_per_session = training_config.get("total_timesteps", 1000)
+        total_timesteps = len(training_rotation) * timesteps_per_session
+        
+        print(f"📊 Episodes per matchup: {episodes_per_pair}")
+        print(f"⏱️ Timesteps per session: {timesteps_per_session:,}")
+        print(f"🔄 Total timesteps: {total_timesteps:,}")
+        
+        # Progress tracking with slowest agent monitoring
+        self.total_sessions = len(training_rotation)
+        self.completed_sessions = 0
+        self.session_progress = {}
+        
+        print(f"🤖 Starting {self.total_sessions} training sessions...")
+        
+        # Create progress bar showing slowest agent
+        self.overall_pbar = tqdm(
+            total=timesteps_per_session,
+            desc="🐌 Slowest Agent",
+            unit="steps",
+            leave=True,
+            ncols=100
+        )
+        
         # Process training rotation in batches to respect concurrent session limits
         completed_sessions = 0
         for i in range(0, len(training_rotation), self.max_concurrent_sessions):
             batch = training_rotation[i:i + self.max_concurrent_sessions]
             
-            # Start batch of training sessions
+            # Start batch of training sessions silently
             batch_futures = []
             for matchup in batch:
                 session_id = self._generate_session_id()
@@ -228,9 +264,16 @@ class MultiAgentTrainer:
                 self.session_futures[session_id] = future
                 batch_futures.append((session_id, future))
                 
-                print(f"🎮 Started session {session_id}: {matchup.player_1_agent} vs {matchup.player_0_agent}")
+                # Initialize progress tracking for this session
+                with self.progress_lock:
+                    self.session_progress[session_id] = {
+                        'steps': 0,
+                        'total': timesteps_per_session,  # Use timesteps_per_session, not total_timesteps
+                        'agent': session.agent_key,
+                        'opponent': session.opponent_agent
+                    }
             
-            # Wait for batch completion
+            # Wait for batch completion with proper progress bar updates
             for session_id, future in batch_futures:
                 try:
                     result = future.result(timeout=3600)  # 1 hour timeout per session
@@ -247,7 +290,17 @@ class MultiAgentTrainer:
                             result["final_avg_reward"]
                         )
                     
-                    print(f"✅ Session {session_id} completed: {result['status']}")
+                    # Update progress tracking
+                    self.completed_sessions += 1
+                    
+                    # Remove completed session from progress tracking
+                    with self.progress_lock:
+                        if session_id in self.session_progress:
+                            del self.session_progress[session_id]
+                        self._update_slowest_progress()
+                    
+                    print(f"✅ Session {self.completed_sessions}/{self.total_sessions}: {result['agent_key']} vs {result['opponent_agent']} | "
+                          f"WR:{result.get('final_win_rate', 0):.0%} R:{result.get('final_avg_reward', 0):.1f}")
                     
                 except Exception as e:
                     print(f"❌ Session {session_id} failed: {e}")
@@ -256,14 +309,22 @@ class MultiAgentTrainer:
                         "status": "failed",
                         "error": str(e)
                     })
+                    self.completed_sessions += 1
+                    with self.progress_lock:
+                        if session_id in self.session_progress:
+                            del self.session_progress[session_id]
+                        self._update_slowest_progress()
+                    print(f"❌ Session {self.completed_sessions}/{self.total_sessions}: FAILED - {session_id}")
                 finally:
                     # Cleanup
                     if session_id in self.active_sessions:
                         del self.active_sessions[session_id]
                     if session_id in self.session_futures:
                         del self.session_futures[session_id]
-            
-            print(f"🔄 Batch completed: {completed_sessions}/{len(training_rotation)} sessions")
+        
+        # Close progress bar
+        self.overall_pbar.close()
+        print(f"🎉 All {self.total_sessions} training sessions completed!")
         
         orchestration_results["end_time"] = time.time()
         orchestration_results["total_duration"] = orchestration_results["end_time"] - orchestration_results["start_time"]
@@ -285,7 +346,7 @@ class MultiAgentTrainer:
                                  rewards_config_name: str) -> Dict[str, Any]:
         """Execute individual training session for specific agent matchup."""
         try:
-            print(f"🏃 Executing session {session.session_id}: {session.agent_key} vs {session.opponent_agent}")
+            # Silent execution to prevent log spam
             
             # Generate scenario for this matchup
             scenario = self.scenario_manager.generate_training_scenario(
@@ -310,12 +371,35 @@ class MultiAgentTrainer:
             
             # Execute training
             start_time = time.time()
+            total_timesteps = session.target_episodes * 200
             
+            # Add progress tracking callback
+            class ProgressTracker(BaseCallback):
+                def __init__(self, trainer, session_id, verbose=0):
+                    super().__init__(verbose)
+                    self.trainer = trainer
+                    self.session_id = session_id
+                    self.last_update = 0
+                
+                def _on_step(self) -> bool:
+                    # Update every 50 steps to avoid too frequent updates
+                    if self.num_timesteps - self.last_update >= 50:
+                        with self.trainer.progress_lock:
+                            if self.session_id in self.trainer.session_progress:
+                                self.trainer.session_progress[self.session_id]['steps'] = self.num_timesteps
+                                self.trainer._update_slowest_progress()
+                        self.last_update = self.num_timesteps
+                    return True
+            
+            progress_tracker = ProgressTracker(self, session.session_id)
+            all_callbacks = callbacks + [progress_tracker] if callbacks else [progress_tracker]
+            
+            # Execute training with individual progress tracking
             model.learn(
-                total_timesteps=session.target_episodes * 200,  # Approximate timesteps per episode
-                callback=callbacks,
-                log_interval=100,
-                progress_bar=False  # Disable for multi-threading
+                total_timesteps=total_timesteps,
+                callback=all_callbacks,
+                log_interval=1000,  # Reduce log frequency
+                progress_bar=False  # Disable built-in progress bar
             )
             
             training_duration = time.time() - start_time
@@ -342,9 +426,7 @@ class MultiAgentTrainer:
                 else:
                     print(f"⚠️ No replay saving method available for session {session.session_id}")
                 
-                if replay_file_saved:
-                    print(f"💾 Replay saved: {replay_file_saved}")
-                else:
+                if not replay_file_saved:
                     print(f"⚠️ No replay data to save for session {session.session_id}")
             except Exception as replay_error:
                 print(f"⚠️ Failed to save replay for session {session.session_id}: {replay_error}")
@@ -377,7 +459,7 @@ class MultiAgentTrainer:
                 "replay_file": replay_file_saved
             }
             
-            print(f"✅ Session {session.session_id} completed successfully")
+            # Reduced verbosity - session completion tracked by progress bar
             return result
             
         except Exception as e:
@@ -415,7 +497,7 @@ class MultiAgentTrainer:
 
     def _cleanup_previous_session_scenarios(self):
         """Clean up all previous session scenario files before starting new training."""
-        session_scenarios_dir = os.path.join(self.config.config_dir, "session_scenarios")
+        session_scenarios_dir = os.path.join(os.path.dirname(self.config.config_dir), "ai", "session_scenarios")
         
         if not os.path.exists(session_scenarios_dir):
             print("📁 No session scenarios directory found - nothing to clean")
@@ -453,14 +535,18 @@ class MultiAgentTrainer:
         training_config = self.config.load_training_config(training_config_name)
         model_params = training_config["model_params"]
         
-        # Create agent-specific environment with generated scenario
+        # Set verbose=0 to reduce SB3 logging
+        model_params["verbose"] = 0
+        
+        # Create agent-specific environment with generated scenario and shared registry
         base_env = W40KEnv(
             rewards_config=rewards_config_name,
             training_config_name=training_config_name,
             controlled_agent=agent_key,
-            scenario_file=scenario_path
+            scenario_file=scenario_path,
+            unit_registry=self.unit_registry  # Pass shared registry
         )
-        monitor_env = Monitor(base_env)
+        monitor_env = Monitor(base_env, allow_early_resets=True)
         
         # Wrap for replay saving access - now properly inherits from gym.Wrapper
         env = ReplaySavingWrapper(monitor_env)
@@ -468,64 +554,44 @@ class MultiAgentTrainer:
         # Agent-specific model path
         model_path = self._get_agent_model_path(agent_key)
         
-        # Create or load model
+        # Create or load model (reduced verbosity)
         if os.path.exists(model_path):
-            print(f"📁 Loading existing model for {agent_key}: {model_path}")
             model = DQN.load(model_path, env=env)
             # Update model parameters for continued training
             model.tensorboard_log = model_params.get("tensorboard_log", "./tensorboard/")
         else:
-            print(f"🆕 Creating new model for {agent_key}")
             model = DQN(env=env, **model_params)
         
         return model, env
 
+    def _update_slowest_progress(self):
+        """Update progress bar to show the slowest agent's progress."""
+        if not self.session_progress:
+            return
+        
+        # Find the session with the lowest completion percentage
+        slowest_session = None
+        slowest_progress = 1.0
+        
+        for session_id, progress in self.session_progress.items():
+            if progress['total'] > 0:
+                completion = progress['steps'] / progress['total']
+                if completion < slowest_progress:
+                    slowest_progress = completion
+                    slowest_session = progress
+        
+        if slowest_session:
+            # Update progress bar to show slowest agent
+            self.overall_pbar.n = slowest_session['steps']
+            self.overall_pbar.total = slowest_session['total']
+            self.overall_pbar.set_description(f"🐌 {slowest_session['agent'][:8]} vs {slowest_session['opponent'][:8]}")
+            self.overall_pbar.set_postfix_str(f"{slowest_progress:.1%}")
+            self.overall_pbar.refresh()
+
     def _setup_session_callbacks(self, session: TrainingSession, model) -> List:
         """Setup training callbacks for session monitoring."""
-        callbacks = []
-        
-        # Create session-specific directories
-        session_dir = os.path.join(self.config.get_models_dir(), "sessions", session.session_id)
-        os.makedirs(session_dir, exist_ok=True)
-        
-        # Evaluation callback
-        try:
-            from gym40k import W40KEnv
-        except ImportError:
-            from ai.gym40k import W40KEnv
-            
-        # Use the same scenario file for evaluation as training
-        # Generate the scenario filename based on agent names and session ID
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        session_scenario_path = os.path.join(
-            self.config.config_dir, 
-            "session_scenarios", 
-            f"scenario_{session.agent_key}_vs_{session.opponent_agent}_{timestamp}.json"
-        )
-        base_eval_env = W40KEnv(controlled_agent=session.agent_key, scenario_file=session_scenario_path)
-        monitor_eval_env = Monitor(base_eval_env)
-        eval_env = ReplaySavingWrapper(monitor_eval_env)
-        
-        eval_callback = EvalCallback(
-            eval_env,
-            best_model_save_path=session_dir,
-            log_path=session_dir,
-            eval_freq=max(1000, session.target_episodes * 20),  # Evaluate periodically
-            deterministic=True,
-            render=False,
-            n_eval_episodes=3  # Quick evaluation
-        )
-        callbacks.append(eval_callback)
-        
-        # Checkpoint callback
-        checkpoint_callback = CheckpointCallback(
-            save_freq=max(2000, session.target_episodes * 40),
-            save_path=session_dir,
-            name_prefix=f"{session.agent_key}_checkpoint"
-        )
-        callbacks.append(checkpoint_callback)
-        
-        return callbacks
+        # Disable all callbacks to prevent log spam during concurrent training
+        return []
 
     def _test_trained_model(self, model, env, num_episodes: int = 10) -> Dict[str, float]:
         """Test trained model and return performance metrics."""
@@ -599,7 +665,8 @@ class MultiAgentTrainer:
         timestamp = scenario["metadata"]["generated_timestamp"]
         
         session_scenario_path = os.path.join(
-            self.config.config_dir, 
+            os.path.dirname(self.config.config_dir), 
+            "ai", 
             "session_scenarios", 
             f"scenario_{player_1_agent}_vs_{player_0_agent}_{timestamp}.json"
         )

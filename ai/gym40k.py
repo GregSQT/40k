@@ -29,11 +29,11 @@ class W40KEnv(gym.Env):
     """Phase-based W40K environment following AI_GAME_OVERVIEW.md specifications exactly."""
 
     def __init__(self, rewards_config="default", training_config_name="default", 
-             controlled_agent=None, active_agents=None, scenario_file=None):
+             controlled_agent=None, active_agents=None, scenario_file=None, unit_registry=None):
         super().__init__()
 
-        # Multi-agent support
-        self.unit_registry = UnitRegistry()
+        # Multi-agent support - reuse shared registry if provided
+        self.unit_registry = unit_registry if unit_registry is not None else UnitRegistry()
         self.controlled_agent = controlled_agent  # Which agent this env controls
         self.active_agents = active_agents or []  # All active agents in training
 
@@ -101,7 +101,7 @@ class W40KEnv(gym.Env):
             raise FileNotFoundError(f"Specified scenario file not found: {scenario_file}")
         
         self.scenario_path = scenario_file
-        print(f"✅ Using specified scenario: {scenario_file}")
+        # Reduced verbosity - scenario path logged only if needed
         if os.path.exists(self.scenario_path):
             try:
                 with open(self.scenario_path, 'r') as f:
@@ -250,10 +250,9 @@ class W40KEnv(gym.Env):
                             # Validate we got essential data
                             if all(prop in unit_data for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg']):
                                 definitions[unit_name] = unit_data
-                            else:
-                                print(f"⚠️ Incomplete data for {unit_name}")
+                            # Remove incomplete data warnings to reduce log clutter
         
-        print(f"✅ Loaded {len(definitions)} unit definitions from TypeScript")
+        # Reduced verbosity - unit loading completed silently
         return definitions
 
     def _load_rewards_config(self):
@@ -487,22 +486,18 @@ class W40KEnv(gym.Env):
             # AI_GAME.md: "The only available action in this phase is moving"
             # Force action to be movement (default to action 0)
             action_type = 0
-            print(f"🔒 AI_GAME.md: Limiting action to movement in move phase")
         elif self.current_phase == "shoot" and action_type != 4:
             # AI_GAME.md: "The only available action in this phase is shooting"
             # Force action to be shooting
             action_type = 4
-            print(f"🔒 AI_GAME.md: Limiting action to shooting in shoot phase")
         elif self.current_phase == "charge" and action_type != 5:
             # AI_GAME.md: Charge phase restriction
             # Force action to be charging
             action_type = 5
-            print(f"🔒 AI_GAME.md: Limiting action to charging in charge phase")
         elif self.current_phase == "combat" and action_type != 6:
             # AI_GAME.md: "The only available action in this phase is attacking"
             # Force action to be attacking
             action_type = 6
-            print(f"🔒 AI_GAME.md: Limiting action to attacking in combat phase")
         
         action_success = False
         
@@ -1534,7 +1529,7 @@ class W40KEnv(gym.Env):
         with open(filename, 'w') as f:
             json.dump(replay_structure, f, indent=2, default=int)
         
-        print(f"✅ Phase-based replay saved: {filename}")
+        # Reduced verbosity to prevent progress bar interference
         return filename
 
     def render(self, mode='human'):
