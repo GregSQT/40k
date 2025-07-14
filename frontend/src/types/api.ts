@@ -1,4 +1,4 @@
-// src/types/api.ts
+// frontend/src/types/api.ts
 export interface APIResponse<T = any> {
   data: T;
   success: boolean;

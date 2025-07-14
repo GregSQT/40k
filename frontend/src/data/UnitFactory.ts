@@ -20,6 +20,7 @@ export interface Unit {
   col: number;
   row: number;
   color: number;
+  BASE: number;
   MOVE: number;
   HP_MAX: number;
   RNG_RNG: number;
@@ -27,6 +28,18 @@ export interface Unit {
   CC_DMG: number;
   ICON: string;
   CUR_HP?: number;
+  // ✅ ADD: Dice system properties
+  RNG_NB?: number;
+  RNG_ATK?: number;
+  RNG_STR?: number;
+  RNG_AP?: number;
+  CC_NB?: number;
+  CC_ATK?: number;
+  CC_STR?: number;
+  CC_AP?: number;
+  T?: number;
+  ARMOR_SAVE?: number;
+  INVUL_SAVE?: number;
 }
 
 // Unit class registry
@@ -54,12 +67,25 @@ export function createUnit(params: {
   
   return {
     ...params,
-    MOVE: UnitClass.MOVE || 6,
-    HP_MAX: UnitClass.HP_MAX || 4,
-    RNG_RNG: UnitClass.RNG_RNG || 4,
-    RNG_DMG: UnitClass.RNG_DMG || 1,
-    CC_DMG: UnitClass.CC_DMG || 1,
-    ICON: UnitClass.ICON || "default",
-    CUR_HP: UnitClass.HP_MAX || 4,
+    BASE: UnitClass.BASE,
+    MOVE: UnitClass.MOVE,
+    HP_MAX: UnitClass.HP_MAX,
+    RNG_RNG: UnitClass.RNG_RNG,
+    RNG_DMG: UnitClass.RNG_DMG,
+    CC_DMG: UnitClass.CC_DMG,
+    ICON: UnitClass.ICON,
+    CUR_HP: UnitClass.HP_MAX,
+    // ✅ ADD: Dice system properties
+    RNG_NB: UnitClass.RNG_NB,
+    RNG_ATK: UnitClass.RNG_ATK,
+    RNG_STR: UnitClass.RNG_STR,
+    RNG_AP: UnitClass.RNG_AP,
+    CC_NB: UnitClass.CC_NB,
+    CC_ATK: UnitClass.CC_ATK,
+    CC_STR: UnitClass.CC_STR,
+    CC_AP: UnitClass.CC_AP,
+    T: UnitClass.T,
+    ARMOR_SAVE: UnitClass.ARMOR_SAVE,
+    INVUL_SAVE: UnitClass.INVUL_SAVE,
   };
 }

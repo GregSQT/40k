@@ -1,6 +1,7 @@
 // src/hooks/useGameActions.ts
 import { useCallback } from 'react';
 import { GameState, UnitId, MovePreview, AttackPreview, Unit } from '../types/game';
+import { shootingSequenceManager, ShootingSequenceState } from '../utils/ShootingSequenceManager';
 
 interface UseGameActionsParams {
   gameState: GameState;
@@ -17,6 +18,8 @@ interface UseGameActionsParams {
     updateUnit: (unitId: UnitId, updates: Partial<Unit>) => void;
     removeUnit: (unitId: UnitId) => void;
   };
+  shootingSequenceState: ShootingSequenceState | null;
+  setShootingSequenceState: (state: ShootingSequenceState | null) => void;
 }
 
 export const useGameActions = ({
@@ -24,6 +27,8 @@ export const useGameActions = ({
   movePreview,
   attackPreview,
   actions,
+  shootingSequenceState,
+  setShootingSequenceState,
 }: UseGameActionsParams) => {
   const { units, currentPlayer, phase, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked } = gameState;
 
@@ -67,6 +72,12 @@ export const useGameActions = ({
   }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked]);
 
   const selectUnit = useCallback((unitId: UnitId | null) => {
+    // Prevent unit selection during shooting sequence
+    if (shootingSequenceState?.isActive) {
+      console.log("Cannot select units during shooting sequence");
+      return;
+    }
+
     if (unitId === null) {
       actions.setSelectedUnitId(null);
       actions.setMovePreview(null);
@@ -188,26 +199,142 @@ export const useGameActions = ({
     actions.setMode("select");
   }, [actions]);
 
+  // === DICE-BASED SHOOTING SYSTEM ===
+
+interface ShootingResult {
+  totalDamage: number;
+  summary: {
+    totalShots: number;
+    hits: number;
+    wounds: number;
+    failedSaves: number;
+  };
+}
+
+// Dice rolling function
+const rollD6 = (): number => Math.floor(Math.random() * 6) + 1;
+
+// Calculate wound target based on strength vs toughness
+const calculateWoundTarget = (strength: number, toughness: number): number => {
+  if (strength * 2 <= toughness) return 6;      // S*2 <= T: wound on 6+
+  if (strength < toughness) return 5;           // S < T: wound on 5+
+  if (strength === toughness) return 4;         // S = T: wound on 4+
+  if (strength > toughness) return 3;           // S > T: wound on 3+
+  if (strength * 2 >= toughness) return 2;     // S*2 >= T: wound on 2+
+  return 6; // fallback
+};
+
+// Calculate save target accounting for AP and invulnerable saves
+const calculateSaveTarget = (armorSave: number, invulSave: number, armorPenetration: number): number => {
+  const modifiedArmor = armorSave + armorPenetration;
+  
+  // Use invulnerable save if it's better than modified armor save (and invul > 0)
+  if (invulSave > 0 && invulSave < modifiedArmor) {
+    return invulSave;
+  }
+  
+  return modifiedArmor;
+};
+
+// Execute complete shooting sequence
+const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
+  // Step 1: Number of shots
+  const numberOfShots = shooter.RNG_NB || 1;
+  
+  let totalDamage = 0;
+  let hits = 0;
+  let wounds = 0;
+  let failedSaves = 0;
+
+  // Process each shot
+  for (let shot = 1; shot <= numberOfShots; shot++) {
+    // Step 2: Range check (already validated before calling)
+    
+    // Step 3: Hit roll
+    const hitRoll = rollD6();
+    const hitTarget = shooter.RNG_ATK || 4;
+    const didHit = hitRoll >= hitTarget;
+    
+    if (!didHit) continue; // Miss - next shot
+    hits++;
+    
+    // Step 4: Wound roll  
+    const woundRoll = rollD6();
+    const woundTarget = calculateWoundTarget(shooter.RNG_STR || 4, target.T || 4);
+    const didWound = woundRoll >= woundTarget;
+    
+    if (!didWound) continue; // Failed to wound - next shot
+    wounds++;
+    
+    // Step 5: Armor save
+    const saveRoll = rollD6();
+    const saveTarget = calculateSaveTarget(
+      target.ARMOR_SAVE || 5, 
+      target.INVUL_SAVE || 0, 
+      shooter.RNG_AP || 0
+    );
+    const savedWound = saveRoll >= saveTarget;
+    
+    if (savedWound) continue; // Save successful - next shot
+    failedSaves++;
+    
+    // Step 6: Inflict damage
+    totalDamage += shooter.RNG_DMG || 1;
+  }
+
+  return {
+    totalDamage,
+    summary: {
+      totalShots: numberOfShots,
+      hits,
+      wounds,
+      failedSaves
+    }
+  };
+};
+
   const handleShoot = useCallback((shooterId: UnitId, targetId: UnitId) => {
     const shooter = findUnit(shooterId);
     const target = findUnit(targetId);
     if (!shooter || !target) return;
 
-    // Calculate damage and apply it
-    const newHP = (target.CUR_HP ?? target.HP_MAX) - (shooter.RNG_DMG ?? 1);
-    
-    if (newHP <= 0) {
-      actions.removeUnit(targetId);
-    } else {
-      actions.updateUnit(targetId, { CUR_HP: newHP });
-    }
+    console.log(`🎯 Starting visual dice-based shooting: ${shooter.name || `Unit ${shooterId}`} -> ${target.name || `Unit ${targetId}`}`);
 
-    // Mark shooter as having shot
-    actions.addMovedUnit(shooterId);
-    actions.setAttackPreview(null);
-    actions.setSelectedUnitId(null);
-    actions.setMode("select");
-  }, [findUnit, actions]);
+    // Start the visual dice-based shooting sequence
+    shootingSequenceManager.startSequence(
+      shooter,
+      target,
+      // On state change callback
+      (newState) => {
+        setShootingSequenceState(newState);
+      },
+      // On sequence complete callback  
+      (finalDamage) => {
+        console.log(`💥 Shooting complete! Final damage: ${finalDamage}`);
+        
+        // Apply the calculated damage
+        const currentHP = target.CUR_HP ?? target.HP_MAX;
+        const newHP = Math.max(0, currentHP - finalDamage);
+        
+        if (newHP <= 0) {
+          console.log(`💀 ${target.name || `Unit ${targetId}`} destroyed!`);
+          actions.removeUnit(targetId);
+        } else {
+          console.log(`🩹 ${target.name || `Unit ${targetId}`} takes ${finalDamage} damage (${newHP}/${target.HP_MAX} HP remaining)`);
+          actions.updateUnit(targetId, { CUR_HP: newHP });
+        }
+
+        // Mark shooter as having shot and reset UI state
+        actions.addMovedUnit(shooterId);
+        actions.setAttackPreview(null);
+        actions.setSelectedUnitId(null);
+        actions.setMode("select");
+        
+        // Clear shooting sequence state
+        setShootingSequenceState(null);
+      }
+    );
+  }, [findUnit, actions, setShootingSequenceState]);
 
   const handleCombatAttack = useCallback((attackerId: UnitId, targetId: UnitId | null) => {
     if (targetId === null) {
@@ -267,6 +394,17 @@ export const useGameActions = ({
     actions.setMode("select");
   }, [actions]);
 
+  const handleShootingStepComplete = useCallback(() => {
+    if (shootingSequenceState?.isActive) {
+      shootingSequenceManager.nextStep();
+    }
+  }, [shootingSequenceState]);
+
+  const cancelShootingSequence = useCallback(() => {
+    shootingSequenceManager.cancelSequence();
+    setShootingSequenceState(null);
+  }, [setShootingSequenceState]);
+
   return {
     selectUnit,
     selectCharger,
@@ -280,5 +418,7 @@ export const useGameActions = ({
     moveCharger,
     cancelCharge,
     validateCharge,
+    handleShootingStepComplete,
+    cancelShootingSequence,
   };
 };

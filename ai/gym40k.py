@@ -25,6 +25,76 @@ from ai.unit_registry import UnitRegistry
 
 from config_loader import get_config_loader
 
+# === DICE-BASED SHOOTING SYSTEM ===
+
+def roll_d6():
+    """Roll a 6-sided die."""
+    return random.randint(1, 6)
+
+def calculate_wound_target(strength, toughness):
+    """Calculate wound target based on strength vs toughness."""
+    if strength * 2 <= toughness:
+        return 6  # S*2 <= T: wound on 6+
+    elif strength < toughness:
+        return 5  # S < T: wound on 5+
+    elif strength == toughness:
+        return 4  # S = T: wound on 4+
+    elif strength > toughness:
+        return 3  # S > T: wound on 3+
+    elif strength * 2 >= toughness:
+        return 2  # S*2 >= T: wound on 2+
+    return 6  # fallback
+
+def calculate_save_target(armor_save, invul_save, armor_penetration):
+    """Calculate save target accounting for AP and invulnerable saves."""
+    modified_armor = armor_save + armor_penetration
+    
+    # Use invulnerable save if it's better than modified armor save (and invul > 0)
+    if invul_save > 0 and invul_save < modified_armor:
+        return invul_save
+    
+    return modified_armor
+
+def execute_shooting_sequence(shooter, target):
+    """Execute complete 6-step shooting sequence."""
+    # Get shooting stats with fallbacks
+    num_shots = shooter.get("rng_nb", 1)
+    hit_skill = shooter.get("rng_atk", 4)
+    strength = shooter.get("rng_str", 4)
+    armor_pen = shooter.get("rng_ap", 0)
+    damage_per_shot = shooter.get("rng_dmg", 1)
+    
+    # Get target stats with fallbacks
+    toughness = target.get("t", 4)
+    armor_save = target.get("armor_save", 5)
+    invul_save = target.get("invul_save", 0)
+    
+    total_damage = 0
+    
+    # Process each shot
+    for shot in range(num_shots):
+        # Step 3: Hit roll
+        hit_roll = roll_d6()
+        if hit_roll < hit_skill:
+            continue  # Miss
+        
+        # Step 4: Wound roll
+        wound_target = calculate_wound_target(strength, toughness)
+        wound_roll = roll_d6()
+        if wound_roll < wound_target:
+            continue  # Failed to wound
+        
+        # Step 5: Armor save
+        save_target = calculate_save_target(armor_save, invul_save, armor_pen)
+        save_roll = roll_d6()
+        if save_roll >= save_target:
+            continue  # Save successful
+        
+        # Step 6: Inflict damage
+        total_damage += damage_per_shot
+    
+    return total_damage
+
 class W40KEnv(gym.Env):
     """Phase-based W40K environment following AI_GAME_OVERVIEW.md specifications exactly."""
 
@@ -216,7 +286,11 @@ class W40KEnv(gym.Env):
                             unit_data = {"unit_type": unit_name}
                             
                             # Extract static numeric properties
-                            static_props = {'HP_MAX': 'hp_max', 'MOVE': 'move', 'RNG_RNG': 'rng_rng', 'RNG_DMG': 'rng_dmg', 'CC_DMG': 'cc_dmg'}
+                            static_props = {
+                                'HP_MAX': 'hp_max', 'MOVE': 'move', 'RNG_RNG': 'rng_rng', 'RNG_DMG': 'rng_dmg', 'CC_DMG': 'cc_dmg',
+                                'RNG_NB': 'rng_nb', 'RNG_ATK': 'rng_atk', 'RNG_STR': 'rng_str', 'RNG_AP': 'rng_ap',
+                                'T': 't', 'ARMOR_SAVE': 'armor_save', 'INVUL_SAVE': 'invul_save'
+                            }
                             
                             for ts_prop, py_prop in static_props.items():
                                 prop_match = re.search(rf'static {ts_prop}\s*=\s*(\d+)', content)
@@ -248,7 +322,7 @@ class W40KEnv(gym.Env):
                                 unit_data['is_melee'] = unit_data.get('cc_dmg', 0) > 0
                             
                             # Validate we got essential data
-                            if all(prop in unit_data for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg']):
+                            if all(prop in unit_data for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg', 'rng_nb', 'rng_atk', 'rng_str', 'rng_ap', 't', 'armor_save', 'invul_save']):
                                 definitions[unit_name] = unit_data
                             # Remove incomplete data warnings to reduce log clutter
         
@@ -269,7 +343,6 @@ class W40KEnv(gym.Env):
             return self.rewards_config.get("SpaceMarineRanged", {})
         else:
             return self.rewards_config.get("SpaceMarineMelee", {})
-            
 
     def reset(self, seed=None, options=None):
         """Reset environment to initial state."""
@@ -323,7 +396,15 @@ class W40KEnv(gym.Env):
                 "has_shot": False,
                 "has_charged": False,
                 "has_attacked": False,
-                "ICON": icon_name
+                "ICON": icon_name,
+                # Add default values for missing shooting attributes
+                "rng_nb": unit.get("rng_nb", 1),
+                "rng_atk": unit.get("rng_atk", 4),
+                "rng_str": unit.get("rng_str", 4),
+                "rng_ap": unit.get("rng_ap", 0),
+                "t": unit.get("t", 4),
+                "armor_save": unit.get("armor_save", 5),
+                "invul_save": unit.get("invul_save", 0)
             })
             self.units.append(unit)
         
@@ -725,7 +806,7 @@ class W40KEnv(gym.Env):
         return unit_rewards.get("wait")
 
     def _execute_shoot_action(self, unit, action_type):
-        """Execute shooting: only action_type==4 shoots following AI_GAME.md."""
+        """Execute shooting using dice-based system: only action_type==4 shoots following AI_GAME.md."""
         unit_rewards = self._get_unit_reward_config(unit)
 
         # Only action 4 shoots in shoot phase; action 7 waits
@@ -733,19 +814,20 @@ class W40KEnv(gym.Env):
             targets = self._get_shooting_targets(unit)
             if targets:
                 target = targets[0]
-                damage = unit["rng_dmg"]
                 old_hp = target["cur_hp"]
-                target["cur_hp"] = max(0, old_hp - damage)
+                
+                # Execute dice-based shooting sequence
+                total_damage = execute_shooting_sequence(unit, target)
+                target["cur_hp"] = max(0, old_hp - total_damage)
 
-                # Base ranged‐attack reward
-                # Base ranged‐attack reward
-                reward = unit_rewards.get("ranged_attack")
+                # Base ranged attack reward (scaled by damage dealt)
+                reward = unit_rewards.get("ranged_attack") * total_damage if total_damage > 0 else unit_rewards.get("ranged_attack", 0) * 0.1
 
                 # Kill bonuses
                 if target["cur_hp"] <= 0:
                     target["alive"] = False
                     reward += unit_rewards.get("enemy_killed_r")
-                    if old_hp == damage:
+                    if old_hp == total_damage:
                         reward += unit_rewards.get("enemy_killed_no_overkill_r") - unit_rewards.get("enemy_killed_r")
                     if self._was_lowest_hp_target(target, targets):
                         reward += unit_rewards.get("enemy_killed_lowests_hp_r") - unit_rewards.get("enemy_killed_r")
@@ -986,28 +1068,34 @@ class W40KEnv(gym.Env):
     def _shoot_at_target(self, unit, target):
         """Shoot at target and return reward."""
         if not target["alive"]:
-            return -0.5
+            unit_rewards = self._get_unit_reward_config(unit)
+            return unit_rewards.get("wait", -0.1)
         
-        damage = unit["rng_dmg"]
+        total_damage = execute_shooting_sequence(unit, target)
         old_hp = target["cur_hp"]
-        target["cur_hp"] = max(0, target["cur_hp"] - damage)
+        target["cur_hp"] = max(0, target["cur_hp"] - total_damage)
         
-        reward = 1.0  # Base shooting reward
+        unit_rewards = self._get_unit_reward_config(unit)
+        
+        # Base ranged attack reward (scaled by damage dealt)
+        reward = unit_rewards.get("ranged_attack", 0.2) * total_damage if total_damage > 0 else unit_rewards.get("ranged_attack", 0.2) * 0.1
         
         if target["cur_hp"] <= 0:
             target["alive"] = False
-            reward += 5.0  # Kill bonus
+            reward += unit_rewards.get("enemy_killed_r", 0.4)
             
             # Bonus for no overkill
-            if old_hp == damage:
-                reward += 1.0
+            if old_hp == total_damage:
+                reward += unit_rewards.get("enemy_killed_no_overkill_r", 0.8) - unit_rewards.get("enemy_killed_r", 0.4)
         
         return reward
 
     def _charge_at_target(self, unit, target):
         """Charge at target (move adjacent)."""
+        unit_rewards = self._get_unit_reward_config(unit)
+        
         if not target["alive"]:
-            return -0.5
+            return unit_rewards.get("wait", -0.1)
         
         # Move unit adjacent to target
         dx = target["col"] - unit["col"]
@@ -1028,7 +1116,7 @@ class W40KEnv(gym.Env):
         unit["col"] = new_col
         unit["row"] = new_row
         
-        return 0.5  # Charge reward
+        return unit_rewards.get("charge_success", 0.2)  # Charge reward
 
     def _is_ranged_unit(self, unit):
         """Check if unit is ranged based on unit definitions."""
@@ -1064,27 +1152,29 @@ class W40KEnv(gym.Env):
 
     def _attack_target(self, unit, target):
         """Attack adjacent target in melee combat."""
+        unit_rewards = self._get_unit_reward_config(unit)
+        
         if not target["alive"]:
-            return -0.5
+            return unit_rewards.get("wait", -0.1)
         
         # Check if actually adjacent
         dist = abs(unit["col"] - target["col"]) + abs(unit["row"] - target["row"])
         if dist > 1:
-            return -0.3  # Not adjacent penalty
+            return unit_rewards.get("atk_wasted_m", -0.3)  # Not adjacent penalty
         
         damage = unit["cc_dmg"]
         old_hp = target["cur_hp"]
         target["cur_hp"] = max(0, target["cur_hp"] - damage)
         
-        reward = 1.0  # Base attack reward
+        reward = unit_rewards.get("attack", 0.2)  # Base attack reward
         
         if target["cur_hp"] <= 0:
             target["alive"] = False
-            reward += 5.0  # Kill bonus
+            reward += unit_rewards.get("enemy_killed_m", 0.4)  # Kill bonus
             
             # Bonus for no overkill
             if old_hp == damage:
-                reward += 1.0
+                reward += unit_rewards.get("enemy_killed_no_overkill_m", 0.8) - unit_rewards.get("enemy_killed_m", 0.4)
         
         return reward
 
@@ -1357,22 +1447,20 @@ class W40KEnv(gym.Env):
             action_taken = False
             
             # Priority 1: Shoot if in range (instead of moving closer)
+            # Priority 1: Shoot if in range (instead of moving closer)
             if dist <= enemy.get("rng_rng", 4) and enemy.get("rng_dmg", 0) > 0:
-                damage = min(enemy["rng_dmg"], nearest_ai["cur_hp"])  # Prevent overkill
-                nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
+                # Execute dice-based shooting for enemy
+                total_damage = execute_shooting_sequence(enemy, nearest_ai)
+                nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - total_damage)
                 if nearest_ai["cur_hp"] <= 0:
                     nearest_ai["alive"] = False
                 action_taken = True
                 
-                # Record bot melee attack action
-                if self.save_replay:
-                    self._record_action(enemy, 6, 0.0)  # action_type 6 = attack, reward 0 for bot
-                
                 # Record bot shooting action
                 if self.save_replay:
                     self._record_action(enemy, 4, 0.0)  # action_type 4 = shoot, reward 0 for bot
-                
-            # Priority 2: Melee attack if adjacent
+
+            # Priority 2: Melee attack if adjacent (no change needed - it's already using damage directly)
             elif dist <= 1 and enemy.get("cc_dmg", 0) > 0:
                 damage = min(enemy["cc_dmg"], nearest_ai["cur_hp"])  # Prevent overkill
                 nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)

@@ -1,4 +1,5 @@
-// types/game.ts
+// frontend/src/types/game.ts
+
 export type PlayerId = 0 | 1;
 export type UnitId = number;
 export type GamePhase = "move" | "shoot" | "charge" | "combat";
@@ -17,6 +18,7 @@ export interface Unit {
   col: number;
   row: number;
   color: number;
+  BASE: number;
   MOVE: number;
   HP_MAX: number;
   CUR_HP?: number;
@@ -24,6 +26,14 @@ export interface Unit {
   RNG_DMG: number;
   CC_DMG: number;
   ICON: string;
+  // Dice system properties
+  RNG_NB?: number;    // Number of shots
+  RNG_ATK?: number;   // Hit skill (percentage)
+  RNG_STR?: number;   // Strength for wounding
+  RNG_AP?: number;    // Armor penetration
+  T?: number;         // Toughness
+  ARMOR_SAVE?: number; // Armor save (D6 target)
+  INVUL_SAVE?: number; // Invulnerable save (D6 target)
 }
 
 export interface GameState {

@@ -3,6 +3,8 @@ import React, { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js-legacy";
 import type { Unit } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
+import { CombatLog } from './CombatLogComponent';
+import { ShootingSequenceState } from '../utils/ShootingSequenceManager';
 
 // For flat-topped hex, even-q offset (col, row)
 function offsetToCube(col: number, row: number) {
@@ -57,6 +59,9 @@ type BoardProps = {
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
   onCancelCharge?: () => void;
   onValidateCharge?: (chargerId: number) => void;
+  shootingSequenceState: ShootingSequenceState | null;
+  onShootingStepComplete: () => void;
+  onCancelShootingSequence: () => void;
 };
 
 export default function Board({
@@ -81,6 +86,9 @@ export default function Board({
   onMoveCharger,
   onCancelCharge,
   onValidateCharge,
+  shootingSequenceState,
+  onShootingStepComplete,
+  onCancelShootingSequence,
 }: BoardProps) {
   console.log("Board render", { phase, mode, selectedUnitId });
   
@@ -673,6 +681,12 @@ export default function Board({
             }
           }
           
+          // Prevent any unit interactions during shooting sequence
+          if (shootingSequenceState?.isActive) {
+            console.log("🚫 Unit interaction blocked during shooting sequence");
+            return;
+          }
+
           // Handle clicking on selected shooter to cancel
           if (unit.id === selectedUnitId && phase === "shoot" && mode === "attackPreview") {
             setSelectedShootingTarget(null);
@@ -860,9 +874,39 @@ export default function Board({
     currentShootingTarget,
     selectedShootingTarget,
     currentCombatTarget,
-    selectedCombatTarget
+    selectedCombatTarget,
+    shootingSequenceState,
+    onShootingStepComplete,
+    onCancelShootingSequence
   ]);
 
-  // Simple container return - loading/error handled inside useEffect
-  return <div ref={containerRef} />;
+  // Helper function to get unit names for combat log
+  const getUnitName = (unitId: number) => {
+    const unit = units.find(u => u.id === unitId);
+    return unit?.name || `Unit ${unitId}`;
+  };
+
+  return (
+    <div className="relative">
+      <div ref={containerRef} />
+      
+      {/* Combat Log Overlay */}
+      {shootingSequenceState?.isActive && (
+        <>
+          <div className="fixed top-0 left-0 bg-red-500 text-white p-2 z-50">
+            🔥 COMBAT LOG SHOULD BE VISIBLE
+          </div>
+          <CombatLog
+            isVisible={true}
+            shooterName={getUnitName(shootingSequenceState.shooter.id)}
+            targetName={getUnitName(shootingSequenceState.target.id)}
+            currentStep={shootingSequenceState.combatResult.steps[shootingSequenceState.currentStepIndex] || null}
+            combatResult={shootingSequenceState.combatResult}
+            onStepComplete={onShootingStepComplete}
+            onCombatComplete={onCancelShootingSequence}
+          />
+        </>
+      )}
+    </div>
+  );
 }

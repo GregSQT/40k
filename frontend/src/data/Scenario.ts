@@ -1,9 +1,10 @@
 // src/data/Scenario.ts
 import { Unit } from '../types/game';
+import { createUnit } from './UnitFactory';
 
 const initialUnits: Unit[] = [
   // Player 0 units
-  {
+  createUnit({
     id: 0,
     name: "P-I",
     type: "Intercessor",
@@ -11,30 +12,18 @@ const initialUnits: Unit[] = [
     col: 23,
     row: 12,
     color: 0x244488,
-    MOVE: 4,
-    HP_MAX: 3,
-    RNG_RNG: 8,
-    RNG_DMG: 2,
-    CC_DMG: 1,
-    ICON: "/icons/Intercessor.webp",
-  },
-  {
+  }),
+  createUnit({
     id: 1,
     name: "P-A",
-    type: "Assault Intercessor",
+    type: "AssaultIntercessor",
     player: 0,
     col: 1,
     row: 12,
     color: 0xff3333,
-    MOVE: 6,
-    HP_MAX: 4,
-    RNG_RNG: 4,
-    RNG_DMG: 1,
-    CC_DMG: 2,
-    ICON: "/icons/AssaultIntercessor.webp",
-  },
+  }),
   // Player 1 units (AI)
-  {
+  createUnit({
     id: 2,
     name: "A-I",
     type: "Intercessor",
@@ -42,28 +31,30 @@ const initialUnits: Unit[] = [
     col: 0,
     row: 5,
     color: 0x882222,
-    MOVE: 4,
-    HP_MAX: 3,
-    RNG_RNG: 8,
-    RNG_DMG: 2,
-    CC_DMG: 1,
-    ICON: "/icons/Intercessor.webp",
-  },
-  {
+  }),
+  createUnit({
     id: 3,
     name: "A-A",
-    type: "Assault Intercessor",
+    type: "AssaultIntercessor",
     player: 1,
     col: 22,
     row: 3,
     color: 0x6633cc,
-    MOVE: 6,
-    HP_MAX: 4,
-    RNG_RNG: 4,
-    RNG_DMG: 1,
-    CC_DMG: 2,
-    ICON: "/icons/AssaultIntercessor.webp",
-  },
+  }),
 ];
+
+// Debug: Log the created units
+console.log('🔧 Created units with properties:', initialUnits.map(unit => ({
+  name: unit.name,
+  type: unit.type,
+  RNG_NB: unit.RNG_NB,
+  RNG_ATK: unit.RNG_ATK,
+  RNG_STR: unit.RNG_STR,
+  RNG_AP: unit.RNG_AP,
+  T: unit.T,
+  ARMOR_SAVE: unit.ARMOR_SAVE,
+  INVUL_SAVE: unit.INVUL_SAVE,
+  RNG_RNG: unit.RNG_RNG
+})));
 
 export default initialUnits;

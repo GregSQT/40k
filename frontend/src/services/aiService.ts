@@ -1,4 +1,4 @@
-// fron,tend/src/services/aiService.ts
+// frontend/src/services/aiService.ts
 import { AIGameState, AIAction } from '../types/game';
 
 export class AIServiceError extends Error {
@@ -18,15 +18,38 @@ export class AIService {
   private config: AIServiceConfig;
 
 constructor(config: Partial<AIServiceConfig> = {}) {
-  this.config = {
-    baseUrl: 'http://localhost:8000',
-    timeout: 5000,
-    retries: 2,
-    ...config,
-  };
+    this.config = {
+      baseUrl: 'http://localhost:8000',
+      timeout: 3000, // Shorter timeout for faster failure detection
+      retries: 1, // Single retry since backend is either up or down
+      ...config,
+    };
 }
 
+  private pendingRequests = new Map<string, Promise<AIAction>>();
+
   async fetchAiAction(gameState: AIGameState): Promise<AIAction> {
+    // Create a unique key for this request to prevent duplicates
+    const requestKey = `${gameState.units.map(u => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}`).join('|')}`;
+    
+    // If same request is already pending, return existing promise
+    if (this.pendingRequests.has(requestKey)) {
+      console.log('[AI] Reusing pending request for same game state');
+      return this.pendingRequests.get(requestKey)!;
+    }
+
+    const requestPromise = this.executeAiRequest(gameState);
+    this.pendingRequests.set(requestKey, requestPromise);
+    
+    try {
+      const result = await requestPromise;
+      return result;
+    } finally {
+      this.pendingRequests.delete(requestKey);
+    }
+  }
+
+  private async executeAiRequest(gameState: AIGameState): Promise<AIAction> {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= this.config.retries; attempt++) {
@@ -34,7 +57,10 @@ constructor(config: Partial<AIServiceConfig> = {}) {
         console.log(`[AI] Attempt ${attempt}/${this.config.retries} - Sending gameState:`, gameState);
         
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
+        const timeoutId = setTimeout(() => {
+          console.warn(`[AI] Request timeout after ${this.config.timeout}ms - backend likely unavailable`);
+          controller.abort();
+        }, this.config.timeout);
 
         let response: Response;
         try {
@@ -72,10 +98,41 @@ constructor(config: Partial<AIServiceConfig> = {}) {
       }
     }
 
-    throw new AIServiceError(
-      `Failed to fetch AI action after ${this.config.retries} attempts`,
-      lastError || undefined
-    );
+    // If all attempts failed, return fallback action instead of throwing
+    console.warn('[AI] All attempts failed, using fallback action');
+    return this.getFallbackAction(gameState.units[0]?.id || 1);
+  }
+
+  /**
+   * Get fallback action when AI service is unavailable
+   */
+  getFallbackAction(unitId: number): AIAction {
+    console.log(`[AI] Using fallback 'skip' action for unit ${unitId}`);
+    return {
+      action: 'skip',
+      unitId: unitId,
+    };
+  }
+
+  /**
+   * Check if backend is likely available (optional health check)
+   */
+  async isBackendAvailable(): Promise<boolean> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1000); // Very short timeout
+      
+      const response = await fetch(`${this.config.baseUrl}/health`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      return response.ok;
+    } catch {
+      console.log('[AI] Backend health check failed - backend not available');
+      return false;
+    }
   }
 
   private isValidAIAction(obj: any): obj is AIAction {

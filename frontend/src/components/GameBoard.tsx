@@ -2,6 +2,7 @@
 import React from 'react';
 import Board from './Board';
 import { Unit, GameState, MovePreview, AttackPreview, UnitId } from '../types/game';
+import { ShootingSequenceState } from '../utils/ShootingSequenceManager';
 
 interface GameBoardProps {
   units: Unit[];
@@ -25,6 +26,9 @@ interface GameBoardProps {
   onMoveCharger: (chargerId: UnitId, destCol: number, destRow: number) => void;
   onCancelCharge: () => void;
   onValidateCharge: (chargerId: UnitId) => void;
+  shootingSequenceState: ShootingSequenceState | null;
+  onShootingStepComplete: () => void;
+  onCancelShootingSequence: () => void;
 }
 
 export const GameBoard: React.FC<GameBoardProps> = (props) => {
@@ -74,6 +78,9 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         onMoveCharger={props.onMoveCharger}
         onCancelCharge={props.onCancelCharge}
         onValidateCharge={props.onValidateCharge}
+        shootingSequenceState={props.shootingSequenceState}
+        onShootingStepComplete={props.onShootingStepComplete}
+        onCancelShootingSequence={props.onCancelShootingSequence}
       />
     </div>
   );

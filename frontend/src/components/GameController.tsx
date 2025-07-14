@@ -1,5 +1,5 @@
 // src/components/GameController.tsx
-import React from "react";
+import React, { useState } from "react";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { UnitSelector } from "./UnitSelector";
 import { GameBoard } from "./GameBoard";
@@ -9,6 +9,7 @@ import { useGameActions } from "../hooks/useGameActions";
 import { useAIPlayer } from "../hooks/useAIPlayer";
 import { usePhaseTransition } from "../hooks/usePhaseTransition";
 import { Unit } from "../types/game";
+import { ShootingSequenceState, shootingSequenceManager } from "../utils/ShootingSequenceManager";
 
 interface GameControllerProps {
   initialUnits: Unit[];
@@ -22,12 +23,17 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Initialize game state with custom hook
   const { gameState, movePreview, attackPreview, actions } = useGameState(initialUnits);
   
+  // Shooting sequence state management
+  const [shootingSequenceState, setShootingSequenceState] = useState<ShootingSequenceState | null>(null);
+  
   // Set up game actions
   const gameActions = useGameActions({
     gameState,
     movePreview,
     attackPreview,
     actions,
+    shootingSequenceState,
+    setShootingSequenceState,
   });
 
   // Handle AI player behavior
@@ -42,6 +48,18 @@ export const GameController: React.FC<GameControllerProps> = ({
     gameState,
     actions,
   });
+
+  // Shooting sequence handlers
+  const handleShootingStepComplete = () => {
+    if (shootingSequenceState?.isActive) {
+      console.log("🎲 Advancing to next shooting step");
+      shootingSequenceManager.nextStep();
+    }
+  };
+  
+  const handleCancelShootingSequence = () => {
+    setShootingSequenceState(null);
+  };
 
   return (
     <div className={`game-controller ${className}`}>
@@ -89,6 +107,9 @@ export const GameController: React.FC<GameControllerProps> = ({
               onMoveCharger={gameActions.moveCharger}
               onCancelCharge={gameActions.cancelCharge}
               onValidateCharge={gameActions.validateCharge}
+              shootingSequenceState={shootingSequenceState}
+              onShootingStepComplete={handleShootingStepComplete}
+              onCancelShootingSequence={handleCancelShootingSequence}
             />
           </ErrorBoundary>
         </div>

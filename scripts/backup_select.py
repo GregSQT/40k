@@ -28,7 +28,10 @@ else:
 ##### root files
 ######################################################################################################
 
+        "AI_GAME.md",
+        "AI_INSTRUCTIONS.md",
         "config_loader.py",
+        "Technical_Overview.md",
 
 ######################################################################################################
 ##### ai files
@@ -72,9 +75,18 @@ else:
         "frontend/public/config/training_config.json",  # AI Training Parameters
         "frontend/public/config/unit_definitions.json",  # Unit Stats & Abilities
 
+        # Frontend/src
+        "frontend/src/App.tsx",
+
         # Frontend/src/components
         "frontend/src/components/Board.tsx",
+        "frontend/src/components/CombatLogComponent.tsx",
+        "frontend/src/components/DiceRollComponent.tsx",
+        "frontend/src/components/ErrorBoundary.tsx",
         "frontend/src/components/GameBoard.tsx",
+        "frontend/src/components/GameController.tsx",
+        "frontend/src/components/GameStatus.tsx",
+        "frontend/src/components/ReplayBoard.tsx",
         "frontend/src/components/ReplayViewer.tsx",
         "frontend/src/components/UnitSelector.tsx",
 
@@ -94,6 +106,15 @@ else:
         "frontend/src/pages/GamePage.tsx",
         "frontend/src/pages/ReplayPage.tsx",
 
+        # frontend/src/services
+        "frontend/src/services/aiService.ts",
+
+        # frontend/src/types
+        "frontend/src/types/api.ts",
+        "frontend/src/types/game.ts",
+        "frontend/src/types/index.ts",
+        "frontend/src/types/replay.ts",
+
         # Frontend/src/roster/spaceMarine
         "frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
         "frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts",
@@ -106,7 +127,10 @@ else:
         "frontend/src/roster/tyranid/TyranidRangedUnit.ts",
         "frontend/src/roster/tyranid/Termagant.ts",
         "frontend/src/roster/tyranid/Hormagaunt.ts",
-        "frontend/src/roster/tyranid/Carnifex.ts"
+        "frontend/src/roster/tyranid/Carnifex.ts",
+
+        # frontend/src/utils
+        "frontend/src/utils/ShootingSequenceManager.ts"
     ]
 
 logfile = os.path.join(DEST_ROOT, "backup.log")

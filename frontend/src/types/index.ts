@@ -1,4 +1,4 @@
-// src/types/index.ts
+// frontend/src/types/index.ts
 // Game types
 export type {
   PlayerId,
