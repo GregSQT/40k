@@ -222,7 +222,8 @@ class W40KEnv(gym.Env):
                         "has_shot": False,
                         "has_charged": False,
                         "has_attacked": False,
-                        "ICON": icon_name
+                        "ICON": icon_name,
+                        "size_radius": unit.get("size_radius", 1)  # Pass size_radius to frontend
                     })
                     self.units.append(unit)
                     
@@ -289,7 +290,8 @@ class W40KEnv(gym.Env):
                             static_props = {
                                 'HP_MAX': 'hp_max', 'MOVE': 'move', 'RNG_RNG': 'rng_rng', 'RNG_DMG': 'rng_dmg', 'CC_DMG': 'cc_dmg',
                                 'RNG_NB': 'rng_nb', 'RNG_ATK': 'rng_atk', 'RNG_STR': 'rng_str', 'RNG_AP': 'rng_ap',
-                                'T': 't', 'ARMOR_SAVE': 'armor_save', 'INVUL_SAVE': 'invul_save'
+                                'T': 't', 'ARMOR_SAVE': 'armor_save', 'INVUL_SAVE': 'invul_save',
+                                'SIZE_RADIUS': 'size_radius'  # New: Extract size_radius if defined in TS
                             }
                             
                             for ts_prop, py_prop in static_props.items():
@@ -320,6 +322,10 @@ class W40KEnv(gym.Env):
                             else:
                                 unit_data['is_ranged'] = unit_data.get('rng_rng', 0) > 1
                                 unit_data['is_melee'] = unit_data.get('cc_dmg', 0) > 0
+                            
+                            # Default size_radius to 1 if not specified
+                            if 'size_radius' not in unit_data:
+                                unit_data['size_radius'] = 1
                             
                             # Validate we got essential data
                             if all(prop in unit_data for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg', 'rng_nb', 'rng_atk', 'rng_str', 'rng_ap', 't', 'armor_save', 'invul_save']):

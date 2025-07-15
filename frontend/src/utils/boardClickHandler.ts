@@ -28,6 +28,12 @@ export function setupBoardClickHandler(callbacks: {
       callbacks.onStartAttackPreview(unitId);
     } else if (phase === 'shoot' && mode === 'attackPreview' && selectedUnitId != null) {
       callbacks.onShoot(selectedUnitId, unitId);
+    } else if (phase === 'combat' && selectedUnitId != null && selectedUnitId !== unitId) {
+      // Combat phase: first unit selected, clicking on target (different unit)
+      callbacks.onCombatAttack(selectedUnitId, unitId);
+    } else if (phase === 'combat' && selectedUnitId === unitId) {
+      // Combat phase: clicking on same unit cancels attack
+      callbacks.onCombatAttack(selectedUnitId, null);
     } else {
       callbacks.onSelectUnit(unitId);
     }

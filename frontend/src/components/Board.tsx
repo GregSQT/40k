@@ -380,6 +380,7 @@ export default function Board({
         attackFromCol !== null &&
         attackFromRow !== null &&
         (
+          mode === "movePreview" ||
           mode === "attackPreview" ||
           (phase === "shoot" && selectedUnit?.SHOOT_LEFT !== undefined && selectedUnit.SHOOT_LEFT > 0)
         )
@@ -711,15 +712,42 @@ export default function Board({
           previewCircle.endFill();
           app.stage.addChild(previewCircle);
 
-          const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
-            fontSize: UNIT_TEXT_SIZE,
-            fill: 0xffffff,
-            align: "center",
-            fontWeight: "bold",
-          });
-          previewText.anchor.set(0.5);
-          previewText.position.set(centerX, centerY + HEX_RADIUS * 0.55);
-          app.stage.addChild(previewText);
+          // ✅ ICON RENDERING FOR PREVIEW UNIT
+          if (previewUnit.ICON) {
+            try {
+              const texture = PIXI.Texture.from(previewUnit.ICON);
+              const sprite = new PIXI.Sprite(texture);
+              sprite.anchor.set(0.5);
+              sprite.position.set(centerX, centerY);
+              sprite.width = HEX_RADIUS * ICON_SCALE;
+              sprite.height = HEX_RADIUS * ICON_SCALE;
+              sprite.alpha = 0.8; // Slightly transparent for preview
+              app.stage.addChild(sprite);
+            } catch (iconError) {
+              console.warn(`Failed to load preview icon ${previewUnit.ICON}:`, iconError);
+              // Fallback to text if icon fails
+              const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
+                fontSize: UNIT_TEXT_SIZE,
+                fill: 0xffffff,
+                align: "center",
+                fontWeight: "bold",
+              });
+              previewText.anchor.set(0.5);
+              previewText.position.set(centerX, centerY);
+              app.stage.addChild(previewText);
+            }
+          } else {
+            // No icon - use text
+            const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
+              fontSize: UNIT_TEXT_SIZE,
+              fill: 0xffffff,
+              align: "center",
+              fontWeight: "bold",
+            });
+            previewText.anchor.set(0.5);
+            previewText.position.set(centerX, centerY);
+            app.stage.addChild(previewText);
+          }
         }
       }
 
@@ -736,15 +764,42 @@ export default function Board({
           previewCircle.endFill();
           app.stage.addChild(previewCircle);
 
-          const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
-            fontSize: UNIT_TEXT_SIZE,
-            fill: 0xffffff,
-            align: "center",
-            fontWeight: "bold",
-          });
-          previewText.anchor.set(0.5);
-          previewText.position.set(centerX, centerY + HEX_RADIUS * 0.55);
-          app.stage.addChild(previewText);
+          // ✅ ICON RENDERING FOR ATTACK PREVIEW UNIT
+          if (previewUnit.ICON) {
+            try {
+              const texture = PIXI.Texture.from(previewUnit.ICON);
+              const sprite = new PIXI.Sprite(texture);
+              sprite.anchor.set(0.5);
+              sprite.position.set(centerX, centerY);
+              sprite.width = HEX_RADIUS * ICON_SCALE;
+              sprite.height = HEX_RADIUS * ICON_SCALE;
+              sprite.alpha = 0.8; // Slightly transparent for preview
+              app.stage.addChild(sprite);
+            } catch (iconError) {
+              console.warn(`Failed to load attack preview icon ${previewUnit.ICON}:`, iconError);
+              // Fallback to text if icon fails
+              const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
+                fontSize: UNIT_TEXT_SIZE,
+                fill: 0xffffff,
+                align: "center",
+                fontWeight: "bold",
+              });
+              previewText.anchor.set(0.5);
+              previewText.position.set(centerX, centerY);
+              app.stage.addChild(previewText);
+            }
+          } else {
+            // No icon - use text
+            const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
+              fontSize: UNIT_TEXT_SIZE,
+              fill: 0xffffff,
+              align: "center",
+              fontWeight: "bold",
+            });
+            previewText.anchor.set(0.5);
+            previewText.position.set(centerX, centerY);
+            app.stage.addChild(previewText);
+          }
         }
       }
 
