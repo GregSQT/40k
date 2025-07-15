@@ -49,7 +49,7 @@ export const GameController: React.FC<GameControllerProps> = ({
     if (gameState.phase === 'shoot') {
       actions.initializeShootingPhase();
     }
-  }, [gameState.phase, actions]);
+  }, [gameState.phase]);
 
   return (
     <div className={`game-controller ${className}`}>
@@ -98,6 +98,22 @@ export const GameController: React.FC<GameControllerProps> = ({
               onCancelCharge={gameActions.cancelCharge}
               onValidateCharge={gameActions.validateCharge}
               shootingPhaseState={shootingPhaseState}
+              targetPreview={gameState.targetPreview}
+              onCancelTargetPreview={() => {
+                if (gameState.targetPreview?.blinkTimer) {
+                  clearInterval(gameState.targetPreview.blinkTimer);
+                }
+                actions.setTargetPreview(null);
+                
+                // Keep the unit selected and stay in attackPreview mode (red hexes)
+                if (gameState.selectedUnitId) {
+                  const selectedUnit = gameState.units.find(u => u.id === gameState.selectedUnitId);
+                  if (selectedUnit) {
+                    actions.setAttackPreview({ unitId: gameState.selectedUnitId, col: selectedUnit.col, row: selectedUnit.row });
+                    actions.setMode("attackPreview");
+                  }
+                }
+              }}
             />
           </ErrorBoundary>
         </div>

@@ -1,7 +1,7 @@
 // hooks/useGameState.ts
 
 import { useState, useCallback } from 'react';
-import { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, MovePreview, AttackPreview, ShootingPhaseState } from '../types/game';
+import { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, MovePreview, AttackPreview, ShootingPhaseState, TargetPreview } from '../types/game';
 
 interface UseGameStateReturn {
   gameState: GameState;
@@ -27,6 +27,7 @@ interface UseGameStateReturn {
     initializeShootingPhase: () => void;
     updateShootingPhaseState: (updates: Partial<ShootingPhaseState>) => void;
     decrementShotsLeft: (unitId: UnitId) => void;
+    setTargetPreview: (preview: TargetPreview | null) => void;
   };
 }
 
@@ -34,7 +35,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   const [gameState, setGameState] = useState<GameState>({
     units: initialUnits.map(unit => ({
       ...unit,
-      SHOOT_LEFT: unit.RNG_NB
+      SHOOT_LEFT: unit.RNG_NB || 0
     })),
     currentPlayer: 0,
     phase: "move",
@@ -43,6 +44,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     unitsMoved: [],
     unitsCharged: [],
     unitsAttacked: [],
+    targetPreview: null,
   });
 
   const [movePreview, setMovePreview] = useState<MovePreview | null>(null);
@@ -159,6 +161,10 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     }));
   }, []);
 
+  const setTargetPreview = useCallback((preview: TargetPreview | null) => {
+    setGameState(prev => ({ ...prev, targetPreview: preview }));
+  }, []);
+
   return {
     gameState,
     movePreview,
@@ -183,6 +189,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       initializeShootingPhase,
       updateShootingPhaseState,
       decrementShotsLeft,
+      setTargetPreview,
     },
   };
 };

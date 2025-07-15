@@ -63,6 +63,18 @@ export interface ShootingPhaseState {
   singleShotState: SingleShotState | null;
 }
 
+export interface TargetPreview {
+  targetId: UnitId;
+  shooterId: UnitId;
+  currentBlinkStep: number;
+  totalBlinkSteps: number;
+  blinkTimer: NodeJS.Timeout | null;
+  hitProbability: number;
+  woundProbability: number;
+  saveProbability: number;
+  overallProbability: number;
+}
+
 export interface GameState {
   units: Unit[];
   currentPlayer: PlayerId;
@@ -72,6 +84,7 @@ export interface GameState {
   unitsMoved: UnitId[];
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
+  targetPreview: TargetPreview | null;
 }
 
 export interface MovePreview {

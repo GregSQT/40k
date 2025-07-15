@@ -1,7 +1,7 @@
 // frontend/src/components/Board.tsx
 import React, { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js-legacy";
-import type { Unit } from "../types/game";
+import type { Unit, TargetPreview } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
 import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
@@ -59,7 +59,9 @@ type BoardProps = {
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
   onCancelCharge?: () => void;
   onValidateCharge?: (chargerId: number) => void;
-  shootingPhaseState?: any; // Add this property
+  shootingPhaseState?: any;
+  targetPreview?: TargetPreview | null;
+  onCancelTargetPreview?: () => void;
 };
 
 export default function Board({
@@ -85,6 +87,8 @@ export default function Board({
   onCancelCharge,
   onValidateCharge,
   shootingPhaseState,
+  targetPreview,
+  onCancelTargetPreview,
 }: BoardProps) {
   React.useEffect(() => {
     console.log("Board render", { phase, mode, selectedUnitId });
@@ -228,8 +232,15 @@ export default function Board({
     // Right click cancels move/attack preview
     if (app.view && app.view.addEventListener) {
       app.view.addEventListener("contextmenu", (e) => {
-        if (mode === "movePreview" || mode === "attackPreview") {
-          e.preventDefault();
+        e.preventDefault();
+        
+        if (phase === "shoot") {
+          // During shooting phase, only cancel target preview if one exists
+          if (targetPreview) {
+            onCancelTargetPreview?.();
+          }
+          // If no target preview, do nothing (don't cancel the whole shooting)
+        } else if (mode === "movePreview" || mode === "attackPreview") {
           onCancelMove?.();
         }
       });
@@ -358,13 +369,10 @@ export default function Board({
           attackFromCol = null;
           attackFromRow = null;
         }
-      } else if (phase === "shoot" && shootingPhaseState?.singleShotState?.shotsLeft > 0) {
-        const shooter = units.find(u => u.id === shootingPhaseState.singleShotState.shooterId);
-        if (shooter) {
-          previewUnit = shooter;
-          attackFromCol = shooter.col;
-          attackFromRow = shooter.row;
-        }
+      } else if (phase === "shoot" && selectedUnit?.SHOOT_LEFT !== undefined && selectedUnit.SHOOT_LEFT > 0) {
+        previewUnit = selectedUnit;
+        attackFromCol = selectedUnit.col;
+        attackFromRow = selectedUnit.row;
       }
 
       if (
@@ -373,7 +381,7 @@ export default function Board({
         attackFromRow !== null &&
         (
           mode === "attackPreview" ||
-          (phase === "shoot" && shootingPhaseState?.singleShotState?.shotsLeft > 0)
+          (phase === "shoot" && selectedUnit?.SHOOT_LEFT !== undefined && selectedUnit.SHOOT_LEFT > 0)
         )
       ) {
         const centerCube = offsetToCube(attackFromCol, attackFromRow);
@@ -460,32 +468,51 @@ export default function Board({
       const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
       const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
-      // ✅ HP BAR USING CONFIG VALUES
+      // ✅ HP BAR USING CONFIG VALUES WITH PREVIEW SUPPORT
       if (unit.HP_MAX) {
+        console.log('🔍 Target preview debug:', { targetPreview, unitId: unit.id });
         const HP_BAR_WIDTH = HEX_RADIUS * HP_BAR_WIDTH_RATIO;
         const HP_BAR_Y_OFFSET = HEX_RADIUS * HP_BAR_Y_OFFSET_RATIO;
 
         const barX = centerX - HP_BAR_WIDTH / 2;
         const barY = centerY - HP_BAR_Y_OFFSET - HP_BAR_HEIGHT;
 
+        // Check if this unit is being previewed for shooting
+        const isTargetPreviewed = targetPreview && targetPreview.targetId === unit.id;
+        
+        // Enhanced size for previewed targets
+        const finalBarWidth = isTargetPreviewed ? HP_BAR_WIDTH * 2.5 : HP_BAR_WIDTH;
+        const finalBarHeight = isTargetPreviewed ? HP_BAR_HEIGHT * 2.5 : HP_BAR_HEIGHT;
+        const finalBarX = isTargetPreviewed ? centerX - finalBarWidth / 2 : barX;
+        const finalBarY = isTargetPreviewed ? barY - (finalBarHeight - HP_BAR_HEIGHT) : barY;
+
         // Draw background (gray)
         const barBg = new PIXI.Graphics();
         barBg.beginFill(0x222222, 1);
-        barBg.drawRoundedRect(barX, barY, HP_BAR_WIDTH, HP_BAR_HEIGHT, 3);
+        barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, 3);
         barBg.endFill();
         app.stage.addChild(barBg);
         
-        // Calculate current HP first
-        const hp = Math.max(0, unit.CUR_HP ?? unit.HP_MAX);
-
-        // ✅ SIMPLIFIED HP BAR - No animations to prevent re-render loops
-        const displayHP = hp;
-        const finalBarWidth = HP_BAR_WIDTH;
-        const finalBarHeight = HP_BAR_HEIGHT;
-        const finalBarX = barX;
-        const finalBarY = barY;
+        // Calculate current HP and future HP for preview
+        const currentHP = Math.max(0, unit.CUR_HP ?? unit.HP_MAX);
+        let displayHP = currentHP;
         
-        // Draw HP slices with enhanced or normal size
+        if (isTargetPreviewed && targetPreview) {
+          const shooter = units.find(u => u.id === targetPreview.shooterId);
+          if (shooter) {
+            if (targetPreview.currentBlinkStep === 0) {
+              // Step 0: Show current HP
+              displayHP = currentHP;
+            } else {
+              // Steps 1+: Show HP after shot number (currentBlinkStep)
+              const damagePerShot = shooter.RNG_DMG || 1;
+              const totalDamage = targetPreview.currentBlinkStep * damagePerShot;
+              displayHP = Math.max(0, currentHP - totalDamage);
+            }
+          }
+        }
+        
+        // Draw HP slices
         const sliceWidth = finalBarWidth / unit.HP_MAX;
         for (let i = 0; i < unit.HP_MAX; i++) {
           const slice = new PIXI.Graphics();
@@ -494,6 +521,34 @@ export default function Board({
           slice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
           slice.endFill();
           app.stage.addChild(slice);
+        }
+        
+        // Show probability display for previewed targets
+        if (isTargetPreviewed && targetPreview) {
+          // Create square background
+          const squareSize = 35;
+          const squareX = centerX - squareSize/2; // Centered relative to HP bar
+          const squareY = finalBarY - squareSize - 8; // Above the HP bar
+          
+          const probBg = new PIXI.Graphics();
+          probBg.beginFill(0x333333, 0.9); // Dark grey background
+          probBg.lineStyle(2, 0x00ff00, 1); // Green border
+          probBg.drawRoundedRect(squareX, squareY, squareSize, squareSize, 3);
+          probBg.endFill();
+          app.stage.addChild(probBg);
+          
+          const probText = new PIXI.Text(
+            `${Math.round(targetPreview.overallProbability)}%`,
+            {
+              fontSize: 12,
+              fill: 0x00ff00, // Green text
+              align: "center",
+              fontWeight: "bold"
+            }
+          );
+          probText.anchor.set(0.5);
+          probText.position.set(squareX + squareSize/2, squareY + squareSize/2);
+          app.stage.addChild(probText);
         }
       }
 
@@ -705,7 +760,8 @@ export default function Board({
       phase,
       boardConfig,
       loading,
-      error
+      error,
+      targetPreview
     ]);
 
     // Simple container return - loading/error handled inside useEffect

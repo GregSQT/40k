@@ -1,6 +1,7 @@
 // src/hooks/useGameActions.ts
 import { useCallback } from 'react';
-import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState } from '../types/game';
+import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState, TargetPreview } from '../types/game';
+import { calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability } from '../utils/probabilityCalculator';
 import { singleShotSequenceManager } from '../utils/ShootingSequenceManager';
 
 interface UseGameActionsParams {
@@ -21,6 +22,7 @@ interface UseGameActionsParams {
     initializeShootingPhase: () => void;
     updateShootingPhaseState: (updates: Partial<ShootingPhaseState>) => void;
     decrementShotsLeft: (unitId: UnitId) => void;
+    setTargetPreview: (preview: TargetPreview | null) => void;
   };
 }
 
@@ -308,11 +310,18 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     }
   };
 };
-
+  //
   const handleShoot = useCallback((shooterId: UnitId, targetId: UnitId) => {
     const shooter = findUnit(shooterId);
     const target = findUnit(targetId);
     if (!shooter || !target) return;
+
+    // bail out if no shots remaining
+    const shotsLeft = shooter.SHOOT_LEFT ?? 0;
+    if (shotsLeft <= 0) {
+      console.log(`🎯 ${shooter.name} has no shots remaining`);
+      return;
+    }
 
     // Check if we're in single shot mode
     if (shootingPhaseState.singleShotState?.isActive) {
@@ -345,61 +354,143 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
         return;
       }
     } else {
-      // Start new shooting sequence for this unit
-      console.log(`🎯 Starting individual shot sequence for ${shooter.name}: ${shooter.SHOOT_LEFT} shots`);
+      // Check if this is a preview (first click) or execute (second click)
+      const currentTargetPreview = gameState.targetPreview;
       
-      singleShotSequenceManager.startShootingSequence(
-        shooter,
-        // On state change
-        (newState) => {
-          actions.updateShootingPhaseState({
-            currentShooter: shooterId,
-            singleShotState: newState
-          });
-        },
-        // On single shot complete
-        (shotResult) => {
-          console.log(`💥 Single shot result: ${shotResult.damageDealt} damage`);
+      if (currentTargetPreview && 
+          currentTargetPreview.targetId === targetId && 
+          currentTargetPreview.shooterId === shooterId) {
+        // Second click - execute shooting
+        console.log(`🎯 Executing shooting sequence for ${shooter.name}: ${shooter.SHOOT_LEFT} shots`);
+        
+        // Clear preview
+        if (currentTargetPreview.blinkTimer) {
+          clearInterval(currentTargetPreview.blinkTimer);
+        }
+        actions.setTargetPreview(null);
+        
+        // Keep track of shots fired locally to avoid React state timing issues
+        let shotsFired = 0;
+        const totalShots = shooter.SHOOT_LEFT;
+        
+        // Create a temporary shooter with only 1 shot to force single-shot behavior
+        const singleShotShooter = {
+          ...shooter,
+          RNG_NB: 1,        // Force only 1 shot per sequence
+          SHOOT_LEFT: 1     // Only 1 shot in this sequence
+        };
+        
+        //////////////////////////////////////////
+        // Simple single shot execution - no complex sequence manager
+        console.log(`🎯 Executing single shot: ${shooter.name} → ${target.name}`);
+        
+        // Roll dice directly
+        const hitRoll = Math.floor(Math.random() * 6) + 1;
+        if (!shooter.RNG_ATK) throw new Error(`shooter.RNG_ATK is undefined for unit ${shooter.name}`);
+        const hitSuccess = hitRoll >= shooter.RNG_ATK;
+        
+        let damageDealt = 0;
+        
+        if (hitSuccess) {
+          const woundRoll = Math.floor(Math.random() * 6) + 1;
+          if (!shooter.RNG_STR) throw new Error(`shooter.RNG_STR is undefined for unit ${shooter.name}`);
+          if (!target.T) throw new Error(`target.T is undefined for unit ${target.name}`);
+          const shooterStr = shooter.RNG_STR;
+          const targetT = target.T;
+          const woundTarget = shooterStr === targetT ? 4 : (shooterStr > targetT ? 3 : 5);
+          const woundSuccess = woundRoll >= woundTarget;
           
-          // Apply damage immediately after each shot
-          if (shotResult.damageDealt > 0) {
-            const currentTarget = findUnit(targetId);
-            if (currentTarget) {
-              const currentHP = currentTarget.CUR_HP ?? currentTarget.HP_MAX;
-              const newHP = Math.max(0, currentHP - shotResult.damageDealt);
-              
-              if (newHP <= 0) {
-                console.log(`💀 Target destroyed by shot!`);
-                actions.removeUnit(targetId);
-              } else {
-                console.log(`🩹 Target takes ${shotResult.damageDealt} damage (${newHP}/${currentTarget.HP_MAX} HP)`);
-                actions.updateUnit(targetId, { CUR_HP: newHP });
-              }
+          if (woundSuccess) {
+            const saveRoll = Math.floor(Math.random() * 6) + 1;
+            if (!target.ARMOR_SAVE) throw new Error(`target.ARMOR_SAVE is undefined for unit ${target.name}`);
+            if (!shooter.RNG_AP) throw new Error(`shooter.RNG_AP is undefined for unit ${shooter.name}`);
+            const saveTarget = target.ARMOR_SAVE + shooter.RNG_AP;
+            const saveSuccess = saveRoll >= saveTarget;
+            
+            if (!saveSuccess) {
+              damageDealt = shooter.RNG_DMG;
             }
           }
+        }
+        
+        console.log(`🎲 Hit: ${hitRoll} (${hitSuccess}), Damage: ${damageDealt}`);
+        
+        // Apply damage
+        if (damageDealt > 0) {
+          const currentHP = target.CUR_HP ?? target.HP_MAX;
+          const newHP = Math.max(0, currentHP - damageDealt);
           
-          // Decrement shots remaining
-          actions.decrementShotsLeft(shooterId);
-        },
-        // On all shots complete
-        (totalDamage) => {
-          console.log(`🎯 All shots complete for ${shooter.name}`);
-          
-          // Mark unit as having shot this phase
+          if (newHP <= 0) {
+            console.log(`💀 Target destroyed!`);
+            actions.removeUnit(targetId);
+          } else {
+            console.log(`🩹 Target takes ${damageDealt} damage`);
+            actions.updateUnit(targetId, { CUR_HP: newHP });
+          }
+        }
+        
+        // Manually decrement shots - get fresh unit state
+        const currentShooter = findUnit(shooterId);
+        if (!currentShooter) throw new Error(`Cannot find shooter unit ${shooterId}`);
+        if (!currentShooter.SHOOT_LEFT) throw new Error(`currentShooter.SHOOT_LEFT is undefined for unit ${currentShooter.name}`);
+        const currentShotsLeft = currentShooter.SHOOT_LEFT;
+        const newShotsLeft = currentShotsLeft - 1;
+        actions.updateUnit(shooterId, { SHOOT_LEFT: newShotsLeft });
+        
+        // Check if more shots remaining
+        if (newShotsLeft > 0) {
+          console.log(`🎯 ${shooter.name} has ${newShotsLeft} shots remaining`);
+          // Stay in attack mode for target reselection
+          actions.setAttackPreview({ unitId: shooterId, col: shooter.col, row: shooter.row });
+          actions.setMode("attackPreview");
+        } else {
+          console.log(`🎯 ${shooter.name} finished shooting`);
+          // Mark as moved and end shooting
           actions.addMovedUnit(shooterId);
           actions.setAttackPreview(null);
           actions.setSelectedUnitId(null);
           actions.setMode("select");
-          
-          // Clear shooting state
-          actions.updateShootingPhaseState({
-            currentShooter: null,
-            singleShotState: null
-          });
         }
-      );
+      } else {
+        // First click - start preview
+        console.log(`🎯 Starting shooting preview for ${shooter.name} → ${target.name}`);
+        
+        // Clear any existing preview
+        if (currentTargetPreview?.blinkTimer) {
+          clearInterval(currentTargetPreview.blinkTimer);
+        }
+        
+        // Calculate probabilities
+        const hitProbability = calculateHitProbability(shooter);
+        const woundProbability = calculateWoundProbability(shooter, target);
+        const saveProbability = calculateSaveProbability(shooter, target);
+        const overallProbability = calculateOverallProbability(shooter, target);
+        
+        // Start preview with blink timer - SINGLE SHOT ONLY
+        const totalBlinkSteps = 2; // Only show: current HP (step 0) -> after next shot (step 1)
+        
+        const preview: TargetPreview = {
+          targetId,
+          shooterId,
+          currentBlinkStep: 0,
+          totalBlinkSteps,
+          blinkTimer: null,
+          hitProbability,
+          woundProbability,
+          saveProbability,
+          overallProbability
+        };
+        
+        // Start blink cycle for single shot preview
+        preview.blinkTimer = setInterval(() => {
+          preview.currentBlinkStep = (preview.currentBlinkStep + 1) % totalBlinkSteps;
+          actions.setTargetPreview({ ...preview });
+        }, 500);
+        
+        actions.setTargetPreview(preview);
+      }
     }
-  }, [findUnit, actions, shootingPhaseState]);
+  }, [findUnit, actions, shootingPhaseState, gameState.targetPreview]);
 
   const handleCombatAttack = useCallback((attackerId: UnitId, targetId: UnitId | null) => {
     if (targetId === null) {

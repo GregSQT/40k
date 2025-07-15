@@ -1,7 +1,7 @@
 // src/components/GameBoard.tsx
 import React from 'react';
 import Board from './Board';
-import { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState } from '../types/game';
+import { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState, TargetPreview } from '../types/game';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
 
 
@@ -28,6 +28,8 @@ interface GameBoardProps {
   onCancelCharge: () => void;
   onValidateCharge: (chargerId: UnitId) => void;
   shootingPhaseState: ShootingPhaseState;
+  targetPreview: TargetPreview | null;
+  onCancelTargetPreview: () => void;
 }
 
 export const GameBoard: React.FC<GameBoardProps> = (props) => {
@@ -101,6 +103,8 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         onCancelCharge={props.onCancelCharge}
         onValidateCharge={props.onValidateCharge}
         shootingPhaseState={props.shootingPhaseState}
+        targetPreview={props.targetPreview}
+        onCancelTargetPreview={props.onCancelTargetPreview}
       />
     </div>
   );
