@@ -6,6 +6,7 @@ export class Termagant extends TyranidRangedUnit {
   static NAME = "Termagant";
 
   // BASE
+  static BASE = 4;             // Base size
   static MOVE = 6;             // Move distance
   static T = 3;                // Toughness score
   static ARMOR_SAVE = 5;       // Armor save score

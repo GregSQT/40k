@@ -5,6 +5,7 @@ import { SpaceMarineRangedUnit } from "./SpaceMarineRangedUnit";
 export class Intercessor extends SpaceMarineRangedUnit {
   static NAME = "Intercessor";
   // BASE
+  static BASE = 5;             // Base size
   static MOVE = 6;             // Move distance
   static T = 4;                // Toughness score
   static ARMOR_SAVE = 3;       // Armor save score

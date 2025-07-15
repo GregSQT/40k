@@ -5,6 +5,7 @@ import { TyranidMeleeUnit } from "./TyranidMeleeUnit";
 export class Carnifex extends TyranidMeleeUnit {
   static NAME = "Carnifex";
   // BASE
+  static BASE = 8;             // Base size
   static MOVE = 8;             // Move distance
   static T = 9;                // Toughness score
   static ARMOR_SAVE = 2;       // Armor save score

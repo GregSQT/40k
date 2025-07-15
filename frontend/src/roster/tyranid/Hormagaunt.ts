@@ -5,6 +5,7 @@ import { TyranidMeleeUnit, REWARDS_MELEE } from "./TyranidMeleeUnit";
 export class Hormagaunt extends TyranidMeleeUnit {
   static NAME = "Hormagaunt";
   // BASE
+  static BASE = 4;             // Base size
   static MOVE = 10;             // Move distance
   static T = 3;                // Toughness score
   static ARMOR_SAVE = 5;       // Armor save score

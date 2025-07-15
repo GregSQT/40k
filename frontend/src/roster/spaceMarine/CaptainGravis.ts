@@ -6,6 +6,7 @@ export class CaptainGravis extends SpaceMarineMeleeUnit {
   static NAME = "Captain Gravis";
 
   // BASE
+  static BASE = 6;             // Base size
   static MOVE = 5;             // Move distance
   static T = 6;                // Toughness score
   static ARMOR_SAVE = 3;       // Armor save score

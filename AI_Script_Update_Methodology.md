@@ -11,7 +11,7 @@ I respect the exact indentation and formatting from your files
 
 2. Two-Block Update Format
 For every code change, I provide:
-ORIGINAL CODE (with line numbers):
+ORIGINAL CODE (with line Numbers outside the code):
 
 // Exact code from your file with proper indentation
 const example = "exactly as you provided";
