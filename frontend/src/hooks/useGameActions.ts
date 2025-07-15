@@ -1,12 +1,13 @@
 // src/hooks/useGameActions.ts
 import { useCallback } from 'react';
-import { GameState, UnitId, MovePreview, AttackPreview, Unit } from '../types/game';
-import { shootingSequenceManager, ShootingSequenceState } from '../utils/ShootingSequenceManager';
+import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState } from '../types/game';
+import { singleShotSequenceManager } from '../utils/ShootingSequenceManager';
 
 interface UseGameActionsParams {
   gameState: GameState;
   movePreview: MovePreview | null;
   attackPreview: AttackPreview | null;
+  shootingPhaseState: ShootingPhaseState;
   actions: {
     setMode: (mode: GameState['mode']) => void;
     setSelectedUnitId: (id: UnitId | null) => void;
@@ -17,18 +18,18 @@ interface UseGameActionsParams {
     addAttackedUnit: (unitId: UnitId) => void;
     updateUnit: (unitId: UnitId, updates: Partial<Unit>) => void;
     removeUnit: (unitId: UnitId) => void;
+    initializeShootingPhase: () => void;
+    updateShootingPhaseState: (updates: Partial<ShootingPhaseState>) => void;
+    decrementShotsLeft: (unitId: UnitId) => void;
   };
-  shootingSequenceState: ShootingSequenceState | null;
-  setShootingSequenceState: (state: ShootingSequenceState | null) => void;
 }
 
 export const useGameActions = ({
   gameState,
   movePreview,
   attackPreview,
+  shootingPhaseState,
   actions,
-  shootingSequenceState,
-  setShootingSequenceState,
 }: UseGameActionsParams) => {
   const { units, currentPlayer, phase, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked } = gameState;
 
@@ -73,7 +74,7 @@ export const useGameActions = ({
 
   const selectUnit = useCallback((unitId: UnitId | null) => {
     // Prevent unit selection during shooting sequence
-    if (shootingSequenceState?.isActive) {
+    if (shootingPhaseState.singleShotState?.isActive) {
       console.log("Cannot select units during shooting sequence");
       return;
     }
@@ -239,7 +240,10 @@ const calculateSaveTarget = (armorSave: number, invulSave: number, armorPenetrat
 // Execute complete shooting sequence
 const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
   // Step 1: Number of shots
-  const numberOfShots = shooter.RNG_NB || 1;
+  if (shooter.RNG_NB === undefined) {
+       throw new Error('shooter.RNG_NB is required');
+     }
+     const numberOfShots = shooter.RNG_NB;
   
   let totalDamage = 0;
   let hits = 0;
@@ -252,7 +256,10 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     
     // Step 3: Hit roll
     const hitRoll = rollD6();
-    const hitTarget = shooter.RNG_ATK || 4;
+    if (shooter.RNG_ATK === undefined) {
+      throw new Error('shooter.RNG_ATK is required');
+    }
+    const hitTarget = shooter.RNG_ATK;
     const didHit = hitRoll >= hitTarget;
     
     if (!didHit) continue; // Miss - next shot
@@ -260,7 +267,13 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     
     // Step 4: Wound roll  
     const woundRoll = rollD6();
-    const woundTarget = calculateWoundTarget(shooter.RNG_STR || 4, target.T || 4);
+    if (shooter.RNG_STR === undefined) {
+      throw new Error('shooter.RNG_STR is required');
+    }
+    if (target.T === undefined) {
+      throw new Error('target.T is required');
+    }
+   const woundTarget = calculateWoundTarget(shooter.RNG_STR, target.T);
     const didWound = woundRoll >= woundTarget;
     
     if (!didWound) continue; // Failed to wound - next shot
@@ -269,9 +282,9 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     // Step 5: Armor save
     const saveRoll = rollD6();
     const saveTarget = calculateSaveTarget(
-      target.ARMOR_SAVE || 5, 
-      target.INVUL_SAVE || 0, 
-      shooter.RNG_AP || 0
+      target.ARMOR_SAVE, 
+      target.INVUL_SAVE, 
+      shooter.RNG_AP
     );
     const savedWound = saveRoll >= saveTarget;
     
@@ -279,7 +292,10 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     failedSaves++;
     
     // Step 6: Inflict damage
-    totalDamage += shooter.RNG_DMG || 1;
+    if (shooter.RNG_DMG === undefined) {
+      throw new Error('shooter.RNG_DMG is required');
+    }
+    totalDamage += shooter.RNG_DMG;
   }
 
   return {
@@ -298,43 +314,92 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     const target = findUnit(targetId);
     if (!shooter || !target) return;
 
-    console.log(`🎯 Starting visual dice-based shooting: ${shooter.name || `Unit ${shooterId}`} -> ${target.name || `Unit ${targetId}`}`);
-
-    // Start the visual dice-based shooting sequence
-    shootingSequenceManager.startSequence(
-      shooter,
-      target,
-      // On state change callback
-      (newState) => {
-        setShootingSequenceState(newState);
-      },
-      // On sequence complete callback  
-      (finalDamage) => {
-        console.log(`💥 Shooting complete! Final damage: ${finalDamage}`);
+    // Check if we're in single shot mode
+    if (shootingPhaseState.singleShotState?.isActive) {
+      // Handle target selection for current shot
+      if (shootingPhaseState.singleShotState.currentStep === 'target_selection') {
+        console.log(`🎯 Shot ${shootingPhaseState.singleShotState.currentShotNumber}: Selecting target ${targetId}`);
+        singleShotSequenceManager.selectTarget(targetId);
         
-        // Apply the calculated damage
-        const currentHP = target.CUR_HP ?? target.HP_MAX;
-        const newHP = Math.max(0, currentHP - finalDamage);
+        // Auto-process hit roll
+        setTimeout(() => {
+          singleShotSequenceManager.processHitRoll(shooter);
+          
+          // Auto-process wound roll if hit succeeded
+          setTimeout(() => {
+            const currentState = singleShotSequenceManager.getState();
+            if (currentState?.stepResults.hitSuccess && target) {
+              singleShotSequenceManager.processWoundRoll(shooter, target);
+              
+              // Auto-process save roll if wound succeeded
+              setTimeout(() => {
+                const updatedState = singleShotSequenceManager.getState();
+                if (updatedState?.stepResults.woundSuccess && target) {
+                  singleShotSequenceManager.processSaveRoll(shooter, target);
+                }
+              }, 50);
+            }
+          }, 50);
+        }, 50);
         
-        if (newHP <= 0) {
-          console.log(`💀 ${target.name || `Unit ${targetId}`} destroyed!`);
-          actions.removeUnit(targetId);
-        } else {
-          console.log(`🩹 ${target.name || `Unit ${targetId}`} takes ${finalDamage} damage (${newHP}/${target.HP_MAX} HP remaining)`);
-          actions.updateUnit(targetId, { CUR_HP: newHP });
-        }
-
-        // Mark shooter as having shot and reset UI state
-        actions.addMovedUnit(shooterId);
-        actions.setAttackPreview(null);
-        actions.setSelectedUnitId(null);
-        actions.setMode("select");
-        
-        // Clear shooting sequence state
-        setShootingSequenceState(null);
+        return;
       }
-    );
-  }, [findUnit, actions, setShootingSequenceState]);
+    } else {
+      // Start new shooting sequence for this unit
+      console.log(`🎯 Starting individual shot sequence for ${shooter.name}: ${shooter.SHOOT_LEFT} shots`);
+      
+      singleShotSequenceManager.startShootingSequence(
+        shooter,
+        // On state change
+        (newState) => {
+          actions.updateShootingPhaseState({
+            currentShooter: shooterId,
+            singleShotState: newState
+          });
+        },
+        // On single shot complete
+        (shotResult) => {
+          console.log(`💥 Single shot result: ${shotResult.damageDealt} damage`);
+          
+          // Apply damage immediately after each shot
+          if (shotResult.damageDealt > 0) {
+            const currentTarget = findUnit(targetId);
+            if (currentTarget) {
+              const currentHP = currentTarget.CUR_HP ?? currentTarget.HP_MAX;
+              const newHP = Math.max(0, currentHP - shotResult.damageDealt);
+              
+              if (newHP <= 0) {
+                console.log(`💀 Target destroyed by shot!`);
+                actions.removeUnit(targetId);
+              } else {
+                console.log(`🩹 Target takes ${shotResult.damageDealt} damage (${newHP}/${currentTarget.HP_MAX} HP)`);
+                actions.updateUnit(targetId, { CUR_HP: newHP });
+              }
+            }
+          }
+          
+          // Decrement shots remaining
+          actions.decrementShotsLeft(shooterId);
+        },
+        // On all shots complete
+        (totalDamage) => {
+          console.log(`🎯 All shots complete for ${shooter.name}`);
+          
+          // Mark unit as having shot this phase
+          actions.addMovedUnit(shooterId);
+          actions.setAttackPreview(null);
+          actions.setSelectedUnitId(null);
+          actions.setMode("select");
+          
+          // Clear shooting state
+          actions.updateShootingPhaseState({
+            currentShooter: null,
+            singleShotState: null
+          });
+        }
+      );
+    }
+  }, [findUnit, actions, shootingPhaseState]);
 
   const handleCombatAttack = useCallback((attackerId: UnitId, targetId: UnitId | null) => {
     if (targetId === null) {
@@ -394,17 +459,6 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     actions.setMode("select");
   }, [actions]);
 
-  const handleShootingStepComplete = useCallback(() => {
-    if (shootingSequenceState?.isActive) {
-      shootingSequenceManager.nextStep();
-    }
-  }, [shootingSequenceState]);
-
-  const cancelShootingSequence = useCallback(() => {
-    shootingSequenceManager.cancelSequence();
-    setShootingSequenceState(null);
-  }, [setShootingSequenceState]);
-
   return {
     selectUnit,
     selectCharger,
@@ -418,7 +472,5 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     moveCharger,
     cancelCharge,
     validateCharge,
-    handleShootingStepComplete,
-    cancelShootingSequence,
   };
 };

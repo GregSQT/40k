@@ -9,7 +9,6 @@ import { useGameActions } from "../hooks/useGameActions";
 import { useAIPlayer } from "../hooks/useAIPlayer";
 import { usePhaseTransition } from "../hooks/usePhaseTransition";
 import { Unit } from "../types/game";
-import { ShootingSequenceState, shootingSequenceManager } from "../utils/ShootingSequenceManager";
 
 interface GameControllerProps {
   initialUnits: Unit[];
@@ -21,19 +20,15 @@ export const GameController: React.FC<GameControllerProps> = ({
   className = "",
 }) => {
   // Initialize game state with custom hook
-  const { gameState, movePreview, attackPreview, actions } = useGameState(initialUnits);
-  
-  // Shooting sequence state management
-  const [shootingSequenceState, setShootingSequenceState] = useState<ShootingSequenceState | null>(null);
+  const { gameState, movePreview, attackPreview, shootingPhaseState, actions } = useGameState(initialUnits);
   
   // Set up game actions
   const gameActions = useGameActions({
     gameState,
     movePreview,
     attackPreview,
+    shootingPhaseState,
     actions,
-    shootingSequenceState,
-    setShootingSequenceState,
   });
 
   // Handle AI player behavior
@@ -49,17 +44,12 @@ export const GameController: React.FC<GameControllerProps> = ({
     actions,
   });
 
-  // Shooting sequence handlers
-  const handleShootingStepComplete = () => {
-    if (shootingSequenceState?.isActive) {
-      console.log("🎲 Advancing to next shooting step");
-      shootingSequenceManager.nextStep();
+  // Initialize shooting phase when entering shoot phase
+  React.useEffect(() => {
+    if (gameState.phase === 'shoot') {
+      actions.initializeShootingPhase();
     }
-  };
-  
-  const handleCancelShootingSequence = () => {
-    setShootingSequenceState(null);
-  };
+  }, [gameState.phase, actions]);
 
   return (
     <div className={`game-controller ${className}`}>
@@ -107,9 +97,7 @@ export const GameController: React.FC<GameControllerProps> = ({
               onMoveCharger={gameActions.moveCharger}
               onCancelCharge={gameActions.cancelCharge}
               onValidateCharge={gameActions.validateCharge}
-              shootingSequenceState={shootingSequenceState}
-              onShootingStepComplete={handleShootingStepComplete}
-              onCancelShootingSequence={handleCancelShootingSequence}
+              shootingPhaseState={shootingPhaseState}
             />
           </ErrorBoundary>
         </div>

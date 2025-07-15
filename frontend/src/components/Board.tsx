@@ -3,8 +3,8 @@ import React, { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js-legacy";
 import type { Unit } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
-import { CombatLog } from './CombatLogComponent';
-import { ShootingSequenceState } from '../utils/ShootingSequenceManager';
+import { SingleShotDisplay } from './SingleShotDisplay';
+import { setupBoardClickHandler } from '../utils/boardClickHandler';
 
 // For flat-topped hex, even-q offset (col, row)
 function offsetToCube(col: number, row: number) {
@@ -59,9 +59,7 @@ type BoardProps = {
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
   onCancelCharge?: () => void;
   onValidateCharge?: (chargerId: number) => void;
-  shootingSequenceState: ShootingSequenceState | null;
-  onShootingStepComplete: () => void;
-  onCancelShootingSequence: () => void;
+  shootingPhaseState?: any; // Add this property
 };
 
 export default function Board({
@@ -86,26 +84,56 @@ export default function Board({
   onMoveCharger,
   onCancelCharge,
   onValidateCharge,
-  shootingSequenceState,
-  onShootingStepComplete,
-  onCancelShootingSequence,
+  shootingPhaseState,
 }: BoardProps) {
-  console.log("Board render", { phase, mode, selectedUnitId });
+  React.useEffect(() => {
+    console.log("Board render", { phase, mode, selectedUnitId });
+  }, [phase, mode, selectedUnitId]);
   
   // ✅ HOOK 1: useRef - ALWAYS called first
   const containerRef = useRef<HTMLDivElement>(null);
   
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig, loading, error } = useGameConfig();
-  // ✅ HOOK 2.5: Add shooting preview state management with React state
-  const [hpAnimationState, setHpAnimationState] = useState<boolean>(false);
-  const [currentShootingTarget, setCurrentShootingTarget] = useState<number | null>(null);
-  const [selectedShootingTarget, setSelectedShootingTarget] = useState<number | null>(null);
-  const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [currentCombatTarget, setCurrentCombatTarget] = useState<number | null>(null);
-  const [selectedCombatTarget, setSelectedCombatTarget] = useState<number | null>(null);
+  // ✅ STABLE CALLBACK REFS - Don't change on every render
+  const stableCallbacks = useRef({
+    onSelectUnit,
+    onStartMovePreview,
+    onStartAttackPreview,
+    onConfirmMove,
+    onCancelMove,
+    onShoot,
+    onCombatAttack,
+    onCharge,
+    onMoveCharger,
+    onCancelCharge,
+    onValidateCharge
+  });
 
-  // ✅ HOOK 3: useEffect - ALWAYS called third, with ALL original logic
+  // Update refs when props change but don't trigger re-render
+  stableCallbacks.current = {
+    onSelectUnit,
+    onStartMovePreview,
+    onStartAttackPreview,
+    onConfirmMove,
+    onCancelMove,
+    onShoot,
+    onCombatAttack,
+    onCharge,
+    onMoveCharger,
+    onCancelCharge,
+    onValidateCharge
+  };
+  // ✅ HOOK 2.5: Add shooting preview state management with React state
+  // ✅ REMOVE ALL ANIMATION STATE - This is causing the re-render loop
+  // const [hpAnimationState, setHpAnimationState] = useState<boolean>(false);
+  // const [currentShootingTarget, setCurrentShootingTarget] = useState<number | null>(null);
+  // const [selectedShootingTarget, setSelectedShootingTarget] = useState<number | null>(null);
+  // const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // const [currentCombatTarget, setCurrentCombatTarget] = useState<number | null>(null);
+  // const [selectedCombatTarget, setSelectedCombatTarget] = useState<number | null>(null);
+
+  // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
     // Early returns INSIDE useEffect to avoid hooks order violation
     if (!containerRef.current) return;
@@ -227,102 +255,32 @@ export default function Board({
       );
     }
 
-    // ✅ SHOOTING PREVIEW: Identify selected shooting target
+    // ✅ SIMPLIFIED SHOOTING PREVIEW - No animations to prevent re-render loop
     let shootingTarget: Unit | null = null;
     if (phase === "shoot" && mode === "attackPreview" && selectedUnit && attackPreview) {
+      // Simple target identification - no state changes here
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
-      
-      // Find enemy units within shooting range
       const enemiesInRange = units.filter(u =>
         u.player !== selectedUnit.player &&
         cubeDistance(c1, offsetToCube(u.col, u.row)) <= selectedUnit.RNG_RNG
       );
       
-      // For shooting, use the selectedShootingTarget if set
-      if (selectedShootingTarget !== null) {
-        shootingTarget = enemiesInRange.find(u => u.id === selectedShootingTarget) || null;
-      }
-      
-      // Update animation target tracking
-      if (shootingTarget && currentShootingTarget !== shootingTarget.id) {
-        setCurrentShootingTarget(shootingTarget.id);
-        setHpAnimationState(false);
-        
-        // Clear existing animation
-        if (animationIntervalRef.current) {
-          clearInterval(animationIntervalRef.current);
-        }
-        
-        // Start HP animation for shooting target
-        animationIntervalRef.current = setInterval(() => {
-          setHpAnimationState(prev => !prev);
-        }, 500);
-      } else if (shootingTarget && currentShootingTarget === shootingTarget.id) {
-        // Keep animation running for the same target
-        if (!animationIntervalRef.current) {
-          animationIntervalRef.current = setInterval(() => {
-            setHpAnimationState(prev => !prev);
-          }, 500);
-        }
-      }
-    } else {
-      // Clear animation when not in shooting preview
-      if (animationIntervalRef.current) {
-        clearInterval(animationIntervalRef.current);
-        animationIntervalRef.current = null;
-      }
-      setCurrentShootingTarget(null);
-      setSelectedShootingTarget(null);
+      // Use the first valid target or null
+      shootingTarget = enemiesInRange[0] || null;
     }
 
-    // ✅ COMBAT PREVIEW: Identify selected combat target - using same pattern as shooting
+    // ✅ SIMPLIFIED COMBAT PREVIEW - No animations to prevent re-render loop
     let combatTarget: Unit | null = null;
     if (phase === "combat" && selectedUnit) {
+      // Simple target identification - no state changes here
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
-      
-      // Find enemy units within combat range (adjacent = distance 1)
       const enemiesInRange = units.filter(u =>
         u.player !== selectedUnit.player &&
         cubeDistance(c1, offsetToCube(u.col, u.row)) === 1
       );
       
-      // For combat, use the selectedCombatTarget if set
-      if (selectedCombatTarget !== null) {
-        combatTarget = enemiesInRange.find(u => u.id === selectedCombatTarget) || null;
-      }
-      
-      // Update animation target tracking for combat
-      if (combatTarget && currentCombatTarget !== combatTarget.id) {
-        setCurrentCombatTarget(combatTarget.id);
-        setHpAnimationState(false);
-        
-        // Clear existing animation
-        if (animationIntervalRef.current) {
-          clearInterval(animationIntervalRef.current);
-        }
-        
-        // Start HP animation for combat target
-        animationIntervalRef.current = setInterval(() => {
-          setHpAnimationState(prev => !prev);
-        }, 500);
-      } else if (combatTarget && currentCombatTarget === combatTarget.id) {
-        // Keep animation running for the same target
-        if (!animationIntervalRef.current) {
-          animationIntervalRef.current = setInterval(() => {
-            setHpAnimationState(prev => !prev);
-          }, 500);
-        }
-      }
-    } else {
-      // Clear combat animation when not in combat preview
-      if (currentCombatTarget !== null) {
-        if (animationIntervalRef.current) {
-          clearInterval(animationIntervalRef.current);
-          animationIntervalRef.current = null;
-        }
-        setCurrentCombatTarget(null);
-        setSelectedCombatTarget(null);
-      }
+      // Use the first valid target or null
+      combatTarget = enemiesInRange[0] || null;
     }
 
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
@@ -390,33 +348,47 @@ export default function Board({
       attackFromCol = movePreview.destCol;
       attackFromRow = movePreview.destRow;
     } else if (mode === "attackPreview" && attackPreview) {
-      // Only preview if you clicked YOUR shooter
-      const clickedUnit = units.find(u => u.id === attackPreview.unitId);
-      if (clickedUnit && clickedUnit.id === selectedUnitId) {
-        previewUnit   = clickedUnit;
-        attackFromCol = clickedUnit.col;
-        attackFromRow = clickedUnit.row;
-      } else {
-        previewUnit   = undefined;
-        attackFromCol = null;
-        attackFromRow = null;
+        const clickedUnit = units.find(u => u.id === attackPreview.unitId);
+        if (clickedUnit && clickedUnit.id === selectedUnitId) {
+          previewUnit = clickedUnit;
+          attackFromCol = clickedUnit.col;
+          attackFromRow = clickedUnit.row;
+        } else {
+          previewUnit = undefined;
+          attackFromCol = null;
+          attackFromRow = null;
+        }
+      } else if (phase === "shoot" && shootingPhaseState?.singleShotState?.shotsLeft > 0) {
+        const shooter = units.find(u => u.id === shootingPhaseState.singleShotState.shooterId);
+        if (shooter) {
+          previewUnit = shooter;
+          attackFromCol = shooter.col;
+          attackFromRow = shooter.row;
+        }
       }
-    }
 
-    // Show red attack hexes for shooter selection, but not when target is already selected
-    if (previewUnit && attackFromCol !== null && attackFromRow !== null && !(phase === "shoot" && shootingTarget)) {
-      const centerCube = offsetToCube(attackFromCol, attackFromRow);
-      const range = previewUnit.RNG_RNG;
-      for (let col = 0; col < BOARD_COLS; col++) {
-        for (let row = 0; row < BOARD_ROWS; row++) {
-          const targetCube = offsetToCube(col, row);
-          const dist = cubeDistance(centerCube, targetCube);
-          if (dist > 0 && dist <= range) {
-            attackCells.push({ col, row });
+      if (
+        previewUnit &&
+        attackFromCol !== null &&
+        attackFromRow !== null &&
+        (
+          mode === "attackPreview" ||
+          (phase === "shoot" && shootingPhaseState?.singleShotState?.shotsLeft > 0)
+        )
+      ) {
+        const centerCube = offsetToCube(attackFromCol, attackFromRow);
+        const range = previewUnit.RNG_RNG;
+        for (let col = 0; col < BOARD_COLS; col++) {
+          for (let row = 0; row < BOARD_ROWS; row++) {
+            const targetCube = offsetToCube(col, row);
+            const dist = cubeDistance(centerCube, targetCube);
+            if (dist > 0 && dist <= range) {
+              attackCells.push({ col, row });
+            }
           }
         }
       }
-    }
+
 
     // Draw grid cells
     for (let col = 0; col < BOARD_COLS; col++) {
@@ -506,45 +478,12 @@ export default function Board({
         // Calculate current HP first
         const hp = Math.max(0, unit.CUR_HP ?? unit.HP_MAX);
 
-        // ✅ ENHANCED HP BAR FOR SHOOTING TARGETS
-        const isShootingTarget = (shootingTarget && unit.id === shootingTarget.id) || (currentShootingTarget !== null && unit.id === currentShootingTarget);
-        
-        // ✅ ENHANCED HP BAR FOR COMBAT TARGETS - identical logic to shooting
-        const isCombatTarget = (combatTarget && unit.id === combatTarget.id) || (currentCombatTarget !== null && unit.id === currentCombatTarget);
-        
-        let displayHP = hp;
-        let finalBarWidth = HP_BAR_WIDTH;
-        let finalBarHeight = HP_BAR_HEIGHT;
-        let finalBarX = barX;
-        let finalBarY = barY;
-        
-        if ((isShootingTarget || isCombatTarget) && selectedUnit) {
-          // Enhanced size and position for shooting targets
-          finalBarWidth = HP_BAR_WIDTH * 1.8;
-          finalBarHeight = HP_BAR_HEIGHT * 1.5;
-          finalBarX = centerX - finalBarWidth / 2;
-          finalBarY = centerY - HP_BAR_Y_OFFSET - finalBarHeight;
-          
-          // Alternate between current and future HP using React state
-          const currentHP = unit.CUR_HP ?? unit.HP_MAX;
-          let futureHP: number;
-          
-          if (isShootingTarget) {
-            futureHP = Math.max(0, currentHP - (selectedUnit.RNG_DMG ?? 1));
-          } else {
-            // isCombatTarget - use CC_DMG instead of RNG_DMG
-            futureHP = Math.max(0, currentHP - (selectedUnit.CC_DMG ?? 1));
-          }
-          
-          displayHP = hpAnimationState ? futureHP : currentHP;
-          
-          // Enhanced background for shooting targets
-          const enhancedBarBg = new PIXI.Graphics();
-          enhancedBarBg.beginFill(0x222222, 1);
-          enhancedBarBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, 3);
-          enhancedBarBg.endFill();
-          app.stage.addChild(enhancedBarBg);
-        }
+        // ✅ SIMPLIFIED HP BAR - No animations to prevent re-render loops
+        const displayHP = hp;
+        const finalBarWidth = HP_BAR_WIDTH;
+        const finalBarHeight = HP_BAR_HEIGHT;
+        const finalBarX = barX;
+        const finalBarY = barY;
         
         // Draw HP slices with enhanced or normal size
         const sliceWidth = finalBarWidth / unit.HP_MAX;
@@ -556,6 +495,21 @@ export default function Board({
           slice.endFill();
           app.stage.addChild(slice);
         }
+      }
+
+      // ✅ SHOOT_LEFT COUNTER - Show shots remaining during shoot phase
+      if (phase === 'shoot' && unit.SHOOT_LEFT !== undefined && unit.SHOOT_LEFT > 0) {
+        const shootText = new PIXI.Text(`${unit.SHOOT_LEFT}`, {
+          fontSize: 14,
+          fill: 0xffff00,
+          align: "center",
+          fontWeight: "bold",
+          stroke: 0x000000,
+          strokeThickness: 2
+        });
+        shootText.anchor.set(0.5);
+        shootText.position.set(centerX + HEX_RADIUS * 0.7, centerY - HEX_RADIUS * 0.7);
+        app.stage.addChild(shootText);
       }
 
       // ✅ GREEN ELIGIBILITY CIRCLES - Check if unit is eligible for current phase
@@ -626,141 +580,56 @@ export default function Board({
         app.stage.addChild(eligibleOutline);
       }
 
-      // ✅ UNIT CLICK HANDLERS - FIXED SHOOT PHASE LOGIC
-      unitCircle.eventMode = 'static'; // FIXED: Use eventMode instead of deprecated interactive
+      // ✅ UNIT CLICK HANDLERS - STABLE REFERENCES
+      unitCircle.eventMode = 'static';
       unitCircle.cursor = "pointer";
+      
       unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
         if (e.button === 0) {
-          // Handle shooting phase with two-click behavior
-          if (mode === "attackPreview" && unit.player !== currentPlayer && phase === "shoot" && selectedUnit) {
-            const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
-            const c2 = offsetToCube(unit.col, unit.row);
-            const distance = cubeDistance(c1, c2);
-            
-            if (distance <= selectedUnit.RNG_RNG) {
-              if (selectedShootingTarget === unit.id) {
-                // Second click - actually shoot
-                onShoot(Number(selectedUnitId), Number(unit.id));
-                setSelectedShootingTarget(null);
-                // Clear animation immediately
-                if (animationIntervalRef.current) {
-                  clearInterval(animationIntervalRef.current);
-                  animationIntervalRef.current = null;
-                }
-                setCurrentShootingTarget(null);
-              } else {
-                // First click - select target and start HP animation
-                setSelectedShootingTarget(unit.id);
-              }
-              return;
+          console.log(`Unit ${unit.id} clicked`);
+          
+          // Store click data and dispatch simple event
+          window.dispatchEvent(new CustomEvent('boardUnitClick', {
+            detail: {
+              unitId: unit.id,
+              phase: phase,
+              mode: mode,
+              selectedUnitId: selectedUnitId
             }
-          }
-          
-          // Handle combat phase with two-click behavior - identical to shooting pattern
-          if (phase === "combat" && unit.player !== currentPlayer && selectedUnit) {
-            const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
-            const c2 = offsetToCube(unit.col, unit.row);
-            const distance = cubeDistance(c1, c2);
-            
-            if (distance === 1) {
-              if (selectedCombatTarget === unit.id) {
-                // Second click - actually attack
-                onCombatAttack?.(Number(selectedUnitId), Number(unit.id));
-                setSelectedCombatTarget(null);
-                // Clear animation immediately
-                if (animationIntervalRef.current) {
-                  clearInterval(animationIntervalRef.current);
-                  animationIntervalRef.current = null;
-                }
-                setCurrentCombatTarget(null);
-              } else {
-                // First click - select target and start HP animation
-                setSelectedCombatTarget(unit.id);
-              }
-              return;
-            }
-          }
-          
-          // Prevent any unit interactions during shooting sequence
-          if (shootingSequenceState?.isActive) {
-            console.log("🚫 Unit interaction blocked during shooting sequence");
-            return;
-          }
-
-          // Handle clicking on selected shooter to cancel
-          if (unit.id === selectedUnitId && phase === "shoot" && mode === "attackPreview") {
-            setSelectedShootingTarget(null);
-            onSelectUnit(null);
-            return;
-          }
-          
-          // Handle clicking on selected attacker to cancel
-          if (unit.id === selectedUnitId && phase === "combat") {
-            setSelectedCombatTarget(null);
-            onSelectUnit(null);
-            return;
-          }
-          
-          // Original handlers for other phases
-          if (mode === "chargePreview" && unit.player !== currentPlayer && chargeTargets.some(target => target.id === unit.id)) {
-            onCharge?.(Number(selectedUnitId), Number(unit.id));
-          } else if (phase === "combat" && unit.player !== currentPlayer && selectedUnitId) {
-            const selectedU = units.find(u => u.id === selectedUnitId);
-            if (selectedU) {
-              const distance = cubeDistance(
-                offsetToCube(selectedU.col, selectedU.row),
-                offsetToCube(unit.col, unit.row)
-              );
-              if (distance === 1) {
-                onCombatAttack?.(Number(selectedUnitId), Number(unit.id));
-                return;
-              }
-            }
-          }
-          
-          // ✅ FIXED: Only allow selection of eligible units in current phase
-          if (unit.player === currentPlayer) {
-            if (phase === "shoot") {
-              // Shoot phase: only allow units that haven't moved AND have enemies in range
-              if (!unitsMoved.includes(unit.id)) {
-                const enemies = units.filter(u2 => u2.player !== currentPlayer);
-                const hasTargetInRange = enemies.some(eu => {
-                  const c1 = offsetToCube(unit.col, unit.row);
-                  const c2 = offsetToCube(eu.col, eu.row);
-                  return cubeDistance(c1, c2) <= unit.RNG_RNG;
-                });
-                if (hasTargetInRange) {
-                  onSelectUnit(unit.id);
-                }
-              }
-            } else {
-              // Other phases: allow selection if eligible (original logic)
-              onSelectUnit(unit.id);
-            }
-          } else {
-            onSelectUnit(unit.id);
-          }
+          }));
         }
       });
 
       app.stage.addChild(unitCircle);
 
-      // Debug: Log what icon we're trying to load
-      console.log(`Unit ${unit.id} (player ${unit.player}, type ${unit.name}): ICON = ${unit.ICON}`);
+        // Debug: Log what icon we're trying to load
+        console.log(`Unit ${unit.id} (player ${unit.player}, type ${unit.name}): ICON = ${unit.ICON}`);
 
-      // ✅ ICON RENDERING FROM CONFIG - Better scaling and error handling
-      if (unit.ICON) {
-        try {
-          const texture = PIXI.Texture.from(unit.ICON);
-          const sprite = new PIXI.Sprite(texture);
-          sprite.anchor.set(0.5);
-          sprite.position.set(centerX, centerY);
-          sprite.width = HEX_RADIUS * ICON_SCALE; // Icon size from config
-          sprite.height = HEX_RADIUS * ICON_SCALE;
-          app.stage.addChild(sprite);
-        } catch (iconError) {
-          console.warn(`Failed to load icon ${unit.ICON}:`, iconError);
-          // Fallback to text if icon fails
+        // ✅ ICON RENDERING FROM CONFIG - Better scaling and error handling
+        if (unit.ICON) {
+          try {
+            const texture = PIXI.Texture.from(unit.ICON);
+            const sprite = new PIXI.Sprite(texture);
+            sprite.anchor.set(0.5);
+            sprite.position.set(centerX, centerY);
+            sprite.width = HEX_RADIUS * ICON_SCALE;
+            sprite.height = HEX_RADIUS * ICON_SCALE;
+            app.stage.addChild(sprite);
+          } catch (iconError) {
+            console.warn(`Failed to load icon ${unit.ICON}:`, iconError);
+            // Fallback to text if icon fails
+            const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
+              fontSize: UNIT_TEXT_SIZE,
+              fill: 0xffffff,
+              align: "center",
+              fontWeight: "bold",
+            });
+            unitText.anchor.set(0.5);
+            unitText.position.set(centerX, centerY);
+            app.stage.addChild(unitText);
+          }
+        } else {
+          // No icon - use text with config size
           const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
             fontSize: UNIT_TEXT_SIZE,
             fill: 0xffffff,
@@ -771,142 +640,93 @@ export default function Board({
           unitText.position.set(centerX, centerY);
           app.stage.addChild(unitText);
         }
-      } else {
-        // No icon - use text with config size
-        const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
-          fontSize: UNIT_TEXT_SIZE,
-          fill: 0xffffff,
-          align: "center",
-          fontWeight: "bold",
-        });
-        unitText.anchor.set(0.5);
-        unitText.position.set(centerX, centerY);
-        app.stage.addChild(unitText);
       }
-    }
 
-    // ✅ ORIGINAL PREVIEW UNIT RENDERING
-    if (mode === "movePreview" && movePreview) {
-      const previewUnit = units.find(u => u.id === movePreview.unitId);
-      if (previewUnit) {
-        const centerX = movePreview.destCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY = movePreview.destRow * HEX_VERT_SPACING + ((movePreview.destCol % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+      // ✅ ORIGINAL PREVIEW UNIT RENDERING
+      if (mode === "movePreview" && movePreview) {
+        const previewUnit = units.find(u => u.id === movePreview.unitId);
+        if (previewUnit) {
+          const centerX = movePreview.destCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const centerY = movePreview.destRow * HEX_VERT_SPACING + ((movePreview.destCol % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
-        const previewCircle = new PIXI.Graphics();
-        previewCircle.beginFill(previewUnit.color, 0.7);
-        previewCircle.lineStyle(3, 0xffffff, 0.8);
-        previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
-        previewCircle.endFill();
-        app.stage.addChild(previewCircle);
+          const previewCircle = new PIXI.Graphics();
+          previewCircle.beginFill(previewUnit.color, 0.7);
+          previewCircle.lineStyle(3, 0xffffff, 0.8);
+          previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
+          previewCircle.endFill();
+          app.stage.addChild(previewCircle);
 
-        const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
-          fontSize: UNIT_TEXT_SIZE,
-          fill: 0xffffff,
-          align: "center",
-          fontWeight: "bold",
-        });
-        previewText.anchor.set(0.5);
-        previewText.position.set(centerX, centerY + HEX_RADIUS * 0.55);
-        app.stage.addChild(previewText);
+          const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
+            fontSize: UNIT_TEXT_SIZE,
+            fill: 0xffffff,
+            align: "center",
+            fontWeight: "bold",
+          });
+          previewText.anchor.set(0.5);
+          previewText.position.set(centerX, centerY + HEX_RADIUS * 0.55);
+          app.stage.addChild(previewText);
+        }
       }
-    }
 
-    if (mode === "attackPreview" && attackPreview) {
-      const previewUnit = units.find(u => u.id === attackPreview.unitId);
-      if (previewUnit) {
-        const centerX = attackPreview.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY = attackPreview.row * HEX_VERT_SPACING + ((attackPreview.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+      if (mode === "attackPreview" && attackPreview) {
+        const previewUnit = units.find(u => u.id === attackPreview.unitId);
+        if (previewUnit) {
+          const centerX = attackPreview.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const centerY = attackPreview.row * HEX_VERT_SPACING + ((attackPreview.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
-        const previewCircle = new PIXI.Graphics();
-        previewCircle.beginFill(previewUnit.color, 0.7);
-        previewCircle.lineStyle(3, 0xffffff, 0.8);
-        previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
-        previewCircle.endFill();
-        app.stage.addChild(previewCircle);
+          const previewCircle = new PIXI.Graphics();
+          previewCircle.beginFill(previewUnit.color, 0.7);
+          previewCircle.lineStyle(3, 0xffffff, 0.8);
+          previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
+          previewCircle.endFill();
+          app.stage.addChild(previewCircle);
 
-        const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
-          fontSize: UNIT_TEXT_SIZE,
-          fill: 0xffffff,
-          align: "center",
-          fontWeight: "bold",
-        });
-        previewText.anchor.set(0.5);
-        previewText.position.set(centerX, centerY + HEX_RADIUS * 0.55);
-        app.stage.addChild(previewText);
+          const previewText = new PIXI.Text(previewUnit.name || `U${previewUnit.id}`, {
+            fontSize: UNIT_TEXT_SIZE,
+            fill: 0xffffff,
+            align: "center",
+            fontWeight: "bold",
+          });
+          previewText.anchor.set(0.5);
+          previewText.position.set(centerX, centerY + HEX_RADIUS * 0.55);
+          app.stage.addChild(previewText);
+        }
       }
-    }
 
-    // Cleanup function
-    return () => {
-      // Clear animation interval
-      if (animationIntervalRef.current) {
-        clearInterval(animationIntervalRef.current);
-        animationIntervalRef.current = null;
-      }
-      app.destroy(true);
-    };
-  }, [
-    // ✅ ALL ORIGINAL DEPENDENCIES
-    units,
-    selectedUnitId,
-    mode,
-    movePreview,
-    attackPreview,
-    currentPlayer,
-    unitsMoved,
-    unitsCharged,
-    unitsAttacked,
-    phase,
-    boardConfig,
-    loading,
-    error,
-    onSelectUnit,
-    onStartMovePreview,
-    onStartAttackPreview,
-    onConfirmMove,
-    onCancelMove,
-    onShoot,
-    onCombatAttack,
-    onCharge,
-    onMoveCharger,
-    onValidateCharge,
-    hpAnimationState,
-    currentShootingTarget,
-    selectedShootingTarget,
-    currentCombatTarget,
-    selectedCombatTarget,
-    shootingSequenceState,
-    onShootingStepComplete,
-    onCancelShootingSequence
-  ]);
+      // Cleanup function
+      return () => {
+        app.destroy(true);
+      };
+    }, [
+      // ✅ MINIMAL DEPENDENCIES - ONLY ESSENTIAL DATA
+      JSON.stringify(units), // Stringify to prevent object reference changes
+      selectedUnitId,
+      mode,
+      phase,
+      boardConfig,
+      loading,
+      error
+    ]);
 
-  // Helper function to get unit names for combat log
-  const getUnitName = (unitId: number) => {
-    const unit = units.find(u => u.id === unitId);
-    return unit?.name || `Unit ${unitId}`;
-  };
-
-  return (
-    <div className="relative">
-      <div ref={containerRef} />
-      
-      {/* Combat Log Overlay */}
-      {shootingSequenceState?.isActive && (
-        <>
-          <div className="fixed top-0 left-0 bg-red-500 text-white p-2 z-50">
-            🔥 COMBAT LOG SHOULD BE VISIBLE
-          </div>
-          <CombatLog
-            isVisible={true}
-            shooterName={getUnitName(shootingSequenceState.shooter.id)}
-            targetName={getUnitName(shootingSequenceState.target.id)}
-            currentStep={shootingSequenceState.combatResult.steps[shootingSequenceState.currentStepIndex] || null}
-            combatResult={shootingSequenceState.combatResult}
-            onStepComplete={onShootingStepComplete}
-            onCombatComplete={onCancelShootingSequence}
+    // Simple container return - loading/error handled inside useEffect
+    return (
+      <div>
+        <div ref={containerRef} />
+        {shootingPhaseState?.singleShotState && (
+          <SingleShotDisplay
+            singleShotState={shootingPhaseState.singleShotState}
+            shooterName={
+              units.find(u => u.id === shootingPhaseState.singleShotState?.shooterId)?.name || 
+              `Unit ${shootingPhaseState.singleShotState?.shooterId}`
+            }
+            targetName={
+              shootingPhaseState.singleShotState.targetId
+                ? units.find(u => u.id === shootingPhaseState.singleShotState?.targetId)?.name || 
+                  `Unit ${shootingPhaseState.singleShotState?.targetId}`
+                : undefined
+            }
           />
-        </>
-      )}
-    </div>
-  );
-}
+        )}
+      </div>
+    );
+  }

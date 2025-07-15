@@ -1,362 +1,286 @@
 // frontend/src/utils/ShootingSequenceManager.ts
-import { Unit } from '../types/game';
-import { CombatStep, CombatResult, calculateWoundThreshold, createCombatSteps } from '../components/CombatLogComponent';
+import { Unit, UnitId, SingleShotState } from '../types/game';
 
-export interface ShootingSequenceState {
-  isActive: boolean;
-  currentStepIndex: number;
-  combatResult: CombatResult;
-  shooter: Unit;
-  target: Unit;
+export interface SingleShotResult {
+  hitRoll: number;
+  hitSuccess: boolean;
+  woundRoll?: number;
+  woundSuccess?: boolean;
+  saveRoll?: number;
+  saveSuccess?: boolean;
+  damageDealt: number;
 }
 
-export class ShootingSequenceManager {
-  private state: ShootingSequenceState | null = null;
-  private onStateChange: ((state: ShootingSequenceState | null) => void) | null = null;
-  private onSequenceComplete: ((finalDamage: number) => void) | null = null;
+export class SingleShotSequenceManager {
+  private state: SingleShotState | null = null;
+  private onStateChange: ((state: SingleShotState | null) => void) | null = null;
+  private onShotComplete: ((result: SingleShotResult) => void) | null = null;
+  private onAllShotsComplete: ((totalDamage: number) => void) | null = null;
 
   /**
-   * Initialize a new shooting sequence
+   * Start a new shooting sequence for a unit
    */
-  startSequence(
-    shooter: Unit, 
-    target: Unit, 
-    onStateChange: (state: ShootingSequenceState | null) => void,
-    onSequenceComplete: (finalDamage: number) => void
+  startShootingSequence(
+    shooter: Unit,
+    onStateChange: (state: SingleShotState | null) => void,
+    onShotComplete: (result: SingleShotResult) => void,
+    onAllShotsComplete: (totalDamage: number) => void
   ): void {
-    console.log('🔥 SEQUENCE MANAGER CALLED');
-    console.log('Shooter:', shooter);
-    console.log('Target:', target);
-
-    // Check what dice properties we actually have - individual logs
-    console.log('🎯 Shooter dice properties:');
-    console.log('  RNG_NB:', shooter.RNG_NB);
-    console.log('  RNG_ATK:', shooter.RNG_ATK);
-    console.log('  RNG_STR:', shooter.RNG_STR);
-    console.log('  RNG_AP:', shooter.RNG_AP);
-    console.log('  RNG_DMG:', shooter.RNG_DMG);
-
-    console.log('🛡️ Target defense properties:');
-    console.log('  T:', target.T);
-    console.log('  ARMOR_SAVE:', target.ARMOR_SAVE);
-    console.log('  INVUL_SAVE:', target.INVUL_SAVE);
-
-    console.log('🔧 Setting initial state...');
+    console.log(`🎯 Starting shooting sequence for ${shooter.name}: ${shooter.SHOOT_LEFT || 0} shots remaining`);
+    
     this.onStateChange = onStateChange;
-    this.onSequenceComplete = onSequenceComplete;
+    this.onShotComplete = onShotComplete;
+    this.onAllShotsComplete = onAllShotsComplete;
 
-    // Validate required unit stats - throw errors if missing
-    if (!shooter.RNG_NB) throw new Error(`Missing RNG_NB for shooter ${shooter.name}`);
-    if (!shooter.RNG_ATK) throw new Error(`Missing RNG_ATK for shooter ${shooter.name}`);
-    if (!shooter.RNG_STR) throw new Error(`Missing RNG_STR for shooter ${shooter.name}`);
-    if (!shooter.RNG_AP && shooter.RNG_AP !== 0) throw new Error(`Missing RNG_AP for shooter ${shooter.name}`);
-    if (!shooter.RNG_DMG) throw new Error(`Missing RNG_DMG for shooter ${shooter.name}`);
-    
-    if (!target.T) throw new Error(`Missing T for target ${target.name}`);
-    if (!target.ARMOR_SAVE) throw new Error(`Missing ARMOR_SAVE for target ${target.name}`);
-    if (!target.INVUL_SAVE && target.INVUL_SAVE !== 0) throw new Error(`Missing INVUL_SAVE for target ${target.name}`);
-
-    // Extract unit stats - all validated above
-    const shots = shooter.RNG_NB;
-    const strength = shooter.RNG_STR;
-    const armorPenetration = shooter.RNG_AP;
-    const damage = shooter.RNG_DMG;
-    
-    const toughness = target.T;
-    const armorSave = target.ARMOR_SAVE;
-    const invulSave = target.INVUL_SAVE;
-
-    // All values are D6 thresholds
-    const hitTarget = shooter.RNG_ATK;
-    const woundTarget = calculateWoundThreshold(strength, toughness);
-    
-    // Calculate final save (best of armor or invul, modified by AP)
-    const modifiedArmorSave = Math.max(2, armorSave + armorPenetration); // AP makes saves harder
-    
-    // Handle invulnerable saves: 0 means no invul save (impossible = 7+)
-    const effectiveInvulSave = invulSave <= 0 ? 7 : invulSave;
-    
-    // Use the better save (lower number = easier save)
-    const finalSaveTarget = Math.min(modifiedArmorSave, effectiveInvulSave);
-
-    console.log(`🛡️ Save calculation: armor=${armorSave}, AP=${armorPenetration}, modified=${modifiedArmorSave}, invul=${invulSave}, effectiveInvul=${effectiveInvulSave}, final=${finalSaveTarget}`);
-
-    // Create combat steps
-    const steps = createCombatSteps(shots, hitTarget, woundTarget, finalSaveTarget);
-
-    // Initialize combat result
-    const combatResult: CombatResult = {
-      totalShots: shots,
-      hits: 0,
-      wounds: 0,
-      saves: 0,
-      damageDealt: 0,
-      steps: steps
-    };
-
-    // Set initial state
-    this.state = {
-      isActive: true,
-      currentStepIndex: 2, // Start with hit rolls (shots and range are auto-complete)
-      combatResult,
-      shooter,
-      target
-    };
-
-    this.updateCurrentStep();
-    this.notifyStateChange();
-  }
-
-  /**
-   * Process the next step in the sequence
-   */
-  nextStep(): void {
-    if (!this.state) return;
-
-    // Mark current step as complete
-    if (this.state.currentStepIndex < this.state.combatResult.steps.length) {
-      this.state.combatResult.steps[this.state.currentStepIndex].status = 'complete';
-    }
-
-    // Move to next step
-    this.state.currentStepIndex++;
-
-    if (this.state.currentStepIndex >= this.state.combatResult.steps.length) {
-      // Sequence complete
-      this.completeSequence();
+    const shotsRemaining = shooter.SHOOT_LEFT || 0;
+    if (shotsRemaining <= 0) {
+      console.log(`❌ No shots remaining for ${shooter.name}`);
+      this.completeAllShots(0);
       return;
     }
 
-    this.updateCurrentStep();
+    this.state = {
+      isActive: true,
+      shooterId: shooter.id,
+      targetId: null,
+      currentShotNumber: (shooter.RNG_NB || 0) - shotsRemaining + 1,
+      totalShots: shooter.RNG_NB || 0,
+      shotsRemaining: shotsRemaining,
+      isSelectingTarget: true,
+      currentStep: 'target_selection',
+      stepResults: {}
+    };
+
     this.notifyStateChange();
   }
 
   /**
-   * Get the current state
+   * Select target for current shot
    */
-  getState(): ShootingSequenceState | null {
+  selectTarget(targetId: UnitId): void {
+    if (!this.state || this.state.currentStep !== 'target_selection') {
+      console.log('❌ Cannot select target - not in target selection phase');
+      return;
+    }
+
+    console.log(`🎯 Shot ${this.state.currentShotNumber}/${this.state.totalShots}: Target selected (${targetId})`);
+    
+    this.state.targetId = targetId;
+    this.state.isSelectingTarget = false;
+    this.state.currentStep = 'hit_roll';
+    
+    this.notifyStateChange();
+  }
+
+  /**
+   * Process hit roll for current shot
+   */
+  processHitRoll(shooter: Unit): void {
+    if (!this.state || this.state.currentStep !== 'hit_roll') return;
+
+    const hitRoll = this.rollD6();
+    if (shooter.RNG_ATK === undefined) {
+      throw new Error('shooter.RNG_ATK is required');
+    }
+    const hitTarget = shooter.RNG_ATK;
+    const hitSuccess = hitRoll >= hitTarget;
+
+    console.log(`🎲 Hit roll: ${hitRoll} (need ${hitTarget}+) = ${hitSuccess ? 'HIT' : 'MISS'}`);
+
+    this.state.stepResults.hitRoll = hitRoll;
+    this.state.stepResults.hitSuccess = hitSuccess;
+
+    if (!hitSuccess) {
+      // Miss - complete this shot with 0 damage
+      this.completeSingleShot({ 
+        hitRoll, 
+        hitSuccess: false, 
+        damageDealt: 0 
+      });
+      return;
+    }
+
+    this.state.currentStep = 'wound_roll';
+    this.notifyStateChange();
+  }
+
+  /**
+   * Process wound roll for current shot
+   */
+  processWoundRoll(shooter: Unit, target: Unit): void {
+    if (!this.state || this.state.currentStep !== 'wound_roll') return;
+
+    const woundRoll = this.rollD6();
+    if (shooter.RNG_STR === undefined) {
+      throw new Error('tshooter.RNG_STR is required');
+    }
+    if (target.T === undefined) {
+      throw new Error('target.T is required');
+    }
+    const woundTarget = this.calculateWoundTarget(shooter.RNG_STR, target.T);
+    const woundSuccess = woundRoll >= woundTarget;
+
+    console.log(`🎲 Wound roll: ${woundRoll} (need ${woundTarget}+) = ${woundSuccess ? 'WOUND' : 'NO WOUND'}`);
+
+    this.state.stepResults.woundRoll = woundRoll;
+    this.state.stepResults.woundSuccess = woundSuccess;
+
+    if (!woundSuccess) {
+      // Failed to wound - complete shot with 0 damage
+      this.completeSingleShot({
+        hitRoll: this.state.stepResults.hitRoll!,
+        hitSuccess: true,
+        woundRoll,
+        woundSuccess: false,
+        damageDealt: 0
+      });
+      return;
+    }
+
+    this.state.currentStep = 'save_roll';
+    this.notifyStateChange();
+  }
+
+  /**
+   * Process save roll for current shot
+   */
+  processSaveRoll(shooter: Unit, target: Unit): void {
+    if (!this.state || this.state.currentStep !== 'save_roll') return;
+
+    const saveRoll = this.rollD6();
+    if (target.ARMOR_SAVE === undefined) {
+      throw new Error('target.ARMOR_SAVE is required');
+    }
+    if (target.INVUL_SAVE === undefined) {
+      throw new Error('target.INVUL_SAVE is required');
+    }
+    if (shooter.RNG_AP === undefined) {
+      throw new Error('shooter.RNG_AP is required');
+    }
+    const saveTarget = this.calculateSaveTarget(
+      target.ARMOR_SAVE,
+      target.INVUL_SAVE,
+      shooter.RNG_AP
+    );
+    const saveSuccess = saveRoll >= saveTarget;
+
+    console.log(`🎲 Save roll: ${saveRoll} (need ${saveTarget}+) = ${saveSuccess ? 'SAVED' : 'FAILED'}`);
+
+    this.state.stepResults.saveRoll = saveRoll;
+    this.state.stepResults.saveSuccess = saveSuccess;
+
+    const damageDealt = saveSuccess ? 0 : (shooter.RNG_DMG);
+    
+    this.state.currentStep = 'damage_application';
+    this.state.stepResults.damageDealt = damageDealt;
+
+    this.completeSingleShot({
+      hitRoll: this.state.stepResults.hitRoll!,
+      hitSuccess: true,
+      woundRoll: this.state.stepResults.woundRoll!,
+      woundSuccess: true,
+      saveRoll,
+      saveSuccess,
+      damageDealt
+    });
+  }
+
+  /**
+   * Complete current shot and prepare for next
+   */
+  private completeSingleShot(result: SingleShotResult): void {
+    if (!this.state) return;
+
+    console.log(`💥 Shot ${this.state.currentShotNumber} complete: ${result.damageDealt} damage`);
+
+    // Notify shot completion
+    if (this.onShotComplete) {
+      this.onShotComplete(result);
+    }
+
+    // Decrease shots remaining
+    this.state.shotsRemaining--;
+
+    if (this.state.shotsRemaining <= 0) {
+      // All shots complete
+      this.completeAllShots(result.damageDealt);
+      return;
+    }
+
+    // Prepare next shot
+    this.state.currentShotNumber++;
+    this.state.targetId = null;
+    this.state.isSelectingTarget = true;
+    this.state.currentStep = 'target_selection';
+    this.state.stepResults = {};
+
+    console.log(`🔄 Next shot: ${this.state.currentShotNumber}/${this.state.totalShots} (${this.state.shotsRemaining} remaining)`);
+    
+    this.notifyStateChange();
+  }
+
+  /**
+   * Complete entire shooting sequence
+   */
+  private completeAllShots(lastShotDamage: number): void {
+    console.log('🎯 All shots completed for unit');
+    
+    if (this.onAllShotsComplete) {
+      this.onAllShotsComplete(lastShotDamage);
+    }
+
+    this.state = null;
+    this.notifyStateChange();
+  }
+
+  /**
+   * Cancel current shooting sequence
+   */
+  cancelSequence(): void {
+    this.state = null;
+    this.onStateChange = null;
+    this.onShotComplete = null;
+    this.onAllShotsComplete = null;
+    this.notifyStateChange();
+  }
+
+  /**
+   * Get current state
+   */
+  getState(): SingleShotState | null {
     return this.state;
   }
 
   /**
-   * Process dice rolls for the current step
+   * Roll a D6
    */
-  processDiceRolls(rolls: number[]): void {
-    if (!this.state) return;
-
-    const currentStep = this.state.combatResult.steps[this.state.currentStepIndex];
-    const targetValue = currentStep.targetValue;
-    if (!targetValue) throw new Error(`Missing target value for step ${currentStep.step}`);
-    const successes = rolls.filter(roll => roll >= targetValue).length;
-
-    // Store roll results
-    currentStep.diceRolls = rolls;
-    currentStep.successes = successes;
-
-    // Update combat result based on step type
-    switch (currentStep.step) {
-      case 'hit':
-        this.state.combatResult.hits = successes;
-        break;
-      case 'wound':
-        this.state.combatResult.wounds = successes;
-        break;
-      case 'save':
-        this.state.combatResult.saves = successes;
-        // Calculate final damage (wounds - successful saves)
-        const unsavedWounds = this.state.combatResult.wounds - successes;
-        this.state.combatResult.damageDealt = Math.max(0, unsavedWounds * (this.state.shooter.RNG_DMG));
-        break;
-    }
-
-    this.notifyStateChange();
+  private rollD6(): number {
+    return Math.floor(Math.random() * 6) + 1;
   }
 
   /**
-   * Cancel the current sequence
+   * Calculate wound target based on strength vs toughness
    */
-  cancelSequence(): void {
-    this.state = null;
-    this.notifyStateChange();
+  private calculateWoundTarget(strength: number, toughness: number): number {
+    if (strength >= toughness * 2) return 2; // S >= 2*T: wound on 2+
+    if (strength > toughness) return 3;       // S > T: wound on 3+
+    if (strength === toughness) return 4;     // S = T: wound on 4+
+    if (strength < toughness) return 5;       // S < T: wound on 5+
+    return 6; // S <= T/2: wound on 6+
   }
 
   /**
-   * Convert percentage (like 66%) to D6 threshold (like 4+)
+   * Calculate save target accounting for AP and invulnerable saves
    */
-  private percentageToD6Threshold(percentage: number): number {
-    if (percentage >= 83) return 2; // 83% = 2+
-    if (percentage >= 67) return 3; // 67% = 3+
-    if (percentage >= 50) return 4; // 50% = 4+
-    if (percentage >= 33) return 5; // 33% = 5+
-    if (percentage >= 17) return 6; // 17% = 6+
-    return 7; // Impossible
-  }
-
-  /**
-   * Update the current step status and auto-roll dice
-   */
-  private updateCurrentStep(): void {
-    if (!this.state) return;
-
-    // Set current step as active
-    if (this.state.currentStepIndex < this.state.combatResult.steps.length) {
-      const currentStep = this.state.combatResult.steps[this.state.currentStepIndex];
-      currentStep.status = 'active';
-      
-      // Auto-roll dice for this step
-      this.autoRollDiceForStep(currentStep);
-    }
-
-    // Skip non-dice steps automatically
-    const currentStep = this.state.combatResult.steps[this.state.currentStepIndex];
+  private calculateSaveTarget(armorSave: number, invulSave: number, armorPenetration: number): number {
+    const modifiedArmor = armorSave + armorPenetration;
     
-    if (currentStep.step === 'damage') {
-      // Auto-complete damage step
-      currentStep.status = 'complete';
-      this.state.currentStepIndex++;
-      
-      if (this.state.currentStepIndex >= this.state.combatResult.steps.length) {
-        this.completeSequence();
-        return;
-      }
+    // Use invulnerable save if it's better than modified armor save (and invul > 0)
+    if (invulSave > 0 && invulSave < modifiedArmor) {
+      return invulSave;
     }
-
-    // Update step descriptions with current context
-    this.updateStepDescriptions();
-  }
-
-  /**
-   * Automatically roll dice for the current step
-   */
-  private autoRollDiceForStep(step: CombatStep): void {
-    if (!this.state) return;
-
-    let numberOfDice = 0;
-    let targetValue = step.targetValue;
-
-    // Determine number of dice based on step type
-    switch (step.step) {
-      case 'hit':
-        numberOfDice = this.state.combatResult.totalShots;
-        break;
-      case 'wound':
-        numberOfDice = this.state.combatResult.hits;
-        break;
-      case 'save':
-        numberOfDice = this.state.combatResult.wounds;
-        break;
-      default:
-        return; // No dice rolling needed
-    }
-
-    // Validate targetValue
-    if (targetValue === undefined || targetValue === null) {
-      console.error(`❌ Missing target value for step ${step.step}`);
-      console.error('Step details:', step);
-      console.error('State:', this.state);
-      return;
-    }
-
-    console.log(`🎲 ${step.step.toUpperCase()} PHASE: Rolling ${numberOfDice} dice, need ${targetValue}+ to succeed`);
-
-    // Handle 0 dice scenario - auto-complete with 0 successes
-    if (numberOfDice === 0) {
-      console.log(`🎲 No dice to roll for ${step.step} phase - auto-completing with 0 successes`);
-      step.diceRolls = [];
-      step.successes = 0;
-      
-      // Update combat result using processDiceRolls to ensure consistency
-      this.processDiceRolls([]);
-
-      // Auto-advance to next step immediately for 0 dice scenarios
-      setTimeout(() => {
-        this.nextStep();
-      }, 500); // Shorter delay for skipped phases
-      return;
-    }
-
-    // Roll all dice at once
-    const rolls: number[] = [];
-    for (let i = 0; i < numberOfDice; i++) {
-      rolls.push(Math.floor(Math.random() * 6) + 1);
-    }
-
-    console.log(`🎲 Dice results: [${rolls.join(', ')}]`);
-
-    // Count successes
-    const successes = rolls.filter(roll => roll >= targetValue).length;
-    console.log(`🎲 Successes: ${successes}/${numberOfDice} (needed ${targetValue}+)`);
-
-    // Process the results immediately
-    this.processDiceRolls(rolls);
-
-    // Auto-advance to next step after a brief display delay
-    setTimeout(() => {
-      this.nextStep();
-    }, 1500); // 1.5 second delay to show results
-  }
-
-  /**
-   * Update step descriptions with current results
-   */
-  private updateStepDescriptions(): void {
-    if (!this.state) return;
-
-    const steps = this.state.combatResult.steps;
-    const result = this.state.combatResult;
-
-    // Update descriptions based on current progress
-    if (result.hits > 0) {
-      const woundStep = steps.find(s => s.step === 'wound');
-      if (woundStep) {
-        woundStep.description = `Rolling ${result.hits} dice to wound`;
-      }
-    }
-
-    if (result.wounds > 0) {
-      const saveStep = steps.find(s => s.step === 'save');
-      if (saveStep) {
-        saveStep.description = `Rolling ${result.wounds} armor saves`;
-      }
-    }
-
-    if (result.damageDealt > 0) {
-      const damageStep = steps.find(s => s.step === 'damage');
-      if (damageStep) {
-        damageStep.description = `${result.damageDealt} damage dealt!`;
-      }
-    }
-  }
-
-  /**
-   * Complete the shooting sequence
-   */
-  private completeSequence(): void {
-    if (!this.state) return;
-
-    const finalDamage = this.state.combatResult.damageDealt;
     
-    // Mark all steps as complete
-    this.state.combatResult.steps.forEach(step => {
-      step.status = 'complete';
-    });
-
-    // Store completion callback before clearing state
-    const completionCallback = this.onSequenceComplete;
-    
-    // Clear state immediately to prevent multiple calls
-    this.state = null;
-    this.onSequenceComplete = null;
-    this.onStateChange = null;
-    
-    this.notifyStateChange();
-
-    // Notify completion after a brief delay
-    setTimeout(() => {
-      if (completionCallback) {
-        completionCallback(finalDamage);
-      }
-    }, 2000);
+    return modifiedArmor;
   }
 
   /**
@@ -370,4 +294,4 @@ export class ShootingSequenceManager {
 }
 
 // Export singleton instance
-export const shootingSequenceManager = new ShootingSequenceManager();
+export const singleShotSequenceManager = new SingleShotSequenceManager();

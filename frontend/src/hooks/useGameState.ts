@@ -1,11 +1,13 @@
 // hooks/useGameState.ts
+
 import { useState, useCallback } from 'react';
-import { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, MovePreview, AttackPreview } from '../types/game';
+import { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, MovePreview, AttackPreview, ShootingPhaseState } from '../types/game';
 
 interface UseGameStateReturn {
   gameState: GameState;
   movePreview: MovePreview | null;
   attackPreview: AttackPreview | null;
+  shootingPhaseState: ShootingPhaseState;
   actions: {
     setUnits: (units: Unit[]) => void;
     setCurrentPlayer: (player: PlayerId) => void;
@@ -22,12 +24,18 @@ interface UseGameStateReturn {
     resetAttackedUnits: () => void;
     updateUnit: (unitId: UnitId, updates: Partial<Unit>) => void;
     removeUnit: (unitId: UnitId) => void;
+    initializeShootingPhase: () => void;
+    updateShootingPhaseState: (updates: Partial<ShootingPhaseState>) => void;
+    decrementShotsLeft: (unitId: UnitId) => void;
   };
 }
 
 export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   const [gameState, setGameState] = useState<GameState>({
-    units: initialUnits,
+    units: initialUnits.map(unit => ({
+      ...unit,
+      SHOOT_LEFT: unit.RNG_NB
+    })),
     currentPlayer: 0,
     phase: "move",
     mode: "select",
@@ -39,6 +47,42 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
 
   const [movePreview, setMovePreview] = useState<MovePreview | null>(null);
   const [attackPreview, setAttackPreview] = useState<AttackPreview | null>(null);
+  const [shootingPhaseState, setShootingPhaseState] = useState<ShootingPhaseState>({
+    activeShooters: [],
+    currentShooter: null,
+    singleShotState: null,
+  });
+
+  const initializeShootingPhase = useCallback(() => {
+    setGameState(prev => ({
+      ...prev,
+      units: prev.units.map(unit => {
+        if (unit.RNG_NB === undefined) {
+          throw new Error('unit.RNG_NB is required');
+        }
+        return { ...unit, SHOOT_LEFT: unit.RNG_NB };
+      })
+    }));
+  }, []);
+
+  const updateShootingPhaseState = useCallback((updates: Partial<ShootingPhaseState>) => {
+    setShootingPhaseState(prev => ({ ...prev, ...updates }));
+  }, []);
+
+  const decrementShotsLeft = useCallback((unitId: UnitId) => {
+    setGameState(prev => ({
+      ...prev,
+      units: prev.units.map(unit => {
+        if (unit.id === unitId) {
+          if (unit.SHOOT_LEFT === undefined) {
+            throw new Error('unit.SHOOT_LEFT is required');
+          }
+          return { ...unit, SHOOT_LEFT: Math.max(0, unit.SHOOT_LEFT - 1) };
+        }
+        return unit;
+      })
+    }));
+  }, []);
 
   const setUnits = useCallback((units: Unit[]) => {
     setGameState(prev => ({ ...prev, units }));
@@ -119,6 +163,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     gameState,
     movePreview,
     attackPreview,
+    shootingPhaseState,
     actions: {
       setUnits,
       setCurrentPlayer,
@@ -135,6 +180,9 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       resetAttackedUnits,
       updateUnit,
       removeUnit,
+      initializeShootingPhase,
+      updateShootingPhaseState,
+      decrementShotsLeft,
     },
   };
 };

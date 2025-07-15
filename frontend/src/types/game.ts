@@ -34,6 +34,33 @@ export interface Unit {
   T?: number;         // Toughness
   ARMOR_SAVE?: number; // Armor save (D6 target)
   INVUL_SAVE?: number; // Invulnerable save (D6 target)
+  SHOOT_LEFT?: number; // Shots remaining this phase
+}
+
+export interface SingleShotState {
+  isActive: boolean;
+  shooterId: UnitId;
+  targetId: UnitId | null;
+  currentShotNumber: number;
+  totalShots: number;
+  shotsRemaining: number;
+  isSelectingTarget: boolean;
+  currentStep: 'target_selection' | 'hit_roll' | 'wound_roll' | 'save_roll' | 'damage_application' | 'complete';
+  stepResults: {
+    hitRoll?: number;
+    hitSuccess?: boolean;
+    woundRoll?: number;
+    woundSuccess?: boolean;
+    saveRoll?: number;
+    saveSuccess?: boolean;
+    damageDealt?: number;
+  };
+}
+
+export interface ShootingPhaseState {
+  activeShooters: UnitId[];
+  currentShooter: UnitId | null;
+  singleShotState: SingleShotState | null;
 }
 
 export interface GameState {

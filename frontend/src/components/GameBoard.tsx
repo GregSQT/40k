@@ -1,8 +1,9 @@
 // src/components/GameBoard.tsx
 import React from 'react';
 import Board from './Board';
-import { Unit, GameState, MovePreview, AttackPreview, UnitId } from '../types/game';
-import { ShootingSequenceState } from '../utils/ShootingSequenceManager';
+import { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState } from '../types/game';
+import { setupBoardClickHandler } from '../utils/boardClickHandler';
+
 
 interface GameBoardProps {
   units: Unit[];
@@ -26,14 +27,35 @@ interface GameBoardProps {
   onMoveCharger: (chargerId: UnitId, destCol: number, destRow: number) => void;
   onCancelCharge: () => void;
   onValidateCharge: (chargerId: UnitId) => void;
-  shootingSequenceState: ShootingSequenceState | null;
-  onShootingStepComplete: () => void;
-  onCancelShootingSequence: () => void;
+  shootingPhaseState: ShootingPhaseState;
 }
 
 export const GameBoard: React.FC<GameBoardProps> = (props) => {
   // Type-safe wrapper for Board component
   // Convert string/number IDs to proper number type for Board component
+  
+    React.useEffect(() => {
+      setupBoardClickHandler({
+        onSelectUnit: props.onSelectUnit,
+        onStartAttackPreview: (shooterId) => {
+          const unit = props.units.find(u => u.id === shooterId);
+          if (unit) {
+            props.onStartAttackPreview(shooterId, unit.col, unit.row);
+          }
+        },
+        onShoot:        props.onShoot,
+        onCombatAttack: props.onCombatAttack
+      });
+    }, [
+      props.onSelectUnit,
+      props.onStartAttackPreview,
+      props.onShoot,
+      props.onCombatAttack,
+      props.units
+    ]);
+
+
+
   
   const handleSelectUnit = (id: number | string | null) => {
     if (typeof id === 'string') {
@@ -78,9 +100,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         onMoveCharger={props.onMoveCharger}
         onCancelCharge={props.onCancelCharge}
         onValidateCharge={props.onValidateCharge}
-        shootingSequenceState={props.shootingSequenceState}
-        onShootingStepComplete={props.onShootingStepComplete}
-        onCancelShootingSequence={props.onCancelShootingSequence}
+        shootingPhaseState={props.shootingPhaseState}
       />
     </div>
   );

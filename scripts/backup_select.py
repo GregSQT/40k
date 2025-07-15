@@ -88,7 +88,8 @@ else:
         "frontend/src/components/GameStatus.tsx",
         "frontend/src/components/ReplayBoard.tsx",
         "frontend/src/components/ReplayViewer.tsx",
-        "frontend/src/components/UnitSelector.tsx",
+        "frontend/src/components/SingleShotDisplay.tsx",
+        "frontend/src/components/UnitSelector.tsx",    
 
         # Frontend/src/data
         "frontend/src/data/Units.ts",
@@ -130,7 +131,8 @@ else:
         "frontend/src/roster/tyranid/Carnifex.ts",
 
         # frontend/src/utils
-        "frontend/src/utils/ShootingSequenceManager.ts"
+        "frontend/src/utils/ShootingSequenceManager.ts",
+        "frontend/src/utils/boardClickHandler.ts"
     ]
 
 logfile = os.path.join(DEST_ROOT, "backup.log")
