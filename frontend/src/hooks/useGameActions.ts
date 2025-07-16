@@ -137,6 +137,16 @@ export const useGameActions = ({
       return;
     }
 
+    // Special handling for combat phase
+    if (phase === "combat") {
+      // Always show the attack preview for adjacent enemies
+      actions.setMovePreview(null);
+      actions.setAttackPreview({ unitId, col: unit.col, row: unit.row });
+      actions.setMode("attackPreview");
+      actions.setSelectedUnitId(unitId);
+      return;
+    }
+
     // Default selection
     actions.setSelectedUnitId(unitId);
     actions.setMovePreview(null);
@@ -534,8 +544,17 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
   }, [actions]);
 
   const moveCharger = useCallback((chargerId: UnitId, destCol: number, destRow: number) => {
+    // Move the unit to the destination
     actions.updateUnit(chargerId, { col: destCol, row: destRow });
-    actions.setMode("chargePreview");
+    
+    // Mark unit as having charged (end of activability for this phase)
+    actions.addChargedUnit(chargerId);
+    
+    // Deselect the unit
+    actions.setSelectedUnitId(null);
+    
+    // Return to select mode (cancel colored cells)
+    actions.setMode("select");
   }, [actions]);
 
   const cancelCharge = useCallback(() => {

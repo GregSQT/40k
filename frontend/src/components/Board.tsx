@@ -163,6 +163,10 @@ export default function Board({
 
     containerRef.current.innerHTML = "";
 
+    // ✅ CLEAR PIXI TEXTURE CACHE
+    PIXI.Texture.removeFromCache('/icons/AssaultIntercessor.webp');
+    PIXI.Texture.removeFromCache('/icons/Intercessor.webp');
+
     // Extract board configuration values - USE CONFIG VALUES
     const BOARD_COLS = boardConfig.cols;
     const BOARD_ROWS = boardConfig.rows;
@@ -232,6 +236,11 @@ export default function Board({
     canvas.style.border = CANVAS_BORDER;
     
     containerRef.current.appendChild(canvas);
+
+    // ✅ CLEAR ALL EXISTING SPRITES
+    app.stage.removeChildren();
+    app.stage.destroy({ children: true, texture: false, baseTexture: false });
+    app.stage = new PIXI.Container();
 
     // Right click cancels move/attack preview
     if (app.view && app.view.addEventListener) {
@@ -486,9 +495,15 @@ export default function Board({
     // ✅ ORIGINAL UNIT RENDERING - All features preserved
     for (const unit of units) {
       // In movePreview, do not draw the moving unit at its old spot
-      if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;
+      if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) {
+        console.log(`🚫 Skipping unit ${unit.id} in movePreview mode`);
+        continue;
+      }
       // In attackPreview, do not draw the unit at its old spot if it's attackPreview
-      if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
+      if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) {
+        console.log(`🚫 Skipping unit ${unit.id} in attackPreview mode`);
+        continue;
+      }
 
       const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
       const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
@@ -682,38 +697,26 @@ export default function Board({
 
       app.stage.addChild(unitCircle);
 
-        // Debug: Log what icon we're trying to load
-        console.log(`Unit ${unit.id} (player ${unit.player}, type ${unit.name}): ICON = ${unit.ICON}`);
+      // Debug: Log what icon we're trying to load
+      console.log(`Unit ${unit.id} (player ${unit.player}, type ${unit.name}): ICON = ${unit.ICON}`);
 
-        // ✅ ICON RENDERING WITH PER-UNIT SCALING
-        if (unit.ICON) {
-          try {
-            const texture = PIXI.Texture.from(unit.ICON);
-            const sprite = new PIXI.Sprite(texture);
-            sprite.anchor.set(0.5);
-            sprite.position.set(centerX, centerY);
-            
-            // ✅ USE PER-UNIT ICON_SCALE OR FALLBACK TO CONFIG
-            const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
-            sprite.width = HEX_RADIUS * unitIconScale;
-            sprite.height = HEX_RADIUS * unitIconScale;
-            
-            app.stage.addChild(sprite);
-          } catch (iconError) {
-            console.warn(`Failed to load icon ${unit.ICON}:`, iconError);
-            // Fallback to text if icon fails
-            const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
-              fontSize: UNIT_TEXT_SIZE,
-              fill: 0xffffff,
-              align: "center",
-              fontWeight: "bold",
-            });
-            unitText.anchor.set(0.5);
-            unitText.position.set(centerX, centerY);
-            app.stage.addChild(unitText);
-          }
-        } else {
-          // No icon - use text with config size
+      // ✅ ICON RENDERING WITH PER-UNIT SCALING
+      if (unit.ICON) {
+        try {
+          const texture = PIXI.Texture.from(unit.ICON);
+          const sprite = new PIXI.Sprite(texture);
+          sprite.anchor.set(0.5);
+          sprite.position.set(centerX, centerY);
+          
+          // ✅ USE PER-UNIT ICON_SCALE OR FALLBACK TO CONFIG
+          const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
+          sprite.width = HEX_RADIUS * unitIconScale;
+          sprite.height = HEX_RADIUS * unitIconScale;
+          
+          app.stage.addChild(sprite);
+        } catch (iconError) {
+          console.warn(`Failed to load icon ${unit.ICON}:`, iconError);
+          // Fallback to text if icon fails
           const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
             fontSize: UNIT_TEXT_SIZE,
             fill: 0xffffff,
@@ -724,17 +727,34 @@ export default function Board({
           unitText.position.set(centerX, centerY);
           app.stage.addChild(unitText);
         }
+      } else {
+        // No icon - use text with config size
+        const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
+          fontSize: UNIT_TEXT_SIZE,
+          fill: 0xffffff,
+          align: "center",
+          fontWeight: "bold",
+        });
+        unitText.anchor.set(0.5);
+        unitText.position.set(centerX, centerY);
+        app.stage.addChild(unitText);
       }
+    }
 
       // ✅ ORIGINAL PREVIEW UNIT RENDERING
       if (mode === "movePreview" && movePreview) {
+        console.log(`🔍 MovePreview Debug: movePreview.unitId=${movePreview.unitId}, selectedUnitId=${selectedUnitId}`);
         const previewUnit = units.find(u => u.id === movePreview.unitId);
+        console.log(`🔍 Found previewUnit:`, previewUnit);
         if (previewUnit) {
           const centerX = movePreview.destCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
           const centerY = movePreview.destRow * HEX_VERT_SPACING + ((movePreview.destCol % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
           const previewCircle = new PIXI.Graphics();
-          previewCircle.beginFill(previewUnit.color, 0.7);
+          // Get the original unit to avoid using modified color
+          const originalUnit = units.find(u => u.id === previewUnit.id);
+          const originalColor = originalUnit?.color || previewUnit.color;
+          previewCircle.beginFill(originalColor, 0.7);
           previewCircle.lineStyle(3, 0xffffff, 0.8);
           previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
           previewCircle.endFill();
@@ -753,13 +773,16 @@ export default function Board({
           // ✅ ICON RENDERING FOR PREVIEW UNIT
           if (previewUnit.ICON) {
             try {
+              console.log(`🖼️ MovePreview loading icon: ${previewUnit.ICON} for unit ${previewUnit.name}`);
               const texture = PIXI.Texture.from(previewUnit.ICON);
               const sprite = new PIXI.Sprite(texture);
               sprite.anchor.set(0.5);
               sprite.position.set(centerX, centerY);
-              sprite.width = HEX_RADIUS * ICON_SCALE;
-              sprite.height = HEX_RADIUS * ICON_SCALE;
+              const unitIconScale = previewUnit.ICON_SCALE || ICON_SCALE;
+              sprite.width = HEX_RADIUS * unitIconScale;
+              sprite.height = HEX_RADIUS * unitIconScale;
               sprite.alpha = 0.8; // Slightly transparent for preview
+              sprite.tint = 0xffffff; // ✅ REMOVE COLOR TINTING
               app.stage.addChild(sprite);
             } catch (iconError) {
               console.warn(`Failed to load preview icon ${previewUnit.ICON}:`, iconError);
@@ -790,7 +813,9 @@ export default function Board({
       }
 
       if (mode === "attackPreview" && attackPreview) {
+        console.log(`🔍 AttackPreview Debug: attackPreview.unitId=${attackPreview.unitId}, selectedUnitId=${selectedUnitId}`);
         const previewUnit = units.find(u => u.id === attackPreview.unitId);
+        console.log(`🔍 Found previewUnit:`, previewUnit);
         if (previewUnit) {
           const centerX = attackPreview.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
           const centerY = attackPreview.row * HEX_VERT_SPACING + ((attackPreview.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
@@ -805,13 +830,16 @@ export default function Board({
           // ✅ ICON RENDERING FOR ATTACK PREVIEW UNIT
           if (previewUnit.ICON) {
             try {
+              console.log(`🖼️ AttackPreview loading icon: ${previewUnit.ICON} for unit ${previewUnit.name}`);
               const texture = PIXI.Texture.from(previewUnit.ICON);
               const sprite = new PIXI.Sprite(texture);
               sprite.anchor.set(0.5);
               sprite.position.set(centerX, centerY);
-              sprite.width = HEX_RADIUS * ICON_SCALE;
-              sprite.height = HEX_RADIUS * ICON_SCALE;
+              const unitIconScale = previewUnit.ICON_SCALE || ICON_SCALE;
+              sprite.width = HEX_RADIUS * unitIconScale;
+              sprite.height = HEX_RADIUS * unitIconScale;
               sprite.alpha = 0.8; // Slightly transparent for preview
+              sprite.tint = 0xffffff; // ✅ REMOVE COLOR TINTING
               app.stage.addChild(sprite);
             } catch (iconError) {
               console.warn(`Failed to load attack preview icon ${previewUnit.ICON}:`, iconError);

@@ -29,7 +29,7 @@ export class Intercessor extends SpaceMarineRangedUnit {
   static CC_DMG = 1;           // Melee attack : damages
 
   static ICON = "/icons/Intercessor.webp"; // Path relative to public folder
-  static ICON_SCALE = 1.8;     // Size of the icon
+  static ICON_SCALE = 1.6;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
     super(name, Intercessor.HP_MAX, startPos);
