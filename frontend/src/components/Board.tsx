@@ -685,15 +685,19 @@ export default function Board({
         // Debug: Log what icon we're trying to load
         console.log(`Unit ${unit.id} (player ${unit.player}, type ${unit.name}): ICON = ${unit.ICON}`);
 
-        // ✅ ICON RENDERING FROM CONFIG - Better scaling and error handling
+        // ✅ ICON RENDERING WITH PER-UNIT SCALING
         if (unit.ICON) {
           try {
             const texture = PIXI.Texture.from(unit.ICON);
             const sprite = new PIXI.Sprite(texture);
             sprite.anchor.set(0.5);
             sprite.position.set(centerX, centerY);
-            sprite.width = HEX_RADIUS * ICON_SCALE;
-            sprite.height = HEX_RADIUS * ICON_SCALE;
+            
+            // ✅ USE PER-UNIT ICON_SCALE OR FALLBACK TO CONFIG
+            const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
+            sprite.width = HEX_RADIUS * unitIconScale;
+            sprite.height = HEX_RADIUS * unitIconScale;
+            
             app.stage.addChild(sprite);
           } catch (iconError) {
             console.warn(`Failed to load icon ${unit.ICON}:`, iconError);
@@ -735,7 +739,7 @@ export default function Board({
           previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
           previewCircle.endFill();
           app.stage.addChild(previewCircle);
-          
+
           // ✅ ADD: Make preview unit clickable for move confirmation
           previewCircle.eventMode = 'static';
           previewCircle.cursor = "pointer";

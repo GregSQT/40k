@@ -6,7 +6,6 @@ export class Termagant extends TyranidRangedUnit {
   static NAME = "Termagant";
 
   // BASE
-  static BASE = 4;             // Base size
   static MOVE = 6;             // Move distance
   static T = 3;                // Toughness score
   static ARMOR_SAVE = 5;       // Armor save score
@@ -31,6 +30,7 @@ export class Termagant extends TyranidRangedUnit {
   static CC_DMG = 1;           // Melee attack : damages
 
   static ICON = "/icons/Termagant.webp"; // Path relative to public folder
+  static ICON_SCALE = 1.4;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
     super(name, Termagant.HP_MAX, startPos);

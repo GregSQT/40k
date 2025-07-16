@@ -27,6 +27,7 @@ export interface Unit {
   RNG_DMG: number;
   CC_DMG: number;
   ICON: string;
+  ICON_SCALE?: number;
   CUR_HP?: number;
   // ✅ ADD: Dice system properties
   RNG_NB?: number;
@@ -74,6 +75,7 @@ export function createUnit(params: {
     RNG_DMG: UnitClass.RNG_DMG,
     CC_DMG: UnitClass.CC_DMG,
     ICON: UnitClass.ICON,
+    ICON_SCALE: UnitClass.ICON_SCALE,
     CUR_HP: UnitClass.HP_MAX,
     // ✅ ADD: Dice system properties
     RNG_NB: UnitClass.RNG_NB,

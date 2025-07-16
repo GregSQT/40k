@@ -26,6 +26,7 @@ export interface Unit {
   RNG_DMG: number;
   CC_DMG: number;
   ICON: string;
+  ICON_SCALE?: number;  // ✅ NEW: Per-unit icon scaling
   // Dice system properties
   RNG_NB?: number;    // Number of shots
   RNG_ATK?: number;   // Hit skill (percentage)

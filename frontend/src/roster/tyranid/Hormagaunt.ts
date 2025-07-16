@@ -5,7 +5,6 @@ import { TyranidMeleeUnit, REWARDS_MELEE } from "./TyranidMeleeUnit";
 export class Hormagaunt extends TyranidMeleeUnit {
   static NAME = "Hormagaunt";
   // BASE
-  static BASE = 4;             // Base size
   static MOVE = 10;             // Move distance
   static T = 3;                // Toughness score
   static ARMOR_SAVE = 5;       // Armor save score
@@ -30,6 +29,7 @@ export class Hormagaunt extends TyranidMeleeUnit {
   static CC_DMG = 1;           // Melee attack : damages
 
   static ICON = "/icons/Hormagaunt.webp"; // Path relative to public folder
+  static ICON_SCALE = 1.4;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
     super(name, Hormagaunt.HP_MAX, startPos);
