@@ -24,7 +24,8 @@
       "lose": -0.9,
       "atk_wasted_r": -0.5,
       "atk_wasted_m": -0.5,
-      "wait": -0.5
+      "wait": -0.5,
+      "friendly_fire_penalty": -1.0
     },
     "SpaceMarineMelee": {
       "move_close": 0.2,
@@ -49,7 +50,8 @@
       "lose": -0.9,
       "atk_wasted_r": -0.5,
       "atk_wasted_m": -0.5,
-      "wait": -0.5
+      "wait": -0.5,
+      "friendly_fire_penalty": -1.0
     }
   },
   "normalized": {

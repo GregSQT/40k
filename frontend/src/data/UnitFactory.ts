@@ -26,6 +26,7 @@ export interface Unit {
   RNG_RNG: number;
   RNG_DMG: number;
   CC_DMG: number;
+  CC_RNG?: number;    // ✅ ADD: Close combat range
   ICON: string;
   ICON_SCALE?: number;
   CUR_HP?: number;
@@ -74,6 +75,7 @@ export function createUnit(params: {
     RNG_RNG: UnitClass.RNG_RNG,
     RNG_DMG: UnitClass.RNG_DMG,
     CC_DMG: UnitClass.CC_DMG,
+    CC_RNG: UnitClass.CC_RNG,    // ✅ ADD: Close combat range
     ICON: UnitClass.ICON,
     ICON_SCALE: UnitClass.ICON_SCALE,
     CUR_HP: UnitClass.HP_MAX,

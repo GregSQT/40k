@@ -332,15 +332,16 @@ export default function Board({
     let chargeCells: { col: number; row: number }[] = [];
     let chargeTargets: Unit[] = [];
 
-    // Combat preview: combatTargets for red outline on adjacent enemies
+    // Combat preview: combatTargets for red outline on enemies within combat range
     let combatTargets: Unit[] = [];
     if (phase === "combat" && selectedUnit) {
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
+      const combatRange = selectedUnit.CC_RNG || 1; // Use CC_RNG instead of hardcoded 1
       
-      // Red outline: all enemy units that are adjacent to the selected unit (distance = 1)
+      // Red outline: all enemy units within combat range of the selected unit
       combatTargets = units.filter(u =>
         u.player !== selectedUnit.player &&
-        cubeDistance(c1, offsetToCube(u.col, u.row)) === 1
+        cubeDistance(c1, offsetToCube(u.col, u.row)) <= combatRange
       );
     }
 

@@ -65,9 +65,10 @@ export const useGameActions = ({
         return !isAdjacent && inRange;
       case "combat":
         if (unitsAttacked.includes(unit.id)) return false;
-        const adjacentEnemies = units.filter(u => u.player !== currentPlayer);
-        return adjacentEnemies.some(enemy =>
-          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
+        const enemiesInCombatRange = units.filter(u => u.player !== currentPlayer);
+        const combatRange = unit.CC_RNG || 1; // Use CC_RNG instead of hardcoded 1
+        return enemiesInCombatRange.some(enemy =>
+          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) <= combatRange
         );
       default:
         return false;
@@ -326,6 +327,12 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     const target = findUnit(targetId);
     if (!shooter || !target) return;
 
+    // PREVENT FRIENDLY FIRE: Cannot shoot friendly units
+    if (target.player === shooter.player) {
+      console.log(`❌ Cannot shoot friendly unit ${target.name || target.id}`);
+      return;
+    }
+
     // bail out if no shots remaining
     const shotsLeft = shooter.SHOOT_LEFT ?? 0;
     if (shotsLeft <= 0) {
@@ -515,12 +522,19 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     const target = findUnit(targetId);
     if (!attacker || !target) return;
 
-    // Check if units are adjacent
+    // PREVENT FRIENDLY FIRE: Cannot attack friendly units
+    if (target.player === attacker.player) {
+      console.log(`❌ Cannot attack friendly unit ${target.name || target.id}`);
+      return;
+    }
+
+    // Check if units are within combat range
     const distance = Math.max(
       Math.abs(attacker.col - target.col),
       Math.abs(attacker.row - target.row)
     );
-    if (distance !== 1) return;
+    const combatRange = attacker.CC_RNG || 1; // Use CC_RNG instead of hardcoded 1
+    if (distance > combatRange) return;
 
     // Apply close combat damage
     const newHP = (target.CUR_HP ?? target.HP_MAX) - (attacker.CC_DMG ?? 1);

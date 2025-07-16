@@ -1077,6 +1077,11 @@ class W40KEnv(gym.Env):
             unit_rewards = self._get_unit_reward_config(unit)
             return unit_rewards.get("wait", -0.1)
         
+        # PREVENT FRIENDLY FIRE: Cannot shoot friendly units
+        if self._is_friendly_unit(unit, target):
+            unit_rewards = self._get_unit_reward_config(unit)
+            return unit_rewards.get("wait", -1.0)  # Large penalty for friendly fire
+        
         total_damage = execute_shooting_sequence(unit, target)
         old_hp = target["cur_hp"]
         target["cur_hp"] = max(0, target["cur_hp"] - total_damage)
@@ -1162,6 +1167,10 @@ class W40KEnv(gym.Env):
         
         if not target["alive"]:
             return unit_rewards.get("wait", -0.1)
+        
+        # PREVENT FRIENDLY FIRE: Cannot attack friendly units
+        if self._is_friendly_unit(unit, target):
+            return unit_rewards.get("wait", -1.0)  # Large penalty for friendly fire
         
         # Check if actually adjacent
         dist = abs(unit["col"] - target["col"]) + abs(unit["row"] - target["row"])
@@ -1276,6 +1285,7 @@ class W40KEnv(gym.Env):
         4. High damage enemy, can't be killed by shooting
         """
         enemies_in_range = [e for e in self.enemy_units if e['alive'] and 
+                           not self._is_friendly_unit(shooter, e) and
                            abs(shooter['col'] - e['col']) + abs(shooter['row'] - e['row']) <= shooter.get('rng_rng', 0)]
         if not enemies_in_range:
             return True
@@ -1310,6 +1320,7 @@ class W40KEnv(gym.Env):
     def _validate_combat_priority(self, attacker, target):
         """AI_GAME.md: Validate combat target selection against priority system."""
         adjacent_enemies = [e for e in self.enemy_units if e['alive'] and 
+                           not self._is_friendly_unit(attacker, e) and
                            abs(attacker['col'] - e['col']) + abs(attacker['row'] - e['row']) == 1]
         if not adjacent_enemies:
             return True

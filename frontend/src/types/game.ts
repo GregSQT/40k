@@ -25,6 +25,7 @@ export interface Unit {
   RNG_RNG: number;
   RNG_DMG: number;
   CC_DMG: number;
+  CC_RNG?: number;    // ✅ ADD: Close combat range
   ICON: string;
   ICON_SCALE?: number;  // ✅ NEW: Per-unit icon scaling
   // Dice system properties

@@ -147,10 +147,11 @@ export const UnitSelector = memo<UnitSelectorProps>(({
           if (hasActed.combat) {
             return { eligible: false, reason: 'Already attacked' };
           }
-          const canAttack = enemies.some(enemy => isAdjacent(unit, enemy));
+          const combatRange = unit.CC_RNG || 1; // Use CC_RNG instead of hardcoded adjacency
+          const canAttack = enemies.some(enemy => isInRange(unit, enemy, combatRange));
           return {
             eligible: canAttack,
-            reason: canAttack ? 'Can attack' : 'No adjacent enemies',
+            reason: canAttack ? 'Can attack' : `No enemies within range ${combatRange}`,
           };
 
         default:

@@ -90,8 +90,10 @@ export const usePhaseTransition = ({
       return enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
     });
 
+    console.log(`[PhaseTransition] Charge check - Player ${currentPlayer} units: ${playerUnits.length}, chargeable: ${chargeableUnits.length}, charged: ${unitsCharged.length}`);
+    
     return chargeableUnits.length === 0;
-  }, [getCurrentPlayerUnits, getEnemyUnits, unitsCharged, areUnitsAdjacent, isUnitInRange]);
+  }, [getCurrentPlayerUnits, getEnemyUnits, unitsCharged, areUnitsAdjacent, isUnitInRange, currentPlayer]);
 
   // Check if combat phase should end turn
   const shouldEndTurn = useCallback((): boolean => {
@@ -103,11 +105,12 @@ export const usePhaseTransition = ({
     // Find units that can still attack in combat
     const attackableUnits = playerUnits.filter(unit => {
       if (unitsAttacked.includes(unit.id)) return false;
-      return enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
+      const combatRange = unit.CC_RNG || 1; // Use CC_RNG instead of hardcoded adjacency
+      return enemyUnits.some(enemy => isUnitInRange(unit, enemy, combatRange));
     });
 
     return attackableUnits.length === 0;
-  }, [getCurrentPlayerUnits, getEnemyUnits, unitsAttacked, areUnitsAdjacent]);
+  }, [getCurrentPlayerUnits, getEnemyUnits, unitsAttacked, isUnitInRange]);
 
   // Transition from move to shoot phase
   const transitionToShoot = useCallback(() => {
