@@ -94,6 +94,10 @@ export default function Board({
     console.log("Board render", { phase, mode, selectedUnitId });
   }, [phase, mode, selectedUnitId]);
   
+  React.useEffect(() => {
+    console.log("Board render", { phase, mode, selectedUnitId, movePreview });
+  }, [phase, mode, selectedUnitId]);
+
   // ✅ HOOK 1: useRef - ALWAYS called first
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -207,15 +211,15 @@ export default function Board({
     const width = gridWidth + 2 * MARGIN;
     const height = gridHeight + 2 * MARGIN;
 
-    // ✅ PIXI CONFIG FROM board_config.json WITH FALLBACKS
+    // ✅ OPTIMIZED PIXI CONFIG - Allow WebGL for better performance
     const pixiConfig = {
       width,
       height,
       backgroundColor: parseColor(boardConfig.colors.background),
       antialias: displayConfig.antialias ?? true,
+      powerPreference: "high-performance" as WebGLPowerPreference,
       resolution: displayConfig.resolution === "auto" ? (window.devicePixelRatio || 1) : (displayConfig.resolution ?? 1),
       autoDensity: displayConfig.autoDensity ?? true,
-      forceCanvas: displayConfig.forceCanvas ?? true,
     };
 
     const app = new PIXI.Application(pixiConfig);
@@ -399,65 +403,85 @@ export default function Board({
       }
 
 
-    // Draw grid cells
+    // ✅ OPTIMIZED: Create containers for hex batching
+    const baseHexContainer = new PIXI.Container();
+    const highlightContainer = new PIXI.Container();
+    baseHexContainer.name = 'baseHexes';
+    highlightContainer.name = 'highlights';
+
+    // Draw grid cells with container batching
     for (let col = 0; col < BOARD_COLS; col++) {
       for (let row = 0; row < BOARD_ROWS; row++) {
         const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
         const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
         const points = getHexPolygonPoints(centerX, centerY, HEX_RADIUS);
-        const cell = new PIXI.Graphics();
-
-        // Fill: green for move, red for attack, orange for charge, or transparent
+        
+        // Check highlight states
         const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
         const isAttackable = attackCells.some(cell => cell.col === col && cell.row === row);
         const isChargeable = chargeCells.some(cell => cell.col === col && cell.row === row);
 
-        if (isChargeable) {
-          cell.beginFill(CHARGE_COLOR, 0.5); // Orange for charge from config
-        } else if (isAttackable) {
-          cell.beginFill(ATTACK_COLOR, 0.5); // Red for attack from config
-        } else if (isAvailable) {
-          cell.beginFill(HIGHLIGHT_COLOR, 0.5); // Green for move from config
-        } else {
-          // Use config colors for normal hex cells
-          const isEven = (col + row) % 2 === 0;
-          const cellColor = isEven ? parseColor(boardConfig.colors.cell_even) : parseColor(boardConfig.colors.cell_odd);
-          cell.beginFill(cellColor, 1.0); // Use config cell colors
-        }
+        // Create base hex (always present)
+        const baseCell = new PIXI.Graphics();
+        const isEven = (col + row) % 2 === 0;
+        const cellColor = isEven ? parseColor(boardConfig.colors.cell_even) : parseColor(boardConfig.colors.cell_odd);
+        baseCell.beginFill(cellColor, 1.0);
+        baseCell.lineStyle(1, parseColor(boardConfig.colors.cell_border), 0.8);
+        baseCell.drawPolygon(points);
+        baseCell.endFill();
+        baseHexContainer.addChild(baseCell);
 
-        cell.lineStyle(1, parseColor(boardConfig.colors.cell_border), 0.8);
-        cell.drawPolygon(points);
-        cell.endFill();
-
-        // Make interactive - FIXED: Use eventMode instead of deprecated interactive
-        cell.eventMode = 'static';
-        cell.cursor = "pointer";
-
-        // ✅ ORIGINAL CLICK HANDLERS - Move confirmation logic preserved
-        if (mode === "movePreview" || mode === "attackPreview") {
-          cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-            if (e.button === 0) onConfirmMove();
-            if (e.button === 2) onCancelMove();
-          });
-        } else if (mode === "chargePreview") {
+        // Create highlight hex (only if needed)
+        if (isChargeable || isAttackable || isAvailable) {
+          const highlightCell = new PIXI.Graphics();
+          
           if (isChargeable) {
-            cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+            highlightCell.beginFill(CHARGE_COLOR, 0.5);
+          } else if (isAttackable) {
+            highlightCell.beginFill(ATTACK_COLOR, 0.5);
+          } else if (isAvailable) {
+            highlightCell.beginFill(HIGHLIGHT_COLOR, 0.5);
+          }
+          
+          highlightCell.drawPolygon(points);
+          highlightCell.endFill();
+          
+          // Make interactive
+          highlightCell.eventMode = 'static';
+          highlightCell.cursor = "pointer";
+
+          // Make base hex interactive for move confirmation
+          baseCell.eventMode = 'static';
+          baseCell.cursor = "pointer";
+          
+          // Add click handlers to base hexes
+          if (mode === "movePreview" || mode === "attackPreview") {
+            baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+              if (e.button === 0) onConfirmMove();
+              if (e.button === 2) onCancelMove();
+            });
+          } else if (mode === "chargePreview" && isChargeable) {
+            highlightCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
               if (e.button === 0 && selectedUnitId !== null) {
                 onMoveCharger?.(Number(selectedUnitId), Number(col), Number(row));
               }
             });
+          } else if (mode === "select" && selectedUnitId !== null && isAvailable) {
+            highlightCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+              if (e.button === 0) {
+                onStartMovePreview(Number(selectedUnitId), Number(col), Number(row));
+              }
+            });
           }
-        } else if (mode === "select" && selectedUnitId !== null) {
-          const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
-          cell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-            if (e.button === 0 && isAvailable) {
-              onStartMovePreview(Number(selectedUnitId), Number(col), Number(row));
-            }
-          });
+          
+          highlightContainer.addChild(highlightCell);
         }
-        app.stage.addChild(cell);
       }
     }
+
+    // ✅ ADD CONTAINERS TO STAGE (2 objects instead of 432)
+    app.stage.addChild(baseHexContainer);
+    app.stage.addChild(highlightContainer);
 
     // ✅ ORIGINAL UNIT RENDERING - All features preserved
     for (const unit of units) {
@@ -711,6 +735,16 @@ export default function Board({
           previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
           previewCircle.endFill();
           app.stage.addChild(previewCircle);
+          
+          // ✅ ADD: Make preview unit clickable for move confirmation
+          previewCircle.eventMode = 'static';
+          previewCircle.cursor = "pointer";
+          previewCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+            if (e.button === 0) {
+              console.log(`Preview unit ${previewUnit.id} clicked - confirming move`);
+              onConfirmMove();
+            }
+          });
 
           // ✅ ICON RENDERING FOR PREVIEW UNIT
           if (previewUnit.ICON) {
@@ -808,15 +842,16 @@ export default function Board({
         app.destroy(true);
       };
     }, [
-      // ✅ MINIMAL DEPENDENCIES - ONLY ESSENTIAL DATA
-      JSON.stringify(units), // Stringify to prevent object reference changes
+      // ✅ FIXED DEPENDENCIES - Prevent board re-render but allow HP animations
+      units.length, // Only re-render when units count changes
+      units.map(u => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}`).join(','), // Only essential unit changes
       selectedUnitId,
       mode,
       phase,
-      boardConfig,
+      boardConfig?.cols, // Only re-render if board structure changes
       loading,
       error,
-      targetPreview
+      targetPreview // Keep full targetPreview for HP bar blinking
     ]);
 
     // Simple container return - loading/error handled inside useEffect

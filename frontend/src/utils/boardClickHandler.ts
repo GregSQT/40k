@@ -9,6 +9,7 @@ export function setupBoardClickHandler(callbacks: {
   onStartAttackPreview(shooterId: UnitId): void;
   onShoot(shooterId: UnitId, targetId: UnitId): void;
   onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
+  onConfirmMove(): void;
 }) {
 
   if (globalClickHandler) {
@@ -28,6 +29,9 @@ export function setupBoardClickHandler(callbacks: {
       callbacks.onStartAttackPreview(unitId);
     } else if (phase === 'shoot' && mode === 'attackPreview' && selectedUnitId != null) {
       callbacks.onShoot(selectedUnitId, unitId);
+    } else if (mode === 'movePreview') {
+      // In movePreview mode, clicking any unit confirms the move
+      callbacks.onConfirmMove();
     } else if (phase === 'combat' && selectedUnitId != null && selectedUnitId !== unitId) {
       // Combat phase: first unit selected, clicking on target (different unit)
       callbacks.onCombatAttack(selectedUnitId, unitId);
