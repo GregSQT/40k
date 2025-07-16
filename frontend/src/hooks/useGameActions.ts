@@ -46,7 +46,10 @@ export const useGameActions = ({
 
     switch (phase) {
       case "move":
-        return !unitsMoved.includes(unit.id);
+        const hasAdjacentEnemy = units.filter(u => u.player !== currentPlayer).some(enemy => 
+            Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
+          );
+          return !unitsMoved.includes(unit.id) && !hasAdjacentEnemy;
       case "shoot":
         if (unitsMoved.includes(unit.id)) return false;
         const enemies = units.filter(u => u.player !== currentPlayer);
@@ -111,8 +114,8 @@ export const useGameActions = ({
     
     // ⚠️ TEMPORARILY ALLOW ALL SELECTIONS FOR DEBUGGING
     if (!eligible) {
-      console.log(`[useGameActions] Unit ${unitId} not eligible, but ALLOWING for debug`);
-      // Don't return early - allow selection anyway for debugging
+      console.log(`[useGameActions] Unit ${unitId} not eligible`);
+      return;
     }
 
     // Special handling for move phase - second click marks as moved

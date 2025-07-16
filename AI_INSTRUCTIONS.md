@@ -36,16 +36,18 @@ Core Principles
 2. Two-Block Update Format
 For every code change, provide:
 - Line number of the code
-- ORIGINAL CODE :
+- A Markdown code blocks snippets containing the ORIGINAL CODE:
 
 // Exact code from the provided file with proper indentation
 const example = "exactly as you provided";
 
-- UPDATED CODE:
+- A Markdown code blocks snippets containing the UPDATED CODE:
 
 // Modified version maintaining same indentation
 const example = "with my changes applied";
 
+Both snippets must have a copy button.
+The copied code from the Markdown code blocks snippets containing the ORIGINAL CODE must fit perfectly the existing code (can be found with a researche function)
 ---
 
 3. Incremental Changes

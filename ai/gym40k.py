@@ -478,7 +478,7 @@ class W40KEnv(gym.Env):
             
             if self.current_phase == "move":
                 # AI_GAME.md: units that haven't moved are selectable (green outline)
-                if unit_id not in self.moved_units:
+                if unit_id not in self.moved_units and not self._has_adjacent_enemies(unit):
                     eligible.append(unit)
                     
             elif self.current_phase == "shoot":

@@ -52,9 +52,14 @@ export const usePhaseTransition = ({
     const playerUnits = getCurrentPlayerUnits();
     if (playerUnits.length === 0) return true;
     
-    // All units have moved
-    return playerUnits.every(unit => unitsMoved.includes(unit.id));
-  }, [getCurrentPlayerUnits, unitsMoved]);
+    // All units have moved or are ineligible (engaged)
+    return playerUnits.every(unit => {
+      if (unitsMoved.includes(unit.id)) return true;
+      // Check if engaged (adjacent to enemy)
+      const hasAdjacentEnemy = getEnemyUnits().some(enemy => areUnitsAdjacent(unit, enemy));
+      return hasAdjacentEnemy;
+    });
+  }, [getCurrentPlayerUnits, unitsMoved, getEnemyUnits, areUnitsAdjacent]);
 
   // Check if shoot phase should transition to charge phase
   const shouldTransitionFromShoot = useCallback((): boolean => {

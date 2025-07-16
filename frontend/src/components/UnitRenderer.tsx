@@ -104,7 +104,10 @@ export class UnitRenderer {
     if (isPreview) return false;
     
     if (phase === "move") {
-      return unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id));
+      const enemies = units.filter(u2 => u2.player !== currentPlayer);
+      const c1 = offsetToCube(unit.col, unit.row);
+      const hasAdjacent = enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) === 1);
+      return unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id)) && !hasAdjacent;
     } else if (phase === "shoot") {
       if (unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id))) {
         const enemies = units.filter(u2 => u2.player !== currentPlayer);
@@ -174,18 +177,21 @@ export class UnitRenderer {
     // Add click handlers for normal units
     unitCircle.eventMode = 'static';
     unitCircle.cursor = "pointer";
-    unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-      if (e.button === 0) {
-        window.dispatchEvent(new CustomEvent('boardUnitClick', {
-          detail: {
-            unitId: unit.id,
-            phase: phase,
-            mode: mode,
-            selectedUnitId: selectedUnitId
-          }
-        }));
-      }
-    });
+    const isEligible = this.calculateEligibility();
+    if (phase !== "move" || isEligible) {
+      unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+        if (e.button === 0) {
+          window.dispatchEvent(new CustomEvent('boardUnitClick', {
+            detail: {
+              unitId: unit.id,
+              phase: phase,
+              mode: mode,
+              selectedUnitId: selectedUnitId
+            }
+          }));
+        }
+      });
+    }
     
     app.stage.addChild(unitCircle);
   }
