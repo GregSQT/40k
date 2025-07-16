@@ -91,11 +91,9 @@ export default function Board({
   onCancelTargetPreview,
 }: BoardProps) {
   React.useEffect(() => {
-    console.log("Board render", { phase, mode, selectedUnitId });
   }, [phase, mode, selectedUnitId]);
   
   React.useEffect(() => {
-    console.log("Board render", { phase, mode, selectedUnitId, movePreview });
   }, [phase, mode, selectedUnitId]);
 
   // ✅ HOOK 1: useRef - ALWAYS called first
@@ -163,9 +161,20 @@ export default function Board({
 
     containerRef.current.innerHTML = "";
 
-    // ✅ CLEAR PIXI TEXTURE CACHE
-    PIXI.Texture.removeFromCache('/icons/AssaultIntercessor.webp');
-    PIXI.Texture.removeFromCache('/icons/Intercessor.webp');
+    // ✅ AGGRESSIVE TEXTURE CACHE CLEARING for movePreview units
+    if (mode === "movePreview" && movePreview) {
+      const previewUnit = units.find(u => u.id === movePreview.unitId);
+      if (previewUnit?.ICON) {
+        PIXI.Texture.removeFromCache(previewUnit.ICON);
+        // Clear all cached textures to force fresh loading
+        PIXI.utils.clearTextureCache();
+      }
+    }
+
+    // ✅ CLEAR COMMON TEXTURE CACHE
+    //PIXI.Texture.removeFromCache('/icons/AssaultIntercessor.webp');
+    //PIXI.Texture.removeFromCache('/icons/AssaultIntercessor_red.webp');
+    //PIXI.Texture.removeFromCache('/icons/Intercessor.webp');
 
     // Extract board configuration values - USE CONFIG VALUES
     const BOARD_COLS = boardConfig.cols;
@@ -227,6 +236,7 @@ export default function Board({
     };
 
     const app = new PIXI.Application(pixiConfig);
+    app.stage.sortableChildren = true;
 
     // ✅ CANVAS STYLING FROM CONFIG
     const canvas = app.view as HTMLCanvasElement;
@@ -236,11 +246,6 @@ export default function Board({
     canvas.style.border = CANVAS_BORDER;
     
     containerRef.current.appendChild(canvas);
-
-    // ✅ CLEAR ALL EXISTING SPRITES
-    app.stage.removeChildren();
-    app.stage.destroy({ children: true, texture: false, baseTexture: false });
-    app.stage = new PIXI.Container();
 
     // Right click cancels move/attack preview
     if (app.view && app.view.addEventListener) {
@@ -488,29 +493,35 @@ export default function Board({
       }
     }
 
+    // ✅ AGGRESSIVE STAGE CLEANUP - Destroy everything first, then clear
+    const childrenToDestroy = [...app.stage.children];
+    app.stage.removeChildren();
+    childrenToDestroy.forEach(child => {
+      if (child.destroy) {
+        child.destroy({ children: true, texture: false, baseTexture: false });
+      }
+    });
+
     // ✅ ADD CONTAINERS TO STAGE (2 objects instead of 432)
     app.stage.addChild(baseHexContainer);
     app.stage.addChild(highlightContainer);
 
     // ✅ ORIGINAL UNIT RENDERING - All features preserved
     for (const unit of units) {
-      // In movePreview, do not draw the moving unit at its old spot
-      if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) {
-        console.log(`🚫 Skipping unit ${unit.id} in movePreview mode`);
-        continue;
-      }
-      // In attackPreview, do not draw the unit at its old spot if it's attackPreview
-      if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) {
-        console.log(`🚫 Skipping unit ${unit.id} in attackPreview mode`);
-        continue;
-      }
-
       const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
       const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
       // ✅ HP BAR USING CONFIG VALUES WITH PREVIEW SUPPORT
       if (unit.HP_MAX) {
-        console.log('🔍 Target preview debug:', { targetPreview, unitId: unit.id });
+
+      // In movePreview, do not draw the moving unit at its old spot
+      if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) {
+        continue;
+      }
+      // In attackPreview, do not draw the unit at its old spot if it's attackPreview
+      if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) {
+        continue;
+      }
         const HP_BAR_WIDTH = HEX_RADIUS * HP_BAR_WIDTH_RATIO;
         const HP_BAR_Y_OFFSET = HEX_RADIUS * HP_BAR_Y_OFFSET_RATIO;
 
@@ -531,6 +542,7 @@ export default function Board({
         barBg.beginFill(0x222222, 1);
         barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, 3);
         barBg.endFill();
+        barBg.zIndex = 100;
         app.stage.addChild(barBg);
         
         // Calculate current HP and future HP for preview
@@ -560,6 +572,7 @@ export default function Board({
           slice.beginFill(color, 1);
           slice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
           slice.endFill();
+          slice.zIndex = 100;
           app.stage.addChild(slice);
         }
         
@@ -680,9 +693,7 @@ export default function Board({
       unitCircle.cursor = "pointer";
       
       unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-        if (e.button === 0) {
-          console.log(`Unit ${unit.id} clicked`);
-          
+        if (e.button === 0) {          
           // Store click data and dispatch simple event
           window.dispatchEvent(new CustomEvent('boardUnitClick', {
             detail: {
@@ -696,9 +707,6 @@ export default function Board({
       });
 
       app.stage.addChild(unitCircle);
-
-      // Debug: Log what icon we're trying to load
-      console.log(`Unit ${unit.id} (player ${unit.player}, type ${unit.name}): ICON = ${unit.ICON}`);
 
       // ✅ ICON RENDERING WITH PER-UNIT SCALING
       if (unit.ICON) {
@@ -743,38 +751,18 @@ export default function Board({
 
       // ✅ ORIGINAL PREVIEW UNIT RENDERING
       if (mode === "movePreview" && movePreview) {
-        console.log(`🔍 MovePreview Debug: movePreview.unitId=${movePreview.unitId}, selectedUnitId=${selectedUnitId}`);
         const previewUnit = units.find(u => u.id === movePreview.unitId);
-        console.log(`🔍 Found previewUnit:`, previewUnit);
         if (previewUnit) {
           const centerX = movePreview.destCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
           const centerY = movePreview.destRow * HEX_VERT_SPACING + ((movePreview.destCol % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
-          const previewCircle = new PIXI.Graphics();
-          // Get the original unit to avoid using modified color
-          const originalUnit = units.find(u => u.id === previewUnit.id);
-          const originalColor = originalUnit?.color || previewUnit.color;
-          previewCircle.beginFill(originalColor, 0.7);
-          previewCircle.lineStyle(3, 0xffffff, 0.8);
-          previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
-          previewCircle.endFill();
-          app.stage.addChild(previewCircle);
-
-          // ✅ ADD: Make preview unit clickable for move confirmation
-          previewCircle.eventMode = 'static';
-          previewCircle.cursor = "pointer";
-          previewCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-            if (e.button === 0) {
-              console.log(`Preview unit ${previewUnit.id} clicked - confirming move`);
-              onConfirmMove();
-            }
-          });
-
           // ✅ ICON RENDERING FOR PREVIEW UNIT
           if (previewUnit.ICON) {
             try {
-              console.log(`🖼️ MovePreview loading icon: ${previewUnit.ICON} for unit ${previewUnit.name}`);
-              const texture = PIXI.Texture.from(previewUnit.ICON);
+              // Force fresh texture - don't use cached version
+              const texture = PIXI.Texture.from(previewUnit.ICON, { 
+                resourceOptions: { crossorigin: 'anonymous' }
+              });
               const sprite = new PIXI.Sprite(texture);
               sprite.anchor.set(0.5);
               sprite.position.set(centerX, centerY);
@@ -783,7 +771,23 @@ export default function Board({
               sprite.height = HEX_RADIUS * unitIconScale;
               sprite.alpha = 0.8; // Slightly transparent for preview
               sprite.tint = 0xffffff; // ✅ REMOVE COLOR TINTING
+
+              // ▶️ Make preview sprite interactive for move-confirm
+              sprite.eventMode = 'static';
+              sprite.cursor = "pointer";
+              sprite.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+                if (e.button === 0) {
+                  onConfirmMove();
+                }
+              });
+
               app.stage.addChild(sprite);
+              
+              // ✅ DEBUG: Check what's actually on the stage
+              app.stage.children.forEach((child, index) => {
+                if (child.children) {
+                }
+              });
             } catch (iconError) {
               console.warn(`Failed to load preview icon ${previewUnit.ICON}:`, iconError);
               // Fallback to text if icon fails
@@ -812,25 +816,24 @@ export default function Board({
         }
       }
 
-      if (mode === "attackPreview" && attackPreview) {
-        console.log(`🔍 AttackPreview Debug: attackPreview.unitId=${attackPreview.unitId}, selectedUnitId=${selectedUnitId}`);
+        if (mode === "attackPreview" && attackPreview) {
         const previewUnit = units.find(u => u.id === attackPreview.unitId);
-        console.log(`🔍 Found previewUnit:`, previewUnit);
         if (previewUnit) {
           const centerX = attackPreview.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
           const centerY = attackPreview.row * HEX_VERT_SPACING + ((attackPreview.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
-          const previewCircle = new PIXI.Graphics();
-          previewCircle.beginFill(previewUnit.color, 0.7);
-          previewCircle.lineStyle(3, 0xffffff, 0.8);
-          previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
-          previewCircle.endFill();
-          app.stage.addChild(previewCircle);
+          if (attackPreview.unitId !== selectedUnitId) {
+            const previewCircle = new PIXI.Graphics();
+            previewCircle.beginFill(previewUnit.color, 0.7);
+            previewCircle.lineStyle(3, 0xffffff, 0.8);
+            previewCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
+            previewCircle.endFill();
+            app.stage.addChild(previewCircle);
+          }
 
           // ✅ ICON RENDERING FOR ATTACK PREVIEW UNIT
           if (previewUnit.ICON) {
             try {
-              console.log(`🖼️ AttackPreview loading icon: ${previewUnit.ICON} for unit ${previewUnit.name}`);
               const texture = PIXI.Texture.from(previewUnit.ICON);
               const sprite = new PIXI.Sprite(texture);
               sprite.anchor.set(0.5);
@@ -871,7 +874,16 @@ export default function Board({
 
       // Cleanup function
       return () => {
-        app.destroy(true);
+        if (app && app.stage) {
+          // Destroy all sprites completely
+          app.stage.children.forEach(child => {
+            if (child.destroy) {
+              child.destroy({ children: true, texture: true, baseTexture: true });
+            }
+          });
+          app.stage.removeChildren();
+        }
+        app.destroy(true, { children: true, texture: true, baseTexture: true });
       };
     }, [
       // ✅ FIXED DEPENDENCIES - Prevent board re-render but allow HP animations
@@ -883,6 +895,9 @@ export default function Board({
       boardConfig?.cols, // Only re-render if board structure changes
       loading,
       error,
+      movePreview?.unitId, // Add this to ensure preview changes trigger re-render
+      movePreview?.destCol, // Add this too
+      movePreview?.destRow,  // And this
       targetPreview // Keep full targetPreview for HP bar blinking
     ]);
 
