@@ -570,10 +570,14 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
   }, [actions]);
 
   const cancelCharge = useCallback(() => {
+    if (selectedUnitId !== null) {
+      actions.addChargedUnit(selectedUnitId);
+    }
+    actions.setSelectedUnitId(null);
     actions.setMode("select");
     actions.setMovePreview(null);
     actions.setAttackPreview(null);
-  }, [actions]);
+  }, [actions, selectedUnitId]);
 
   const validateCharge = useCallback((chargerId: UnitId) => {
     actions.addChargedUnit(chargerId);

@@ -537,12 +537,25 @@ export default function Board({
         baseCell.beginFill(cellColor, 1.0);
         baseCell.lineStyle(1, parseColor(boardConfig.colors.cell_border), 0.8);
         baseCell.drawPolygon(points);
-        baseCell.endFill();
-        baseHexContainer.addChild(baseCell);
+                  baseCell.endFill();
+          baseHexContainer.addChild(baseCell);
 
-        // Create highlight hex (only if needed)
-        if (isChargeable || isAttackable || isAvailable) {
-          const highlightCell = new PIXI.Graphics();
+          // Cancel charge on re-click of active unit during charge preview
+          if (mode === "chargePreview" && selectedUnitId !== null) {
+            const unit = units.find(u => u.id === selectedUnitId);
+            if (unit && col === unit.col && row === unit.row) {
+              baseCell.eventMode = 'static';
+              baseCell.cursor    = "pointer";
+              baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+                if (e.button === 0) onCancelCharge?.();
+              });
+            }
+          }
+
+          // Create highlight hex (only if needed)
+          if (isChargeable || isAttackable || isAvailable) {
+            const highlightCell = new PIXI.Graphics();
+
           
           if (isChargeable) {
             highlightCell.beginFill(CHARGE_COLOR, 0.5);
@@ -554,9 +567,18 @@ export default function Board({
           
           highlightCell.drawPolygon(points);
           highlightCell.endFill();
-          
-          // Make interactive
-          highlightCell.eventMode = 'static';
+
+          // Make interactive (disable during charge preview)
+          if (mode === "chargePreview") {
+            highlightCell.eventMode = 'none';
+          } else {
+            highlightCell.eventMode = 'static';
+          }
+          highlightCell.cursor = "pointer";
+
+          // Make base hex interactive for move confirmation
+          baseCell.eventMode = 'static';
+
           highlightCell.cursor = "pointer";
 
           // Make base hex interactive for move confirmation
@@ -569,10 +591,16 @@ export default function Board({
               if (e.button === 0) onConfirmMove();
               if (e.button === 2) onCancelMove();
             });
-          } else if (mode === "chargePreview" && isChargeable) {
-            highlightCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-              if (e.button === 0 && selectedUnitId !== null) {
-                onMoveCharger?.(Number(selectedUnitId), Number(col), Number(row));
+          } else if (mode === "chargePreview" && selectedUnitId !== null) {
+            baseCell.eventMode = 'static';
+            baseCell.cursor    = "pointer";
+            baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+              if (e.button !== 0) return;
+              const unit = units.find(u => u.id === selectedUnitId);
+              if (unit?.col === col && unit.row === row) {
+                onCancelCharge?.();
+              } else if (isChargeable) {
+                onMoveCharger?.(selectedUnitId, Number(col), Number(row));
               }
             });
           } else if (mode === "select" && selectedUnitId !== null && isAvailable) {

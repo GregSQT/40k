@@ -10,6 +10,7 @@ export function setupBoardClickHandler(callbacks: {
   onShoot(shooterId: UnitId, targetId: UnitId): void;
   onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
   onConfirmMove(): void;
+  onCancelCharge?(): void;
 }) {
 
   if (globalClickHandler) {
@@ -44,6 +45,9 @@ export function setupBoardClickHandler(callbacks: {
   };
 
   window.addEventListener('boardUnitClick', globalClickHandler);
+  window.addEventListener('boardCancelCharge', () => {
+    callbacks.onCancelCharge?.();
+  });
 }
 
 ;(window as any).setupBoardClickHandler = setupBoardClickHandler;

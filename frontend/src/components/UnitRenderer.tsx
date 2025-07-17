@@ -145,9 +145,26 @@ export class UnitRenderer {
     const { unit, centerX, centerY, app, isPreview, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked,
              chargeTargets, combatTargets, boardConfig, HEX_RADIUS, UNIT_CIRCLE_RADIUS_RATIO,
              SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-             phase, mode, parseColor } = this.props;
+             phase, mode, currentPlayer, units, parseColor } = this.props;
     
     if (isPreview) return;
+    
+    // Grey-out enemies adjacent to any friendly unit during shooting phase
+    if (phase === "shoot" && unit.player !== currentPlayer) {
+      const friendlies = units.filter(u2 => u2.player === currentPlayer);
+      if (friendlies.some(fu => areUnitsAdjacent(unit, fu))) {
+        const grey = 0x888888;
+        const g = new PIXI.Graphics();
+        g.beginFill(grey);
+        g.lineStyle(DEFAULT_BORDER_WIDTH, grey);
+        g.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
+        g.endFill();
+        g.zIndex = iconZIndex;
+        g.eventMode = 'none';
+        app.stage.addChild(g);
+        return;
+      }
+    }
     
     let unitColor = unit.color;
     let borderColor = 0xffffff;
@@ -177,11 +194,18 @@ export class UnitRenderer {
     unitCircle.endFill();
     unitCircle.zIndex = iconZIndex;
     
-    // Add click handlers for normal units
+    // Add click handlers for normal units (with charge-cancel on re-click)
     unitCircle.eventMode = 'static';
     unitCircle.cursor = "pointer";
     const isEligible = this.calculateEligibility();
-    if (phase !== "move" || isEligible) {
+    if (phase === "charge" && selectedUnitId === unit.id) {
+      // Cancel charge on second click of active unit
+      unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+        if (e.button === 0) {
+          window.dispatchEvent(new CustomEvent('boardCancelCharge'));
+        }
+      });
+    } else if (phase !== "move" || isEligible) {
       unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
         if (e.button === 0) {
           window.dispatchEvent(new CustomEvent('boardUnitClick', {
@@ -201,7 +225,7 @@ export class UnitRenderer {
   
   private renderUnitIcon(iconZIndex: number): void {
     const { unit, centerX, centerY, app, isPreview, previewType, HEX_RADIUS, UNIT_TEXT_SIZE,
-             ICON_SCALE, onConfirmMove } = this.props;
+             ICON_SCALE, phase, currentPlayer, units, onConfirmMove } = this.props;
     
     const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
     
@@ -229,8 +253,17 @@ export class UnitRenderer {
             sprite.alpha = 0.8;
           }
         }
-        
-        app.stage.addChild(sprite);
+        // Grey-out enemies adjacent to any friendly unit during shooting phase
+        if (!isPreview && phase === "shoot" && unit.player !== currentPlayer) {
+          const friendlies = units.filter(u2 => u2.player === currentPlayer);
+          if (friendlies.some(fu => areUnitsAdjacent(unit, fu))) {
+            sprite.alpha = 0.5;
+            sprite.tint  = 0x888888;
+          }
+        }
+         
+         app.stage.addChild(sprite);
+
       } catch (iconError) {
         console.warn(`Failed to load icon ${unit.ICON}:`, iconError);
         this.renderTextFallback(iconZIndex);
