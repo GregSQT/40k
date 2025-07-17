@@ -16,6 +16,7 @@ interface GameBoardProps {
   unitsMoved: UnitId[];
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
+  unitsFled: UnitId[];  // ✅ ADD THIS LINE
   onSelectUnit: (id: UnitId | null) => void;
   onStartMovePreview: (unitId: UnitId, col: number, row: number) => void;
   onStartAttackPreview: (unitId: UnitId, col: number, row: number) => void;
@@ -95,6 +96,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         unitsMoved={props.unitsMoved}
         unitsCharged={props.unitsCharged}
         unitsAttacked={props.unitsAttacked}
+        unitsFled={props.unitsFled}  // ✅ ADD THIS LINE
         onSelectUnit={handleSelectUnit}
         onStartMovePreview={handleStartMovePreview}
         onStartAttackPreview={props.onStartAttackPreview}

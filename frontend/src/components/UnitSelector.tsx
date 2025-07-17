@@ -11,6 +11,7 @@ interface UnitSelectorProps {
   unitsMoved: UnitId[];
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
+  unitsFled: UnitId[];  // ✅ ADD THIS LINE
   phase: GameState['phase'];
 }
 
@@ -92,6 +93,7 @@ export const UnitSelector = memo<UnitSelectorProps>(({
   unitsMoved,
   unitsCharged,
   unitsAttacked,
+  unitsFled,
   phase,
 }) => {
   const { eligibleUnits, ineligibleUnits } = useMemo(() => {
@@ -123,6 +125,10 @@ export const UnitSelector = memo<UnitSelectorProps>(({
           if (hasAdjacentEnemyShoot) {
             return { eligible: false, reason: 'Engaged in combat' };
           }
+          // NEW RULE: Units that fled cannot shoot
+          if (unitsFled.includes(unit.id)) {
+            return { eligible: false, reason: 'Unit fled - cannot shoot' };
+          }
           const canShoot = enemies.some(enemy => isUnitInRange(unit, enemy, unit.RNG_RNG));
           return {
             eligible: canShoot,
@@ -135,6 +141,10 @@ export const UnitSelector = memo<UnitSelectorProps>(({
           const hasAdjacentEnemy = enemies.some(enemy => areUnitsAdjacent(unit, enemy));
           if (hasAdjacentEnemy) {
             return { eligible: false, reason: 'Enemy adjacent' };
+          }
+          // NEW RULE: Units that fled cannot charge
+          if (unitsFled.includes(unit.id)) {
+            return { eligible: false, reason: 'Unit fled - cannot charge' };
           }
           const canCharge = enemies.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
           return {
@@ -176,7 +186,7 @@ export const UnitSelector = memo<UnitSelectorProps>(({
       eligibleUnits: eligible,
       ineligibleUnits: ineligible,
     };
-  }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked]);
+  }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled]);
 
   const handleUnitClick = (unitId: UnitId) => {
     console.log('[UnitSelector] Unit clicked:', unitId, { phase, unitsMoved, unitsCharged });

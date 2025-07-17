@@ -9,6 +9,7 @@ interface GameStatusProps {
   unitsMoved: UnitId[];
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
+  unitsFled: UnitId[];  // ✅ ADD THIS LINE
 }
 
 const PHASE_LABELS = {
@@ -30,6 +31,7 @@ export const GameStatus = memo<GameStatusProps>(({
   unitsMoved,
   unitsCharged,
   unitsAttacked,
+  unitsFled,  // ✅ ADD THIS LINE
 }) => {
   // Get current player's units that have acted
   const currentPlayerUnits = units.filter(u => u.player === currentPlayer);

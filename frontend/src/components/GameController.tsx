@@ -123,6 +123,7 @@ export const GameController: React.FC<GameControllerProps> = ({
             unitsMoved={gameState.unitsMoved}
             unitsCharged={gameState.unitsCharged}
             unitsAttacked={gameState.unitsAttacked}
+            unitsFled={gameState.unitsFled}
             phase={gameState.phase}
           />
         </ErrorBoundary>
@@ -146,6 +147,7 @@ export const GameController: React.FC<GameControllerProps> = ({
               unitsMoved={gameState.unitsMoved}
               unitsCharged={gameState.unitsCharged}
               unitsAttacked={gameState.unitsAttacked}
+              unitsFled={gameState.unitsFled}
               onSelectUnit={gameState.phase === "charge" ? gameActions.selectCharger : gameActions.selectUnit}
               onStartMovePreview={gameActions.startMovePreview}
               onStartAttackPreview={gameActions.startAttackPreview}
@@ -186,6 +188,7 @@ export const GameController: React.FC<GameControllerProps> = ({
             unitsMoved={gameState.unitsMoved}
             unitsCharged={gameState.unitsCharged}
             unitsAttacked={gameState.unitsAttacked}
+            unitsFled={gameState.unitsFled}
           />
         </footer>
       </main>
