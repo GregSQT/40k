@@ -513,9 +513,9 @@ class W40KEnv(gym.Env):
                     eligible.append(unit)
                     
             elif self.current_phase == "combat":
-                # AI_GAME.md: Enemy adjacent, hasn't attacked this phase
+                # AI_GAME.md: Enemy within CC_RNG range, hasn't attacked this phase
                 if (unit_id not in self.attacked_units and 
-                    self._has_adjacent_enemies(unit)):
+                    self._has_enemies_in_combat_range(unit)):
                     eligible.append(unit)
         
         return eligible
@@ -570,15 +570,14 @@ class W40KEnv(gym.Env):
         # Return the agent type of the first eligible unit
         return self.unit_registry.get_model_key(eligible_units[0]["unit_type"])
 
-    def _has_enemies_in_move_range(self, unit):
-        """Check if unit has enemies within MOVE range for charging per AI_GAME.md."""
+    def _has_enemies_in_combat_range(self, unit):
+        """Check if unit has enemies within CC_RNG combat range per AI_GAME.md."""
+        combat_range = unit.get("cc_rng", 1)  # Default to 1 if not specified
         for enemy in self.enemy_units:
             if enemy["alive"]:
-                if is_unit_in_range(unit, enemy, unit.get("move", 0)):
+                if is_unit_in_range(unit, enemy, combat_range):
                     return True
         return False
-
-    def _execute_action_with_phase(self, unit, action_type):
         """Execute action with current phase context and AI_GAME.md tracking."""
         unit_rewards = self._get_unit_reward_config(unit)
         
@@ -1009,25 +1008,25 @@ class W40KEnv(gym.Env):
     def _get_combat_targets(self, unit):
         """Get combat targets in AI_GAME_OVERVIEW.md priority order."""
         targets = []
-        adjacent_enemies = []
+        combat_enemies = []
         
-        # Find adjacent enemies
+        # Find enemies within combat range (CC_RNG)
+        combat_range = unit.get("cc_rng", 1)  # Default to 1 if not specified
         for enemy in self.enemy_units:
             if enemy["alive"]:
-                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                if dist <= 1:
-                    adjacent_enemies.append(enemy)
+                if is_unit_in_range(unit, enemy, combat_range):
+                    combat_enemies.append(enemy)
         
-        if not adjacent_enemies:
+        if not combat_enemies:
             return targets
         
         # Priority 1: Can kill in 1 melee phase
-        for enemy in adjacent_enemies:
+        for enemy in combat_enemies:
             if enemy["cur_hp"] <= unit["cc_dmg"]:
                 targets.append(enemy)
         
         # Priority 2: Highest threat, lowest HP
-        remaining = [e for e in adjacent_enemies if e not in targets]
+        remaining = [e for e in combat_enemies if e not in targets]
         remaining.sort(key=lambda e: (max(e.get("rng_dmg", 0), e.get("cc_dmg", 0)), -e["cur_hp"]), reverse=True)
         targets.extend(remaining)
         
