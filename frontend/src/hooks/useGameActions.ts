@@ -2,6 +2,7 @@
 import { useCallback } from 'react';
 import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState, TargetPreview } from '../types/game';
 import { calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability } from '../utils/probabilityCalculator';
+import { areUnitsAdjacent, isUnitInRange } from '../utils/gameHelpers';
 import { singleShotSequenceManager } from '../utils/ShootingSequenceManager';
 
 interface UseGameActionsParams {
@@ -44,41 +45,29 @@ export const useGameActions = ({
   const isUnitEligible = useCallback((unit: Unit) => {
     if (unit.player !== currentPlayer) return false;
 
+    // Get enemy units once for efficiency
+    const enemyUnits = units.filter(u => u.player !== currentPlayer);
+
     switch (phase) {
       case "move":
-        const hasAdjacentEnemy = units.filter(u => u.player !== currentPlayer).some(enemy => 
-            Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
-          );
-          return !unitsMoved.includes(unit.id) && !hasAdjacentEnemy;
+        const hasAdjacentEnemy = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
+        return !unitsMoved.includes(unit.id) && !hasAdjacentEnemy;
       case "shoot":
         if (unitsMoved.includes(unit.id)) return false;
         // Check if unit is adjacent to any enemy (engaged in combat)
-        const hasAdjacentEnemyShoot = units.filter(u => u.player !== currentPlayer).some(enemy => 
-          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
-        );
+        const hasAdjacentEnemyShoot = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         if (hasAdjacentEnemyShoot) return false;
         // Check if unit has enemies in shooting range
-        const enemies = units.filter(u => u.player !== currentPlayer);
-        return enemies.some(enemy => 
-          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) <= unit.RNG_RNG
-        );
+        return enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.RNG_RNG));
       case "charge":
         if (unitsCharged.includes(unit.id)) return false;
-        const enemyUnits = units.filter(u => u.player !== currentPlayer);
-        const isAdjacent = enemyUnits.some(enemy =>
-          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
-        );
-        const inRange = enemyUnits.some(enemy =>
-          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) <= unit.MOVE
-        );
+        const isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
+        const inRange = enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
         return !isAdjacent && inRange;
       case "combat":
         if (unitsAttacked.includes(unit.id)) return false;
-        const enemiesInCombatRange = units.filter(u => u.player !== currentPlayer);
-        const combatRange = unit.CC_RNG || 1; // Use CC_RNG instead of hardcoded 1
-        return enemiesInCombatRange.some(enemy =>
-          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) <= combatRange
-        );
+        const combatRange = unit.CC_RNG || 1;
+        return enemyUnits.some(enemy => isUnitInRange(unit, enemy, combatRange));
       default:
         return false;
     }

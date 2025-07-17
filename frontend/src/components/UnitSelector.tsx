@@ -1,6 +1,7 @@
 // components/UnitSelector.tsx
 import React, { memo, useMemo } from 'react';
 import { Unit, UnitId, GameState } from '../types/game';
+import { areUnitsAdjacent, isUnitInRange } from '../utils/gameHelpers';
 
 interface UnitSelectorProps {
   units: Unit[];
@@ -104,17 +105,11 @@ export const UnitSelector = memo<UnitSelectorProps>(({
         combat: unitsAttacked.includes(unit.id),
       };
 
-      const isAdjacent = (u1: Unit, u2: Unit) => 
-        Math.max(Math.abs(u1.col - u2.col), Math.abs(u1.row - u2.row)) === 1;
-
-      const isInRange = (u1: Unit, u2: Unit, range: number) =>
-        Math.max(Math.abs(u1.col - u2.col), Math.abs(u1.row - u2.row)) <= range;
-
       const enemies = units.filter(u => u.player !== currentPlayer);
 
       switch (phase) {
         case 'move':
-          const hasAdjacentEnemyMove = enemies.some(enemy => isAdjacent(unit, enemy));
+          const hasAdjacentEnemyMove = enemies.some(enemy => areUnitsAdjacent(unit, enemy));
           return {
             eligible: !hasActed.move && !hasAdjacentEnemyMove,
             reason: hasAdjacentEnemyMove ? 'Engaged in combat' : (hasActed.move ? 'Already moved' : 'Can move'),
@@ -125,11 +120,11 @@ export const UnitSelector = memo<UnitSelectorProps>(({
             return { eligible: false, reason: 'Already shot' };
           }
           // Check if unit is adjacent to any enemy (engaged in combat)
-          const hasAdjacentEnemyShoot = enemies.some(enemy => isAdjacent(unit, enemy));
+          const hasAdjacentEnemyShoot = enemies.some(enemy => areUnitsAdjacent(unit, enemy));
           if (hasAdjacentEnemyShoot) {
             return { eligible: false, reason: 'Engaged in combat' };
           }
-          const canShoot = enemies.some(enemy => isInRange(unit, enemy, unit.RNG_RNG));
+          const canShoot = enemies.some(enemy => isUnitInRange(unit, enemy, unit.RNG_RNG));
           return {
             eligible: canShoot,
             reason: canShoot ? 'Can shoot' : 'No enemies in range',
@@ -138,11 +133,11 @@ export const UnitSelector = memo<UnitSelectorProps>(({
           if (hasActed.charge) {
             return { eligible: false, reason: 'Already charged' };
           }
-          const hasAdjacentEnemy = enemies.some(enemy => isAdjacent(unit, enemy));
+          const hasAdjacentEnemy = enemies.some(enemy => areUnitsAdjacent(unit, enemy));
           if (hasAdjacentEnemy) {
             return { eligible: false, reason: 'Enemy adjacent' };
           }
-          const canCharge = enemies.some(enemy => isInRange(unit, enemy, unit.MOVE));
+          const canCharge = enemies.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
           return {
             eligible: canCharge,
             reason: canCharge ? 'Can charge' : 'No enemies in charge range',
@@ -153,7 +148,7 @@ export const UnitSelector = memo<UnitSelectorProps>(({
             return { eligible: false, reason: 'Already attacked' };
           }
           const combatRange = unit.CC_RNG || 1; // Use CC_RNG instead of hardcoded adjacency
-          const canAttack = enemies.some(enemy => isInRange(unit, enemy, combatRange));
+          const canAttack = enemies.some(enemy => isUnitInRange(unit, enemy, combatRange));
           return {
             eligible: canAttack,
             reason: canAttack ? 'Can attack' : `No enemies within range ${combatRange}`,

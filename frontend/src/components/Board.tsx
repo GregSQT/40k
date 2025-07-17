@@ -336,7 +336,13 @@ export default function Board({
     let combatTargets: Unit[] = [];
     if (phase === "combat" && selectedUnit) {
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
-      const combatRange = selectedUnit.CC_RNG || 1; // Use CC_RNG instead of hardcoded 1
+      
+      // Validate CC_RNG is defined
+      if (selectedUnit.CC_RNG === undefined || selectedUnit.CC_RNG === null) {
+        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required CC_RNG property for combat phase`);
+      }
+      
+      const combatRange = selectedUnit.CC_RNG;
       
       // Red outline: all enemy units within combat range of the selected unit
       combatTargets = units.filter(u =>
@@ -348,6 +354,11 @@ export default function Board({
     // ✅ SIMPLIFIED SHOOTING PREVIEW - No animations to prevent re-render loop
     let shootingTarget: Unit | null = null;
     if (phase === "shoot" && mode === "attackPreview" && selectedUnit && attackPreview) {
+      // Validate RNG_RNG is defined
+      if (selectedUnit.RNG_RNG === undefined || selectedUnit.RNG_RNG === null) {
+        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required RNG_RNG property for shooting phase`);
+      }
+      
       // Simple target identification - no state changes here
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
       const enemiesInRange = units.filter(u =>
@@ -374,6 +385,11 @@ export default function Board({
     }
 
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
+      // Validate MOVE is defined first
+      if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
+        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for charge preview`);
+      }
+      
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
 
       // Orange cells: within MOVE, not blocked, AND adjacent to at least one enemy (within MOVE)
@@ -408,6 +424,11 @@ export default function Board({
 
     // Green move cells (mode: 'select')
     if (selectedUnit && mode === "select" && phase !== "charge" && phase !== "combat") {
+      // Validate MOVE is defined
+      if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
+        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for movement preview`);
+      }
+      
       const centerCol = selectedUnit.col;
       const centerRow = selectedUnit.row;
       const c1 = offsetToCube(centerCol, centerRow);
@@ -465,7 +486,20 @@ export default function Board({
         )
       ) {
         const centerCube = offsetToCube(attackFromCol, attackFromRow);
-        const range = previewUnit.RNG_RNG;
+        
+        // Validate required range properties are defined and get range
+        let range: number;
+        if (phase === "combat") {
+          if (previewUnit.CC_RNG === undefined || previewUnit.CC_RNG === null) {
+            throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required CC_RNG property for combat phase preview`);
+          }
+          range = previewUnit.CC_RNG;
+        } else {
+          if (previewUnit.RNG_RNG === undefined || previewUnit.RNG_RNG === null) {
+            throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required RNG_RNG property for shooting phase preview`);
+          }
+          range = previewUnit.RNG_RNG;
+        }
         for (let col = 0; col < BOARD_COLS; col++) {
           for (let row = 0; row < BOARD_ROWS; row++) {
             const targetCube = offsetToCube(col, row);

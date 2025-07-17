@@ -1,6 +1,7 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview } from "../types/game";
+import { areUnitsAdjacent, isUnitInRange } from '../utils/gameHelpers';
 
 // For flat-topped hex, even-q offset (col, row)
 function offsetToCube(col: number, row: number) {
@@ -105,38 +106,35 @@ export class UnitRenderer {
     
     if (phase === "move") {
       const enemies = units.filter(u2 => u2.player !== currentPlayer);
-      const c1 = offsetToCube(unit.col, unit.row);
-      const hasAdjacent = enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) === 1);
+      const hasAdjacent = enemies.some(eu => areUnitsAdjacent(unit, eu));
       return unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id)) && !hasAdjacent;
     } else if (phase === "shoot") {
       if (unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id))) {
         const enemies = units.filter(u2 => u2.player !== currentPlayer);
-        const c1 = offsetToCube(unit.col, unit.row);
         // Check if unit is adjacent to any enemy (engaged in combat)
-        const hasAdjacentEnemy = enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) === 1);
+        const hasAdjacentEnemy = enemies.some(eu => areUnitsAdjacent(unit, eu));
         if (hasAdjacentEnemy) return false;
         // Check if unit has enemies in shooting range
-        return enemies.some(eu => {
-          const c2 = offsetToCube(eu.col, eu.row);
-          return cubeDistance(c1, c2) <= unit.RNG_RNG;
-        });
+        return enemies.some(eu => isUnitInRange(unit, eu, unit.RNG_RNG));
       }
     } else if (phase === "charge") {
       const unitsChargedArr = unitsCharged || [];
       if (unit.player === currentPlayer && !unitsChargedArr.includes(Number(unit.id))) {
         const enemies = units.filter(u2 => u2.player !== currentPlayer);
-        const c1 = offsetToCube(unit.col, unit.row);
-        const isAdjacent = enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) === 1);
-        const inRange = enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) <= unit.MOVE);
+        const isAdjacent = enemies.some(eu => areUnitsAdjacent(unit, eu));
+        const inRange = enemies.some(eu => isUnitInRange(unit, eu, unit.MOVE));
         return !isAdjacent && inRange;
       }
     } else if (phase === "combat") {
       const unitsAttackedArr = unitsAttacked || [];
       if (unit.player === currentPlayer && !unitsAttackedArr.includes(Number(unit.id))) {
         const enemies = units.filter(u2 => u2.player !== currentPlayer);
-        const c1 = offsetToCube(unit.col, unit.row);
-        const combatRange = unit.CC_RNG || 1; // Use CC_RNG instead of hardcoded 1
-        return enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) <= combatRange);
+        // Validate CC_RNG is defined
+        if (unit.CC_RNG === undefined || unit.CC_RNG === null) {
+          throw new Error(`Unit ${unit.id} (${unit.type || 'unknown'}) is missing required CC_RNG property for combat phase eligibility`);
+        }
+        const combatRange = unit.CC_RNG;
+        return enemies.some(eu => isUnitInRange(unit, eu, combatRange));
       }
     }
     

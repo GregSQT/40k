@@ -1,6 +1,7 @@
 // hooks/usePhaseTransition.ts
 import { useEffect, useCallback } from 'react';
 import { GameState, Unit, UnitId, PlayerId } from '../types/game';
+import { areUnitsAdjacent, isUnitInRange } from '../utils/gameHelpers';
 
 interface UsePhaseTransitionParams {
   gameState: GameState;
@@ -50,9 +51,6 @@ export const usePhaseTransition = ({
   // Check if move phase should transition to shoot phase
   const shouldTransitionFromMove = useCallback((): boolean => {
     const playerUnits = getCurrentPlayerUnits();
-    if (playerUnits.length === 0) return true;
-    
-    // All units have moved or are ineligible (engaged)
     return playerUnits.every(unit => {
       if (unitsMoved.includes(unit.id)) return true;
       // Check if engaged (adjacent to enemy)

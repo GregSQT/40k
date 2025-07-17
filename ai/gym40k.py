@@ -23,9 +23,26 @@ sys.path.insert(0, str(project_root))
 
 from ai.unit_registry import UnitRegistry
 
-from config_loader import get_config_loader
+try:
+    from config_loader import get_config_loader
+except ImportError:
+    # Add fallback path for config_loader
+    sys.path.append(str(project_root))
+    from config_loader import get_config_loader
 
-# === DICE-BASED SHOOTING SYSTEM ===
+# === HEX GRID DISTANCE CALCULATION ===
+
+def get_hex_distance(unit1, unit2):
+    """Calculate hex grid distance using Chebyshev distance (consistent with frontend)."""
+    return max(abs(unit1["col"] - unit2["col"]), abs(unit1["row"] - unit2["row"]))
+
+def are_units_adjacent(unit1, unit2):
+    """Check if two units are adjacent (distance = 1)."""
+    return get_hex_distance(unit1, unit2) == 1
+
+def is_unit_in_range(attacker, target, range_value):
+    """Check if target is within specified range of attacker."""
+    return get_hex_distance(attacker, target) <= range_value
 
 def roll_d6():
     """Roll a 6-sided die."""
@@ -507,8 +524,7 @@ class W40KEnv(gym.Env):
         """Check if unit has enemies within shooting range."""
         for enemy in self.enemy_units:
             if enemy["alive"]:
-                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                if dist <= unit.get("rng_rng", 0):
+                if is_unit_in_range(unit, enemy, unit.get("rng_rng", 0)):
                     return True
         return False
 
@@ -516,17 +532,16 @@ class W40KEnv(gym.Env):
         """Check if unit can charge (enemy within move range, not adjacent)."""
         for enemy in self.enemy_units:
             if enemy["alive"]:
-                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                dist = get_hex_distance(unit, enemy)
                 if dist <= unit.get("move", 0) and dist > 1:  # Can reach but not adjacent
                     return True
         return False
 
     def _has_adjacent_enemies(self, unit):
-        """Check if unit has adjacent enemies for combat."""
+        """Check if unit has adjacent enemies for combat using hex distance."""
         for enemy in self.enemy_units:
             if enemy["alive"]:
-                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                if dist <= 1:
+                if are_units_adjacent(unit, enemy):
                     return True
         return False
 
@@ -534,8 +549,7 @@ class W40KEnv(gym.Env):
         """Check if unit has enemies within RNG_RNG shooting range per AI_GAME.md."""
         for enemy in self.enemy_units:
             if enemy["alive"]:
-                distance = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                if distance <= unit.get("rng_rng", 0):
+                if is_unit_in_range(unit, enemy, unit.get("rng_rng", 0)):
                     return True
         return False
     
@@ -560,8 +574,7 @@ class W40KEnv(gym.Env):
         """Check if unit has enemies within MOVE range for charging per AI_GAME.md."""
         for enemy in self.enemy_units:
             if enemy["alive"]:
-                distance = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                if distance <= unit.get("move", 0):
+                if is_unit_in_range(unit, enemy, unit.get("move", 0)):
                     return True
         return False
 
@@ -781,7 +794,7 @@ class W40KEnv(gym.Env):
         # Movement rewards based on tactical positioning (only for successful moves)
         nearest_enemy = self._get_nearest_enemy(unit)
         if nearest_enemy:
-            new_dist = abs(unit["col"] - nearest_enemy["col"]) + abs(unit["row"] - nearest_enemy["row"])
+            new_dist = get_hex_distance(unit, nearest_enemy)
             
             if unit["is_ranged"]:
                 # Ranged units want to be at optimal range
@@ -1036,7 +1049,7 @@ class W40KEnv(gym.Env):
         
         for enemy in self.enemy_units:
             if enemy["alive"]:
-                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+                dist = get_hex_distance(unit, enemy)
                 if dist < min_dist:
                     min_dist = dist
                     nearest = enemy
@@ -1159,8 +1172,8 @@ class W40KEnv(gym.Env):
         return False
     
     def _calculate_distance(self, unit1, unit2):
-        """Calculate Manhattan distance between two units."""
-        return abs(unit1["col"] - unit2["col"]) + abs(unit1["row"] - unit2["row"])
+        """Calculate hex grid distance between two units."""
+        return get_hex_distance(unit1, unit2)
 
     def _attack_target(self, unit, target):
         """Attack adjacent target in melee combat."""
@@ -1201,7 +1214,7 @@ class W40KEnv(gym.Env):
         
         for unit in self.ai_units:
             if unit["alive"]:
-                dist = abs(enemy["col"] - unit["col"]) + abs(enemy["row"] - unit["row"])
+                dist = get_hex_distance(enemy, unit)
                 if dist < min_dist:
                     min_dist = dist
                     nearest = unit
@@ -1465,8 +1478,7 @@ class W40KEnv(gym.Env):
             action_taken = False
             
             # Priority 1: Shoot if in range (instead of moving closer)
-            # Priority 1: Shoot if in range (instead of moving closer)
-            if dist <= enemy.get("rng_rng", 4) and enemy.get("rng_dmg", 0) > 0:
+            if is_unit_in_range(enemy, nearest_ai, enemy.get("rng_rng", 4)) and enemy.get("rng_dmg", 0) > 0:
                 # Execute dice-based shooting for enemy
                 total_damage = execute_shooting_sequence(enemy, nearest_ai)
                 nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - total_damage)
@@ -1479,7 +1491,7 @@ class W40KEnv(gym.Env):
                     self._record_action(enemy, 4, 0.0)  # action_type 4 = shoot, reward 0 for bot
 
             # Priority 2: Melee attack if adjacent (no change needed - it's already using damage directly)
-            elif dist <= 1 and enemy.get("cc_dmg", 0) > 0:
+            elif are_units_adjacent(enemy, nearest_ai) and enemy.get("cc_dmg", 0) > 0:
                 damage = min(enemy["cc_dmg"], nearest_ai["cur_hp"])  # Prevent overkill
                 nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
                 if nearest_ai["cur_hp"] <= 0:
@@ -1527,7 +1539,7 @@ class W40KEnv(gym.Env):
         
         for unit in self.ai_units:
             if unit["alive"]:
-                dist = abs(enemy["col"] - unit["col"]) + abs(enemy["row"] - unit["row"])
+                dist = get_hex_distance(enemy, unit)
                 if dist < min_dist:
                     min_dist = dist
                     nearest = unit
