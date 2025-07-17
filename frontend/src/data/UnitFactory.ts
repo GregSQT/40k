@@ -28,17 +28,6 @@ async function initializeUnitRegistry(): Promise<void> {
       
       for (const unitFile of unitFiles) {
         try {
-          const modulePath = `../roster/${faction}/${unitFile}`;
-          console.log(`🔍 Attempting to import: ${modulePath}`);
-          
-          const module = await import(modulePath);
-          
-          // Find the exported class (should match filename)
-          const className = unitFile; // e.g., "Intercessor"
-          const UnitClass = module[className];
-          
-          if (!UnitClass) {for (const unitFile of unitFiles) {
-        try {
           // Use @vite-ignore to suppress the dynamic import warning
           const module = await import(/* @vite-ignore */ `../roster/${faction}/${unitFile}`);
           
@@ -48,23 +37,6 @@ async function initializeUnitRegistry(): Promise<void> {
           
           if (!UnitClass) {
             console.warn(`⚠️ No class ${className} found in ${faction}/${unitFile}`);
-            continue;
-          }
-          
-          // Validate it's a proper unit class
-          if (UnitClass.MOVE && UnitClass.HP_MAX && UnitClass.ICON) {
-            unitClassMap[className] = UnitClass;
-            availableUnitTypes.push(className);
-            console.log(`✅ Auto-discovered unit: ${className}`);
-          } else {
-            console.warn(`⚠️ ${className} missing required unit properties`);
-          }
-          
-        } catch (importError) {
-          console.warn(`⚠️ Failed to import ${faction}/${unitFile}:`, importError);
-        }
-      }
-            console.warn(`⚠️ No class ${className} found in ${modulePath}`);
             continue;
           }
           

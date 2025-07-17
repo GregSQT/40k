@@ -28,9 +28,9 @@ constructor(config: Partial<AIServiceConfig> = {}) {
 
   private pendingRequests = new Map<string, Promise<AIAction>>();
 
-  async fetchAiAction(gameState: AIGameState): Promise<AIAction> {
+  async fetchAiAction(gameState: AIGameState, currentUnitId?: number): Promise<AIAction> {
     // Create a unique key for this request to prevent duplicates
-    const requestKey = `${gameState.units.map(u => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}`).join('|')}`;
+    const requestKey = `${gameState.units.map(u => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}`).join('|')}-${currentUnitId}-${Date.now()}`;
     
     // If same request is already pending, return existing promise
     if (this.pendingRequests.has(requestKey)) {
@@ -38,7 +38,7 @@ constructor(config: Partial<AIServiceConfig> = {}) {
       return this.pendingRequests.get(requestKey)!;
     }
 
-    const requestPromise = this.executeAiRequest(gameState);
+    const requestPromise = this.executeAiRequest(gameState, currentUnitId);
     this.pendingRequests.set(requestKey, requestPromise);
     
     try {
@@ -49,7 +49,7 @@ constructor(config: Partial<AIServiceConfig> = {}) {
     }
   }
 
-  private async executeAiRequest(gameState: AIGameState): Promise<AIAction> {
+  private async executeAiRequest(gameState: AIGameState, currentUnitId?: number): Promise<AIAction> {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= this.config.retries; attempt++) {
@@ -100,7 +100,7 @@ constructor(config: Partial<AIServiceConfig> = {}) {
 
     // If all attempts failed, return fallback action instead of throwing
     console.warn('[AI] All attempts failed, using fallback action');
-    return this.getFallbackAction(gameState.units[0]?.id || 1);
+    return this.getFallbackAction(currentUnitId || gameState.units[0]?.id || 1);
   }
 
   /**

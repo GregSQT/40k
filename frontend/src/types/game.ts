@@ -86,6 +86,7 @@ export interface GameState {
   unitsMoved: UnitId[];
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
+  unitsFled: UnitId[];  // NEW: Track units that fled (moved away from adjacent enemies)
   targetPreview: TargetPreview | null;
 }
 

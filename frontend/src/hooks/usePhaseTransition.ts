@@ -13,6 +13,7 @@ interface UsePhaseTransitionParams {
     resetMovedUnits: () => void;
     resetChargedUnits: () => void;
     resetAttackedUnits: () => void;
+    resetFledUnits: () => void;  // NEW
   };
 }
 
@@ -20,7 +21,7 @@ export const usePhaseTransition = ({
   gameState,
   actions,
 }: UsePhaseTransitionParams) => {
-  const { units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked } = gameState;
+  const { units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled } = gameState;
 
   // Helper to get current player's units
   const getCurrentPlayerUnits = useCallback((): Unit[] => {
@@ -53,11 +54,10 @@ export const usePhaseTransition = ({
     const playerUnits = getCurrentPlayerUnits();
     return playerUnits.every(unit => {
       if (unitsMoved.includes(unit.id)) return true;
-      // Check if engaged (adjacent to enemy)
-      const hasAdjacentEnemy = getEnemyUnits().some(enemy => areUnitsAdjacent(unit, enemy));
-      return hasAdjacentEnemy;
+      // Units adjacent to enemies can still move (flee), but if they don't move, phase continues
+      return false;
     });
-  }, [getCurrentPlayerUnits, unitsMoved, getEnemyUnits, areUnitsAdjacent]);
+  }, [getCurrentPlayerUnits, unitsMoved]);
 
   // Check if shoot phase should transition to charge phase
   const shouldTransitionFromShoot = useCallback((): boolean => {
@@ -70,6 +70,9 @@ export const usePhaseTransition = ({
     const shootableUnits = playerUnits.filter(unit => {
       if (unitsMoved.includes(unit.id)) return false;
       
+      // NEW RULE: Units that fled cannot shoot
+      if (unitsFled.includes(unit.id)) return false;
+      
       // Can't shoot if adjacent to enemy (engaged in combat)
       const hasAdjacentEnemy = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
       if (hasAdjacentEnemy) return false;
@@ -79,7 +82,7 @@ export const usePhaseTransition = ({
     });
 
     return shootableUnits.length === 0;
-  }, [getCurrentPlayerUnits, getEnemyUnits, unitsMoved, isUnitInRange, areUnitsAdjacent]);
+  }, [getCurrentPlayerUnits, getEnemyUnits, unitsMoved, unitsFled, isUnitInRange, areUnitsAdjacent]);
 
   // Check if charge phase should transition to combat phase
   const shouldTransitionFromCharge = useCallback((): boolean => {
@@ -92,6 +95,9 @@ export const usePhaseTransition = ({
     const chargeableUnits = playerUnits.filter(unit => {
       if (unitsCharged.includes(unit.id)) return false;
       
+      // NEW RULE: Units that fled cannot charge
+      if (unitsFled.includes(unit.id)) return false;
+      
       // Can't charge if adjacent to enemy
       if (enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy))) return false;
       
@@ -102,7 +108,7 @@ export const usePhaseTransition = ({
     console.log(`[PhaseTransition] Charge check - Player ${currentPlayer} units: ${playerUnits.length}, chargeable: ${chargeableUnits.length}, charged: ${unitsCharged.length}`);
     
     return chargeableUnits.length === 0;
-  }, [getCurrentPlayerUnits, getEnemyUnits, unitsCharged, areUnitsAdjacent, isUnitInRange, currentPlayer]);
+  }, [getCurrentPlayerUnits, getEnemyUnits, unitsCharged, unitsFled, areUnitsAdjacent, isUnitInRange, currentPlayer]);
 
   // Check if combat phase should end turn
   const shouldEndTurn = useCallback((): boolean => {
@@ -117,7 +123,10 @@ export const usePhaseTransition = ({
     // Find units that can still attack in combat
     const attackableUnits = playerUnits.filter(unit => {
       if (unitsAttacked.includes(unit.id)) return false;
-      const combatRange = unit.CC_RNG || 1; // Use CC_RNG instead of hardcoded adjacency
+      if (unit.CC_RNG === undefined) {
+        throw new Error('unit.CC_RNG is required');
+      }
+      const combatRange = unit.CC_RNG;
       const canAttack = enemyUnits.some(enemy => isUnitInRange(unit, enemy, combatRange));
       
       // Debug logging for each unit
@@ -174,6 +183,7 @@ export const usePhaseTransition = ({
       actions.resetMovedUnits();
       actions.resetChargedUnits();
       actions.resetAttackedUnits();
+      actions.resetFledUnits();  // NEW
       actions.setSelectedUnitId(null);
     }, 300);
   }, [actions, currentPlayer]);

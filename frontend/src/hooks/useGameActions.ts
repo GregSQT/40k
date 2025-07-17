@@ -18,6 +18,7 @@ interface UseGameActionsParams {
     addMovedUnit: (unitId: UnitId) => void;
     addChargedUnit: (unitId: UnitId) => void;
     addAttackedUnit: (unitId: UnitId) => void;
+    addFledUnit: (unitId: UnitId) => void;  // NEW
     updateUnit: (unitId: UnitId, updates: Partial<Unit>) => void;
     removeUnit: (unitId: UnitId) => void;
     initializeShootingPhase: () => void;
@@ -34,7 +35,7 @@ export const useGameActions = ({
   shootingPhaseState,
   actions,
 }: UseGameActionsParams) => {
-  const { units, currentPlayer, phase, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked } = gameState;
+  const { units, currentPlayer, phase, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled } = gameState;
 
   // Helper function to find unit by ID
   const findUnit = useCallback((unitId: UnitId) => {
@@ -50,10 +51,11 @@ export const useGameActions = ({
 
     switch (phase) {
       case "move":
-        const hasAdjacentEnemy = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
-        return !unitsMoved.includes(unit.id) && !hasAdjacentEnemy;
+        return !unitsMoved.includes(unit.id); // Units can always move, even if adjacent to enemies
       case "shoot":
         if (unitsMoved.includes(unit.id)) return false;
+        // NEW RULE: Units that fled cannot shoot
+        if (unitsFled.includes(unit.id)) return false;
         // Check if unit is adjacent to any enemy (engaged in combat)
         const hasAdjacentEnemyShoot = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         if (hasAdjacentEnemyShoot) return false;
@@ -69,17 +71,22 @@ export const useGameActions = ({
         });
       case "charge":
         if (unitsCharged.includes(unit.id)) return false;
+        // NEW RULE: Units that fled cannot charge
+        if (unitsFled.includes(unit.id)) return false;
         const isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         const inRange = enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
         return !isAdjacent && inRange;
       case "combat":
         if (unitsAttacked.includes(unit.id)) return false;
-        const combatRange = unit.CC_RNG || 1;
+        if (unit.CC_RNG === undefined) {
+          throw new Error('unit.CC_RNG is required');
+        }
+        const combatRange = unit.CC_RNG;
         return enemyUnits.some(enemy => isUnitInRange(unit, enemy, combatRange));
       default:
         return false;
     }
-  }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked]);
+  }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled]);
 
   const selectUnit = useCallback((unitId: UnitId | null) => {
     // Prevent unit selection during shooting sequence
@@ -121,7 +128,7 @@ export const useGameActions = ({
       return; // Exit immediately - no phase handling
     }
 
-    // Special handling for move phase - second click marks as moved
+    // Special handling for move phase - second click marks as moved (or chose not to move)
     if (phase === "move" && selectedUnitId === unitId) {
       actions.addMovedUnit(unitId);
       actions.setSelectedUnitId(null);
@@ -194,6 +201,27 @@ export const useGameActions = ({
     let movedUnitId: UnitId | null = null;
 
     if (gameState.mode === "movePreview" && movePreview) {
+      const unit = findUnit(movePreview.unitId);
+      if (unit && phase === "move") {
+        // Check if unit is fleeing (was adjacent to enemy at start of move, ends move not adjacent)
+        const enemyUnits = units.filter(u => u.player !== unit.player);
+        const wasAdjacentToEnemy = enemyUnits.some(enemy => 
+          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
+        );
+        
+        if (wasAdjacentToEnemy) {
+          // Check if unit will still be adjacent after the move
+          const willBeAdjacentToEnemy = enemyUnits.some(enemy => 
+            Math.max(Math.abs(movePreview.destCol - enemy.col), Math.abs(movePreview.destRow - enemy.row)) === 1
+          );
+          
+          // Only mark as fled if unit was adjacent and will no longer be adjacent
+          if (!willBeAdjacentToEnemy) {
+            actions.addFledUnit(movePreview.unitId);
+          }
+        }
+      }
+      
       actions.updateUnit(movePreview.unitId, {
         col: movePreview.destCol,
         row: movePreview.destRow,
@@ -211,7 +239,7 @@ export const useGameActions = ({
     actions.setAttackPreview(null);
     actions.setSelectedUnitId(null);
     actions.setMode("select");
-  }, [gameState.mode, movePreview, attackPreview, actions]);
+  }, [gameState.mode, movePreview, attackPreview, actions, findUnit, phase, units]);
 
   const cancelMove = useCallback(() => {
     actions.setMovePreview(null);
@@ -350,7 +378,10 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     }
 
     // bail out if no shots remaining
-    const shotsLeft = shooter.SHOOT_LEFT ?? 0;
+    if (shooter.SHOOT_LEFT === undefined) {
+      throw new Error('shooter.SHOOT_LEFT is required');
+    }
+    const shotsLeft = shooter.SHOOT_LEFT;
     if (shotsLeft <= 0) {
       console.log(`🎯 ${shooter.name} has no shots remaining`);
       return;
@@ -441,6 +472,9 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
             const saveSuccess = saveRoll >= saveTarget;
             
             if (!saveSuccess) {
+              if (shooter.RNG_DMG === undefined) {
+                throw new Error('shooter.RNG_DMG is required');
+              }
               damageDealt = shooter.RNG_DMG;
             }
           }
@@ -450,7 +484,10 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
         
         // Apply damage
         if (damageDealt > 0) {
-          const currentHP = target.CUR_HP ?? target.HP_MAX;
+          if (target.CUR_HP === undefined) {
+            throw new Error('target.CUR_HP is required');
+          }
+          const currentHP = target.CUR_HP;
           const newHP = Math.max(0, currentHP - damageDealt);
           
           if (newHP <= 0) {
@@ -553,7 +590,13 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     if (distance > combatRange) return;
 
     // Apply close combat damage
-    const newHP = (target.CUR_HP ?? target.HP_MAX) - (attacker.CC_DMG ?? 1);
+    if (target.CUR_HP === undefined) {
+      throw new Error('target.CUR_HP is required');
+    }
+    if (attacker.CC_DMG === undefined) {
+      throw new Error('attacker.CC_DMG is required');
+    }
+    const newHP = target.CUR_HP - attacker.CC_DMG;
     
     if (newHP <= 0) {
       actions.removeUnit(targetId);

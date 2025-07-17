@@ -9,6 +9,10 @@ interface UseAIPlayerParams {
     handleShoot: (shooterId: UnitId, targetId: UnitId) => void;
     handleCombatAttack: (attackerId: UnitId, targetId: UnitId | null) => void;
     handleCharge: (chargerId: UnitId, targetId: UnitId) => void;
+    addMovedUnit: (unitId: UnitId) => void;
+    addChargedUnit: (unitId: UnitId) => void;
+    addAttackedUnit: (unitId: UnitId) => void;
+    updateUnit: (unitId: UnitId, updates: Partial<any>) => void;
   };
   enabled: boolean;
   config?: {
@@ -68,7 +72,10 @@ export const useAIPlayer = ({
       case "combat":
         return aiUnits.filter(u => {
           if (unitsAttacked.includes(u.id)) return false;
-          const combatRange = u.CC_RNG || 1;
+          if (u.CC_RNG === undefined) {
+            throw new Error('u.CC_RNG is required');
+          }
+          const combatRange = u.CC_RNG;
           const canAttack = enemyUnits.some(enemy => {
             const distance = Math.max(Math.abs(u.col - enemy.col), Math.abs(u.row - enemy.row));
             return distance <= combatRange;
@@ -90,19 +97,32 @@ export const useAIPlayer = ({
   // Helper to mark unit as moved/charged/attacked
   const markUnitAction = useCallback((unitId: UnitId, actionType: 'moved' | 'charged' | 'attacked') => {
     console.log(`[AI] Marking unit ${unitId} as ${actionType}`);
-    // This would need to be connected to the game state actions
-  }, []);
+    // Connect to the actual game state actions
+    if (actionType === 'moved') {
+      gameActions.addMovedUnit(unitId);
+    } else if (actionType === 'charged') {
+      gameActions.addChargedUnit(unitId);
+    } else if (actionType === 'attacked') {
+      gameActions.addAttackedUnit(unitId);
+    }
+  }, [gameActions]);
 
   // Process a single AI action with error handling
   const processAIAction = useCallback(async (unit: any, retryCount = 0): Promise<boolean> => {
     try {
       const gameState = convertToAIGameState();
-      const result = await aiService.fetchAiAction(gameState);
+      const result = await aiService.fetchAiAction(gameState, unit.id);
 
-      // Validate that the action is for the expected unit
+      // Fix unit ID mismatch for fallback actions
       if (result.unitId !== unit.id) {
         console.warn(`[AI] Action unitId mismatch: expected ${unit.id}, got ${result.unitId}`);
-        return false;
+        // If this is a skip action, correct the unit ID and continue
+        if (result.action === 'skip') {
+          console.log(`[AI] Correcting skip action unit ID from ${result.unitId} to ${unit.id}`);
+          result.unitId = unit.id;
+        } else {
+          return false;
+        }
       }
 
       // Process the action based on phase and action type
@@ -252,6 +272,7 @@ export const useAIPlayer = ({
   useEffect(() => {
     // Only process if AI is enabled and it's the AI player's turn
     if (!enabled || currentPlayer !== 1) {
+      abortAIProcessing(); // Stop any ongoing AI processing
       return;
     }
 

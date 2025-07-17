@@ -88,8 +88,14 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Handle AI player behavior
   useAIPlayer({
     gameState,
-    gameActions,
-    enabled: gameState.currentPlayer === 1,
+    gameActions: {
+      ...gameActions,
+      addMovedUnit: actions.addMovedUnit,
+      addChargedUnit: actions.addChargedUnit,
+      addAttackedUnit: actions.addAttackedUnit,
+      updateUnit: actions.updateUnit,
+    },
+    enabled: false,  // Disable AI - player controls all units
   });
 
   // Manage phase transitions

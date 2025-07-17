@@ -19,9 +19,11 @@ interface UseGameStateReturn {
     addMovedUnit: (unitId: UnitId) => void;
     addChargedUnit: (unitId: UnitId) => void;
     addAttackedUnit: (unitId: UnitId) => void;
+    addFledUnit: (unitId: UnitId) => void;  // NEW
     resetMovedUnits: () => void;
     resetChargedUnits: () => void;
     resetAttackedUnits: () => void;
+    resetFledUnits: () => void;  // NEW
     updateUnit: (unitId: UnitId, updates: Partial<Unit>) => void;
     removeUnit: (unitId: UnitId) => void;
     initializeShootingPhase: () => void;
@@ -33,10 +35,15 @@ interface UseGameStateReturn {
 
 export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   const [gameState, setGameState] = useState<GameState>({
-    units: initialUnits.map(unit => ({
-      ...unit,
-      SHOOT_LEFT: unit.RNG_NB || 0
-    })),
+    units: initialUnits.map(unit => {
+      if (unit.RNG_NB === undefined) {
+        throw new Error('unit.RNG_NB is required');
+      }
+      return {
+        ...unit,
+        SHOOT_LEFT: unit.RNG_NB
+      };
+    }),
     currentPlayer: 0,
     phase: "move",
     mode: "select",
@@ -44,6 +51,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     unitsMoved: [],
     unitsCharged: [],
     unitsAttacked: [],
+    unitsFled: [],
     targetPreview: null,
   });
 
@@ -145,6 +153,19 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     setGameState(prev => ({ ...prev, unitsAttacked: [] }));
   }, []);
 
+  const addFledUnit = useCallback((unitId: UnitId) => {
+    setGameState(prev => ({
+      ...prev,
+      unitsFled: prev.unitsFled.includes(unitId)
+        ? prev.unitsFled
+        : [...prev.unitsFled, unitId]
+    }));
+  }, []);
+
+  const resetFledUnits = useCallback(() => {
+    setGameState(prev => ({ ...prev, unitsFled: [] }));
+  }, []);
+
   const updateUnit = useCallback((unitId: UnitId, updates: Partial<Unit>) => {
     setGameState(prev => ({
       ...prev,
@@ -181,9 +202,11 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       addMovedUnit,
       addChargedUnit,
       addAttackedUnit,
+      addFledUnit,  // NEW
       resetMovedUnits,
       resetChargedUnits,
       resetAttackedUnits,
+      resetFledUnits,  // NEW
       updateUnit,
       removeUnit,
       initializeShootingPhase,

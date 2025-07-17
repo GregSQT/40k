@@ -109,10 +109,9 @@ export const UnitSelector = memo<UnitSelectorProps>(({
 
       switch (phase) {
         case 'move':
-          const hasAdjacentEnemyMove = enemies.some(enemy => areUnitsAdjacent(unit, enemy));
           return {
-            eligible: !hasActed.move && !hasAdjacentEnemyMove,
-            reason: hasAdjacentEnemyMove ? 'Engaged in combat' : (hasActed.move ? 'Already moved' : 'Can move'),
+            eligible: !hasActed.move,
+            reason: hasActed.move ? 'Already moved' : 'Can move',
           };
 
         case 'shoot':
