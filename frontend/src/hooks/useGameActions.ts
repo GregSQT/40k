@@ -390,6 +390,12 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       return;
     }
 
+    // NEW: Check if unit fled this turn (SECOND CHECK)
+    if (unitsFled.includes(shooterId)) {
+      console.log(`❌ Unit fled this turn and cannot shoot - ignoring handleShoot call for ${shooterId}`);
+      return;
+    }
+
     // ADDITIONAL CHECK: Prevent shooting if unit has no shots left
     const preShooter = findUnit(shooterId);
     if (preShooter && preShooter.SHOOT_LEFT !== undefined && preShooter.SHOOT_LEFT <= 0) {
@@ -472,6 +478,12 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
           currentTargetPreview.shooterId === shooterId) {
         // Second click - execute shooting
         console.log(`🎯 Executing shooting sequence for ${shooter.name}: ${shooter.SHOOT_LEFT} shots`);
+        
+        // NEW: IMMEDIATE PROTECTION - Only for single shot units (RNG_NB = 1)
+        // Multi-shot units need to complete all shots before being marked as moved
+        if (shooter.RNG_NB === 1) {
+          actions.addMovedUnit(shooterId);
+        }
         
         // Clear preview
         if (currentTargetPreview.blinkTimer) {
