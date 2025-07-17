@@ -111,8 +111,12 @@ export class UnitRenderer {
     } else if (phase === "shoot") {
       if (unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id))) {
         const enemies = units.filter(u2 => u2.player !== currentPlayer);
+        const c1 = offsetToCube(unit.col, unit.row);
+        // Check if unit is adjacent to any enemy (engaged in combat)
+        const hasAdjacentEnemy = enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) === 1);
+        if (hasAdjacentEnemy) return false;
+        // Check if unit has enemies in shooting range
         return enemies.some(eu => {
-          const c1 = offsetToCube(unit.col, unit.row);
           const c2 = offsetToCube(eu.col, eu.row);
           return cubeDistance(c1, c2) <= unit.RNG_RNG;
         });
@@ -131,7 +135,8 @@ export class UnitRenderer {
       if (unit.player === currentPlayer && !unitsAttackedArr.includes(Number(unit.id))) {
         const enemies = units.filter(u2 => u2.player !== currentPlayer);
         const c1 = offsetToCube(unit.col, unit.row);
-        return enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) === 1);
+        const combatRange = unit.CC_RNG || 1; // Use CC_RNG instead of hardcoded 1
+        return enemies.some(eu => cubeDistance(c1, offsetToCube(eu.col, eu.row)) <= combatRange);
       }
     }
     

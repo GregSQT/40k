@@ -1,4 +1,4 @@
-// frontend/src/roster/spaceMarine/CaptainGravis.ts
+// frontend/src/roster/spaceMarine/Carnifex.ts
 
 import { TyranidMeleeUnit } from "./TyranidMeleeUnit";
 
@@ -29,7 +29,7 @@ export class Carnifex extends TyranidMeleeUnit {
   static CC_DMG = 3;           // Melee attack : damages
 
   static ICON = "/icons/Carnifex.webp"; // Path relative to public folder
-  static ICON_SCALE = 2.2;     // Size of the icon
+  static ICON_SCALE = 2.5;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
     super(name, Carnifex.HP_MAX, startPos);

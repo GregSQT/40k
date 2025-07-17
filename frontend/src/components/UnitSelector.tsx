@@ -124,12 +124,16 @@ export const UnitSelector = memo<UnitSelectorProps>(({
           if (hasActed.shoot) {
             return { eligible: false, reason: 'Already shot' };
           }
+          // Check if unit is adjacent to any enemy (engaged in combat)
+          const hasAdjacentEnemyShoot = enemies.some(enemy => isAdjacent(unit, enemy));
+          if (hasAdjacentEnemyShoot) {
+            return { eligible: false, reason: 'Engaged in combat' };
+          }
           const canShoot = enemies.some(enemy => isInRange(unit, enemy, unit.RNG_RNG));
           return {
             eligible: canShoot,
             reason: canShoot ? 'Can shoot' : 'No enemies in range',
           };
-
         case 'charge':
           if (hasActed.charge) {
             return { eligible: false, reason: 'Already charged' };

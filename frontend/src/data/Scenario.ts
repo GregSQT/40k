@@ -1,6 +1,6 @@
 // src/data/Scenario.ts
 import { Unit } from '../types/game';
-import { createUnit } from './UnitFactory';
+import { createUnit, getAvailableUnitTypes } from './UnitFactory';
 
 const initialUnits: Unit[] = [
   // Player 0 units
@@ -25,8 +25,8 @@ const initialUnits: Unit[] = [
   // Player 1 units (AI)
   createUnit({
     id: 2,
-    name: "A-I",
-    type: "Intercessor",
+    name: "A-T",
+    type: "Termagant",
     player: 1,
     col: 0,
     row: 5,
@@ -34,8 +34,8 @@ const initialUnits: Unit[] = [
   }),
   createUnit({
     id: 3,
-    name: "A-A",
-    type: "AssaultIntercessor",
+    name: "A-C",
+    type: "Carnifex",
     player: 1,
     col: 22,
     row: 3,
@@ -51,6 +51,10 @@ console.log('🔧 Created units with properties:', initialUnits.map(unit => ({
   RNG_ATK: unit.RNG_ATK,
   RNG_STR: unit.RNG_STR,
   RNG_AP: unit.RNG_AP,
+  CC_NB: unit.RNG_NB,
+  CC_ATK: unit.RNG_ATK,
+  CC_STR: unit.RNG_STR,
+  CC_AP: unit.RNG_AP,
   T: unit.T,
   ARMOR_SAVE: unit.ARMOR_SAVE,
   INVUL_SAVE: unit.INVUL_SAVE,

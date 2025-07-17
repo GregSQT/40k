@@ -52,6 +52,12 @@ export const useGameActions = ({
           return !unitsMoved.includes(unit.id) && !hasAdjacentEnemy;
       case "shoot":
         if (unitsMoved.includes(unit.id)) return false;
+        // Check if unit is adjacent to any enemy (engaged in combat)
+        const hasAdjacentEnemyShoot = units.filter(u => u.player !== currentPlayer).some(enemy => 
+          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
+        );
+        if (hasAdjacentEnemyShoot) return false;
+        // Check if unit has enemies in shooting range
         const enemies = units.filter(u => u.player !== currentPlayer);
         return enemies.some(enemy => 
           Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) <= unit.RNG_RNG
@@ -112,10 +118,10 @@ export const useGameActions = ({
       unitsAttacked
     });
     
-    // ⚠️ TEMPORARILY ALLOW ALL SELECTIONS FOR DEBUGGING
+    // CRITICAL FIX: Block ALL actions if unit is not eligible
     if (!eligible) {
-      console.log(`[useGameActions] Unit ${unitId} not eligible`);
-      return;
+      console.log(`[useGameActions] Unit ${unitId} not eligible for phase ${phase} - selection completely blocked`);
+      return; // Exit immediately - no phase handling
     }
 
     // Special handling for move phase - second click marks as moved

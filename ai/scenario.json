@@ -15,14 +15,14 @@
   },
   {
     "id": 3,
-    "unit_type": "Intercessor",
+    "unit_type": "Termagant",
     "player": 1,
     "col": 0,
     "row": 5
   },
   {
     "id": 4,
-    "unit_type": "AssaultIntercessor",
+    "unit_type": "Carnifex",
     "player": 1,
     "col": 22,
     "row": 3

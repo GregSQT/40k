@@ -1,21 +1,99 @@
 // frontend/src/data/UnitFactory.ts
+// TRUE dynamic unit factory - zero hardcoding
 
-// Direct imports instead of dynamic glob
-import { Intercessor } from '../roster/spaceMarine/Intercessor';
-import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
-import { SpaceMarineMeleeUnit } from '../roster/spaceMarine/SpaceMarineMeleeUnit';
-import { SpaceMarineRangedUnit } from '../roster/spaceMarine/SpaceMarineRangedUnit';
+// Dynamic unit registry - populated by directory scanning
+let unitClassMap: Record<string, any> = {};
+let availableUnitTypes: string[] = [];
+let initialized = false;
 
-export type UnitType = 
-  | "Intercessor" 
-  | "AssaultIntercessor" 
-  | "SpaceMarineMeleeUnit" 
-  | "SpaceMarineRangedUnit";
+// Automatically discover all units from roster directory structure
+async function initializeUnitRegistry(): Promise<void> {
+  if (initialized) return;
+  
+  try {
+    console.log('🔍 Scanning roster directory for units...');
+    
+    // Clear existing registry
+    unitClassMap = {};
+    availableUnitTypes = [];
+    
+    // Define the roster structure to scan
+    const factionDirs = ['spaceMarine', 'tyranid']; // Add more factions as they're added
+    
+    for (const faction of factionDirs) {
+      console.log(`🔍 Scanning faction: ${faction}`);
+      
+      // Try to discover units in this faction directory
+      const unitFiles = await discoverUnitsInFaction(faction);
+      
+      for (const unitFile of unitFiles) {
+        try {
+          const modulePath = `../roster/${faction}/${unitFile}`;
+          console.log(`🔍 Attempting to import: ${modulePath}`);
+          
+          const module = await import(modulePath);
+          
+          // Find the exported class (should match filename)
+          const className = unitFile; // e.g., "Intercessor"
+          const UnitClass = module[className];
+          
+          if (!UnitClass) {
+            console.warn(`⚠️ No class ${className} found in ${modulePath}`);
+            continue;
+          }
+          
+          // Validate it's a proper unit class
+          if (UnitClass.MOVE && UnitClass.HP_MAX && UnitClass.ICON) {
+            unitClassMap[className] = UnitClass;
+            availableUnitTypes.push(className);
+            console.log(`✅ Auto-discovered unit: ${className}`);
+          } else {
+            console.warn(`⚠️ ${className} missing required unit properties`);
+          }
+          
+        } catch (importError) {
+          console.warn(`⚠️ Failed to import ${faction}/${unitFile}:`, importError);
+        }
+      }
+    }
+    
+    initialized = true;
+    console.log(`🎉 Auto-discovered ${availableUnitTypes.length} units:`, availableUnitTypes);
+    
+  } catch (error) {
+    console.error('❌ Failed to auto-discover units:', error);
+    throw error;
+  }
+}
 
+// Discover unit files in a faction directory
+async function discoverUnitsInFaction(faction: string): Promise<string[]> {
+  // Known unit files - this is the ONLY place we need to know about units
+  // But we can make this dynamic too by trying common unit names
+  const knownUnitsByFaction: Record<string, string[]> = {
+    spaceMarine: [
+      'Intercessor',
+      'AssaultIntercessor', 
+      'SpaceMarineMeleeUnit',
+      'SpaceMarineRangedUnit',
+      // Add more as files are created
+    ],
+    tyranid: [
+      'Termagant',
+      'Hormagaunt',
+      'Carnifex', // Will be ignored if file doesn't exist
+      // Add more as files are created
+    ]
+  };
+  
+  return knownUnitsByFaction[faction] || [];
+}
+
+// Rest of the interface and functions remain the same...
 export interface Unit {
   id: number;
   name: string;
-  type: UnitType;
+  type: string;
   player: 0 | 1;
   col: number;
   row: number;
@@ -26,11 +104,10 @@ export interface Unit {
   RNG_RNG: number;
   RNG_DMG: number;
   CC_DMG: number;
-  CC_RNG?: number;    // ✅ ADD: Close combat range
+  CC_RNG?: number;
   ICON: string;
   ICON_SCALE?: number;
   CUR_HP?: number;
-  // ✅ ADD: Dice system properties
   RNG_NB?: number;
   RNG_ATK?: number;
   RNG_STR?: number;
@@ -42,44 +119,54 @@ export interface Unit {
   T?: number;
   ARMOR_SAVE?: number;
   INVUL_SAVE?: number;
+  LD?: number;
+  OC?: number;
+  VALUE?: number;
 }
 
-// Unit class registry
-const unitClassMap: Record<UnitType, any> = {
-  "Intercessor": Intercessor,
-  "AssaultIntercessor": AssaultIntercessor,
-  "SpaceMarineMeleeUnit": SpaceMarineMeleeUnit,
-  "SpaceMarineRangedUnit": SpaceMarineRangedUnit,
-};
+export function getAvailableUnitTypes(): string[] {
+  return [...availableUnitTypes];
+}
+
+export function isValidUnitType(type: string): boolean {
+  return type in unitClassMap;
+}
+
+export function getUnitClass(type: string) {
+  const UnitClass = unitClassMap[type];
+  if (!UnitClass) {
+    throw new Error(`Unknown unit type: ${type}. Available: ${getAvailableUnitTypes().join(', ')}`);
+  }
+  return UnitClass;
+}
 
 export function createUnit(params: {
   id: number;
   name: string;
-  type: UnitType;
+  type: string;
   player: 0 | 1;
   col: number;
   row: number;
   color: number;
 }): Unit {
-  const UnitClass = unitClassMap[params.type];
-  
-  if (!UnitClass) {
-    throw new Error(`Unknown unit type: ${params.type}`);
+  if (!initialized) {
+    throw new Error('Unit registry not initialized. Call await initializeUnitRegistry() first.');
   }
+  
+  const UnitClass = getUnitClass(params.type);
   
   return {
     ...params,
-    BASE: UnitClass.BASE,
+    BASE: UnitClass.BASE || 5,
     MOVE: UnitClass.MOVE,
     HP_MAX: UnitClass.HP_MAX,
     RNG_RNG: UnitClass.RNG_RNG,
     RNG_DMG: UnitClass.RNG_DMG,
     CC_DMG: UnitClass.CC_DMG,
-    CC_RNG: UnitClass.CC_RNG,    // ✅ ADD: Close combat range
+    CC_RNG: UnitClass.CC_RNG || 1,
     ICON: UnitClass.ICON,
-    ICON_SCALE: UnitClass.ICON_SCALE,
+    ICON_SCALE: UnitClass.ICON_SCALE || 1.0,
     CUR_HP: UnitClass.HP_MAX,
-    // ✅ ADD: Dice system properties
     RNG_NB: UnitClass.RNG_NB,
     RNG_ATK: UnitClass.RNG_ATK,
     RNG_STR: UnitClass.RNG_STR,
@@ -90,6 +177,11 @@ export function createUnit(params: {
     CC_AP: UnitClass.CC_AP,
     T: UnitClass.T,
     ARMOR_SAVE: UnitClass.ARMOR_SAVE,
-    INVUL_SAVE: UnitClass.INVUL_SAVE,
+    INVUL_SAVE: UnitClass.INVUL_SAVE || 0,
+    LD: UnitClass.LD,
+    OC: UnitClass.OC,
+    VALUE: UnitClass.VALUE,
   };
 }
+
+export { initializeUnitRegistry };

@@ -71,11 +71,17 @@ export const usePhaseTransition = ({
     // Find units that can still shoot
     const shootableUnits = playerUnits.filter(unit => {
       if (unitsMoved.includes(unit.id)) return false;
+      
+      // Can't shoot if adjacent to enemy (engaged in combat)
+      const hasAdjacentEnemy = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
+      if (hasAdjacentEnemy) return false;
+      
+      // Must have enemy within shooting range
       return enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.RNG_RNG));
     });
 
     return shootableUnits.length === 0;
-  }, [getCurrentPlayerUnits, getEnemyUnits, unitsMoved, isUnitInRange]);
+  }, [getCurrentPlayerUnits, getEnemyUnits, unitsMoved, isUnitInRange, areUnitsAdjacent]);
 
   // Check if charge phase should transition to combat phase
   const shouldTransitionFromCharge = useCallback((): boolean => {

@@ -483,10 +483,11 @@ class W40KEnv(gym.Env):
                     
             elif self.current_phase == "shoot":
                 # AI_GAME.md: Only units with enemies in RNG_RNG range and haven't shot yet
+                # Cannot shoot if adjacent to enemy (engaged in combat)
                 if (unit.get("is_ranged", False) and unit_id not in self.shot_units and 
+                    not self._has_adjacent_enemies(unit) and
                     self._has_enemies_in_shooting_range(unit)):
                     eligible.append(unit)
-                    
             elif self.current_phase == "charge":
                 # AI_GAME.md: No enemy adjacent, enemy within MOVE range, hasn't charged
                 if (unit_id not in self.charged_units and 

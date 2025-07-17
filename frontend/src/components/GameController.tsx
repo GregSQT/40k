@@ -1,5 +1,5 @@
 // src/components/GameController.tsx
-import React, { useState } from "react";
+import React from "react";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { UnitSelector } from "./UnitSelector";
 import { GameBoard } from "./GameBoard";
@@ -9,9 +9,11 @@ import { useGameActions } from "../hooks/useGameActions";
 import { useAIPlayer } from "../hooks/useAIPlayer";
 import { usePhaseTransition } from "../hooks/usePhaseTransition";
 import { Unit } from "../types/game";
+import { useState, useEffect } from "react";
+import { createUnit, getAvailableUnitTypes } from "../data/UnitFactory";
 
 interface GameControllerProps {
-  initialUnits: Unit[];
+  initialUnits?: Unit[];  // Make optional
   className?: string;
 }
 
@@ -19,9 +21,61 @@ export const GameController: React.FC<GameControllerProps> = ({
   initialUnits,
   className = "",
 }) => {
-  // Initialize game state with custom hook
-  const { gameState, movePreview, attackPreview, shootingPhaseState, actions } = useGameState(initialUnits);
+  // Generate default units if none provided
+  const [gameUnits, setGameUnits] = useState<Unit[]>(initialUnits || []);
   
+  useEffect(() => {
+    if (!initialUnits || initialUnits.length === 0) {
+      // Generate units dynamically using available types
+      const availableTypes = getAvailableUnitTypes();
+      
+      if (availableTypes.length >= 4) {
+        const dynamicUnits: Unit[] = [
+          createUnit({
+            id: 0,
+            name: "P-I",
+            type: availableTypes.includes('Intercessor') ? 'Intercessor' : availableTypes[0],
+            player: 0,
+            col: 23,
+            row: 12,
+            color: 0x244488,
+          }),
+          createUnit({
+            id: 1,
+            name: "P-A",
+            type: availableTypes.includes('AssaultIntercessor') ? 'AssaultIntercessor' : availableTypes[1],
+            player: 0,
+            col: 1,
+            row: 12,
+            color: 0xff3333,
+          }),
+          createUnit({
+            id: 2,
+            name: "A-T",
+            type: availableTypes.includes('Termagant') ? 'Termagant' : availableTypes[2] || availableTypes[0],
+            player: 1,
+            col: 0,
+            row: 5,
+            color: 0x882222,
+          }),
+          createUnit({
+            id: 3,
+            name: "A-H",
+            type: availableTypes.includes('Hormagaunt') ? 'Hormagaunt' : availableTypes[3] || availableTypes[1],
+            player: 1,
+            col: 22,
+            row: 3,
+            color: 0x6633cc,
+          }),
+        ];
+        setGameUnits(dynamicUnits);
+      }
+    }
+  }, [initialUnits]);
+
+  // Initialize game state with custom hook
+  const { gameState, movePreview, attackPreview, shootingPhaseState, actions } = useGameState(gameUnits);
+
   // Set up game actions
   const gameActions = useGameActions({
     gameState,
