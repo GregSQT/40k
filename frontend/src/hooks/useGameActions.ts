@@ -384,6 +384,19 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
 };
   //
   const handleShoot = useCallback((shooterId: UnitId, targetId: UnitId) => {
+    // CRITICAL: Check if unit has already shot this phase (FIRST CHECK)
+    if (unitsMoved.includes(shooterId)) {
+      console.log(`❌ Unit already shot this phase - ignoring handleShoot call for ${shooterId}`);
+      return;
+    }
+
+    // ADDITIONAL CHECK: Prevent shooting if unit has no shots left
+    const preShooter = findUnit(shooterId);
+    if (preShooter && preShooter.SHOOT_LEFT !== undefined && preShooter.SHOOT_LEFT <= 0) {
+      console.log(`❌ Unit ${preShooter.name} has no shots left - ignoring handleShoot call`);
+      return;
+    }
+
     const shooter = findUnit(shooterId);
     const target = findUnit(targetId);
     if (!shooter || !target) return;
@@ -401,6 +414,12 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     );
     if (isTargetAdjacentToFriendly) {
       console.log(`❌ Cannot shoot ${target.name || target.id} - adjacent to friendly unit`);
+      return;
+    }
+
+    // Add range check
+    if (!isUnitInRange(shooter, target, shooter.RNG_RNG)) {
+      console.log(`❌ Cannot shoot ${target.name || target.id} - out of range`);
       return;
     }
 
@@ -445,12 +464,6 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
         return;
       }
     } else {
-      // CRITICAL: Check if unit has already shot this phase (FIRST CHECK)
-      if (unitsMoved.includes(shooterId)) {
-        console.log(`❌ Unit ${shooter.name} already shot this phase - ignoring click`);
-        return;
-      }
-      
       // Check if this is a preview (first click) or execute (second click)
       const currentTargetPreview = gameState.targetPreview;
       
@@ -684,15 +697,20 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       if (!unit) {
         console.error(`❌ CANCEL CHARGE ERROR: Unit ${selectedUnitId} not found!`);
       } else {
-        console.log(`⚔️ Adding ${selectedUnitId} to charged units via cancelCharge`);
-        actions.addChargedUnit(selectedUnitId);
+        // CRITICAL FIX: Check if unit is already charged to prevent duplicates
+        if (unitsCharged.includes(selectedUnitId)) {
+          console.log(`⚠️ Unit ${selectedUnitId} already charged - skipping cancelCharge`);
+        } else {
+          console.log(`⚔️ Adding ${selectedUnitId} to charged units via cancelCharge`);
+          actions.addChargedUnit(selectedUnitId);
+        }
       }
     }
     actions.setSelectedUnitId(null);
     actions.setMode("select");
     actions.setMovePreview(null);
     actions.setAttackPreview(null);
-  }, [actions, selectedUnitId, findUnit]);
+  }, [actions, selectedUnitId, findUnit, unitsCharged]);
 
   const validateCharge = useCallback((chargerId: UnitId) => {
     console.log(`✅ VALIDATE CHARGE: Unit ${chargerId}`);

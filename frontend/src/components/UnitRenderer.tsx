@@ -215,18 +215,30 @@ export class UnitRenderer {
         }
       });
     } else if (phase !== "move" || isEligible) {
-      unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-        if (e.button === 0) {
-          window.dispatchEvent(new CustomEvent('boardUnitClick', {
-            detail: {
-              unitId: unit.id,
-              phase: phase,
-              mode: mode,
-              selectedUnitId: selectedUnitId
-            }
-          }));
+      let addClickHandler = true;
+      if (phase === "shoot" && mode === "attackPreview" && unit.player !== currentPlayer && selectedUnitId !== null) {
+        const selectedUnit = units.find(u => u.id === selectedUnitId);
+        if (selectedUnit && !isUnitInRange(selectedUnit, unit, selectedUnit.RNG_RNG)) {
+          addClickHandler = false;
         }
-      });
+      }
+      if (addClickHandler) {
+        unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+          if (e.button === 0) {
+            window.dispatchEvent(new CustomEvent('boardUnitClick', {
+              detail: {
+                unitId: unit.id,
+                phase: phase,
+                mode: mode,
+                selectedUnitId: selectedUnitId
+              }
+            }));
+          }
+        });
+      } else {
+        unitCircle.eventMode = 'none';
+        unitCircle.cursor = "default";
+      }
     }
     
     app.stage.addChild(unitCircle);
@@ -400,7 +412,7 @@ export class UnitRenderer {
       return;
     }
     
-    console.log(`🔍 Rendering shooting counter for ${unit.name} (${unit.id}) - fled units: [${unitsFled?.join(', ') || 'none'}]`);
+    console.log(`🔍 Rendering shooting counter for ${unit.name} (${unit.id}) - fled units: [${unitsFled?.join(', ') || 'none'}] - unitsFled type: ${typeof unitsFled}, raw:`, unitsFled);
     
     const shotsLeft = unit.SHOOT_LEFT !== undefined ? unit.SHOOT_LEFT : unit.RNG_NB || 0;
     const totalShots = unit.RNG_NB || 0;

@@ -45,9 +45,21 @@ export function setupBoardClickHandler(callbacks: {
   };
 
   window.addEventListener('boardUnitClick', globalClickHandler);
-  window.addEventListener('boardCancelCharge', () => {
+  
+  // Remove existing charge cancel handler before adding new one
+  const existingCancelHandler = (window as any).cancelChargeHandler;
+  if (existingCancelHandler) {
+    window.removeEventListener('boardCancelCharge', existingCancelHandler);
+  }
+  
+  // Create new cancel handler and store reference
+  const cancelChargeHandler = () => {
+    console.log('🔥 boardCancelCharge event triggered');
     callbacks.onCancelCharge?.();
-  });
+  };
+  (window as any).cancelChargeHandler = cancelChargeHandler;
+  
+  window.addEventListener('boardCancelCharge', cancelChargeHandler);
 }
 
 ;(window as any).setupBoardClickHandler = setupBoardClickHandler;

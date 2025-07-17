@@ -434,17 +434,44 @@ export default function Board({
       const centerCol = selectedUnit.col;
       const centerRow = selectedUnit.row;
       const c1 = offsetToCube(centerCol, centerRow);
-      for (let col = 0; col < BOARD_COLS; col++) {
-        for (let row = 0; row < BOARD_ROWS; row++) {
-          const c2 = offsetToCube(col, row);
-          const distance = cubeDistance(c1, c2);
-          const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
-          if (
-            !blocked &&
-            distance <= selectedUnit.MOVE &&
-            !(col === centerCol && row === centerRow)
-          ) {
-            availableCells.push({ col, row });
+
+      // Use BFS to find reachable cells avoiding forbidden areas
+      const visited = new Set<string>();
+      const queue: [number, number, number][] = [[centerCol, centerRow, 0]];  // col, row, steps
+      const directionsEven = [[1, 0], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1]];
+      const directionsOdd = [[1, 0], [1, -1], [0, -1], [-1, 0], [0, 1], [1, 1]];
+
+      while (queue.length > 0) {
+        const [col, row, steps] = queue.shift()!;
+        const key = `${col},${row}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+
+        const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
+        const isAdjacentToEnemy = units.some(u => 
+          u.player !== selectedUnit.player && 
+          cubeDistance(offsetToCube(col, row), offsetToCube(u.col, u.row)) === 1
+        );
+
+        if (steps > 0 && steps <= selectedUnit.MOVE && !blocked && !isAdjacentToEnemy) {
+          availableCells.push({ col, row });
+        }
+
+        if (steps >= selectedUnit.MOVE) continue;
+
+        const directions = (col % 2 === 0) ? directionsEven : directionsOdd;
+        for (const [dx, dy] of directions) {
+          const ncol = col + dx;
+          const nrow = row + dy;
+          if (ncol >= 0 && ncol < BOARD_COLS && nrow >= 0 && nrow < BOARD_ROWS) {
+            const nblocked = units.some(u => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id);
+            const nisAdjacentToEnemy = units.some(u => 
+              u.player !== selectedUnit.player && 
+              cubeDistance(offsetToCube(ncol, nrow), offsetToCube(u.col, u.row)) === 1
+            );
+            if (!nblocked && !nisAdjacentToEnemy) {
+              queue.push([ncol, nrow, steps + 1]);
+            }
           }
         }
       }
