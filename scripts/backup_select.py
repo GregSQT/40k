@@ -98,6 +98,7 @@ else:
         "frontend/src/data/Scenario.ts",
 
         # Frontend/src/hooks
+        "frontend/src/hooks/useAIPlayer.ts",
         "frontend/src/hooks/useGameActions.ts",
         "frontend/src/hooks/useGameConfig.ts",
         "frontend/src/hooks/useGameState.ts",

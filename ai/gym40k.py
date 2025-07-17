@@ -1054,6 +1054,14 @@ class W40KEnv(gym.Env):
                     nearest = enemy
         
         return nearest
+    
+    def _is_target_adjacent_to_friendly_unit(self, target):
+        """Check if target enemy is adjacent to any friendly unit (Rule 2)."""
+        for friendly_unit in self.ai_units:
+            if friendly_unit.get("alive", True):
+                if are_units_adjacent(target, friendly_unit):
+                    return True
+        return False
 
     def _get_valid_actions_for_phase(self, unit, current_phase):
         """Get valid action types for current phase following AI_GAME.md."""
@@ -1094,6 +1102,11 @@ class W40KEnv(gym.Env):
         if self._is_friendly_unit(unit, target):
             unit_rewards = self._get_unit_reward_config(unit)
             return unit_rewards.get("wait", -1.0)  # Large penalty for friendly fire
+        
+        # RULE 2: Cannot shoot enemy units adjacent to friendly units
+        if self._is_target_adjacent_to_friendly_unit(target):
+            unit_rewards = self._get_unit_reward_config(unit)
+            return unit_rewards.get("wait", -0.5)  # Penalty for invalid targeting
         
         total_damage = execute_shooting_sequence(unit, target)
         old_hp = target["cur_hp"]
@@ -1167,7 +1180,9 @@ class W40KEnv(gym.Env):
             if enemy.get("alive", True):
                 distance = self._calculate_distance(unit, enemy)
                 if distance <= unit_range:
-                    return True
+                    # Rule 2: Cannot shoot enemy units adjacent to friendly units
+                    if not self._is_target_adjacent_to_friendly_unit(enemy):
+                        return True
         return False
     
     def _calculate_distance(self, unit1, unit2):

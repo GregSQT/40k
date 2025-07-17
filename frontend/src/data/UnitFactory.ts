@@ -37,7 +37,33 @@ async function initializeUnitRegistry(): Promise<void> {
           const className = unitFile; // e.g., "Intercessor"
           const UnitClass = module[className];
           
+          if (!UnitClass) {for (const unitFile of unitFiles) {
+        try {
+          // Use @vite-ignore to suppress the dynamic import warning
+          const module = await import(/* @vite-ignore */ `../roster/${faction}/${unitFile}`);
+          
+          // Find the exported class (should match filename)
+          const className = unitFile; // e.g., "Intercessor"
+          const UnitClass = module[className];
+          
           if (!UnitClass) {
+            console.warn(`⚠️ No class ${className} found in ${faction}/${unitFile}`);
+            continue;
+          }
+          
+          // Validate it's a proper unit class
+          if (UnitClass.MOVE && UnitClass.HP_MAX && UnitClass.ICON) {
+            unitClassMap[className] = UnitClass;
+            availableUnitTypes.push(className);
+            console.log(`✅ Auto-discovered unit: ${className}`);
+          } else {
+            console.warn(`⚠️ ${className} missing required unit properties`);
+          }
+          
+        } catch (importError) {
+          console.warn(`⚠️ Failed to import ${faction}/${unitFile}:`, importError);
+        }
+      }
             console.warn(`⚠️ No class ${className} found in ${modulePath}`);
             continue;
           }
@@ -156,16 +182,22 @@ export function createUnit(params: {
   const UnitClass = getUnitClass(params.type);
   
   return {
-    ...params,
-    BASE: UnitClass.BASE || 5,
+    id: params.id,
+    name: params.name,
+    type: params.type,
+    player: params.player,
+    col: params.col,
+    row: params.row,
+    color: params.color,
+    BASE: UnitClass.BASE,
     MOVE: UnitClass.MOVE,
     HP_MAX: UnitClass.HP_MAX,
     RNG_RNG: UnitClass.RNG_RNG,
     RNG_DMG: UnitClass.RNG_DMG,
     CC_DMG: UnitClass.CC_DMG,
-    CC_RNG: UnitClass.CC_RNG || 1,
+    CC_RNG: UnitClass.CC_RNG,
     ICON: UnitClass.ICON,
-    ICON_SCALE: UnitClass.ICON_SCALE || 1.0,
+    ICON_SCALE: UnitClass.ICON_SCALE,
     CUR_HP: UnitClass.HP_MAX,
     RNG_NB: UnitClass.RNG_NB,
     RNG_ATK: UnitClass.RNG_ATK,
@@ -177,7 +209,7 @@ export function createUnit(params: {
     CC_AP: UnitClass.CC_AP,
     T: UnitClass.T,
     ARMOR_SAVE: UnitClass.ARMOR_SAVE,
-    INVUL_SAVE: UnitClass.INVUL_SAVE || 0,
+    INVUL_SAVE: UnitClass.INVUL_SAVE,
     LD: UnitClass.LD,
     OC: UnitClass.OC,
     VALUE: UnitClass.VALUE,

@@ -46,13 +46,17 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
           }
         },
         onShoot:        props.onShoot,
-        onCombatAttack: props.onCombatAttack
+        onCombatAttack: props.onCombatAttack,
+        onConfirmMove: props.onConfirmMove,
+        onCancelCharge: props.onCancelCharge
       });
     }, [
       props.onSelectUnit,
       props.onStartAttackPreview,
       props.onShoot,
       props.onCombatAttack,
+      props.onConfirmMove,
+      props.onCancelCharge,
       props.units
     ]);
 

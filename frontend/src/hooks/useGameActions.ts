@@ -57,8 +57,16 @@ export const useGameActions = ({
         // Check if unit is adjacent to any enemy (engaged in combat)
         const hasAdjacentEnemyShoot = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         if (hasAdjacentEnemyShoot) return false;
-        // Check if unit has enemies in shooting range
-        return enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.RNG_RNG));
+        // Check if unit has enemies in shooting range that are NOT adjacent to friendly units
+        const friendlyUnits = units.filter(u => u.player === unit.player && u.id !== unit.id);
+        return enemyUnits.some(enemy => {
+          if (!isUnitInRange(unit, enemy, unit.RNG_RNG)) return false;
+          // Rule 2: Cannot shoot enemy units adjacent to friendly units
+          const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => 
+            Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
+          );
+          return !isEnemyAdjacentToFriendly;
+        });
       case "charge":
         if (unitsCharged.includes(unit.id)) return false;
         const isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
@@ -328,6 +336,16 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     // PREVENT FRIENDLY FIRE: Cannot shoot friendly units
     if (target.player === shooter.player) {
       console.log(`❌ Cannot shoot friendly unit ${target.name || target.id}`);
+      return;
+    }
+
+    // RULE 2: Cannot shoot enemy units adjacent to friendly units
+    const friendlyUnits = units.filter(u => u.player === shooter.player && u.id !== shooter.id);
+    const isTargetAdjacentToFriendly = friendlyUnits.some(friendly => 
+      Math.max(Math.abs(friendly.col - target.col), Math.abs(friendly.row - target.row)) === 1
+    );
+    if (isTargetAdjacentToFriendly) {
+      console.log(`❌ Cannot shoot ${target.name || target.id} - adjacent to friendly unit`);
       return;
     }
 

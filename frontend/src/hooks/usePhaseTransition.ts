@@ -109,17 +109,34 @@ export const usePhaseTransition = ({
     const playerUnits = getCurrentPlayerUnits();
     const enemyUnits = getEnemyUnits();
     
-    if (playerUnits.length === 0) return true;
+    if (playerUnits.length === 0) {
+      console.log(`[PhaseTransition] Combat - No player units, ending turn`);
+      return true;
+    }
 
     // Find units that can still attack in combat
     const attackableUnits = playerUnits.filter(unit => {
       if (unitsAttacked.includes(unit.id)) return false;
       const combatRange = unit.CC_RNG || 1; // Use CC_RNG instead of hardcoded adjacency
-      return enemyUnits.some(enemy => isUnitInRange(unit, enemy, combatRange));
+      const canAttack = enemyUnits.some(enemy => isUnitInRange(unit, enemy, combatRange));
+      
+      // Debug logging for each unit
+      if (!canAttack) {
+        console.log(`[PhaseTransition] Unit ${unit.name} (${unit.id}) cannot attack - CC_RNG: ${unit.CC_RNG}, position: (${unit.col}, ${unit.row})`);
+        enemyUnits.forEach(enemy => {
+          const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
+          console.log(`  - Enemy ${enemy.name} (${enemy.id}) at (${enemy.col}, ${enemy.row}) - distance: ${distance}, range: ${combatRange}`);
+        });
+      }
+      
+      return canAttack;
     });
 
-    return attackableUnits.length === 0;
-  }, [getCurrentPlayerUnits, getEnemyUnits, unitsAttacked, isUnitInRange]);
+    const shouldEnd = attackableUnits.length === 0;
+    console.log(`[PhaseTransition] Combat check - Player ${currentPlayer} units: ${playerUnits.length}, attackable: ${attackableUnits.length}, attacked: ${unitsAttacked.length}, shouldEnd: ${shouldEnd}`);
+    
+    return shouldEnd;
+  }, [getCurrentPlayerUnits, getEnemyUnits, unitsAttacked, isUnitInRange, currentPlayer]);
 
   // Transition from move to shoot phase
   const transitionToShoot = useCallback(() => {

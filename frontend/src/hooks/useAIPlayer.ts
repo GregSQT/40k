@@ -56,6 +56,7 @@ export const useAIPlayer = ({
   // Helper to get AI units for current phase
   const getEligibleAIUnits = useCallback(() => {
     const aiUnits = units.filter(u => u.player === 1);
+    const enemyUnits = units.filter(u => u.player !== 1);
     
     switch (phase) {
       case "move":
@@ -65,7 +66,15 @@ export const useAIPlayer = ({
       case "charge":
         return aiUnits.filter(u => !unitsCharged.includes(u.id));
       case "combat":
-        return aiUnits.filter(u => !unitsAttacked.includes(u.id));
+        return aiUnits.filter(u => {
+          if (unitsAttacked.includes(u.id)) return false;
+          const combatRange = u.CC_RNG || 1;
+          const canAttack = enemyUnits.some(enemy => {
+            const distance = Math.max(Math.abs(u.col - enemy.col), Math.abs(u.row - enemy.row));
+            return distance <= combatRange;
+          });
+          return canAttack;
+        });
       default:
         return [];
     }
