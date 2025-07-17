@@ -55,6 +55,7 @@ type BoardProps = {
   unitsMoved: number[];
   unitsCharged?: number[];
   unitsAttacked?: number[];
+  unitsFled?: number[];
   phase: "move" | "shoot" | "charge" | "combat";
   onCharge?: (chargerId: number, targetId: number) => void;
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
@@ -84,6 +85,7 @@ export default function Board({
   onCharge,
   unitsCharged,
   unitsAttacked,
+  unitsFled,
   onMoveCharger,
   onCancelCharge,
   onValidateCharge,
@@ -644,7 +646,7 @@ export default function Board({
         boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
         HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
         SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-        phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked,
+        phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
         units, chargeTargets, combatTargets, targetPreview,
         onConfirmMove, parseColor
       });
@@ -663,7 +665,7 @@ export default function Board({
           boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-          phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked,
+          phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
           units, chargeTargets, combatTargets, targetPreview,
           onConfirmMove, parseColor
         });
@@ -683,7 +685,7 @@ export default function Board({
           boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-          phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked,
+          phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
           units, chargeTargets, combatTargets, targetPreview,
           onConfirmMove, parseColor
         });

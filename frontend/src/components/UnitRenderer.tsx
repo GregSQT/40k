@@ -50,6 +50,7 @@ interface UnitRendererProps {
   unitsMoved: number[];
   unitsCharged?: number[];
   unitsAttacked?: number[];
+  unitsFled?: number[];
   units: Unit[];
   chargeTargets: Unit[];
   combatTargets: Unit[];
@@ -100,7 +101,7 @@ export class UnitRenderer {
   }
   
   private calculateEligibility(): boolean {
-    const { unit, isPreview, phase, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, units } = this.props;
+    const { unit, isPreview, phase, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled, units } = this.props;
     
     if (isPreview) return false;
     
@@ -108,6 +109,11 @@ export class UnitRenderer {
       return unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id));
     } else if (phase === "shoot") {
       if (unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id))) {
+        // NEW RULE: Units that fled cannot shoot
+        if (unitsFled && unitsFled.includes(Number(unit.id))) {
+          console.log(`🏃 UnitRenderer: Unit ${unit.name} (${unit.id}) ineligible for shoot - fled this turn`);
+          return false;
+        }
         const enemies = units.filter(u2 => u2.player !== currentPlayer);
         // Check if unit is adjacent to any enemy (engaged in combat)
         const hasAdjacentEnemy = enemies.some(eu => areUnitsAdjacent(unit, eu));
@@ -118,6 +124,11 @@ export class UnitRenderer {
     } else if (phase === "charge") {
       const unitsChargedArr = unitsCharged || [];
       if (unit.player === currentPlayer && !unitsChargedArr.includes(Number(unit.id))) {
+        // NEW RULE: Units that fled cannot charge
+        if (unitsFled && unitsFled.includes(Number(unit.id))) {
+          console.log(`🏃 UnitRenderer: Unit ${unit.name} (${unit.id}) ineligible for charge - fled this turn`);
+          return false;
+        }
         const enemies = units.filter(u2 => u2.player !== currentPlayer);
         const isAdjacent = enemies.some(eu => areUnitsAdjacent(unit, eu));
         const inRange = enemies.some(eu => isUnitInRange(unit, eu, unit.MOVE));
@@ -379,9 +390,17 @@ export class UnitRenderer {
   }
   
   private renderShootingCounter(unitIconScale: number): void {
-    const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS } = this.props;
+    const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled } = this.props;
     
     if (phase !== 'shoot' || unit.player !== currentPlayer) return;
+    
+    // NEW RULE: Hide shooting counter for units that fled
+    if (unitsFled && unitsFled.includes(unit.id)) {
+      console.log(`🏃 Hiding shooting counter for fled unit ${unit.name} (${unit.id})`);
+      return;
+    }
+    
+    console.log(`🔍 Rendering shooting counter for ${unit.name} (${unit.id}) - fled units: [${unitsFled?.join(', ') || 'none'}]`);
     
     const shotsLeft = unit.SHOOT_LEFT !== undefined ? unit.SHOOT_LEFT : unit.RNG_NB || 0;
     const totalShots = unit.RNG_NB || 0;

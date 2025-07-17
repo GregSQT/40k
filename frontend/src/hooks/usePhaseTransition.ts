@@ -99,10 +99,16 @@ export const usePhaseTransition = ({
       if (unitsFled.includes(unit.id)) return false;
       
       // Can't charge if adjacent to enemy
-      if (enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy))) return false;
+      const isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
+      if (isAdjacent) return false;
       
       // Must have enemy within move range
-      return enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
+      const inRange = enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
+      
+      // Debug logging to match useGameActions format
+      console.log(`[PhaseTransition] Unit ${unit.name} (${unit.id}) charge eligibility: ${!isAdjacent && inRange} (adjacent: ${isAdjacent}, inRange: ${inRange})`);
+      
+      return inRange;
     });
 
     console.log(`[PhaseTransition] Charge check - Player ${currentPlayer} units: ${playerUnits.length}, chargeable: ${chargeableUnits.length}, charged: ${unitsCharged.length}`);

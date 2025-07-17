@@ -54,11 +54,19 @@ export const useGameActions = ({
 
     switch (phase) {
       case "move":
-        return !unitsMoved.includes(unit.id); // Units can always move, even if adjacent to enemies
+        const moveEligible = !unitsMoved.includes(unit.id);
+        console.log(`🔍 Unit ${unit.name} (${unit.id}) move eligibility: ${moveEligible} (moved: ${unitsMoved.includes(unit.id)})`);
+        return moveEligible;
       case "shoot":
-        if (unitsMoved.includes(unit.id)) return false;
+        if (unitsMoved.includes(unit.id)) {
+          console.log(`❌ Unit ${unit.name} (${unit.id}) ineligible - already moved this phase`);
+          return false;
+        }
         // NEW RULE: Units that fled cannot shoot
-        if (unitsFled.includes(unit.id)) return false;
+        if (unitsFled.includes(unit.id)) {
+          console.log(`🏃 Unit ${unit.name} (${unit.id}) ineligible - fled this turn`);
+          return false;
+        }
         // Check if unit is adjacent to any enemy (engaged in combat)
         const hasAdjacentEnemyShoot = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         if (hasAdjacentEnemyShoot) return false;
@@ -73,12 +81,20 @@ export const useGameActions = ({
           return !isEnemyAdjacentToFriendly;
         });
       case "charge":
-        if (unitsCharged.includes(unit.id)) return false;
+        if (unitsCharged.includes(unit.id)) {
+          console.log(`❌ Unit ${unit.name} (${unit.id}) ineligible - already charged this phase`);
+          return false;
+        }
         // NEW RULE: Units that fled cannot charge
-        if (unitsFled.includes(unit.id)) return false;
+        if (unitsFled.includes(unit.id)) {
+          console.log(`🏃 Unit ${unit.name} (${unit.id}) ineligible - fled this turn`);
+          return false;
+        }
         const isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         const inRange = enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
-        return !isAdjacent && inRange;
+        const chargeEligible = !isAdjacent && inRange;
+        console.log(`⚔️ Unit ${unit.name} (${unit.id}) charge eligibility: ${chargeEligible} (adjacent: ${isAdjacent}, inRange: ${inRange})`);
+        return chargeEligible;
       case "combat":
         if (unitsAttacked.includes(unit.id)) return false;
         if (unit.CC_RNG === undefined) {
@@ -122,7 +138,8 @@ export const useGameActions = ({
       unitPlayer: unit.player,
       unitsMoved,
       unitsCharged,
-      unitsAttacked
+      unitsAttacked,
+      unitsFled
     });
     
     // CRITICAL FIX: Block ALL actions if unit is not eligible
@@ -208,20 +225,27 @@ export const useGameActions = ({
       if (unit && phase === "move") {
         // Check if unit is fleeing (was adjacent to enemy at start of move, ends move not adjacent)
         const enemyUnits = units.filter(u => u.player !== unit.player);
+        
+        // FIXED: Check adjacency at ORIGINAL position before move
         const wasAdjacentToEnemy = enemyUnits.some(enemy => 
           Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
         );
         
         if (wasAdjacentToEnemy) {
-          // Check if unit will still be adjacent after the move
+          // Check if unit will still be adjacent after the move to DESTINATION
           const willBeAdjacentToEnemy = enemyUnits.some(enemy => 
             Math.max(Math.abs(movePreview.destCol - enemy.col), Math.abs(movePreview.destRow - enemy.row)) === 1
           );
           
           // Only mark as fled if unit was adjacent and will no longer be adjacent
           if (!willBeAdjacentToEnemy) {
+            console.log(`🏃 Unit ${unit.name} (${unit.id}) FLED from (${unit.col},${unit.row}) to (${movePreview.destCol},${movePreview.destRow})`);
             actions.addFledUnit(movePreview.unitId);
+          } else {
+            console.log(`📍 Unit ${unit.name} (${unit.id}) moved but stayed adjacent - not fleeing`);
           }
+        } else {
+          console.log(`✅ Unit ${unit.name} (${unit.id}) moved but was not adjacent to enemies - normal move`);
         }
       }
       
@@ -421,6 +445,12 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
         return;
       }
     } else {
+      // CRITICAL: Check if unit has already shot this phase (FIRST CHECK)
+      if (unitsMoved.includes(shooterId)) {
+        console.log(`❌ Unit ${shooter.name} already shot this phase - ignoring click`);
+        return;
+      }
+      
       // Check if this is a preview (first click) or execute (second click)
       const currentTargetPreview = gameState.targetPreview;
       
@@ -613,17 +643,31 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
   }, [findUnit, actions]);
 
   const handleCharge = useCallback((chargerId: UnitId, targetId: UnitId) => {
-    console.log(`Charge! Unit ${chargerId} charges unit ${targetId}`);
+    console.log(`⚔️ CHARGE: Unit ${chargerId} charges unit ${targetId}`);
+    const charger = findUnit(chargerId);
+    if (!charger) {
+      console.error(`❌ CHARGE ERROR: Charger unit ${chargerId} not found!`);
+      return;
+    }
+    console.log(`⚔️ Adding ${chargerId} to charged units`);
     actions.addChargedUnit(chargerId);
     actions.setSelectedUnitId(null);
     actions.setMode("select");
-  }, [actions]);
+  }, [actions, findUnit]);
 
   const moveCharger = useCallback((chargerId: UnitId, destCol: number, destRow: number) => {
+    console.log(`🏃 MOVE CHARGER: Unit ${chargerId} moves to (${destCol}, ${destRow})`);
+    const charger = findUnit(chargerId);
+    if (!charger) {
+      console.error(`❌ MOVE CHARGER ERROR: Unit ${chargerId} not found!`);
+      return;
+    }
+    
     // Move the unit to the destination
     actions.updateUnit(chargerId, { col: destCol, row: destRow });
     
     // Mark unit as having charged (end of activability for this phase)
+    console.log(`⚔️ Adding ${chargerId} to charged units via moveCharger`);
     actions.addChargedUnit(chargerId);
     
     // Deselect the unit
@@ -631,23 +675,37 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     
     // Return to select mode (cancel colored cells)
     actions.setMode("select");
-  }, [actions]);
+  }, [actions, findUnit]);
 
   const cancelCharge = useCallback(() => {
+    console.log(`❌ CANCEL CHARGE: selectedUnitId = ${selectedUnitId}`);
     if (selectedUnitId !== null) {
-      actions.addChargedUnit(selectedUnitId);
+      const unit = findUnit(selectedUnitId);
+      if (!unit) {
+        console.error(`❌ CANCEL CHARGE ERROR: Unit ${selectedUnitId} not found!`);
+      } else {
+        console.log(`⚔️ Adding ${selectedUnitId} to charged units via cancelCharge`);
+        actions.addChargedUnit(selectedUnitId);
+      }
     }
     actions.setSelectedUnitId(null);
     actions.setMode("select");
     actions.setMovePreview(null);
     actions.setAttackPreview(null);
-  }, [actions, selectedUnitId]);
+  }, [actions, selectedUnitId, findUnit]);
 
   const validateCharge = useCallback((chargerId: UnitId) => {
+    console.log(`✅ VALIDATE CHARGE: Unit ${chargerId}`);
+    const charger = findUnit(chargerId);
+    if (!charger) {
+      console.error(`❌ VALIDATE CHARGE ERROR: Unit ${chargerId} not found!`);
+      return;
+    }
+    console.log(`⚔️ Adding ${chargerId} to charged units via validateCharge`);
     actions.addChargedUnit(chargerId);
     actions.setSelectedUnitId(null);
     actions.setMode("select");
-  }, [actions]);
+  }, [actions, findUnit]);
 
   return {
     selectUnit,
