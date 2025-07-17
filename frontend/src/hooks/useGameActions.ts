@@ -37,6 +37,9 @@ export const useGameActions = ({
 }: UseGameActionsParams) => {
   const { units, currentPlayer, phase, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled } = gameState;
 
+  // DEBUG: Log fled units state
+  console.log(`[DEBUG] Phase: ${phase}, Player: ${currentPlayer}, UnitsFled:`, unitsFled, 'UnitsMoved:', unitsMoved);
+
   // Helper function to find unit by ID
   const findUnit = useCallback((unitId: UnitId) => {
     return units.find(u => u.id === unitId);

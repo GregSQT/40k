@@ -105,9 +105,7 @@ export class UnitRenderer {
     if (isPreview) return false;
     
     if (phase === "move") {
-      const enemies = units.filter(u2 => u2.player !== currentPlayer);
-      const hasAdjacent = enemies.some(eu => areUnitsAdjacent(unit, eu));
-      return unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id)) && !hasAdjacent;
+      return unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id));
     } else if (phase === "shoot") {
       if (unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id))) {
         const enemies = units.filter(u2 => u2.player !== currentPlayer);
