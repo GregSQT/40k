@@ -37,6 +37,8 @@ interface BoardConfig {
   rows: number;
   hex_radius: number;
   margin: number;
+  wall_hexes: [number, number][];
+  objective_hexes: [number, number][];
   colors: {
     background: string;
     cell_even: string;
@@ -53,6 +55,7 @@ interface BoardConfig {
     charge?: string;
     objective_zone?: string;
     wall?: string;
+    objective: string;
   };
   objective_zones?: ObjectiveZone[];
   walls?: Wall[];

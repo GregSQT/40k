@@ -619,18 +619,59 @@ export default function Board({
           const isChargeable = chargeCells.some(cell => cell.col === col && cell.row === row);
 
           // Check if this hex is in an objective zone
-          const isObjectiveZone = boardConfig.objective_zones?.some(zone => 
-            zone.hexes.some(hex => hex.col === col && hex.row === row)
-          ) || false;
+          const isObjectiveZone = false;
+
+          // Check if this is a wall hex
+          const wallHexSet = new Set<string>(
+            (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+          );
+          const isWallHex = wallHexSet.has(`${col},${row}`);
+
+          // New: Compute all objective hexes and their adjacent hexes
+          // ✅ Compute objectiveHexSet (base + adjacent), run once
+          const objectiveHexSet = new Set<string>();
+          const baseObjectives = boardConfig.objective_hexes || [];
+
+          const cubeDirections = [
+            [1, -1, 0], [1, 0, -1], [0, 1, -1],
+            [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+          ];
+
+          for (const [col, row] of baseObjectives) {
+            objectiveHexSet.add(`${col},${row}`);
+
+            const cube = offsetToCube(col, row);
+            for (const [dx, dy, dz] of cubeDirections) {
+              const neighborCube = {
+                x: cube.x + dx,
+                y: cube.y + dy,
+                z: cube.z + dz
+              };
+
+              const adjCol = neighborCube.x;
+              const adjRow = neighborCube.z + ((adjCol - (adjCol & 1)) >> 1);
+
+              if (
+                adjCol >= 0 && adjCol < BOARD_COLS &&
+                adjRow >= 0 && adjRow < BOARD_ROWS
+              ) {
+                objectiveHexSet.add(`${adjCol},${adjRow}`);
+              }
+            }
+          }
+
 
           // Create base hex (always present)
           const baseCell = new PIXI.Graphics();
           const isEven = (col + row) % 2 === 0;
           let cellColor = isEven ? parseColor(boardConfig.colors.cell_even) : parseColor(boardConfig.colors.cell_odd);
-          
-          // Override color for objective zones
-          if (isObjectiveZone) {
-            cellColor = OBJECTIVE_ZONE_COLOR;
+
+          // Override color for walls and objective zones
+          if (isWallHex) {
+            cellColor = WALL_COLOR;
+          // Removed objective zone color override
+          } else if (objectiveHexSet.has(`${col},${row}`)) {
+            cellColor = parseColor(boardConfig.colors.objective);
           }
           
           baseCell.beginFill(cellColor, 1.0);
@@ -653,7 +694,7 @@ export default function Board({
             if (mode === "chargePreview" && selectedUnitId !== null) {
               const unit = units.find(u => u.id === selectedUnitId);
               if (unit && col === unit.col && row === unit.row) {
-                baseCell.eventMode = 'static';
+                baseCell.eventMode = isWallHex ? 'none' : 'static';
                 baseCell.cursor    = "pointer";
                 baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
                   if (e.button === 0) onCancelCharge?.();
@@ -681,7 +722,8 @@ export default function Board({
             if (mode === "chargePreview") {
               highlightCell.eventMode = 'none';
             } else {
-              highlightCell.eventMode = 'static';
+              highlightCell.eventMode = isWallHex ? 'none' : 'static';
+;
             }
             highlightCell.cursor = "pointer";
 
