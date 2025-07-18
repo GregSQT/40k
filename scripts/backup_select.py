@@ -77,6 +77,7 @@ else:
 
         # Frontend/src
         "frontend/src/App.tsx",
+        "frontend/src/App.css",
 
         # Frontend/src/components
         "frontend/src/components/Board.tsx",

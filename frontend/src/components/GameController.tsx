@@ -1,7 +1,7 @@
 // src/components/GameController.tsx
 import React from "react";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { UnitSelector } from "./UnitSelector";
+import { UnitStatusTable } from "./UnitStatusTable";
 import { GameBoard } from "./GameBoard";
 import { GameStatus } from "./GameStatus";
 import { useGameState } from "../hooks/useGameState";
@@ -113,29 +113,14 @@ export const GameController: React.FC<GameControllerProps> = ({
 
   return (
     <div className={`game-controller ${className}`}>
-      <aside className="sidebar">
-        <ErrorBoundary fallback={<div>Failed to load unit selector</div>}>
-          <UnitSelector
-            units={gameState.units}
-            currentPlayer={gameState.currentPlayer}
-            selectedUnitId={gameState.selectedUnitId}
-            onSelect={gameState.phase === "charge" ? gameActions.selectCharger : gameActions.selectUnit}
-            unitsMoved={gameState.unitsMoved}
-            unitsCharged={gameState.unitsCharged}
-            unitsAttacked={gameState.unitsAttacked}
-            unitsFled={gameState.unitsFled}
-            phase={gameState.phase}
-          />
-        </ErrorBoundary>
-      </aside>
-
       <main className="main-content">
         <header className="game-header">
           <h1>WH40K Tactics RL Demo</h1>
         </header>
 
         <div className="game-area">
-          <ErrorBoundary fallback={<div>Failed to load game board</div>}>
+          <div className="game-board-section">
+            <ErrorBoundary fallback={<div>Failed to load game board</div>}>
             <GameBoard
               units={gameState.units}
               selectedUnitId={gameState.selectedUnitId}
@@ -178,6 +163,31 @@ export const GameController: React.FC<GameControllerProps> = ({
               }}
             />
           </ErrorBoundary>
+          </div>
+
+          <div className="unit-status-tables">
+            <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
+              <UnitStatusTable
+                units={gameState.units}
+                player={0}
+                selectedUnitId={gameState.selectedUnitId}
+                onSelectUnit={gameState.phase === "charge" ? 
+                  gameActions.selectCharger : gameActions.selectUnit}
+                title="Player 1 Units"
+              />
+            </ErrorBoundary>
+
+            <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
+              <UnitStatusTable
+                units={gameState.units}
+                player={1}
+                selectedUnitId={gameState.selectedUnitId}
+                onSelectUnit={gameState.phase === "charge" ? 
+                  gameActions.selectCharger : gameActions.selectUnit}
+                title="Player 2 Units"
+              />
+            </ErrorBoundary>
+          </div>
         </div>
 
         <footer className="game-footer">
