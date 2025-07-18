@@ -50,10 +50,14 @@ Both snippets must have a copy button.
 The copied code from the Markdown code blocks snippets containing the ORIGINAL CODE must fit perfectly the existing code (can be found with a researche function)
 
 **Critical Update Rules:**
-- NEVER use artifacts for code changes
+- NEVER create new artifacts when updating existing code
+- NEVER provide code snippets outside of the update method
 - NEVER use "add" operations alone - always show context with update method
+- If user says "respect instructions" or "no artifact", immediately use the update method
+- When modifying any code from project knowledge, ALWAYS default to using the update method
+- Only create new artifacts for completely new code that doesn't exist yet
 - ALWAYS use update method even for additions (show 3 lines before/after the addition point)
-- Respect exact indentation from the original file
+- ALWAYS respect exact indentation from the original file
 - Show minimal necessary context but enough to locate the exact position
 ---
 

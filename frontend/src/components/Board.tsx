@@ -431,6 +431,8 @@ export default function Board({
           if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
             throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for movement preview`);
           }
+          
+          console.log(`🏃 Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) MOVE: ${selectedUnit.MOVE}`);
 
           const centerCol = selectedUnit.col;
           const centerRow = selectedUnit.row;
@@ -438,26 +440,40 @@ export default function Board({
           const visited = new Map<string, number>();
           const queue: [number, number, number][] = [[centerCol, centerRow, 0]];
 
-          const directionsEven = [[1, 0], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1]];
-          const directionsOdd = [[1, 0], [1, -1], [0, -1], [-1, 0], [0, 1], [1, 1]];
+          // Use cube coordinate system for proper hex neighbors
+          const cubeDirections = [
+            [1, -1, 0], [1, 0, -1], [0, 1, -1], 
+            [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+          ];
 
-          // Collect all forbidden hexes (adjacent to any enemy)
+          // Collect all forbidden hexes (adjacent to any enemy) using cube coordinates
           const forbiddenSet = new Set<string>();
           for (const enemy of units) {
             if (enemy.player === selectedUnit.player) continue;
 
             // Add enemy position itself
             forbiddenSet.add(`${enemy.col},${enemy.row}`);
+            console.log(`🚫 Enemy at (${enemy.col},${enemy.row}) - position forbidden`);
 
-            const dirs = (enemy.col % 2 === 0) ? directionsEven : directionsOdd;
-            for (const [dx, dy] of dirs) {
-              const adjCol = enemy.col + dx;
-              const adjRow = enemy.row + dy;
+            // Use cube coordinates for proper hex adjacency
+            const enemyCube = offsetToCube(enemy.col, enemy.row);
+            for (const [dx, dy, dz] of cubeDirections) {
+              const adjCube = {
+                x: enemyCube.x + dx,
+                y: enemyCube.y + dy,
+                z: enemyCube.z + dz
+              };
+              
+              // Convert back to offset coordinates
+              const adjCol = adjCube.x;
+              const adjRow = adjCube.z + ((adjCube.x - (adjCube.x & 1)) >> 1);
+              
               if (
                 adjCol >= 0 && adjCol < BOARD_COLS &&
                 adjRow >= 0 && adjRow < BOARD_ROWS
               ) {
                 forbiddenSet.add(`${adjCol},${adjRow}`);
+                console.log(`🚫 Hex (${adjCol},${adjRow}) forbidden - adjacent to enemy at (${enemy.col},${enemy.row})`);
               }
             }
           }
@@ -471,28 +487,48 @@ export default function Board({
             if (!next) continue;
             const [col, row, steps] = next;
             const key = `${col},${row}`;
-            if (forbiddenSet.has(key)) continue;
-            if (visited.has(key) && steps >= visited.get(key)!) continue;
+            console.log(`🔍 BFS processing: (${col},${row}) at step ${steps}`);
+            
+            if (visited.has(key) && steps >= visited.get(key)!) {
+              console.log(`❌ Already visited (${col},${row}) with better/equal steps`);
+              continue;
+            }
 
-            if (visited.has(key) && steps >= visited.get(key)!) continue;
-
-            // ⛔ Forbidden tiles skipped only in neighbor loop (not here)
             visited.set(key, steps);
 
+            // ⛔ Skip forbidden positions completely - don't expand from them
+            if (forbiddenSet.has(key) && steps > 0) {
+              console.log(`❌ Skipping forbidden position (${col},${row})`);
+              continue;
+            }
 
             const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
 
-              if (steps > 0 && steps <= selectedUnit.MOVE && !blocked) {
-                console.log("✅ Reachable tile:", key, "at step", steps);
+              if (steps > 0 && steps <= selectedUnit.MOVE && !blocked && !forbiddenSet.has(key)) {
+                // Validate actual distance using cube coordinates
+                const actualDistance = cubeDistance(offsetToCube(centerCol, centerRow), offsetToCube(col, row));
+                console.log(`✅ Reachable tile: ${key} at BFS step ${steps}, actual distance ${actualDistance}`);
                 availableCells.push({ col, row });
               }
 
-              if (steps >= selectedUnit.MOVE) continue;
+              if (steps >= selectedUnit.MOVE) {
+                console.log(`❌ Max steps reached at (${col},${row}) - not expanding further`);
+                continue;
+              }
 
-              const directions = (col % 2 === 0) ? directionsEven : directionsOdd;
-              for (const [dx, dy] of directions) {
-                const ncol = col + dx;
-                const nrow = row + dy;
+              // Use cube coordinates for proper hex neighbors
+              const currentCube = offsetToCube(col, row);
+              for (const [dx, dy, dz] of cubeDirections) {
+                const neighborCube = {
+                  x: currentCube.x + dx,
+                  y: currentCube.y + dy,
+                  z: currentCube.z + dz
+                };
+                
+                // Convert back to offset coordinates
+                const ncol = neighborCube.x;
+                const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+                
                 const nkey = `${ncol},${nrow}`;
                 const nextSteps = steps + 1;
 
@@ -503,13 +539,8 @@ export default function Board({
                   !forbiddenSet.has(nkey)
                 ) {
                   const nblocked = units.some(u => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id);
-                  const adjacentToEnemy = units.some(u =>
-                    u.player !== selectedUnit.player &&
-                    cubeDistance(offsetToCube(ncol, nrow), offsetToCube(u.col, u.row)) === 1
-                  );
                   if (
                     !nblocked &&
-                    !adjacentToEnemy &&
                     (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
                   ) {
                     queue.push([ncol, nrow, nextSteps]);
@@ -521,6 +552,9 @@ export default function Board({
         };
 
         runMovementBFS();
+        
+        console.log(`🎯 Available cells found: ${availableCells.length}`);
+        console.log(`🎯 Available cells: ${availableCells.map(c => `(${c.col},${c.row})`).join(', ')}`);
       }
 
       // Red attack cells: Either after move (movePreview) or attackPreview
@@ -604,6 +638,10 @@ export default function Board({
           const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
           const isAttackable = attackCells.some(cell => cell.col === col && cell.row === row);
           const isChargeable = chargeCells.some(cell => cell.col === col && cell.row === row);
+          
+          if (isAvailable) {
+            console.log(`🟢 Highlighting available cell: (${col},${row})`);
+          }
 
           // Create base hex (always present)
           const baseCell = new PIXI.Graphics();
@@ -612,10 +650,20 @@ export default function Board({
           baseCell.beginFill(cellColor, 1.0);
           baseCell.lineStyle(1, parseColor(boardConfig.colors.cell_border), 0.8);
           baseCell.drawPolygon(points);
-                    baseCell.endFill();
-            baseHexContainer.addChild(baseCell);
+          baseCell.endFill();
+          baseHexContainer.addChild(baseCell);
+          
+          // Add coordinate text for debugging
+          const coordText = new PIXI.Text(`${col},${row}`, {
+            fontSize: 8,
+            fill: 0xFFFFFF,
+            align: 'center'
+          });
+          coordText.anchor.set(0.5);
+          coordText.position.set(centerX, centerY);
+          baseHexContainer.addChild(coordText);
 
-            // Cancel charge on re-click of active unit during charge preview
+          // Cancel charge on re-click of active unit during charge preview
             if (mode === "chargePreview" && selectedUnitId !== null) {
               const unit = units.find(u => u.id === selectedUnitId);
               if (unit && col === unit.col && row === unit.row) {
