@@ -1,6 +1,7 @@
 // src/components/GameBoard.tsx
 import React from 'react';
 import Board from './Board';
+import { TurnPhaseTracker } from './TurnPhaseTracker';
 import { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState, TargetPreview } from '../types/game';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
 
@@ -17,6 +18,8 @@ interface GameBoardProps {
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
   unitsFled: UnitId[];  // ✅ ADD THIS LINE
+  currentTurn: number;
+  maxTurns?: number;
   onSelectUnit: (id: UnitId | null) => void;
   onStartMovePreview: (unitId: UnitId, col: number, row: number) => void;
   onStartAttackPreview: (unitId: UnitId, col: number, row: number) => void;
@@ -85,6 +88,11 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
   
   return (
     <div className="game-board">
+      <TurnPhaseTracker
+        currentTurn={props.currentTurn}
+        currentPhase={props.phase}
+        maxTurns={props.maxTurns}
+      />
       <Board
         units={props.units}
         selectedUnitId={props.selectedUnitId}
