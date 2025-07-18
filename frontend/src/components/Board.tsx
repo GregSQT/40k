@@ -199,13 +199,6 @@ export default function Board({
     const ATTACK_COLOR = parseColor(boardConfig.colors.attack!);
     const CHARGE_COLOR = parseColor(boardConfig.colors.charge!);
     const ELIGIBLE_COLOR = parseColor(boardConfig.colors.eligible!);
-    console.log('🎨 BOARD.TSX DEBUG - Board colors:', {
-      background: parseColor(boardConfig.colors.background),
-      cell_even: parseColor(boardConfig.colors.cell_even),
-      cell_odd: parseColor(boardConfig.colors.cell_odd),
-      highlight: HIGHLIGHT_COLOR,
-      attack: ATTACK_COLOR
-    });
 
     // ✅ ALL DISPLAY VALUES FROM CONFIG - NO FALLBACKS, RAISE ERRORS IF MISSING
     if (!boardConfig.display) {
@@ -453,7 +446,6 @@ export default function Board({
 
             // Add enemy position itself
             forbiddenSet.add(`${enemy.col},${enemy.row}`);
-            console.log(`🚫 Enemy at (${enemy.col},${enemy.row}) - position forbidden`);
 
             // Use cube coordinates for proper hex adjacency
             const enemyCube = offsetToCube(enemy.col, enemy.row);
@@ -473,24 +465,17 @@ export default function Board({
                 adjRow >= 0 && adjRow < BOARD_ROWS
               ) {
                 forbiddenSet.add(`${adjCol},${adjRow}`);
-                console.log(`🚫 Hex (${adjCol},${adjRow}) forbidden - adjacent to enemy at (${enemy.col},${enemy.row})`);
               }
             }
           }
-
-          const forbiddenList = Array.from(forbiddenSet);
-          console.log("🚫 Forbidden hexes:", forbiddenList.join(" | "));
-
 
           while (queue.length > 0) {
             const next = queue.shift();
             if (!next) continue;
             const [col, row, steps] = next;
             const key = `${col},${row}`;
-            console.log(`🔍 BFS processing: (${col},${row}) at step ${steps}`);
             
             if (visited.has(key) && steps >= visited.get(key)!) {
-              console.log(`❌ Already visited (${col},${row}) with better/equal steps`);
               continue;
             }
 
@@ -498,21 +483,16 @@ export default function Board({
 
             // ⛔ Skip forbidden positions completely - don't expand from them
             if (forbiddenSet.has(key) && steps > 0) {
-              console.log(`❌ Skipping forbidden position (${col},${row})`);
               continue;
             }
 
             const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
 
               if (steps > 0 && steps <= selectedUnit.MOVE && !blocked && !forbiddenSet.has(key)) {
-                // Validate actual distance using cube coordinates
-                const actualDistance = cubeDistance(offsetToCube(centerCol, centerRow), offsetToCube(col, row));
-                console.log(`✅ Reachable tile: ${key} at BFS step ${steps}, actual distance ${actualDistance}`);
                 availableCells.push({ col, row });
               }
 
               if (steps >= selectedUnit.MOVE) {
-                console.log(`❌ Max steps reached at (${col},${row}) - not expanding further`);
                 continue;
               }
 
@@ -552,9 +532,6 @@ export default function Board({
         };
 
         runMovementBFS();
-        
-        console.log(`🎯 Available cells found: ${availableCells.length}`);
-        console.log(`🎯 Available cells: ${availableCells.map(c => `(${c.col},${c.row})`).join(', ')}`);
       }
 
       // Red attack cells: Either after move (movePreview) or attackPreview
@@ -638,10 +615,6 @@ export default function Board({
           const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
           const isAttackable = attackCells.some(cell => cell.col === col && cell.row === row);
           const isChargeable = chargeCells.some(cell => cell.col === col && cell.row === row);
-          
-          if (isAvailable) {
-            console.log(`🟢 Highlighting available cell: (${col},${row})`);
-          }
 
           // Create base hex (always present)
           const baseCell = new PIXI.Graphics();

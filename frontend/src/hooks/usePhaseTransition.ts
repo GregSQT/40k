@@ -68,7 +68,8 @@ export const usePhaseTransition = ({
 
     // Find units that can still shoot
     const shootableUnits = playerUnits.filter(unit => {
-      if (unitsMoved.includes(unit.id)) return false;
+      // CRITICAL FIX: Check SHOOT_LEFT instead of unitsMoved
+      if (unit.SHOOT_LEFT !== undefined && unit.SHOOT_LEFT <= 0) return false;
       
       // NEW RULE: Units that fled cannot shoot
       if (unitsFled.includes(unit.id)) return false;
@@ -82,7 +83,7 @@ export const usePhaseTransition = ({
     });
 
     return shootableUnits.length === 0;
-  }, [getCurrentPlayerUnits, getEnemyUnits, unitsMoved, unitsFled, isUnitInRange, areUnitsAdjacent]);
+  }, [getCurrentPlayerUnits, getEnemyUnits, unitsFled, isUnitInRange, areUnitsAdjacent, currentPlayer]);
 
   // Check if charge phase should transition to combat phase
   const shouldTransitionFromCharge = useCallback((): boolean => {
@@ -105,14 +106,9 @@ export const usePhaseTransition = ({
       // Must have enemy within move range
       const inRange = enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
       
-      // Debug logging to match useGameActions format
-      console.log(`[PhaseTransition] Unit ${unit.name} (${unit.id}) charge eligibility: ${!isAdjacent && inRange} (adjacent: ${isAdjacent}, inRange: ${inRange})`);
-      
       return inRange;
     });
 
-    console.log(`[PhaseTransition] Charge check - Player ${currentPlayer} units: ${playerUnits.length}, chargeable: ${chargeableUnits.length}, charged: ${unitsCharged.length}`);
-    
     return chargeableUnits.length === 0;
   }, [getCurrentPlayerUnits, getEnemyUnits, unitsCharged, unitsFled, areUnitsAdjacent, isUnitInRange, currentPlayer]);
 
@@ -148,8 +144,6 @@ export const usePhaseTransition = ({
     });
 
     const shouldEnd = attackableUnits.length === 0;
-    console.log(`[PhaseTransition] Combat check - Player ${currentPlayer} units: ${playerUnits.length}, attackable: ${attackableUnits.length}, attacked: ${unitsAttacked.length}, shouldEnd: ${shouldEnd}`);
-    
     return shouldEnd;
   }, [getCurrentPlayerUnits, getEnemyUnits, unitsAttacked, isUnitInRange, currentPlayer]);
 
@@ -233,10 +227,7 @@ export const usePhaseTransition = ({
     endTurn,
   ]);
 
-  // Log phase transitions for debugging
-  useEffect(() => {
-    console.log(`[PhaseTransition] Current phase: ${phase}, Player: ${currentPlayer}`);
-  }, [phase, currentPlayer]);
+  // Remove this entire useEffect block
 
   return {
     // Expose transition functions for manual control if needed

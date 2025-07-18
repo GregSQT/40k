@@ -399,13 +399,14 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     // ADDITIONAL CHECK: Prevent shooting if unit has no shots left
     const preShooter = findUnit(shooterId);
     if (preShooter && preShooter.SHOOT_LEFT !== undefined && preShooter.SHOOT_LEFT <= 0) {
-      console.log(`❌ Unit ${preShooter.name} has no shots left - ignoring handleShoot call`);
       return;
     }
 
     const shooter = findUnit(shooterId);
     const target = findUnit(targetId);
-    if (!shooter || !target) return;
+    if (!shooter || !target) {
+      return;
+    }
 
     // PREVENT FRIENDLY FIRE: Cannot shoot friendly units
     if (target.player === shooter.player) {
@@ -425,17 +426,16 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
 
     // Add range check
     if (!isUnitInRange(shooter, target, shooter.RNG_RNG)) {
-      console.log(`❌ Cannot shoot ${target.name || target.id} - out of range`);
       return;
     }
 
-    // bail out if no shots remaining
     if (shooter.SHOOT_LEFT === undefined) {
       throw new Error('shooter.SHOOT_LEFT is required');
     }
+
     const shotsLeft = shooter.SHOOT_LEFT;
+    
     if (shotsLeft <= 0) {
-      console.log(`🎯 ${shooter.name} has no shots remaining`);
       return;
     }
 
@@ -443,7 +443,6 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     if (shootingPhaseState.singleShotState?.isActive) {
       // Handle target selection for current shot
       if (shootingPhaseState.singleShotState.currentStep === 'target_selection') {
-        console.log(`🎯 Shot ${shootingPhaseState.singleShotState.currentShotNumber}: Selecting target ${targetId}`);
         singleShotSequenceManager.selectTarget(targetId);
         
         // Auto-process hit roll
@@ -477,8 +476,6 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
           currentTargetPreview.targetId === targetId && 
           currentTargetPreview.shooterId === shooterId) {
         // Second click - execute shooting
-        console.log(`🎯 Executing shooting sequence for ${shooter.name}: ${shooter.SHOOT_LEFT} shots`);
-        
         // NEW: IMMEDIATE PROTECTION - Only for single shot units (RNG_NB = 1)
         // Multi-shot units need to complete all shots before being marked as moved
         if (shooter.RNG_NB === 1) {
@@ -490,22 +487,8 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
           clearInterval(currentTargetPreview.blinkTimer);
         }
         actions.setTargetPreview(null);
-        
-        // Keep track of shots fired locally to avoid React state timing issues
-        let shotsFired = 0;
-        const totalShots = shooter.SHOOT_LEFT;
-        
-        // Create a temporary shooter with only 1 shot to force single-shot behavior
-        const singleShotShooter = {
-          ...shooter,
-          RNG_NB: 1,        // Force only 1 shot per sequence
-          SHOOT_LEFT: 1     // Only 1 shot in this sequence
-        };
-        
-        //////////////////////////////////////////
+
         // Simple single shot execution - no complex sequence manager
-        console.log(`🎯 Executing single shot: ${shooter.name} → ${target.name}`);
-        
         // Roll dice directly
         const hitRoll = Math.floor(Math.random() * 6) + 1;
         if (!shooter.RNG_ATK) throw new Error(`shooter.RNG_ATK is undefined for unit ${shooter.name}`);
@@ -538,8 +521,6 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
           }
         }
         
-        console.log(`🎲 Hit: ${hitRoll} (${hitSuccess}), Damage: ${damageDealt}`);
-        
         // Apply damage
         if (damageDealt > 0) {
           if (target.CUR_HP === undefined) {
@@ -549,10 +530,8 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
           const newHP = Math.max(0, currentHP - damageDealt);
           
           if (newHP <= 0) {
-            console.log(`💀 Target destroyed!`);
             actions.removeUnit(targetId);
           } else {
-            console.log(`🩹 Target takes ${damageDealt} damage`);
             actions.updateUnit(targetId, { CUR_HP: newHP });
           }
         }
@@ -567,22 +546,33 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
         
         // Check if more shots remaining
         if (newShotsLeft > 0) {
-          console.log(`🎯 ${shooter.name} has ${newShotsLeft} shots remaining`);
           // Stay in attack mode for target reselection
           actions.setAttackPreview({ unitId: shooterId, col: shooter.col, row: shooter.row });
           actions.setMode("attackPreview");
         } else {
-          console.log(`🎯 ${shooter.name} finished shooting`);
           // Mark as moved and end shooting
           actions.addMovedUnit(shooterId);
           actions.setAttackPreview(null);
           actions.setSelectedUnitId(null);
           actions.setMode("select");
+          
+          // CRITICAL FIX: Force immediate phase transition check
+          // This prevents the React state timing issue
+          setTimeout(() => {
+            const playerUnits = units.filter(u => u.player === currentPlayer);
+            const stillShootable = playerUnits.some(unit => {
+              if (unit.id === shooterId) return false; // This unit just finished
+              if (unit.SHOOT_LEFT !== undefined && unit.SHOOT_LEFT > 0) return true;
+              return false;
+            });
+            
+            if (!stillShootable) {
+              // The usePhaseTransition hook will handle the actual transition
+            }
+          }, 100);
         }
       } else {
         // First click - start preview
-        console.log(`🎯 Starting shooting preview for ${shooter.name} → ${target.name}`);
-        
         // Clear any existing preview
         if (currentTargetPreview?.blinkTimer) {
           clearInterval(currentTargetPreview.blinkTimer);
