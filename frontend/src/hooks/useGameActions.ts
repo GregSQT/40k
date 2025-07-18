@@ -171,6 +171,15 @@ export const useGameActions = ({
       return;
     }
 
+    // Special handling for charge phase
+    if (phase === "charge") {
+      actions.setSelectedUnitId(unitId);
+      actions.setMode("chargePreview");
+      actions.setMovePreview(null);
+      actions.setAttackPreview(null);
+      return;
+    }
+
     // Special handling for combat phase
     if (phase === "combat") {
       // Always show the attack preview for adjacent enemies

@@ -33,21 +33,7 @@ export const usePhaseTransition = ({
     return units.filter(u => u.player !== currentPlayer);
   }, [units, currentPlayer]);
 
-  // Helper to check if units are adjacent
-  const areUnitsAdjacent = useCallback((unit1: Unit, unit2: Unit): boolean => {
-    return Math.max(
-      Math.abs(unit1.col - unit2.col),
-      Math.abs(unit1.row - unit2.row)
-    ) === 1;
-  }, []);
-
-  // Helper to check if unit is in range of another unit
-  const isUnitInRange = useCallback((attacker: Unit, target: Unit, range: number): boolean => {
-    return Math.max(
-      Math.abs(attacker.col - target.col),
-      Math.abs(attacker.row - target.row)
-    ) <= range;
-  }, []);
+  // Use imported helper functions from gameHelpers - DO NOT redefine locally
 
   // Check if move phase should transition to shoot phase
   const shouldTransitionFromMove = useCallback((): boolean => {
@@ -68,8 +54,8 @@ export const usePhaseTransition = ({
 
     // Find units that can still shoot
     const shootableUnits = playerUnits.filter(unit => {
-      // CRITICAL FIX: Check SHOOT_LEFT instead of unitsMoved
-      if (unit.SHOOT_LEFT !== undefined && unit.SHOOT_LEFT <= 0) return false;
+      // Check if unit already shot this phase (tracked in unitsMoved during shoot phase)
+      if (unitsMoved.includes(unit.id)) return false;
       
       // NEW RULE: Units that fled cannot shoot
       if (unitsFled.includes(unit.id)) return false;
@@ -83,7 +69,7 @@ export const usePhaseTransition = ({
     });
 
     return shootableUnits.length === 0;
-  }, [getCurrentPlayerUnits, getEnemyUnits, unitsFled, isUnitInRange, areUnitsAdjacent, currentPlayer]);
+  }, [getCurrentPlayerUnits, getEnemyUnits, unitsFled, unitsMoved, isUnitInRange, areUnitsAdjacent, currentPlayer]);
 
   // Check if charge phase should transition to combat phase
   const shouldTransitionFromCharge = useCallback((): boolean => {
@@ -160,6 +146,7 @@ export const usePhaseTransition = ({
   const transitionToCharge = useCallback(() => {
     setTimeout(() => {
       actions.setPhase("charge");
+      actions.resetMovedUnits();  // Reset unitsMoved when entering charge phase
       actions.resetChargedUnits();
       actions.setSelectedUnitId(null);
     }, 300);
