@@ -111,7 +111,6 @@ export class UnitRenderer {
       if (unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id))) {
         // NEW RULE: Units that fled cannot shoot
         if (unitsFled && unitsFled.includes(Number(unit.id))) {
-          console.log(`🏃 UnitRenderer: Unit ${unit.name} (${unit.id}) ineligible for shoot - fled this turn`);
           return false;
         }
         const enemies = units.filter(u2 => u2.player !== currentPlayer);
@@ -126,7 +125,6 @@ export class UnitRenderer {
       if (unit.player === currentPlayer && !unitsChargedArr.includes(Number(unit.id))) {
         // NEW RULE: Units that fled cannot charge
         if (unitsFled && unitsFled.includes(Number(unit.id))) {
-          console.log(`🏃 UnitRenderer: Unit ${unit.name} (${unit.id}) ineligible for charge - fled this turn`);
           return false;
         }
         const enemies = units.filter(u2 => u2.player !== currentPlayer);
@@ -286,7 +284,6 @@ export class UnitRenderer {
          app.stage.addChild(sprite);
 
       } catch (iconError) {
-        console.warn(`Failed to load icon ${unit.ICON}:`, iconError);
         this.renderTextFallback(iconZIndex);
       }
     } else {
@@ -408,11 +405,8 @@ export class UnitRenderer {
     
     // NEW RULE: Hide shooting counter for units that fled
     if (unitsFled && unitsFled.includes(unit.id)) {
-      console.log(`🏃 Hiding shooting counter for fled unit ${unit.name} (${unit.id})`);
       return;
     }
-    
-    console.log(`🔍 Rendering shooting counter for ${unit.name} (${unit.id}) - fled units: [${unitsFled?.join(', ') || 'none'}] - unitsFled type: ${typeof unitsFled}, raw:`, unitsFled);
     
     const shotsLeft = unit.SHOOT_LEFT !== undefined ? unit.SHOOT_LEFT : unit.RNG_NB || 0;
     const totalShots = unit.RNG_NB || 0;
