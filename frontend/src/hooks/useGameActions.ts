@@ -643,27 +643,106 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       Math.abs(attacker.col - target.col),
       Math.abs(attacker.row - target.row)
     );
-    const combatRange = attacker.CC_RNG || 1; // Use CC_RNG instead of hardcoded 1
+    const combatRange = attacker.CC_RNG || 1;
     if (distance > combatRange) return;
 
-    // Apply close combat damage
-    if (target.CUR_HP === undefined) {
-      throw new Error('target.CUR_HP is required');
-    }
-    if (attacker.CC_DMG === undefined) {
-      throw new Error('attacker.CC_DMG is required');
-    }
-    const newHP = target.CUR_HP - attacker.CC_DMG;
-    
-    if (newHP <= 0) {
-      actions.removeUnit(targetId);
-    } else {
-      actions.updateUnit(targetId, { CUR_HP: newHP });
+    // Initialize ATTACK_LEFT if not set
+    if (attacker.ATTACK_LEFT === undefined) {
+      actions.updateUnit(attackerId, { ATTACK_LEFT: attacker.CC_NB || 1 });
+      return; // Return to let state update, then continue
     }
 
-    actions.addAttackedUnit(attackerId);
-    actions.setSelectedUnitId(null);
-    actions.setMode("select");
+    // Check if attacker has attacks remaining
+    if (attacker.ATTACK_LEFT <= 0) {
+      console.log(`❌ No attacks remaining for ${attacker.name}`);
+      actions.addAttackedUnit(attackerId);
+      actions.setSelectedUnitId(null);
+      actions.setMode("select");
+      return;
+    }
+
+    // 6-Step Combat Sequence using CC_ attributes
+    console.log(`⚔️ Combat: ${attacker.name} attacks ${target.name}`);
+
+    // Step 3: Hit Roll
+    const hitRoll = Math.floor(Math.random() * 6) + 1;
+    if (!attacker.CC_ATK) throw new Error(`attacker.CC_ATK is undefined for unit ${attacker.name}`);
+    const hitSuccess = hitRoll >= attacker.CC_ATK;
+    console.log(`🎲 Hit roll: ${hitRoll} (need ${attacker.CC_ATK}+) = ${hitSuccess ? 'HIT' : 'MISS'}`);
+
+    if (!hitSuccess) {
+      // Miss - decrease attacks and end
+      actions.updateUnit(attackerId, { ATTACK_LEFT: attacker.ATTACK_LEFT - 1 });
+      if (attacker.ATTACK_LEFT - 1 <= 0) {
+        actions.addAttackedUnit(attackerId);
+        actions.setSelectedUnitId(null);
+        actions.setMode("select");
+      }
+      return;
+    }
+
+    // Step 4: Wound Roll
+    const woundRoll = Math.floor(Math.random() * 6) + 1;
+    if (!attacker.CC_STR) throw new Error(`attacker.CC_STR is undefined for unit ${attacker.name}`);
+    if (!target.T) throw new Error(`target.T is undefined for unit ${target.name}`);
+    
+    const attackerStr = attacker.CC_STR;
+    const targetT = target.T;
+    const woundTarget = attackerStr >= targetT * 2 ? 2 : 
+                      attackerStr > targetT ? 3 : 
+                      attackerStr === targetT ? 4 : 
+                      attackerStr < targetT ? 5 : 6;
+    const woundSuccess = woundRoll >= woundTarget;
+    console.log(`🎲 Wound roll: ${woundRoll} (need ${woundTarget}+) = ${woundSuccess ? 'WOUND' : 'NO WOUND'}`);
+
+    if (!woundSuccess) {
+      // No wound - decrease attacks and end
+      actions.updateUnit(attackerId, { ATTACK_LEFT: attacker.ATTACK_LEFT - 1 });
+      if (attacker.ATTACK_LEFT - 1 <= 0) {
+        actions.addAttackedUnit(attackerId);
+        actions.setSelectedUnitId(null);
+        actions.setMode("select");
+      }
+      return;
+    }
+
+    // Step 5: Armor Save
+    const saveRoll = Math.floor(Math.random() * 6) + 1;
+    if (!target.ARMOR_SAVE) throw new Error(`target.ARMOR_SAVE is undefined for unit ${target.name}`);
+    if (!attacker.CC_AP) throw new Error(`attacker.CC_AP is undefined for unit ${attacker.name}`);
+    
+    const modifiedArmor = target.ARMOR_SAVE + attacker.CC_AP;
+    const invulSave = target.INVUL_SAVE || 0;
+    const saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
+    const saveSuccess = saveRoll >= saveTarget;
+    console.log(`🎲 Save roll: ${saveRoll} (need ${saveTarget}+) = ${saveSuccess ? 'SAVED' : 'FAILED'}`);
+
+    // Step 6: Damage Application
+    const damageDealt = saveSuccess ? 0 : (attacker.CC_DMG || 1);
+    console.log(`💥 Damage dealt: ${damageDealt}`);
+
+    if (damageDealt > 0) {
+      if (target.CUR_HP === undefined) {
+        throw new Error('target.CUR_HP is required');
+      }
+      const newHP = target.CUR_HP - damageDealt;
+      
+      if (newHP <= 0) {
+        actions.removeUnit(targetId);
+      } else {
+        actions.updateUnit(targetId, { CUR_HP: newHP });
+      }
+    }
+
+    // Decrease attacks remaining
+    actions.updateUnit(attackerId, { ATTACK_LEFT: attacker.ATTACK_LEFT - 1 });
+
+    // Check if attacker is done
+    if (attacker.ATTACK_LEFT - 1 <= 0) {
+      actions.addAttackedUnit(attackerId);
+      actions.setSelectedUnitId(null);
+      actions.setMode("select");
+    }
   }, [findUnit, actions]);
 
   const handleCharge = useCallback((chargerId: UnitId, targetId: UnitId) => {

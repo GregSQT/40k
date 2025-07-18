@@ -33,10 +33,15 @@ export interface Unit {
   RNG_ATK?: number;   // Hit skill (percentage)
   RNG_STR?: number;   // Strength for wounding
   RNG_AP?: number;    // Armor penetration
+  CC_NB?: number;     // Number of melee attacks
+  CC_ATK?: number;    // Melee hit skill
+  CC_STR?: number;    // Melee strength for wounding
+  CC_AP?: number;     // Melee armor penetration
   T?: number;         // Toughness
   ARMOR_SAVE?: number; // Armor save (D6 target)
   INVUL_SAVE?: number; // Invulnerable save (D6 target)
   SHOOT_LEFT?: number; // Shots remaining this phase
+  ATTACK_LEFT?: number; // Attacks remaining this phase
 }
 
 export interface SingleShotState {
@@ -59,10 +64,36 @@ export interface SingleShotState {
   };
 }
 
+export interface SingleAttackState {
+  isActive: boolean;
+  attackerId: UnitId;
+  targetId: UnitId | null;
+  currentAttackNumber: number;
+  totalAttacks: number;
+  attacksRemaining: number;
+  isSelectingTarget: boolean;
+  currentStep: 'target_selection' | 'hit_roll' | 'wound_roll' | 'save_roll' | 'damage_application' | 'complete';
+  stepResults: {
+    hitRoll?: number;
+    hitSuccess?: boolean;
+    woundRoll?: number;
+    woundSuccess?: boolean;
+    saveRoll?: number;
+    saveSuccess?: boolean;
+    damageDealt?: number;
+  };
+}
+
 export interface ShootingPhaseState {
   activeShooters: UnitId[];
   currentShooter: UnitId | null;
   singleShotState: SingleShotState | null;
+}
+
+export interface CombatPhaseState {
+  activeAttackers: UnitId[];
+  currentAttacker: UnitId | null;
+  singleAttackState: SingleAttackState | null;
 }
 
 export interface TargetPreview {
