@@ -28,6 +28,10 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
     const currentPhaseIndex = phases.indexOf(currentPhase);
     const phaseIndex = phases.indexOf(phase);
     
+    if (currentPhaseIndex === -1 || phaseIndex === -1) {
+      return 'upcoming';
+    }
+    
     if (phaseIndex < currentPhaseIndex) {
       return 'passed';
     } else if (phaseIndex === currentPhaseIndex) {
@@ -37,18 +41,43 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
     }
   };
 
-  const getPhaseClassName = (status: 'passed' | 'current' | 'upcoming'): string => {
-    const baseClasses = "px-3 py-1 rounded font-medium text-sm border";
+  const getPhaseStyle = (status: 'passed' | 'current' | 'upcoming'): React.CSSProperties => {
+    const baseStyle: React.CSSProperties = {
+      padding: '6px 12px',
+      borderRadius: '4px',
+      fontWeight: 'medium',
+      fontSize: '14px',
+      border: '1px solid',
+      cursor: 'default',
+      outline: 'none'
+    };
     
     switch (status) {
       case 'passed':
-        return `${baseClasses} bg-gray-400 text-white border-gray-500`;
+        return {
+          ...baseStyle,
+          backgroundColor: '#6B7280', // grey-500
+          color: '#FFFFFF',
+          borderColor: '#4B5563' // grey-600
+        };
       case 'current':
-        return `${baseClasses} bg-green-500 text-white border-green-600`;
+        return {
+          ...baseStyle,
+          backgroundColor: '#059669', // green-600
+          color: '#FFFFFF',
+          borderColor: '#047857', // green-700
+          fontWeight: 'bold',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+        };
       case 'upcoming':
-        return `${baseClasses} bg-blue-200 text-blue-800 border-blue-300`;
+        return {
+          ...baseStyle,
+          backgroundColor: '#BFDBFE', // blue-200
+          color: '#1E40AF', // blue-800
+          borderColor: '#93C5FD' // blue-300
+        };
       default:
-        return baseClasses;
+        return baseStyle;
     }
   };
 
@@ -71,11 +100,13 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
         <div className="flex items-center space-x-2">
           {phases.map((phase) => {
             const status = getPhaseStatus(phase);
+            const style = getPhaseStyle(status);
+            console.log(`Phase ${phase}: status=${status}, style applied`);
             
             return (
               <button
                 key={phase}
-                className={getPhaseClassName(status)}
+                style={style}
                 disabled
               >
                 {formatPhaseName(phase)}
