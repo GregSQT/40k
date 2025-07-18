@@ -424,271 +424,298 @@ export default function Board({
       );
     }
 
-    // Green move cells (mode: 'select')
-    if (selectedUnit && mode === "select" && phase !== "charge" && phase !== "combat") {
-      // Validate MOVE is defined
-      if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
-        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for movement preview`);
+      // Green move cells (mode: 'select' or 'movePreview')
+      if (selectedUnit && (mode === "select" || mode === "movePreview") && phase === "move") {
+
+        const runMovementBFS = () => {
+          if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
+            throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for movement preview`);
+          }
+
+          const centerCol = selectedUnit.col;
+          const centerRow = selectedUnit.row;
+
+          const visited = new Map<string, number>();
+          const queue: [number, number, number][] = [[centerCol, centerRow, 0]];
+
+          const directionsEven = [[1, 0], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1]];
+          const directionsOdd = [[1, 0], [1, -1], [0, -1], [-1, 0], [0, 1], [1, 1]];
+
+          // Collect all forbidden hexes (adjacent to any enemy)
+          const forbiddenSet = new Set<string>();
+          for (const enemy of units) {
+            if (enemy.player === selectedUnit.player) continue;
+
+            // Add enemy position itself
+            forbiddenSet.add(`${enemy.col},${enemy.row}`);
+
+            const dirs = (enemy.col % 2 === 0) ? directionsEven : directionsOdd;
+            for (const [dx, dy] of dirs) {
+              const adjCol = enemy.col + dx;
+              const adjRow = enemy.row + dy;
+              if (
+                adjCol >= 0 && adjCol < BOARD_COLS &&
+                adjRow >= 0 && adjRow < BOARD_ROWS
+              ) {
+                forbiddenSet.add(`${adjCol},${adjRow}`);
+              }
+            }
+          }
+
+          const forbiddenList = Array.from(forbiddenSet);
+          console.log("🚫 Forbidden hexes:", forbiddenList.join(" | "));
+
+
+          while (queue.length > 0) {
+            const next = queue.shift();
+            if (!next) continue;
+            const [col, row, steps] = next;
+            const key = `${col},${row}`;
+            if (forbiddenSet.has(key)) continue;
+            if (visited.has(key) && steps >= visited.get(key)!) continue;
+
+            if (visited.has(key) && steps >= visited.get(key)!) continue;
+
+            // ⛔ Forbidden tiles skipped only in neighbor loop (not here)
+            visited.set(key, steps);
+
+
+            const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
+
+              if (steps > 0 && steps <= selectedUnit.MOVE && !blocked) {
+                console.log("✅ Reachable tile:", key, "at step", steps);
+                availableCells.push({ col, row });
+              }
+
+              if (steps >= selectedUnit.MOVE) continue;
+
+              const directions = (col % 2 === 0) ? directionsEven : directionsOdd;
+              for (const [dx, dy] of directions) {
+                const ncol = col + dx;
+                const nrow = row + dy;
+                const nkey = `${ncol},${nrow}`;
+                const nextSteps = steps + 1;
+
+                if (
+                  ncol >= 0 && ncol < BOARD_COLS &&
+                  nrow >= 0 && nrow < BOARD_ROWS &&
+                  nextSteps <= selectedUnit.MOVE &&
+                  !forbiddenSet.has(nkey)
+                ) {
+                  const nblocked = units.some(u => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id);
+                  const adjacentToEnemy = units.some(u =>
+                    u.player !== selectedUnit.player &&
+                    cubeDistance(offsetToCube(ncol, nrow), offsetToCube(u.col, u.row)) === 1
+                  );
+                  if (
+                    !nblocked &&
+                    !adjacentToEnemy &&
+                    (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
+                  ) {
+                    queue.push([ncol, nrow, nextSteps]);
+                  }
+                }
+              }
+
+          }
+        };
+
+        runMovementBFS();
       }
-      
-      const centerCol = selectedUnit.col;
-      const centerRow = selectedUnit.row;
-      const c1 = offsetToCube(centerCol, centerRow);
 
-      // Use BFS to find reachable cells avoiding forbidden areas
-      const visited = new Set<string>();
-      const queue: [number, number, number][] = [[centerCol, centerRow, 0]];  // col, row, steps
-      const directionsEven = [[1, 0], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1]];
-      const directionsOdd = [[1, 0], [1, -1], [0, -1], [-1, 0], [0, 1], [1, 1]];
+      // Red attack cells: Either after move (movePreview) or attackPreview
+      let attackCells: { col: number; row: number }[] = [];
+      let previewUnit: Unit | undefined = undefined;
+      let attackFromCol: number | null = null;
+      let attackFromRow: number | null = null;
 
-      while (queue.length > 0) {
-        const [col, row, steps] = queue.shift()!;
-        const key = `${col},${row}`;
-        if (visited.has(key)) continue;
-        visited.add(key);
-
-        const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
-        const isAdjacentToEnemy = units.some(u => 
-          u.player !== selectedUnit.player && 
-          cubeDistance(offsetToCube(col, row), offsetToCube(u.col, u.row)) === 1
-        );
-
-        if (steps > 0 && steps <= selectedUnit.MOVE && !blocked && !isAdjacentToEnemy) {
-          availableCells.push({ col, row });
+      if (mode === "movePreview" && movePreview) {
+        previewUnit = units.find(u => u.id === movePreview.unitId);
+        attackFromCol = movePreview.destCol;
+        attackFromRow = movePreview.destRow;
+      } else if (mode === "attackPreview" && attackPreview) {
+          const clickedUnit = units.find(u => u.id === attackPreview.unitId);
+          if (clickedUnit && clickedUnit.id === selectedUnitId) {
+            previewUnit = clickedUnit;
+            attackFromCol = clickedUnit.col;
+            attackFromRow = clickedUnit.row;
+          } else {
+            previewUnit = undefined;
+            attackFromCol = null;
+            attackFromRow = null;
+          }
+        } else if (phase === "shoot" && selectedUnit?.SHOOT_LEFT !== undefined && selectedUnit.SHOOT_LEFT > 0) {
+          previewUnit = selectedUnit;
+          attackFromCol = selectedUnit.col;
+          attackFromRow = selectedUnit.row;
         }
 
-        if (steps >= selectedUnit.MOVE) continue;
-
-        const directions = (col % 2 === 0) ? directionsEven : directionsOdd;
-        for (const [dx, dy] of directions) {
-          const ncol = col + dx;
-          const nrow = row + dy;
-          if (ncol >= 0 && ncol < BOARD_COLS && nrow >= 0 && nrow < BOARD_ROWS) {
-            const nblocked = units.some(u => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id);
-            const nisAdjacentToEnemy = units.some(u => 
-              u.player !== selectedUnit.player && 
-              cubeDistance(offsetToCube(ncol, nrow), offsetToCube(u.col, u.row)) === 1
-            );
-            if (!nblocked && !nisAdjacentToEnemy) {
-              queue.push([ncol, nrow, steps + 1]);
+        if (
+          previewUnit &&
+          attackFromCol !== null &&
+          attackFromRow !== null &&
+          (
+            mode === "movePreview" ||
+            mode === "attackPreview" ||
+            (phase === "shoot" && selectedUnit?.SHOOT_LEFT !== undefined && selectedUnit.SHOOT_LEFT > 0)
+          )
+        ) {
+          const centerCube = offsetToCube(attackFromCol, attackFromRow);
+          
+          // Validate required range properties are defined and get range
+          let range: number;
+          if (phase === "combat") {
+            if (previewUnit.CC_RNG === undefined || previewUnit.CC_RNG === null) {
+              throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required CC_RNG property for combat phase preview`);
+            }
+            range = previewUnit.CC_RNG;
+          } else {
+            if (previewUnit.RNG_RNG === undefined || previewUnit.RNG_RNG === null) {
+              throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required RNG_RNG property for shooting phase preview`);
+            }
+            range = previewUnit.RNG_RNG;
+          }
+          for (let col = 0; col < BOARD_COLS; col++) {
+            for (let row = 0; row < BOARD_ROWS; row++) {
+              const targetCube = offsetToCube(col, row);
+              const dist = cubeDistance(centerCube, targetCube);
+              if (dist > 0 && dist <= range) {
+                attackCells.push({ col, row });
+              }
             }
           }
         }
-      }
-    }
 
-    // Red attack cells: Either after move (movePreview) or attackPreview
-    let attackCells: { col: number; row: number }[] = [];
-    let previewUnit: Unit | undefined = undefined;
-    let attackFromCol: number | null = null;
-    let attackFromRow: number | null = null;
 
-    if (mode === "movePreview" && movePreview) {
-      previewUnit = units.find(u => u.id === movePreview.unitId);
-      attackFromCol = movePreview.destCol;
-      attackFromRow = movePreview.destRow;
-    } else if (mode === "attackPreview" && attackPreview) {
-        const clickedUnit = units.find(u => u.id === attackPreview.unitId);
-        if (clickedUnit && clickedUnit.id === selectedUnitId) {
-          previewUnit = clickedUnit;
-          attackFromCol = clickedUnit.col;
-          attackFromRow = clickedUnit.row;
-        } else {
-          previewUnit = undefined;
-          attackFromCol = null;
-          attackFromRow = null;
-        }
-      } else if (phase === "shoot" && selectedUnit?.SHOOT_LEFT !== undefined && selectedUnit.SHOOT_LEFT > 0) {
-        previewUnit = selectedUnit;
-        attackFromCol = selectedUnit.col;
-        attackFromRow = selectedUnit.row;
-      }
+      // ✅ OPTIMIZED: Create containers for hex batching
+      const baseHexContainer = new PIXI.Container();
+      const highlightContainer = new PIXI.Container();
+      baseHexContainer.name = 'baseHexes';
+      highlightContainer.name = 'highlights';
 
-      if (
-        previewUnit &&
-        attackFromCol !== null &&
-        attackFromRow !== null &&
-        (
-          mode === "movePreview" ||
-          mode === "attackPreview" ||
-          (phase === "shoot" && selectedUnit?.SHOOT_LEFT !== undefined && selectedUnit.SHOOT_LEFT > 0)
-        )
-      ) {
-        const centerCube = offsetToCube(attackFromCol, attackFromRow);
-        
-        // Validate required range properties are defined and get range
-        let range: number;
-        if (phase === "combat") {
-          if (previewUnit.CC_RNG === undefined || previewUnit.CC_RNG === null) {
-            throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required CC_RNG property for combat phase preview`);
-          }
-          range = previewUnit.CC_RNG;
-        } else {
-          if (previewUnit.RNG_RNG === undefined || previewUnit.RNG_RNG === null) {
-            throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required RNG_RNG property for shooting phase preview`);
-          }
-          range = previewUnit.RNG_RNG;
-        }
-        for (let col = 0; col < BOARD_COLS; col++) {
-          for (let row = 0; row < BOARD_ROWS; row++) {
-            const targetCube = offsetToCube(col, row);
-            const dist = cubeDistance(centerCube, targetCube);
-            if (dist > 0 && dist <= range) {
-              attackCells.push({ col, row });
+      // Draw grid cells with container batching
+      for (let col = 0; col < BOARD_COLS; col++) {
+        for (let row = 0; row < BOARD_ROWS; row++) {
+          const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          const points = getHexPolygonPoints(centerX, centerY, HEX_RADIUS);
+          
+          // Check highlight states
+          const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
+          const isAttackable = attackCells.some(cell => cell.col === col && cell.row === row);
+          const isChargeable = chargeCells.some(cell => cell.col === col && cell.row === row);
+
+          // Create base hex (always present)
+          const baseCell = new PIXI.Graphics();
+          const isEven = (col + row) % 2 === 0;
+          const cellColor = isEven ? parseColor(boardConfig.colors.cell_even) : parseColor(boardConfig.colors.cell_odd);
+          baseCell.beginFill(cellColor, 1.0);
+          baseCell.lineStyle(1, parseColor(boardConfig.colors.cell_border), 0.8);
+          baseCell.drawPolygon(points);
+                    baseCell.endFill();
+            baseHexContainer.addChild(baseCell);
+
+            // Cancel charge on re-click of active unit during charge preview
+            if (mode === "chargePreview" && selectedUnitId !== null) {
+              const unit = units.find(u => u.id === selectedUnitId);
+              if (unit && col === unit.col && row === unit.row) {
+                baseCell.eventMode = 'static';
+                baseCell.cursor    = "pointer";
+                baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+                  if (e.button === 0) onCancelCharge?.();
+                });
+              }
             }
-          }
-        }
-      }
 
+            // Create highlight hex (only if needed)
+            if (isChargeable || isAttackable || isAvailable) {
+              const highlightCell = new PIXI.Graphics();
 
-    // ✅ OPTIMIZED: Create containers for hex batching
-    const baseHexContainer = new PIXI.Container();
-    const highlightContainer = new PIXI.Container();
-    baseHexContainer.name = 'baseHexes';
-    highlightContainer.name = 'highlights';
+            
+            if (isChargeable) {
+              highlightCell.beginFill(CHARGE_COLOR, 0.5);
+            } else if (isAttackable) {
+              highlightCell.beginFill(ATTACK_COLOR, 0.5);
+            } else if (isAvailable) {
+              highlightCell.beginFill(HIGHLIGHT_COLOR, 0.5);
+            }
+            
+            highlightCell.drawPolygon(points);
+            highlightCell.endFill();
 
-    // Draw grid cells with container batching
-    for (let col = 0; col < BOARD_COLS; col++) {
-      for (let row = 0; row < BOARD_ROWS; row++) {
-        const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
-        const points = getHexPolygonPoints(centerX, centerY, HEX_RADIUS);
-        
-        // Check highlight states
-        const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
-        const isAttackable = attackCells.some(cell => cell.col === col && cell.row === row);
-        const isChargeable = chargeCells.some(cell => cell.col === col && cell.row === row);
+            // Make interactive (disable during charge preview)
+            if (mode === "chargePreview") {
+              highlightCell.eventMode = 'none';
+            } else {
+              highlightCell.eventMode = 'static';
+            }
+            highlightCell.cursor = "pointer";
 
-        // Create base hex (always present)
-        const baseCell = new PIXI.Graphics();
-        const isEven = (col + row) % 2 === 0;
-        const cellColor = isEven ? parseColor(boardConfig.colors.cell_even) : parseColor(boardConfig.colors.cell_odd);
-        baseCell.beginFill(cellColor, 1.0);
-        baseCell.lineStyle(1, parseColor(boardConfig.colors.cell_border), 0.8);
-        baseCell.drawPolygon(points);
-                  baseCell.endFill();
-          baseHexContainer.addChild(baseCell);
+            // Make base hex interactive for move confirmation
+            baseCell.eventMode = 'static';
 
-          // Cancel charge on re-click of active unit during charge preview
-          if (mode === "chargePreview" && selectedUnitId !== null) {
-            const unit = units.find(u => u.id === selectedUnitId);
-            if (unit && col === unit.col && row === unit.row) {
+            highlightCell.cursor = "pointer";
+
+            // Make base hex interactive for move confirmation
+            baseCell.eventMode = 'static';
+            baseCell.cursor = "pointer";
+            
+            // Add click handlers to base hexes
+            if (mode === "movePreview" || mode === "attackPreview") {
+              baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+                if (e.button === 0) onConfirmMove();
+                if (e.button === 2) onCancelMove();
+              });
+            } else if (mode === "chargePreview" && selectedUnitId !== null) {
               baseCell.eventMode = 'static';
               baseCell.cursor    = "pointer";
               baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-                if (e.button === 0) onCancelCharge?.();
+                if (e.button !== 0) return;
+                const unit = units.find(u => u.id === selectedUnitId);
+                if (unit?.col === col && unit.row === row) {
+                  onCancelCharge?.();
+                } else if (isChargeable) {
+                  onMoveCharger?.(selectedUnitId, Number(col), Number(row));
+                }
+              });
+            } else if (mode === "select" && selectedUnitId !== null && isAvailable) {
+              highlightCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+                if (e.button === 0) {
+                  onStartMovePreview(Number(selectedUnitId), Number(col), Number(row));
+                }
               });
             }
+            
+            highlightContainer.addChild(highlightCell);
           }
-
-          // Create highlight hex (only if needed)
-          if (isChargeable || isAttackable || isAvailable) {
-            const highlightCell = new PIXI.Graphics();
-
-          
-          if (isChargeable) {
-            highlightCell.beginFill(CHARGE_COLOR, 0.5);
-          } else if (isAttackable) {
-            highlightCell.beginFill(ATTACK_COLOR, 0.5);
-          } else if (isAvailable) {
-            highlightCell.beginFill(HIGHLIGHT_COLOR, 0.5);
-          }
-          
-          highlightCell.drawPolygon(points);
-          highlightCell.endFill();
-
-          // Make interactive (disable during charge preview)
-          if (mode === "chargePreview") {
-            highlightCell.eventMode = 'none';
-          } else {
-            highlightCell.eventMode = 'static';
-          }
-          highlightCell.cursor = "pointer";
-
-          // Make base hex interactive for move confirmation
-          baseCell.eventMode = 'static';
-
-          highlightCell.cursor = "pointer";
-
-          // Make base hex interactive for move confirmation
-          baseCell.eventMode = 'static';
-          baseCell.cursor = "pointer";
-          
-          // Add click handlers to base hexes
-          if (mode === "movePreview" || mode === "attackPreview") {
-            baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-              if (e.button === 0) onConfirmMove();
-              if (e.button === 2) onCancelMove();
-            });
-          } else if (mode === "chargePreview" && selectedUnitId !== null) {
-            baseCell.eventMode = 'static';
-            baseCell.cursor    = "pointer";
-            baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-              if (e.button !== 0) return;
-              const unit = units.find(u => u.id === selectedUnitId);
-              if (unit?.col === col && unit.row === row) {
-                onCancelCharge?.();
-              } else if (isChargeable) {
-                onMoveCharger?.(selectedUnitId, Number(col), Number(row));
-              }
-            });
-          } else if (mode === "select" && selectedUnitId !== null && isAvailable) {
-            highlightCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-              if (e.button === 0) {
-                onStartMovePreview(Number(selectedUnitId), Number(col), Number(row));
-              }
-            });
-          }
-          
-          highlightContainer.addChild(highlightCell);
         }
       }
-    }
 
-    // ✅ AGGRESSIVE STAGE CLEANUP - Destroy everything first, then clear
-    const childrenToDestroy = [...app.stage.children];
-    app.stage.removeChildren();
-    childrenToDestroy.forEach(child => {
-      if (child.destroy) {
-        child.destroy({ children: true, texture: false, baseTexture: false });
-      }
-    });
-
-    // ✅ ADD CONTAINERS TO STAGE (2 objects instead of 432)
-    app.stage.addChild(baseHexContainer);
-    app.stage.addChild(highlightContainer);
-
-    // ✅ UNIFIED UNIT RENDERING USING COMPONENT
-    for (const unit of units) {
-      const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-      const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
-
-      // Skip units that are being previewed elsewhere
-      if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;
-      if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
-
-      renderUnit({
-        unit, centerX, centerY, app,
-        isPreview: false,
-        boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
-        HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
-        SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-        phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
-        units, chargeTargets, combatTargets, targetPreview,
-        onConfirmMove, parseColor
+      // ✅ AGGRESSIVE STAGE CLEANUP - Destroy everything first, then clear
+      const childrenToDestroy = [...app.stage.children];
+      app.stage.removeChildren();
+      childrenToDestroy.forEach(child => {
+        if (child.destroy) {
+          child.destroy({ children: true, texture: false, baseTexture: false });
+        }
       });
-    }
 
-    // ✅ MOVE PREVIEW RENDERING
-    if (mode === "movePreview" && movePreview) {
-      const previewUnit = units.find(u => u.id === movePreview.unitId);
-      if (previewUnit) {
-        const centerX = movePreview.destCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY = movePreview.destRow * HEX_VERT_SPACING + ((movePreview.destCol % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
-        
+      // ✅ ADD CONTAINERS TO STAGE (2 objects instead of 432)
+      app.stage.addChild(baseHexContainer);
+      app.stage.addChild(highlightContainer);
+
+      // ✅ UNIFIED UNIT RENDERING USING COMPONENT
+      for (const unit of units) {
+        const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+
+        // Skip units that are being previewed elsewhere
+        if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;
+        if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
+
         renderUnit({
-          unit: previewUnit, centerX, centerY, app,
-          isPreview: true, previewType: 'move',
+          unit, centerX, centerY, app,
+          isPreview: false,
           boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
@@ -697,77 +724,96 @@ export default function Board({
           onConfirmMove, parseColor
         });
       }
-    }
 
-    // ✅ ATTACK PREVIEW RENDERING
-    if (mode === "attackPreview" && attackPreview) {
-      const previewUnit = units.find(u => u.id === attackPreview.unitId);
-      if (previewUnit) {
-        const centerX = attackPreview.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY = attackPreview.row * HEX_VERT_SPACING + ((attackPreview.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
-        
-        renderUnit({
-          unit: previewUnit, centerX, centerY, app,
-          isPreview: true, previewType: 'attack',
-          boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
-          HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
-          SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-          phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
-          units, chargeTargets, combatTargets, targetPreview,
-          onConfirmMove, parseColor
-        });
+      // ✅ MOVE PREVIEW RENDERING
+      if (mode === "movePreview" && movePreview) {
+        const previewUnit = units.find(u => u.id === movePreview.unitId);
+        if (previewUnit) {
+          const centerX = movePreview.destCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const centerY = movePreview.destRow * HEX_VERT_SPACING + ((movePreview.destCol % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          
+          renderUnit({
+            unit: previewUnit, centerX, centerY, app,
+            isPreview: true, previewType: 'move',
+            boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
+            HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
+            SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
+            phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+            units, chargeTargets, combatTargets, targetPreview,
+            onConfirmMove, parseColor
+          });
+        }
       }
-    }
 
-    // Cleanup function
-    return () => {
-      if (app && app.stage) {
-        // Destroy all sprites completely
-        app.stage.children.forEach(child => {
-          if (child.destroy) {
-            child.destroy({ children: true, texture: true, baseTexture: true });
-          }
-        });
-        app.stage.removeChildren();
+      // ✅ ATTACK PREVIEW RENDERING
+      if (mode === "attackPreview" && attackPreview) {
+        const previewUnit = units.find(u => u.id === attackPreview.unitId);
+        if (previewUnit) {
+          const centerX = attackPreview.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const centerY = attackPreview.row * HEX_VERT_SPACING + ((attackPreview.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          
+          renderUnit({
+            unit: previewUnit, centerX, centerY, app,
+            isPreview: true, previewType: 'attack',
+            boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
+            HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
+            SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
+            phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+            units, chargeTargets, combatTargets, targetPreview,
+            onConfirmMove, parseColor
+          });
+        }
       }
-      app.destroy(true, { children: true, texture: true, baseTexture: true });
-    };
 
-    }, [
-      // ✅ FIXED DEPENDENCIES - Prevent board re-render but allow HP animations
-      units.length, // Only re-render when units count changes
-      units.map(u => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}`).join(','), // Only essential unit changes
-      selectedUnitId,
-      mode,
-      phase,
-      boardConfig?.cols, // Only re-render if board structure changes
-      loading,
-      error,
-      movePreview?.unitId, // Add this to ensure preview changes trigger re-render
-      movePreview?.destCol, // Add this too
-      movePreview?.destRow,  // And this
-      targetPreview // Keep full targetPreview for HP bar blinking
-    ]);
+      // Cleanup function
+      return () => {
+        if (app && app.stage) {
+          // Destroy all sprites completely
+          app.stage.children.forEach(child => {
+            if (child.destroy) {
+              child.destroy({ children: true, texture: true, baseTexture: true });
+            }
+          });
+          app.stage.removeChildren();
+        }
+        app.destroy(true, { children: true, texture: true, baseTexture: true });
+      };
 
-    // Simple container return - loading/error handled inside useEffect
-    return (
-      <div>
-        <div ref={containerRef} />
-        {shootingPhaseState?.singleShotState && (
-          <SingleShotDisplay
-            singleShotState={shootingPhaseState.singleShotState}
-            shooterName={
-              units.find(u => u.id === shootingPhaseState.singleShotState?.shooterId)?.name || 
-              `Unit ${shootingPhaseState.singleShotState?.shooterId}`
-            }
-            targetName={
-              shootingPhaseState.singleShotState.targetId
-                ? units.find(u => u.id === shootingPhaseState.singleShotState?.targetId)?.name || 
-                  `Unit ${shootingPhaseState.singleShotState?.targetId}`
-                : undefined
-            }
-          />
-        )}
-      </div>
-    );
-  }
+      }, [
+        // ✅ FIXED DEPENDENCIES - Prevent board re-render but allow HP animations
+        units.length, // Only re-render when units count changes
+        units.map(u => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}`).join(','), // Only essential unit changes
+        selectedUnitId,
+        mode,
+        phase,
+        boardConfig?.cols, // Only re-render if board structure changes
+        loading,
+        error,
+        movePreview?.unitId, // Add this to ensure preview changes trigger re-render
+        movePreview?.destCol, // Add this too
+        movePreview?.destRow,  // And this
+        targetPreview // Keep full targetPreview for HP bar blinking
+      ]);
+
+      // Simple container return - loading/error handled inside useEffect
+      return (
+        <div>
+          <div ref={containerRef} />
+          {shootingPhaseState?.singleShotState && (
+            <SingleShotDisplay
+              singleShotState={shootingPhaseState.singleShotState}
+              shooterName={
+                units.find(u => u.id === shootingPhaseState.singleShotState?.shooterId)?.name || 
+                `Unit ${shootingPhaseState.singleShotState?.shooterId}`
+              }
+              targetName={
+                shootingPhaseState.singleShotState.targetId
+                  ? units.find(u => u.id === shootingPhaseState.singleShotState?.targetId)?.name || 
+                    `Unit ${shootingPhaseState.singleShotState?.targetId}`
+                  : undefined
+              }
+            />
+          )}
+        </div>
+      );
+    }

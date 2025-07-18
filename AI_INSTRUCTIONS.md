@@ -48,6 +48,13 @@ const example = "with my changes applied";
 
 Both snippets must have a copy button.
 The copied code from the Markdown code blocks snippets containing the ORIGINAL CODE must fit perfectly the existing code (can be found with a researche function)
+
+**Critical Update Rules:**
+- NEVER use artifacts for code changes
+- NEVER use "add" operations alone - always show context with update method
+- ALWAYS use update method even for additions (show 3 lines before/after the addition point)
+- Respect exact indentation from the original file
+- Show minimal necessary context but enough to locate the exact position
 ---
 
 3. Incremental Changes

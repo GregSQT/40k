@@ -1,4 +1,4 @@
-// src/utils/gameHelpers.ts
+// frontend/src/utils/gameHelpers.ts
 import { Unit, Position, UnitId } from '../types/game';
 
 // Distance calculations for hex grid
