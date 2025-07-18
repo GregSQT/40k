@@ -1,8 +1,8 @@
 ﻿{
   "default": {
-    "cols": 24,
-    "rows": 18,
-    "hex_radius": 24,
+    "cols": 32,
+    "rows": 32,
+    "hex_radius": 18,
     "margin": 32,
     "colors": {
       "background": "0x002200",
@@ -17,8 +17,104 @@
       "current_unit": "0xffd700",
       "eligible": "0x00ff00",
       "attack": "0xff4444",
-      "charge": "0xff9900"
+      "charge": "0xff9900",
+      "objective_zone": "0xff9933",
+      "wall": "0x808080"
     },
+    "objective_zones": [
+      {
+        "id": "center_top",
+        "hexes": [
+          {"col": 15, "row": 4},
+          {"col": 16, "row": 4},
+          {"col": 15, "row": 5},
+          {"col": 16, "row": 5},
+          {"col": 14, "row": 5},
+          {"col": 17, "row": 5},
+          {"col": 15, "row": 6}
+        ]
+      },
+      {
+        "id": "left",
+        "hexes": [
+          {"col": 4, "row": 15},
+          {"col": 4, "row": 16},
+          {"col": 5, "row": 15},
+          {"col": 5, "row": 16},
+          {"col": 5, "row": 14},
+          {"col": 5, "row": 17},
+          {"col": 6, "row": 15}
+        ]
+      },
+      {
+        "id": "right", 
+        "hexes": [
+          {"col": 27, "row": 15},
+          {"col": 27, "row": 16},
+          {"col": 26, "row": 15},
+          {"col": 26, "row": 16},
+          {"col": 26, "row": 14},
+          {"col": 26, "row": 17},
+          {"col": 25, "row": 15}
+        ]
+      },
+      {
+        "id": "center_bottom",
+        "hexes": [
+          {"col": 15, "row": 27},
+          {"col": 16, "row": 27},
+          {"col": 15, "row": 26},
+          {"col": 16, "row": 26},
+          {"col": 14, "row": 26},
+          {"col": 17, "row": 26},
+          {"col": 15, "row": 25}
+        ]
+      },
+      {
+        "id": "middle_right",
+        "hexes": [
+          {"col": 20, "row": 12},
+          {"col": 21, "row": 12},
+          {"col": 20, "row": 13},
+          {"col": 21, "row": 13},
+          {"col": 19, "row": 13},
+          {"col": 22, "row": 13},
+          {"col": 20, "row": 14}
+        ]
+      }
+    ],
+    "walls": [
+      {
+        "id": "top_left_wall",
+        "start": {"col": 12, "row": 6},
+        "end": {"col": 6, "row": 12},
+        "thickness": 3
+      },
+      {
+        "id": "top_right_wall",
+        "start": {"col": 19, "row": 6}, 
+        "end": {"col": 25, "row": 12},
+        "thickness": 3
+      },
+      {
+        "id": "bottom_left_wall",
+        "start": {"col": 6, "row": 19},
+        "end": {"col": 12, "row": 25},
+        "thickness": 3
+      },
+      {
+        "id": "bottom_right_wall",
+        "start": {"col": 19, "row": 25},
+        "end": {"col": 25, "row": 19},
+        "thickness": 3
+      },
+      {
+        "id": "middle_wall",
+        "start": {"col": 17, "row": 12},
+        "end": {"col": 17, "row": 17},
+        "thickness": 3
+      }
+    ],
     "display": {
       "resolution": "auto",
       "autoDensity": true,
@@ -35,84 +131,6 @@
       "selected_border_width": 4,
       "charge_target_border_width": 3,
       "default_border_width": 2,
-      "canvas_border": "1px solid #333"
-    }
-  },
-  "small": {
-    "cols": 12,
-    "rows": 9,
-    "hex_radius": 20,
-    "margin": 24,
-    "colors": {
-      "background": "0x002200",
-      "cell_even": "0x002200", 
-      "cell_odd": "0x001a00",
-      "cell_border": "0x00ff00",
-      "player_0": "0x244488",
-      "player_1": "0x882222",
-      "hp_full": "0x36e36b",
-      "hp_damaged": "0x444444",
-      "highlight": "0x80ff80",
-      "current_unit": "0xffd700",
-      "eligible": "0x00ff00",
-      "attack": "0xff4444",
-      "charge": "0xff9900"
-    },
-    "display": {
-      "resolution": "auto",
-      "autoDensity": true,
-      "antialias": true,
-      "forceCanvas": true,
-      "icon_scale": 1.0,
-      "eligible_outline_width": 2,
-      "eligible_outline_alpha": 0.8,
-      "hp_bar_width_ratio": 1.2,
-      "hp_bar_height": 5,
-      "hp_bar_y_offset_ratio": 0.8,
-      "unit_circle_radius_ratio": 0.6,
-      "unit_text_size": 8,
-      "selected_border_width": 3,
-      "charge_target_border_width": 2,
-      "default_border_width": 1,
-      "canvas_border": "1px solid #333"
-    }
-  },
-  "large": {
-    "cols": 36,
-    "rows": 27,
-    "hex_radius": 20,
-    "margin": 40,
-    "colors": {
-      "background": "0x002200",
-      "cell_even": "0x002200",
-      "cell_odd": "0x001a00",
-      "cell_border": "0x00ff00",
-      "player_0": "0x244488",
-      "player_1": "0x882222",
-      "hp_full": "0x36e36b",
-      "hp_damaged": "0x444444",
-      "highlight": "0x80ff80",
-      "current_unit": "0xffd700",
-      "eligible": "0x00ff00",
-      "attack": "0xff4444",
-      "charge": "0xff9900"
-    },
-    "display": {
-      "resolution": "auto",
-      "autoDensity": true,
-      "antialias": true,
-      "forceCanvas": true,
-      "icon_scale": 1.0,
-      "eligible_outline_width": 2,
-      "eligible_outline_alpha": 0.8,
-      "hp_bar_width_ratio": 1.2,
-      "hp_bar_height": 6,
-      "hp_bar_y_offset_ratio": 0.8,
-      "unit_circle_radius_ratio": 0.6,
-      "unit_text_size": 9,
-      "selected_border_width": 3,
-      "charge_target_border_width": 2,
-      "default_border_width": 1,
       "canvas_border": "1px solid #333"
     }
   }

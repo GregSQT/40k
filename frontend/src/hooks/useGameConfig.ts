@@ -20,6 +20,18 @@ interface DisplayConfig {
   canvas_border?: string;
 }
 
+interface ObjectiveZone {
+  id: string;
+  hexes: Array<{ col: number; row: number }>;
+}
+
+interface Wall {
+  id: string;
+  start: { col: number; row: number };
+  end: { col: number; row: number };
+  thickness?: number;
+}
+
 interface BoardConfig {
   cols: number;
   rows: number;
@@ -39,7 +51,11 @@ interface BoardConfig {
     eligible?: string;
     attack?: string;
     charge?: string;
+    objective_zone?: string;
+    wall?: string;
   };
+  objective_zones?: ObjectiveZone[];
+  walls?: Wall[];
   display?: DisplayConfig;
 }
 

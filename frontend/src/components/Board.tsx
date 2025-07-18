@@ -199,6 +199,8 @@ export default function Board({
     const ATTACK_COLOR = parseColor(boardConfig.colors.attack!);
     const CHARGE_COLOR = parseColor(boardConfig.colors.charge!);
     const ELIGIBLE_COLOR = parseColor(boardConfig.colors.eligible!);
+    const OBJECTIVE_ZONE_COLOR = parseColor(boardConfig.colors.objective_zone!);
+    const WALL_COLOR = parseColor(boardConfig.colors.wall!);
 
     // ✅ ALL DISPLAY VALUES FROM CONFIG - NO FALLBACKS, RAISE ERRORS IF MISSING
     if (!boardConfig.display) {
@@ -616,10 +618,21 @@ export default function Board({
           const isAttackable = attackCells.some(cell => cell.col === col && cell.row === row);
           const isChargeable = chargeCells.some(cell => cell.col === col && cell.row === row);
 
+          // Check if this hex is in an objective zone
+          const isObjectiveZone = boardConfig.objective_zones?.some(zone => 
+            zone.hexes.some(hex => hex.col === col && hex.row === row)
+          ) || false;
+
           // Create base hex (always present)
           const baseCell = new PIXI.Graphics();
           const isEven = (col + row) % 2 === 0;
-          const cellColor = isEven ? parseColor(boardConfig.colors.cell_even) : parseColor(boardConfig.colors.cell_odd);
+          let cellColor = isEven ? parseColor(boardConfig.colors.cell_even) : parseColor(boardConfig.colors.cell_odd);
+          
+          // Override color for objective zones
+          if (isObjectiveZone) {
+            cellColor = OBJECTIVE_ZONE_COLOR;
+          }
+          
           baseCell.beginFill(cellColor, 1.0);
           baseCell.lineStyle(1, parseColor(boardConfig.colors.cell_border), 0.8);
           baseCell.drawPolygon(points);
@@ -784,6 +797,31 @@ export default function Board({
             onConfirmMove, parseColor
           });
         }
+      }
+
+      // ✅ RENDER WALLS - Add after unit rendering
+      if (boardConfig.walls && boardConfig.walls.length > 0) {
+        const wallsContainer = new PIXI.Container();
+        wallsContainer.name = 'walls';
+        
+        boardConfig.walls.forEach(wall => {
+          const wallGraphics = new PIXI.Graphics();
+          
+          // Calculate start and end positions
+          const startX = wall.start.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const startY = wall.start.row * HEX_VERT_SPACING + ((wall.start.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          const endX = wall.end.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const endY = wall.end.row * HEX_VERT_SPACING + ((wall.end.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          
+          // Draw wall as thick line
+          wallGraphics.lineStyle(wall.thickness || 3, WALL_COLOR, 1.0);
+          wallGraphics.moveTo(startX, startY);
+          wallGraphics.lineTo(endX, endY);
+          
+          wallsContainer.addChild(wallGraphics);
+        });
+        
+        app.stage.addChild(wallsContainer);
       }
 
       // Cleanup function
