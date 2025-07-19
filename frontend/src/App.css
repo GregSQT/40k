@@ -268,13 +268,16 @@ body {
 }
 
 .unit-status-header-cell {
-  padding: 1px 3px;
+  padding: 0 1px;
   text-align: center;
   font-weight: var(--font-weight-bold);
   color: var(--text-accent);
   border-right: 1px solid #444;
   white-space: nowrap;
   font-size: 11px;
+  max-width: 32px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .unit-status-header-cell:last-child {
@@ -298,11 +301,14 @@ body {
 
 /* Cell styles */
 .unit-status-cell {
-  padding: 1px 3px;
+  padding: 0 1px;
   text-align: center;
   border-right: 1px solid #333;
   white-space: nowrap;
   vertical-align: middle;
+  max-width: 32px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .unit-status-cell:last-child {
@@ -688,5 +694,258 @@ textarea:focus {
   .game-footer {
     border: none;
     background: transparent;
+  }
+}
+/* Game Log Container */
+.game-log {
+  background: var(--bg-secondary);
+  border: 1px solid #555;
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+  color: var(--text-primary);
+  margin-top: var(--spacing-lg);
+  max-height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.game-log__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-md);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid #555;
+}
+
+.game-log__title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-accent);
+}
+
+.game-log__count {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  background: #333;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.game-log__content {
+  flex: 1;
+  overflow: hidden;
+}
+
+.game-log__empty {
+  text-align: center;
+  color: var(--text-secondary);
+  font-style: italic;
+  padding: var(--spacing-xl);
+}
+
+.game-log__events {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Custom Scrollbar */
+.game-log__events::-webkit-scrollbar {
+  width: 6px;
+}
+
+.game-log__events::-webkit-scrollbar-track {
+  background: #333;
+  border-radius: 3px;
+}
+
+.game-log__events::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 3px;
+}
+
+.game-log__events::-webkit-scrollbar-thumb:hover {
+  background: #666;
+}
+
+/* Game Log Entry */
+.game-log-entry {
+  margin-bottom: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  border-radius: var(--radius-md);
+  border-left: 3px solid #555;
+  background: rgba(255, 255, 255, 0.02);
+  transition: background-color var(--transition-fast);
+}
+
+.game-log-entry:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.game-log-entry__single-line {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.game-log-entry__icon {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+}
+
+.game-log-entry__time {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  font-family: 'Courier New', monospace;
+}
+
+.game-log-entry__turn {
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+  font-weight: var(--font-weight-bold);
+  background: rgba(30, 144, 255, 0.2);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+}
+
+.game-log-entry__message {
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+/* Event Type Specific Styles */
+.game-log-entry--turn {
+  border-left-color: var(--color-accent);
+  background: rgba(30, 144, 255, 0.1);
+}
+
+.game-log-entry--phase {
+  border-left-color: #9966cc;
+  background: rgba(153, 102, 204, 0.1);
+}
+
+.game-log-entry--move {
+  border-left-color: #00cc66;
+  background: rgba(0, 204, 102, 0.1);
+}
+
+.game-log-entry--shoot {
+  border-left-color: #ff6600;
+  background: rgba(255, 102, 0, 0.1);
+}
+
+.game-log-entry--charge {
+  border-left-color: #ffcc00;
+  background: rgba(255, 204, 0, 0.1);
+}
+
+.game-log-entry--shoot {
+  border-left-color: #ff6600;
+  background: rgba(255, 102, 0, 0.1);
+}
+
+.game-log-entry--shoot-failed {
+  border-left-color: #ff9900;
+  background: rgba(255, 153, 0, 0.1);
+}
+
+.game-log-entry--combat {
+  border-left-color: #cc0000;
+  background: rgba(204, 0, 0, 0.1);
+}
+
+.game-log-entry--combat-failed {
+  border-left-color: #ff9900;
+  background: rgba(255, 153, 0, 0.1);
+}
+
+.game-log-entry--combat-no-damage {
+  border-left-color: #666;
+  background: rgba(102, 102, 102, 0.1);
+}
+
+.game-log-entry--death {
+  border-left-color: #666;
+  background: rgba(102, 102, 102, 0.1);
+}
+
+.game-log-entry--death .game-log-entry__message {
+  color: #ff6666;
+  font-weight: var(--font-weight-bold);
+}
+
+.game-log-entry--cancel {
+  border-left-color: #999;
+  background: rgba(153, 153, 153, 0.1);
+}
+
+.game-log-entry--cancel .game-log-entry__message {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* Shooting/Combat Details */
+.game-log-entry__details {
+  margin-top: var(--spacing-xs);
+  margin-left: 32px;
+  padding-left: var(--spacing-sm);
+  border-left: 1px solid #444;
+}
+
+.game-log-shoot-detail {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: 'Courier New', monospace;
+}
+
+.game-log-shoot-detail__shot {
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  margin-bottom: 1px;
+}
+
+.game-log-shoot-detail__roll {
+  margin-left: var(--spacing-sm);
+  padding: 1px 4px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 2px;
+  margin-bottom: 1px;
+}
+
+/* Responsive Design */
+@media (max-width: 1400px) {
+  .game-log {
+    max-height: 300px;
+  }
+  
+  .game-log__events {
+    max-height: 220px;
+  }
+}
+
+@media (max-width: 768px) {
+  .game-log {
+    margin-top: var(--spacing-md);
+    max-height: 250px;
+  }
+  
+  .game-log__events {
+    max-height: 170px;
+  }
+  
+  .game-log-entry {
+    padding: var(--spacing-xs);
+  }
+  
+  .game-log-entry__message {
+    font-size: 11px;
   }
 }

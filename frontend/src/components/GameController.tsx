@@ -4,10 +4,12 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { UnitStatusTable } from "./UnitStatusTable";
 import { GameBoard } from "./GameBoard";
 import { GameStatus } from "./GameStatus";
+import { GameLog } from "./GameLog";
 import { useGameState } from "../hooks/useGameState";
 import { useGameActions } from "../hooks/useGameActions";
 import { useAIPlayer } from "../hooks/useAIPlayer";
 import { usePhaseTransition } from "../hooks/usePhaseTransition";
+import { useGameLog } from "../hooks/useGameLog";
 import { Unit } from "../types/game";
 import { useState, useEffect } from "react";
 import { createUnit, getAvailableUnitTypes } from "../data/UnitFactory";
@@ -76,13 +78,17 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Initialize game state with custom hook
   const { gameState, movePreview, attackPreview, shootingPhaseState, actions } = useGameState(gameUnits);
 
-  // Set up game actions
+  // Initialize game log hook
+  const gameLog = useGameLog();
+
+  // Set up game actions with game log
   const gameActions = useGameActions({
     gameState,
     movePreview,
     attackPreview,
     shootingPhaseState,
     actions,
+    gameLog,
   });
 
   // Handle AI player behavior
@@ -120,6 +126,46 @@ export const GameController: React.FC<GameControllerProps> = ({
       actions.initializeShootingPhase();
     }
   }, [gameState.phase]);
+
+  // Track turn changes with ref to prevent infinite loops
+  const lastLoggedTurn = React.useRef<number>(0);
+  
+  React.useEffect(() => {
+    if (gameState.currentTurn > 1 && gameState.currentTurn !== lastLoggedTurn.current) {
+      gameLog.logTurnStart(gameState.currentTurn);
+      lastLoggedTurn.current = gameState.currentTurn;
+    }
+  }, [gameState.currentTurn, gameLog]);
+
+  // Track phase changes with ref to prevent duplicates
+  const lastLoggedPhase = React.useRef<string>('');
+  
+  React.useEffect(() => {
+    if (gameState.currentTurn >= 1) { // Only log phases after game starts
+      const currentPhaseKey = `${gameState.currentTurn}-${gameState.phase}-${gameState.currentPlayer}`;
+      
+      if (currentPhaseKey !== lastLoggedPhase.current) {
+        gameLog.logPhaseChange(gameState.phase, gameState.currentPlayer, gameState.currentTurn);
+        lastLoggedPhase.current = currentPhaseKey;
+      }
+    }
+  }, [gameState.phase, gameState.currentPlayer, gameState.currentTurn, gameLog]);
+
+  // Track unit deaths
+  React.useEffect(() => {
+    const deadUnits = gameState.units.filter(unit => (unit.CUR_HP ?? unit.HP_MAX) <= 0);
+    deadUnits.forEach(unit => {
+      // Check if we haven't already logged this death
+      const alreadyLogged = gameLog.events.some(event => 
+        event.type === 'death' && 
+        event.unitId === unit.id
+      );
+      
+      if (!alreadyLogged) {
+        gameLog.logUnitDeath(unit, gameState.currentTurn);
+      }
+    });
+  }, [gameState.units, gameState.currentTurn, gameLog]);
 
   return (
     <div className={`game-controller ${className}`}>
@@ -191,6 +237,14 @@ export const GameController: React.FC<GameControllerProps> = ({
                 selectedUnitId={gameState.selectedUnitId}
                 onSelectUnit={gameState.phase === "charge" ? 
                   gameActions.selectCharger : gameActions.selectUnit}
+              />
+            </ErrorBoundary>
+
+            {/* Game Log Component */}
+            <ErrorBoundary fallback={<div>Failed to load game log</div>}>
+              <GameLog 
+                events={gameLog.events}
+                maxEvents={50}
               />
             </ErrorBoundary>
           </div>

@@ -2,8 +2,8 @@
   "default": {
     "cols": 27,
     "rows": 23,
-    "hex_radius": 18,
-    "margin": 32,
+    "hex_radius": 21,
+    "margin": 4,
     "colors": {
       "background": "0x002200",
       "cell_even": "0x002200", 

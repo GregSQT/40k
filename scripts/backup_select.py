@@ -86,13 +86,15 @@ else:
         "frontend/src/components/ErrorBoundary.tsx",
         "frontend/src/components/GameBoard.tsx",
         "frontend/src/components/GameController.tsx",
+        "frontend/src/components/GameLog.tsx",
         "frontend/src/components/GameStatus.tsx",
         "frontend/src/components/ReplayBoard.tsx",
         "frontend/src/components/ReplayViewer.tsx",
         "frontend/src/components/SingleShotDisplay.tsx",
         "frontend/src/components/TurnPhaseTracker.tsx",
         "frontend/src/components/UnitRenderer.tsx",
-        "frontend/src/components/UnitSelector.tsx",    
+        "frontend/src/components/UnitSelector.tsx",
+        "frontend/src/components/UnitStatusTable.tsx",   
 
         # Frontend/src/data
         "frontend/src/data/Units.ts",
@@ -103,6 +105,7 @@ else:
         "frontend/src/hooks/useAIPlayer.ts",
         "frontend/src/hooks/useGameActions.ts",
         "frontend/src/hooks/useGameConfig.ts",
+        "frontend/src/hooks/useGameLog.ts",
         "frontend/src/hooks/useGameState.ts",
         "frontend/src/hooks/usePhaseTransition.ts",
 

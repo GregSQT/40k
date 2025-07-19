@@ -4,6 +4,8 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { GameController } from "./components/GameController";
 import { initializeUnitRegistry } from "./data/UnitFactory";
 import "./App.css";
+import { GameLog } from './components/GameLog';
+import { useGameLog } from './hooks/useGameLog';
 
 export default function App() {
   const [registryInitialized, setRegistryInitialized] = useState(false);

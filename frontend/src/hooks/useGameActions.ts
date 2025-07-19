@@ -10,6 +10,7 @@ interface UseGameActionsParams {
   movePreview: MovePreview | null;
   attackPreview: AttackPreview | null;
   shootingPhaseState: ShootingPhaseState;
+  gameLog?: any; // Add gameLog parameter as optional
   actions: {
     setMode: (mode: GameState['mode']) => void;
     setSelectedUnitId: (id: UnitId | null) => void;
@@ -33,12 +34,10 @@ export const useGameActions = ({
   movePreview,
   attackPreview,
   shootingPhaseState,
+  gameLog,
   actions,
 }: UseGameActionsParams) => {
   const { units, currentPlayer, phase, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled } = gameState;
-
-  // DEBUG: Log fled units state
-  console.log(`[DEBUG] Phase: ${phase}, Player: ${currentPlayer}, UnitsFled:`, unitsFled, 'UnitsMoved:', unitsMoved);
 
   // Helper function to find unit by ID
   const findUnit = useCallback((unitId: UnitId) => {
@@ -255,6 +254,11 @@ export const useGameActions = ({
           }
         } else {
           console.log(`✅ Unit ${unit.name} (${unit.id}) moved but was not adjacent to enemies - normal move`);
+        }
+
+        // Log the move action
+        if (gameLog) {
+          gameLog.logMoveAction(unit, unit.col, unit.row, movePreview.destCol, movePreview.destRow, gameState.currentTurn);
         }
       }
       
@@ -504,22 +508,34 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
         const hitSuccess = hitRoll >= shooter.RNG_ATK;
         
         let damageDealt = 0;
+        let woundRoll = 0;
+        let woundSuccess = false;
+        let saveRoll = 0;
+        let saveSuccess = false;
+        
+        // Declare these at the top level for logging
+        if (!shooter.RNG_STR) throw new Error(`shooter.RNG_STR is undefined for unit ${shooter.name}`);
+        const shooterStr = shooter.RNG_STR;
+        if (!target.T) throw new Error(`target.T is undefined for unit ${target.name}`);
+        const targetT = target.T;
+        if (!target.ARMOR_SAVE) throw new Error(`target.ARMOR_SAVE is undefined for unit ${target.name}`);
+        const targetArmorSave = target.ARMOR_SAVE;
+        if (!shooter.RNG_AP) throw new Error(`shooter.RNG_AP is undefined for unit ${shooter.name}`);
+        const shooterAP = shooter.RNG_AP;
         
         if (hitSuccess) {
-          const woundRoll = Math.floor(Math.random() * 6) + 1;
+          woundRoll = Math.floor(Math.random() * 6) + 1;
           if (!shooter.RNG_STR) throw new Error(`shooter.RNG_STR is undefined for unit ${shooter.name}`);
           if (!target.T) throw new Error(`target.T is undefined for unit ${target.name}`);
-          const shooterStr = shooter.RNG_STR;
-          const targetT = target.T;
-          const woundTarget = shooterStr === targetT ? 4 : (shooterStr > targetT ? 3 : 5);
-          const woundSuccess = woundRoll >= woundTarget;
+          const woundTarget = shooterStr === targetT ? 4 : (shooterStr > target.T ? 3 : 5);
+          woundSuccess = woundRoll >= woundTarget;
           
           if (woundSuccess) {
-            const saveRoll = Math.floor(Math.random() * 6) + 1;
+            saveRoll = Math.floor(Math.random() * 6) + 1;
             if (!target.ARMOR_SAVE) throw new Error(`target.ARMOR_SAVE is undefined for unit ${target.name}`);
             if (!shooter.RNG_AP) throw new Error(`shooter.RNG_AP is undefined for unit ${shooter.name}`);
             const saveTarget = target.ARMOR_SAVE + shooter.RNG_AP;
-            const saveSuccess = saveRoll >= saveTarget;
+            saveSuccess = saveRoll >= saveTarget;
             
             if (!saveSuccess) {
               if (shooter.RNG_DMG === undefined) {
@@ -539,10 +555,32 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
           const newHP = Math.max(0, currentHP - damageDealt);
           
           if (newHP <= 0) {
+            // Log unit death before removing it
+            if (gameLog) {
+              gameLog.logUnitDeath(target, gameState.currentTurn);
+            }
             actions.removeUnit(targetId);
           } else {
             actions.updateUnit(targetId, { CUR_HP: newHP });
           }
+        }
+
+        // Log the shooting action
+        if (gameLog) {
+          const shootDetails = [{
+            shotNumber: 1,
+            attackRoll: hitRoll,
+            strengthRoll: woundRoll,
+            hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
+            strengthResult: (hitSuccess && woundSuccess) ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
+            hitTarget: shooter.RNG_ATK,
+            woundTarget: hitSuccess ? (shooterStr === targetT ? 4 : (shooterStr > targetT ? 3 : 5)) : undefined,
+            saveTarget: (hitSuccess && woundSuccess) ? (targetArmorSave + shooterAP) : undefined,
+            saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
+            saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
+            damageDealt: damageDealt
+          }];
+          gameLog.logShootingAction(shooter, target, shootDetails, gameState.currentTurn);
         }
         
         // Manually decrement shots - get fresh unit state
@@ -620,6 +658,8 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
   }, [findUnit, actions, shootingPhaseState, gameState.targetPreview]);
 
   const handleCombatAttack = useCallback((attackerId: UnitId, targetId: UnitId | null) => {
+    console.log(`🥊 COMBAT ATTACK CALLED: Attacker ${attackerId} -> Target ${targetId}`);
+    
     if (targetId === null) {
       // Skip attack but mark as attacked
       actions.addAttackedUnit(attackerId);
@@ -630,6 +670,9 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
 
     const attacker = findUnit(attackerId);
     const target = findUnit(targetId);
+    console.log(`🥊 COMBAT: Found attacker:`, attacker?.name, attacker?.id);
+    console.log(`🥊 COMBAT: Found target:`, target?.name, target?.id);
+    
     if (!attacker || !target) return;
 
     // PREVENT FRIENDLY FIRE: Cannot attack friendly units
@@ -643,12 +686,13 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       Math.abs(attacker.col - target.col),
       Math.abs(attacker.row - target.row)
     );
-    const combatRange = attacker.CC_RNG || 1;
+    if (!attacker.CC_RNG) throw new Error(`attacker.CC_RNG is undefined for unit ${attacker.name}`);
+    const combatRange = attacker.CC_RNG;
     if (distance > combatRange) return;
 
     // Initialize ATTACK_LEFT if not set
     if (attacker.ATTACK_LEFT === undefined) {
-      actions.updateUnit(attackerId, { ATTACK_LEFT: attacker.CC_NB || 1 });
+      actions.updateUnit(attackerId, { ATTACK_LEFT: attacker.CC_NB });
       return; // Return to let state update, then continue
     }
 
@@ -661,16 +705,33 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       return;
     }
 
-    // 6-Step Combat Sequence using CC_ attributes
-    console.log(`⚔️ Combat: ${attacker.name} attacks ${target.name}`);
+    // Combat Sequence: Hit → Wound → Save → Damage
+    console.log(`⚔️ ${attacker.name} attacks ${target.name}`);
 
-    // Step 3: Hit Roll
+    // Hit Roll
     const hitRoll = Math.floor(Math.random() * 6) + 1;
     if (!attacker.CC_ATK) throw new Error(`attacker.CC_ATK is undefined for unit ${attacker.name}`);
     const hitSuccess = hitRoll >= attacker.CC_ATK;
-    console.log(`🎲 Hit roll: ${hitRoll} (need ${attacker.CC_ATK}+) = ${hitSuccess ? 'HIT' : 'MISS'}`);
 
     if (!hitSuccess) {
+      // Log the miss
+      if (gameLog) {
+        const combatDetails = [{
+          shotNumber: 1,
+          attackRoll: hitRoll,
+          strengthRoll: 0,
+          hitResult: 'MISS' as 'HIT' | 'MISS',
+          strengthResult: 'FAILED' as 'SUCCESS' | 'FAILED',
+          hitTarget: attacker.CC_ATK,
+          woundTarget: undefined,
+          saveTarget: undefined,
+          saveRoll: undefined,
+          saveSuccess: undefined,
+          damageDealt: 0
+        }];
+        gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
+      }
+
       // Miss - decrease attacks and end
       actions.updateUnit(attackerId, { ATTACK_LEFT: attacker.ATTACK_LEFT - 1 });
       if (attacker.ATTACK_LEFT - 1 <= 0) {
@@ -681,7 +742,7 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       return;
     }
 
-    // Step 4: Wound Roll
+    // Wound Roll
     const woundRoll = Math.floor(Math.random() * 6) + 1;
     if (!attacker.CC_STR) throw new Error(`attacker.CC_STR is undefined for unit ${attacker.name}`);
     if (!target.T) throw new Error(`target.T is undefined for unit ${target.name}`);
@@ -693,9 +754,26 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
                       attackerStr === targetT ? 4 : 
                       attackerStr < targetT ? 5 : 6;
     const woundSuccess = woundRoll >= woundTarget;
-    console.log(`🎲 Wound roll: ${woundRoll} (need ${woundTarget}+) = ${woundSuccess ? 'WOUND' : 'NO WOUND'}`);
 
     if (!woundSuccess) {
+      // Log the failed wound
+      if (gameLog) {
+        const combatDetails = [{
+          shotNumber: 1,
+          attackRoll: hitRoll,
+          strengthRoll: woundRoll,
+          hitResult: 'HIT' as 'HIT' | 'MISS',
+          strengthResult: 'FAILED' as 'SUCCESS' | 'FAILED',
+          hitTarget: attacker.CC_ATK,
+          woundTarget: woundTarget,
+          saveTarget: undefined,
+          saveRoll: undefined,
+          saveSuccess: undefined,
+          damageDealt: 0
+        }];
+        gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
+      }
+
       // No wound - decrease attacks and end
       actions.updateUnit(attackerId, { ATTACK_LEFT: attacker.ATTACK_LEFT - 1 });
       if (attacker.ATTACK_LEFT - 1 <= 0) {
@@ -706,20 +784,20 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       return;
     }
 
-    // Step 5: Armor Save
+    // Armor Save
     const saveRoll = Math.floor(Math.random() * 6) + 1;
     if (!target.ARMOR_SAVE) throw new Error(`target.ARMOR_SAVE is undefined for unit ${target.name}`);
     if (!attacker.CC_AP) throw new Error(`attacker.CC_AP is undefined for unit ${attacker.name}`);
     
     const modifiedArmor = target.ARMOR_SAVE + attacker.CC_AP;
-    const invulSave = target.INVUL_SAVE || 0;
+    if (!target.INVUL_SAVE) throw new Error(`target.INVUL_SAVE is undefined for unit ${target.name}`);
+    const invulSave = target.INVUL_SAVE;
     const saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
     const saveSuccess = saveRoll >= saveTarget;
-    console.log(`🎲 Save roll: ${saveRoll} (need ${saveTarget}+) = ${saveSuccess ? 'SAVED' : 'FAILED'}`);
 
-    // Step 6: Damage Application
-    const damageDealt = saveSuccess ? 0 : (attacker.CC_DMG || 1);
-    console.log(`💥 Damage dealt: ${damageDealt}`);
+    // Damage Application
+    const damageDealt = saveSuccess ? 0 : (attacker.CC_DMG);
+    console.log(`${saveSuccess ? 'Saved' : 'Wounded'} - ${damageDealt} damage`);
 
     if (damageDealt > 0) {
       if (target.CUR_HP === undefined) {
@@ -727,7 +805,29 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       }
       const newHP = target.CUR_HP - damageDealt;
       
+      // Log the combat action FIRST
+      if (gameLog) {
+        const combatDetails = [{
+          shotNumber: 1,
+          attackRoll: hitRoll,
+          strengthRoll: woundRoll,
+          hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
+          strengthResult: woundSuccess ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
+          hitTarget: attacker.CC_ATK,
+          woundTarget: hitSuccess ? woundTarget : undefined,
+          saveTarget: (hitSuccess && woundSuccess) ? saveTarget : undefined,
+          saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
+          saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
+          damageDealt: damageDealt
+        }];
+        gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
+      }
+
       if (newHP <= 0) {
+        // Log unit death AFTER the attack that killed it
+        if (gameLog) {
+          gameLog.logUnitDeath(target, gameState.currentTurn);
+        }
         actions.removeUnit(targetId);
       } else {
         actions.updateUnit(targetId, { CUR_HP: newHP });
@@ -748,15 +848,26 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
   const handleCharge = useCallback((chargerId: UnitId, targetId: UnitId) => {
     console.log(`⚔️ CHARGE: Unit ${chargerId} charges unit ${targetId}`);
     const charger = findUnit(chargerId);
+    const target = findUnit(targetId);
     if (!charger) {
       console.error(`❌ CHARGE ERROR: Charger unit ${chargerId} not found!`);
       return;
     }
+    if (!target) {
+      console.error(`❌ CHARGE ERROR: Target unit ${targetId} not found!`);
+      return;
+    }
+
+    // Log the charge action
+    if (gameLog) {
+      gameLog.logChargeAction(charger, target, charger.col, charger.row, target.col, target.row, gameState.currentTurn);
+    }
+
     console.log(`⚔️ Adding ${chargerId} to charged units`);
     actions.addChargedUnit(chargerId);
     actions.setSelectedUnitId(null);
     actions.setMode("select");
-  }, [actions, findUnit]);
+  }, [actions, findUnit, gameLog, gameState.currentTurn]);
 
   const moveCharger = useCallback((chargerId: UnitId, destCol: number, destRow: number) => {
     console.log(`🏃 MOVE CHARGER: Unit ${chargerId} moves to (${destCol}, ${destRow})`);
@@ -764,6 +875,25 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     if (!charger) {
       console.error(`❌ MOVE CHARGER ERROR: Unit ${chargerId} not found!`);
       return;
+    }
+    
+    // Log the charge move
+    if (gameLog) {
+      // Find the nearest enemy unit (charge target)
+      const enemyUnits = units.filter(u => u.player !== charger.player);
+      const target = enemyUnits.find(enemy => {
+        // Check if enemy is adjacent to the destination
+        const distance = Math.max(Math.abs(destCol - enemy.col), Math.abs(destRow - enemy.row));
+        return distance <= 1;
+      });
+      
+      if (target) {
+        gameLog.logChargeAction(charger, target, charger.col, charger.row, destCol, destRow, gameState.currentTurn);
+      } else {
+        // If no specific target found, log as a general charge move
+        const dummyTarget = { id: -1, type: 'Enemy', name: 'Enemy' } as any;
+        gameLog.logChargeAction(charger, dummyTarget, charger.col, charger.row, destCol, destRow, gameState.currentTurn);
+      }
     }
     
     // Move the unit to the destination
@@ -778,7 +908,7 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     
     // Return to select mode (cancel colored cells)
     actions.setMode("select");
-  }, [actions, findUnit]);
+  }, [actions, findUnit, gameLog, gameState.currentTurn, units]);
 
   const cancelCharge = useCallback(() => {
     console.log(`❌ CANCEL CHARGE: selectedUnitId = ${selectedUnitId}`);
@@ -791,6 +921,10 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
         if (unitsCharged.includes(selectedUnitId)) {
           console.log(`⚠️ Unit ${selectedUnitId} already charged - skipping cancelCharge`);
         } else {
+          // Log charge cancellation
+          if (gameLog) {
+            gameLog.logChargeCancellation(unit, gameState.currentTurn);
+          }
           console.log(`⚔️ Adding ${selectedUnitId} to charged units via cancelCharge`);
           actions.addChargedUnit(selectedUnitId);
         }
@@ -800,7 +934,7 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     actions.setMode("select");
     actions.setMovePreview(null);
     actions.setAttackPreview(null);
-  }, [actions, selectedUnitId, findUnit, unitsCharged]);
+  }, [actions, selectedUnitId, findUnit, unitsCharged, gameLog, gameState.currentTurn]);
 
   const validateCharge = useCallback((chargerId: UnitId) => {
     console.log(`✅ VALIDATE CHARGE: Unit ${chargerId}`);
@@ -809,11 +943,24 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       console.error(`❌ VALIDATE CHARGE ERROR: Unit ${chargerId} not found!`);
       return;
     }
+
+    // Log the charge validation
+    if (gameLog) {
+      // Find nearby enemy as target
+      const enemyUnits = units.filter(u => u.player !== charger.player);
+      const target = enemyUnits.find(enemy => 
+        Math.max(Math.abs(charger.col - enemy.col), Math.abs(charger.row - enemy.row)) <= 1
+      );
+      if (target) {
+        gameLog.logChargeAction(charger, target, charger.col, charger.row, charger.col, charger.row, gameState.currentTurn);
+      }
+    }
+
     console.log(`⚔️ Adding ${chargerId} to charged units via validateCharge`);
     actions.addChargedUnit(chargerId);
     actions.setSelectedUnitId(null);
     actions.setMode("select");
-  }, [actions, findUnit]);
+  }, [actions, findUnit, gameLog, gameState.currentTurn, units]);
 
   return {
     selectUnit,

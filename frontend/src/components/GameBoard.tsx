@@ -88,11 +88,6 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
   
   return (
     <div className="game-board w-full flex flex-col">
-      <TurnPhaseTracker
-        currentTurn={props.currentTurn}
-        currentPhase={props.phase}
-        maxTurns={props.maxTurns}
-      />
       <Board
         units={props.units}
         selectedUnitId={props.selectedUnitId}
