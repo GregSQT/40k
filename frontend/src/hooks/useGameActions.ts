@@ -794,11 +794,11 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
 
     // Armor Save
     const saveRoll = Math.floor(Math.random() * 6) + 1;
-    if (!target.ARMOR_SAVE) throw new Error(`target.ARMOR_SAVE is undefined for unit ${target.name}`);
-    if (!attacker.CC_AP) throw new Error(`attacker.CC_AP is undefined for unit ${attacker.name}`);
+    if (target.ARMOR_SAVE === undefined) throw new Error(`target.ARMOR_SAVE is undefined for unit ${target.name}`);
+    if (attacker.CC_AP === undefined) throw new Error(`attacker.CC_AP is undefined for unit ${attacker.name}`);
     
     const modifiedArmor = target.ARMOR_SAVE + attacker.CC_AP;
-    if (!target.INVUL_SAVE) throw new Error(`target.INVUL_SAVE is undefined for unit ${target.name}`);
+    if (target.INVUL_SAVE === undefined) throw new Error(`target.INVUL_SAVE is undefined for unit ${target.name}`);
     const invulSave = target.INVUL_SAVE;
     const saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
     const saveSuccess = saveRoll >= saveTarget;
@@ -811,29 +811,29 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
 
     console.log(`💥 About to decrement ATTACK_LEFT from ${attacker.ATTACK_LEFT} to ${attacker.ATTACK_LEFT - 1}`);
 
+    // Log the combat action FIRST (regardless of damage)
+    if (gameLog) {
+      const combatDetails = [{
+        shotNumber: 1,
+        attackRoll: hitRoll,
+        strengthRoll: woundRoll,
+        hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
+        strengthResult: woundSuccess ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
+        hitTarget: attacker.CC_ATK,
+        woundTarget: hitSuccess ? woundTarget : undefined,
+        saveTarget: (hitSuccess && woundSuccess) ? saveTarget : undefined,
+        saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
+        saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
+        damageDealt: damageDealt
+      }];
+      gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
+    }
+
     if (damageDealt > 0) {
       if (target.CUR_HP === undefined) {
         throw new Error('target.CUR_HP is required');
       }
       const newHP = target.CUR_HP - damageDealt;
-      
-      // Log the combat action FIRST
-      if (gameLog) {
-        const combatDetails = [{
-          shotNumber: 1,
-          attackRoll: hitRoll,
-          strengthRoll: woundRoll,
-          hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
-          strengthResult: woundSuccess ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
-          hitTarget: attacker.CC_ATK,
-          woundTarget: hitSuccess ? woundTarget : undefined,
-          saveTarget: (hitSuccess && woundSuccess) ? saveTarget : undefined,
-          saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
-          saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
-          damageDealt: damageDealt
-        }];
-        gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
-      }
 
       if (newHP <= 0) {
         // Log unit death AFTER the attack that killed it
