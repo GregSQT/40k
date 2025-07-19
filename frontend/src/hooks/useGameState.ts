@@ -27,6 +27,7 @@ interface UseGameStateReturn {
     updateUnit: (unitId: UnitId, updates: Partial<Unit>) => void;
     removeUnit: (unitId: UnitId) => void;
     initializeShootingPhase: () => void;
+    initializeCombatPhase: () => void;
     updateShootingPhaseState: (updates: Partial<ShootingPhaseState>) => void;
     decrementShotsLeft: (unitId: UnitId) => void;
     setTargetPreview: (preview: TargetPreview | null) => void;
@@ -73,6 +74,20 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
           throw new Error('unit.RNG_NB is required');
         }
         return { ...unit, SHOOT_LEFT: unit.RNG_NB };
+      })
+    }));
+  }, []);
+
+  const initializeCombatPhase = useCallback(() => {
+    console.log('🔧 INITIALIZING COMBAT PHASE - Setting ATTACK_LEFT for all units');
+    setGameState(prev => ({
+      ...prev,
+      units: prev.units.map(unit => {
+        if (unit.CC_NB === undefined) {
+          throw new Error('unit.CC_NB is required');
+        }
+        console.log(`🔧 Unit ${unit.name} (${unit.id}): ATTACK_LEFT set to ${unit.CC_NB}`);
+        return { ...unit, ATTACK_LEFT: unit.CC_NB };
       })
     }));
   }, []);
@@ -216,6 +231,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       updateUnit,
       removeUnit,
       initializeShootingPhase,
+      initializeCombatPhase,
       updateShootingPhaseState,
       decrementShotsLeft,
       setTargetPreview,

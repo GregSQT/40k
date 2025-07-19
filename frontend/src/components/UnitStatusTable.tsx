@@ -72,6 +72,11 @@ const UnitRow = memo<UnitRowProps>(({ unit, isSelected, onSelect }) => {
         {unit.RNG_RNG}"
       </td>
       
+      {/* RNG_NB (Number of Ranged Attacks) */}
+      <td className="unit-status-cell unit-status-cell--stat">
+        {unit.RNG_NB}
+      </td>
+      
       {/* RNG_ATK (Ranged Attack) */}
       <td className="unit-status-cell unit-status-cell--stat">
         {unit.RNG_ATK}+
@@ -90,6 +95,11 @@ const UnitRow = memo<UnitRowProps>(({ unit, isSelected, onSelect }) => {
       {/* RNG_DMG (Ranged Damage) */}
       <td className="unit-status-cell unit-status-cell--stat">
         {unit.RNG_DMG}
+      </td>
+      
+      {/* CC_NB (Number of Close Combat Attacks) */}
+      <td className="unit-status-cell unit-status-cell--stat">
+        {unit.CC_NB}
       </td>
       
       {/* CC_ATK (Close Combat Attack) */}
@@ -147,14 +157,14 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
         <table className="unit-status-table">
           <thead>
             <tr className="unit-status-player-row">
-              <th className="unit-status-player-header" colSpan={15}>
+              <th className="unit-status-player-header" colSpan={17}>
                 {player === 0 ? "Player 1" : "Player 2"}
               </th>
             </tr>
             <tr className="unit-status-header-group">
               <th className="unit-status-header-group-cell" colSpan={6}></th>
-              <th className="unit-status-header-group-cell" colSpan={5}>RANGE WEAPON</th>
-              <th className="unit-status-header-group-cell" colSpan={4}>MELEE WEAPON</th>
+              <th className="unit-status-header-group-cell" colSpan={6}>RANGE WEAPON</th>
+              <th className="unit-status-header-group-cell" colSpan={5}>MELEE WEAPON</th>
             </tr>
             <tr className="unit-status-header">
               <th className="unit-status-header-cell">ID</th>
@@ -164,11 +174,13 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
               <th className="unit-status-header-cell" title="Toughness">T</th>
               <th className="unit-status-header-cell" title="Armor Save">SV</th>
               <th className="unit-status-header-cell" title="Range">RNG</th>
-              <th className="unit-status-header-cell" title="Ranged Attack">A</th>
+              <th className="unit-status-header-cell" title="Number of Ranged Attacks">A</th>
+              <th className="unit-status-header-cell" title="Ranged Attack">BS</th>
               <th className="unit-status-header-cell" title="Strength">S</th>
               <th className="unit-status-header-cell" title="Armor Penetration">AP</th>
               <th className="unit-status-header-cell" title="Damage">D</th>
-              <th className="unit-status-header-cell" title="Close Combat Attack">A</th>
+              <th className="unit-status-header-cell" title="Number of Close Combat Attacks">A</th>
+              <th className="unit-status-header-cell" title="Close Combat Attack">CC</th>
               <th className="unit-status-header-cell" title="Strength">S</th>
               <th className="unit-status-header-cell" title="Armor Penetration">AP</th>
               <th className="unit-status-header-cell" title="Damage">D</th>

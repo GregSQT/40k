@@ -14,6 +14,7 @@ interface UsePhaseTransitionParams {
     resetChargedUnits: () => void;
     resetAttackedUnits: () => void;
     resetFledUnits: () => void;  // NEW
+    initializeCombatPhase: () => void;  // NEW
     setCurrentTurn: (turn: number) => void;  // NEW
   };
 }
@@ -157,6 +158,7 @@ export const usePhaseTransition = ({
   const transitionToCombat = useCallback(() => {
     setTimeout(() => {
       actions.setPhase("combat");
+      actions.initializeCombatPhase();
       actions.setSelectedUnitId(null);
       actions.resetAttackedUnits();
       actions.setMode("select");

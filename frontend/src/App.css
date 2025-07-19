@@ -275,7 +275,7 @@ body {
   border-right: 1px solid #444;
   white-space: nowrap;
   font-size: 11px;
-  max-width: 32px;
+  max-width: 24px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -306,7 +306,7 @@ body {
   border-right: 1px solid #333;
   white-space: nowrap;
   vertical-align: middle;
-  max-width: 32px;
+  max-width: 24px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -318,24 +318,24 @@ body {
 .unit-status-cell--number {
   font-weight: var(--font-weight-bold);
   color: var(--text-accent);
-  width: 40px;
+  width: 28px;
 }
 
 .unit-status-cell--type {
   font-weight: var(--font-weight-medium);
   text-align: left;
-  width: 120px;
-  min-width: 120px;
+  width: 90px;
+  min-width: 90px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .unit-status-cell--hp {
-  width: 80px;
+  width: 60px;
 }
 
 .unit-status-cell--stat {
-  width: 45px;
+  width: 30px;
   font-family: 'Courier New', monospace;
   font-weight: var(--font-weight-medium);
 }
@@ -523,12 +523,12 @@ body {
   }
   
   .unit-status-cell--stat {
-    width: 50px;
+    width: 35px;
   }
   
   .unit-status-cell--type {
-    width: 120px;
-    min-width: 120px;
+    width: 95px;
+    min-width: 95px;
   }
 }
 

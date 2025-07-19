@@ -705,6 +705,8 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       return;
     }
 
+    console.log(`✅ ${attacker.name} has ${attacker.ATTACK_LEFT} attacks remaining - proceeding with attack`);
+
     // Combat Sequence: Hit → Wound → Save → Damage
     console.log(`⚔️ ${attacker.name} attacks ${target.name}`);
 
@@ -712,6 +714,8 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     const hitRoll = Math.floor(Math.random() * 6) + 1;
     if (!attacker.CC_ATK) throw new Error(`attacker.CC_ATK is undefined for unit ${attacker.name}`);
     const hitSuccess = hitRoll >= attacker.CC_ATK;
+
+    console.log(`🎲 Hit roll: ${hitRoll} vs ${attacker.CC_ATK}+ = ${hitSuccess ? 'HIT' : 'MISS'}`);
 
     if (!hitSuccess) {
       // Log the miss
@@ -755,6 +759,8 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
                       attackerStr < targetT ? 5 : 6;
     const woundSuccess = woundRoll >= woundTarget;
 
+    console.log(`🎲 Wound roll: ${woundRoll} vs ${woundTarget}+ = ${woundSuccess ? 'WOUND' : 'NO WOUND'}`);
+
     if (!woundSuccess) {
       // Log the failed wound
       if (gameLog) {
@@ -784,6 +790,8 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       return;
     }
 
+    console.log(`🎲 Proceeding to armor save...`);
+
     // Armor Save
     const saveRoll = Math.floor(Math.random() * 6) + 1;
     if (!target.ARMOR_SAVE) throw new Error(`target.ARMOR_SAVE is undefined for unit ${target.name}`);
@@ -795,9 +803,13 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     const saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
     const saveSuccess = saveRoll >= saveTarget;
 
+    console.log(`🎲 Save roll: ${saveRoll} vs ${saveTarget}+ = ${saveSuccess ? 'SAVED' : 'FAILED'}`);
+
     // Damage Application
     const damageDealt = saveSuccess ? 0 : (attacker.CC_DMG);
     console.log(`${saveSuccess ? 'Saved' : 'Wounded'} - ${damageDealt} damage`);
+
+    console.log(`💥 About to decrement ATTACK_LEFT from ${attacker.ATTACK_LEFT} to ${attacker.ATTACK_LEFT - 1}`);
 
     if (damageDealt > 0) {
       if (target.CUR_HP === undefined) {
@@ -834,11 +846,19 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       }
     }
 
-    // Decrease attacks remaining
-    actions.updateUnit(attackerId, { ATTACK_LEFT: attacker.ATTACK_LEFT - 1 });
+    // Get fresh unit state and decrement attacks
+    const currentAttacker = findUnit(attackerId);
+    if (!currentAttacker) throw new Error(`Cannot find attacker unit ${attackerId}`);
+    if (!currentAttacker.ATTACK_LEFT) throw new Error(`currentAttacker.ATTACK_LEFT is undefined for unit ${currentAttacker.name}`);
+    const currentAttacksLeft = currentAttacker.ATTACK_LEFT;
+    const newAttacksLeft = currentAttacksLeft - 1;
+    
+    actions.updateUnit(attackerId, { ATTACK_LEFT: newAttacksLeft });
+
+    console.log(`📉 Updated ${attacker.name} ATTACK_LEFT to ${newAttacksLeft}`);
 
     // Check if attacker is done
-    if (attacker.ATTACK_LEFT - 1 <= 0) {
+    if (newAttacksLeft <= 0) {
       actions.addAttackedUnit(attackerId);
       actions.setSelectedUnitId(null);
       actions.setMode("select");

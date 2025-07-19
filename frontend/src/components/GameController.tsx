@@ -116,6 +116,7 @@ export const GameController: React.FC<GameControllerProps> = ({
       resetChargedUnits: actions.resetChargedUnits,
       resetAttackedUnits: actions.resetAttackedUnits,
       resetFledUnits: actions.resetFledUnits,
+      initializeCombatPhase: actions.initializeCombatPhase,
       setCurrentTurn: actions.setCurrentTurn,
     },
   });
@@ -124,6 +125,13 @@ export const GameController: React.FC<GameControllerProps> = ({
   React.useEffect(() => {
     if (gameState.phase === 'shoot') {
       actions.initializeShootingPhase();
+    }
+  }, [gameState.phase]);
+
+  // Initialize combat phase when entering combat phase
+  React.useEffect(() => {
+    if (gameState.phase === 'combat') {
+      actions.initializeCombatPhase();
     }
   }, [gameState.phase]);
 

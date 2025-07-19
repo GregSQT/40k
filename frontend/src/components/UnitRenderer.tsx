@@ -98,6 +98,7 @@ export class UnitRenderer {
     this.renderGreenActivationCircle(isEligible, unitIconScale);
     this.renderHPBar(unitIconScale);
     this.renderShootingCounter(unitIconScale);
+    this.renderAttackCounter(unitIconScale);
   }
   
   private calculateEligibility(): boolean {
@@ -424,6 +425,35 @@ export class UnitRenderer {
     shootText.position.set(centerX + scaledOffset, centerY - scaledOffset * 1.1);
     shootText.zIndex = 450;
     app.stage.addChild(shootText);
+  }
+  
+  private renderAttackCounter(unitIconScale: number): void {
+    const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled } = this.props;
+    
+    if (phase !== 'combat' || unit.player !== currentPlayer) return;
+    
+    // NEW RULE: Hide attack counter for units that fled
+    if (unitsFled && unitsFled.includes(unit.id)) {
+      return;
+    }
+    
+    const attacksLeft = unit.ATTACK_LEFT !== undefined ? 
+      unit.ATTACK_LEFT : unit.CC_NB || 0;
+    const totalAttacks = unit.CC_NB || 0;
+    const scaledOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
+    
+    const attackText = new PIXI.Text(`${attacksLeft}/${totalAttacks}`, {
+      fontSize: 14,
+      fill: attacksLeft > 0 ? 0xffff00 : 0x666666,
+      align: "center",
+      fontWeight: "bold",
+      stroke: 0x000000,
+      strokeThickness: 2
+    });
+    attackText.anchor.set(0.1);
+    attackText.position.set(centerX + scaledOffset, centerY - scaledOffset * 1.1);
+    attackText.zIndex = 450;
+    app.stage.addChild(attackText);
   }
 }
 
