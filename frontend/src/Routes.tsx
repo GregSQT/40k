@@ -1,23 +1,47 @@
-// src/routes.tsx
+// frontend/src/Routes.tsx
 
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Link, Navigate, useLocation } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import GamePage from "./pages/GamePage";
 import ReplayPage from "./pages/ReplayPage";
 
+function Navigation() {
+  const location = useLocation();
+  
+  const getButtonStyle = (path: string) => ({
+    padding: '8px 16px',
+    backgroundColor: location.pathname === path ? '#1e40af' : (
+      path === '/game' ? '#64748b' : 
+      path === '/pve' ? '#64748b' : '#64748b'
+    ),
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    marginRight: '8px',
+    cursor: 'pointer',
+    fontWeight: location.pathname === path ? 'bold' : 'normal'
+  });
+
+  return (
+    <nav style={{ margin: 16 }}>
+      <button onClick={() => window.location.href = '/game'} style={getButtonStyle('/game')}>PvP</button>
+      <button onClick={() => window.location.href = '/pve'} style={getButtonStyle('/pve')}>PvE</button>
+      <button onClick={() => window.location.href = '/replay'} style={getButtonStyle('/replay')}>Replay</button>
+    </nav>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <nav style={{ margin: 16 }}>
-        <Link to="/">Home</Link> | <Link to="/game">Game</Link> | <Link to="/replay">Replay</Link>
-      </nav>
+      <Navigation />
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        {/* Redirect root path directly to game mode */}
+        <Route path="/" element={<Navigate to="/game" replace />} />
+        <Route path="/home" element={<HomePage />} />
         <Route path="/game" element={<GamePage />} />
         <Route path="/replay" element={<ReplayPage />} />
       </Routes>
     </BrowserRouter>
   );
 }
-
-

@@ -124,9 +124,6 @@ export const GameController: React.FC<GameControllerProps> = ({
   return (
     <div className={`game-controller ${className}`}>
       <main className="main-content">
-        <header className="game-header">
-          <h1>WH40K Tactics RL Demo</h1>
-        </header>
 
         <div className="game-area">
           <div className="game-board-section">
