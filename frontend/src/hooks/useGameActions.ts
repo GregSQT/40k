@@ -1,7 +1,7 @@
 // src/hooks/useGameActions.ts
 import { useCallback } from 'react';
 import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState, TargetPreview } from '../types/game';
-import { calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability } from '../utils/probabilityCalculator';
+import { calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability, calculateCombatHitProbability, calculateCombatWoundProbability, calculateCombatSaveProbability, calculateCombatOverallProbability } from '../utils/probabilityCalculator';
 import { areUnitsAdjacent, isUnitInRange } from '../utils/gameHelpers';
 import { singleShotSequenceManager } from '../utils/ShootingSequenceManager';
 
@@ -697,6 +697,7 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     }
 
     // Check if attacker has attacks remaining
+    if (attacker.ATTACK_LEFT === undefined) throw new Error(`attacker.ATTACK_LEFT is undefined for unit ${attacker.name}`);
     if (attacker.ATTACK_LEFT <= 0) {
       console.log(`❌ No attacks remaining for ${attacker.name}`);
       actions.addAttackedUnit(attackerId);
@@ -707,11 +708,27 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
 
     console.log(`✅ ${attacker.name} has ${attacker.ATTACK_LEFT} attacks remaining - proceeding with attack`);
 
-    // Combat Sequence: Hit → Wound → Save → Damage
-    console.log(`⚔️ ${attacker.name} attacks ${target.name}`);
+    // ✅ NEW: Combat Preview System (similar to shooting preview)
+    const currentTargetPreview = gameState.targetPreview;
+    const isConfirmingAttack = currentTargetPreview?.targetId === targetId && currentTargetPreview?.shooterId === attackerId;
 
-    // Hit Roll
-    const hitRoll = Math.floor(Math.random() * 6) + 1;
+    if (isConfirmingAttack) {
+      // Second click - execute attack
+      console.log(`🎯 Confirming combat attack for ${attacker.name} → ${target.name}`);
+      
+      // Clear the preview
+      if (currentTargetPreview?.blinkTimer) {
+        clearInterval(currentTargetPreview.blinkTimer);
+      }
+      actions.setTargetPreview(null);
+      
+      // Execute the actual combat attack (existing logic wrapped in setTimeout)
+      setTimeout(() => {
+        // Combat Sequence: Hit → Wound → Save → Damage
+        console.log(`⚔️ ${attacker.name} attacks ${target.name}`);
+
+        // Hit Roll
+        const hitRoll = Math.floor(Math.random() * 6) + 1;
     if (!attacker.CC_ATK) throw new Error(`attacker.CC_ATK is undefined for unit ${attacker.name}`);
     const hitSuccess = hitRoll >= attacker.CC_ATK;
 
@@ -737,8 +754,10 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       }
 
       // Miss - decrease attacks and end
-      actions.updateUnit(attackerId, { ATTACK_LEFT: attacker.ATTACK_LEFT - 1 });
-      if (attacker.ATTACK_LEFT - 1 <= 0) {
+      if (attacker.ATTACK_LEFT === undefined) throw new Error(`attacker.ATTACK_LEFT is undefined for unit ${attacker.name}`);
+      const currentAttacks = attacker.ATTACK_LEFT;
+      actions.updateUnit(attackerId, { ATTACK_LEFT: currentAttacks - 1 });
+      if (currentAttacks - 1 <= 0) {
         actions.addAttackedUnit(attackerId);
         actions.setSelectedUnitId(null);
         actions.setMode("select");
@@ -781,8 +800,10 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       }
 
       // No wound - decrease attacks and end
-      actions.updateUnit(attackerId, { ATTACK_LEFT: attacker.ATTACK_LEFT - 1 });
-      if (attacker.ATTACK_LEFT - 1 <= 0) {
+      if (attacker.ATTACK_LEFT === undefined) throw new Error(`attacker.ATTACK_LEFT is undefined for unit ${attacker.name}`);
+      const currentAttacks = attacker.ATTACK_LEFT;
+      actions.updateUnit(attackerId, { ATTACK_LEFT: currentAttacks - 1 });
+      if (currentAttacks - 1 <= 0) {
         actions.addAttackedUnit(attackerId);
         actions.setSelectedUnitId(null);
         actions.setMode("select");
@@ -809,6 +830,7 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     const damageDealt = saveSuccess ? 0 : (attacker.CC_DMG);
     console.log(`${saveSuccess ? 'Saved' : 'Wounded'} - ${damageDealt} damage`);
 
+    if (attacker.ATTACK_LEFT === undefined) throw new Error(`attacker.ATTACK_LEFT is undefined for unit ${attacker.name}`);
     console.log(`💥 About to decrement ATTACK_LEFT from ${attacker.ATTACK_LEFT} to ${attacker.ATTACK_LEFT - 1}`);
 
     // Log the combat action FIRST (regardless of damage)
@@ -849,7 +871,7 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     // Get fresh unit state and decrement attacks
     const currentAttacker = findUnit(attackerId);
     if (!currentAttacker) throw new Error(`Cannot find attacker unit ${attackerId}`);
-    if (!currentAttacker.ATTACK_LEFT) throw new Error(`currentAttacker.ATTACK_LEFT is undefined for unit ${currentAttacker.name}`);
+    if (currentAttacker.ATTACK_LEFT === undefined) throw new Error(`currentAttacker.ATTACK_LEFT is undefined for unit ${currentAttacker.name}`);
     const currentAttacksLeft = currentAttacker.ATTACK_LEFT;
     const newAttacksLeft = currentAttacksLeft - 1;
     
@@ -858,12 +880,51 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     console.log(`📉 Updated ${attacker.name} ATTACK_LEFT to ${newAttacksLeft}`);
 
     // Check if attacker is done
-    if (newAttacksLeft <= 0) {
-      actions.addAttackedUnit(attackerId);
-      actions.setSelectedUnitId(null);
-      actions.setMode("select");
+        if (newAttacksLeft <= 0) {
+          actions.addAttackedUnit(attackerId);
+          actions.setSelectedUnitId(null);
+          actions.setMode("select");
+        }
+      }, 100);
+    } else {
+      // First click - start preview
+      console.log(`🎯 Starting combat preview for ${attacker.name} → ${target.name}`);
+      
+      // Clear any existing preview
+      if (currentTargetPreview?.blinkTimer) {
+        clearInterval(currentTargetPreview.blinkTimer);
+      }
+      
+      // Calculate combat probabilities
+      const hitProbability = calculateCombatHitProbability(attacker);
+      const woundProbability = calculateCombatWoundProbability(attacker, target);
+      const saveProbability = calculateCombatSaveProbability(attacker, target);
+      const overallProbability = calculateCombatOverallProbability(attacker, target);
+      
+      // Start preview with blink timer - SINGLE ATTACK ONLY
+      const totalBlinkSteps = 2; // Only show: current HP (step 0) -> after next attack (step 1)
+      
+      const preview: TargetPreview = {
+        targetId,
+        shooterId: attackerId, // Reuse shooterId field for attacker
+        currentBlinkStep: 0,
+        totalBlinkSteps,
+        blinkTimer: null,
+        hitProbability,
+        woundProbability,
+        saveProbability,
+        overallProbability
+      };
+      
+      // Start blink cycle for single attack preview
+      preview.blinkTimer = setInterval(() => {
+        preview.currentBlinkStep = (preview.currentBlinkStep + 1) % totalBlinkSteps;
+        actions.setTargetPreview({ ...preview });
+      }, 500);
+      
+      actions.setTargetPreview(preview);
     }
-  }, [findUnit, actions]);
+  }, [findUnit, actions, gameState.targetPreview, gameState.currentTurn, gameLog]);
 
   const handleCharge = useCallback((chargerId: UnitId, targetId: UnitId) => {
     console.log(`⚔️ CHARGE: Unit ${chargerId} charges unit ${targetId}`);

@@ -355,9 +355,16 @@ export class UnitRenderer {
         if (targetPreview.currentBlinkStep === 0) {
           displayHP = currentHP;
         } else {
-          const damagePerShot = shooter.RNG_DMG || 1;
-          const totalDamage = targetPreview.currentBlinkStep * damagePerShot;
-          displayHP = Math.max(0, currentHP - totalDamage);
+          // ✅ FIX: Use CC_DMG for combat phase, RNG_DMG for shooting phase
+          if (this.props.phase === 'combat') {
+            if (shooter.CC_DMG === undefined) throw new Error(`shooter.CC_DMG is undefined for unit ${shooter.name || shooter.id}`);
+            const totalDamage = targetPreview.currentBlinkStep * shooter.CC_DMG;
+            displayHP = Math.max(0, currentHP - totalDamage);
+          } else {
+            if (shooter.RNG_DMG === undefined) throw new Error(`shooter.RNG_DMG is undefined for unit ${shooter.name || shooter.id}`);
+            const totalDamage = targetPreview.currentBlinkStep * shooter.RNG_DMG;
+            displayHP = Math.max(0, currentHP - totalDamage);
+          }
         }
       }
     }
