@@ -197,6 +197,7 @@ body {
   width: 100%;
   max-width: 900px;
   margin-left: var(--spacing-lg);
+  margin-top: 60px; /* Push tables below navigation buttons */
 }
 
 .unit-status-table-container {
@@ -225,6 +226,38 @@ body {
   font-size: 12px;
   background: var(--bg-primary);
   min-width: 800px;
+}
+
+.turn-phase-tracker-spacing {
+  margin-bottom: var(--spacing-lg);
+}
+
+.turn-phase-tracker-right {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid #555;
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--spacing-lg);
+}
+
+.turn-phase-tracker-right {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid #555;
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--spacing-lg);
+}
+
+.turn-phase-tracker-right .flex {
+  flex-direction: row !important;
+}
+
+.turn-phase-tracker-right > div {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 /* Header styles */

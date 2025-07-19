@@ -13,6 +13,7 @@ import { useGameLog } from "../hooks/useGameLog";
 import { Unit } from "../types/game";
 import { useState, useEffect } from "react";
 import { createUnit, getAvailableUnitTypes } from "../data/UnitFactory";
+import { TurnPhaseTracker } from "./TurnPhaseTracker";
 
 interface GameControllerProps {
   initialUnits?: Unit[];  // Make optional
@@ -228,6 +229,11 @@ export const GameController: React.FC<GameControllerProps> = ({
           </div>
 
           <div className="unit-status-tables">
+            <TurnPhaseTracker 
+              currentTurn={gameState.currentTurn} 
+              currentPhase={gameState.phase}
+              className="turn-phase-tracker-right"
+            />
             <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
               <UnitStatusTable
                 units={gameState.units}

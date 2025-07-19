@@ -44,7 +44,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
 
   const getTurnStyle = (status: 'passed' | 'current' | 'upcoming'): React.CSSProperties => {
     const baseStyle: React.CSSProperties = {
-      padding: '6px 12px',
+      padding: '4px 8px',
       borderRadius: '4px',
       fontWeight: 'medium',
       fontSize: '14px',
@@ -101,7 +101,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
 
   const getPhaseStyle = (status: 'passed' | 'current' | 'upcoming'): React.CSSProperties => {
     const baseStyle: React.CSSProperties = {
-      padding: '6px 12px',
+      padding: '4px 8px',
       borderRadius: '4px',
       fontWeight: 'medium',
       fontSize: '14px',
@@ -142,10 +142,10 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   const formatPhaseName = (phase: string): string => {
     return phase.charAt(0).toUpperCase() + phase.slice(1);
   };
-      return (
-    <div className={`bg-white border-b border-gray-200 shadow-sm ${className}`}>
-      <div className="flex items-center px-6 py-3 w-full overflow-hidden">
-        <div className="flex items-center space-x-2 flex-shrink-0">
+    return (
+    <div className={className} style={{ background: '#1f2937', border: '1px solid #555', borderRadius: '8px', padding: '8px' }}>
+      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+        <div style={{ display: 'flex', gap: '2px' }}>
           {turns.map((turn) => {
             const status = getTurnStatus(turn);
             const style = getTurnStyle(status);
@@ -154,7 +154,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
               <button
                 key={turn}
                 style={style}
-                className="min-w-0"
+                className="text-xs"
                 disabled
               >
                 Turn {turn}
@@ -162,32 +162,24 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
             );
           })}
         </div>
-        <div className="ml-auto overflow-hidden">
-          <div className="flex items-center justify-end space-x-2 flex-nowrap overflow-x-auto">
-            {phases.map((phase) => {
-              const status = getPhaseStatus(phase);
-              const style = getPhaseStyle(status);
+        <div style={{ display: 'flex', gap: '2px' }}>
+          {phases.map((phase) => {
+            const status = getPhaseStatus(phase);
+            const style = getPhaseStyle(status);
 
-              return (
-                <button
-                  key={phase}
-                  style={{
-                    ...style,
-                    fontSize: '0.85rem'
-                  }}
-                  className="min-w-0"
-                  disabled
-                >
-                  {formatPhaseName(phase)}
-                </button>
-              );
-            })}
-          </div>
+            return (
+              <button
+                key={phase}
+                style={style}
+                className="text-xs"
+                disabled
+              >
+                {formatPhaseName(phase)}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
   );
-
-
-
 };
