@@ -898,8 +898,8 @@ export default function Board({
 
       // Simple container return - loading/error handled inside useEffect
       return (
-        <div>
-          <div ref={containerRef} />
+        <div className="w-full">
+          <div ref={containerRef} className="w-full" />
           {shootingPhaseState?.singleShotState && (
             <SingleShotDisplay
               singleShotState={shootingPhaseState.singleShotState}
@@ -910,11 +910,13 @@ export default function Board({
               targetName={
                 shootingPhaseState.singleShotState.targetId
                   ? units.find(u => u.id === shootingPhaseState.singleShotState?.targetId)?.name || 
-                    `Unit ${shootingPhaseState.singleShotState?.targetId}`
+                    `Unit ${shootingPhaseState.singleShotState.targetId}`
                   : undefined
               }
             />
           )}
         </div>
       );
+
+
     }

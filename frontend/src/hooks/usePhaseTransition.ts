@@ -14,6 +14,7 @@ interface UsePhaseTransitionParams {
     resetChargedUnits: () => void;
     resetAttackedUnits: () => void;
     resetFledUnits: () => void;  // NEW
+    setCurrentTurn: (turn: number) => void;  // NEW
   };
 }
 
@@ -165,7 +166,14 @@ export const usePhaseTransition = ({
   // End turn and switch to next player
   const endTurn = useCallback(() => {
     setTimeout(() => {
-      actions.setCurrentPlayer(currentPlayer === 0 ? 1 : 0);
+      const newPlayer = currentPlayer === 0 ? 1 : 0;
+      actions.setCurrentPlayer(newPlayer);
+      
+      // Increment turn when player 0 starts their turn (beginning of new turn)
+      if (newPlayer === 0) {
+        actions.setCurrentTurn(gameState.currentTurn + 1);
+      }
+      
       actions.setPhase("move");
       actions.resetMovedUnits();
       actions.resetChargedUnits();
@@ -173,7 +181,7 @@ export const usePhaseTransition = ({
       actions.resetFledUnits();  // NEW
       actions.setSelectedUnitId(null);
     }, 300);
-  }, [actions, currentPlayer]);
+  }, [actions, currentPlayer, gameState.currentTurn]);
 
   // Main phase transition effect
   useEffect(() => {

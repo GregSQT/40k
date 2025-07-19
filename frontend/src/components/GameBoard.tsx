@@ -17,7 +17,7 @@ interface GameBoardProps {
   unitsMoved: UnitId[];
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
-  unitsFled: UnitId[];  // ✅ ADD THIS LINE
+  unitsFled: UnitId[];
   currentTurn: number;
   maxTurns?: number;
   onSelectUnit: (id: UnitId | null) => void;
@@ -87,7 +87,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
   };
   
   return (
-    <div className="game-board">
+    <div className="game-board w-full flex flex-col">
       <TurnPhaseTracker
         currentTurn={props.currentTurn}
         currentPhase={props.phase}
@@ -104,7 +104,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         unitsMoved={props.unitsMoved}
         unitsCharged={props.unitsCharged}
         unitsAttacked={props.unitsAttacked}
-        unitsFled={props.unitsFled}  // ✅ ADD THIS LINE
+        unitsFled={props.unitsFled}
         onSelectUnit={handleSelectUnit}
         onStartMovePreview={handleStartMovePreview}
         onStartAttackPreview={props.onStartAttackPreview}

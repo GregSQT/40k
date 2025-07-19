@@ -119,6 +119,7 @@ export interface GameState {
   unitsAttacked: UnitId[];
   unitsFled: UnitId[];  // NEW: Track units that fled (moved away from adjacent enemies)
   targetPreview: TargetPreview | null;
+  currentTurn: number;  // NEW: Track current turn (1-based)
 }
 
 export interface MovePreview {

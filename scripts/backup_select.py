@@ -90,6 +90,7 @@ else:
         "frontend/src/components/ReplayBoard.tsx",
         "frontend/src/components/ReplayViewer.tsx",
         "frontend/src/components/SingleShotDisplay.tsx",
+        "frontend/src/components/TurnPhaseTracker.tsx",
         "frontend/src/components/UnitRenderer.tsx",
         "frontend/src/components/UnitSelector.tsx",    
 

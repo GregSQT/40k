@@ -101,7 +101,17 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Manage phase transitions
   usePhaseTransition({
     gameState,
-    actions,
+    actions: {
+      setPhase: actions.setPhase,
+      setCurrentPlayer: actions.setCurrentPlayer,
+      setSelectedUnitId: actions.setSelectedUnitId,
+      setMode: actions.setMode,
+      resetMovedUnits: actions.resetMovedUnits,
+      resetChargedUnits: actions.resetChargedUnits,
+      resetAttackedUnits: actions.resetAttackedUnits,
+      resetFledUnits: actions.resetFledUnits,
+      setCurrentTurn: actions.setCurrentTurn,
+    },
   });
 
   // Initialize shooting phase when entering shoot phase
@@ -133,6 +143,7 @@ export const GameController: React.FC<GameControllerProps> = ({
               unitsCharged={gameState.unitsCharged}
               unitsAttacked={gameState.unitsAttacked}
               unitsFled={gameState.unitsFled}
+              currentTurn={gameState.currentTurn}
               onSelectUnit={gameState.phase === "charge" ? gameActions.selectCharger : gameActions.selectUnit}
               onStartMovePreview={gameActions.startMovePreview}
               onStartAttackPreview={gameActions.startAttackPreview}
@@ -173,7 +184,6 @@ export const GameController: React.FC<GameControllerProps> = ({
                 selectedUnitId={gameState.selectedUnitId}
                 onSelectUnit={gameState.phase === "charge" ? 
                   gameActions.selectCharger : gameActions.selectUnit}
-                title="Player 1 Units"
               />
             </ErrorBoundary>
 
@@ -184,7 +194,6 @@ export const GameController: React.FC<GameControllerProps> = ({
                 selectedUnitId={gameState.selectedUnitId}
                 onSelectUnit={gameState.phase === "charge" ? 
                   gameActions.selectCharger : gameActions.selectUnit}
-                title="Player 2 Units"
               />
             </ErrorBoundary>
           </div>

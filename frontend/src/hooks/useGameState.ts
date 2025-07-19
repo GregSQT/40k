@@ -30,6 +30,7 @@ interface UseGameStateReturn {
     updateShootingPhaseState: (updates: Partial<ShootingPhaseState>) => void;
     decrementShotsLeft: (unitId: UnitId) => void;
     setTargetPreview: (preview: TargetPreview | null) => void;
+    setCurrentTurn: (turn: number) => void;
   };
 }
 
@@ -53,6 +54,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     unitsAttacked: [],
     unitsFled: [],
     targetPreview: null,
+    currentTurn: 1,
   });
 
   const [movePreview, setMovePreview] = useState<MovePreview | null>(null);
@@ -186,6 +188,10 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     setGameState(prev => ({ ...prev, targetPreview: preview }));
   }, []);
 
+  const setCurrentTurn = useCallback((turn: number) => {
+    setGameState(prev => ({ ...prev, currentTurn: turn }));
+  }, []);
+
   return {
     gameState,
     movePreview,
@@ -213,6 +219,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       updateShootingPhaseState,
       decrementShotsLeft,
       setTargetPreview,
+      setCurrentTurn,
     },
   };
 };
