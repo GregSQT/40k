@@ -160,18 +160,18 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
               <th className="unit-status-header-cell">ID</th>
               <th className="unit-status-header-cell">Type</th>
               <th className="unit-status-header-cell">HP</th>
-              <th className="unit-status-header-cell" title="Movement">MOV</th>
+              <th className="unit-status-header-cell" title="Movement">M</th>
               <th className="unit-status-header-cell" title="Toughness">T</th>
-              <th className="unit-status-header-cell" title="Armor Save">AS</th>
+              <th className="unit-status-header-cell" title="Armor Save">SV</th>
               <th className="unit-status-header-cell" title="Range">RNG</th>
-              <th className="unit-status-header-cell" title="Ranged Attack">ATK</th>
-              <th className="unit-status-header-cell" title="Strength">STR</th>
+              <th className="unit-status-header-cell" title="Ranged Attack">A</th>
+              <th className="unit-status-header-cell" title="Strength">S</th>
               <th className="unit-status-header-cell" title="Armor Penetration">AP</th>
-              <th className="unit-status-header-cell" title="Damage">DMG</th>
-              <th className="unit-status-header-cell" title="Close Combat Attack">ATK</th>
-              <th className="unit-status-header-cell" title="Strength">STR</th>
+              <th className="unit-status-header-cell" title="Damage">D</th>
+              <th className="unit-status-header-cell" title="Close Combat Attack">A</th>
+              <th className="unit-status-header-cell" title="Strength">S</th>
               <th className="unit-status-header-cell" title="Armor Penetration">AP</th>
-              <th className="unit-status-header-cell" title="Damage">DMG</th>
+              <th className="unit-status-header-cell" title="Damage">D</th>
             </tr>
           </thead>
           <tbody>
