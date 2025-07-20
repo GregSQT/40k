@@ -11,8 +11,6 @@ async function initializeUnitRegistry(): Promise<void> {
   if (initialized) return;
   
   try {
-    console.log('🔍 Scanning roster directory for units...');
-    
     // Clear existing registry
     unitClassMap = {};
     availableUnitTypes = [];
@@ -20,9 +18,7 @@ async function initializeUnitRegistry(): Promise<void> {
     // Define the roster structure to scan
     const factionDirs = ['spaceMarine', 'tyranid']; // Add more factions as they're added
     
-    for (const faction of factionDirs) {
-      console.log(`🔍 Scanning faction: ${faction}`);
-      
+    for (const faction of factionDirs) {      
       // Try to discover units in this faction directory
       const unitFiles = await discoverUnitsInFaction(faction);
       
@@ -44,7 +40,6 @@ async function initializeUnitRegistry(): Promise<void> {
           if (UnitClass.MOVE && UnitClass.HP_MAX && UnitClass.ICON) {
             unitClassMap[className] = UnitClass;
             availableUnitTypes.push(className);
-            console.log(`✅ Auto-discovered unit: ${className}`);
           } else {
             console.warn(`⚠️ ${className} missing required unit properties`);
           }
@@ -56,7 +51,6 @@ async function initializeUnitRegistry(): Promise<void> {
     }
     
     initialized = true;
-    console.log(`🎉 Auto-discovered ${availableUnitTypes.length} units:`, availableUnitTypes);
     
   } catch (error) {
     console.error('❌ Failed to auto-discover units:', error);

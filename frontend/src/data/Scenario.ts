@@ -43,22 +43,4 @@ const initialUnits: Unit[] = [
   }),
 ];
 
-// Debug: Log the created units
-console.log('🔧 Created units with properties:', initialUnits.map(unit => ({
-  name: unit.name,
-  type: unit.type,
-  RNG_NB: unit.RNG_NB,
-  RNG_ATK: unit.RNG_ATK,
-  RNG_STR: unit.RNG_STR,
-  RNG_AP: unit.RNG_AP,
-  CC_NB: unit.RNG_NB,
-  CC_ATK: unit.RNG_ATK,
-  CC_STR: unit.RNG_STR,
-  CC_AP: unit.RNG_AP,
-  T: unit.T,
-  ARMOR_SAVE: unit.ARMOR_SAVE,
-  INVUL_SAVE: unit.INVUL_SAVE,
-  RNG_RNG: unit.RNG_RNG
-})));
-
 export default initialUnits;

@@ -213,7 +213,8 @@ export class UnitRenderer {
           window.dispatchEvent(new CustomEvent('boardCancelCharge'));
         }
       });
-    } else if (phase !== "move" || isEligible) {
+    } else {
+      // Always add click handlers so we can detect clicks on non-selectable units
       let addClickHandler = true;
       if (phase === "shoot" && mode === "attackPreview" && unit.player !== currentPlayer && selectedUnitId !== null) {
         const selectedUnit = units.find(u => u.id === selectedUnitId);
@@ -251,7 +252,10 @@ export class UnitRenderer {
     
     if (unit.ICON) {
       try {
-        const texture = PIXI.Texture.from(unit.ICON, isPreview ? { resourceOptions: { crossorigin: 'anonymous' } } : undefined);
+        // Use red border icon for Player 2 units
+        const iconPath = unit.player === 1 ? unit.ICON.replace('.webp', '_red.webp') : unit.ICON;
+        
+        const texture = PIXI.Texture.from(iconPath, isPreview ? { resourceOptions: { crossorigin: 'anonymous' } } : undefined);
         const sprite = new PIXI.Sprite(texture);
         sprite.anchor.set(0.5);
         sprite.position.set(centerX, centerY);

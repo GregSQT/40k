@@ -32,7 +32,6 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   const getTurnStatus = (turn: number): 'passed' | 'current' | 'upcoming' => {
     // Default to turn 1 if currentTurn is undefined
     const actualCurrentTurn = currentTurn || 1;
-    console.log(`Turn ${turn}, currentTurn: ${currentTurn}, actualCurrentTurn: ${actualCurrentTurn}`);
     if (turn < actualCurrentTurn) {
       return 'passed';
     } else if (turn === actualCurrentTurn) {

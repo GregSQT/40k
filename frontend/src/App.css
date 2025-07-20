@@ -285,6 +285,11 @@ body {
   background: var(--color-accent);
 }
 
+.unit-status-player-header--red {
+  background: #dc2626 !important; /* red-600 */
+  border-color: #b91c1c !important; /* red-700 */
+}
+
 .unit-status-player-header {
   background: var(--color-accent);
   color: white;
@@ -328,8 +333,13 @@ body {
 }
 
 .unit-status-row--selected {
-  background: rgba(30, 144, 255, 0.2) !important;
-  border: 2px solid var(--color-accent);
+  background: rgba(34, 197, 94, 0.3) !important; /* green highlight for selected/active unit */
+  border: 2px solid #22c55e; /* green border */
+}
+
+.unit-status-row--clicked {
+  background: rgba(30, 144, 255, 0.2) !important; /* blue highlight for clicked non-selectable unit */
+  border: 2px solid var(--color-accent); /* blue border */
 }
 
 /* Cell styles */

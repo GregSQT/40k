@@ -6,23 +6,28 @@ interface UnitStatusTableProps {
   units: Unit[];
   player: 0 | 1;
   selectedUnitId: UnitId | null;
+  clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
 }
 
 interface UnitRowProps {
   unit: Unit;
   isSelected: boolean;
+  isClicked: boolean;
   onSelect: (unitId: UnitId) => void;
 }
 
-const UnitRow = memo<UnitRowProps>(({ unit, isSelected, onSelect }) => {
+const UnitRow = memo<UnitRowProps>(({ unit, isSelected, isClicked, onSelect }) => {
   const currentHP = unit.CUR_HP ?? unit.HP_MAX;
   const hpPercentage = (currentHP / unit.HP_MAX) * 100;
   
   return (
     <tr 
-      className={`unit-status-row ${isSelected ? 'unit-status-row--selected' : ''}`}
-      onClick={() => onSelect(unit.id)}
+      className={`unit-status-row ${isSelected ? 'unit-status-row--selected' : ''} ${isClicked ? 'unit-status-row--clicked' : ''}`}
+      onClick={() => {
+        console.log('🖱️ Table row clicked for unit:', unit.id);
+        onSelect(unit.id);
+      }}
       style={{ cursor: 'pointer' }}
     >
       {/* Unit Number */}
@@ -131,6 +136,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
   units,
   player,
   selectedUnitId,
+  clickedUnitId,
   onSelectUnit
 }) => {
   // Filter units for this player and exclude dead units
@@ -157,7 +163,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
         <table className="unit-status-table">
           <thead>
             <tr className="unit-status-player-row">
-              <th className="unit-status-player-header" colSpan={17}>
+              <th className={`unit-status-player-header ${player === 1 ? 'unit-status-player-header--red' : ''}`} colSpan={17}>
                 {player === 0 ? "Player 1" : "Player 2"}
               </th>
             </tr>
@@ -192,6 +198,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
                 key={unit.id}
                 unit={unit}
                 isSelected={selectedUnitId === unit.id}
+                isClicked={clickedUnitId === unit.id && selectedUnitId !== unit.id}
                 onSelect={onSelectUnit}
               />
             ))}
