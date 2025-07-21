@@ -705,6 +705,7 @@ export default function Board({
               
               console.log(`🎯 Checking ${enemyUnits.length} enemies for line of sight from (${attackFromCol},${attackFromRow})`);
               
+              // First process actual enemy units
               for (const enemy of enemyUnits) {
                 const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
                 if (distance > 0 && distance <= range) {
@@ -724,10 +725,16 @@ export default function Board({
                     coverTargets.add(`${enemy.col},${enemy.row}`);
                     console.log(`🟠 Added COVER enemy at (${enemy.col},${enemy.row})`);
                     
-                    // Mark all hexes in the path that contribute to cover
+                    // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
                     const pathHexes = getHexLine(attackFromCol, attackFromRow, enemy.col, enemy.row);
+                    const wallHexSet = new Set<string>(
+                      (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+                    );
                     pathHexes.forEach(hex => {
-                      coverPathHexes.add(`${hex.col},${hex.row}`);
+                      const hexKey = `${hex.col},${hex.row}`;
+                      if (!wallHexSet.has(hexKey)) {
+                        coverPathHexes.add(hexKey);
+                      }
                     });
                     console.log(`🟠 Added ${pathHexes.length} path hexes for cover`);
                   } else if (lineOfSight.canSee) {
@@ -772,6 +779,8 @@ export default function Board({
                         
                         if (lineOfSight.canSee && !lineOfSight.inCover) {
                           attackCells.push({ col, row });
+                        } else if (lineOfSight.canSee && lineOfSight.inCover) {
+                          coverCells.push({ col, row });
                         }
                       }
                     }
@@ -853,7 +862,6 @@ export default function Board({
           // Override color for walls and objective zones
           if (isWallHex) {
             cellColor = WALL_COLOR;
-          // Removed objective zone color override
           } else if (objectiveHexSet.has(`${col},${row}`)) {
             cellColor = parseColor(boardConfig.colors.objective);
           }

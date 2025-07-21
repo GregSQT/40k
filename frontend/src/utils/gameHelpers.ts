@@ -75,7 +75,7 @@ function lineIntersectsWall(
   return t >= 0 && t <= 1 && u >= 0 && u <= 1;
 }
 
-// Simple center-to-center line of sight system
+// Simplified direct blocking line of sight system  
 export function hasLineOfSight(
   fromUnit: Unit | Position,
   toUnit: Unit | Position, 
@@ -88,47 +88,54 @@ export function hasLineOfSight(
     return { canSee: true, inCover: false };
   }
   
+  // Debug: Log range information for captain
+  if (fromPos.col === 23 && fromPos.row === 9) {
+    console.log(`🎯 Captain at (23,9) checking LoS to (${toPos.col},${toPos.row})`);
+    const distance = Math.max(
+      Math.abs(fromPos.col - toPos.col),
+      Math.abs(fromPos.row - toPos.row),
+      Math.abs((fromPos.row - ((fromPos.col - (fromPos.col & 1)) >> 1)) - (toPos.row - ((toPos.col - (toPos.col & 1)) >> 1)))
+    );
+    console.log(`📏 Distance: ${distance} hexes`);
+  }
+  
   // Create set of wall hex positions for fast lookup
   const wallHexSet = new Set<string>(
     wallHexes.map(([c, r]) => `${c},${r}`)
   );
-  
-  // Get all hexes along the line from center to center
+
+  // Use the actual line algorithm to check for blocking walls
   const lineHexes = getHexLine(fromPos.col, fromPos.row, toPos.col, toPos.row);
   
   // Remove start and end hexes (shooter and target positions don't block)
   const pathHexes = lineHexes.slice(1, -1);
   
-  // Count wall hexes in the path
-  let wallHexesInPath = 0;
-  const wallsInPath: string[] = [];
+  // Count wall hexes that are actually on the line path
+  let blockingWalls = 0;
+  const blockingWallList: string[] = [];
   
   for (const hex of pathHexes) {
     const hexKey = `${hex.col},${hex.row}`;
     if (wallHexSet.has(hexKey)) {
-      wallHexesInPath++;
-      wallsInPath.push(hexKey);
+      blockingWalls++;
+      blockingWallList.push(hexKey);
     }
   }
-  
+
   // Debug logging
-  console.log(`🎯 CENTER-TO-CENTER LoS from (${fromPos.col},${fromPos.row}) to (${toPos.col},${toPos.row})`);
-  console.log(`📍 Path hexes:`, pathHexes.map(h => `(${h.col},${h.row})`).join(', '));
-  console.log(`🚫 ${wallHexesInPath} wall hexes in path:`, wallsInPath);
+  console.log(`🎯 LINE-BASED LoS from (${fromPos.col},${fromPos.row}) to (${toPos.col},${toPos.row})`);
+  console.log(`🛤️ Path hexes: ${pathHexes.map(h => `(${h.col},${h.row})`).join(', ')}`);
+  console.log(`🚫 Blocking walls found: ${blockingWalls} - ${blockingWallList.join(', ')}`);
   
-  // Simple rules:
-  // 0 walls = clear line of sight
-  // 1 wall = target in cover (+1 armor save)
-  // 2+ walls = completely blocked
-  
-  if (wallHexesInPath === 0) {
-    console.log(`✅ CLEAR LINE OF SIGHT`);
+  // Rules based on actual walls blocking the line path
+  if (blockingWalls === 0) {
+    console.log(`✅ CLEAR LINE OF SIGHT (no blocking walls)`);
     return { canSee: true, inCover: false };
-  } else if (wallHexesInPath === 1) {
-    console.log(`🛡️ TARGET IN COVER (+1 armor save)`);
+  } else if (blockingWalls <= 2) {
+    console.log(`🛡️ TARGET IN COVER (${blockingWalls} blocking walls, +1 armor save)`);
     return { canSee: true, inCover: true };
   } else {
-    console.log(`❌ LINE OF SIGHT BLOCKED (${wallHexesInPath} walls)`);
+    console.log(`❌ LINE OF SIGHT BLOCKED (${blockingWalls} blocking walls)`);
     return { canSee: false, inCover: false };
   }
 }
