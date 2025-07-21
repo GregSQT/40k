@@ -2,7 +2,7 @@
 import React from 'react';
 import Board from './Board';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
-import { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState, TargetPreview } from '../types/game';
+import { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState, TargetPreview, CombatSubPhase, PlayerId } from '../types/game';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
 
 
@@ -18,6 +18,8 @@ interface GameBoardProps {
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
   unitsFled: UnitId[];
+  combatSubPhase?: CombatSubPhase; // NEW
+  combatActivePlayer?: PlayerId; // NEW
   currentTurn: number;
   maxTurns?: number;
   onSelectUnit: (id: UnitId | null) => void;
@@ -100,6 +102,8 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         unitsCharged={props.unitsCharged}
         unitsAttacked={props.unitsAttacked}
         unitsFled={props.unitsFled}
+        combatSubPhase={props.combatSubPhase}
+        combatActivePlayer={props.combatActivePlayer}
         onSelectUnit={handleSelectUnit}
         onStartMovePreview={handleStartMovePreview}
         onStartAttackPreview={props.onStartAttackPreview}

@@ -4,6 +4,7 @@ export type PlayerId = 0 | 1;
 export type UnitId = number;
 export type GamePhase = "move" | "shoot" | "charge" | "combat";
 export type GameMode = "select" | "movePreview" | "attackPreview" | "chargePreview";
+export type CombatSubPhase = "charged_units" | "alternating_combat"; // NEW: Combat sub-phases
 
 export interface Position {
   col: number;
@@ -42,6 +43,7 @@ export interface Unit {
   INVUL_SAVE?: number; // Invulnerable save (D6 target)
   SHOOT_LEFT?: number; // Shots remaining this phase
   ATTACK_LEFT?: number; // Attacks remaining this phase
+  hasChargedThisTurn?: boolean; // NEW: Track if unit charged this turn
 }
 
 export interface SingleShotState {
@@ -117,9 +119,11 @@ export interface GameState {
   unitsMoved: UnitId[];
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
-  unitsFled: UnitId[];  // NEW: Track units that fled (moved away from adjacent enemies)
+  unitsFled: UnitId[];  // Track units that fled (moved away from adjacent enemies)
   targetPreview: TargetPreview | null;
-  currentTurn: number;  // NEW: Track current turn (1-based)
+  currentTurn: number;  // Track current turn (1-based)
+  combatSubPhase?: CombatSubPhase; // NEW: Track combat sub-phase
+  combatActivePlayer?: PlayerId; // NEW: Track who's turn it is in alternating combat
 }
 
 export interface MovePreview {

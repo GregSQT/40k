@@ -1,6 +1,6 @@
 // src/hooks/useGameActions.ts
 import { useCallback } from 'react';
-import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState, TargetPreview } from '../types/game';
+import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState, TargetPreview, CombatSubPhase, PlayerId } from '../types/game';
 import { calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability, calculateCombatHitProbability, calculateCombatWoundProbability, calculateCombatSaveProbability, calculateCombatOverallProbability } from '../utils/probabilityCalculator';
 import { areUnitsAdjacent, isUnitInRange } from '../utils/gameHelpers';
 import { singleShotSequenceManager } from '../utils/ShootingSequenceManager';
@@ -26,6 +26,8 @@ interface UseGameActionsParams {
     updateShootingPhaseState: (updates: Partial<ShootingPhaseState>) => void;
     decrementShotsLeft: (unitId: UnitId) => void;
     setTargetPreview: (preview: TargetPreview | null) => void;
+    setCombatSubPhase: (subPhase: CombatSubPhase | undefined) => void; // NEW
+    setCombatActivePlayer: (player: PlayerId | undefined) => void; // NEW
   };
 }
 
@@ -37,7 +39,18 @@ export const useGameActions = ({
   gameLog,
   actions,
 }: UseGameActionsParams) => {
-  const { units, currentPlayer, phase, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled } = gameState;
+  const { 
+    units, 
+    currentPlayer, 
+    phase, 
+    selectedUnitId, 
+    unitsMoved, 
+    unitsCharged, 
+    unitsAttacked, 
+    unitsFled,
+    combatSubPhase,
+    combatActivePlayer
+  } = gameState;
 
   // Helper function to find unit by ID
   const findUnit = useCallback((unitId: UnitId) => {
@@ -46,24 +59,20 @@ export const useGameActions = ({
 
   // Helper function to check if unit is eligible for selection
   const isUnitEligible = useCallback((unit: Unit) => {
-    if (unit.player !== currentPlayer) return false;
+    // Special handling for combat phase - don't block based on currentPlayer yet
+    if (phase !== "combat" && unit.player !== currentPlayer) return false;
 
     // Get enemy units once for efficiency
     const enemyUnits = units.filter(u => u.player !== currentPlayer);
 
     switch (phase) {
       case "move":
-        const moveEligible = !unitsMoved.includes(unit.id);
-        console.log(`🔍 Unit ${unit.name} (${unit.id}) move eligibility: ${moveEligible} (moved: ${unitsMoved.includes(unit.id)})`);
-        return moveEligible;
+        return !unitsMoved.includes(unit.id);
       case "shoot":
         if (unitsMoved.includes(unit.id)) {
-          console.log(`❌ Unit ${unit.name} (${unit.id}) ineligible - already moved this phase`);
           return false;
         }
-        // NEW RULE: Units that fled cannot shoot
         if (unitsFled.includes(unit.id)) {
-          console.log(`🏃 Unit ${unit.name} (${unit.id}) ineligible - fled this turn`);
           return false;
         }
         // Check if unit is adjacent to any enemy (engaged in combat)
@@ -81,21 +90,29 @@ export const useGameActions = ({
         });
       case "charge":
         if (unitsCharged.includes(unit.id)) {
-          console.log(`❌ Unit ${unit.name} (${unit.id}) ineligible - already charged this phase`);
           return false;
         }
-        // NEW RULE: Units that fled cannot charge
         if (unitsFled.includes(unit.id)) {
-          console.log(`🏃 Unit ${unit.name} (${unit.id}) ineligible - fled this turn`);
           return false;
         }
         const isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         const inRange = enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
-        const chargeEligible = !isAdjacent && inRange;
-        console.log(`⚔️ Unit ${unit.name} (${unit.id}) charge eligibility: ${chargeEligible} (adjacent: ${isAdjacent}, inRange: ${inRange})`);
-        return chargeEligible;
+        return !isAdjacent && inRange;
       case "combat":
         if (unitsAttacked.includes(unit.id)) return false;
+        
+        if (gameState.combatSubPhase === "charged_units") {
+          if (unit.player !== currentPlayer) return false;
+          if (!unit.hasChargedThisTurn) return false;
+        } else if (gameState.combatSubPhase === "alternating_combat") {
+          if (unit.player !== gameState.combatActivePlayer) return false;
+          if (unit.hasChargedThisTurn) return false;
+        } else {
+          if (unit.player !== currentPlayer) {
+            return false;
+          }
+        }
+        
         if (unit.CC_RNG === undefined) {
           throw new Error('unit.CC_RNG is required');
         }
@@ -104,12 +121,11 @@ export const useGameActions = ({
       default:
         return false;
     }
-  }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled]);
+  }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer]);
 
   const selectUnit = useCallback((unitId: UnitId | null) => {
     // Prevent unit selection during shooting sequence
     if (shootingPhaseState.singleShotState?.isActive) {
-      console.log("Cannot select units during shooting sequence");
       return;
     }
 
@@ -122,29 +138,15 @@ export const useGameActions = ({
     }
 
     const unit = findUnit(unitId);
-    console.log(`[useGameActions] Found unit:`, unit);
     
     if (!unit) {
-      console.log(`[useGameActions] Unit ${unitId} not found in units array`);
       return;
     }
     
     const eligible = isUnitEligible(unit);
-    console.log(`[useGameActions] Unit ${unitId} eligibility check:`, {
-      eligible,
-      phase,
-      currentPlayer,
-      unitPlayer: unit.player,
-      unitsMoved,
-      unitsCharged,
-      unitsAttacked,
-      unitsFled
-    });
     
-    // CRITICAL FIX: Block ALL actions if unit is not eligible
     if (!eligible) {
-      console.log(`[useGameActions] Unit ${unitId} not eligible for phase ${phase} - selection completely blocked`);
-      return; // Exit immediately - no phase handling
+      return;
     }
 
     // Special handling for move phase - second click marks as moved (or chose not to move)
@@ -194,7 +196,7 @@ export const useGameActions = ({
     actions.setMovePreview(null);
     actions.setAttackPreview(null);
     actions.setMode("select");
-  }, [findUnit, isUnitEligible, phase, selectedUnitId, actions, currentPlayer, unitsMoved, unitsCharged, unitsAttacked]);
+  }, [findUnit, isUnitEligible, phase, selectedUnitId, actions, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer]);
 
   const selectCharger = useCallback((unitId: UnitId | null) => {
     if (unitId === null) {
@@ -240,20 +242,13 @@ export const useGameActions = ({
         );
         
         if (wasAdjacentToEnemy) {
-          // Check if unit will still be adjacent after the move to DESTINATION
           const willBeAdjacentToEnemy = enemyUnits.some(enemy => 
             Math.max(Math.abs(movePreview.destCol - enemy.col), Math.abs(movePreview.destRow - enemy.row)) === 1
           );
           
-          // Only mark as fled if unit was adjacent and will no longer be adjacent
           if (!willBeAdjacentToEnemy) {
-            console.log(`🏃 Unit ${unit.name} (${unit.id}) FLED from (${unit.col},${unit.row}) to (${movePreview.destCol},${movePreview.destRow})`);
             actions.addFledUnit(movePreview.unitId);
-          } else {
-            console.log(`📍 Unit ${unit.name} (${unit.id}) moved but stayed adjacent - not fleeing`);
           }
-        } else {
-          console.log(`✅ Unit ${unit.name} (${unit.id}) moved but was not adjacent to enemies - normal move`);
         }
 
         // Log the move action
@@ -397,15 +392,11 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
 };
   //
   const handleShoot = useCallback((shooterId: UnitId, targetId: UnitId) => {
-    // CRITICAL: Check if unit has already shot this phase (FIRST CHECK)
     if (unitsMoved.includes(shooterId)) {
-      console.log(`❌ Unit already shot this phase - ignoring handleShoot call for ${shooterId}`);
       return;
     }
 
-    // NEW: Check if unit fled this turn (SECOND CHECK)
     if (unitsFled.includes(shooterId)) {
-      console.log(`❌ Unit fled this turn and cannot shoot - ignoring handleShoot call for ${shooterId}`);
       return;
     }
 
@@ -421,19 +412,15 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       return;
     }
 
-    // PREVENT FRIENDLY FIRE: Cannot shoot friendly units
     if (target.player === shooter.player) {
-      console.log(`❌ Cannot shoot friendly unit ${target.name || target.id}`);
       return;
     }
 
-    // RULE 2: Cannot shoot enemy units adjacent to friendly units
     const friendlyUnits = units.filter(u => u.player === shooter.player && u.id !== shooter.id);
     const isTargetAdjacentToFriendly = friendlyUnits.some(friendly => 
       Math.max(Math.abs(friendly.col - target.col), Math.abs(friendly.row - target.row)) === 1
     );
     if (isTargetAdjacentToFriendly) {
-      console.log(`❌ Cannot shoot ${target.name || target.id} - adjacent to friendly unit`);
       return;
     }
 
@@ -658,7 +645,6 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
   }, [findUnit, actions, shootingPhaseState, gameState.targetPreview]);
 
   const handleCombatAttack = useCallback((attackerId: UnitId, targetId: UnitId | null) => {
-    console.log(`🥊 COMBAT ATTACK CALLED: Attacker ${attackerId} -> Target ${targetId}`);
     
     if (targetId === null) {
       // Skip attack but mark as attacked
@@ -670,14 +656,11 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
 
     const attacker = findUnit(attackerId);
     const target = findUnit(targetId);
-    console.log(`🥊 COMBAT: Found attacker:`, attacker?.name, attacker?.id);
-    console.log(`🥊 COMBAT: Found target:`, target?.name, target?.id);
     
     if (!attacker || !target) return;
 
     // PREVENT FRIENDLY FIRE: Cannot attack friendly units
     if (target.player === attacker.player) {
-      console.log(`❌ Cannot attack friendly unit ${target.name || target.id}`);
       return;
     }
 
@@ -696,46 +679,32 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       return; // Return to let state update, then continue
     }
 
-    // Check if attacker has attacks remaining
     if (attacker.ATTACK_LEFT === undefined) throw new Error(`attacker.ATTACK_LEFT is undefined for unit ${attacker.name}`);
     if (attacker.ATTACK_LEFT <= 0) {
-      console.log(`❌ No attacks remaining for ${attacker.name}`);
       actions.addAttackedUnit(attackerId);
       actions.setSelectedUnitId(null);
       actions.setMode("select");
       return;
     }
 
-    console.log(`✅ ${attacker.name} has ${attacker.ATTACK_LEFT} attacks remaining - proceeding with attack`);
-
     // ✅ NEW: Combat Preview System (similar to shooting preview)
     const currentTargetPreview = gameState.targetPreview;
     const isConfirmingAttack = currentTargetPreview?.targetId === targetId && currentTargetPreview?.shooterId === attackerId;
 
     if (isConfirmingAttack) {
-      // Second click - execute attack
-      console.log(`🎯 Confirming combat attack for ${attacker.name} → ${target.name}`);
-      
-      // Clear the preview
       if (currentTargetPreview?.blinkTimer) {
         clearInterval(currentTargetPreview.blinkTimer);
       }
       actions.setTargetPreview(null);
       
-      // Execute the actual combat attack (existing logic wrapped in setTimeout)
       setTimeout(() => {
-        // Combat Sequence: Hit → Wound → Save → Damage
-        console.log(`⚔️ ${attacker.name} attacks ${target.name}`);
 
         // Hit Roll
         const hitRoll = Math.floor(Math.random() * 6) + 1;
     if (!attacker.CC_ATK) throw new Error(`attacker.CC_ATK is undefined for unit ${attacker.name}`);
     const hitSuccess = hitRoll >= attacker.CC_ATK;
 
-    console.log(`🎲 Hit roll: ${hitRoll} vs ${attacker.CC_ATK}+ = ${hitSuccess ? 'HIT' : 'MISS'}`);
-
     if (!hitSuccess) {
-      // Log the miss
       if (gameLog) {
         const combatDetails = [{
           shotNumber: 1,
@@ -778,10 +747,7 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
                       attackerStr < targetT ? 5 : 6;
     const woundSuccess = woundRoll >= woundTarget;
 
-    console.log(`🎲 Wound roll: ${woundRoll} vs ${woundTarget}+ = ${woundSuccess ? 'WOUND' : 'NO WOUND'}`);
-
     if (!woundSuccess) {
-      // Log the failed wound
       if (gameLog) {
         const combatDetails = [{
           shotNumber: 1,
@@ -811,9 +777,6 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       return;
     }
 
-    console.log(`🎲 Proceeding to armor save...`);
-
-    // Armor Save
     const saveRoll = Math.floor(Math.random() * 6) + 1;
     if (target.ARMOR_SAVE === undefined) throw new Error(`target.ARMOR_SAVE is undefined for unit ${target.name}`);
     if (attacker.CC_AP === undefined) throw new Error(`attacker.CC_AP is undefined for unit ${attacker.name}`);
@@ -824,14 +787,9 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     const saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
     const saveSuccess = saveRoll >= saveTarget;
 
-    console.log(`🎲 Save roll: ${saveRoll} vs ${saveTarget}+ = ${saveSuccess ? 'SAVED' : 'FAILED'}`);
-
-    // Damage Application
     const damageDealt = saveSuccess ? 0 : (attacker.CC_DMG);
-    console.log(`${saveSuccess ? 'Saved' : 'Wounded'} - ${damageDealt} damage`);
 
     if (attacker.ATTACK_LEFT === undefined) throw new Error(`attacker.ATTACK_LEFT is undefined for unit ${attacker.name}`);
-    console.log(`💥 About to decrement ATTACK_LEFT from ${attacker.ATTACK_LEFT} to ${attacker.ATTACK_LEFT - 1}`);
 
     // Log the combat action FIRST (regardless of damage)
     if (gameLog) {
@@ -877,18 +835,13 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     
     actions.updateUnit(attackerId, { ATTACK_LEFT: newAttacksLeft });
 
-    console.log(`📉 Updated ${attacker.name} ATTACK_LEFT to ${newAttacksLeft}`);
-
-    // Check if attacker is done
-        if (newAttacksLeft <= 0) {
-          actions.addAttackedUnit(attackerId);
-          actions.setSelectedUnitId(null);
-          actions.setMode("select");
-        }
-      }, 100);
-    } else {
-      // First click - start preview
-      console.log(`🎯 Starting combat preview for ${attacker.name} → ${target.name}`);
+    if (newAttacksLeft <= 0) {
+      actions.addAttackedUnit(attackerId);
+      actions.setSelectedUnitId(null);
+      actions.setMode("select");
+    }
+  }, 100);
+} else {
       
       // Clear any existing preview
       if (currentTargetPreview?.blinkTimer) {
@@ -927,43 +880,34 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
   }, [findUnit, actions, gameState.targetPreview, gameState.currentTurn, gameLog]);
 
   const handleCharge = useCallback((chargerId: UnitId, targetId: UnitId) => {
-    console.log(`⚔️ CHARGE: Unit ${chargerId} charges unit ${targetId}`);
     const charger = findUnit(chargerId);
     const target = findUnit(targetId);
     if (!charger) {
-      console.error(`❌ CHARGE ERROR: Charger unit ${chargerId} not found!`);
       return;
     }
     if (!target) {
-      console.error(`❌ CHARGE ERROR: Target unit ${targetId} not found!`);
       return;
     }
 
-    // Log the charge action
     if (gameLog) {
       gameLog.logChargeAction(charger, target, charger.col, charger.row, target.col, target.row, gameState.currentTurn);
     }
 
-    console.log(`⚔️ Adding ${chargerId} to charged units`);
+    actions.updateUnit(chargerId, { hasChargedThisTurn: true });
     actions.addChargedUnit(chargerId);
     actions.setSelectedUnitId(null);
     actions.setMode("select");
   }, [actions, findUnit, gameLog, gameState.currentTurn]);
 
   const moveCharger = useCallback((chargerId: UnitId, destCol: number, destRow: number) => {
-    console.log(`🏃 MOVE CHARGER: Unit ${chargerId} moves to (${destCol}, ${destRow})`);
     const charger = findUnit(chargerId);
     if (!charger) {
-      console.error(`❌ MOVE CHARGER ERROR: Unit ${chargerId} not found!`);
       return;
     }
     
-    // Log the charge move
     if (gameLog) {
-      // Find the nearest enemy unit (charge target)
       const enemyUnits = units.filter(u => u.player !== charger.player);
       const target = enemyUnits.find(enemy => {
-        // Check if enemy is adjacent to the destination
         const distance = Math.max(Math.abs(destCol - enemy.col), Math.abs(destRow - enemy.row));
         return distance <= 1;
       });
@@ -971,42 +915,29 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       if (target) {
         gameLog.logChargeAction(charger, target, charger.col, charger.row, destCol, destRow, gameState.currentTurn);
       } else {
-        // If no specific target found, log as a general charge move
         const dummyTarget = { id: -1, type: 'Enemy', name: 'Enemy' } as any;
         gameLog.logChargeAction(charger, dummyTarget, charger.col, charger.row, destCol, destRow, gameState.currentTurn);
       }
     }
     
-    // Move the unit to the destination
-    actions.updateUnit(chargerId, { col: destCol, row: destRow });
-    
-    // Mark unit as having charged (end of activability for this phase)
-    console.log(`⚔️ Adding ${chargerId} to charged units via moveCharger`);
+    actions.updateUnit(chargerId, { col: destCol, row: destRow, hasChargedThisTurn: true });
     actions.addChargedUnit(chargerId);
-    
-    // Deselect the unit
     actions.setSelectedUnitId(null);
-    
-    // Return to select mode (cancel colored cells)
     actions.setMode("select");
   }, [actions, findUnit, gameLog, gameState.currentTurn, units]);
 
   const cancelCharge = useCallback(() => {
-    console.log(`❌ CANCEL CHARGE: selectedUnitId = ${selectedUnitId}`);
     if (selectedUnitId !== null) {
       const unit = findUnit(selectedUnitId);
       if (!unit) {
-        console.error(`❌ CANCEL CHARGE ERROR: Unit ${selectedUnitId} not found!`);
+        // Handle error silently
       } else {
-        // CRITICAL FIX: Check if unit is already charged to prevent duplicates
         if (unitsCharged.includes(selectedUnitId)) {
-          console.log(`⚠️ Unit ${selectedUnitId} already charged - skipping cancelCharge`);
+          // Already charged, skip
         } else {
-          // Log charge cancellation
           if (gameLog) {
             gameLog.logChargeCancellation(unit, gameState.currentTurn);
           }
-          console.log(`⚔️ Adding ${selectedUnitId} to charged units via cancelCharge`);
           actions.addChargedUnit(selectedUnitId);
         }
       }
@@ -1018,16 +949,12 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
   }, [actions, selectedUnitId, findUnit, unitsCharged, gameLog, gameState.currentTurn]);
 
   const validateCharge = useCallback((chargerId: UnitId) => {
-    console.log(`✅ VALIDATE CHARGE: Unit ${chargerId}`);
     const charger = findUnit(chargerId);
     if (!charger) {
-      console.error(`❌ VALIDATE CHARGE ERROR: Unit ${chargerId} not found!`);
       return;
     }
 
-    // Log the charge validation
     if (gameLog) {
-      // Find nearby enemy as target
       const enemyUnits = units.filter(u => u.player !== charger.player);
       const target = enemyUnits.find(enemy => 
         Math.max(Math.abs(charger.col - enemy.col), Math.abs(charger.row - enemy.row)) <= 1
@@ -1037,7 +964,7 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
       }
     }
 
-    console.log(`⚔️ Adding ${chargerId} to charged units via validateCharge`);
+    actions.updateUnit(chargerId, { hasChargedThisTurn: true });
     actions.addChargedUnit(chargerId);
     actions.setSelectedUnitId(null);
     actions.setMode("select");

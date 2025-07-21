@@ -7,6 +7,13 @@
     "row": 12
   },
   {
+    "id": 5,
+    "unit_type": "Intercessor",
+    "player": 0,
+    "col": 22,
+    "row": 12
+  },
+  {
     "id": 2,
     "unit_type": "AssaultIntercessor",
     "player": 0,

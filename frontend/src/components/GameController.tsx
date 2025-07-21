@@ -22,7 +22,7 @@ interface GameControllerProps {
 
 export const GameController: React.FC<GameControllerProps> = ({
   initialUnits,
-  className = "",
+  className,
 }) => {
   // Generate default units if none provided
   const [gameUnits, setGameUnits] = useState<Unit[]>(initialUnits || []);
@@ -125,6 +125,9 @@ export const GameController: React.FC<GameControllerProps> = ({
       resetFledUnits: actions.resetFledUnits,
       initializeCombatPhase: actions.initializeCombatPhase,
       setCurrentTurn: actions.setCurrentTurn,
+      setCombatSubPhase: actions.setCombatSubPhase,
+      setCombatActivePlayer: actions.setCombatActivePlayer,
+      setUnits: actions.setUnits,
     },
   });
 
@@ -213,6 +216,8 @@ export const GameController: React.FC<GameControllerProps> = ({
               unitsCharged={gameState.unitsCharged}
               unitsAttacked={gameState.unitsAttacked}
               unitsFled={gameState.unitsFled}
+              combatSubPhase={gameState.combatSubPhase}
+              combatActivePlayer={gameState.combatActivePlayer}
               currentTurn={gameState.currentTurn}
               onSelectUnit={(unitId) => {
                 if (unitId === null) return;
@@ -221,9 +226,31 @@ export const GameController: React.FC<GameControllerProps> = ({
                 if (!unit) return;
                 
                 // Check if unit is selectable based on game rules
-                const isSelectable = unit.player === gameState.currentPlayer && 
-                  !gameState.unitsMoved.includes(unitId) &&
-                  (unit.CUR_HP ?? unit.HP_MAX) > 0;
+                // NEW: Use the same eligibility logic as useGameActions for combat phase
+                let isSelectable = false;
+                if (gameState.phase === "combat") {
+                  // In combat phase, use combat-specific eligibility
+                  if (!gameState.unitsAttacked.includes(unitId) && (unit.CUR_HP ?? unit.HP_MAX) > 0) {
+                    const combatSubPhase = gameState.combatSubPhase;
+                    const combatActivePlayer = gameState.combatActivePlayer;
+                    
+                    if (combatSubPhase === "charged_units") {
+                      // Phase 1: Only active player's charged units
+                      isSelectable = unit.player === gameState.currentPlayer && unit.hasChargedThisTurn === true;
+                    } else if (combatSubPhase === "alternating_combat") {
+                      // Phase 2: Only combat active player's non-charged units
+                      isSelectable = unit.player === combatActivePlayer && unit.hasChargedThisTurn !== true;
+                    } else {
+                      // Fallback
+                      isSelectable = unit.player === gameState.currentPlayer;
+                    }
+                  }
+                } else {
+                  // Original logic for non-combat phases
+                  isSelectable = unit.player === gameState.currentPlayer && 
+                    !gameState.unitsMoved.includes(unitId) &&
+                    (unit.CUR_HP ?? unit.HP_MAX) > 0;
+                }
                 
                 if (isSelectable) {
                   // Unit is selectable, use normal selection
@@ -313,43 +340,23 @@ export const GameController: React.FC<GameControllerProps> = ({
                 selectedUnitId={gameState.selectedUnitId}
                 clickedUnitId={clickedUnitId}
                 onSelectUnit={(unitId) => {
-                  console.log('🔍 Unit clicked:', unitId);
                   const unit = gameState.units.find(u => u.id === unitId);
                   if (!unit) {
-                    console.log('❌ Unit not found:', unitId);
                     return;
                   }
                   
-                  console.log('📊 Unit details:', {
-                    id: unit.id,
-                    player: unit.player,
-                    currentPlayer: gameState.currentPlayer,
-                    moved: gameState.unitsMoved.includes(unitId),
-                    hp: unit.CUR_HP ?? unit.HP_MAX,
-                    phase: gameState.phase
-                  });
-                  
-                  // Check if unit is selectable based on game rules
                   const isSelectable = unit.player === gameState.currentPlayer && 
                     !gameState.unitsMoved.includes(unitId) &&
                     (unit.CUR_HP ?? unit.HP_MAX) > 0;
                   
-                  console.log('✅ Is selectable:', isSelectable);
-                  
                   if (isSelectable) {
-                    console.log('🎯 Selecting unit normally');
-                    // Unit is selectable, use normal selection
                     const originalSelectFunction = gameState.phase === "charge" ? 
                       gameActions.selectCharger : gameActions.selectUnit;
                     originalSelectFunction(unitId);
                     setClickedUnitId(null);
                   } else {
-                    console.log('🔵 Showing blue highlight for non-selectable unit');
-                    // Unit is not selectable, show blue highlight
                     setClickedUnitId(unitId);
-                    // Clear clicked highlight after 2 seconds
                     setTimeout(() => {
-                      console.log('🔵 Clearing blue highlight');
                       setClickedUnitId(null);
                     }, 2000);
                   }
@@ -361,23 +368,10 @@ export const GameController: React.FC<GameControllerProps> = ({
             <ErrorBoundary fallback={<div>Failed to load game log</div>}>
               <GameLog 
                 events={gameLog.events}
-                maxEvents={50}
               />
             </ErrorBoundary>
           </div>
         </div>
-
-        <footer className="game-footer">
-          <GameStatus
-            currentPlayer={gameState.currentPlayer}
-            phase={gameState.phase}
-            units={gameState.units}
-            unitsMoved={gameState.unitsMoved}
-            unitsCharged={gameState.unitsCharged}
-            unitsAttacked={gameState.unitsAttacked}
-            unitsFled={gameState.unitsFled}
-          />
-        </footer>
       </main>
     </div>
   );

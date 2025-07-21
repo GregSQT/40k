@@ -35,9 +35,9 @@ interface GameLogProps {
   maxEvents?: number;
 }
 
-export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 50 }) => {
-  // Display only the most recent events (newest first)
-  const displayedEvents = events.slice(0, maxEvents);
+export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5 }) => {
+  // Display all events (newest first) - maxEvents now controls visual height via CSS
+  const displayedEvents = events;
 
   const getEventIcon = (type: GameLogEvent['type']): string => {
     switch (type) {

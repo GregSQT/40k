@@ -87,17 +87,11 @@ export const useAIPlayer = ({
     }
   }, [units, phase, unitsMoved, unitsCharged, unitsAttacked]);
 
-  // Helper to update unit position
   const updateUnitPosition = useCallback((unitId: UnitId, destCol: number, destRow: number) => {
     // This would need to be connected to the game state actions
-    console.log(`[AI] Moving unit ${unitId} to (${destCol}, ${destRow})`);
-    // You'll need to expose this from useGameState or pass it through gameActions
   }, []);
 
-  // Helper to mark unit as moved/charged/attacked
   const markUnitAction = useCallback((unitId: UnitId, actionType: 'moved' | 'charged' | 'attacked') => {
-    console.log(`[AI] Marking unit ${unitId} as ${actionType}`);
-    // Connect to the actual game state actions
     if (actionType === 'moved') {
       gameActions.addMovedUnit(unitId);
     } else if (actionType === 'charged') {
@@ -113,12 +107,8 @@ export const useAIPlayer = ({
       const gameState = convertToAIGameState();
       const result = await aiService.fetchAiAction(gameState, unit.id);
 
-      // Fix unit ID mismatch for fallback actions
       if (result.unitId !== unit.id) {
-        console.warn(`[AI] Action unitId mismatch: expected ${unit.id}, got ${result.unitId}`);
-        // If this is a skip action, correct the unit ID and continue
         if (result.action === 'skip') {
-          console.log(`[AI] Correcting skip action unit ID from ${result.unitId} to ${unit.id}`);
           result.unitId = unit.id;
         } else {
           return false;
@@ -173,26 +163,15 @@ export const useAIPlayer = ({
           break;
       }
 
-      console.warn(`[AI] Unexpected action for phase ${phase}:`, result);
       return false;
 
     } catch (error) {
-      if (error instanceof AIServiceError) {
-        console.error(`[AI] Service error for unit ${unit.id}:`, error.message);
-      } else {
-        console.error(`[AI] Unexpected error for unit ${unit.id}:`, error);
-      }
-
-      // Retry logic
       if (retryCount < retryAttempts) {
-        console.log(`[AI] Retrying action for unit ${unit.id} (attempt ${retryCount + 1}/${retryAttempts})`);
-        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
         return processAIAction(unit, retryCount + 1);
       }
 
-      // Fallback to skip if all retries failed
       if (fallbackToSkip) {
-        console.log(`[AI] Falling back to skip for unit ${unit.id}`);
         switch (phase) {
           case "move":
           case "shoot":
@@ -215,44 +194,30 @@ export const useAIPlayer = ({
   // Process all AI units for the current phase
   const processAITurn = useCallback(async () => {
     if (isProcessingRef.current) {
-      console.log('[AI] Already processing, skipping duplicate request');
       return;
     }
 
     isProcessingRef.current = true;
     
     try {
-      // Create abort controller for this AI turn
       abortControllerRef.current = new AbortController();
       
       const eligibleUnits = getEligibleAIUnits();
-      console.log(`[AI] Processing ${eligibleUnits.length} units for phase: ${phase}`);
 
       for (const unit of eligibleUnits) {
-        // Check if we should abort
         if (abortControllerRef.current.signal.aborted) {
-          console.log('[AI] Turn processing aborted');
           break;
         }
 
-        console.log(`[AI] Processing unit: ${unit.name} (${unit.id})`);
-        
         const success = await processAIAction(unit);
-        
-        if (!success) {
-          console.warn(`[AI] Failed to process action for unit ${unit.id}`);
-        }
 
-        // Add delay between actions to make it more visible
         if (actionDelay > 0) {
           await new Promise(resolve => setTimeout(resolve, actionDelay));
         }
       }
-
-      console.log(`[AI] Completed processing for phase: ${phase}`);
       
     } catch (error) {
-      console.error('[AI] Error during turn processing:', error);
+      // Handle error silently or with minimal logging
     } finally {
       isProcessingRef.current = false;
       abortControllerRef.current = null;
@@ -263,7 +228,6 @@ export const useAIPlayer = ({
   const abortAIProcessing = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
-      console.log('[AI] Aborted ongoing AI processing');
     }
     isProcessingRef.current = false;
   }, []);
@@ -295,7 +259,6 @@ export const useAIPlayer = ({
         return;
       }
 
-      console.log(`[AI] Triggering AI turn for phase: ${phase}`);
       processAITurn();
     }, 25); // 25ms delay for phase stability
 

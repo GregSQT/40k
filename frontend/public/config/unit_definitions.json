@@ -5,6 +5,9 @@
     },
     "AssaultIntercessor": {
       "class_name": "AssaultIntercessor"
+    },
+    "CaptainGravis": {
+      "class_name": "CaptainGravis"
     }
   },
   "required_properties": [

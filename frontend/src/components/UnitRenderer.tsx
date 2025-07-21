@@ -1,6 +1,6 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
-import type { Unit, TargetPreview } from "../types/game";
+import type { Unit, TargetPreview, CombatSubPhase, PlayerId } from "../types/game";
 import { areUnitsAdjacent, isUnitInRange } from '../utils/gameHelpers';
 
 // For flat-topped hex, even-q offset (col, row)
@@ -51,6 +51,8 @@ interface UnitRendererProps {
   unitsCharged?: number[];
   unitsAttacked?: number[];
   unitsFled?: number[];
+  combatSubPhase?: CombatSubPhase; // NEW
+  combatActivePlayer?: PlayerId; // NEW
   units: Unit[];
   chargeTargets: Unit[];
   combatTargets: Unit[];
@@ -102,9 +104,22 @@ export class UnitRenderer {
   }
   
   private calculateEligibility(): boolean {
-    const { unit, isPreview, phase, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled, units } = this.props;
+    const { unit, isPreview, phase, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled, units, combatSubPhase, combatActivePlayer } = this.props;
     
     if (isPreview) return false;
+    
+    // Debug logging for combat phase
+    if (phase === "combat") {
+      console.log(`🎨 UnitRenderer eligibility for ${unit.name} (${unit.id}):`, {
+        combatSubPhase,
+        combatActivePlayer,
+        currentPlayer,
+        unitPlayer: unit.player,
+        hasChargedThisTurn: unit.hasChargedThisTurn,
+        alreadyAttacked: unitsAttacked?.includes(Number(unit.id)),
+        timestamp: Date.now() // Add timestamp to see timing
+      });
+    }
     
     if (phase === "move") {
       return unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id));
@@ -135,8 +150,22 @@ export class UnitRenderer {
       }
     } else if (phase === "combat") {
       const unitsAttackedArr = unitsAttacked || [];
-      if (unit.player === currentPlayer && !unitsAttackedArr.includes(Number(unit.id))) {
-        const enemies = units.filter(u2 => u2.player !== currentPlayer);
+      if (!unitsAttackedArr.includes(Number(unit.id))) {
+        // NEW: Check combat sub-phase eligibility
+        if (combatSubPhase === "charged_units") {
+          // Phase 1: Only active player's charged units can attack
+          if (unit.player !== currentPlayer) return false;
+          if (!unit.hasChargedThisTurn) return false;
+        } else if (combatSubPhase === "alternating_combat") {
+          // Phase 2: Only current combat player's non-charged units can attack
+          if (unit.player !== combatActivePlayer) return false;
+          if (unit.hasChargedThisTurn) return false;
+        } else {
+          // Fallback to original logic if no sub-phase set
+          if (unit.player !== currentPlayer) return false;
+        }
+        
+        const enemies = units.filter(u2 => u2.player !== unit.player);
         // Validate CC_RNG is defined
         if (unit.CC_RNG === undefined || unit.CC_RNG === null) {
           throw new Error(`Unit ${unit.id} (${unit.type || 'unknown'}) is missing required CC_RNG property for combat phase eligibility`);
@@ -206,6 +235,9 @@ export class UnitRenderer {
     unitCircle.eventMode = 'static';
     unitCircle.cursor = "pointer";
     const isEligible = this.calculateEligibility();
+    
+    console.log(`🖱️ Setting up click handler for ${unit.name} (${unit.id}): eligible=${isEligible}, phase=${phase}`);
+    
     if (phase === "charge" && selectedUnitId === unit.id) {
       // Cancel charge on second click of active unit
       unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
@@ -225,6 +257,7 @@ export class UnitRenderer {
       if (addClickHandler) {
         unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
           if (e.button === 0) {
+            console.log(`🖱️ Unit clicked: ${unit.name} (${unit.id}), dispatching boardUnitClick event`);
             window.dispatchEvent(new CustomEvent('boardUnitClick', {
               detail: {
                 unitId: unit.id,
@@ -320,8 +353,29 @@ export class UnitRenderer {
     const circleRadius = (HEX_RADIUS * unitIconScale) / 2 * 1.1;
     eligibleOutline.lineStyle(ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA);
     eligibleOutline.drawCircle(centerX, centerY, circleRadius);
-    eligibleOutline.zIndex = 250;
+    
+    // Use same z-index calculation as icons to ensure proper layering
+    const unitZIndexRange = 149;
+    const minIconScale = 0.5;
+    const maxIconScale = 2.5;
+    const minZIndex = 100;
+    const scaleRange = maxIconScale - minIconScale;
+    const iconZIndex = minZIndex + Math.round((maxIconScale - unitIconScale) / scaleRange * unitZIndexRange);
+    const greenCircleZIndex = iconZIndex + 50; // Always above the unit icon
+    
+    eligibleOutline.zIndex = greenCircleZIndex;
     app.stage.addChild(eligibleOutline);
+    
+    // NEW: Add red circle around green circle for charged units in combat phase
+    const { unit, phase, combatSubPhase } = this.props;
+    if (phase === "combat" && combatSubPhase === "charged_units" && unit.hasChargedThisTurn && isEligible) {
+      const chargedOutline = new PIXI.Graphics();
+      const outerCircleRadius = circleRadius + ELIGIBLE_OUTLINE_WIDTH + 2; // Slightly larger than green circle
+      chargedOutline.lineStyle(ELIGIBLE_OUTLINE_WIDTH, 0xff0000, ELIGIBLE_OUTLINE_ALPHA); // Red color
+      chargedOutline.drawCircle(centerX, centerY, outerCircleRadius);
+      chargedOutline.zIndex = 251; // Above green circle
+      app.stage.addChild(chargedOutline);
+    }
   }
   
   private renderHPBar(unitIconScale: number): void {
@@ -439,9 +493,19 @@ export class UnitRenderer {
   }
   
   private renderAttackCounter(unitIconScale: number): void {
-    const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled } = this.props;
+    const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled, units } = this.props;
     
     if (phase !== 'combat' || unit.player !== currentPlayer) return;
+    
+    // NEW: Only show attack counter for units that have enemies in melee range
+    const enemies = units.filter(u => u.player !== unit.player);
+    const combatRange = unit.CC_RNG || 1;
+    const hasEnemiesInMeleeRange = enemies.some(enemy => {
+      const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
+      return distance <= combatRange;
+    });
+    
+    if (!hasEnemiesInMeleeRange) return;
     
     // NEW RULE: Hide attack counter for units that fled
     if (unitsFled && unitsFled.includes(unit.id)) {

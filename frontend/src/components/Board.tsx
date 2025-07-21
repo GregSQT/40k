@@ -1,7 +1,7 @@
 // frontend/src/components/Board.tsx
 import React, { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js-legacy";
-import type { Unit, TargetPreview } from "../types/game";
+import type { Unit, TargetPreview, CombatSubPhase, PlayerId } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
 import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
@@ -56,6 +56,8 @@ type BoardProps = {
   unitsCharged?: number[];
   unitsAttacked?: number[];
   unitsFled?: number[];
+  combatSubPhase?: CombatSubPhase; // NEW
+  combatActivePlayer?: PlayerId; // NEW
   phase: "move" | "shoot" | "charge" | "combat";
   onCharge?: (chargerId: number, targetId: number) => void;
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
@@ -86,6 +88,8 @@ export default function Board({
   unitsCharged,
   unitsAttacked,
   unitsFled,
+  combatSubPhase,
+  combatActivePlayer,
   onMoveCharger,
   onCancelCharge,
   onValidateCharge,
@@ -796,6 +800,7 @@ export default function Board({
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
           phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+          combatSubPhase, combatActivePlayer,
           units, chargeTargets, combatTargets, targetPreview,
           onConfirmMove, parseColor
         });
@@ -815,6 +820,7 @@ export default function Board({
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
             phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+            combatSubPhase, combatActivePlayer,
             units, chargeTargets, combatTargets, targetPreview,
             onConfirmMove, parseColor
           });
@@ -835,6 +841,7 @@ export default function Board({
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
             phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+            combatSubPhase, combatActivePlayer,
             units, chargeTargets, combatTargets, targetPreview,
             onConfirmMove, parseColor
           });
@@ -887,6 +894,8 @@ export default function Board({
         selectedUnitId,
         mode,
         phase,
+        combatSubPhase, // NEW: Trigger re-render when combat sub-phase changes
+        combatActivePlayer, // NEW: Trigger re-render when combat active player changes
         boardConfig?.cols, // Only re-render if board structure changes
         loading,
         error,

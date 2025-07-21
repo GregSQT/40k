@@ -66,6 +66,7 @@ async function discoverUnitsInFaction(faction: string): Promise<string[]> {
     spaceMarine: [
       'Intercessor',
       'AssaultIntercessor', 
+      'CaptainGravis',
       'SpaceMarineMeleeUnit',
       'SpaceMarineRangedUnit',
       // Add more as files are created
@@ -73,7 +74,9 @@ async function discoverUnitsInFaction(faction: string): Promise<string[]> {
     tyranid: [
       'Termagant',
       'Hormagaunt',
-      'Carnifex', // Will be ignored if file doesn't exist
+      'Carnifex', 
+      'TyranidMeleeUnit',
+      'TyranidRangedUnit',
       // Add more as files are created
     ]
   };

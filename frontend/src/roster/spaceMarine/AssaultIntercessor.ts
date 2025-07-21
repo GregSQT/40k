@@ -21,7 +21,7 @@ export class AssaultIntercessor extends SpaceMarineMeleeUnit {
   static RNG_AP = 1;           // Range attack Armor penetration
   static RNG_DMG = 1;          // Range attack : damages
   // MELEE WEAPON
-  static CC_NB = 4;            // Melee attack : number of attacks
+  static CC_NB = 1;            // Melee attack : number of attacks - 4
   static CC_RNG = 1;           // Melee attack : range
   static CC_ATK = 2;           // Melee attack : score
   static CC_STR = 4;           // Melee attack Strength

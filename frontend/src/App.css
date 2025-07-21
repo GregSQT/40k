@@ -747,7 +747,7 @@ textarea:focus {
   padding: var(--spacing-md);
   color: var(--text-primary);
   margin-top: var(--spacing-lg);
-  max-height: 400px;
+  max-height: 320px;
   display: flex;
   flex-direction: column;
 }
@@ -789,7 +789,7 @@ textarea:focus {
 }
 
 .game-log__events {
-  max-height: 320px;
+  max-height: 220px;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -966,22 +966,22 @@ textarea:focus {
 /* Responsive Design */
 @media (max-width: 1400px) {
   .game-log {
-    max-height: 300px;
+    max-height: 270px;
   }
   
   .game-log__events {
-    max-height: 220px;
+    max-height: 190px;
   }
 }
 
 @media (max-width: 768px) {
   .game-log {
     margin-top: var(--spacing-md);
-    max-height: 250px;
+    max-height: 200px;
   }
   
   .game-log__events {
-    max-height: 170px;
+    max-height: 120px;
   }
   
   .game-log-entry {
