@@ -1,10 +1,11 @@
 // hooks/usePhaseTransition.ts
 import { useEffect, useCallback } from 'react';
 import { GameState, Unit, UnitId, PlayerId, CombatSubPhase } from '../types/game';
-import { areUnitsAdjacent, isUnitInRange } from '../utils/gameHelpers';
+import { areUnitsAdjacent, isUnitInRange, hasLineOfSight } from '../utils/gameHelpers';
 
 interface UsePhaseTransitionParams {
   gameState: GameState;
+  boardConfig: any; // Add boardConfig parameter
   actions: {
     setPhase: (phase: GameState['phase']) => void;
     setCurrentPlayer: (player: PlayerId) => void;
@@ -24,6 +25,7 @@ interface UsePhaseTransitionParams {
 
 export const usePhaseTransition = ({
   gameState,
+  boardConfig,
   actions,
 }: UsePhaseTransitionParams) => {
   const { units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer } = gameState;
@@ -134,6 +136,9 @@ export const usePhaseTransition = ({
       // NEW RULE: Units that fled cannot shoot
       if (unitsFled.includes(unit.id)) return false;
       
+      // CRITICAL: Check if unit has shots remaining
+      if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) return false;
+      
       // Can't shoot if adjacent to enemy (engaged in combat)
       const hasAdjacentEnemy = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
       if (hasAdjacentEnemy) return false;
@@ -142,14 +147,22 @@ export const usePhaseTransition = ({
       return enemyUnits.some(enemy => {
         if (!isUnitInRange(unit, enemy, unit.RNG_RNG)) return false;
         
-        // Check line of sight (need walls from game state)
-        // This will need walls passed to usePhaseTransition or stored in game state
-        return true; // Placeholder - will be implemented when walls are available
+        // Check line of sight using boardConfig
+        if (boardConfig && boardConfig.wall_hexes) {
+          const lineOfSight = hasLineOfSight(
+            { col: unit.col, row: unit.row },
+            { col: enemy.col, row: enemy.row },
+            boardConfig.wall_hexes
+          );
+          if (!lineOfSight.canSee) return false;
+        }
+        
+        return true;
       });
     });
 
     return shootableUnits.length === 0;
-  }, [getCurrentPlayerUnits, getEnemyUnits, unitsFled, unitsMoved, isUnitInRange, areUnitsAdjacent, currentPlayer]);
+  }, [getCurrentPlayerUnits, getEnemyUnits, unitsFled, unitsMoved, isUnitInRange, areUnitsAdjacent, currentPlayer, boardConfig]);
 
   // Check if charge phase should transition to combat phase
   const shouldTransitionFromCharge = useCallback((): boolean => {

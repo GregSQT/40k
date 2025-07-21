@@ -19,10 +19,16 @@ export function calculateWoundProbability(shooter: Unit, target: Unit): number {
   return Math.max(0, (7 - woundTarget) / 6 * 100);
 }
 
-export function calculateSaveProbability(shooter: Unit, target: Unit): number {
-  const armorSave = target.ARMOR_SAVE || 5;
+export function calculateSaveProbability(shooter: Unit, target: Unit, inCover: boolean = false): number {
+  let armorSave = target.ARMOR_SAVE || 5;
   const invulSave = target.INVUL_SAVE || 0;
   const armorPenetration = shooter.RNG_AP || 0;
+  
+  // Apply cover bonus - +1 to armor save (better save)
+  if (inCover) {
+    armorSave = Math.max(2, armorSave - 1); // Improve armor save by 1, minimum 2+
+    // Note: Invulnerable saves are not affected by cover
+  }
   
   const modifiedArmor = armorSave + armorPenetration;
   const saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
@@ -31,10 +37,10 @@ export function calculateSaveProbability(shooter: Unit, target: Unit): number {
   return 100 - saveProbability;
 }
 
-export function calculateOverallProbability(shooter: Unit, target: Unit): number {
+export function calculateOverallProbability(shooter: Unit, target: Unit, inCover: boolean = false): number {
   const hitProb = calculateHitProbability(shooter);
   const woundProb = calculateWoundProbability(shooter, target);
-  const saveFailProb = calculateSaveProbability(shooter, target);
+  const saveFailProb = calculateSaveProbability(shooter, target, inCover);
   
   return (hitProb / 100) * (woundProb / 100) * (saveFailProb / 100) * 100;
 }

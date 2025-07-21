@@ -7,6 +7,7 @@ import { GameStatus } from "./GameStatus";
 import { GameLog } from "./GameLog";
 import { useGameState } from "../hooks/useGameState";
 import { useGameActions } from "../hooks/useGameActions";
+import { useGameConfig } from "../hooks/useGameConfig";
 import { useAIPlayer } from "../hooks/useAIPlayer";
 import { usePhaseTransition } from "../hooks/usePhaseTransition";
 import { useGameLog } from "../hooks/useGameLog";
@@ -82,6 +83,9 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Track clicked (but not selected) units for blue highlighting
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
 
+  // Get board configuration for line of sight calculations
+  const { boardConfig } = useGameConfig();
+
   // Initialize game log hook
   const gameLog = useGameLog();
 
@@ -91,6 +95,7 @@ export const GameController: React.FC<GameControllerProps> = ({
     movePreview,
     attackPreview,
     shootingPhaseState,
+    boardConfig,
     actions,
     gameLog,
   });
@@ -112,8 +117,10 @@ export const GameController: React.FC<GameControllerProps> = ({
   });
 
   // Manage phase transitions
+  // Manage phase transitions
   usePhaseTransition({
     gameState,
+    boardConfig,  // Add this line
     actions: {
       setPhase: actions.setPhase,
       setCurrentPlayer: actions.setCurrentPlayer,
@@ -130,7 +137,6 @@ export const GameController: React.FC<GameControllerProps> = ({
       setUnits: actions.setUnits,
     },
   });
-
   // Initialize shooting phase when entering shoot phase
   React.useEffect(() => {
     if (gameState.phase === 'shoot') {

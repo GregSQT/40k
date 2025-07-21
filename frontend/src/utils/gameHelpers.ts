@@ -41,6 +41,61 @@ function hexToPixel(col: number, row: number, hexRadius: number): { x: number; y
   return { x, y };
 }
 
+// Check if a line passes through any part of a hex
+function linePassesThroughHex(
+  startPoint: { x: number; y: number },
+  endPoint: { x: number; y: number },
+  hexCol: number,
+  hexRow: number,
+  hexRadius: number
+): boolean {
+  const hexCenter = hexToPixel(hexCol, hexRow, hexRadius);
+  
+  // Create hex polygon points (6 corners)
+  const hexPoints: { x: number; y: number }[] = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = (i * Math.PI) / 3; // 60 degree increments for hex
+    const x = hexCenter.x + hexRadius * Math.cos(angle);
+    const y = hexCenter.y + hexRadius * Math.sin(angle);
+    hexPoints.push({ x, y });
+  }
+  
+  // Check if line intersects any edge of the hex polygon
+  for (let i = 0; i < hexPoints.length; i++) {
+    const p1 = hexPoints[i];
+    const p2 = hexPoints[(i + 1) % hexPoints.length];
+    
+    if (lineSegmentsIntersect(startPoint, endPoint, p1, p2)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// Helper function to check if two line segments intersect
+function lineSegmentsIntersect(
+  line1Start: { x: number; y: number },
+  line1End: { x: number; y: number },
+  line2Start: { x: number; y: number },
+  line2End: { x: number; y: number }
+): boolean {
+  const d1 = { x: line1End.x - line1Start.x, y: line1End.y - line1Start.y };
+  const d2 = { x: line2End.x - line2Start.x, y: line2End.y - line2Start.y };
+  const d3 = { x: line2Start.x - line1Start.x, y: line2Start.y - line1Start.y };
+  
+  const cross1 = d1.x * d2.y - d1.y * d2.x;
+  const cross2 = d3.x * d2.y - d3.y * d2.x;
+  const cross3 = d3.x * d1.y - d3.y * d1.x;
+  
+  if (Math.abs(cross1) < 0.0001) return false; // Parallel lines
+  
+  const t1 = cross2 / cross1;
+  const t2 = cross3 / cross1;
+  
+  return t1 >= 0 && t1 <= 1 && t2 >= 0 && t2 <= 1;
+}
+
 // Check if a line segment from start to end intersects with a wall
 function lineIntersectsWall(
   startCol: number, 
@@ -75,7 +130,7 @@ function lineIntersectsWall(
   return t >= 0 && t <= 1 && u >= 0 && u <= 1;
 }
 
-// Simplified direct blocking line of sight system  
+// 9-Point Line of Sight System
 export function hasLineOfSight(
   fromUnit: Unit | Position,
   toUnit: Unit | Position, 
@@ -88,55 +143,68 @@ export function hasLineOfSight(
     return { canSee: true, inCover: false };
   }
   
-  // Debug: Log range information for captain
-  if (fromPos.col === 23 && fromPos.row === 9) {
-    console.log(`🎯 Captain at (23,9) checking LoS to (${toPos.col},${toPos.row})`);
-    const distance = Math.max(
-      Math.abs(fromPos.col - toPos.col),
-      Math.abs(fromPos.row - toPos.row),
-      Math.abs((fromPos.row - ((fromPos.col - (fromPos.col & 1)) >> 1)) - (toPos.row - ((toPos.col - (toPos.col & 1)) >> 1)))
-    );
-    console.log(`📏 Distance: ${distance} hexes`);
-  }
+  // Convert hex coordinates to pixel coordinates for accurate line testing
+  const fromPixel = hexToPixel(fromPos.col, fromPos.row, 21);
+  const toPixel = hexToPixel(toPos.col, toPos.row, 21);
   
-  // Create set of wall hex positions for fast lookup
-  const wallHexSet = new Set<string>(
-    wallHexes.map(([c, r]) => `${c},${r}`)
-  );
-
-  // Use the actual line algorithm to check for blocking walls
-  const lineHexes = getHexLine(fromPos.col, fromPos.row, toPos.col, toPos.row);
+  // Define 9 points for each hex: center + 8 corners
+  const getHexPoints = (centerX: number, centerY: number, radius: number) => {
+    const points = [{ x: centerX, y: centerY }]; // Center point
+    
+    // 8 corner points around the hex (not actual hex corners, but distributed around)
+    for (let i = 0; i < 8; i++) {
+      const angle = (i * Math.PI) / 4; // 45 degree increments
+      const x = centerX + radius * 0.8 * Math.cos(angle);
+      const y = centerY + radius * 0.8 * Math.sin(angle);
+      points.push({ x, y });
+    }
+    return points;
+  };
   
-  // Remove start and end hexes (shooter and target positions don't block)
-  const pathHexes = lineHexes.slice(1, -1);
+  const shooterPoints = getHexPoints(fromPixel.x, fromPixel.y, 21);
+  const targetPoints = getHexPoints(toPixel.x, toPixel.y, 21);
   
-  // Count wall hexes that are actually on the line path
-  let blockingWalls = 0;
-  const blockingWallList: string[] = [];
+  // Check how many sight lines from shooter points can reach target points
+  let clearSightLines = 0;
   
-  for (const hex of pathHexes) {
-    const hexKey = `${hex.col},${hex.row}`;
-    if (wallHexSet.has(hexKey)) {
-      blockingWalls++;
-      blockingWallList.push(hexKey);
+  for (const shooterPoint of shooterPoints) {
+    let shooterPointHasClearLine = false;
+    
+    for (const targetPoint of targetPoints) {
+      // Check if this line is blocked by any wall hex
+      let lineBlocked = false;
+      
+      for (const [wallCol, wallRow] of wallHexes) {
+        if (linePassesThroughHex(shooterPoint, targetPoint, wallCol, wallRow, 21)) {
+          lineBlocked = true;
+          break;
+        }
+      }
+      
+      if (!lineBlocked) {
+        shooterPointHasClearLine = true;
+        break; // This shooter point has at least one clear line to any target point
+      }
+    }
+    
+    if (shooterPointHasClearLine) {
+      clearSightLines++;
     }
   }
-
-  // Debug logging
-  console.log(`🎯 LINE-BASED LoS from (${fromPos.col},${fromPos.row}) to (${toPos.col},${toPos.row})`);
-  console.log(`🛤️ Path hexes: ${pathHexes.map(h => `(${h.col},${h.row})`).join(', ')}`);
-  console.log(`🚫 Blocking walls found: ${blockingWalls} - ${blockingWallList.join(', ')}`);
   
-  // Rules based on actual walls blocking the line path
-  if (blockingWalls === 0) {
-    console.log(`✅ CLEAR LINE OF SIGHT (no blocking walls)`);
-    return { canSee: true, inCover: false };
-  } else if (blockingWalls <= 2) {
-    console.log(`🛡️ TARGET IN COVER (${blockingWalls} blocking walls, +1 armor save)`);
+  console.log(`🎯 9-POINT LoS from (${fromPos.col},${fromPos.row}) to (${toPos.col},${toPos.row})`);
+  console.log(`👁️ Clear sight lines: ${clearSightLines}/9 shooter points`);
+  
+  // Apply your rules: 0 = blocked, 1-2 = cover, 3+ = clear
+  if (clearSightLines === 0) {
+    console.log(`❌ LINE OF SIGHT BLOCKED (no clear sight lines)`);
+    return { canSee: false, inCover: false };
+  } else if (clearSightLines <= 2) {
+    console.log(`🛡️ TARGET IN COVER (${clearSightLines} clear sight lines)`);
     return { canSee: true, inCover: true };
   } else {
-    console.log(`❌ LINE OF SIGHT BLOCKED (${blockingWalls} blocking walls)`);
-    return { canSee: false, inCover: false };
+    console.log(`✅ CLEAR LINE OF SIGHT (${clearSightLines} clear sight lines)`);
+    return { canSee: true, inCover: false };
   }
 }
 

@@ -2,7 +2,7 @@
 import { useCallback } from 'react';
 import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState, TargetPreview, CombatSubPhase, PlayerId } from '../types/game';
 import { calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability, calculateCombatHitProbability, calculateCombatWoundProbability, calculateCombatSaveProbability, calculateCombatOverallProbability } from '../utils/probabilityCalculator';
-import { areUnitsAdjacent, isUnitInRange } from '../utils/gameHelpers';
+import { areUnitsAdjacent, isUnitInRange, hasLineOfSight } from '../utils/gameHelpers';
 import { singleShotSequenceManager } from '../utils/ShootingSequenceManager';
 
 interface UseGameActionsParams {
@@ -10,6 +10,7 @@ interface UseGameActionsParams {
   movePreview: MovePreview | null;
   attackPreview: AttackPreview | null;
   shootingPhaseState: ShootingPhaseState;
+  boardConfig: any; // Add board configuration for line of sight checks
   gameLog?: any; // Add gameLog parameter as optional
   actions: {
     setMode: (mode: GameState['mode']) => void;
@@ -36,6 +37,7 @@ export const useGameActions = ({
   movePreview,
   attackPreview,
   shootingPhaseState,
+  boardConfig,
   gameLog,
   actions,
 }: UseGameActionsParams) => {
@@ -88,9 +90,17 @@ export const useGameActions = ({
           );
           if (isEnemyAdjacentToFriendly) return false;
           
-          // Check line of sight (need walls from game state)
-          // This will need walls passed to useGameActions or stored in game state  
-          return true; // Placeholder - will be implemented when walls are available
+          // Check line of sight using boardConfig
+          if (boardConfig && boardConfig.wall_hexes) {
+            const lineOfSight = hasLineOfSight(
+              { col: unit.col, row: unit.row },
+              { col: enemy.col, row: enemy.row },
+              boardConfig.wall_hexes
+            );
+            if (!lineOfSight.canSee) return false;
+          }
+          
+          return true;
         });
       case "charge":
         if (unitsCharged.includes(unit.id)) {
@@ -632,8 +642,17 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
         // Calculate probabilities
         const hitProbability = calculateHitProbability(shooter);
         const woundProbability = calculateWoundProbability(shooter, target);
-        const saveProbability = calculateSaveProbability(shooter, target);
-        const overallProbability = calculateOverallProbability(shooter, target);
+        
+        // Check if target is in cover using line of sight
+        const lineOfSight = hasLineOfSight(
+          { col: shooter.col, row: shooter.row },
+          { col: target.col, row: target.row },
+          boardConfig.wall_hexes || []
+        );
+        const targetInCover = lineOfSight.canSee && lineOfSight.inCover;
+        
+        const saveProbability = calculateSaveProbability(shooter, target, targetInCover);
+        const overallProbability = calculateOverallProbability(shooter, target, targetInCover); 
         
         // Start preview with blink timer - SINGLE SHOT ONLY
         const totalBlinkSteps = 2; // Only show: current HP (step 0) -> after next shot (step 1)

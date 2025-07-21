@@ -1,7 +1,7 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview, CombatSubPhase, PlayerId } from "../types/game";
-import { areUnitsAdjacent, isUnitInRange } from '../utils/gameHelpers';
+import { areUnitsAdjacent, isUnitInRange, hasLineOfSight } from '../utils/gameHelpers';
 
 // For flat-topped hex, even-q offset (col, row)
 function offsetToCube(col: number, row: number) {
@@ -104,7 +104,7 @@ export class UnitRenderer {
   }
   
   private calculateEligibility(): boolean {
-    const { unit, isPreview, phase, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled, units, combatSubPhase, combatActivePlayer } = this.props;
+    const { unit, isPreview, phase, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled, units, combatSubPhase, combatActivePlayer, boardConfig } = this.props;
     
     if (isPreview) return false;
     
@@ -137,9 +137,17 @@ export class UnitRenderer {
         return enemies.some(eu => {
           if (!isUnitInRange(unit, eu, unit.RNG_RNG)) return false;
           
-          // Check line of sight (need walls from boardConfig)
-          // This will need boardConfig passed as prop to UnitRenderer
-          return true; // Placeholder - will be implemented when boardConfig is available
+          // Check line of sight using boardConfig
+          if (boardConfig && boardConfig.wall_hexes) {
+            const lineOfSight = hasLineOfSight(
+              { col: unit.col, row: unit.row },
+              { col: eu.col, row: eu.row },
+              boardConfig.wall_hexes
+            );
+            if (!lineOfSight.canSee) return false;
+          }
+          
+          return true;
         });
       }
     } else if (phase === "charge") {
@@ -476,6 +484,12 @@ export class UnitRenderer {
     
     // NEW RULE: Hide shooting counter for units that fled
     if (unitsFled && unitsFled.includes(unit.id)) {
+      return;
+    }
+    
+    // Only show shooting counter if unit is eligible (has line of sight to enemies)
+    const isEligible = this.calculateEligibility();
+    if (!isEligible) {
       return;
     }
     
