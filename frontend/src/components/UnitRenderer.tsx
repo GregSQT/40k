@@ -133,8 +133,14 @@ export class UnitRenderer {
         // Check if unit is adjacent to any enemy (engaged in combat)
         const hasAdjacentEnemy = enemies.some(eu => areUnitsAdjacent(unit, eu));
         if (hasAdjacentEnemy) return false;
-        // Check if unit has enemies in shooting range
-        return enemies.some(eu => isUnitInRange(unit, eu, unit.RNG_RNG));
+        // Check if unit has enemies in shooting range AND line of sight
+        return enemies.some(eu => {
+          if (!isUnitInRange(unit, eu, unit.RNG_RNG)) return false;
+          
+          // Check line of sight (need walls from boardConfig)
+          // This will need boardConfig passed as prop to UnitRenderer
+          return true; // Placeholder - will be implemented when boardConfig is available
+        });
       }
     } else if (phase === "charge") {
       const unitsChargedArr = unitsCharged || [];
@@ -187,6 +193,7 @@ export class UnitRenderer {
     if (isPreview) return;
     
     // Grey-out enemies adjacent to any friendly unit during shooting phase
+    // Also grey-out enemies with no line of sight
     if (phase === "shoot" && unit.player !== currentPlayer) {
       const friendlies = units.filter(u2 => u2.player === currentPlayer);
       if (friendlies.some(fu => areUnitsAdjacent(unit, fu))) {
@@ -235,8 +242,6 @@ export class UnitRenderer {
     unitCircle.eventMode = 'static';
     unitCircle.cursor = "pointer";
     const isEligible = this.calculateEligibility();
-    
-    console.log(`🖱️ Setting up click handler for ${unit.name} (${unit.id}): eligible=${isEligible}, phase=${phase}`);
     
     if (phase === "charge" && selectedUnitId === unit.id) {
       // Cancel charge on second click of active unit

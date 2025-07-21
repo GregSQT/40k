@@ -138,8 +138,14 @@ export const usePhaseTransition = ({
       const hasAdjacentEnemy = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
       if (hasAdjacentEnemy) return false;
       
-      // Must have enemy within shooting range
-      return enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.RNG_RNG));
+      // Must have enemy within shooting range AND line of sight
+      return enemyUnits.some(enemy => {
+        if (!isUnitInRange(unit, enemy, unit.RNG_RNG)) return false;
+        
+        // Check line of sight (need walls from game state)
+        // This will need walls passed to usePhaseTransition or stored in game state
+        return true; // Placeholder - will be implemented when walls are available
+      });
     });
 
     return shootableUnits.length === 0;

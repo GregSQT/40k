@@ -86,7 +86,11 @@ export const useGameActions = ({
           const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => 
             Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
           );
-          return !isEnemyAdjacentToFriendly;
+          if (isEnemyAdjacentToFriendly) return false;
+          
+          // Check line of sight (need walls from game state)
+          // This will need walls passed to useGameActions or stored in game state  
+          return true; // Placeholder - will be implemented when walls are available
         });
       case "charge":
         if (unitsCharged.includes(unit.id)) {
@@ -320,7 +324,7 @@ const calculateSaveTarget = (armorSave: number, invulSave: number, armorPenetrat
 };
 
 // Execute complete shooting sequence
-const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
+const executeShootingSequence = (shooter: any, target: any, targetInCover: boolean = false): ShootingResult => {
   // Step 1: Number of shots
   if (shooter.RNG_NB === undefined) {
        throw new Error('shooter.RNG_NB is required');
@@ -361,12 +365,22 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     if (!didWound) continue; // Failed to wound - next shot
     wounds++;
     
-    // Step 5: Armor save
+    // Step 5: Armor save (with cover bonus)
     const saveRoll = rollD6();
+    let baseArmorSave = target.ARMOR_SAVE;
+    let invulSave = target.INVUL_SAVE;
+    let armorPenetration = shooter.RNG_AP;
+    
+    // Apply cover bonus - +1 to armor save (better save)
+    if (targetInCover) {
+      baseArmorSave = Math.max(2, baseArmorSave - 1); // Improve armor save by 1, minimum 2+
+      // Note: Invulnerable saves are not affected by cover
+    }
+    
     const saveTarget = calculateSaveTarget(
-      target.ARMOR_SAVE, 
-      target.INVUL_SAVE, 
-      shooter.RNG_AP
+      baseArmorSave, 
+      invulSave, 
+      armorPenetration
     );
     const savedWound = saveRoll >= saveTarget;
     
@@ -428,6 +442,9 @@ const executeShootingSequence = (shooter: any, target: any): ShootingResult => {
     if (!isUnitInRange(shooter, target, shooter.RNG_RNG)) {
       return;
     }
+
+    // TODO: Add line of sight check when boardConfig is available
+    // For now, all shots have line of sight (existing behavior)
 
     if (shooter.SHOOT_LEFT === undefined) {
       throw new Error('shooter.SHOOT_LEFT is required');

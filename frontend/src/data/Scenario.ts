@@ -9,8 +9,8 @@ const initialUnits: Unit[] = [
     name: "P-I",
     type: "Intercessor",
     player: 0,
-    col: 23,
-    row: 5,
+    col: 2,
+    row: 8,
     color: 0x244488,
   }),
   createUnit({
@@ -18,8 +18,8 @@ const initialUnits: Unit[] = [
     name: "P-I",
     type: "CaptainGravis",
     player: 0,
-    col: 24,
-    row: 5,
+    col: 23,
+    row: 9,
     color: 0x244488,
   }),
   createUnit({
@@ -27,8 +27,8 @@ const initialUnits: Unit[] = [
     name: "P-A",
     type: "AssaultIntercessor",
     player: 0,
-    col: 25,
-    row: 5,
+    col: 16,
+    row: 4,
     color: 0xff3333,
   }),
   // Player 1 units (AI)
@@ -76,6 +76,24 @@ const initialUnits: Unit[] = [
     col: 23,
     row: 1,
     color: 0x6633cc,
+  }),
+  createUnit({
+    id: 8,
+    name: "A-T",
+    type: "Termagant",
+    player: 1,
+    col: 3,
+    row: 3,
+    color: 0x882222,
+  }),
+  createUnit({
+    id: 9,
+    name: "A-T",
+    type: "Termagant",
+    player: 1,
+    col: 6,
+    row: 4,
+    color: 0x882222,
   }),
 ];
 

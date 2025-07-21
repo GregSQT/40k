@@ -139,8 +139,11 @@ else:
         "frontend/src/roster/tyranid/Carnifex.ts",
 
         # frontend/src/utils
-        "frontend/src/utils/ShootingSequenceManager.ts",
-        "frontend/src/utils/boardClickHandler.ts"
+        "frontend/src/utils/boardClickHandler.ts",
+        "frontend/src/utils/CombatSequenceManager.ts",
+        "frontend/src/utils/gameHelpers.ts",
+        "frontend/src/utils/probabilityCalculator.ts",
+        "frontend/src/utils/ShootingSequenceManager.ts"
     ]
 
 logfile = os.path.join(DEST_ROOT, "backup.log")

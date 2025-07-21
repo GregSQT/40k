@@ -6,6 +6,7 @@ import { useGameConfig } from '../hooks/useGameConfig';
 import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
 import { renderUnit } from './UnitRenderer';
+import { isMovementBlocked, hasLineOfSight, isChargeBlocked } from '../utils/gameHelpers';
 
 // For flat-topped hex, even-q offset (col, row)
 function offsetToCube(col: number, row: number) {
@@ -34,6 +35,59 @@ function hexCorner(cx: number, cy: number, size: number, i: number) {
 
 function getHexPolygonPoints(cx: number, cy: number, size: number) {
   return Array.from({ length: 6 }, (_, i) => hexCorner(cx, cy, size, i)).flat();
+}
+
+// Get all hexes along a line from start to end using hex grid line drawing
+function getHexLine(startCol: number, startRow: number, endCol: number, endRow: number): { col: number; row: number }[] {
+  const startCube = offsetToCube(startCol, startRow);
+  const endCube = offsetToCube(endCol, endRow);
+  
+  const distance = cubeDistance(startCube, endCube);
+  const hexes: { col: number; row: number }[] = [];
+  
+  if (distance === 0) {
+    return [{ col: startCol, row: startRow }];
+  }
+  
+  for (let i = 0; i <= distance; i++) {
+    const t = i / distance;
+    
+    const x = startCube.x + (endCube.x - startCube.x) * t;
+    const y = startCube.y + (endCube.y - startCube.y) * t;
+    const z = startCube.z + (endCube.z - startCube.z) * t;
+    
+    const roundedCube = roundCube({ x, y, z });
+    
+    const col = roundedCube.x;
+    const row = roundedCube.z + ((roundedCube.x - (roundedCube.x & 1)) >> 1);
+    
+    const hexKey = `${col},${row}`;
+    if (!hexes.some(h => `${h.col},${h.row}` === hexKey)) {
+      hexes.push({ col, row });
+    }
+  }
+  
+  return hexes;
+}
+
+function roundCube(cube: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+  let rx = Math.round(cube.x);
+  let ry = Math.round(cube.y);
+  let rz = Math.round(cube.z);
+  
+  const xDiff = Math.abs(rx - cube.x);
+  const yDiff = Math.abs(ry - cube.y);
+  const zDiff = Math.abs(rz - cube.z);
+  
+  if (xDiff > yDiff && xDiff > zDiff) {
+    rx = -ry - rz;
+  } else if (yDiff > zDiff) {
+    ry = -rx - rz;
+  } else {
+    rz = -rx - ry;
+  }
+  
+  return { x: rx, y: ry, z: rz };
 }
 
 type Mode = "select" | "movePreview" | "attackPreview" | "chargePreview";
@@ -410,7 +464,15 @@ export default function Board({
               cubeDistance(offsetToCube(col, row), offsetToCube(u.col, u.row)) === 1
             );
             if (adjEnemy) {
-              chargeCells.push({ col, row });
+              // Check if charge destination is a wall hex
+              const wallHexSet = new Set<string>(
+                (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+              );
+              const chargeBlocked = wallHexSet.has(`${col},${row}`);
+              
+              if (!chargeBlocked) {
+                chargeCells.push({ col, row });
+              }
             }
           }
         }
@@ -445,8 +507,15 @@ export default function Board({
             [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
           ];
 
-          // Collect all forbidden hexes (adjacent to any enemy) using cube coordinates
+          // Collect all forbidden hexes (adjacent to any enemy + wall hexes) using cube coordinates  
           const forbiddenSet = new Set<string>();
+          
+          // Add all wall hexes as forbidden
+          const wallHexSet = new Set<string>(
+            (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+          );
+          wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
+          
           for (const enemy of units) {
             if (enemy.player === selectedUnit.player) continue;
 
@@ -525,6 +594,8 @@ export default function Board({
                   !forbiddenSet.has(nkey)
                 ) {
                   const nblocked = units.some(u => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id);
+                  // Wall hexes are already handled by forbiddenSet above
+                  
                   if (
                     !nblocked &&
                     (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
@@ -540,8 +611,11 @@ export default function Board({
         runMovementBFS();
       }
 
-      // Red attack cells: Either after move (movePreview) or attackPreview
-      let attackCells: { col: number; row: number }[] = [];
+      // Attack cells: Different colors for different line of sight conditions
+      let attackCells: { col: number; row: number }[] = []; // Red = clear line of sight
+      let coverCells: { col: number; row: number }[] = []; // Orange = targets in cover
+      let blockedTargets: Set<string> = new Set(); // Track targets with no line of sight (no hex shown)
+      let coverTargets: Set<string> = new Set(); // Track targets in cover
       let previewUnit: Unit | undefined = undefined;
       let attackFromCol: number | null = null;
       let attackFromRow: number | null = null;
@@ -579,6 +653,27 @@ export default function Board({
         ) {
           const centerCube = offsetToCube(attackFromCol, attackFromRow);
           
+          // Check line of sight for each potential target during shooting
+          if (phase === "shoot") {
+            const enemyUnits = units.filter(u => u.player !== previewUnit!.player);
+            for (const enemy of enemyUnits) {
+              const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
+              if (distance <= (previewUnit.RNG_RNG || 0)) {
+                const lineOfSight = hasLineOfSight(
+                  { col: attackFromCol, row: attackFromRow },
+                  { col: enemy.col, row: enemy.row },
+                  boardConfig.wall_hexes || []
+                );
+                
+                if (!lineOfSight.canSee) {
+                  blockedTargets.add(`${enemy.col},${enemy.row}`);
+                } else if (lineOfSight.inCover) {
+                  coverTargets.add(`${enemy.col},${enemy.row}`);
+                }
+              }
+            }
+          }
+          
           // Validate required range properties are defined and get range
           let range: number;
           if (phase === "combat") {
@@ -586,18 +681,102 @@ export default function Board({
               throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required CC_RNG property for combat phase preview`);
             }
             range = previewUnit.CC_RNG;
+            // For combat phase, show all hexes in range (original behavior)
+            for (let col = 0; col < BOARD_COLS; col++) {
+              for (let row = 0; row < BOARD_ROWS; row++) {
+                const targetCube = offsetToCube(col, row);
+                const dist = cubeDistance(centerCube, targetCube);
+                if (dist > 0 && dist <= range) {
+                  attackCells.push({ col, row });
+                }
+              }
+            }
           } else {
             if (previewUnit.RNG_RNG === undefined || previewUnit.RNG_RNG === null) {
               throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required RNG_RNG property for shooting phase preview`);
             }
             range = previewUnit.RNG_RNG;
-          }
-          for (let col = 0; col < BOARD_COLS; col++) {
-            for (let row = 0; row < BOARD_ROWS; row++) {
-              const targetCube = offsetToCube(col, row);
-              const dist = cubeDistance(centerCube, targetCube);
-              if (dist > 0 && dist <= range) {
-                attackCells.push({ col, row });
+            
+            // During shooting phase, show different colored hexes based on line of sight
+            if (phase === "shoot") {
+              // First, find all enemies in range and mark cover paths
+              const coverPathHexes = new Set<string>();
+              const enemyUnits = units.filter(u => u.player !== previewUnit!.player);
+              
+              console.log(`🎯 Checking ${enemyUnits.length} enemies for line of sight from (${attackFromCol},${attackFromRow})`);
+              
+              for (const enemy of enemyUnits) {
+                const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
+                if (distance > 0 && distance <= range) {
+                  console.log(`🎯 Enemy at (${enemy.col},${enemy.row}) in range (${distance}/${range})`);
+                  
+                  const lineOfSight = hasLineOfSight(
+                    { col: attackFromCol, row: attackFromRow },
+                    { col: enemy.col, row: enemy.row },
+                    boardConfig.wall_hexes || []
+                  );
+                  
+                  console.log(`🎯 Enemy at (${enemy.col},${enemy.row}): canSee=${lineOfSight.canSee}, inCover=${lineOfSight.inCover}`);
+                  
+                  if (lineOfSight.canSee && lineOfSight.inCover) {
+                    // Mark this enemy as in cover
+                    coverCells.push({ col: enemy.col, row: enemy.row });
+                    coverTargets.add(`${enemy.col},${enemy.row}`);
+                    console.log(`🟠 Added COVER enemy at (${enemy.col},${enemy.row})`);
+                    
+                    // Mark all hexes in the path that contribute to cover
+                    const pathHexes = getHexLine(attackFromCol, attackFromRow, enemy.col, enemy.row);
+                    pathHexes.forEach(hex => {
+                      coverPathHexes.add(`${hex.col},${hex.row}`);
+                    });
+                    console.log(`🟠 Added ${pathHexes.length} path hexes for cover`);
+                  } else if (lineOfSight.canSee) {
+                    // Clear line of sight enemy
+                    attackCells.push({ col: enemy.col, row: enemy.row });
+                    console.log(`🔴 Added CLEAR enemy at (${enemy.col},${enemy.row})`);
+                  } else {
+                    // Blocked enemy
+                    blockedTargets.add(`${enemy.col},${enemy.row}`);
+                    console.log(`❌ Added BLOCKED enemy at (${enemy.col},${enemy.row})`);
+                  }
+                } else {
+                  console.log(`🎯 Enemy at (${enemy.col},${enemy.row}) out of range (${distance}/${range})`);
+                }
+              }
+              
+              console.log(`🎯 Final results: ${attackCells.length} red cells, ${coverCells.length} orange cells, ${blockedTargets.size} blocked`);
+              
+              // Now show all hexes in range with appropriate colors
+              for (let col = 0; col < BOARD_COLS; col++) {
+                for (let row = 0; row < BOARD_ROWS; row++) {
+                  const targetCube = offsetToCube(col, row);
+                  const dist = cubeDistance(centerCube, targetCube);
+                  if (dist > 0 && dist <= range) {
+                    const hexKey = `${col},${row}`;
+                    const hasEnemy = units.some(u => 
+                      u.player !== previewUnit!.player && 
+                      u.col === col && 
+                      u.row === row
+                    );
+                    
+                    if (!hasEnemy) {
+                      // For empty hexes, show orange if part of cover path, red if clear
+                      if (coverPathHexes.has(hexKey)) {
+                        coverCells.push({ col, row });
+                      } else {
+                        const lineOfSight = hasLineOfSight(
+                          { col: attackFromCol, row: attackFromRow },
+                          { col, row },
+                          boardConfig.wall_hexes || []
+                        );
+                        
+                        if (lineOfSight.canSee && !lineOfSight.inCover) {
+                          attackCells.push({ col, row });
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -620,6 +799,7 @@ export default function Board({
           // Check highlight states
           const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
           const isAttackable = attackCells.some(cell => cell.col === col && cell.row === row);
+          const isInCover = coverCells.some(cell => cell.col === col && cell.row === row);
           const isChargeable = chargeCells.some(cell => cell.col === col && cell.row === row);
 
           // Check if this hex is in an objective zone
@@ -707,14 +887,16 @@ export default function Board({
             }
 
             // Create highlight hex (only if needed)
-            if (isChargeable || isAttackable || isAvailable) {
+            if (isChargeable || isAttackable || isInCover || isAvailable) {
               const highlightCell = new PIXI.Graphics();
 
             
             if (isChargeable) {
               highlightCell.beginFill(CHARGE_COLOR, 0.5);
             } else if (isAttackable) {
-              highlightCell.beginFill(ATTACK_COLOR, 0.5);
+              highlightCell.beginFill(ATTACK_COLOR, 0.5); // Red for clear line of sight
+            } else if (isInCover) {
+              highlightCell.beginFill(CHARGE_COLOR, 0.5); // Orange for targets in cover (reuse CHARGE_COLOR)
             } else if (isAvailable) {
               highlightCell.beginFill(HIGHLIGHT_COLOR, 0.5);
             }
@@ -848,6 +1030,47 @@ export default function Board({
         }
       }
 
+      // ✅ RENDER LINE OF SIGHT INDICATORS - Add after unit rendering
+      if (phase === "shoot" && selectedUnit && (blockedTargets.size > 0 || coverTargets.size > 0)) {
+        const losContainer = new PIXI.Container();
+        losContainer.name = 'line-of-sight-indicators';
+        
+        // Show blocked targets with red X
+        blockedTargets.forEach(targetKey => {
+          const [col, row] = targetKey.split(',').map(Number);
+          const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          
+          const blockedIndicator = new PIXI.Graphics();
+          blockedIndicator.lineStyle(3, 0xFF0000, 1.0);
+          // Draw X
+          blockedIndicator.moveTo(centerX - HEX_RADIUS/2, centerY - HEX_RADIUS/2);
+          blockedIndicator.lineTo(centerX + HEX_RADIUS/2, centerY + HEX_RADIUS/2);
+          blockedIndicator.moveTo(centerX + HEX_RADIUS/2, centerY - HEX_RADIUS/2);
+          blockedIndicator.lineTo(centerX - HEX_RADIUS/2, centerY + HEX_RADIUS/2);
+          
+          losContainer.addChild(blockedIndicator);
+        });
+        
+        // Show targets in cover with yellow shield icon
+        coverTargets.forEach(targetKey => {
+          const [col, row] = targetKey.split(',').map(Number);
+          const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          
+          const coverIndicator = new PIXI.Graphics();
+          coverIndicator.lineStyle(2, 0xFFFF00, 1.0);
+          coverIndicator.beginFill(0xFFFF00, 0.3);
+          // Draw shield shape
+          coverIndicator.drawCircle(centerX, centerY - HEX_RADIUS/3, HEX_RADIUS/4);
+          coverIndicator.endFill();
+          
+          losContainer.addChild(coverIndicator);
+        });
+        
+        app.stage.addChild(losContainer);
+      }
+      
       // ✅ RENDER WALLS - Add after unit rendering
       if (boardConfig.walls && boardConfig.walls.length > 0) {
         const wallsContainer = new PIXI.Container();

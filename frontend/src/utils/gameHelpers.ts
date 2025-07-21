@@ -1,6 +1,14 @@
 // frontend/src/utils/gameHelpers.ts
 import { Unit, Position, UnitId } from '../types/game';
 
+// Wall interface for collision detection
+interface Wall {
+  id: string;
+  start: { col: number; row: number };
+  end: { col: number; row: number };
+  thickness?: number;
+} 
+
 // Distance calculations for hex grid
 export function offsetToCube(col: number, row: number): { x: number; y: number; z: number } {
   const x = col;
@@ -18,6 +26,202 @@ export function cubeDistance(
     Math.abs(a.y - b.y),
     Math.abs(a.z - b.z)
   );
+}
+
+// === WALL COLLISION SYSTEM ===
+
+// Convert hex coordinates to pixel coordinates for line intersection
+function hexToPixel(col: number, row: number, hexRadius: number): { x: number; y: number } {
+  const hexWidth = 1.5 * hexRadius;
+  const hexHeight = Math.sqrt(3) * hexRadius;
+  
+  const x = col * hexWidth;
+  const y = row * hexHeight + ((col % 2) * hexHeight / 2);
+  
+  return { x, y };
+}
+
+// Check if a line segment from start to end intersects with a wall
+function lineIntersectsWall(
+  startCol: number, 
+  startRow: number, 
+  endCol: number, 
+  endRow: number,
+  wall: Wall,
+  hexRadius: number = 21
+): boolean {
+  // Convert hex coordinates to pixel coordinates
+  const lineStart = hexToPixel(startCol, startRow, hexRadius);
+  const lineEnd = hexToPixel(endCol, endRow, hexRadius);
+  const wallStart = hexToPixel(wall.start.col, wall.start.row, hexRadius);
+  const wallEnd = hexToPixel(wall.end.col, wall.end.row, hexRadius);
+  
+  // Line segment intersection using cross products
+  const lineDir = { x: lineEnd.x - lineStart.x, y: lineEnd.y - lineStart.y };
+  const wallDir = { x: wallEnd.x - wallStart.x, y: wallEnd.y - wallStart.y };
+  const toWallStart = { x: wallStart.x - lineStart.x, y: wallStart.y - lineStart.y };
+  
+  const lineCrossWall = lineDir.x * wallDir.y - lineDir.y * wallDir.x;
+  const toCrossWall = toWallStart.x * wallDir.y - toWallStart.y * wallDir.x;
+  const toCrossLine = toWallStart.x * lineDir.y - toWallStart.y * lineDir.x;
+  
+  // Lines are parallel
+  if (Math.abs(lineCrossWall) < 0.0001) return false;
+  
+  const t = toCrossWall / lineCrossWall;
+  const u = toCrossLine / lineCrossWall;
+  
+  // Intersection occurs within both line segments
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+}
+
+// Simple center-to-center line of sight system
+export function hasLineOfSight(
+  fromUnit: Unit | Position,
+  toUnit: Unit | Position, 
+  wallHexes: [number, number][]
+): { canSee: boolean; inCover: boolean } {
+  const fromPos = 'col' in fromUnit ? { col: fromUnit.col, row: fromUnit.row } : fromUnit;
+  const toPos = 'col' in toUnit ? { col: toUnit.col, row: toUnit.row } : toUnit;
+  
+  if (!wallHexes || wallHexes.length === 0) {
+    return { canSee: true, inCover: false };
+  }
+  
+  // Create set of wall hex positions for fast lookup
+  const wallHexSet = new Set<string>(
+    wallHexes.map(([c, r]) => `${c},${r}`)
+  );
+  
+  // Get all hexes along the line from center to center
+  const lineHexes = getHexLine(fromPos.col, fromPos.row, toPos.col, toPos.row);
+  
+  // Remove start and end hexes (shooter and target positions don't block)
+  const pathHexes = lineHexes.slice(1, -1);
+  
+  // Count wall hexes in the path
+  let wallHexesInPath = 0;
+  const wallsInPath: string[] = [];
+  
+  for (const hex of pathHexes) {
+    const hexKey = `${hex.col},${hex.row}`;
+    if (wallHexSet.has(hexKey)) {
+      wallHexesInPath++;
+      wallsInPath.push(hexKey);
+    }
+  }
+  
+  // Debug logging
+  console.log(`🎯 CENTER-TO-CENTER LoS from (${fromPos.col},${fromPos.row}) to (${toPos.col},${toPos.row})`);
+  console.log(`📍 Path hexes:`, pathHexes.map(h => `(${h.col},${h.row})`).join(', '));
+  console.log(`🚫 ${wallHexesInPath} wall hexes in path:`, wallsInPath);
+  
+  // Simple rules:
+  // 0 walls = clear line of sight
+  // 1 wall = target in cover (+1 armor save)
+  // 2+ walls = completely blocked
+  
+  if (wallHexesInPath === 0) {
+    console.log(`✅ CLEAR LINE OF SIGHT`);
+    return { canSee: true, inCover: false };
+  } else if (wallHexesInPath === 1) {
+    console.log(`🛡️ TARGET IN COVER (+1 armor save)`);
+    return { canSee: true, inCover: true };
+  } else {
+    console.log(`❌ LINE OF SIGHT BLOCKED (${wallHexesInPath} walls)`);
+    return { canSee: false, inCover: false };
+  }
+}
+
+// Simple straight-line algorithm for hex grids using linear interpolation
+function getHexLine(startCol: number, startRow: number, endCol: number, endRow: number): Position[] {
+  // Convert to cube coordinates for proper line drawing
+  const startCube = offsetToCube(startCol, startRow);
+  const endCube = offsetToCube(endCol, endRow);
+  
+  const distance = cubeDistance(startCube, endCube);
+  if (distance === 0) {
+    return [{ col: startCol, row: startRow }];
+  }
+  
+  const hexes: Position[] = [];
+  const steps = Math.max(distance * 3, 20); // Use many steps for accuracy
+  
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    
+    // Linear interpolation in cube coordinates
+    const x = startCube.x + (endCube.x - startCube.x) * t;
+    const y = startCube.y + (endCube.y - startCube.y) * t;
+    const z = startCube.z + (endCube.z - startCube.z) * t;
+    
+    // Round to nearest hex
+    const roundedCube = roundCube({ x, y, z });
+    
+    // Convert back to offset coordinates
+    const col = roundedCube.x;
+    const row = roundedCube.z + ((roundedCube.x - (roundedCube.x & 1)) >> 1);
+    
+    // Add hex if not already in list
+    const hexKey = `${col},${row}`;
+    if (!hexes.some(h => `${h.col},${h.row}` === hexKey)) {
+      hexes.push({ col, row });
+    }
+  }
+  
+  console.log(`🛤️ Line from (${startCol},${startRow}) to (${endCol},${endRow}):`, hexes.map(h => `(${h.col},${h.row})`).join(', '));
+  
+  return hexes;
+}
+
+// Round cube coordinates to nearest valid hex
+function roundCube(cube: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+  let rx = Math.round(cube.x);
+  let ry = Math.round(cube.y);
+  let rz = Math.round(cube.z);
+  
+  const xDiff = Math.abs(rx - cube.x);
+  const yDiff = Math.abs(ry - cube.y);
+  const zDiff = Math.abs(rz - cube.z);
+  
+  if (xDiff > yDiff && xDiff > zDiff) {
+    rx = -ry - rz;
+  } else if (yDiff > zDiff) {
+    ry = -rx - rz;
+  } else {
+    rz = -rx - ry;
+  }
+  
+  return { x: rx, y: ry, z: rz };
+}
+
+// Check if movement from one hex to another is blocked by walls
+export function isMovementBlocked(
+  fromCol: number,
+  fromRow: number,
+  toCol: number,
+  toRow: number,
+  walls: Wall[]
+): boolean {
+  if (walls.length === 0) return false;
+  
+  // Check if direct movement line intersects any wall
+  for (const wall of walls) {
+    if (lineIntersectsWall(fromCol, fromRow, toCol, toRow, wall)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// Check if a charge path is blocked by walls
+export function isChargeBlocked(
+  charger: Unit,
+  target: Unit,
+  walls: Wall[]
+): boolean {
+  return isMovementBlocked(charger.col, charger.row, target.col, target.row, walls);
 }
 
 export function getHexDistance(pos1: Position, pos2: Position): number {
