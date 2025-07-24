@@ -103,57 +103,15 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Use original game actions without modification
   const gameActions = originalGameActions;
 
-  // Calculate eligible units using the same logic as useGameActions
+  // Calculate eligible units by calling the useGameActions.isUnitEligible function (no duplicate logic)
   const eligibleUnitIds = React.useMemo(() => {
     if (!boardConfig) return [];
     
     return gameState.units.filter(unit => {
-      // Same eligibility logic as useGameActions.isUnitEligible
-      if (gameState.phase !== "combat" && unit.player !== gameState.currentPlayer) return false;
-
-      const enemyUnits = gameState.units.filter(u => u.player !== gameState.currentPlayer);
-
-      switch (gameState.phase) {
-        case "move":
-          return !gameState.unitsMoved.includes(unit.id);
-        case "shoot":
-          if (gameState.unitsMoved.includes(unit.id)) return false;
-          if (gameState.unitsFled.includes(unit.id)) return false;
-          // Add full shooting eligibility logic here...
-          return true; // Simplified for now
-        case "charge":
-          if (gameState.unitsCharged.includes(unit.id)) return false;
-          if (gameState.unitsFled.includes(unit.id)) return false;
-          
-          const isAdjacent = enemyUnits.some(enemy => 
-            Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
-          );
-          
-          const hasEnemiesWithin12Hexes = enemyUnits.some(enemy => {
-            const cube1 = { x: unit.col, z: unit.row - ((unit.col - (unit.col & 1)) >> 1), y: -unit.col - (unit.row - ((unit.col - (unit.col & 1)) >> 1)) };
-            const cube2 = { x: enemy.col, z: enemy.row - ((enemy.col - (enemy.col & 1)) >> 1), y: -enemy.col - (enemy.row - ((enemy.col - (enemy.col & 1)) >> 1)) };
-            const hexDistance = Math.max(Math.abs(cube1.x - cube2.x), Math.abs(cube1.y - cube2.y), Math.abs(cube1.z - cube2.z));
-            
-            if (hexDistance > 12) return false;
-            
-            if (boardConfig?.wall_hexes) {
-              const wallHexSet = new Set(boardConfig.wall_hexes.map(([c, r]: [number, number]) => `${c},${r}`));
-              // Simplified wall check
-              return true; // For now
-            }
-            
-            return true;
-          });
-          
-          return !isAdjacent && hasEnemiesWithin12Hexes;
-        case "combat":
-          // Add combat eligibility logic here...
-          return true; // Simplified for now
-        default:
-          return false;
-      }
+      // Call the ACTUAL isUnitEligible function from useGameActions (single source of truth)
+      return originalGameActions.isUnitEligible(unit);
     }).map(unit => unit.id);
-  }, [gameState.units, gameState.currentPlayer, gameState.phase, gameState.unitsMoved, gameState.unitsCharged, gameState.unitsFled, boardConfig]);
+  }, [gameState.units, boardConfig, originalGameActions.isUnitEligible]);
 
   // Handle AI player behavior
   useAIPlayer({
@@ -172,7 +130,8 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Manage phase transitions
   usePhaseTransition({
     gameState,
-    boardConfig,  // Add this line
+    boardConfig,
+    isUnitEligible: originalGameActions.isUnitEligible, // Pass the authoritative eligibility function
     actions: {
       setPhase: actions.setPhase,
       setCurrentPlayer: actions.setCurrentPlayer,

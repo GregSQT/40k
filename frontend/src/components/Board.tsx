@@ -6,23 +6,9 @@ import { useGameConfig } from '../hooks/useGameConfig';
 import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
 import { renderUnit } from './UnitRenderer';
-import { isMovementBlocked, hasLineOfSight, isChargeBlocked } from '../utils/gameHelpers';
+import { isMovementBlocked, hasLineOfSight, isChargeBlocked, offsetToCube, cubeDistance, getHexLine } from '../utils/gameHelpers';
 
-// For flat-topped hex, even-q offset (col, row)
-function offsetToCube(col: number, row: number) {
-  const x = col;
-  const z = row - ((col - (col & 1)) >> 1);
-  const y = -x - z;
-  return { x, y, z };
-}
-
-function cubeDistance(a: { x: number, y: number, z: number }, b: { x: number, y: number, z: number }) {
-  return Math.max(
-    Math.abs(a.x - b.x),
-    Math.abs(a.y - b.y),
-    Math.abs(a.z - b.z)
-  );
-}
+// Import hex coordinate functions from gameHelpers (no duplication)
 
 function hexCorner(cx: number, cy: number, size: number, i: number) {
   const angle_deg = 60 * i;
@@ -35,59 +21,6 @@ function hexCorner(cx: number, cy: number, size: number, i: number) {
 
 function getHexPolygonPoints(cx: number, cy: number, size: number) {
   return Array.from({ length: 6 }, (_, i) => hexCorner(cx, cy, size, i)).flat();
-}
-
-// Get all hexes along a line from start to end using hex grid line drawing
-function getHexLine(startCol: number, startRow: number, endCol: number, endRow: number): { col: number; row: number }[] {
-  const startCube = offsetToCube(startCol, startRow);
-  const endCube = offsetToCube(endCol, endRow);
-  
-  const distance = cubeDistance(startCube, endCube);
-  const hexes: { col: number; row: number }[] = [];
-  
-  if (distance === 0) {
-    return [{ col: startCol, row: startRow }];
-  }
-  
-  for (let i = 0; i <= distance; i++) {
-    const t = i / distance;
-    
-    const x = startCube.x + (endCube.x - startCube.x) * t;
-    const y = startCube.y + (endCube.y - startCube.y) * t;
-    const z = startCube.z + (endCube.z - startCube.z) * t;
-    
-    const roundedCube = roundCube({ x, y, z });
-    
-    const col = roundedCube.x;
-    const row = roundedCube.z + ((roundedCube.x - (roundedCube.x & 1)) >> 1);
-    
-    const hexKey = `${col},${row}`;
-    if (!hexes.some(h => `${h.col},${h.row}` === hexKey)) {
-      hexes.push({ col, row });
-    }
-  }
-  
-  return hexes;
-}
-
-function roundCube(cube: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
-  let rx = Math.round(cube.x);
-  let ry = Math.round(cube.y);
-  let rz = Math.round(cube.z);
-  
-  const xDiff = Math.abs(rx - cube.x);
-  const yDiff = Math.abs(ry - cube.y);
-  const zDiff = Math.abs(rz - cube.z);
-  
-  if (xDiff > yDiff && xDiff > zDiff) {
-    rx = -ry - rz;
-  } else if (yDiff > zDiff) {
-    ry = -rx - rz;
-  } else {
-    rz = -rx - ry;
-  }
-  
-  return { x: rx, y: ry, z: rz };
 }
 
 type Mode = "select" | "movePreview" | "attackPreview" | "chargePreview";
@@ -520,14 +453,21 @@ export default function Board({
             continue;
           }
 
-          // Check if this position is adjacent to an enemy and within charge range
+          // Check if this position is adjacent to a chargeable enemy and within charge range
           if (steps > 0 && steps <= chargeDistance && !forbiddenSet.has(key)) {
-            const enemyAdjacent = units.some(u =>
-              u.player !== selectedUnit.player &&
-              Math.max(Math.abs(col - u.col), Math.abs(row - u.row)) === 1
-            );
+            const chargeableEnemyAdjacent = units.some(u => {
+              if (u.player === selectedUnit.player) return false;
+              
+              // Check if this enemy is adjacent to the destination
+              const isAdjacent = Math.max(Math.abs(col - u.col), Math.abs(row - u.row)) === 1;
+              if (!isAdjacent) return false;
+              
+              // Check if this enemy is also within original charge range (reachable via pathfinding)
+              const enemyDistance = cubeDistance(offsetToCube(selectedUnit.col, selectedUnit.row), offsetToCube(u.col, u.row));
+              return enemyDistance <= chargeDistance;
+            });
             
-            if (enemyAdjacent) {
+            if (chargeableEnemyAdjacent) {
               validDestinations.push({ col, row });
             }
           }
@@ -711,36 +651,12 @@ export default function Board({
         }
       }
 
-      // Green circles for charge eligibility (same as useGameActions logic)
+      // Green circles for charge eligibility - use eligibleUnitIds prop (no redundant logic)
       if (phase === "charge" && selectedUnit && mode === "select") {
-        const enemyUnits = units.filter(u => u.player !== selectedUnit.player);
-        const isAdjacent = enemyUnits.some(enemy => 
-          Math.max(Math.abs(selectedUnit.col - enemy.col), Math.abs(selectedUnit.row - enemy.row)) === 1
-        );
-        
-        if (!isAdjacent) {
-          const hasEnemiesWithin12Hexes = enemyUnits.some(enemy => {
-            const cube1 = offsetToCube(selectedUnit.col, selectedUnit.row);
-            const cube2 = offsetToCube(enemy.col, enemy.row);
-            const hexDistance = cubeDistance(cube1, cube2);
-            
-            if (hexDistance > 12) return false;
-            
-            // Check if path is blocked by walls
-            if (boardConfig?.wall_hexes) {
-              const wallHexSet = new Set(boardConfig.wall_hexes.map(([c, r]: [number, number]) => `${c},${r}`));
-              const line = getHexLine(selectedUnit.col, selectedUnit.row, enemy.col, enemy.row);
-              const isBlocked = line.some(pos => wallHexSet.has(`${pos.col},${pos.row}`));
-              return !isBlocked;
-            }
-            
-            return true;
-          });
-          
-          if (hasEnemiesWithin12Hexes) {
-            // Show green circle around the unit (just its own hex)
-            availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
-          }
+        // Simply check if this unit is in the eligibleUnitIds array passed from GameController
+        if (eligibleUnitIds.includes(selectedUnit.id)) {
+          // Show green circle around the unit (just its own hex)
+          availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
         }
       }
 
@@ -1119,6 +1035,7 @@ export default function Board({
         renderUnit({
           unit, centerX, centerY, app,
           isPreview: false,
+          isEligible: eligibleUnitIds.includes(unit.id), // Add eligibility from GameController
           boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
@@ -1139,6 +1056,7 @@ export default function Board({
           renderUnit({
             unit: previewUnit, centerX, centerY, app,
             isPreview: true, previewType: 'move',
+            isEligible: false, // Preview units are not eligible
             boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
@@ -1160,6 +1078,7 @@ export default function Board({
           renderUnit({
             unit: previewUnit, centerX, centerY, app,
             isPreview: true, previewType: 'attack',
+            isEligible: false, // Preview units are not eligible
             boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
@@ -1301,7 +1220,8 @@ export default function Board({
         movePreview?.unitId, // Add this to ensure preview changes trigger re-render
         movePreview?.destCol, // Add this too
         movePreview?.destRow,  // And this
-        targetPreview // Keep full targetPreview for HP bar blinking
+        targetPreview, // Keep full targetPreview for HP bar blinking
+        eligibleUnitIds.join(',') // Add eligibleUnitIds to trigger re-render when eligibility changes
       ]);
 
       // Simple container return - loading/error handled inside useEffect

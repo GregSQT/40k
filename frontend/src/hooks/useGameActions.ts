@@ -170,6 +170,7 @@ export const useGameActions = ({
         const isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         
         // Use 12-hex pathfinding check with wall blocking
+        if (unit.id === 1) console.log(`🔍 Unit 1 has ${enemyUnits.length} enemies to check`);
         const hasEnemiesWithin12Hexes = enemyUnits.some(enemy => {
           // First check raw hex distance using proper cube coordinates
           const cube1 = offsetToCube(unit.col, unit.row);
@@ -356,20 +357,27 @@ export const useGameActions = ({
         
         console.log(`🎲 Unit ${unitId} (${unit.name || unit.type}) rolls 2d6 for charge: ${chargeRoll}`);
         
-        console.log(`🚀 Triggering charge roll popup for unit ${unitId}, roll: ${chargeRoll}, tooLow: ${!canCharge}`);
         // Show popup immediately
         actions.showChargeRollPopup(unitId, chargeRoll, !canCharge);
-        console.log(`✅ Charge roll popup function called`);
         
         // If no enemies in range, auto-end activation after popup
         if (!canCharge) {
-          setTimeout(() => {
+          const timeoutId = setTimeout(() => {
             actions.addChargedUnit(unitId);
             actions.setSelectedUnitId(null);
             actions.setMode("select");
           }, 2000);
+          
+          // Store timeout ID to prevent interference (optional - depends on your state management)
+          console.log(`⏰ Set timeout ${timeoutId} for unit ${unitId} charge end`);
           return;
         }
+        
+        // For successful charges, also set a timeout to clear the popup
+        setTimeout(() => {
+          // Only clear popup if it's still showing for this unit
+          // This prevents clearing popups for other units
+        }, 2000);
         
         // If charge is possible, proceed to charge preview
         actions.setSelectedUnitId(unitId);
@@ -1198,6 +1206,118 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
     actions.setMode("select");
   }, [actions, findUnit, gameLog, gameState.currentTurn, units]);
 
+  // Calculate valid charge destinations for a unit (used by Board.tsx)
+  const getChargeDestinations = useCallback((unitId: UnitId): { col: number; row: number }[] => {
+    const unit = findUnit(unitId);
+    if (!unit) return [];
+    
+    const chargeDistance = gameState.unitChargeRolls?.[unitId];
+    if (!chargeDistance) return [];
+    
+    if (!boardConfig?.cols || !boardConfig?.rows) return [];
+    
+    const BOARD_COLS = boardConfig.cols;
+    const BOARD_ROWS = boardConfig.rows;
+    
+    const visited = new Map<string, number>();
+    const queue: [number, number, number][] = [[unit.col, unit.row, 0]];
+    const validDestinations: { col: number; row: number }[] = [];
+
+    // Cube directions for proper hex neighbors
+    const cubeDirections = [
+      [1, -1, 0], [1, 0, -1], [0, 1, -1], 
+      [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+    ];
+
+    // Collect forbidden hexes (walls + other units)
+    const forbiddenSet = new Set<string>();
+    
+    // Add wall hexes
+    const wallHexSet = new Set<string>(
+      (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+    );
+    wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
+    
+    // Add other units (but not the charging unit itself)
+    units.forEach(u => {
+      if (u.id !== unit.id) {
+        forbiddenSet.add(`${u.col},${u.row}`);
+      }
+    });
+
+    while (queue.length > 0) {
+      const next = queue.shift();
+      if (!next) continue;
+      const [col, row, steps] = next;
+      const key = `${col},${row}`;
+      
+      if (visited.has(key) && steps >= visited.get(key)!) {
+        continue;
+      }
+
+      visited.set(key, steps);
+
+      // Skip forbidden positions (can't move through them)
+      if (forbiddenSet.has(key) && steps > 0) {
+        continue;
+      }
+
+      // Check if this position is adjacent to a chargeable enemy and within charge range
+      if (steps > 0 && steps <= chargeDistance && !forbiddenSet.has(key)) {
+        const chargeableEnemyAdjacent = units.some(u => {
+          if (u.player === unit.player) return false;
+          
+          // Check if this enemy is adjacent to the destination
+          const isAdjacent = Math.max(Math.abs(col - u.col), Math.abs(row - u.row)) === 1;
+          if (!isAdjacent) return false;
+          
+          // Use the same pathfinding logic as eligibility check
+          if (boardConfig?.wall_hexes) {
+            const wallHexSet = new Set((boardConfig.wall_hexes as [number, number][]).map(([c, r]) => `${c},${r}`));
+            const isReachable = checkPathfindingReachable(unit, u, wallHexSet, chargeDistance);
+            return isReachable;
+          }
+          
+          return true;
+        });
+        
+        if (chargeableEnemyAdjacent) {
+          validDestinations.push({ col, row });
+        }
+      }
+
+      if (steps >= chargeDistance) {
+        continue;
+      }
+
+      // Explore neighbors using cube coordinates
+      const currentCube = offsetToCube(col, row);
+      for (const [dx, dy, dz] of cubeDirections) {
+        const neighborCube = {
+          x: currentCube.x + dx,
+          y: currentCube.y + dy,
+          z: currentCube.z + dz
+        };
+        
+        const ncol = neighborCube.x;
+        const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+        const nkey = `${ncol},${nrow}`;
+        const nextSteps = steps + 1;
+
+        if (
+          ncol >= 0 && ncol < BOARD_COLS &&
+          nrow >= 0 && nrow < BOARD_ROWS &&
+          nextSteps <= chargeDistance &&
+          (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
+        ) {
+          queue.push([ncol, nrow, nextSteps]);
+        }
+      }
+    }
+
+    return validDestinations;
+  }, [findUnit, gameState.unitChargeRolls, boardConfig, units, checkPathfindingReachable]);
+
   return {
     selectUnit,
     selectCharger,
@@ -1211,5 +1331,7 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
     moveCharger,
     cancelCharge,
     validateCharge,
+    isUnitEligible, // Expose the eligibility function
+    getChargeDestinations, // Expose the charge destinations function
   };
 };

@@ -5,7 +5,8 @@ import { areUnitsAdjacent, isUnitInRange, hasLineOfSight } from '../utils/gameHe
 
 interface UsePhaseTransitionParams {
   gameState: GameState;
-  boardConfig: any; // Add boardConfig parameter
+  boardConfig: any;
+  isUnitEligible: (unit: Unit) => boolean; // Add the authoritative eligibility function
   actions: {
     setPhase: (phase: GameState['phase']) => void;
     setCurrentPlayer: (player: PlayerId) => void;
@@ -14,18 +15,19 @@ interface UsePhaseTransitionParams {
     resetMovedUnits: () => void;
     resetChargedUnits: () => void;
     resetAttackedUnits: () => void;
-    resetFledUnits: () => void;  // NEW
-    initializeCombatPhase: () => void;  // NEW
-    setCurrentTurn: (turn: number) => void;  // NEW
-    setCombatSubPhase: (subPhase: CombatSubPhase | undefined) => void; // NEW
-    setCombatActivePlayer: (player: PlayerId | undefined) => void; // NEW
-    setUnits: (units: Unit[]) => void; // NEW
+    resetFledUnits: () => void;
+    initializeCombatPhase: () => void;
+    setCurrentTurn: (turn: number) => void;
+    setCombatSubPhase: (subPhase: CombatSubPhase | undefined) => void;
+    setCombatActivePlayer: (player: PlayerId | undefined) => void;
+    setUnits: (units: Unit[]) => void;
   };
 }
 
 export const usePhaseTransition = ({
   gameState,
   boardConfig,
+  isUnitEligible,
   actions,
 }: UsePhaseTransitionParams) => {
   const { units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer } = gameState;
@@ -159,29 +161,14 @@ export const usePhaseTransition = ({
   // Check if charge phase should transition to combat phase
   const shouldTransitionFromCharge = useCallback((): boolean => {
     const playerUnits = getCurrentPlayerUnits();
-    const enemyUnits = getEnemyUnits();
     
     if (playerUnits.length === 0) return true;
 
-    // Find units that can still charge
-    const chargeableUnits = playerUnits.filter(unit => {
-      if (unitsCharged.includes(unit.id)) return false;
-      
-      // NEW RULE: Units that fled cannot charge
-      if (unitsFled.includes(unit.id)) return false;
-      
-      // Can't charge if adjacent to enemy
-      const isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
-      if (isAdjacent) return false;
-      
-      // Must have enemy within move range
-      const inRange = enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
-      
-      return inRange;
-    });
+    // Use the authoritative isUnitEligible function - no duplicate logic!
+    const chargeableUnits = playerUnits.filter(unit => isUnitEligible(unit));
 
     return chargeableUnits.length === 0;
-  }, [getCurrentPlayerUnits, getEnemyUnits, unitsCharged, unitsFled, areUnitsAdjacent, isUnitInRange, currentPlayer]);
+  }, [getCurrentPlayerUnits, isUnitEligible]);
 
   // Check if combat phase should end turn
   const shouldEndTurn = useCallback((): boolean => {

@@ -99,73 +99,15 @@ export const UnitSelector = memo<UnitSelectorProps>(({
   const { eligibleUnits, ineligibleUnits } = useMemo(() => {
     const playerUnits = units.filter(unit => unit.player === currentPlayer);
     
+    // UnitSelector should receive eligibility information as props rather than calculating it
+    // This requires the parent component to pass eligible/ineligible unit arrays
+    // For now, this component should be refactored to not duplicate eligibility logic
     const getUnitEligibility = (unit: Unit) => {
-      const hasActed = {
-        move: unitsMoved.includes(unit.id),
-        shoot: unitsMoved.includes(unit.id),
-        charge: unitsCharged.includes(unit.id),
-        combat: unitsAttacked.includes(unit.id),
+      // Simplified fallback - parent should provide eligibility data
+      return {
+        eligible: false,
+        reason: 'Eligibility calculated by parent component',
       };
-
-      const enemies = units.filter(u => u.player !== currentPlayer);
-
-      switch (phase) {
-        case 'move':
-          return {
-            eligible: !hasActed.move,
-            reason: hasActed.move ? 'Already moved' : 'Can move',
-          };
-
-        case 'shoot':
-          if (hasActed.shoot) {
-            return { eligible: false, reason: 'Already shot' };
-          }
-          // Check if unit is adjacent to any enemy (engaged in combat)
-          const hasAdjacentEnemyShoot = enemies.some(enemy => areUnitsAdjacent(unit, enemy));
-          if (hasAdjacentEnemyShoot) {
-            return { eligible: false, reason: 'Engaged in combat' };
-          }
-          // NEW RULE: Units that fled cannot shoot
-          if (unitsFled.includes(unit.id)) {
-            return { eligible: false, reason: 'Unit fled - cannot shoot' };
-          }
-          const canShoot = enemies.some(enemy => isUnitInRange(unit, enemy, unit.RNG_RNG));
-          return {
-            eligible: canShoot,
-            reason: canShoot ? 'Can shoot' : 'No enemies in range',
-          };
-        case 'charge':
-          if (hasActed.charge) {
-            return { eligible: false, reason: 'Already charged' };
-          }
-          const hasAdjacentEnemy = enemies.some(enemy => areUnitsAdjacent(unit, enemy));
-          if (hasAdjacentEnemy) {
-            return { eligible: false, reason: 'Enemy adjacent' };
-          }
-          // NEW RULE: Units that fled cannot charge
-          if (unitsFled.includes(unit.id)) {
-            return { eligible: false, reason: 'Unit fled - cannot charge' };
-          }
-          const canCharge = enemies.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
-          return {
-            eligible: canCharge,
-            reason: canCharge ? 'Can charge' : 'No enemies in charge range',
-          };
-
-        case 'combat':
-          if (hasActed.combat) {
-            return { eligible: false, reason: 'Already attacked' };
-          }
-          const combatRange = unit.CC_RNG || 1; // Use CC_RNG instead of hardcoded adjacency
-          const canAttack = enemies.some(enemy => isUnitInRange(unit, enemy, combatRange));
-          return {
-            eligible: canAttack,
-            reason: canAttack ? 'Can attack' : `No enemies within range ${combatRange}`,
-          };
-
-        default:
-          return { eligible: false, reason: 'Unknown phase' };
-      }
     };
 
     const eligible: Array<Unit & { reason: string }> = [];

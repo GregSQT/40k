@@ -3,22 +3,6 @@ import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview, CombatSubPhase, PlayerId } from "../types/game";
 import { areUnitsAdjacent, isUnitInRange, hasLineOfSight } from '../utils/gameHelpers';
 
-// For flat-topped hex, even-q offset (col, row)
-function offsetToCube(col: number, row: number) {
-  const x = col;
-  const z = row - ((col - (col & 1)) >> 1);
-  const y = -x - z;
-  return { x, y, z };
-}
-
-function cubeDistance(a: { x: number, y: number, z: number }, b: { x: number, y: number, z: number }) {
-  return Math.max(
-    Math.abs(a.x - b.x),
-    Math.abs(a.y - b.y),
-    Math.abs(a.z - b.z)
-  );
-}
-
 interface UnitRendererProps {
   unit: Unit;
   centerX: number;
@@ -26,6 +10,7 @@ interface UnitRendererProps {
   app: PIXI.Application;
   isPreview?: boolean;
   previewType?: 'move' | 'attack';
+  isEligible?: boolean; // Add eligibility as a prop instead of calculating it
   
   // Board configuration
   boardConfig: any;
@@ -91,8 +76,8 @@ export class UnitRenderer {
     const scaleRange = maxIconScale - minIconScale;
     const iconZIndex = minZIndex + Math.round((maxIconScale - unitIconScale) / scaleRange * unitZIndexRange);
     
-    // ===== ELIGIBILITY CALCULATION =====
-    const isEligible = this.calculateEligibility();
+    // ===== ELIGIBILITY FROM PROPS =====
+    const isEligible = this.props.isEligible || false;
     
     // ===== RENDER COMPONENTS =====
     this.renderUnitCircle(iconZIndex);
@@ -104,78 +89,9 @@ export class UnitRenderer {
   }
   
   private calculateEligibility(): boolean {
-    const { unit, isPreview, phase, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled, units, combatSubPhase, combatActivePlayer, boardConfig } = this.props;
-    
-    if (isPreview) return false;
-    
-    if (phase === "move") {
-      return unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id));
-    } else if (phase === "shoot") {
-      if (unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id))) {
-        // NEW RULE: Units that fled cannot shoot
-        if (unitsFled && unitsFled.includes(Number(unit.id))) {
-          return false;
-        }
-        const enemies = units.filter(u2 => u2.player !== currentPlayer);
-        // Check if unit is adjacent to any enemy (engaged in combat)
-        const hasAdjacentEnemy = enemies.some(eu => areUnitsAdjacent(unit, eu));
-        if (hasAdjacentEnemy) return false;
-        // Check if unit has enemies in shooting range AND line of sight
-        return enemies.some(eu => {
-          if (!isUnitInRange(unit, eu, unit.RNG_RNG)) return false;
-          
-          // Check line of sight using boardConfig
-          if (boardConfig && boardConfig.wall_hexes) {
-            const lineOfSight = hasLineOfSight(
-              { col: unit.col, row: unit.row },
-              { col: eu.col, row: eu.row },
-              boardConfig.wall_hexes
-            );
-            if (!lineOfSight.canSee) return false;
-          }
-          
-          return true;
-        });
-      }
-    } else if (phase === "charge") {
-      const unitsChargedArr = unitsCharged || [];
-      if (unit.player === currentPlayer && !unitsChargedArr.includes(Number(unit.id))) {
-        // NEW RULE: Units that fled cannot charge
-        if (unitsFled && unitsFled.includes(Number(unit.id))) {
-          return false;
-        }
-        const enemies = units.filter(u2 => u2.player !== currentPlayer);
-        const isAdjacent = enemies.some(eu => areUnitsAdjacent(unit, eu));
-        const inRange = enemies.some(eu => isUnitInRange(unit, eu, unit.MOVE));
-        return !isAdjacent && inRange;
-      }
-    } else if (phase === "combat") {
-      const unitsAttackedArr = unitsAttacked || [];
-      if (!unitsAttackedArr.includes(Number(unit.id))) {
-        // NEW: Check combat sub-phase eligibility
-        if (combatSubPhase === "charged_units") {
-          // Phase 1: Only active player's charged units can attack
-          if (unit.player !== currentPlayer) return false;
-          if (!unit.hasChargedThisTurn) return false;
-        } else if (combatSubPhase === "alternating_combat") {
-          // Phase 2: Only current combat player's non-charged units can attack
-          if (unit.player !== combatActivePlayer) return false;
-          if (unit.hasChargedThisTurn) return false;
-        } else {
-          // Fallback to original logic if no sub-phase set
-          if (unit.player !== currentPlayer) return false;
-        }
-        
-        const enemies = units.filter(u2 => u2.player !== unit.player);
-        // Validate CC_RNG is defined
-        if (unit.CC_RNG === undefined || unit.CC_RNG === null) {
-          throw new Error(`Unit ${unit.id} (${unit.type || 'unknown'}) is missing required CC_RNG property for combat phase eligibility`);
-        }
-        const combatRange = unit.CC_RNG;
-        return enemies.some(eu => isUnitInRange(unit, eu, combatRange));
-      }
-    }
-    
+    // UnitRenderer should not calculate eligibility - this should be passed as a prop
+    // For now, return false and rely on parent components to determine eligibility
+    // TODO: Refactor to receive eligibility as a prop instead of calculating it
     return false;
   }
   
