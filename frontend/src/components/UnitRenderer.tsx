@@ -108,19 +108,6 @@ export class UnitRenderer {
     
     if (isPreview) return false;
     
-    // Debug logging for combat phase
-    if (phase === "combat") {
-      console.log(`🎨 UnitRenderer eligibility for ${unit.name} (${unit.id}):`, {
-        combatSubPhase,
-        combatActivePlayer,
-        currentPlayer,
-        unitPlayer: unit.player,
-        hasChargedThisTurn: unit.hasChargedThisTurn,
-        alreadyAttacked: unitsAttacked?.includes(Number(unit.id)),
-        timestamp: Date.now() // Add timestamp to see timing
-      });
-    }
-    
     if (phase === "move") {
       return unit.player === currentPlayer && !unitsMoved.includes(Number(unit.id));
     } else if (phase === "shoot") {
@@ -270,7 +257,6 @@ export class UnitRenderer {
       if (addClickHandler) {
         unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
           if (e.button === 0) {
-            console.log(`🖱️ Unit clicked: ${unit.name} (${unit.id}), dispatching boardUnitClick event`);
             window.dispatchEvent(new CustomEvent('boardUnitClick', {
               detail: {
                 unitId: unit.id,

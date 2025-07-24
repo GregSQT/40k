@@ -47,10 +47,6 @@ export const usePhaseTransition = ({
     if (phase !== "combat" || combatSubPhase !== "charged_units") return false;
     
     const activePlayerUnits = units.filter(u => u.player === currentPlayer);
-    console.log("🔍 Checking shouldTransitionFromChargedUnitsPhase:", {
-      activePlayerUnits: activePlayerUnits.length,
-      unitsAttacked: unitsAttacked.length
-    });
     const eligibleChargedUnits = activePlayerUnits.filter(unit => {
       if (unitsAttacked.includes(unit.id)) return false;
       if (!unit.hasChargedThisTurn) return false;
@@ -64,10 +60,6 @@ export const usePhaseTransition = ({
     });
     
     const shouldTransition = eligibleChargedUnits.length === 0;
-    console.log("🔍 Transition decision:", {
-      eligibleChargedUnits: eligibleChargedUnits.length,
-      shouldTransition
-    });
     
     return shouldTransition;
   }, [units, currentPlayer, phase, combatSubPhase, unitsAttacked]);
@@ -210,15 +202,6 @@ export const usePhaseTransition = ({
       const combatRange = unit.CC_RNG;
       const canAttack = enemyUnits.some(enemy => isUnitInRange(unit, enemy, combatRange));
       
-      // Debug logging for each unit
-      if (!canAttack) {
-        console.log(`[PhaseTransition] Unit ${unit.name} (${unit.id}) cannot attack - CC_RNG: ${unit.CC_RNG}, position: (${unit.col}, ${unit.row})`);
-        enemyUnits.forEach(enemy => {
-          const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
-          console.log(`  - Enemy ${enemy.name} (${enemy.id}) at (${enemy.col}, ${enemy.row}) - distance: ${distance}, range: ${combatRange}`);
-        });
-      }
-      
       return canAttack;
     });
 
@@ -311,14 +294,8 @@ export const usePhaseTransition = ({
         
       case "combat":
         // Handle combat sub-phase transitions
-        console.log("🔍 Combat phase check:", {
-          combatSubPhase,
-          shouldTransition: combatSubPhase === "charged_units" ? shouldTransitionFromChargedUnitsPhase() : "N/A"
-        });
-        
         if (combatSubPhase === "charged_units" && shouldTransitionFromChargedUnitsPhase()) {
           // Transition from charged units phase to alternating combat
-          console.log("🔄 Transitioning from charged_units to alternating_combat");
           // Use setState updates with immediate re-render
           const nextCombatPlayer = currentPlayer === 0 ? 1 : 0;
           

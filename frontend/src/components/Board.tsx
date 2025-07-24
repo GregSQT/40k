@@ -1,7 +1,7 @@
 // frontend/src/components/Board.tsx
 import React, { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js-legacy";
-import type { Unit, TargetPreview, CombatSubPhase, PlayerId } from "../types/game";
+import type { Unit, TargetPreview, CombatSubPhase, PlayerId, GameState } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
 import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
@@ -117,9 +117,11 @@ type BoardProps = {
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
   onCancelCharge?: () => void;
   onValidateCharge?: (chargerId: number) => void;
+  onLogChargeRoll?: (unit: Unit, roll: number) => void;
   shootingPhaseState?: any;
   targetPreview?: TargetPreview | null;
   onCancelTargetPreview?: () => void;
+  gameState: GameState; // Add gameState prop
 };
 
 export default function Board({
@@ -147,9 +149,11 @@ export default function Board({
   onMoveCharger,
   onCancelCharge,
   onValidateCharge,
+  onLogChargeRoll,
   shootingPhaseState,
   targetPreview,
   onCancelTargetPreview,
+  gameState,
 }: BoardProps) {
   React.useEffect(() => {
   }, [phase, mode, selectedUnitId]);
@@ -163,7 +167,20 @@ export default function Board({
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig, loading, error } = useGameConfig();
   // ✅ STABLE CALLBACK REFS - Don't change on every render
-  const stableCallbacks = useRef({
+  const stableCallbacks = useRef<{
+    onSelectUnit: (id: number | string | null) => void;
+    onStartMovePreview: (unitId: number | string, col: number | string, row: number | string) => void;
+    onStartAttackPreview: (unitId: number, col: number, row: number) => void;
+    onConfirmMove: () => void;
+    onCancelMove: () => void;
+    onShoot: (shooterId: number, targetId: number) => void;
+    onCombatAttack?: (attackerId: number, targetId: number | null) => void;
+    onCharge?: (chargerId: number, targetId: number) => void;
+    onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
+    onCancelCharge?: () => void;
+    onValidateCharge?: (chargerId: number) => void;
+    onLogChargeRoll?: (unit: Unit, roll: number) => void;
+  }>({
     onSelectUnit,
     onStartMovePreview,
     onStartAttackPreview,
@@ -174,7 +191,8 @@ export default function Board({
     onCharge,
     onMoveCharger,
     onCancelCharge,
-    onValidateCharge
+    onValidateCharge,
+    onLogChargeRoll
   });
 
   // Update refs when props change but don't trigger re-render
@@ -189,7 +207,8 @@ export default function Board({
     onCharge,
     onMoveCharger,
     onCancelCharge,
-    onValidateCharge
+    onValidateCharge,
+    onLogChargeRoll
   };
   // ✅ HOOK 2.5: Add shooting preview state management with React state
   // ✅ REMOVE ALL ANIMATION STATE - This is causing the re-render loop
@@ -440,50 +459,122 @@ export default function Board({
     }
 
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
-      // Validate MOVE is defined first
-      if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
-        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for charge preview`);
-      }
+      // Use stored charge roll from gameState (rolled when unit was first selected)
+      const chargeDistance = gameState.unitChargeRolls && gameState.unitChargeRolls[selectedUnit.id];
       
-      const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
+      if (!chargeDistance) {
+        console.warn(`⚠️ No charge roll found for unit ${selectedUnit.id}, skipping charge preview`);
+        chargeCells = [];
+        chargeTargets = [];
+      } else {
+        console.log(`🎯 Unit ${selectedUnit.id} using stored charge roll: ${chargeDistance}`);
 
-      // Orange cells: within MOVE, not blocked, AND adjacent to at least one enemy (within MOVE)
-      for (let col = 0; col < BOARD_COLS; col++) {
-        for (let row = 0; row < BOARD_ROWS; row++) {
-          const c2 = offsetToCube(col, row);
-          const dist = cubeDistance(c1, c2);
-          const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
-          if (
-            !blocked &&
-            dist > 0 && dist <= selectedUnit.MOVE
-          ) {
-            // Only allow if adjacent to an enemy that is also within MOVE
-            const adjEnemy = units.find(u =>
+      // Use BFS pathfinding to find valid charge destinations (same as movement but with charge distance)
+      const chargePathfinding = () => {
+        const centerCol = selectedUnit.col;
+        const centerRow = selectedUnit.row;
+        const visited = new Map<string, number>();
+        const queue: [number, number, number][] = [[centerCol, centerRow, 0]];
+        const validDestinations: { col: number; row: number }[] = [];
+
+        // Cube directions for proper hex neighbors
+        const cubeDirections = [
+          [1, -1, 0], [1, 0, -1], [0, 1, -1], 
+          [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+        ];
+
+        // Collect forbidden hexes (walls + other units)
+        const forbiddenSet = new Set<string>();
+        
+        // Add wall hexes
+        const wallHexSet = new Set<string>(
+          (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+        );
+        wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
+        
+        // Add other units (but not the charging unit itself)
+        units.forEach(unit => {
+          if (unit.id !== selectedUnit.id) {
+            forbiddenSet.add(`${unit.col},${unit.row}`);
+          }
+        });
+
+        while (queue.length > 0) {
+          const next = queue.shift();
+          if (!next) continue;
+          const [col, row, steps] = next;
+          const key = `${col},${row}`;
+          
+          if (visited.has(key) && steps >= visited.get(key)!) {
+            continue;
+          }
+
+          visited.set(key, steps);
+
+          // Skip forbidden positions (can't move through them)
+          if (forbiddenSet.has(key) && steps > 0) {
+            continue;
+          }
+
+          // Check if this position is adjacent to an enemy and within charge range
+          if (steps > 0 && steps <= chargeDistance && !forbiddenSet.has(key)) {
+            const enemyAdjacent = units.some(u =>
               u.player !== selectedUnit.player &&
-              cubeDistance(c1, offsetToCube(u.col, u.row)) <= selectedUnit.MOVE &&
-              cubeDistance(offsetToCube(col, row), offsetToCube(u.col, u.row)) === 1
+              Math.max(Math.abs(col - u.col), Math.abs(row - u.row)) === 1
             );
-            if (adjEnemy) {
-              // Check if charge destination is a wall hex
-              const wallHexSet = new Set<string>(
-                (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
-              );
-              const chargeBlocked = wallHexSet.has(`${col},${row}`);
-              
-              if (!chargeBlocked) {
-                chargeCells.push({ col, row });
-              }
+            
+            if (enemyAdjacent) {
+              validDestinations.push({ col, row });
+            }
+          }
+
+          if (steps >= chargeDistance) {
+            continue;
+          }
+
+          // Explore neighbors using cube coordinates
+          const currentCube = offsetToCube(col, row);
+          for (const [dx, dy, dz] of cubeDirections) {
+            const neighborCube = {
+              x: currentCube.x + dx,
+              y: currentCube.y + dy,
+              z: currentCube.z + dz
+            };
+            
+            const ncol = neighborCube.x;
+            const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+            const nkey = `${ncol},${nrow}`;
+            const nextSteps = steps + 1;
+
+            if (
+              ncol >= 0 && ncol < BOARD_COLS &&
+              nrow >= 0 && nrow < BOARD_ROWS &&
+              nextSteps <= chargeDistance &&
+              (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
+            ) {
+              queue.push([ncol, nrow, nextSteps]);
             }
           }
         }
-      }
 
-      // Red outline: all enemy units within the selected unit's MOVE
-      chargeTargets = units.filter(u =>
-        u.player !== selectedUnit.player &&
-        cubeDistance(c1, offsetToCube(u.col, u.row)) <= selectedUnit.MOVE
-      );
+        return validDestinations;
+      };
+
+      chargeCells = chargePathfinding();
+
+          // Red outline: enemy units that can be reached via valid charge movement
+          chargeTargets = units.filter(u => {
+            if (u.player === selectedUnit.player) return false;
+            
+            // Check if any valid charge destination is adjacent to this enemy
+            return chargeCells.some(dest =>
+              Math.max(Math.abs(dest.col - u.col), Math.abs(dest.row - u.row)) === 1
+            );
+          });
+          
+      }
     }
+    
 
       // Green move cells (mode: 'select' or 'movePreview')
       if (selectedUnit && (mode === "select" || mode === "movePreview") && phase === "move") {
@@ -1037,6 +1128,10 @@ export default function Board({
           });
         }
       }
+
+      // ✅ CHARGE ROLL POPUP RENDERING - Use popup state from useGameState
+      // The popup is now managed by useGameState.showChargeRollPopup() and will be passed as a prop
+      // Remove this section as popup is handled by parent component
 
       // ✅ RENDER LINE OF SIGHT INDICATORS - Add after unit rendering
       if (phase === "shoot" && selectedUnit && (blockedTargets.size > 0 || coverTargets.size > 0)) {

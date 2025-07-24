@@ -29,6 +29,9 @@ interface UseGameActionsParams {
     setTargetPreview: (preview: TargetPreview | null) => void;
     setCombatSubPhase: (subPhase: CombatSubPhase | undefined) => void; // NEW
     setCombatActivePlayer: (player: PlayerId | undefined) => void; // NEW
+    setUnitChargeRoll: (unitId: UnitId, roll: number) => void;
+    showChargeRollPopup: (unitId: UnitId, roll: number, tooLow: boolean) => void;
+    resetChargeRolls: () => void;
   };
 }
 
@@ -110,7 +113,16 @@ export const useGameActions = ({
           return false;
         }
         const isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
-        const inRange = enemyUnits.some(enemy => isUnitInRange(unit, enemy, unit.MOVE));
+        // Check if unit can potentially reach any enemy within 12 hexes (respecting movement rules)
+        const inRange = enemyUnits.some(enemy => {
+          // Use proper hex distance calculation for 12-hex eligibility check
+          const dx = Math.abs(unit.col - enemy.col);
+          const dy = Math.abs(unit.row - enemy.row);
+          const dz = Math.abs(dx - dy);
+          const hexDistance = Math.max(dx, dy, dz);
+          
+          return hexDistance <= 12; // Within potential charge range (max 2d6 roll)
+        });
         return !isAdjacent && inRange;
       case "combat":
         if (unitsAttacked.includes(unit.id)) return false;
@@ -188,6 +200,58 @@ export const useGameActions = ({
 
     // Special handling for charge phase
     if (phase === "charge") {
+      // Roll 2d6 for charge distance when unit is first activated
+      const existingRoll = gameState.unitChargeRolls?.[unitId];
+      let chargeRoll = existingRoll;
+      
+      if (!existingRoll) {
+        // Roll 2d6 for first time activation
+        const die1 = Math.floor(Math.random() * 6) + 1;
+        const die2 = Math.floor(Math.random() * 6) + 1;
+        chargeRoll = die1 + die2;
+        
+        // Store the roll for this unit
+        actions.setUnitChargeRoll(unitId, chargeRoll);
+        
+        // Check if any enemies are within charge distance
+        const enemyUnits = units.filter(u => u.player !== unit.player);
+        const enemiesInRange = enemyUnits.filter(enemy => {
+          // Use proper hex distance calculation for charge success
+          const dx = Math.abs(unit.col - enemy.col);
+          const dy = Math.abs(unit.row - enemy.row);
+          const dz = Math.abs(dx - dy);
+          const hexDistance = Math.max(dx, dy, dz);
+          
+          // Check if enemy is within actual rolled charge distance
+          if (hexDistance > chargeRoll) return false;
+          
+          // TODO: Add movement blocking check here if needed
+          // For now, assume direct line charge is possible
+          return true;
+        });
+        
+        // Log charge roll (separate from charge movement)
+        if (gameLog) {
+          const canCharge = enemiesInRange.length > 0;
+          gameLog.logChargeRoll(unit, chargeRoll, canCharge, gameState.currentTurn);
+        }
+        
+        console.log(`🎲 Unit ${unitId} (${unit.name || unit.type}) rolls 2d6 for charge: ${chargeRoll}`);
+        
+        // Show popup with correct text format
+        actions.showChargeRollPopup(unitId, chargeRoll, enemiesInRange.length === 0); 
+        
+        // If no enemies in range, auto-end activation after popup
+        if (enemiesInRange.length === 0) {
+          setTimeout(() => {
+            actions.addChargedUnit(unitId);
+            actions.setSelectedUnitId(null);
+            actions.setMode("select");
+          }, 2000);
+          return;
+        }
+      }
+      
       actions.setSelectedUnitId(unitId);
       actions.setMode("chargePreview");
       actions.setMovePreview(null);

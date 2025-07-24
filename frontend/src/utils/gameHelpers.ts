@@ -192,18 +192,12 @@ export function hasLineOfSight(
     }
   }
   
-  console.log(`🎯 9-POINT LoS from (${fromPos.col},${fromPos.row}) to (${toPos.col},${toPos.row})`);
-  console.log(`👁️ Clear sight lines: ${clearSightLines}/9 shooter points`);
-  
   // Apply your rules: 0 = blocked, 1-2 = cover, 3+ = clear
   if (clearSightLines === 0) {
-    console.log(`❌ LINE OF SIGHT BLOCKED (no clear sight lines)`);
     return { canSee: false, inCover: false };
   } else if (clearSightLines <= 2) {
-    console.log(`🛡️ TARGET IN COVER (${clearSightLines} clear sight lines)`);
     return { canSee: true, inCover: true };
   } else {
-    console.log(`✅ CLEAR LINE OF SIGHT (${clearSightLines} clear sight lines)`);
     return { canSee: true, inCover: false };
   }
 }
@@ -243,8 +237,6 @@ function getHexLine(startCol: number, startRow: number, endCol: number, endRow: 
       hexes.push({ col, row });
     }
   }
-  
-  console.log(`🛤️ Line from (${startCol},${startRow}) to (${endCol},${endRow}):`, hexes.map(h => `(${h.col},${h.row})`).join(', '));
   
   return hexes;
 }

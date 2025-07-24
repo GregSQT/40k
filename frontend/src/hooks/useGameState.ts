@@ -3,11 +3,19 @@
 import { useState, useCallback } from 'react';
 import { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, MovePreview, AttackPreview, ShootingPhaseState, TargetPreview, CombatSubPhase } from '../types/game';
 
+interface ChargeRollPopup {
+  unitId: UnitId;
+  roll: number;
+  tooLow: boolean;
+  timestamp: number;
+}
+
 interface UseGameStateReturn {
   gameState: GameState;
   movePreview: MovePreview | null;
   attackPreview: AttackPreview | null;
   shootingPhaseState: ShootingPhaseState;
+  chargeRollPopup: ChargeRollPopup | null;
   actions: {
     setUnits: (units: Unit[]) => void;
     setCurrentPlayer: (player: PlayerId) => void;
@@ -34,6 +42,9 @@ interface UseGameStateReturn {
     setCurrentTurn: (turn: number) => void;
     setCombatSubPhase: (subPhase: CombatSubPhase | undefined) => void; // NEW
     setCombatActivePlayer: (player: PlayerId | undefined) => void; // NEW
+    setUnitChargeRoll: (unitId: UnitId, roll: number) => void;
+    showChargeRollPopup: (unitId: UnitId, roll: number, tooLow: boolean) => void;
+    resetChargeRolls: () => void;
   };
 }
 
@@ -60,7 +71,10 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     currentTurn: 1,
     combatSubPhase: undefined,
     combatActivePlayer: undefined,
+    unitChargeRolls: {},
   });
+
+  const [chargeRollPopup, setChargeRollPopup] = useState<ChargeRollPopup | null>(null);
 
   const [movePreview, setMovePreview] = useState<MovePreview | null>(null);
   const [attackPreview, setAttackPreview] = useState<AttackPreview | null>(null);
@@ -219,11 +233,32 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     setGameState(prev => ({ ...prev, combatActivePlayer: player }));
   }, []);
 
+  const setUnitChargeRoll = useCallback((unitId: UnitId, roll: number) => {
+    setGameState(prev => ({
+      ...prev,
+      unitChargeRolls: { ...prev.unitChargeRolls, [unitId]: roll }
+    }));
+  }, []);
+
+  const showChargeRollPopup = useCallback((unitId: UnitId, roll: number, tooLow: boolean) => {
+    setChargeRollPopup({ unitId, roll, tooLow, timestamp: Date.now() });
+    // Auto-hide popup after 2 seconds
+    setTimeout(() => {
+      setChargeRollPopup(null);
+    }, 2000);
+  }, []);
+
+  const resetChargeRolls = useCallback(() => {
+    setGameState(prev => ({ ...prev, unitChargeRolls: {} }));
+    setChargeRollPopup(null);
+  }, []);
+
   return {
     gameState,
     movePreview,
     attackPreview,
     shootingPhaseState,
+    chargeRollPopup,
     actions: {
       setUnits,
       setCurrentPlayer,
@@ -250,6 +285,9 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       setCurrentTurn,
       setCombatSubPhase,
       setCombatActivePlayer,
+      setUnitChargeRoll,
+      showChargeRollPopup,
+      resetChargeRolls,
     },
   };
 };

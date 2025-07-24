@@ -124,6 +124,7 @@ export interface GameState {
   currentTurn: number;  // Track current turn (1-based)
   combatSubPhase?: CombatSubPhase; // NEW: Track combat sub-phase
   combatActivePlayer?: PlayerId; // NEW: Track who's turn it is in alternating combat
+  unitChargeRolls: Record<UnitId, number>; // Store 2d6 charge rolls for each unit
 }
 
 export interface MovePreview {

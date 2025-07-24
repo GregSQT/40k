@@ -225,6 +225,7 @@ export const GameController: React.FC<GameControllerProps> = ({
               combatSubPhase={gameState.combatSubPhase}
               combatActivePlayer={gameState.combatActivePlayer}
               currentTurn={gameState.currentTurn}
+              gameState={gameState}
               onSelectUnit={(unitId) => {
                 if (unitId === null) return;
                 
@@ -260,9 +261,7 @@ export const GameController: React.FC<GameControllerProps> = ({
                 
                 if (isSelectable) {
                   // Unit is selectable, use normal selection
-                  const originalSelectFunction = gameState.phase === "charge" ? 
-                    gameActions.selectCharger : gameActions.selectUnit;
-                  originalSelectFunction(unitId);
+                  gameActions.selectUnit(unitId);
                   setClickedUnitId(null);
                 } else {
                   // Unit is not selectable, show blue highlight

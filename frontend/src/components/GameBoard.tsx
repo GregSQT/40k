@@ -21,6 +21,7 @@ interface GameBoardProps {
   combatSubPhase?: CombatSubPhase; // NEW
   combatActivePlayer?: PlayerId; // NEW
   currentTurn: number;
+  gameState: GameState;
   maxTurns?: number;
   onSelectUnit: (id: UnitId | null) => void;
   onStartMovePreview: (unitId: UnitId, col: number, row: number) => void;
@@ -104,6 +105,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         unitsFled={props.unitsFled}
         combatSubPhase={props.combatSubPhase}
         combatActivePlayer={props.combatActivePlayer}
+        gameState={props.gameState}
         onSelectUnit={handleSelectUnit}
         onStartMovePreview={handleStartMovePreview}
         onStartAttackPreview={props.onStartAttackPreview}
