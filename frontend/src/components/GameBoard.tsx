@@ -9,6 +9,7 @@ import { setupBoardClickHandler } from '../utils/boardClickHandler';
 interface GameBoardProps {
   units: Unit[];
   selectedUnitId: UnitId | null;
+  eligibleUnitIds: number[];
   phase: GameState['phase'];
   mode: GameState['mode'];
   movePreview: MovePreview | null;
@@ -95,6 +96,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
       <Board
         units={props.units}
         selectedUnitId={props.selectedUnitId}
+        eligibleUnitIds={props.eligibleUnitIds}
         phase={props.phase}
         mode={props.mode}
         movePreview={props.movePreview}

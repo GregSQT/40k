@@ -62,6 +62,60 @@ export const useGameActions = ({
     return units.find(u => u.id === unitId);
   }, [units]);
 
+  // Helper function to check if enemy is reachable via pathfinding around walls
+  const checkPathfindingReachable = useCallback((unit: Unit, enemy: Unit, wallHexSet: Set<string>, maxDistance: number): boolean => {
+    if (!boardConfig?.cols || !boardConfig?.rows) {
+      throw new Error('boardConfig.cols and boardConfig.rows are required for pathfinding');
+    }
+    
+    const visited = new Set<string>();
+    const queue: Array<{col: number, row: number, distance: number}> = [{col: unit.col, row: unit.row, distance: 0}];
+    
+    const cubeDirections = [
+      [1, -1, 0], [1, 0, -1], [0, 1, -1], 
+      [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+    ];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const key = `${current.col},${current.row}`;
+      
+      if (visited.has(key)) continue;
+      visited.add(key);
+      
+      // Found the enemy
+      if (current.col === enemy.col && current.row === enemy.row) {
+        return true;
+      }
+      
+      // Don't expand beyond max distance
+      if (current.distance >= maxDistance) continue;
+      
+      // Expand to neighbors
+      const currentCube = offsetToCube(current.col, current.row);
+      for (const [dx, dy, dz] of cubeDirections) {
+        const neighborCube = {
+          x: currentCube.x + dx,
+          y: currentCube.y + dy,
+          z: currentCube.z + dz
+        };
+        
+        const ncol = neighborCube.x;
+        const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+        const nkey = `${ncol},${nrow}`;
+        
+        // Skip if out of bounds, already visited, or is a wall
+        if (ncol < 0 || ncol >= boardConfig.cols || nrow < 0 || nrow >= boardConfig.rows) continue;
+        if (visited.has(nkey)) continue;
+        if (wallHexSet.has(nkey)) continue;
+        
+        queue.push({col: ncol, row: nrow, distance: current.distance + 1});
+      }
+    }
+    
+    return false; // Enemy not reachable
+  }, [boardConfig]);
+
   // Helper function to check if unit is eligible for selection
   const isUnitEligible = useCallback((unit: Unit) => {
     // Special handling for combat phase - don't block based on currentPlayer yet
@@ -106,6 +160,7 @@ export const useGameActions = ({
           return true;
         });
       case "charge":
+        console.log(`🔧 DEBUG: Charge eligibility check for unit ${unit.id} - NEW 12-HEX VERSION`);
         if (unitsCharged.includes(unit.id)) {
           return false;
         }
@@ -125,18 +180,26 @@ export const useGameActions = ({
           
           if (hexDistance > 12) return false;
           
-          // Check if path is blocked by walls using pathfinding
+          console.log(`🔍 About to check walls for unit ${unit.id} to enemy ${enemy.id}`);
+          console.log(`🔍 boardConfig exists: ${!!boardConfig}`);
+          console.log(`🔍 boardConfig.wall_hexes exists: ${!!boardConfig?.wall_hexes}`);
+          
+          // Check if path is blocked by walls using actual pathfinding (not just direct line)
           if (boardConfig?.wall_hexes) {
-            const wallHexSet = new Set(boardConfig.wall_hexes.map(([c, r]: [number, number]) => `${c},${r}`));
+            console.log(`🔍 Inside wall check for unit ${unit.id} to enemy ${enemy.id}`);
+            const wallHexSet = new Set((boardConfig.wall_hexes as [number, number][]).map(([c, r]) => `${c},${r}`));
             
-            // Simple path check - if direct line crosses walls, consider blocked
-            const line = getHexLine(unit.col, unit.row, enemy.col, enemy.row);
-            const isBlocked = line.some(pos => wallHexSet.has(`${pos.col},${pos.row}`));
+            // Use BFS pathfinding to check if enemy is reachable within 12 hexes
+            console.log(`🔍 Calling pathfinding for unit ${unit.id} to enemy ${enemy.id}`);
+            const isReachable = checkPathfindingReachable(unit, enemy, wallHexSet, 12);
+            console.log(`🔍 Pathfinding result: ${isReachable}`);
             
-            console.log(`🔍 Wall blocking check: ${isBlocked ? 'BLOCKED' : 'CLEAR'}`);
+            console.log(`🔍 Wall blocking check: ${isReachable ? 'CLEAR' : 'BLOCKED'}`);
             
-            return !isBlocked;
+            return isReachable;
           }
+          
+          console.log(`🔍 No walls to check - returning true for unit ${unit.id} to enemy ${enemy.id}`);
           
           return true; // No walls to block
         });
@@ -167,7 +230,7 @@ export const useGameActions = ({
       default:
         return false;
     }
-  }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer]);
+  }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer, boardConfig, gameState]);
 
   const selectUnit = useCallback((unitId: UnitId | null) => {
     // Prevent unit selection during shooting sequence
@@ -241,7 +304,7 @@ export const useGameActions = ({
         
         console.log(`💾 Stored charge roll ${chargeRoll} for unit ${unitId}`);
         
-        // Check if any enemies are within the rolled charge distance
+        // Check if any enemies within 12 hexes are also within the rolled charge distance
         const enemyUnits = units.filter(u => u.player !== unit.player);
         console.log(`🎯 Checking ${enemyUnits.length} enemies against charge roll of ${chargeRoll}`);
         
@@ -254,27 +317,20 @@ export const useGameActions = ({
           
           console.log(`📏 Enemy ${enemy.id} hex distance: ${hexDistance} vs charge roll ${chargeRoll}`);
           
-          // Check if enemy is within actual rolled charge distance
+          // Check if enemy is within rolled charge distance (12-hex limit already checked in eligibility)
           if (hexDistance > chargeRoll) {
-            console.log(`❌ Enemy ${enemy.id} too far (${hexDistance} > ${chargeRoll})`);
+            console.log(`❌ Enemy ${enemy.id} too far for charge roll (${hexDistance} > ${chargeRoll})`);
             return false;
           }
           
           console.log(`✅ Enemy ${enemy.id} within charge range, checking walls...`);
           
-          // Check if path is blocked by walls
+          // Use same pathfinding logic as eligibility check
           if (boardConfig?.wall_hexes) {
-            console.log(`🧱 Checking walls for enemy ${enemy.id}...`);
-            const wallHexSet = new Set(boardConfig.wall_hexes.map(([c, r]: [number, number]) => `${c},${r}`));
-            console.log(`🧱 Wall hexes: ${wallHexSet.size} walls`);
-            
-            const line = getHexLine(unit.col, unit.row, enemy.col, enemy.row);
-            console.log(`📍 Path to enemy ${enemy.id}: ${line.length} hexes`);
-            
-            const isBlocked = line.some(pos => wallHexSet.has(`${pos.col},${pos.row}`));
-            console.log(`🧱 Enemy ${enemy.id} path blocked: ${isBlocked}`);
-            
-            if (isBlocked) return false;
+            const wallHexSet = new Set((boardConfig.wall_hexes as [number, number][]).map(([c, r]) => `${c},${r}`));
+            const isReachable = checkPathfindingReachable(unit, enemy, wallHexSet, chargeRoll);
+            console.log(`🧱 Enemy ${enemy.id} pathfinding result: ${isReachable}`);
+            if (!isReachable) return false;
           }
           
           console.log(`✅ Enemy ${enemy.id} is chargeable!`);
