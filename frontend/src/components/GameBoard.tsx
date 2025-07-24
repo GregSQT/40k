@@ -37,6 +37,7 @@ interface GameBoardProps {
   shootingPhaseState: ShootingPhaseState;
   targetPreview: TargetPreview | null;
   onCancelTargetPreview: () => void;
+  chargeRollPopup?: { unitId: number; roll: number; tooLow: boolean; timestamp: number } | null;
 }
 
 export const GameBoard: React.FC<GameBoardProps> = (props) => {
@@ -120,6 +121,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         shootingPhaseState={props.shootingPhaseState}
         targetPreview={props.targetPreview}
         onCancelTargetPreview={props.onCancelTargetPreview}
+        chargeRollPopup={props.chargeRollPopup}
       />
     </div>
   );

@@ -2,7 +2,7 @@
 import { useCallback } from 'react';
 import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState, TargetPreview, CombatSubPhase, PlayerId } from '../types/game';
 import { calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability, calculateCombatHitProbability, calculateCombatWoundProbability, calculateCombatSaveProbability, calculateCombatOverallProbability } from '../utils/probabilityCalculator';
-import { areUnitsAdjacent, isUnitInRange, hasLineOfSight } from '../utils/gameHelpers';
+import { areUnitsAdjacent, isUnitInRange, hasLineOfSight, offsetToCube, cubeDistance, getHexLine } from '../utils/gameHelpers';
 import { singleShotSequenceManager } from '../utils/ShootingSequenceManager';
 
 interface UseGameActionsParams {
@@ -113,17 +113,37 @@ export const useGameActions = ({
           return false;
         }
         const isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
-        // Check if unit can potentially reach any enemy within 12 hexes (respecting movement rules)
-        const inRange = enemyUnits.some(enemy => {
-          // Use proper hex distance calculation for 12-hex eligibility check
-          const dx = Math.abs(unit.col - enemy.col);
-          const dy = Math.abs(unit.row - enemy.row);
-          const dz = Math.abs(dx - dy);
-          const hexDistance = Math.max(dx, dy, dz);
+        
+        // Use 12-hex pathfinding check with wall blocking
+        const hasEnemiesWithin12Hexes = enemyUnits.some(enemy => {
+          // First check raw hex distance using proper cube coordinates
+          const cube1 = offsetToCube(unit.col, unit.row);
+          const cube2 = offsetToCube(enemy.col, enemy.row);
+          const hexDistance = cubeDistance(cube1, cube2);
           
-          return hexDistance <= 12; // Within potential charge range (max 2d6 roll)
+          console.log(`🔍 Charge eligibility: Unit ${unit.id} to Enemy ${enemy.id} - Distance: ${hexDistance}`);
+          
+          if (hexDistance > 12) return false;
+          
+          // Check if path is blocked by walls using pathfinding
+          if (boardConfig?.wall_hexes) {
+            const wallHexSet = new Set(boardConfig.wall_hexes.map(([c, r]: [number, number]) => `${c},${r}`));
+            
+            // Simple path check - if direct line crosses walls, consider blocked
+            const line = getHexLine(unit.col, unit.row, enemy.col, enemy.row);
+            const isBlocked = line.some(pos => wallHexSet.has(`${pos.col},${pos.row}`));
+            
+            console.log(`🔍 Wall blocking check: ${isBlocked ? 'BLOCKED' : 'CLEAR'}`);
+            
+            return !isBlocked;
+          }
+          
+          return true; // No walls to block
         });
-        return !isAdjacent && inRange;
+        
+        console.log(`🔍 Final charge eligibility for unit ${unit.id}: Adjacent=${isAdjacent}, HasEnemiesWithin12=${hasEnemiesWithin12Hexes}`);
+        
+        return !isAdjacent && hasEnemiesWithin12Hexes;
       case "combat":
         if (unitsAttacked.includes(unit.id)) return false;
         
@@ -171,7 +191,10 @@ export const useGameActions = ({
     
     const eligible = isUnitEligible(unit);
     
+    console.log(`🔍 Unit ${unitId} eligible: ${eligible}, phase: ${phase}`);
+    
     if (!eligible) {
+      console.log(`❌ Unit ${unitId} not eligible - returning early`);
       return;
     }
 
@@ -200,49 +223,90 @@ export const useGameActions = ({
 
     // Special handling for charge phase
     if (phase === "charge") {
-      // Roll 2d6 for charge distance when unit is first activated
+      console.log(`⚡ CHARGE PHASE - Unit ${unitId}, existing roll: ${gameState.unitChargeRolls?.[unitId] || 'NONE'}`);
+      // Check if this unit already has a charge roll
       const existingRoll = gameState.unitChargeRolls?.[unitId];
-      let chargeRoll = existingRoll;
       
       if (!existingRoll) {
-        // Roll 2d6 for first time activation
+        console.log(`🎲 ROLLING NEW CHARGE for unit ${unitId} - first time selection`);
+        // First time selecting this unit - roll 2d6 for charge distance
         const die1 = Math.floor(Math.random() * 6) + 1;
         const die2 = Math.floor(Math.random() * 6) + 1;
-        chargeRoll = die1 + die2;
+        const chargeRoll = die1 + die2;
+        
+        console.log(`🎲 Rolled ${die1} + ${die2} = ${chargeRoll} for unit ${unitId}`);
         
         // Store the roll for this unit
         actions.setUnitChargeRoll(unitId, chargeRoll);
         
-        // Check if any enemies are within charge distance
+        console.log(`💾 Stored charge roll ${chargeRoll} for unit ${unitId}`);
+        
+        // Check if any enemies are within the rolled charge distance
         const enemyUnits = units.filter(u => u.player !== unit.player);
+        console.log(`🎯 Checking ${enemyUnits.length} enemies against charge roll of ${chargeRoll}`);
+        
         const enemiesInRange = enemyUnits.filter(enemy => {
-          // Use proper hex distance calculation for charge success
-          const dx = Math.abs(unit.col - enemy.col);
-          const dy = Math.abs(unit.row - enemy.row);
-          const dz = Math.abs(dx - dy);
-          const hexDistance = Math.max(dx, dy, dz);
+          console.log(`📏 Checking enemy ${enemy.id} at (${enemy.col},${enemy.row}) vs unit at (${unit.col},${unit.row})`);
+          // Use proper cube coordinates for charge distance check
+          const cube1 = offsetToCube(unit.col, unit.row);
+          const cube2 = offsetToCube(enemy.col, enemy.row);
+          const hexDistance = cubeDistance(cube1, cube2);
+          
+          console.log(`📏 Enemy ${enemy.id} hex distance: ${hexDistance} vs charge roll ${chargeRoll}`);
           
           // Check if enemy is within actual rolled charge distance
-          if (hexDistance > chargeRoll) return false;
+          if (hexDistance > chargeRoll) {
+            console.log(`❌ Enemy ${enemy.id} too far (${hexDistance} > ${chargeRoll})`);
+            return false;
+          }
           
-          // TODO: Add movement blocking check here if needed
-          // For now, assume direct line charge is possible
+          console.log(`✅ Enemy ${enemy.id} within charge range, checking walls...`);
+          
+          // Check if path is blocked by walls
+          if (boardConfig?.wall_hexes) {
+            console.log(`🧱 Checking walls for enemy ${enemy.id}...`);
+            const wallHexSet = new Set(boardConfig.wall_hexes.map(([c, r]: [number, number]) => `${c},${r}`));
+            console.log(`🧱 Wall hexes: ${wallHexSet.size} walls`);
+            
+            const line = getHexLine(unit.col, unit.row, enemy.col, enemy.row);
+            console.log(`📍 Path to enemy ${enemy.id}: ${line.length} hexes`);
+            
+            const isBlocked = line.some(pos => wallHexSet.has(`${pos.col},${pos.row}`));
+            console.log(`🧱 Enemy ${enemy.id} path blocked: ${isBlocked}`);
+            
+            if (isBlocked) return false;
+          }
+          
+          console.log(`✅ Enemy ${enemy.id} is chargeable!`);
           return true;
         });
         
-        // Log charge roll (separate from charge movement)
+        console.log(`🎯 Found ${enemiesInRange.length} enemies in charge range`);
+        const canCharge = enemiesInRange.length > 0;
+        console.log(`⚡ Can charge: ${canCharge}`);
+        
+        // Log charge roll immediately
         if (gameLog) {
-          const canCharge = enemiesInRange.length > 0;
-          gameLog.logChargeRoll(unit, chargeRoll, canCharge, gameState.currentTurn);
+          console.log(`📝 Logging charge roll to combat log...`);
+          try {
+            gameLog.logChargeRoll(unit, chargeRoll, canCharge, gameState.currentTurn);
+            console.log(`✅ Charge roll logged successfully`);
+          } catch (error) {
+            console.error(`❌ Error logging charge roll:`, error);
+          }
+        } else {
+          console.log(`❌ No gameLog available`);
         }
         
         console.log(`🎲 Unit ${unitId} (${unit.name || unit.type}) rolls 2d6 for charge: ${chargeRoll}`);
         
-        // Show popup with correct text format
-        actions.showChargeRollPopup(unitId, chargeRoll, enemiesInRange.length === 0); 
+        console.log(`🚀 Triggering charge roll popup for unit ${unitId}, roll: ${chargeRoll}, tooLow: ${!canCharge}`);
+        // Show popup immediately
+        actions.showChargeRollPopup(unitId, chargeRoll, !canCharge);
+        console.log(`✅ Charge roll popup function called`);
         
         // If no enemies in range, auto-end activation after popup
-        if (enemiesInRange.length === 0) {
+        if (!canCharge) {
           setTimeout(() => {
             actions.addChargedUnit(unitId);
             actions.setSelectedUnitId(null);
@@ -250,13 +314,21 @@ export const useGameActions = ({
           }, 2000);
           return;
         }
+        
+        // If charge is possible, proceed to charge preview
+        actions.setSelectedUnitId(unitId);
+        actions.setMode("chargePreview");
+        actions.setMovePreview(null);
+        actions.setAttackPreview(null);
+        return;
+      } else {
+        // Unit already has a roll - go directly to charge preview
+        actions.setSelectedUnitId(unitId);
+        actions.setMode("chargePreview");
+        actions.setMovePreview(null);
+        actions.setAttackPreview(null);
+        return;
       }
-      
-      actions.setSelectedUnitId(unitId);
-      actions.setMode("chargePreview");
-      actions.setMovePreview(null);
-      actions.setAttackPreview(null);
-      return;
     }
 
     // Special handling for combat phase

@@ -10,7 +10,7 @@ const initialUnits: Unit[] = [
     type: "Intercessor",
     player: 0,
     col: 2,
-    row: 8,
+    row: 5,
     color: 0x244488,
   }),
   createUnit({
@@ -18,8 +18,8 @@ const initialUnits: Unit[] = [
     name: "P-I",
     type: "CaptainGravis",
     player: 0,
-    col: 23,
-    row: 9,
+    col: 25,
+    row: 12,
     color: 0x244488,
   }),
   createUnit({

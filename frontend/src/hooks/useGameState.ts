@@ -242,6 +242,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
 
   const showChargeRollPopup = useCallback((unitId: UnitId, roll: number, tooLow: boolean) => {
     setChargeRollPopup({ unitId, roll, tooLow, timestamp: Date.now() });
+    console.log(`🎪 POPUP STATE SET:`, { unitId, roll, tooLow, timestamp: Date.now() });
     // Auto-hide popup after 2 seconds
     setTimeout(() => {
       setChargeRollPopup(null);

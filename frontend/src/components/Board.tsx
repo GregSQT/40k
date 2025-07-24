@@ -122,6 +122,7 @@ type BoardProps = {
   targetPreview?: TargetPreview | null;
   onCancelTargetPreview?: () => void;
   gameState: GameState; // Add gameState prop
+  chargeRollPopup?: { unitId: number; roll: number; tooLow: boolean; timestamp: number } | null;
 };
 
 export default function Board({
@@ -154,6 +155,7 @@ export default function Board({
   targetPreview,
   onCancelTargetPreview,
   gameState,
+  chargeRollPopup,
 }: BoardProps) {
   React.useEffect(() => {
   }, [phase, mode, selectedUnitId]);
@@ -1129,9 +1131,39 @@ export default function Board({
         }
       }
 
-      // ✅ CHARGE ROLL POPUP RENDERING - Use popup state from useGameState
-      // The popup is now managed by useGameState.showChargeRollPopup() and will be passed as a prop
-      // Remove this section as popup is handled by parent component
+      // ✅ CHARGE ROLL POPUP RENDERING
+      if (chargeRollPopup) {
+        const popupText = chargeRollPopup.tooLow 
+          ? `Charge ${chargeRollPopup.roll} - no charge possible!`
+          : `Charge: ${chargeRollPopup.roll}!`;
+        
+        const popupContainer = new PIXI.Container();
+        popupContainer.name = 'charge-roll-popup';
+        
+        // Create popup background
+        const popupBg = new PIXI.Graphics();
+        popupBg.beginFill(0x000000, 0.8);
+        popupBg.lineStyle(2, chargeRollPopup.tooLow ? 0xFF0000 : 0x00FF00, 1.0);
+        popupBg.drawRoundedRect(0, 0, 300, 60, 10);
+        popupBg.endFill();
+        
+        // Create popup text
+        const popupTextObj = new PIXI.Text(popupText, {
+          fontSize: 24,
+          fill: chargeRollPopup.tooLow ? 0xFF4444 : 0x44FF44,
+          fontWeight: 'bold',
+          align: 'center'
+        });
+        popupTextObj.anchor.set(0.5);
+        popupTextObj.position.set(150, 30);
+        
+        // Position popup in center of screen
+        popupContainer.position.set((width - 300) / 2, (height - 60) / 2);
+        popupContainer.addChild(popupBg);
+        popupContainer.addChild(popupTextObj);
+        
+        app.stage.addChild(popupContainer);
+      }
 
       // ✅ RENDER LINE OF SIGHT INDICATORS - Add after unit rendering
       if (phase === "shoot" && selectedUnit && (blockedTargets.size > 0 || coverTargets.size > 0)) {

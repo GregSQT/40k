@@ -203,7 +203,7 @@ export function hasLineOfSight(
 }
 
 // Simple straight-line algorithm for hex grids using linear interpolation
-function getHexLine(startCol: number, startRow: number, endCol: number, endRow: number): Position[] {
+export function getHexLine(startCol: number, startRow: number, endCol: number, endRow: number): Position[] {
   // Convert to cube coordinates for proper line drawing
   const startCube = offsetToCube(startCol, startRow);
   const endCube = offsetToCube(endCol, endRow);

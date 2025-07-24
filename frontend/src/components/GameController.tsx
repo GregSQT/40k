@@ -78,7 +78,7 @@ export const GameController: React.FC<GameControllerProps> = ({
   }, [initialUnits]);
 
   // Initialize game state with custom hook
-  const { gameState, movePreview, attackPreview, shootingPhaseState, actions } = useGameState(gameUnits);
+  const { gameState, movePreview, attackPreview, shootingPhaseState, chargeRollPopup, actions } = useGameState(gameUnits);
   
   // Track clicked (but not selected) units for blue highlighting
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
@@ -297,6 +297,7 @@ export const GameController: React.FC<GameControllerProps> = ({
                   }
                 }
               }}
+              chargeRollPopup={chargeRollPopup}
             />
           </ErrorBoundary>
           </div>
