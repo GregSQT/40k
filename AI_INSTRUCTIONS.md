@@ -36,6 +36,7 @@ Core Principles
 2. Two-Block Update Format
 For every code change, provide:
 - Line number of the code
+- Path and name of the file to update
 - A Markdown code blocks snippets containing the ORIGINAL CODE:
 
 // Exact code from the provided file with proper indentation
