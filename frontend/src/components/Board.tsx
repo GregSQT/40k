@@ -57,6 +57,7 @@ type BoardProps = {
   onCancelTargetPreview?: () => void;
   gameState: GameState; // Add gameState prop
   chargeRollPopup?: { unitId: number; roll: number; tooLow: boolean; timestamp: number } | null;
+  getChargeDestinations: (unitId: number) => { col: number; row: number }[];
 };
 
 export default function Board({
@@ -91,6 +92,7 @@ export default function Board({
   onCancelTargetPreview,
   gameState,
   chargeRollPopup,
+  getChargeDestinations,
 }: BoardProps) {
   React.useEffect(() => {
   }, [phase, mode, selectedUnitId]);
@@ -406,105 +408,8 @@ export default function Board({
       } else {
         console.log(`🎯 Unit ${selectedUnit.id} using stored charge roll: ${chargeDistance}`);
 
-      // Use BFS pathfinding to find valid charge destinations (same as movement but with charge distance)
-      const chargePathfinding = () => {
-        const centerCol = selectedUnit.col;
-        const centerRow = selectedUnit.row;
-        const visited = new Map<string, number>();
-        const queue: [number, number, number][] = [[centerCol, centerRow, 0]];
-        const validDestinations: { col: number; row: number }[] = [];
-
-        // Cube directions for proper hex neighbors
-        const cubeDirections = [
-          [1, -1, 0], [1, 0, -1], [0, 1, -1], 
-          [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
-        ];
-
-        // Collect forbidden hexes (walls + other units)
-        const forbiddenSet = new Set<string>();
-        
-        // Add wall hexes
-        const wallHexSet = new Set<string>(
-          (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
-        );
-        wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
-        
-        // Add other units (but not the charging unit itself)
-        units.forEach(unit => {
-          if (unit.id !== selectedUnit.id) {
-            forbiddenSet.add(`${unit.col},${unit.row}`);
-          }
-        });
-
-        while (queue.length > 0) {
-          const next = queue.shift();
-          if (!next) continue;
-          const [col, row, steps] = next;
-          const key = `${col},${row}`;
-          
-          if (visited.has(key) && steps >= visited.get(key)!) {
-            continue;
-          }
-
-          visited.set(key, steps);
-
-          // Skip forbidden positions (can't move through them)
-          if (forbiddenSet.has(key) && steps > 0) {
-            continue;
-          }
-
-          // Check if this position is adjacent to a chargeable enemy and within charge range
-          if (steps > 0 && steps <= chargeDistance && !forbiddenSet.has(key)) {
-            const chargeableEnemyAdjacent = units.some(u => {
-              if (u.player === selectedUnit.player) return false;
-              
-              // Check if this enemy is adjacent to the destination
-              const isAdjacent = Math.max(Math.abs(col - u.col), Math.abs(row - u.row)) === 1;
-              if (!isAdjacent) return false;
-              
-              // Check if this enemy is also within original charge range (reachable via pathfinding)
-              const enemyDistance = cubeDistance(offsetToCube(selectedUnit.col, selectedUnit.row), offsetToCube(u.col, u.row));
-              return enemyDistance <= chargeDistance;
-            });
-            
-            if (chargeableEnemyAdjacent) {
-              validDestinations.push({ col, row });
-            }
-          }
-
-          if (steps >= chargeDistance) {
-            continue;
-          }
-
-          // Explore neighbors using cube coordinates
-          const currentCube = offsetToCube(col, row);
-          for (const [dx, dy, dz] of cubeDirections) {
-            const neighborCube = {
-              x: currentCube.x + dx,
-              y: currentCube.y + dy,
-              z: currentCube.z + dz
-            };
-            
-            const ncol = neighborCube.x;
-            const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
-            const nkey = `${ncol},${nrow}`;
-            const nextSteps = steps + 1;
-
-            if (
-              ncol >= 0 && ncol < BOARD_COLS &&
-              nrow >= 0 && nrow < BOARD_ROWS &&
-              nextSteps <= chargeDistance &&
-              (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
-            ) {
-              queue.push([ncol, nrow, nextSteps]);
-            }
-          }
-        }
-
-        return validDestinations;
-      };
-
-      chargeCells = chargePathfinding();
+      // Use authoritative getChargeDestinations function (single source of truth)
+      chargeCells = getChargeDestinations(selectedUnit.id);
 
           // Red outline: enemy units that can be reached via valid charge movement
           chargeTargets = units.filter(u => {

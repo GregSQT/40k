@@ -238,6 +238,7 @@ export const GameController: React.FC<GameControllerProps> = ({
               combatActivePlayer={gameState.combatActivePlayer}
               currentTurn={gameState.currentTurn}
               gameState={gameState}
+              getChargeDestinations={gameActions.getChargeDestinations}
               onSelectUnit={(unitId) => {
                 if (unitId === null) return;
                 

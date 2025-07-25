@@ -118,16 +118,23 @@ export const useGameActions = ({
 
   // Helper function to check if unit is eligible for selection
   const isUnitEligible = useCallback((unit: Unit) => {
+    console.log(`🔍 ELIGIBILITY: Unit ${unit.id} player=${unit.player}, currentPlayer=${currentPlayer}, phase="${phase}"`);
     // Special handling for combat phase - don't block based on currentPlayer yet
-    if (phase !== "combat" && unit.player !== currentPlayer) return false;
+    if (phase !== "combat" && unit.player !== currentPlayer) {
+      console.log(`🔍 ELIGIBILITY: Unit ${unit.id} BLOCKED - wrong player (${unit.player} !== ${currentPlayer})`);
+      return false;
+    }
 
     // Get enemy units once for efficiency
     const enemyUnits = units.filter(u => u.player !== currentPlayer);
 
+    console.log(`🔍 ELIGIBILITY: Unit ${unit.id} entering switch with phase="${phase}"`);
     switch (phase) {
       case "move":
+        console.log(`🔍 ELIGIBILITY: Unit ${unit.id} hit MOVE case`);
         return !unitsMoved.includes(unit.id);
       case "shoot":
+        console.log(`🔍 ELIGIBILITY: Unit ${unit.id} hit SHOOT case`);
         if (unitsMoved.includes(unit.id)) {
           return false;
         }
@@ -160,19 +167,20 @@ export const useGameActions = ({
           return true;
         });
       case "charge":
-        console.log(`🔧 DEBUG: Charge eligibility check for unit ${unit.id} - NEW 12-HEX VERSION`);
+        console.log(`🔍 ELIGIBILITY: Unit ${unit.id} ENTERING CHARGE CASE - 12-HEX PATHFINDING VERSION`);
+        console.log(`🔍 ELIGIBILITY: unitsCharged array:`, unitsCharged);
         if (unitsCharged.includes(unit.id)) {
+          console.log(`🔍 ELIGIBILITY: Unit ${unit.id} already charged - THIS IS A BUG ON FIRST TURN!`);
           return false;
         }
         if (unitsFled.includes(unit.id)) {
+          console.log(`🔍 ELIGIBILITY: Unit ${unit.id} has fled`);
           return false;
         }
         const isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         
-        // Use 12-hex pathfinding check with wall blocking
-        if (unit.id === 1) console.log(`🔍 Unit 1 has ${enemyUnits.length} enemies to check`);
+        // Use 12-hex pathfinding check with wall blocking (respects obstacles like move phase)
         const hasEnemiesWithin12Hexes = enemyUnits.some(enemy => {
-          // First check raw hex distance using proper cube coordinates
           const cube1 = offsetToCube(unit.col, unit.row);
           const cube2 = offsetToCube(enemy.col, enemy.row);
           const hexDistance = cubeDistance(cube1, cube2);
@@ -181,32 +189,18 @@ export const useGameActions = ({
           
           if (hexDistance > 12) return false;
           
-          console.log(`🔍 About to check walls for unit ${unit.id} to enemy ${enemy.id}`);
-          console.log(`🔍 boardConfig exists: ${!!boardConfig}`);
-          console.log(`🔍 boardConfig.wall_hexes exists: ${!!boardConfig?.wall_hexes}`);
-          
-          // Check if path is blocked by walls using actual pathfinding (not just direct line)
+          // Check pathfinding around walls/obstacles (same as move phase)
           if (boardConfig?.wall_hexes) {
-            console.log(`🔍 Inside wall check for unit ${unit.id} to enemy ${enemy.id}`);
             const wallHexSet = new Set((boardConfig.wall_hexes as [number, number][]).map(([c, r]) => `${c},${r}`));
-            
-            // Use BFS pathfinding to check if enemy is reachable within 12 hexes
-            console.log(`🔍 Calling pathfinding for unit ${unit.id} to enemy ${enemy.id}`);
             const isReachable = checkPathfindingReachable(unit, enemy, wallHexSet, 12);
-            console.log(`🔍 Pathfinding result: ${isReachable}`);
-            
-            console.log(`🔍 Wall blocking check: ${isReachable ? 'CLEAR' : 'BLOCKED'}`);
-            
+            console.log(`🔍 Enemy ${enemy.id} pathfinding result: ${isReachable}`);
             return isReachable;
           }
           
-          console.log(`🔍 No walls to check - returning true for unit ${unit.id} to enemy ${enemy.id}`);
-          
-          return true; // No walls to block
+          return true;
         });
         
         console.log(`🔍 Final charge eligibility for unit ${unit.id}: Adjacent=${isAdjacent}, HasEnemiesWithin12=${hasEnemiesWithin12Hexes}`);
-        
         return !isAdjacent && hasEnemiesWithin12Hexes;
       case "combat":
         if (unitsAttacked.includes(unit.id)) return false;
@@ -229,6 +223,7 @@ export const useGameActions = ({
         const combatRange = unit.CC_RNG;
         return enemyUnits.some(enemy => isUnitInRange(unit, enemy, combatRange));
       default:
+        console.log(`🔍 ELIGIBILITY: Unit ${unit.id} hit DEFAULT case with phase="${phase}"`);
         return false;
     }
   }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer, boardConfig, gameState]);
@@ -256,6 +251,11 @@ export const useGameActions = ({
     const eligible = isUnitEligible(unit);
     
     console.log(`🔍 Unit ${unitId} eligible: ${eligible}, phase: ${phase}`);
+    if (!eligible) {
+      console.log(`🔍 DEBUG: Unit ${unitId} failed eligibility - calling isUnitEligible again with debug`);
+      // Call it again to see the debug logs
+      isUnitEligible(unit);
+    }
     
     if (!eligible) {
       console.log(`❌ Unit ${unitId} not eligible - returning early`);
@@ -373,11 +373,7 @@ export const useGameActions = ({
           return;
         }
         
-        // For successful charges, also set a timeout to clear the popup
-        setTimeout(() => {
-          // Only clear popup if it's still showing for this unit
-          // This prevents clearing popups for other units
-        }, 2000);
+        // Note: Popup timeout is handled automatically in useGameState.ts showChargeRollPopup function
         
         // If charge is possible, proceed to charge preview
         actions.setSelectedUnitId(unitId);
@@ -1271,13 +1267,7 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
           const isAdjacent = Math.max(Math.abs(col - u.col), Math.abs(row - u.row)) === 1;
           if (!isAdjacent) return false;
           
-          // Use the same pathfinding logic as eligibility check
-          if (boardConfig?.wall_hexes) {
-            const wallHexSet = new Set((boardConfig.wall_hexes as [number, number][]).map(([c, r]) => `${c},${r}`));
-            const isReachable = checkPathfindingReachable(unit, u, wallHexSet, chargeDistance);
-            return isReachable;
-          }
-          
+          // For now, skip wall checking in charge destinations (simplified)
           return true;
         });
         

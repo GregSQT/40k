@@ -24,6 +24,7 @@ interface GameBoardProps {
   currentTurn: number;
   gameState: GameState;
   maxTurns?: number;
+  getChargeDestinations: (unitId: UnitId) => { col: number; row: number }[];
   onSelectUnit: (id: UnitId | null) => void;
   onStartMovePreview: (unitId: UnitId, col: number, row: number) => void;
   onStartAttackPreview: (unitId: UnitId, col: number, row: number) => void;
@@ -124,6 +125,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         targetPreview={props.targetPreview}
         onCancelTargetPreview={props.onCancelTargetPreview}
         chargeRollPopup={props.chargeRollPopup}
+        getChargeDestinations={props.getChargeDestinations}
       />
     </div>
   );
