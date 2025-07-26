@@ -240,48 +240,10 @@ export const GameController: React.FC<GameControllerProps> = ({
               gameState={gameState}
               getChargeDestinations={gameActions.getChargeDestinations}
               onSelectUnit={(unitId) => {
+                console.log(`🖱️ GameController: Board click on unit ${unitId}`);
                 if (unitId === null) return;
-                
-                const unit = gameState.units.find(u => u.id === unitId);
-                if (!unit) return;
-                
-                // Check if unit is selectable based on game rules
-                // NEW: Use the same eligibility logic as useGameActions for combat phase
-                let isSelectable = false;
-                if (gameState.phase === "combat") {
-                  // In combat phase, use combat-specific eligibility
-                  if (!gameState.unitsAttacked.includes(unitId) && (unit.CUR_HP ?? unit.HP_MAX) > 0) {
-                    const combatSubPhase = gameState.combatSubPhase;
-                    const combatActivePlayer = gameState.combatActivePlayer;
-                    
-                    if (combatSubPhase === "charged_units") {
-                      // Phase 1: Only active player's charged units
-                      isSelectable = unit.player === gameState.currentPlayer && unit.hasChargedThisTurn === true;
-                    } else if (combatSubPhase === "alternating_combat") {
-                      // Phase 2: Only combat active player's non-charged units
-                      isSelectable = unit.player === combatActivePlayer && unit.hasChargedThisTurn !== true;
-                    } else {
-                      // Fallback
-                      isSelectable = unit.player === gameState.currentPlayer;
-                    }
-                  }
-                } else {
-                  // Original logic for non-combat phases
-                  isSelectable = unit.player === gameState.currentPlayer && 
-                    !gameState.unitsMoved.includes(unitId) &&
-                    (unit.CUR_HP ?? unit.HP_MAX) > 0;
-                }
-                
-                if (isSelectable) {
-                  // Unit is selectable, use normal selection
-                  gameActions.selectUnit(unitId);
-                  setClickedUnitId(null);
-                } else {
-                  // Unit is not selectable, show blue highlight
-                  setClickedUnitId(unitId);
-                  // Clear clicked highlight after 2 seconds
-                  setTimeout(() => setClickedUnitId(null), 2000);
-                }
+                gameActions.selectUnit(unitId);
+                setClickedUnitId(null);
               }}
               onStartMovePreview={gameActions.startMovePreview}
               onStartAttackPreview={gameActions.startAttackPreview}
@@ -328,26 +290,9 @@ export const GameController: React.FC<GameControllerProps> = ({
                 selectedUnitId={gameState.selectedUnitId}
                 clickedUnitId={clickedUnitId}
                 onSelectUnit={(unitId) => {
-                  const unit = gameState.units.find(u => u.id === unitId);
-                  if (!unit) return;
-                  
-                  // Check if unit is selectable based on game rules
-                  const isSelectable = unit.player === gameState.currentPlayer && 
-                    !gameState.unitsMoved.includes(unitId) &&
-                    (unit.CUR_HP ?? unit.HP_MAX) > 0;
-                  
-                  if (isSelectable) {
-                    // Unit is selectable, use normal selection
-                    const originalSelectFunction = gameState.phase === "charge" ? 
-                      gameActions.selectCharger : gameActions.selectUnit;
-                    originalSelectFunction(unitId);
-                    setClickedUnitId(null);
-                  } else {
-                    // Unit is not selectable, show blue highlight
-                    setClickedUnitId(unitId);
-                    // Clear clicked highlight after 2 seconds
-                    setTimeout(() => setClickedUnitId(null), 2000);
-                  }
+                  console.log(`🖱️ GameController: Unit status table click on unit ${unitId}`);
+                  gameActions.selectUnit(unitId);
+                  setClickedUnitId(null);
                 }}
               />
             </ErrorBoundary>
@@ -359,26 +304,9 @@ export const GameController: React.FC<GameControllerProps> = ({
                 selectedUnitId={gameState.selectedUnitId}
                 clickedUnitId={clickedUnitId}
                 onSelectUnit={(unitId) => {
-                  const unit = gameState.units.find(u => u.id === unitId);
-                  if (!unit) {
-                    return;
-                  }
-                  
-                  const isSelectable = unit.player === gameState.currentPlayer && 
-                    !gameState.unitsMoved.includes(unitId) &&
-                    (unit.CUR_HP ?? unit.HP_MAX) > 0;
-                  
-                  if (isSelectable) {
-                    const originalSelectFunction = gameState.phase === "charge" ? 
-                      gameActions.selectCharger : gameActions.selectUnit;
-                    originalSelectFunction(unitId);
-                    setClickedUnitId(null);
-                  } else {
-                    setClickedUnitId(unitId);
-                    setTimeout(() => {
-                      setClickedUnitId(null);
-                    }, 2000);
-                  }
+                  console.log(`🖱️ GameController: Unit status table click on unit ${unitId}`);
+                  gameActions.selectUnit(unitId);
+                  setClickedUnitId(null);
                 }}
               />
             </ErrorBoundary>

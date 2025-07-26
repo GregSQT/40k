@@ -152,7 +152,7 @@ export class UnitRenderer {
     // Add click handlers for normal units (with charge-cancel on re-click)
     unitCircle.eventMode = 'static';
     unitCircle.cursor = "pointer";
-    const isEligible = this.calculateEligibility();
+    // Always add click handlers so we can detect clicks on all units
     
     if (phase === "charge" && selectedUnitId === unit.id) {
       // Cancel charge on second click of active unit
@@ -171,8 +171,11 @@ export class UnitRenderer {
         }
       }
       if (addClickHandler) {
+        console.log(`🔧 Adding click handler to unit ${unit.id} circle`);
         unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+          console.log(`🖱️ Unit ${unit.id} icon clicked! Button: ${e.button}`);
           if (e.button === 0) {
+            console.log(`🖱️ Dispatching boardUnitClick event for unit ${unit.id}`);
             window.dispatchEvent(new CustomEvent('boardUnitClick', {
               detail: {
                 unitId: unit.id,
@@ -181,6 +184,7 @@ export class UnitRenderer {
                 selectedUnitId: selectedUnitId
               }
             }));
+            console.log(`🖱️ boardUnitClick event dispatched for unit ${unit.id}`);
           }
         });
       } else {

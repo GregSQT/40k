@@ -320,6 +320,11 @@ export default function Board({
     
     containerRef.current.appendChild(canvas);
 
+    // Add general click detector
+    canvas.addEventListener('click', (e) => {
+      console.log('🖱️ CANVAS CLICK DETECTED at:', e.offsetX, e.offsetY);
+    });
+
     // Right click cancels move/attack preview
     if (app.view && app.view.addEventListener) {
       app.view.addEventListener("contextmenu", (e) => {

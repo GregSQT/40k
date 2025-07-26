@@ -229,6 +229,7 @@ export const useGameActions = ({
   }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer, boardConfig, gameState]);
 
   const selectUnit = useCallback((unitId: UnitId | null) => {
+    console.log(`🖱️ selectUnit called with unitId: ${unitId}, phase: ${phase}`);
     // Prevent unit selection during shooting sequence
     if (shootingPhaseState.singleShotState?.isActive) {
       return;
@@ -261,9 +262,12 @@ export const useGameActions = ({
       console.log(`❌ Unit ${unitId} not eligible - returning early`);
       return;
     }
+    
+    console.log(`✅ Unit ${unitId} passed eligibility check, continuing to phase handling...`);
 
     // Special handling for move phase - second click marks as moved (or chose not to move)
     if (phase === "move" && selectedUnitId === unitId) {
+      console.log(`🏃 MOVE PHASE - second click handling`);
       actions.addMovedUnit(unitId);
       actions.setSelectedUnitId(null);
       actions.setMovePreview(null);
@@ -273,6 +277,7 @@ export const useGameActions = ({
 
     // Special handling for shoot phase
     if (phase === "shoot") {
+      console.log(`🎯 SHOOT PHASE - handling click`);
       // Always show the attack preview…
       actions.setMovePreview(null);
       actions.setAttackPreview({ unitId, col: unit.col, row: unit.row });
@@ -287,6 +292,8 @@ export const useGameActions = ({
 
     // Special handling for charge phase
     if (phase === "charge") {
+      console.log(`⚡ CHARGE PHASE CLICKED - Unit ${unitId}, phase: ${phase}, eligible: ${eligible}`);
+      console.log(`⚡ CHARGE PHASE - About to check existing roll...`);
       console.log(`⚡ CHARGE PHASE - Unit ${unitId}, existing roll: ${gameState.unitChargeRolls?.[unitId] || 'NONE'}`);
       // Check if this unit already has a charge roll
       const existingRoll = gameState.unitChargeRolls?.[unitId];
@@ -342,51 +349,50 @@ export const useGameActions = ({
         const canCharge = enemiesInRange.length > 0;
         console.log(`⚡ Can charge: ${canCharge}`);
         
-        // Log charge roll immediately
-        if (gameLog) {
-          console.log(`📝 Logging charge roll to combat log...`);
-          try {
-            gameLog.logChargeRoll(unit, chargeRoll, canCharge, gameState.currentTurn);
-            console.log(`✅ Charge roll logged successfully`);
-          } catch (error) {
-            console.error(`❌ Error logging charge roll:`, error);
-          }
+        // Show charge roll popup with proper message and 2-second timeout
+        if (canCharge) {
+          actions.showChargeRollPopup(unitId, chargeRoll, false); // Roll successful
+          console.log(`🎲 Roll: ${chargeRoll}! Showing charge preview`);
         } else {
-          console.log(`❌ No gameLog available`);
+          actions.showChargeRollPopup(unitId, chargeRoll, true); // Roll failed
+          console.log(`🎲 Roll: ${chargeRoll} no charge! Ending activation`);
         }
         
-        console.log(`🎲 Unit ${unitId} (${unit.name || unit.type}) rolls 2d6 for charge: ${chargeRoll}`);
-        
-        // Show popup immediately
-        actions.showChargeRollPopup(unitId, chargeRoll, !canCharge);
-        
-        // If no enemies in range, auto-end activation after popup
-        if (!canCharge) {
-          const timeoutId = setTimeout(() => {
-            actions.addChargedUnit(unitId);
-            actions.setSelectedUnitId(null);
-            actions.setMode("select");
-          }, 2000);
-          
-          // Store timeout ID to prevent interference (optional - depends on your state management)
-          console.log(`⏰ Set timeout ${timeoutId} for unit ${unitId} charge end`);
-          return;
+        // Log to combat log
+        if (gameLog) {
+          gameLog.logChargeRoll(unit, chargeRoll, canCharge, gameState.currentTurn);
         }
         
-        // Note: Popup timeout is handled automatically in useGameState.ts showChargeRollPopup function
+        // Handle game logic immediately - popup timeout is handled separately
+        if (canCharge) {
+          // Show charge preview immediately
+          actions.setSelectedUnitId(unitId);
+          actions.setMode("chargePreview");
+        } else {
+          // End activation immediately for failed charges
+          actions.addChargedUnit(unitId);
+          actions.setSelectedUnitId(null);
+          actions.setMode("select");
+          if (gameLog) {
+            gameLog.logChargeFailure(unit, chargeRoll, gameState.currentTurn);
+          }
+        } 
         
-        // If charge is possible, proceed to charge preview
-        actions.setSelectedUnitId(unitId);
-        actions.setMode("chargePreview");
-        actions.setMovePreview(null);
-        actions.setAttackPreview(null);
         return;
       } else {
-        // Unit already has a roll - go directly to charge preview
-        actions.setSelectedUnitId(unitId);
-        actions.setMode("chargePreview");
-        actions.setMovePreview(null);
-        actions.setAttackPreview(null);
+        // Second click on same unit - cancel charge
+        if (selectedUnitId === unitId) {
+          actions.addChargedUnit(unitId);
+          actions.setSelectedUnitId(null);
+          actions.setMode("select");
+          if (gameLog) {
+            gameLog.logChargeCancellation(unit, gameState.currentTurn);
+          }
+        } else {
+          // Different unit with existing roll - show preview
+          actions.setSelectedUnitId(unitId);
+          actions.setMode("chargePreview");
+        }
         return;
       }
     }

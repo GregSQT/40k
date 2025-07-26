@@ -18,6 +18,7 @@ export function setupBoardClickHandler(callbacks: {
   }
 
   globalClickHandler = (e: Event) => {
+    console.log(`🖱️ boardClickHandler received event for unit:`, (e as CustomEvent).detail);
     const { unitId, phase, mode, selectedUnitId } = (e as CustomEvent<{
       unitId: number;
       phase: string;
