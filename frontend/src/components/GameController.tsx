@@ -111,7 +111,7 @@ export const GameController: React.FC<GameControllerProps> = ({
       // Call the ACTUAL isUnitEligible function from useGameActions (single source of truth)
       return originalGameActions.isUnitEligible(unit);
     }).map(unit => unit.id);
-  }, [gameState.units, boardConfig, originalGameActions.isUnitEligible]);
+  }, [gameState.units, boardConfig, originalGameActions.isUnitEligible, gameState.phase, gameState.currentPlayer, gameState.unitsMoved, gameState.unitsCharged, gameState.unitsAttacked, gameState.unitsFled]);
 
   // Handle AI player behavior
   useAIPlayer({

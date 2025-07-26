@@ -320,9 +320,19 @@ export default function Board({
     
     containerRef.current.appendChild(canvas);
 
-    // Add general click detector
-    canvas.addEventListener('click', (e) => {
-      console.log('🖱️ CANVAS CLICK DETECTED at:', e.offsetX, e.offsetY);
+    // Set up board click handler to prevent event conflicts
+    setupBoardClickHandler({
+      onSelectUnit: stableCallbacks.current.onSelectUnit,
+      onStartAttackPreview: (shooterId: number) => {
+        const unit = units.find(u => u.id === shooterId);
+        if (unit) {
+          stableCallbacks.current.onStartAttackPreview(shooterId, unit.col, unit.row);
+        }
+      },
+      onShoot: stableCallbacks.current.onShoot,
+      onCombatAttack: stableCallbacks.current.onCombatAttack || (() => {}),
+      onConfirmMove: stableCallbacks.current.onConfirmMove,
+      onCancelCharge: stableCallbacks.current.onCancelCharge,
     });
 
     // Right click cancels move/attack preview
@@ -905,6 +915,7 @@ export default function Board({
                   onCancelCharge?.();
                 } else if (isChargeable) {
                   onMoveCharger?.(selectedUnitId, Number(col), Number(row));
+                  onValidateCharge?.(selectedUnitId);
                 }
               });
             } else if (mode === "select" && selectedUnitId !== null && isAvailable) {

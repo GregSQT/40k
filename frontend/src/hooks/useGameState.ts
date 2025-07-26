@@ -75,6 +75,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     unitChargeRolls: {},
   });
 
+  const [unitChargeRolls, setUnitChargeRolls] = useState<Record<number, number>>({});
   const [chargeRollPopup, setChargeRollPopup] = useState<ChargeRollPopup | null>(null);
 
   const [movePreview, setMovePreview] = useState<MovePreview | null>(null);

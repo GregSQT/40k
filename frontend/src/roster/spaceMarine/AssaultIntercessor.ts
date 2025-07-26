@@ -14,7 +14,7 @@ export class AssaultIntercessor extends SpaceMarineMeleeUnit {
   static OC = 2;               // Operative Control
   static VALUE = 20;           // Unit value
   // RANGE WEAPON
-  static RNG_RNG = 18;         // Range attack : range
+  static RNG_RNG = 1;         // Range attack : range - 18
   static RNG_NB = 1;           // Range attack : number of attacks
   static RNG_ATK = 3;          // Range attack : To Hit score
   static RNG_STR = 4;          // Range attack Strength

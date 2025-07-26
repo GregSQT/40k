@@ -57,8 +57,10 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         },
         onShoot:        props.onShoot,
         onCombatAttack: props.onCombatAttack,
-        onConfirmMove: props.onConfirmMove,
-        onCancelCharge: props.onCancelCharge
+        onConfirmMove:  props.onConfirmMove,
+        onCancelCharge: props.onCancelCharge,
+        onValidateCharge: props.onValidateCharge,
+        onMoveCharger:    props.onMoveCharger
       });
     }, [
       props.onSelectUnit,
@@ -67,6 +69,8 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
       props.onCombatAttack,
       props.onConfirmMove,
       props.onCancelCharge,
+      props.onValidateCharge,
+      props.onMoveCharger,
       props.units
     ]);
 

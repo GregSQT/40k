@@ -171,11 +171,10 @@ export class UnitRenderer {
         }
       }
       if (addClickHandler) {
-        console.log(`🔧 Adding click handler to unit ${unit.id} circle`);
         unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-          console.log(`🖱️ Unit ${unit.id} icon clicked! Button: ${e.button}`);
           if (e.button === 0) {
-            console.log(`🖱️ Dispatching boardUnitClick event for unit ${unit.id}`);
+            // Prevent event bubbling and multiple dispatches
+            e.stopPropagation();
             window.dispatchEvent(new CustomEvent('boardUnitClick', {
               detail: {
                 unitId: unit.id,
@@ -184,7 +183,6 @@ export class UnitRenderer {
                 selectedUnitId: selectedUnitId
               }
             }));
-            console.log(`🖱️ boardUnitClick event dispatched for unit ${unit.id}`);
           }
         });
       } else {

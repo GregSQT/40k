@@ -11,6 +11,8 @@ export function setupBoardClickHandler(callbacks: {
   onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
   onConfirmMove(): void;
   onCancelCharge?(): void;
+  onValidateCharge?(chargerId: UnitId): void;
+  onMoveCharger?(chargerId: UnitId, destCol: number, destRow: number): void;
 }) {
 
   if (globalClickHandler) {

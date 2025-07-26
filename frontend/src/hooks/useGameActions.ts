@@ -284,107 +284,58 @@ export const useGameActions = ({
       const existingRoll = gameState.unitChargeRolls?.[unitId];
       
       if (!existingRoll) {
-        console.log(`🎲 ROLLING NEW CHARGE for unit ${unitId} - first time selection`);
         // First time selecting this unit - roll 2d6 for charge distance
         const die1 = Math.floor(Math.random() * 6) + 1;
         const die2 = Math.floor(Math.random() * 6) + 1;
         const chargeRoll = die1 + die2;
         
-        console.log(`🎲 Rolled ${die1} + ${die2} = ${chargeRoll} for unit ${unitId}`);
-        
-        // Store the roll for this unit
-        actions.setUnitChargeRoll(unitId, chargeRoll);
-        
-        console.log(`💾 Stored charge roll ${chargeRoll} for unit ${unitId}`);
-        
         // Check if any enemies within 12 hexes are also within the rolled charge distance
         const enemyUnits = units.filter(u => u.player !== unit.player);
-        console.log(`🎯 Checking ${enemyUnits.length} enemies against charge roll of ${chargeRoll}`);
         
         const enemiesInRange = enemyUnits.filter(enemy => {
-          try {
-            console.log(`📏 Checking enemy ${enemy.id} at (${enemy.col},${enemy.row}) vs unit at (${unit.col},${unit.row})`);
-            // First check if enemy is within 12 hexes (eligibility already passed this)
-            const cube1 = offsetToCube(unit.col, unit.row);
-            const cube2 = offsetToCube(enemy.col, enemy.row);
-            const hexDistance = cubeDistance(cube1, cube2);
-            
-            console.log(`📏 Enemy ${enemy.id} hex distance: ${hexDistance} vs charge roll ${chargeRoll}`);
-            
-            // Check if enemy is within rolled charge distance (12-hex limit already checked in eligibility)
-            if (hexDistance > chargeRoll) {
-              console.log(`❌ Enemy ${enemy.id} too far for charge roll (${hexDistance} > ${chargeRoll})`);
-              return false;
-            }
-            
-            if (hexDistance > 12) {
-              console.log(`❌ Enemy ${enemy.id} beyond 12-hex eligibility limit (${hexDistance} > 12)`);
-              return false;
-            }
-            
-            console.log(`✅ Enemy ${enemy.id} within charge range, checking walls...`);
-            
-            // Use same pathfinding logic as eligibility check
-            if (boardConfig?.wall_hexes) {
-              const wallHexSet = new Set((boardConfig.wall_hexes as [number, number][]).map(([c, r]) => `${c},${r}`));
-              const isReachable = checkPathfindingReachable(unit, enemy, wallHexSet, chargeRoll);
-              console.log(`🧱 Enemy ${enemy.id} pathfinding result: ${isReachable}`);
-              if (!isReachable) return false;
-            }
-            
-            console.log(`✅ Enemy ${enemy.id} is chargeable!`);
-            return true;
-          } catch (error) {
-            console.error(`💥 Error checking enemy ${enemy.id}:`, error);
-            return false;
+          // First check if enemy is within 12 hexes (eligibility already passed this)
+          const cube1 = offsetToCube(unit.col, unit.row);
+          const cube2 = offsetToCube(enemy.col, enemy.row);
+          const hexDistance = cubeDistance(cube1, cube2);
+          
+          // Check if enemy is within rolled charge distance (12-hex limit already checked in eligibility)
+          if (hexDistance > chargeRoll) return false;
+          if (hexDistance > 12) return false;
+          
+          // Use same pathfinding logic as eligibility check
+          if (boardConfig?.wall_hexes) {
+            const wallHexSet = new Set((boardConfig.wall_hexes as [number, number][]).map(([c, r]) => `${c},${r}`));
+            const isReachable = checkPathfindingReachable(unit, enemy, wallHexSet, chargeRoll);
+            if (!isReachable) return false;
           }
+          
+          return true;
         });
         
-        console.log(`🔧 Filter operation completed, about to check enemiesInRange.length`);
-        console.log(`🔧 enemiesInRange array:`, enemiesInRange);
-        console.log(`🎯 Found ${enemiesInRange.length} enemies in charge range`);
-        console.log(`🔧 About to check canCharge condition`);
-        
-        console.log(`🎯 Found ${enemiesInRange.length} enemies in charge range`);
         const canCharge = enemiesInRange.length > 0;
-        console.log(`⚡ Can charge: ${canCharge}`);
         
-        // Handle game logic FIRST - popup LAST to avoid blocking execution
-        if (canCharge) {
-          console.log(`🎲 Roll: ${chargeRoll}! Showing charge preview`);
-          // Show charge preview and highlight possible targets
-          actions.setSelectedUnitId(unitId);
-          actions.setMode("chargePreview");
-        } else {
-          console.log(`🎲 Roll: ${chargeRoll} no charge! Ending activation`);
-          console.log(`🚫 Adding unit ${unitId} to charged list to remove green circle`);
-          // End activation immediately for failed charges
-          actions.addChargedUnit(unitId);
-          actions.setSelectedUnitId(null);
-          actions.setMode("select");
-          console.log(`📝 Logging charge failure to combat log`);
-          if (gameLog) {
-            gameLog.logChargeFailure(unit, chargeRoll, gameState.currentTurn);
-          }
-          console.log(`✅ Failed charge handling completed`);
-        }
-        
-        // Log to combat log
+        // Execute logging and popup BEFORE state updates to prevent re-render interruption
         if (gameLog) {
           gameLog.logChargeRoll(unit, chargeRoll, canCharge, gameState.currentTurn);
         }
-        
-        // Show charge roll popup LAST - in case it causes issues
-        console.log(`🎪 About to call showChargeRollPopup(${unitId}, ${chargeRoll}, ${!canCharge})`);
         actions.showChargeRollPopup(unitId, chargeRoll, !canCharge);
-        console.log(`🎪 showChargeRollPopup call completed`);
+        
+        // Store the roll and handle game logic AFTER logging/popup
+        actions.setUnitChargeRoll(unitId, chargeRoll);
+        
+        if (canCharge) {
+          actions.setSelectedUnitId(unitId);
+          actions.setMode("chargePreview");
+        } else {
+          actions.addChargedUnit(unitId);
+          actions.setSelectedUnitId(null);
+          actions.setMode("select");
+        }
         
         return;
       } else {
-        console.log(`⚡ Unit ${unitId} already has charge roll: ${existingRoll}, selectedUnitId: ${selectedUnitId}`);
         // Unit already has a charge roll
         if (selectedUnitId === unitId) {
-          console.log(`🚫 Second click on same unit - canceling charge and ending activation`);
           // Second click on same unit - cancel charge and end activation
           actions.resetUnitChargeRoll(unitId);
           actions.addChargedUnit(unitId);
@@ -394,7 +345,6 @@ export const useGameActions = ({
             gameLog.logChargeCancellation(unit, gameState.currentTurn);
           }
         } else {
-          console.log(`🎯 Different unit selected - showing charge preview`);
           // Different unit with existing roll - show preview
           actions.setSelectedUnitId(unitId);
           actions.setMode("chargePreview");
@@ -517,7 +467,9 @@ interface ShootingResult {
 }
 
 // Dice rolling function
-const rollD6 = (): number => Math.floor(Math.random() * 6) + 1;
+  const rollD6 = (): number => {
+    return Math.floor(Math.random() * 6) + 1;
+  };
 
 // Calculate wound target based on strength vs toughness
 const calculateWoundTarget = (strength: number, toughness: number): number => {
@@ -1165,6 +1117,7 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
     }
     
     actions.updateUnit(chargerId, { col: destCol, row: destRow, hasChargedThisTurn: true });
+    actions.resetUnitChargeRoll(chargerId);
     actions.addChargedUnit(chargerId);
     actions.setSelectedUnitId(null);
     actions.setMode("select");
@@ -1335,5 +1288,6 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
     validateCharge,
     isUnitEligible, // Expose the eligibility function
     getChargeDestinations, // Expose the charge destinations function
+    rollD6,
   };
 };
