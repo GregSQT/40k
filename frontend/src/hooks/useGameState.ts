@@ -43,6 +43,7 @@ interface UseGameStateReturn {
     setCombatSubPhase: (subPhase: CombatSubPhase | undefined) => void; // NEW
     setCombatActivePlayer: (player: PlayerId | undefined) => void; // NEW
     setUnitChargeRoll: (unitId: UnitId, roll: number) => void;
+    resetUnitChargeRoll: (unitId: UnitId) => void;
     showChargeRollPopup: (unitId: UnitId, roll: number, tooLow: boolean) => void;
     resetChargeRolls: () => void;
   };
@@ -240,6 +241,14 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     }));
   }, []);
 
+  const resetUnitChargeRoll = useCallback((unitId: UnitId) => {
+    setGameState(prev => {
+      const newChargeRolls = { ...prev.unitChargeRolls };
+      delete newChargeRolls[unitId];
+      return { ...prev, unitChargeRolls: newChargeRolls };
+    });
+  }, []);
+
   const showChargeRollPopup = useCallback((unitId: UnitId, roll: number, tooLow: boolean) => {
     setChargeRollPopup({ unitId, roll, tooLow, timestamp: Date.now() });
     console.log(`🎪 POPUP STATE SET:`, { unitId, roll, tooLow, timestamp: Date.now() });
@@ -287,6 +296,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       setCombatSubPhase,
       setCombatActivePlayer,
       setUnitChargeRoll,
+      resetUnitChargeRoll,
       showChargeRollPopup,
       resetChargeRolls,
     },

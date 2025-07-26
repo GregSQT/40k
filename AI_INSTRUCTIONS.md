@@ -59,6 +59,7 @@ The copied code from the Markdown code blocks snippets containing the ORIGINAL C
 - Only create new artifacts for completely new code that doesn't exist yet
 - ALWAYS use update method even for additions (show 3 lines before/after the addition point)
 - ALWAYS respect exact indentation from the original file
+- ALWAYS use the last file I gave you as the reference
 - Show minimal necessary context but enough to locate the exact position
 ---
 

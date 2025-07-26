@@ -19,7 +19,7 @@ const initialUnits: Unit[] = [
     type: "CaptainGravis",
     player: 0,
     col: 25,
-    row: 3, //12
+    row: 12, //12 or 3
     color: 0x244488,
   }),
   createUnit({
@@ -28,7 +28,7 @@ const initialUnits: Unit[] = [
     type: "AssaultIntercessor",
     player: 0,
     col: 16,
-    row: 2, //4
+    row: 4, //4 or 2
     color: 0xff3333,
   }),
   // Player 1 units (AI)
