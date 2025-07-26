@@ -119,23 +119,23 @@ export const useGameActions = ({
 
   // Helper function to check if unit is eligible for selection
   const isUnitEligible = useCallback((unit: Unit) => {
-    console.log(`🔍 ELIGIBILITY: Unit ${unit.id} player=${unit.player}, currentPlayer=${currentPlayer}, phase="${phase}"`);
+    //console.log(`🔍 ELIGIBILITY: Unit ${unit.id} player=${unit.player}, currentPlayer=${currentPlayer}, phase="${phase}"`);
     // Special handling for combat phase - don't block based on currentPlayer yet
     if (phase !== "combat" && unit.player !== currentPlayer) {
-      console.log(`🔍 ELIGIBILITY: Unit ${unit.id} BLOCKED - wrong player (${unit.player} !== ${currentPlayer})`);
+      //console.log(`🔍 ELIGIBILITY: Unit ${unit.id} BLOCKED - wrong player (${unit.player} !== ${currentPlayer})`);
       return false;
     }
 
     // Get enemy units once for efficiency
     const enemyUnits = units.filter(u => u.player !== currentPlayer);
 
-    console.log(`🔍 ELIGIBILITY: Unit ${unit.id} entering switch with phase="${phase}"`);
+    //console.log(`🔍 ELIGIBILITY: Unit ${unit.id} entering switch with phase="${phase}"`);
     switch (phase) {
       case "move":
-        console.log(`🔍 ELIGIBILITY: Unit ${unit.id} hit MOVE case`);
+        //console.log(`🔍 ELIGIBILITY: Unit ${unit.id} hit MOVE case`);
         return !unitsMoved.includes(unit.id);
       case "shoot":
-        console.log(`🔍 ELIGIBILITY: Unit ${unit.id} hit SHOOT case`);
+        //console.log(`🔍 ELIGIBILITY: Unit ${unit.id} hit SHOOT case`);
         if (unitsMoved.includes(unit.id)) {
           return false;
         }
@@ -212,7 +212,7 @@ export const useGameActions = ({
         const combatRange = unit.CC_RNG;
         return enemyUnits.some(enemy => isUnitInRange(unit, enemy, combatRange));
       default:
-        console.log(`🔍 ELIGIBILITY: Unit ${unit.id} hit DEFAULT case with phase="${phase}"`);
+        //console.log(`🔍 ELIGIBILITY: Unit ${unit.id} hit DEFAULT case with phase="${phase}"`);
         return false;
     }
   }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer, boardConfig, gameState]);
@@ -281,9 +281,11 @@ export const useGameActions = ({
 
     // Special handling for charge phase
     if (phase === "charge") {
+      console.log(`🎲 CHARGE PHASE ENTERED - unitId: ${unitId}, existingRoll: ${gameState.unitChargeRolls?.[unitId]}`);
       const existingRoll = gameState.unitChargeRolls?.[unitId];
       
       if (!existingRoll) {
+        console.log(`🎲 ROLLING CHARGE DICE for unit ${unitId}`);
         // First time selecting this unit - roll 2d6 for charge distance
         const die1 = Math.floor(Math.random() * 6) + 1;
         const die2 = Math.floor(Math.random() * 6) + 1;
@@ -314,19 +316,31 @@ export const useGameActions = ({
         
         const canCharge = enemiesInRange.length > 0;
         
+        console.log(`🎲 CHARGE ROLL COMPLETE: roll=${chargeRoll}, canCharge=${canCharge}, enemiesInRange=${enemiesInRange.length}`);
+        
         // Execute logging and popup BEFORE state updates to prevent re-render interruption
+        console.log(`🎲 STARTING LOGGING AND POPUP: gameLog exists=${!!gameLog}, canCharge=${canCharge}`);
         if (gameLog) {
-          gameLog.logChargeRoll(unit, chargeRoll, canCharge, gameState.currentTurn);
+          try {
+            console.log(`🎲 GAME LOG - would log: Unit ${unit.name} CHARGE ROLL : ${chargeRoll} : ${canCharge ? 'Enemy unit(s) in range' : 'No enemy unit(s) in range'}`);
+            console.log(`🎲 GAME LOG COMPLETED`);
+          } catch (error) {
+            console.error(`🎲 GAME LOG ERROR:`, error);
+          }
         }
         actions.showChargeRollPopup(unitId, chargeRoll, !canCharge);
+        console.log(`🎲 POPUP TRIGGERED`);
         
         // Store the roll and handle game logic AFTER logging/popup
         actions.setUnitChargeRoll(unitId, chargeRoll);
+        console.log(`🎲 CHARGE ROLL STORED`);
         
         if (canCharge) {
+          console.log(`🎲 CAN CHARGE - entering preview mode`);
           actions.setSelectedUnitId(unitId);
           actions.setMode("chargePreview");
         } else {
+          console.log(`🎲 CANNOT CHARGE - ending activation`);
           actions.addChargedUnit(unitId);
           actions.setSelectedUnitId(null);
           actions.setMode("select");
@@ -337,13 +351,13 @@ export const useGameActions = ({
         // Unit already has a charge roll
         if (selectedUnitId === unitId) {
           // Second click on same unit - cancel charge and end activation
+          if (gameLog) {
+            gameLog.logChargeCancellation(unit, gameState.currentTurn);
+          }
           actions.resetUnitChargeRoll(unitId);
           actions.addChargedUnit(unitId);
           actions.setSelectedUnitId(null);
           actions.setMode("select");
-          if (gameLog) {
-            gameLog.logChargeCancellation(unit, gameState.currentTurn);
-          }
         } else {
           // Different unit with existing roll - show preview
           actions.setSelectedUnitId(unitId);
@@ -1102,18 +1116,7 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
     }
     
     if (gameLog) {
-      const enemyUnits = units.filter(u => u.player !== charger.player);
-      const target = enemyUnits.find(enemy => {
-        const distance = Math.max(Math.abs(destCol - enemy.col), Math.abs(destRow - enemy.row));
-        return distance <= 1;
-      });
-      
-      if (target) {
-        gameLog.logChargeAction(charger, target, charger.col, charger.row, destCol, destRow, gameState.currentTurn);
-      } else {
-        const dummyTarget = { id: -1, type: 'Enemy', name: 'Enemy' } as any;
-        gameLog.logChargeAction(charger, dummyTarget, charger.col, charger.row, destCol, destRow, gameState.currentTurn);
-      }
+      gameLog.logMessage(`Unit ${charger.name} CHARGED from (${charger.col}, ${charger.row}) to (${destCol}, ${destRow})`, gameState.currentTurn);
     }
     
     actions.updateUnit(chargerId, { col: destCol, row: destRow, hasChargedThisTurn: true });

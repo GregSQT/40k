@@ -333,6 +333,8 @@ export default function Board({
       onCombatAttack: stableCallbacks.current.onCombatAttack || (() => {}),
       onConfirmMove: stableCallbacks.current.onConfirmMove,
       onCancelCharge: stableCallbacks.current.onCancelCharge,
+      onMoveCharger: stableCallbacks.current.onMoveCharger,
+      onStartMovePreview: stableCallbacks.current.onStartMovePreview,
     });
 
     // Right click cancels move/attack preview
@@ -571,13 +573,14 @@ export default function Board({
         }
       }
 
-      // Green circles for charge eligibility - use eligibleUnitIds prop (no redundant logic)
-      if (phase === "charge" && selectedUnit && mode === "select") {
-        // Simply check if this unit is in the eligibleUnitIds array passed from GameController
-        if (eligibleUnitIds.includes(selectedUnit.id)) {
-          // Show green circle around the unit (just its own hex)
-          availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
-        }
+      // Green circles for all eligible charge units (not just selected)
+      if (phase === "charge" && mode === "select") {
+        eligibleUnitIds.forEach(unitId => {
+          const eligibleUnit = units.find(u => u.id === unitId);
+          if (eligibleUnit) {
+            availableCells.push({ col: eligibleUnit.col, row: eligibleUnit.row });
+          }
+        });
       }
 
       // Attack cells: Different colors for different line of sight conditions
@@ -881,50 +884,40 @@ export default function Board({
             highlightCell.drawPolygon(points);
             highlightCell.endFill();
 
-            // Make interactive (disable during charge preview)
-            if (mode === "chargePreview") {
-              highlightCell.eventMode = 'none';
-            } else {
-              highlightCell.eventMode = isWallHex ? 'none' : 'static';
-;
-            }
+            // Make interactive for hex clicks
+            highlightCell.eventMode = isWallHex ? 'none' : 'static';
             highlightCell.cursor = "pointer";
-
-            // Make base hex interactive for move confirmation
-            baseCell.eventMode = 'static';
-
-            highlightCell.cursor = "pointer";
-
-            // Make base hex interactive for move confirmation
             baseCell.eventMode = 'static';
             baseCell.cursor = "pointer";
             
-            // Add click handlers to base hexes
-            if (mode === "movePreview" || mode === "attackPreview") {
-              baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-                if (e.button === 0) onConfirmMove();
-                if (e.button === 2) onCancelMove();
-              });
-            } else if (mode === "chargePreview" && selectedUnitId !== null) {
-              baseCell.eventMode = 'static';
-              baseCell.cursor    = "pointer";
-              baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-                if (e.button !== 0) return;
-                const unit = units.find(u => u.id === selectedUnitId);
-                if (unit?.col === col && unit.row === row) {
-                  onCancelCharge?.();
-                } else if (isChargeable) {
-                  onMoveCharger?.(selectedUnitId, Number(col), Number(row));
-                  onValidateCharge?.(selectedUnitId);
-                }
-              });
-            } else if (mode === "select" && selectedUnitId !== null && isAvailable) {
+            // Use global event system for all hex clicks
+            if (isChargeable || isAttackable || isInCover || isAvailable) {
               highlightCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
                 if (e.button === 0) {
-                  onStartMovePreview(Number(selectedUnitId), Number(col), Number(row));
+                  console.log(`🟠 Hex clicked: (${col},${row}), mode: ${mode}`);
+                  window.dispatchEvent(new CustomEvent('boardHexClick', {
+                    detail: { col, row, phase, mode, selectedUnitId }
+                  }));
                 }
               });
             }
+            
+            // Base cell clicks for unit position (charge cancel)
+            baseCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+              if (e.button === 0) {
+                const unit = units.find(u => u.id === selectedUnitId);
+                if (mode === "chargePreview" && unit?.col === col && unit.row === row) {
+                  onCancelCharge?.();
+                } else {
+                  window.dispatchEvent(new CustomEvent('boardHexClick', {
+                    detail: { col, row, phase, mode, selectedUnitId }
+                  }));
+                }
+              }
+              if (e.button === 2) {
+                onCancelMove?.();
+              }
+            });
             
             highlightContainer.addChild(highlightCell);
           }
@@ -1014,8 +1007,8 @@ export default function Board({
       // ✅ CHARGE ROLL POPUP RENDERING
       if (chargeRollPopup) {
         const popupText = chargeRollPopup.tooLow 
-          ? `Charge ${chargeRollPopup.roll} - no charge possible!`
-          : `Charge: ${chargeRollPopup.roll}!`;
+          ? `Roll : ${chargeRollPopup.roll} : No charge !`
+          : `Roll : ${chargeRollPopup.roll} !`;
         
         const popupContainer = new PIXI.Container();
         popupContainer.name = 'charge-roll-popup';

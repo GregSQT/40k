@@ -26,7 +26,7 @@ Core Principles
 
 1. Exact File Reference
 
-- ONLY use code from files you explicitly provide
+- ONLY work from the ACTUAL current code : the script you were given and the updates you provided for
 - Never assume or guess code structure
 - If I need to see more code, ask for specific line numbers or sections
 - Respect the exact indentation and formatting from your files

@@ -13,6 +13,7 @@ export function setupBoardClickHandler(callbacks: {
   onCancelCharge?(): void;
   onValidateCharge?(chargerId: UnitId): void;
   onMoveCharger?(chargerId: UnitId, destCol: number, destRow: number): void;
+  onStartMovePreview?(unitId: UnitId, col: number, row: number): void;
 }) {
 
   if (globalClickHandler) {
@@ -63,6 +64,36 @@ export function setupBoardClickHandler(callbacks: {
   (window as any).cancelChargeHandler = cancelChargeHandler;
   
   window.addEventListener('boardCancelCharge', cancelChargeHandler);
+  
+  // Handle hex clicks
+  const hexClickHandler = (e: Event) => {
+    console.log(`🖱️ boardClickHandler received hex click:`, (e as CustomEvent).detail);
+    const { col, row, phase, mode, selectedUnitId } = (e as CustomEvent<{
+      col: number;
+      row: number;
+      phase: string;
+      mode: string;
+      selectedUnitId: number | null;
+    }>).detail;
+
+    if (mode === 'chargePreview' && selectedUnitId !== null) {
+      console.log(`🟠 Calling onMoveCharger(${selectedUnitId}, ${col}, ${row}), callback exists: ${!!callbacks.onMoveCharger}`);
+      if (callbacks.onMoveCharger) {
+        callbacks.onMoveCharger(selectedUnitId, col, row);
+        console.log(`🟠 onMoveCharger called successfully`);
+      } else {
+        console.error(`🟠 onMoveCharger callback is missing!`);
+      }
+    } else if (mode === 'select' && selectedUnitId !== null) {
+      if (callbacks.onStartMovePreview) {
+        callbacks.onStartMovePreview(selectedUnitId, col, row);
+      }
+    } else if (mode === 'movePreview') {
+      callbacks.onConfirmMove();
+    }
+  };
+  
+  window.addEventListener('boardHexClick', hexClickHandler);
 }
 
 ;(window as any).setupBoardClickHandler = setupBoardClickHandler;
