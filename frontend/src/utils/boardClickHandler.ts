@@ -84,12 +84,16 @@ export function setupBoardClickHandler(callbacks: {
 
     if (mode === 'chargePreview' && selectedUnitId !== null) {
       console.log(`🟠 Calling onMoveCharger(${selectedUnitId}, ${col}, ${row}), callback exists: ${!!callbacks.onMoveCharger}`);
-      if (callbacks.onMoveCharger) {
+    if (callbacks.onMoveCharger) {
+      try {
         callbacks.onMoveCharger(selectedUnitId, col, row);
         console.log(`🟠 onMoveCharger called successfully`);
-      } else {
-        console.error(`🟠 onMoveCharger callback is missing!`);
+      } catch (error) {
+        console.error(`🟠 Error in onMoveCharger:`, error);
       }
+    } else {
+      console.error(`🟠 onMoveCharger callback is missing!`);
+    }
     } else if (mode === 'select' && selectedUnitId !== null) {
       if (callbacks.onStartMovePreview) {
         callbacks.onStartMovePreview(selectedUnitId, col, row);
