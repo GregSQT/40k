@@ -25,10 +25,7 @@ const UnitRow = memo<UnitRowProps>(({ unit, isSelected, isClicked, onSelect }) =
     <tr 
       className={`unit-status-row ${isSelected ? 'unit-status-row--selected' : ''} ${isClicked ? 'unit-status-row--clicked' : ''}`}
       onClick={() => {
-        console.log('🖱️ Table row clicked for unit:', unit.id);
-        console.log('🖱️ About to call onSelect...');
         onSelect(unit.id);
-        console.log('🖱️ onSelect call completed');
       }}
       style={{ cursor: 'pointer' }}
     >

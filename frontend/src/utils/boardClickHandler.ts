@@ -28,7 +28,6 @@ export function setupBoardClickHandler(callbacks: {
   }
 
   globalClickHandler = (e: Event) => {
-    console.log(`🖱️ boardClickHandler received event for unit:`, (e as CustomEvent).detail);
     const { unitId, phase, mode, selectedUnitId } = (e as CustomEvent<{
       unitId: number;
       phase: string;
@@ -65,7 +64,6 @@ export function setupBoardClickHandler(callbacks: {
   
   // Create new cancel handler and store reference
   const cancelChargeHandler = () => {
-    console.log('🔥 boardCancelCharge event triggered');
     callbacks.onCancelCharge?.();
   };
   (window as any).cancelChargeHandler = cancelChargeHandler;
@@ -73,7 +71,6 @@ export function setupBoardClickHandler(callbacks: {
   window.addEventListener('boardCancelCharge', cancelChargeHandler);
   
   globalHexClickHandler = (e: Event) => {
-    console.log(`🖱️ boardClickHandler received hex click:`, (e as CustomEvent).detail);
     const { col, row, phase, mode, selectedUnitId } = (e as CustomEvent<{
       col: number;
       row: number;
@@ -83,11 +80,9 @@ export function setupBoardClickHandler(callbacks: {
     }>).detail;
 
     if (mode === 'chargePreview' && selectedUnitId !== null) {
-      console.log(`🟠 Calling onMoveCharger(${selectedUnitId}, ${col}, ${row}), callback exists: ${!!callbacks.onMoveCharger}`);
     if (callbacks.onMoveCharger) {
       try {
         callbacks.onMoveCharger(selectedUnitId, col, row);
-        console.log(`🟠 onMoveCharger called successfully`);
       } catch (error) {
         console.error(`🟠 Error in onMoveCharger:`, error);
       }

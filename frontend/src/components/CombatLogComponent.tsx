@@ -44,7 +44,6 @@ export const CombatLog: React.FC<CombatLogProps> = ({
   const handleDiceRollComplete = (results: number[]) => {
     // For automatic rolling, we don't need to wait for dice interaction
     // The dice rolls are handled automatically by ShootingSequenceManager
-    console.log('Auto dice results:', results);
     
     // Immediately proceed to next step (no delay needed for automatic rolling)
     onStepComplete();

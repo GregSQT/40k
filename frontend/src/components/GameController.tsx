@@ -240,7 +240,6 @@ export const GameController: React.FC<GameControllerProps> = ({
               gameState={gameState}
               getChargeDestinations={gameActions.getChargeDestinations}
               onSelectUnit={(unitId) => {
-                console.log(`🖱️ GameController: Board click on unit ${unitId}`);
                 if (unitId === null) return;
                 gameActions.selectUnit(unitId);
                 setClickedUnitId(null);
@@ -290,7 +289,6 @@ export const GameController: React.FC<GameControllerProps> = ({
                 selectedUnitId={gameState.selectedUnitId}
                 clickedUnitId={clickedUnitId}
                 onSelectUnit={(unitId) => {
-                  console.log(`🖱️ GameController: Unit status table click on unit ${unitId}`);
                   gameActions.selectUnit(unitId);
                   setClickedUnitId(null);
                 }}
@@ -304,7 +302,6 @@ export const GameController: React.FC<GameControllerProps> = ({
                 selectedUnitId={gameState.selectedUnitId}
                 clickedUnitId={clickedUnitId}
                 onSelectUnit={(unitId) => {
-                  console.log(`🖱️ GameController: Unit status table click on unit ${unitId}`);
                   gameActions.selectUnit(unitId);
                   setClickedUnitId(null);
                 }}

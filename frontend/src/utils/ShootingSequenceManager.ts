@@ -26,7 +26,6 @@ export class SingleShotSequenceManager {
     onShotComplete: (result: SingleShotResult) => void,
     onAllShotsComplete: (totalDamage: number) => void
   ): void {
-    console.log(`🎯 Starting shooting sequence for ${shooter.name}: ${shooter.SHOOT_LEFT || 0} shots remaining`);
     
     this.onStateChange = onStateChange;
     this.onShotComplete = onShotComplete;
@@ -34,7 +33,6 @@ export class SingleShotSequenceManager {
 
     const shotsRemaining = shooter.SHOOT_LEFT || 0;
     if (shotsRemaining <= 0) {
-      console.log(`❌ No shots remaining for ${shooter.name}`);
       this.completeAllShots(0);
       return;
     }
@@ -59,12 +57,8 @@ export class SingleShotSequenceManager {
    */
   selectTarget(targetId: UnitId): void {
     if (!this.state || this.state.currentStep !== 'target_selection') {
-      console.log('❌ Cannot select target - not in target selection phase');
       return;
-    }
-
-    console.log(`🎯 Shot ${this.state.currentShotNumber}/${this.state.totalShots}: Target selected (${targetId})`);
-    
+    }    
     this.state.targetId = targetId;
     this.state.isSelectingTarget = false;
     this.state.currentStep = 'hit_roll';
@@ -84,8 +78,6 @@ export class SingleShotSequenceManager {
     }
     const hitTarget = shooter.RNG_ATK;
     const hitSuccess = hitRoll >= hitTarget;
-
-    console.log(`🎲 Hit roll: ${hitRoll} (need ${hitTarget}+) = ${hitSuccess ? 'HIT' : 'MISS'}`);
 
     this.state.stepResults.hitRoll = hitRoll;
     this.state.stepResults.hitSuccess = hitSuccess;
@@ -119,8 +111,6 @@ export class SingleShotSequenceManager {
     }
     const woundTarget = this.calculateWoundTarget(shooter.RNG_STR, target.T);
     const woundSuccess = woundRoll >= woundTarget;
-
-    console.log(`🎲 Wound roll: ${woundRoll} (need ${woundTarget}+) = ${woundSuccess ? 'WOUND' : 'NO WOUND'}`);
 
     this.state.stepResults.woundRoll = woundRoll;
     this.state.stepResults.woundSuccess = woundSuccess;
@@ -164,8 +154,6 @@ export class SingleShotSequenceManager {
     );
     const saveSuccess = saveRoll >= saveTarget;
 
-    console.log(`🎲 Save roll: ${saveRoll} (need ${saveTarget}+) = ${saveSuccess ? 'SAVED' : 'FAILED'}`);
-
     this.state.stepResults.saveRoll = saveRoll;
     this.state.stepResults.saveSuccess = saveSuccess;
 
@@ -190,9 +178,6 @@ export class SingleShotSequenceManager {
    */
   private completeSingleShot(result: SingleShotResult): void {
     if (!this.state) return;
-
-    console.log(`💥 Shot ${this.state.currentShotNumber} complete: ${result.damageDealt} damage`);
-
     // Notify shot completion
     if (this.onShotComplete) {
       this.onShotComplete(result);
@@ -213,9 +198,6 @@ export class SingleShotSequenceManager {
     this.state.isSelectingTarget = true;
     this.state.currentStep = 'target_selection';
     this.state.stepResults = {};
-
-    console.log(`🔄 Next shot: ${this.state.currentShotNumber}/${this.state.totalShots} (${this.state.shotsRemaining} remaining)`);
-    
     this.notifyStateChange();
   }
 
@@ -223,7 +205,6 @@ export class SingleShotSequenceManager {
    * Complete entire shooting sequence
    */
   private completeAllShots(lastShotDamage: number): void {
-    console.log('🎯 All shots completed for unit');
     
     if (this.onAllShotsComplete) {
       this.onAllShotsComplete(lastShotDamage);

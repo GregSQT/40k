@@ -26,7 +26,6 @@ export class SingleAttackSequenceManager {
     onAttackComplete: (result: SingleAttackResult) => void,
     onAllAttacksComplete: (totalDamage: number) => void
   ): void {
-    console.log(`⚔️ Starting combat sequence for ${attacker.name}: ${attacker.ATTACK_LEFT || 0} attacks remaining`);
     
     this.onStateChange = onStateChange;
     this.onAttackComplete = onAttackComplete;
@@ -34,7 +33,6 @@ export class SingleAttackSequenceManager {
 
     const attacksRemaining = attacker.ATTACK_LEFT || 0;
     if (attacksRemaining <= 0) {
-      console.log(`❌ No attacks remaining for ${attacker.name}`);
       this.completeAllAttacks(0);
       return;
     }
@@ -59,11 +57,8 @@ export class SingleAttackSequenceManager {
    */
   selectTarget(targetId: UnitId): void {
     if (!this.state || this.state.currentStep !== 'target_selection') {
-      console.log('❌ Cannot select target - not in target selection phase');
       return;
     }
-
-    console.log(`⚔️ Attack ${this.state.currentAttackNumber}/${this.state.totalAttacks}: Target selected (${targetId})`);
     
     this.state.targetId = targetId;
     this.state.isSelectingTarget = false;
@@ -84,9 +79,6 @@ export class SingleAttackSequenceManager {
     }
     const hitTarget = attacker.CC_ATK;
     const hitSuccess = hitRoll >= hitTarget;
-
-    console.log(`🎲 Hit roll: ${hitRoll} (need ${hitTarget}+) = ${hitSuccess ? 'HIT' : 'MISS'}`);
-
     this.state.stepResults.hitRoll = hitRoll;
     this.state.stepResults.hitSuccess = hitSuccess;
 
@@ -119,9 +111,6 @@ export class SingleAttackSequenceManager {
     }
     const woundTarget = this.calculateWoundTarget(attacker.CC_STR, target.T);
     const woundSuccess = woundRoll >= woundTarget;
-
-    console.log(`🎲 Wound roll: ${woundRoll} (need ${woundTarget}+) = ${woundSuccess ? 'WOUND' : 'NO WOUND'}`);
-
     this.state.stepResults.woundRoll = woundRoll;
     this.state.stepResults.woundSuccess = woundSuccess;
 
@@ -160,9 +149,6 @@ export class SingleAttackSequenceManager {
       attacker.CC_AP
     );
     const saveSuccess = saveRoll >= saveTarget;
-
-    console.log(`🎲 Save roll: ${saveRoll} (need ${saveTarget}+) = ${saveSuccess ? 'SAVED' : 'FAILED'}`);
-
     this.state.stepResults.saveRoll = saveRoll;
     this.state.stepResults.saveSuccess = saveSuccess;
 
@@ -188,8 +174,6 @@ export class SingleAttackSequenceManager {
   private completeSingleAttack(result: SingleAttackResult): void {
     if (!this.state) return;
 
-    console.log(`💥 Attack ${this.state.currentAttackNumber} complete: ${result.damageDealt} damage`);
-
     // Notify attack completion
     if (this.onAttackComplete) {
       this.onAttackComplete(result);
@@ -210,8 +194,6 @@ export class SingleAttackSequenceManager {
     this.state.isSelectingTarget = true;
     this.state.currentStep = 'target_selection';
     this.state.stepResults = {};
-
-    console.log(`🔄 Next attack: ${this.state.currentAttackNumber}/${this.state.totalAttacks} (${this.state.attacksRemaining} remaining)`);
     
     this.notifyStateChange();
   }
@@ -220,7 +202,6 @@ export class SingleAttackSequenceManager {
    * Complete entire combat sequence
    */
   private completeAllAttacks(lastAttackDamage: number): void {
-    console.log('⚔️ All attacks completed for unit');
     
     if (this.onAllAttacksComplete) {
       this.onAllAttacksComplete(lastAttackDamage);

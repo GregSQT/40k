@@ -78,13 +78,10 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
 
   
   const handleSelectUnit = (id: number | string | null) => {
-    console.log(`🖱️ GameBoard: handleSelectUnit called with id: ${id}, type: ${typeof id}`);
     if (typeof id === 'string') {
       const numId = parseInt(id, 10);
-      console.log(`🖱️ GameBoard: Converting string ${id} to number ${numId}`);
       props.onSelectUnit(isNaN(numId) ? null : numId);
     } else {
-      console.log(`🖱️ GameBoard: Passing through id: ${id}`);
       props.onSelectUnit(id);
     }
   };

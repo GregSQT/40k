@@ -176,7 +176,6 @@ export const usePhaseTransition = ({
     const enemyUnits = getEnemyUnits();
     
     if (playerUnits.length === 0) {
-      console.log(`[PhaseTransition] Combat - No player units, ending turn`);
       return true;
     }
 
@@ -291,11 +290,8 @@ export const usePhaseTransition = ({
           actions.setCombatActivePlayer(nextCombatPlayer);
           actions.setSelectedUnitId(null);
           
-          console.log("✅ Set alternating combat phase, active combat player:", nextCombatPlayer);
-          
           // Force immediate state propagation by triggering a re-render
           setTimeout(() => {
-            console.log("🔄 Forcing UI update - should see alternating_combat phase now");
             // Trigger a dummy update to force re-render
             actions.setSelectedUnitId(null);
             actions.setMode("select");

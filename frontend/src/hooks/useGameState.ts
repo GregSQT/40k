@@ -99,14 +99,12 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   }, []);
 
   const initializeCombatPhase = useCallback(() => {
-    console.log('🔧 INITIALIZING COMBAT PHASE - Setting ATTACK_LEFT for all units');
     setGameState(prev => ({
       ...prev,
       units: prev.units.map(unit => {
         if (unit.CC_NB === undefined) {
           throw new Error('unit.CC_NB is required');
         }
-        console.log(`🔧 Unit ${unit.name} (${unit.id}): ATTACK_LEFT set to ${unit.CC_NB}`);
         return { ...unit, ATTACK_LEFT: unit.CC_NB };
       })
     }));
@@ -257,13 +255,10 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     // Set new popup after a brief delay to ensure re-render
     setTimeout(() => {
       setChargeRollPopup({ unitId, roll, tooLow, timestamp: Date.now() });
-      console.log(`🎪 POPUP STATE SET:`, { unitId, roll, tooLow, timestamp: Date.now() });
       
       // Auto-hide popup after exactly 2 seconds
       setTimeout(() => {
-        console.log(`🎪 POPUP AUTO-HIDE: Hiding popup for unit ${unitId}`);
         setChargeRollPopup(null);
-        console.log(`🎪 POPUP CLEARED`);
       }, 2000);
     }, 10);
   }, []);

@@ -423,8 +423,6 @@ export default function Board({
         chargeCells = [];
         chargeTargets = [];
       } else {
-        console.log(`🎯 Unit ${selectedUnit.id} using stored charge roll: ${chargeDistance}`);
-
       // Use authoritative getChargeDestinations function (single source of truth)
       chargeCells = getChargeDestinations(selectedUnit.id);
 
@@ -450,8 +448,6 @@ export default function Board({
             if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
               throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for movement preview`);
             }
-            
-            console.log(`🏃 Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) MOVE: ${selectedUnit.MOVE}`);
 
             const centerCol = selectedUnit.col;
             const centerRow = selectedUnit.row;
@@ -675,13 +671,10 @@ export default function Board({
               const coverPathHexes = new Set<string>();
               const enemyUnits = units.filter(u => u.player !== previewUnit!.player);
               
-              console.log(`🎯 Checking ${enemyUnits.length} enemies for line of sight from (${attackFromCol},${attackFromRow})`);
-              
               // First process actual enemy units
               for (const enemy of enemyUnits) {
                 const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
                 if (distance > 0 && distance <= range) {
-                  console.log(`🎯 Enemy at (${enemy.col},${enemy.row}) in range (${distance}/${range})`);
                   
                   const lineOfSight = hasLineOfSight(
                     { col: attackFromCol, row: attackFromRow },
@@ -689,13 +682,11 @@ export default function Board({
                     boardConfig.wall_hexes || []
                   );
                   
-                  console.log(`🎯 Enemy at (${enemy.col},${enemy.row}): canSee=${lineOfSight.canSee}, inCover=${lineOfSight.inCover}`);
                   
                   if (lineOfSight.canSee && lineOfSight.inCover) {
                     // Mark this enemy as in cover
                     coverCells.push({ col: enemy.col, row: enemy.row });
                     coverTargets.add(`${enemy.col},${enemy.row}`);
-                    console.log(`🟠 Added COVER enemy at (${enemy.col},${enemy.row})`);
                     
                     // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
                     const pathHexes = getHexLine(attackFromCol, attackFromRow, enemy.col, enemy.row);
@@ -708,22 +699,15 @@ export default function Board({
                         coverPathHexes.add(hexKey);
                       }
                     });
-                    console.log(`🟠 Added ${pathHexes.length} path hexes for cover`);
                   } else if (lineOfSight.canSee) {
                     // Clear line of sight enemy
                     attackCells.push({ col: enemy.col, row: enemy.row });
-                    console.log(`🔴 Added CLEAR enemy at (${enemy.col},${enemy.row})`);
                   } else {
                     // Blocked enemy
                     blockedTargets.add(`${enemy.col},${enemy.row}`);
-                    console.log(`❌ Added BLOCKED enemy at (${enemy.col},${enemy.row})`);
                   }
-                } else {
-                  console.log(`🎯 Enemy at (${enemy.col},${enemy.row}) out of range (${distance}/${range})`);
                 }
               }
-              
-              console.log(`🎯 Final results: ${attackCells.length} red cells, ${coverCells.length} orange cells, ${blockedTargets.size} blocked`);
               
               // Now show all hexes in range with appropriate colors
               for (let col = 0; col < BOARD_COLS; col++) {
@@ -894,7 +878,6 @@ export default function Board({
             if (isChargeable || isAttackable || isInCover || isAvailable) {
               highlightCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
                 if (e.button === 0) {
-                  console.log(`🟠 Hex clicked: (${col},${row}), mode: ${mode}`);
                   window.dispatchEvent(new CustomEvent('boardHexClick', {
                     detail: { col, row, phase, mode, selectedUnitId }
                   }));

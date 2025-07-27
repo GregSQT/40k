@@ -1,76 +1,114 @@
-# Warhammer 40K AI Training System - Complete & Verified Technical Overview
+# Warhammer 40K AI Training System - Complete Technical Overview
 
 ## 🎯 Project Overview
 
 This is a sophisticated multi-agent AI training system for Warhammer 40K tactical combat, featuring a React/TypeScript frontend with PIXI.js rendering and a Python backend using Stable-Baselines3 for reinforcement learning. The system supports dynamic multi-faction combat with phase-based gameplay following official W40K rules.
 
 **✅ VERIFIED:** Based on complete project analysis including all source files, configurations, and documentation.
-**🚀 UPDATED:** Performance optimizations implemented for large-scale battlefield rendering with per-unit visual customization.
+**🚀 UPDATED:** Major performance optimizations and architectural improvements implemented.
 
 ## 🏗️ Architecture Overview
 
 **Frontend Stack:**
 - React 18.2.0 with TypeScript in strict mode
 - **PIXI.js-legacy 7.4.3** for hardware-accelerated rendering with **WebGL optimization**
-- Vite build system with custom configuration copying
+- Vite 6.3.5 build system with custom configuration copying
 - React Router 7.6.2 for navigation
+- Axios 1.9.0 for HTTP requests
 
 **Backend Stack:**
 - Python with Stable-Baselines3 DQN implementation
 - Custom Gymnasium environment (gym40k.py) 
-- Multi-agent orchestration system
+- Multi-agent orchestration system with concurrent training
 - JSON-based configuration management via config_loader.py
 
-**✅ VERIFIED:** All package versions and dependencies confirmed from package.json files.
+**Build & Development:**
+- TypeScript 5.8.3 with strict mode
+- ESLint with React hooks enforcement
+- Pre-build configuration copying system
+- Automated backup and restoration capabilities
 
-## 📁 Project Structure (Confirmed)
+## 📁 Project Structure
 
 ```
 wh40k-tactics/
-├── frontend/src/
-│   ├── components/
-│   │   ├── Board.tsx                 # Optimized PIXI.js game board with WebGL
-│   │   ├── UnitRenderer.tsx          # Centralized unit display component (NEW)
-│   │   └── ReplayViewer.tsx          # PIXI.js replay visualization
-│   ├── hooks/
-│   │   └── useGameConfig.tsx         # Configuration loading hook
-│   ├── types/
-│   │   └── game.ts                   # Enhanced with per-unit scaling support
-│   └── roster/                       # Unit definitions by faction
-│       ├── spaceMarine/              # Space Marine units with visual scaling
-│       └── tyranid/                  # Tyranid units
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Board.tsx                 # Optimized PIXI.js game board with WebGL
+│   │   │   ├── UnitRenderer.tsx          # Centralized unit display component
+│   │   │   └── ReplayViewer.tsx          # PIXI.js replay visualization
+│   │   ├── hooks/
+│   │   │   ├── useGameConfig.tsx         # Configuration loading hook
+│   │   │   └── useGameActions.ts         # Game action handlers
+│   │   ├── pages/
+│   │   │   ├── HomePage.tsx              # Landing page with navigation
+│   │   │   ├── GamePage.tsx              # PvP/PvE game wrapper
+│   │   │   └── ReplayPage.tsx            # Replay analysis page
+│   │   ├── types/
+│   │   │   └── game.ts                   # Enhanced with per-unit scaling support
+│   │   ├── data/
+│   │   │   └── UnitFactory.ts            # Dynamic unit registry system
+│   │   ├── roster/                       # Unit definitions by faction
+│   │   │   ├── spaceMarine/              # Space Marine units with visual scaling
+│   │   │   └── tyranid/                  # Tyranid units
+│   │   ├── Routes.tsx                    # Main routing configuration
+│   │   └── App.tsx                       # Core game application
+│   └── package.json                      # Dependencies and build scripts
 ├── ai/
-│   ├── train.py                      # Main training orchestration
-│   ├── gym40k.py                     # Custom Gymnasium environment
-│   ├── multi_agent_trainer.py       # Multi-agent training system
-│   ├── scenario_manager.py           # Dynamic scenario generation
-│   ├── unit_registry.py              # Dynamic unit discovery
-│   ├── evaluate.py                   # Model evaluation script
-│   ├── session_scenarios/            # Generated training scenarios
-│   └── event_log/                    # Replay JSON files
+│   ├── train.py                          # Main training orchestration
+│   ├── gym40k.py                         # Custom Gymnasium environment
+│   ├── multi_agent_trainer.py           # Multi-agent training system
+│   ├── scenario_manager.py               # Dynamic scenario generation
+│   ├── unit_registry.py                  # Dynamic unit discovery
+│   ├── evaluate.py                       # Model evaluation script
+│   ├── session_scenarios/                # Generated training scenarios
+│   └── event_log/                        # Replay JSON files
 ├── config/
-│   ├── training_config.json          # DQN hyperparameters
-│   ├── rewards_config.json           # Reward system definitions
-│   ├── scenario_templates.json       # Scenario generation templates
-│   ├── unit_registry.json            # Unit to TypeScript file mappings
-│   └── board_config.json             # Board layout and visualization
+│   ├── training_config.json              # DQN hyperparameters
+│   ├── rewards_config.json               # Reward system definitions
+│   ├── scenario_templates.json           # Scenario generation templates
+│   ├── unit_registry.json                # Unit to TypeScript file mappings
+│   └── board_config.json                 # Board layout and visualization
 ├── scripts/
-│   ├── backup_block.py               # Complete backup system
-│   └── copy-configs.js               # Build-time config copying
-└── config_loader.py                  # Centralized configuration manager
+│   ├── backup_block.py                   # Complete backup system
+│   └── copy-configs.js                   # Build-time config copying
+└── config_loader.py                      # Centralized configuration manager
 ```
 
-## 🧩 Component Architecture (Latest Refactoring)
+## 🎮 Navigation & User Interface
+
+### Route System
+The application features a modern SPA routing system with three main modes:
+
+**Routes Available:**
+- **`/game`** - Default PvP mode (root redirects here)
+- **`/pve`** - PvE mode against AI (under development)
+- **`/replay`** - Replay analysis and visualization
+- **`/home`** - Landing page with mode selection
+
+**Navigation Features:**
+- Top-right navigation bar with mode buttons
+- Visual indication of current active mode
+- Direct navigation between game modes
+- Responsive design with proper spacing
+
+### Game Modes
+1. **PvP Mode**: Human vs Human tactical combat
+2. **PvE Mode**: Human vs AI opponents (accessible via navigation)
+3. **Replay Mode**: Analysis of completed games with step-by-step playback
+
+## 🧩 Component Architecture
 
 ### UnitRenderer Component System
 
-**Major Architectural Improvement** (Latest Update):
+**Major Architectural Improvement:**
 - **Centralized Unit Rendering**: All unit display logic moved to dedicated UnitRenderer component
 - **Code Reduction**: Board.tsx reduced from ~800 lines to ~500 lines (37% reduction)
 - **Maintainability**: Single source of truth for all unit visual features
 - **Consistency**: Identical rendering behavior across normal, move preview, and attack preview modes
 
-**UnitRenderer Features** (frontend/src/components/UnitRenderer.tsx):
+**UnitRenderer Features:**
 ```typescript
 // Unified rendering function handles all unit display aspects
 renderUnit({
@@ -82,85 +120,32 @@ renderUnit({
 ```
 
 **Component Responsibilities:**
-1. **Icon Rendering**: Per-unit scaling with ICON_SCALE support
-2. **HP Bar Display**: Dynamically positioned based on icon size
-3. **Shooting Counter**: Scaled positioning with format "current/total" (e.g., "2/2", "1/2")
-4. **Green Activation Circles**: Size-adaptive eligibility indicators
-5. **Unit Circle Background**: Player colors and selection states
-6. **Z-Index Management**: Layered rendering with size-based priority
+1. **Unit Icon Rendering**: Dynamic scaling based on unit type
+2. **HP Bar Display**: Adaptive positioning for different icon sizes
+3. **Shooting Counters**: "current/total" format with collision avoidance
+4. **Activation Circles**: Green circles replacing hexagons for better scaling
+5. **Z-Index Management**: Size-based layering (smaller units above larger)
 
-**Enhanced Z-Index System:**
-- **450**: Shooting counters (always on top)
-- **350**: HP bars and probability displays
-- **250**: Green activation circles
-- **100-249**: Unit icons (smaller units rendered above larger units)
-- **0**: Board hexes (foundation layer)
+### Dynamic Unit Registry System
 
-**Dynamic Scaling Formula:**
+**Zero-Hardcoding Unit Discovery:**
 ```typescript
-// Smaller units get higher z-index for better visibility
-const iconZIndex = 100 + Math.round((2.5 - unitIconScale) / 2.0 * 149);
-// Range: 0.5 (tiny) = 249, 2.5 (huge) = 100
+// Automatic unit discovery from roster directory structure
+async function initializeUnitRegistry(): Promise<void> {
+  const factionDirs = ['spaceMarine', 'tyranid'];
+  
+  for (const faction of factionDirs) {
+    const unitFiles = await discoverUnitsInFaction(faction);
+    // Dynamic imports with proper validation
+  }
+}
 ```
 
-### Visual Enhancement Features
-
-**Shooting Counter Improvements:**
-- **Format**: "current/total" display (e.g., "2/2", "1/2", "0/1")
-- **Positioning**: Adaptive scaling with formula `(0.9 + 0.3 / unitIconScale)`
-- **Visibility**: Always visible during shooting phase for current player units
-- **Color Coding**: Yellow for available shots, gray for depleted units
-
-**HP Bar Enhancements:**
-- **Icon-Relative Positioning**: HP bars scale with unit icon size
-- **Consistent Offset**: Uses same scaling formula as shooting counters
-- **Preview Compatibility**: Maintains position during all preview modes
-
-**Green Circle Activation:**
-- **Circular Design**: Replaced hexagonal outlines with scalable circles
-- **Adaptive Radius**: `(HEX_RADIUS * unitIconScale) / 2 * 1.1`
-- **Perfect Scaling**: Always proportional to icon size regardless of unit type
-
-**Move Preview Transparency Fix:**
-- **Issue Resolved**: Icons now fully opaque (`alpha = 1.0`) during move preview
-- **Background Independence**: No longer affected by hex background color bleeding through
-- **Visual Consistency**: Preview units look identical to normal units
-
-## 🎨 Visual Scaling System (Enhanced)
-
-### Per-Unit Icon Scaling
-
-**Implemented Scale Range:**
-- **Minimum Scale**: 0.5 (tiny units)
-- **Maximum Scale**: 2.5 (massive units)
-- **Default Scale**: 1.2 (from board configuration)
-- **Unit-Specific**: Each unit type can override with `ICON_SCALE` property
-
-**Example Unit Scales:**
-- **Regular Intercessor**: `ICON_SCALE = 1.6` (standard infantry)
-- **Assault Intercessor**: `ICON_SCALE = 1.8` (enhanced battlefield presence)
-- **Flexible System**: Easy to customize per unit type
-
-**Visual Element Adaptation:**
-- **HP Bars**: Scale position based on icon size
-- **Shooting Counters**: Dynamic positioning with anti-collision formula
-- **Activation Circles**: Radius adapts to icon dimensions
-- **Z-Index Priority**: Smaller units automatically render above larger ones
-
-### Positioning Mathematics
-
-**Scaling Formula for UI Elements:**
-```typescript
-// Adaptive positioning that works for any icon size
-const scaledOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
-// Result: Close positioning for small icons, further for large icons
-```
-
-**Benefits:**
-- **Anti-Collision**: UI elements never overlap with icons
-- **Proportional**: Maintains visual balance across all unit sizes
-- **Scalable**: Works seamlessly from 0.5x to 2.5x scaling
-- **Future-Proof**: Automatically adapts to new unit types
+**Registry Features:**
+- **Automatic Discovery**: Scans faction directories for unit types
+- **Type Safety**: Full TypeScript integration with validation
+- **Hot Reloading**: Development-time unit addition without restart
+- **Cross-Platform**: Works in both frontend and AI training systems
 
 ## 🚀 Performance Optimizations
 
@@ -168,7 +153,7 @@ const scaledOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconSca
 
 **WebGL Acceleration:**
 - **Removed forceCanvas**: Enabled hardware-accelerated WebGL rendering
-- **Power Preference**: Added "high-performance" GPU preference
+- **Power Preference**: Added "high-performance" GPU preference in board config
 - **Performance Gain**: 300-500% faster rendering on compatible devices
 
 **Container Batching System:**
@@ -190,239 +175,65 @@ const scaledOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconSca
 - **Memory Efficient**: WebGL + container batching enables massive scale
 - **Performance Target**: 60 FPS on modern hardware even with large boards
 
-## 🎮 Game Mechanics & AI Training (Verified Implementation)
+## 🎨 Visual Enhancement System
 
-### Phase-Based Combat System
+### Per-Unit Icon Scaling
 
-**Confirmed Phase Order** (from config_loader.py):
-1. **Movement Phase**: Units move within MOVE range
-2. **Shooting Phase**: Ranged attacks with RNG_RNG range
-3. **Charge Phase**: Units move adjacent for combat
-4. **Combat Phase**: Melee attacks between adjacent units
+**Implemented Scale Range:**
+- **Minimum Scale**: 0.5 (tiny units)
+- **Maximum Scale**: 2.5 (massive units)
+- **Default Scale**: 1.2 (from board configuration)
+- **Unit-Specific**: Each unit type can override with `ICON_SCALE` property
 
-### Detailed Shooting Phase Implementation (Verified)
-
-**Shooting Phase Prerequisites** (from AI_GAME.md):
-- Only available action in this phase is shooting
-- No unit can shoot more than once per shooting phase
-- Only units with enemies within RNG_RNG range can shoot
-- Units that already shot this phase are ineligible
-
-**6-Step Shooting Sequence** (Verified Implementation):
-
-**Step 1: Number of Shots**
-- Each unit fires `RNG_NB` number of shots per shooting action
-- Example: Intercessor fires 2 shots (`RNG_NB = 2`)
-
-**Step 2: Range Check**
-- Target must be within `RNG_RNG` hexes from shooter
-- Example: Intercessor range of 24 hexes (`RNG_RNG = 24`)
-- Range validation performed before shooting sequence begins
-
-**Step 3: Hit Roll** (Verified in useGameActions.ts & gym40k.py)
+**Example Unit Scales:**
 ```typescript
-const hitRoll = rollD6(); // 1-6
-const hitTarget = shooter.RNG_ATK; // Usually 3+ or 4+
-const didHit = hitRoll >= hitTarget;
-```
-- Roll 1d6 for each shot
-- Compare to shooter's `RNG_ATK` skill (lower is better)
-- Example: Intercessor hits on 3+ (`RNG_ATK = 3`)
+// In unit definition files
+export class Intercessor {
+  static ICON_SCALE = 1.6; // Standard infantry
+  // ... other properties
+}
 
-**Step 4: Wound Roll** (Verified Implementation)
-```typescript
-const woundTarget = calculateWoundTarget(shooter.RNG_STR, target.T);
-const didWound = woundRoll >= woundTarget;
-```
-
-**Wound Chart** (Confirmed in multiple files):
-- **S ≥ 2×T**: Wound on 2+ (overwhelming strength)
-- **S > T**: Wound on 3+ (higher strength)
-- **S = T**: Wound on 4+ (equal strength)
-- **S < T**: Wound on 5+ (lower strength)
-- **S ≤ T/2**: Wound on 6+ (inadequate strength)
-
-**Step 5: Armor Save** (Verified Implementation)
-```typescript
-const saveTarget = calculateSaveTarget(
-  target.ARMOR_SAVE, 
-  target.INVUL_SAVE, 
-  shooter.RNG_AP
-);
-const savedWound = saveRoll >= saveTarget;
-```
-
-**Save Mechanics** (Confirmed):
-- **Modified Armor Save**: `ARMOR_SAVE + RNG_AP`
-- **Invulnerable Save**: Overrides armor if better (when `INVUL_SAVE > 0`)
-- **Best Save**: Uses whichever save is better
-- Example: 3+ armor save vs AP-1 becomes 4+ save
-
-**Step 6: Damage Application** (Verified)
-- If save fails, apply `RNG_DMG` damage to target
-- Reduce target's `CUR_HP` by damage amount
-- Unit dies when `CUR_HP` reaches 0
-
-**AI Shooting Priority System** (Verified from AI_GAME.md):
-1. **Priority 1**: High-value target that can't be killed this phase but sets up melee kill
-2. **Priority 2**: Lowest HP target that can be killed this phase
-3. **Priority 3**: Any target that can be killed this phase
-4. **Priority 4**: High-value target (general damage)
-
-**Frontend Shooting Visualization** (Verified Features):
-- Real-time dice rolling animations with MultipleDiceRoll component
-- Step-by-step combat log showing each phase
-- Probability calculations for hit/wound/save chances
-- Visual feedback for successful hits, wounds, and saves
-- Comprehensive combat summary with damage totals
-
-**Shooting Sequence Manager** (Verified Implementation):
-- SingleShotSequenceManager for step-by-step visualization
-- State tracking through each shooting step
-- Error handling for missing unit statistics
-- Proper cleanup and memory management
-
-### Enhanced Unit System (Updated)
-
-**Confirmed Unit Properties** (from TypeScript roster files):
-- `BASE`: Base size (5 for Intercessor)
-- `MOVE`: Movement range per turn (6)
-- `T`: Toughness score (4)
-- `ARMOR_SAVE`: Armor save score (3)
-- `INVUL_SAVE`: Invulnerable save score (0)
-- `HP_MAX`: Maximum hit points (2)
-- `LD`: Leadership score (6)
-- `OC`: Operative Control (2)
-- `VALUE`: Unit value (20)
-
-**Shooting Statistics:**
-- `RNG_RNG`: Shooting range (24)
-- `RNG_NB`: Number of ranged attacks (2)
-- `RNG_ATK`: Ranged attack to-hit score (3)
-- `RNG_STR`: Ranged attack strength (4)
-- `RNG_AP`: Ranged armor penetration (1)
-- `RNG_DMG`: Ranged damage (1)
-
-**Melee Statistics:**
-- `CC_NB`: Number of melee attacks (3)
-- `CC_RNG`: Melee attack range (1)
-- `CC_ATK`: Melee attack to-hit score (3)
-- `CC_STR`: Melee attack strength (4)
-- `CC_AP`: Melee armor penetration (0)
-- `CC_DMG`: Close combat damage (1)
-
-**Visual Properties:**
-- `ICON`: Visual sprite path
-- `ICON_SCALE`**: Per-unit visual scaling (1.8 for Intercessor)
-- `COLOR`: Faction color
-
-**Per-Unit Visual Customization** (NEW):
-- **Intercessor**: `ICON_SCALE = 1.6` (Basic size for reference)
-- **AssaultIntercessor**: Custom scaling available per unit type
-- **Flexible System**: Each unit type can have custom visual scaling
-- **Gameplay Preserved**: Visual scaling doesn't affect game mechanics
-
-**Verified Agent Types** (from unit_registry.py):
-- **SpaceMarine_Ranged**: Intercessor-based units
-- **SpaceMarine_Melee**: AssaultIntercessor-based units  
-- **Tyranid_Ranged**: Termagant-based units
-- **Tyranid_Melee**: Hormagaunt-based units
-
-## 🤖 AI Training System (Verified Implementation)
-
-### Multi-Agent Training Process
-
-**Confirmed Training Command:**
-```bash
-python ai/train.py --orchestrate --total-episodes 1000 --training-config debug
-```
-
-**Verified Training Flow:**
-1. **Unit Discovery**: unit_registry.py scans frontend/src/roster/ for TypeScript units
-2. **Agent Classification**: Creates faction-role combinations (SpaceMarine_Ranged, etc.)
-3. **Scenario Generation**: scenario_manager.py creates balanced matchups
-4. **Concurrent Training**: multi_agent_trainer.py runs parallel DQN sessions
-5. **Progress Monitoring**: Real-time tracking with slowest agent focus
-6. **Model Persistence**: Saves agent-specific models with replay files
-
-### Training Configuration (Verified Parameters)
-
-**Confirmed DQN Parameters** (from training_config.json):
-- Learning Rate: 0.0005 (default config)
-- Buffer Size: 200,000
-- Batch Size: 128
-- Target Network Update: 10,000 steps
-- Exploration: Epsilon-greedy with decay
-
-**Debug Configuration:**
-- Total Timesteps: 50,000 (quick testing)
-- Reduced buffer and evaluation frequency
-
-### Reward System (Verified Structure)
-
-**Confirmed Reward Categories** (from rewards_config.json):
-- **Movement**: move_to_rng (0.6), move_to_charge (0.4), move_close (0.3)
-- **Combat**: enemy_killed_r (0.4), enemy_killed_m (0.8), win (0.9)
-- **Penalties**: wait (-0.1), atk_wasted (-0.2), being_charged (-0.3)
-- **Faction-Specific**: Different reward matrices per agent type
-
-## 🖥️ Frontend Visualization (Enhanced Implementation)
-
-### Optimized Board Component
-
-**Confirmed Technologies:**
-- **PIXI.js-legacy 7.4.3**: Hardware-accelerated hexagonal board rendering with **WebGL**
-- **React Hooks**: useState, useEffect, useRef for state management
-- **TypeScript Strict Mode**: Complete type safety with no 'any' types
-- **Container Batching**: Optimized rendering for large-scale boards
-
-**Enhanced Features** (Updated Board.tsx):
-- Hexagonal battlefield with proper coordinate system
-- **WebGL-accelerated rendering** for superior performance
-- **Per-unit visual scaling** with ICON_SCALE support
-- **Container-based hex batching** for memory efficiency
-- **Optimized re-render prevention** with maintained animations
-- Proper PIXI.js memory management and cleanup
-
-### ReplayViewer Component
-
-**Verified Features** (from ReplayViewer.tsx):
-- Hexagonal battlefield with proper coordinate system
-- Unit sprites with faction-specific colors and icons
-- Battle log with turn-by-turn action descriptions
-- Auto-play functionality with configurable speed
-- File loading via browser File API
-- **Performance optimizations** applied consistently
-
-**Confirmed Replay Format:**
-```json
-{
-  "game_info": {
-    "scenario": "training_episode",
-    "total_turns": 25,
-    "winner": 0,
-    "ai_behavior": "phase_based"
-  },
-  "initial_state": {
-    "units": [...],
-    "board_size": [24, 18]
-  },
-  "actions": [...]
+export class AssaultIntercessor {
+  static ICON_SCALE = 1.8; // Enhanced battlefield presence
+  // ... other properties
 }
 ```
 
-## ⚙️ Configuration System (Verified Implementation)
+**Visual Element Adaptation:**
+- **HP Bars**: Scale position based on icon size
+- **Shooting Counters**: Dynamic positioning with anti-collision formula
+- **Activation Circles**: Radius adapts to icon dimensions
+- **Z-Index Priority**: Smaller units automatically render above larger ones
+
+### Enhanced Visual Features
+
+**Move Preview System:**
+- **Transparency Fix**: Preview units now fully opaque (alpha = 1.0)
+- **Background Independence**: No longer affected by hex background color bleeding
+- **Visual Consistency**: Preview units look identical to normal units
+
+**Shooting Counter Display:**
+- **Format**: Changed from simple count to "current/total" display
+- **Positioning**: Dynamic placement avoiding icon overlap
+- **Visibility**: Clear display even with various icon sizes
+
+**Activation Indicators:**
+- **Green Circles**: Replaced hexagonal activation indicators
+- **Scalable**: Radius adapts to unit icon size
+- **Better Contrast**: More visible against hex backgrounds
+
+## ⚙️ Configuration System
 
 ### ConfigLoader System
 
-**Confirmed Configuration Files:**
+**Configuration Files:**
 - **training_config.json**: DQN hyperparameters with named configs
 - **rewards_config.json**: Faction-specific reward matrices
 - **board_config.json**: Board layout and visualization with performance settings
 - **scenario_templates.json**: Templates for dynamic scenario generation
 - **unit_registry.json**: Unit name to TypeScript file mappings
 
-**Enhanced Board Configuration** (Updated):
+**Enhanced Board Configuration:**
 ```json
 {
   "default": {
@@ -439,64 +250,36 @@ python ai/train.py --orchestrate --total-episodes 1000 --training-config debug
 }
 ```
 
-**Verified Loading Methods** (from config_loader.py):
+**Loading Methods:**
 ```python
 config = get_config_loader()
 training_config = config.load_training_config("default")
 rewards_config = config.load_rewards_config("SpaceMarine_Ranged") 
 ```
 
-## 🔄 Multi-Agent Orchestration (Verified System)
+## 🔄 Multi-Agent Orchestration System
 
 ### Scenario Management
 
-**Confirmed Features** (from scenario_manager.py):
+**Features:**
 - Dynamic scenario generation from templates
 - Balanced episode allocation across agent combinations  
 - Training history tracking and progress reporting
 - Cross-faction and same-faction matchup generation
 
-**Verified Session Management** (from multi_agent_trainer.py):
+**Session Management:**
 - Concurrent training with CPU-based load balancing
 - Session isolation with proper cleanup
 - Progress tracking focusing on slowest agent
 - Automatic replay file generation per session
 
-**Confirmed File Paths:**
+**File Organization:**
 - Session scenarios: `ai/session_scenarios/`
 - Training replays: `ai/event_log/`
 - Model outputs: Configured via config_loader.get_model_path()
 
-## 📊 Performance & Monitoring (Verified Implementation)
-
-### Training Monitoring
-
-**Confirmed Metrics:**
-- Win rate tracking per agent matchup
-- Average episode rewards
-- Training session duration and efficiency
-- Real-time progress bars with slowest agent focus
-
-**Verified Logging:**
-- Tensorboard integration at `./tensorboard/`
-- Comprehensive replay files with AI decision context
-- Orchestration results with performance statistics
-
-### Build & Development System
-
-**Confirmed Build Process:**
-- Pre-build config copying via `scripts/copy-configs.js`
-- Vite build system with TypeScript compilation
-- ESLint configuration with React hooks enforcement
-
-**Verified Backup System:**
-- Complete project backup via `scripts/backup_block.py`
-- Timestamped archives with file mapping documentation
-- Selective restoration capabilities
-
-## 🚀 Usage Examples
-
 ### Training Workflows
+
 ```bash
 # Basic training
 python ai/train.py
@@ -511,7 +294,273 @@ python ai/train.py --training-config debug
 python ai/evaluate.py --episodes 50
 ```
 
-### Frontend Development
+## 🎮 Game Mechanics Implementation
+
+### Phase-Based Combat System
+
+The game follows a strict turn-based phase system where each player completes all phases before the opponent's turn begins.
+
+**Phase Order (Per Player Turn):**
+1. **Movement Phase**: Units move within MOVE range
+2. **Shooting Phase**: Ranged attacks with RNG_RNG range
+3. **Charge Phase**: Units move adjacent for combat
+4. **Combat Phase**: Close combat resolution with sub-phases
+
+### Detailed Phase Mechanics
+
+#### 1. Movement Phase
+
+**Unit Eligibility:**
+```typescript
+// A unit can move if it hasn't moved this phase
+isEligible = !unitsMoved.includes(unit.id);
+```
+
+**Movement Rules:**
+- Units can move up to their `MOVE` value in hexes
+- Pathfinding respects walls and obstacles
+- **Fleeing Mechanics**: Units adjacent to enemies that move away from all enemies are marked as "fled"
+  - Fled units face penalties in subsequent phases
+    - ❌ Cannot Shoot: if (unitsFled.includes(unit.id)) return false;
+    - ❌ Cannot Charge: if (unitsFled.includes(unit.id)) return false;
+    - ✅ Can Move: No movement restrictions
+    - ✅ Can Fight: No combat restrictions
+    - ⏰ Duration: Penalties last until end of current turn only
+
+```
+
+**Phase Transition:**
+- Phase advances when all eligible units have moved OR player chooses to skip remaining moves
+
+#### 2. Shooting Phase
+
+**Unit Eligibility:**
+```typescript
+// Complex eligibility with multiple restrictions
+isEligible = !unitsMoved.includes(unit.id) &&           // Haven't shot yet
+             !unitsFled.includes(unit.id) &&            // Fled units can't shoot  
+             !hasAdjacentEnemy &&                       // Not engaged in combat
+             hasEnemyInRangeWithLineOfSight &&          // Valid targets available
+             unit.SHOOT_LEFT > 0;                       // Has shots remaining
+```
+
+**Shooting Restrictions:**
+- **No Adjacent Enemies**: Units engaged in combat cannot shoot
+- **No Fled Units**: Units that fled during movement phase cannot shoot
+- **Line of Sight**: Must have clear line of sight to target (respects walls)
+- **One Shot Per Phase**: Each unit can only shoot once per shooting phase
+
+**Shooting Sequence (Per Target):**
+1. **Target Selection**: Choose enemy within `RNG_RNG` range
+2. **Multiple Shots**: Fire `RNG_NB` shots (e.g., Intercessor fires 2 shots)
+3. **Hit Rolls**: Roll 1d6 per shot, succeed on `RNG_ATK`+ (e.g., 3+)
+4. **Wound Rolls**: Compare shooter's `RNG_STR` vs target's `T` using wound chart
+5. **Save Rolls**: Target attempts `ARMOR_SAVE` modified by shooter's `RNG_AP`
+6. **Damage Application**: Apply `RNG_DMG` per failed save
+
+**Phase Transition:**
+- Phase advances when no units can shoot (no targets, already shot, or fled)
+
+#### 3. Charge Phase
+
+**Unit Eligibility:**
+```typescript
+// Charge eligibility requirements
+isEligible = !unitsCharged.includes(unit.id) &&        // Haven't charged yet
+             !unitsFled.includes(unit.id) &&           // Fled units can't charge
+             !isAdjacentToEnemy &&                     // Not already in combat
+             hasEnemyWithinMoveRange;                   // Enemy within MOVE range
+```
+
+**Charge Rules:**
+- Units must move to become adjacent (distance = 1) to an enemy
+- Charging units get priority in subsequent combat phase
+- Units that charge are marked with `hasChargedThisTurn = true`
+- Failed charges still count as having charged
+
+**Charge Movement:**
+- Units can move up to their `MOVE` value
+- Must end adjacent to at least one enemy unit
+- Pathfinding respects terrain and obstacles
+
+**Phase Transition:**
+- Phase advances when no eligible units can charge
+
+#### 4. Combat Phase (Two Sub-Phases)
+
+The combat phase has sophisticated sub-phase mechanics:
+
+**Sub-Phase 1: Charged Units Fight First**
+```typescript
+// Only units that charged this turn can fight
+combatSubPhase = "charged_units";
+isEligible = !unitsAttacked.includes(unit.id) &&
+             unit.hasChargedThisTurn === true &&
+             hasEnemyInCombatRange;
+```
+
+**Sub-Phase 2: Alternating Combat**
+```typescript
+// Non-charged units fight in alternating player order
+combatSubPhase = "alternating_combat";
+isEligible = !unitsAttacked.includes(unit.id) &&
+             unit.hasChargedThisTurn === false &&  // Non-charged units only
+             hasEnemyInCombatRange;
+```
+
+**Combat Mechanics:**
+- **Combat Range**: Units fight enemies within `CC_RNG` (usually 1 hex)
+- **Multiple Attacks**: Each unit makes `CC_NB` attacks
+- **Hit/Wound/Save**: Same dice system as shooting but uses `CC_ATK`, `CC_STR`, `CC_AP`, `CC_DMG`
+- **Alternating Selection**: In sub-phase 2, players alternate selecting units to fight
+
+### Dice System & Combat Mathematics
+
+#### Wound Chart (Strength vs Toughness)
+```typescript
+// Implemented wound calculation system
+function calculateWoundTarget(strength: number, toughness: number): number {
+  if (strength >= 2 * toughness) return 2;      // Overwhelming strength
+  if (strength > toughness) return 3;           // Higher strength  
+  if (strength === toughness) return 4;         // Equal strength
+  if (strength < toughness) return 5;           // Lower strength
+  if (strength <= toughness / 2) return 6;     // Inadequate strength
+  return 6; // Fallback
+}
+```
+
+#### Armor Save System
+```typescript
+// Best save calculation (armor vs invulnerable)
+function calculateSaveTarget(armorSave: number, invulSave: number, armorPenetration: number): number {
+  const modifiedArmorSave = armorSave + armorPenetration;
+  
+  // Use invulnerable save if it exists and is better than modified armor
+  if (invulSave > 0 && invulSave < modifiedArmorSave) {
+    return invulSave;
+  }
+  
+  return modifiedArmorSave;
+}
+```
+
+#### Combat Resolution Examples
+
+**Intercessor vs Intercessor (Shooting):**
+- Intercessor fires 2 shots (`RNG_NB = 2`)
+- Hits on 3+ (`RNG_ATK = 3`)
+- Strength 4 vs Toughness 4 = Wound on 4+
+- 3+ armor save modified by AP-1 = 4+ save needed
+- 1 damage per failed save
+
+**Space Marine vs Tyranid (Combat):**
+- Space Marine makes 3 attacks (`CC_NB = 3`) 
+- Hits on 3+ (`CC_ATK = 3`)
+- Strength 4 vs varying Tyranid toughness
+- Tyranid armor saves vary by unit type
+- 1 damage per failed save typically
+
+**Phase Transition:**
+- Sub-phase 1 → Sub-phase 2 when no charged units can fight
+- Sub-phase 2 → End turn when no units from either player can fight
+
+### Turn Management
+
+**Turn Structure:**
+```typescript
+// Complete turn cycle
+Player 0: Movement → Shooting → Charge → Combat
+Player 1: Movement → Shooting → Charge → Combat
+// Increment turn counter, repeat
+```
+
+**State Tracking:**
+- `unitsMoved`: Units that have moved/shot this phase
+- `unitsCharged`: Units that have charged this turn
+- `unitsAttacked`: Units that have fought in combat this turn  
+- `unitsFled`: Units that fled from combat (carry penalties)
+- `hasChargedThisTurn`: Per-unit flag reset at turn end
+
+**Turn Reset:**
+```typescript
+// At end of each complete turn
+actions.resetMovedUnits();
+actions.resetChargedUnits(); 
+actions.resetAttackedUnits();
+actions.resetFledUnits();
+// Reset hasChargedThisTurn for all units
+```
+
+### Complete Shooting Phase Implementation
+
+**6-Step Shooting Sequence:**
+1. **Target Selection**: Choose valid target within range
+2. **Hit Roll**: Roll to hit based on shooter's skill
+3. **Wound Roll**: Compare Strength vs Toughness
+4. **Save Roll**: Target attempts armor/invulnerable save
+5. **Damage Application**: Apply wounds if save fails
+6. **Next Shot**: Continue until all shots resolved
+
+**AI Shooting Priority System:**
+- **Tier 1**: Wounded enemies (finish them off)
+- **Tier 2**: High-value targets by point cost
+- **Tier 3**: Closest enemies for reliable hits
+- **Tier 4**: Any valid target in range
+
+### Combat Sub-Phases
+
+**Enhanced Combat System:**
+- **Charged Units Fight First**: Units that were charged get priority
+- **Alternating Combat**: Players alternate selecting units to fight
+- **Combat State Tracking**: Tracks which units have fought each round
+- **Multi-Round Combat**: Continues until one side retreats or is destroyed
+
+## 📊 Performance & Monitoring
+
+### Training Monitoring
+
+**Metrics Tracked:**
+- Win rate tracking per agent matchup
+- Average episode rewards
+- Training session duration and efficiency
+- Real-time progress bars with slowest agent focus
+
+**Logging Systems:**
+- Tensorboard integration at `./tensorboard/`
+- Comprehensive replay files with AI decision context
+- Orchestration results with performance statistics
+
+### Replay System
+
+**Features:**
+- Step-by-step action replay with visual feedback
+- Battle log with turn-by-turn action descriptions
+- Auto-play functionality with configurable speed
+- File loading via browser File API
+- Performance optimizations applied consistently
+
+**Replay Format:**
+```json
+{
+  "game_info": {
+    "scenario": "training_episode",
+    "total_turns": 25,
+    "winner": 0,
+    "ai_behavior": "phase_based"
+  },
+  "initial_state": {
+    "units": [...],
+    "board_size": [24, 18]
+  },
+  "actions": [...]
+}
+```
+
+## 🛠️ Development System
+
+### Build Process
+
+**Frontend Development:**
 ```bash
 # Start development server (with config copying)
 cd frontend && npm run dev
@@ -520,9 +569,19 @@ cd frontend && npm run dev
 npm run build
 ```
 
-## 🎯 Key Innovation Summary
+**Pre-build Configuration:**
+- Automatic config copying via `scripts/copy-configs.js`
+- Vite build system with TypeScript compilation
+- ESLint configuration with React hooks enforcement
 
-**Verified Technical Achievements:**
+**Backup System:**
+- Complete project backup via `scripts/backup_block.py`
+- Timestamped archives with file mapping documentation
+- Selective restoration capabilities
+
+## 🎯 Key Technical Achievements
+
+**Verified Innovations:**
 
 1. **Dynamic Multi-Agent Discovery**: Automatically discovers agents from TypeScript files without manual configuration
 
@@ -554,11 +613,15 @@ npm run build
 
 15. **⚡ Size-Based Z-Index Layering**: Intelligent unit rendering priority ensuring smaller units stay visible
 
----
+16. **🎮 Modern SPA Navigation**: Complete routing system with PvP/PvE/Replay modes
+
+17. **🔍 Dynamic Unit Registry**: Zero-hardcoding automatic unit discovery system
+
+18. **📱 Responsive UI Design**: Optimized for various screen sizes with proper spacing
 
 ## 🔄 Recent Updates Summary
 
-**Performance Optimizations Implemented:**
+**Performance Optimizations:**
 - ✅ WebGL rendering enabled (removed forceCanvas)
 - ✅ Container batching system for hex rendering
 - ✅ Re-render loop prevention with preserved animations
@@ -568,24 +631,30 @@ npm run build
 - ✅ Scalable to 240×180 hex boards (43,200 hexes)
 - ✅ Memory-efficient rendering pipeline
 - ✅ Maintained all existing game mechanics
-- ✅ **UnitRenderer component refactoring** (37% code reduction in Board.tsx)
-- ✅ **Centralized unit display logic** with single source of truth
-- ✅ **Enhanced z-index system** with size-based unit layering
+- ✅ UnitRenderer component refactoring (37% code reduction in Board.tsx)
+- ✅ Centralized unit display logic with single source of truth
+- ✅ Enhanced z-index system with size-based unit layering
 
 **Visual Enhancements:**
-- ✅ Space Marines now render with 1.8x icon scaling (enhanced presence)
+- ✅ Space Marines now render with enhanced icon scaling
 - ✅ Per-unit ICON_SCALE system implemented and functional
 - ✅ Flexible per-unit visual customization system
-- ✅ **Dynamic HP bar positioning** scaling with icon size
-- ✅ **Shooting counter format** changed to "current/total" display
-- ✅ **Green activation circles** replaced hexagons for better scaling
-- ✅ **Move preview transparency fix** (eliminated background bleeding)
-- ✅ **Size-based z-index layering** (smaller units render above larger ones)
+- ✅ Dynamic HP bar positioning scaling with icon size
+- ✅ Shooting counter format changed to "current/total" display
+- ✅ Green activation circles replaced hexagons for better scaling
+- ✅ Move preview transparency fix (eliminated background bleeding)
+- ✅ Size-based z-index layering (smaller units render above larger ones)
 
-**Shooting Phase Enhancement:**
-- ✅ Complete 6-step shooting sequence documented and verified
-- ✅ AI shooting priority system detailed
-- ✅ Frontend visualization features confirmed
-- ✅ Cross-platform implementation consistency verified
+**Navigation & UX:**
+- ✅ Complete SPA routing system with React Router 7.6.2
+- ✅ Modern navigation with PvP/PvE/Replay mode buttons
+- ✅ Responsive design with proper component spacing
+- ✅ Direct navigation between all game modes
 
-This description is **100% accurate** based on complete GitHub repository analysis and includes all recent performance optimizations, component refactoring, visual enhancements, and UnitRenderer architecture improvements implemented during development.
+**Development Workflow:**
+- ✅ Automated configuration copying system
+- ✅ Complete backup and restoration capabilities
+- ✅ TypeScript strict mode with proper type safety
+- ✅ ESLint integration with React hooks enforcement
+
+This technical overview represents the complete current state of the Warhammer 40K AI Training System, based on thorough analysis of all source files, configurations, and recent updates. The system is production-ready with sophisticated AI training capabilities, modern web interface, and comprehensive monitoring tools.
