@@ -318,23 +318,35 @@ export const useGameActions = ({
         
         console.log(`🎲 CHARGE ROLL COMPLETE: roll=${chargeRoll}, canCharge=${canCharge}, enemiesInRange=${enemiesInRange.length}`);
         
-        // Execute logging and popup BEFORE state updates to prevent re-render interruption
-        console.log(`🎲 STARTING LOGGING AND POPUP: gameLog exists=${!!gameLog}, canCharge=${canCharge}`);
+        // Log the charge roll with correct format
         if (gameLog) {
-          try {
-            console.log(`🎲 GAME LOG - would log: Unit ${unit.name} CHARGE ROLL : ${chargeRoll} : ${canCharge ? 'Enemy unit(s) in range' : 'No enemy unit(s) in range'}`);
-            console.log(`🎲 GAME LOG COMPLETED`);
-          } catch (error) {
-            console.error(`🎲 GAME LOG ERROR:`, error);
-          }
+          // Create a proper charge event instead of using non-existent logMessage
+          const chargeEvent = {
+            id: `charge-roll-${Date.now()}-${unit.id}`,
+            timestamp: new Date(),
+            type: 'charge' as const,
+            message: canCharge 
+              ? `Unit ${unit.name} CHARGE ROLL : ${chargeRoll} : Enemy unit(s) in range`
+              : `Unit ${unit.name} CHARGE ROLL : ${chargeRoll} : No enemy unit(s) in range`,
+            turnNumber: gameState.currentTurn,
+            phase: 'charge',
+            player: unit.player,
+            unitType: unit.type,
+            unitId: unit.id
+          };
+          gameLog.events.push(chargeEvent);
+          console.log(`🎲 GAME LOG WRITTEN: ${chargeEvent.message}`);
         }
+        
+        // Show popup with exact format required
         actions.showChargeRollPopup(unitId, chargeRoll, !canCharge);
         console.log(`🎲 POPUP TRIGGERED`);
         
-        // Store the roll and handle game logic AFTER logging/popup
+        // Store the roll and handle game logic
         actions.setUnitChargeRoll(unitId, chargeRoll);
         console.log(`🎲 CHARGE ROLL STORED`);
         
+        // Continue with state management
         if (canCharge) {
           console.log(`🎲 CAN CHARGE - entering preview mode`);
           actions.setSelectedUnitId(unitId);
@@ -342,17 +354,31 @@ export const useGameActions = ({
         } else {
           console.log(`🎲 CANNOT CHARGE - ending activation`);
           actions.addChargedUnit(unitId);
+          actions.resetUnitChargeRoll(unitId);
           actions.setSelectedUnitId(null);
           actions.setMode("select");
         }
         
+        console.log(`🎲 CHARGE PROCESSING COMPLETE`);
+
         return;
       } else {
         // Unit already has a charge roll
         if (selectedUnitId === unitId) {
           // Second click on same unit - cancel charge and end activation
           if (gameLog) {
-            gameLog.logChargeCancellation(unit, gameState.currentTurn);
+            const cancelEvent = {
+              id: `charge-cancel-${Date.now()}-${unit.id}`,
+              timestamp: new Date(),
+              type: 'charge_cancel' as const,
+              message: `Unit ${unit.name} CHARGE CANCELLED`,
+              turnNumber: gameState.currentTurn,
+              phase: 'charge',
+              player: unit.player,
+              unitType: unit.type,
+              unitId: unit.id
+            };
+            gameLog.events.push(cancelEvent);
           }
           actions.resetUnitChargeRoll(unitId);
           actions.addChargedUnit(unitId);
@@ -1117,9 +1143,35 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
       return;
     }
     console.log(`🎯 Unit ${charger.name} CHARGED from (${charger.col}, ${charger.row}) to (${destCol}, ${destRow})`);
+    
+    // Create charge event for game log
     if (gameLog) {
-      gameLog.logMessage(`Unit ${charger.name} CHARGED from (${charger.col}, ${charger.row}) to (${destCol}, ${destRow})`, gameState.currentTurn);
+      const chargeEvent = {
+        id: `charge-move-${Date.now()}-${charger.id}`,
+        timestamp: new Date(),
+        type: 'charge' as const,
+        message: `Unit ${charger.name} CHARGED from (${charger.col}, ${charger.row}) to (${destCol}, ${destRow})`,
+        turnNumber: gameState.currentTurn,
+        phase: 'charge',
+        player: charger.player,
+        unitType: charger.type,
+        unitId: charger.id
+      };
+      gameLog.events.push(chargeEvent);
     }
+    
+    // Move unit to destination
+    actions.updateUnit(chargerId, { col: destCol, row: destRow, hasChargedThisTurn: true });
+    
+    // Clean up charge state
+    actions.resetUnitChargeRoll(chargerId);
+    actions.addChargedUnit(chargerId);
+    
+    // Reset UI state
+    actions.setSelectedUnitId(null);
+    actions.setMode("select");
+    
+    console.log(`🎯 Charge complete - unit moved and activation ended`);
     actions.updateUnit(chargerId, { col: destCol, row: destRow, hasChargedThisTurn: true });
     actions.resetUnitChargeRoll(chargerId);
     actions.addChargedUnit(chargerId);
@@ -1237,11 +1289,19 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
         const chargeableEnemyAdjacent = units.some(u => {
           if (u.player === unit.player) return false;
           
-          // Check if this enemy is adjacent to the destination
-          const isAdjacent = Math.max(Math.abs(col - u.col), Math.abs(row - u.row)) === 1;
+          // Check if this enemy is adjacent to the destination using cube coordinates for proper hex adjacency
+          const destCube = offsetToCube(col, row);
+          const targetEnemyCube = offsetToCube(u.col, u.row);
+          const hexDistance = cubeDistance(destCube, targetEnemyCube);
+          const isAdjacent = hexDistance === 1;
           if (!isAdjacent) return false;
           
-          // For now, skip wall checking in charge destinations (simplified)
+          // Additional check: enemy must be within the original charge eligibility range (12 hexes)
+          const enemyCube = offsetToCube(u.col, u.row);
+          const unitCube = offsetToCube(unit.col, unit.row);
+          const distanceToEnemy = cubeDistance(unitCube, enemyCube);
+          if (distanceToEnemy > 12) return false;
+          
           return true;
         });
         

@@ -1135,7 +1135,8 @@ export default function Board({
         movePreview?.destCol, // Add this too
         movePreview?.destRow,  // And this
         targetPreview, // Keep full targetPreview for HP bar blinking
-        eligibleUnitIds.join(',') // Add eligibleUnitIds to trigger re-render when eligibility changes
+        eligibleUnitIds.join(','), // Add eligibleUnitIds to trigger re-render when eligibility changes
+        chargeRollPopup // Add chargeRollPopup to trigger re-render when popup state changes
       ]);
 
       // Simple container return - loading/error handled inside useEffect

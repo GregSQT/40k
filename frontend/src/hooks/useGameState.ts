@@ -251,12 +251,21 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   }, []);
 
   const showChargeRollPopup = useCallback((unitId: UnitId, roll: number, tooLow: boolean) => {
-    setChargeRollPopup({ unitId, roll, tooLow, timestamp: Date.now() });
-    console.log(`🎪 POPUP STATE SET:`, { unitId, roll, tooLow, timestamp: Date.now() });
-    // Auto-hide popup after exactly 2 seconds
+    // Clear any existing popup first
+    setChargeRollPopup(null);
+    
+    // Set new popup after a brief delay to ensure re-render
     setTimeout(() => {
-      setChargeRollPopup(null);
-    }, 2000);
+      setChargeRollPopup({ unitId, roll, tooLow, timestamp: Date.now() });
+      console.log(`🎪 POPUP STATE SET:`, { unitId, roll, tooLow, timestamp: Date.now() });
+      
+      // Auto-hide popup after exactly 2 seconds
+      setTimeout(() => {
+        console.log(`🎪 POPUP AUTO-HIDE: Hiding popup for unit ${unitId}`);
+        setChargeRollPopup(null);
+        console.log(`🎪 POPUP CLEARED`);
+      }, 2000);
+    }, 10);
   }, []);
 
   const resetChargeRolls = useCallback(() => {
