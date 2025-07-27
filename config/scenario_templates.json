@@ -1,56 +1,50 @@
 {
-  "balanced_2v2": {
-    "description": "Balanced 2v2 scenario for multi-agent training",
-    "board_size": [24, 15],
-    "positions": {
-      "player_0": [
-        {"col": 1, "row": 7},
-        {"col": 1, "row": 8}
-      ],
-      "player_1": [
-        {"col": 22, "row": 7},
-        {"col": 22, "row": 8}
-      ]
+  "marines_vs_tyranids_new_composition": {
+    "description": "New team composition: Marines (2 Intercessors, 2 Assault Intercessors, 1 Captain Gravis) vs Tyranids (4 Termagants, 4 Hormagaunts, 1 Carnifex)",
+    "board_size": [24, 18],
+    "agent_compositions": {
+      "SpaceMarine_Ranged": ["Intercessor"],
+      "SpaceMarine_Melee": ["AssaultIntercessor", "CaptainGravis"],
+      "Tyranid_Ranged": ["Termagant"],
+      "Tyranid_Melee": ["Hormagaunt", "Carnifex"]
     },
-    "unit_composition": {
-      "ranged": 1,
-      "melee": 1
-    }
+    "unit_counts": {
+      "Intercessor": 2,
+      "AssaultIntercessor": 2,
+      "CaptainGravis": 1,
+      "Termagant": 4,
+      "Hormagaunt": 4,
+      "Carnifex": 1
+    },
+    "deployment_zones": {
+      "0": [[2, 6], [2, 8], [3, 7], [3, 9], [1, 9]],
+      "1": [[21, 6], [21, 8], [21, 10], [21, 12], [20, 7], [20, 9], [20, 11], [22, 9], [19, 9]]
+    },
+    "difficulty": "hard",
+    "training_focus": "cross_faction"
   },
-  "ranged_focus": {
-    "description": "Ranged-focused scenario for tactical training",
-    "board_size": [24, 15],
-    "positions": {
-      "player_0": [
-        {"col": 2, "row": 6},
-        {"col": 2, "row": 9}
-      ],
-      "player_1": [
-        {"col": 21, "row": 6},
-        {"col": 21, "row": 9}
-      ]
+  "tyranids_vs_marines_focused": {
+    "description": "Tyranid AI training focused scenario vs Marines",
+    "board_size": [24, 18],
+    "agent_compositions": {
+      "Tyranid_Ranged": ["Termagant"],
+      "Tyranid_Melee": ["Hormagaunt", "Carnifex"],
+      "SpaceMarine_Ranged": ["Intercessor"],
+      "SpaceMarine_Melee": ["AssaultIntercessor", "CaptainGravis"]
     },
-    "unit_composition": {
-      "ranged": 2,
-      "melee": 0
-    }
-  },
-  "melee_focus": {
-    "description": "Melee-focused scenario for close combat training",
-    "board_size": [24, 15],
-    "positions": {
-      "player_0": [
-        {"col": 5, "row": 7},
-        {"col": 5, "row": 8}
-      ],
-      "player_1": [
-        {"col": 18, "row": 7},
-        {"col": 18, "row": 8}
-      ]
+    "unit_counts": {
+      "Termagant": 4,
+      "Hormagaunt": 4,
+      "Carnifex": 1,
+      "Intercessor": 2,
+      "AssaultIntercessor": 2,
+      "CaptainGravis": 1
     },
-    "unit_composition": {
-      "ranged": 0,
-      "melee": 2
-    }
+    "deployment_zones": {
+      "0": [[1, 6], [1, 8], [1, 10], [1, 12], [2, 7], [2, 9], [2, 11], [0, 9], [3, 9]],
+      "1": [[22, 6], [22, 8], [22, 10], [22, 12], [21, 7], [21, 9], [21, 11], [23, 9], [20, 9]]
+    },
+    "difficulty": "hard",
+    "training_focus": "tyranid_specialization"
   }
 }
