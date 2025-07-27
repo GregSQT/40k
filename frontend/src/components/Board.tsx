@@ -665,8 +665,21 @@ export default function Board({
             }
             range = previewUnit.RNG_RNG;
             
+            // During move phase with movePreview, show red RNG_RNG hexes around new position
+            if (phase === "move" && mode === "movePreview") {
+              // Show all hexes within RNG_RNG range of the preview position
+              for (let col = 0; col < BOARD_COLS; col++) {
+                for (let row = 0; row < BOARD_ROWS; row++) {
+                  const targetCube = offsetToCube(col, row);
+                  const dist = cubeDistance(centerCube, targetCube);
+                  if (dist > 0 && dist <= range) {
+                    attackCells.push({ col, row });
+                  }
+                }
+              }
+            }
             // During shooting phase, show different colored hexes based on line of sight
-            if (phase === "shoot") {
+            else if (phase === "shoot") {
               // First, find all enemies in range and mark cover paths
               const coverPathHexes = new Set<string>();
               const enemyUnits = units.filter(u => u.player !== previewUnit!.player);
