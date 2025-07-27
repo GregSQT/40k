@@ -22,6 +22,7 @@ project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
 from ai.unit_registry import UnitRegistry
+from shared.gameRules import roll_d6, calculate_wound_target, calculate_save_target, execute_shooting_sequence
 
 try:
     from config_loader import get_config_loader
@@ -44,73 +45,13 @@ def is_unit_in_range(attacker, target, range_value):
     """Check if target is within specified range of attacker."""
     return get_hex_distance(attacker, target) <= range_value
 
-def roll_d6():
-    """Roll a 6-sided die."""
-    return random.randint(1, 6)
+# roll_d6 function removed - now using shared function
 
-def calculate_wound_target(strength, toughness):
-    """Calculate wound target based on strength vs toughness."""
-    if strength * 2 <= toughness:
-        return 6  # S*2 <= T: wound on 6+
-    elif strength < toughness:
-        return 5  # S < T: wound on 5+
-    elif strength == toughness:
-        return 4  # S = T: wound on 4+
-    elif strength > toughness:
-        return 3  # S > T: wound on 3+
-    elif strength * 2 >= toughness:
-        return 2  # S*2 >= T: wound on 2+
-    return 6  # fallback
+# calculate_wound_target function removed - now using shared functioncalculate_save_target
 
-def calculate_save_target(armor_save, invul_save, armor_penetration):
-    """Calculate save target accounting for AP and invulnerable saves."""
-    modified_armor = armor_save + armor_penetration
-    
-    # Use invulnerable save if it's better than modified armor save (and invul > 0)
-    if invul_save > 0 and invul_save < modified_armor:
-        return invul_save
-    
-    return modified_armor
+# calculate_save_target function removed - now using shared function
 
-def execute_shooting_sequence(shooter, target):
-    """Execute complete 6-step shooting sequence."""
-    # Get shooting stats with fallbacks
-    num_shots = shooter.get("rng_nb", 1)
-    hit_skill = shooter.get("rng_atk", 4)
-    strength = shooter.get("rng_str", 4)
-    armor_pen = shooter.get("rng_ap", 0)
-    damage_per_shot = shooter.get("rng_dmg", 1)
-    
-    # Get target stats with fallbacks
-    toughness = target.get("t", 4)
-    armor_save = target.get("armor_save", 5)
-    invul_save = target.get("invul_save", 0)
-    
-    total_damage = 0
-    
-    # Process each shot
-    for shot in range(num_shots):
-        # Step 3: Hit roll
-        hit_roll = roll_d6()
-        if hit_roll < hit_skill:
-            continue  # Miss
-        
-        # Step 4: Wound roll
-        wound_target = calculate_wound_target(strength, toughness)
-        wound_roll = roll_d6()
-        if wound_roll < wound_target:
-            continue  # Failed to wound
-        
-        # Step 5: Armor save
-        save_target = calculate_save_target(armor_save, invul_save, armor_pen)
-        save_roll = roll_d6()
-        if save_roll >= save_target:
-            continue  # Save successful
-        
-        # Step 6: Inflict damage
-        total_damage += damage_per_shot
-    
-    return total_damage
+# execute_shooting_sequence function removed - now using shared function
 
 class W40KEnv(gym.Env):
     """Phase-based W40K environment following AI_GAME_OVERVIEW.md specifications exactly."""
@@ -836,7 +777,8 @@ class W40KEnv(gym.Env):
                 old_hp = target["cur_hp"]
                 
                 # Execute dice-based shooting sequence
-                total_damage = execute_shooting_sequence(unit, target)
+                result = execute_shooting_sequence(unit, target)
+                total_damage = result["totalDamage"]
                 target["cur_hp"] = max(0, old_hp - total_damage)
 
                 # Base ranged attack reward (scaled by damage dealt)
@@ -1108,7 +1050,8 @@ class W40KEnv(gym.Env):
             unit_rewards = self._get_unit_reward_config(unit)
             return unit_rewards.get("wait", -0.5)  # Penalty for invalid targeting
         
-        total_damage = execute_shooting_sequence(unit, target)
+        result = execute_shooting_sequence(unit, target)
+        total_damage = result["totalDamage"]
         old_hp = target["cur_hp"]
         target["cur_hp"] = max(0, target["cur_hp"] - total_damage)
         
@@ -1494,7 +1437,8 @@ class W40KEnv(gym.Env):
             # Priority 1: Shoot if in range (instead of moving closer)
             if is_unit_in_range(enemy, nearest_ai, enemy.get("rng_rng", 4)) and enemy.get("rng_dmg", 0) > 0:
                 # Execute dice-based shooting for enemy
-                total_damage = execute_shooting_sequence(enemy, nearest_ai)
+                result = execute_shooting_sequence(enemy, nearest_ai)
+                total_damage = result["totalDamage"]
                 nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - total_damage)
                 if nearest_ai["cur_hp"] <= 0:
                     nearest_ai["alive"] = False

@@ -47,9 +47,9 @@
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
   "include": [
-    "frontend/src/**/*",
-    "config/**/*.json",
-    "shared/**/*"
+    "src/**/*",
+    "../config/**/*.json",
+    "../shared/**/*"
   ],
   "exclude": [
     "node_modules",

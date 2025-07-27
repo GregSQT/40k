@@ -88,12 +88,11 @@ export function rollD6(): number {
 }
 
 export function calculateWoundTarget(strength: number, toughness: number): number {
-  if (strength * 2 <= toughness) return 6;      // S*2 <= T: wound on 6+
-  if (strength < toughness) return 5;           // S < T: wound on 5+
-  if (strength === toughness) return 4;         // S = T: wound on 4+
-  if (strength > toughness) return 3;           // S > T: wound on 3+
-  if (strength * 2 >= toughness) return 2;     // S*2 >= T: wound on 2+
-  return 6; // fallback
+  if (strength * 2 <= toughness) return 6;    // S*2 <= T: wound on 6+
+  if (strength >= toughness * 2) return 2;    // S >= 2*T: wound on 2+
+  if (strength > toughness) return 3;         // S > T: wound on 3+
+  if (strength === toughness) return 4;       // S = T: wound on 4+
+  return 5;                                   // S < T: wound on 5+
 }
 
 export function calculateSaveTarget(armorSave: number, invulSave: number, armorPenetration: number): number {

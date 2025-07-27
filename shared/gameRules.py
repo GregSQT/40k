@@ -49,15 +49,14 @@ def calculate_wound_target(strength: int, toughness: int) -> int:
     """Calculate wound target based on strength vs toughness (EXACT from frontend)."""
     if strength * 2 <= toughness:
         return 6  # S*2 <= T: wound on 6+
-    elif strength < toughness:
-        return 5  # S < T: wound on 5+
-    elif strength == toughness:
-        return 4  # S = T: wound on 4+
+    elif strength >= toughness * 2:
+        return 2  # S >= 2*T: wound on 2+
     elif strength > toughness:
         return 3  # S > T: wound on 3+
-    elif strength * 2 >= toughness:
-        return 2  # S*2 >= T: wound on 2+
-    return 6  # fallback
+    elif strength == toughness:
+        return 4  # S = T: wound on 4+
+    else:  # strength < toughness
+        return 5  # S < T: wound on 5+
 
 def calculate_save_target(armor_save: int, invul_save: int, armor_penetration: int) -> int:
     """Calculate save target accounting for AP and invulnerable saves (EXACT from frontend)."""
