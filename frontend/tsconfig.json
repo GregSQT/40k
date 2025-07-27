@@ -1,51 +1,55 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "baseUrl": "src",
+    "baseUrl": "../",
     "paths": {
       "@/*": [
-        "*"
+        "frontend/src/*"
       ],
       "@roster/*": [
-        "roster/*"
+        "frontend/src/roster/*"
       ],
       "@data/*": [
-        "data/*"
+        "frontend/src/data/*"
       ],
       "@components/*": [
-        "components/*"
+        "frontend/src/components/*"
       ],
       "@pages/*": [
-        "pages/*"
+        "frontend/src/pages/*"
       ],
       "@types/*": [
-        "types/*"
+        "frontend/src/types/*"
       ],
       "@hooks/*": [
-        "hooks/*"
+        "frontend/src/hooks/*"
       ],
       "@services/*": [
-        "services/*"
+        "frontend/src/services/*"
       ],
       "@constants/*": [
-        "constants/*"
+        "frontend/src/constants/*"
       ],
       "@utils/*": [
-        "utils/*"
+        "frontend/src/utils/*"
       ],
       "@ai/*": [
-        "../ai/*"
+        "ai/*"
+      ],
+      "@shared/*": [
+        "shared/*"
       ]
     },
     "composite": true,
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": "../",
     "noEmit": false,
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
   "include": [
-    "src/**/*",
-    "../config/**/*.json" 
+    "frontend/src/**/*",
+    "config/**/*.json",
+    "shared/**/*"
   ],
   "exclude": [
     "node_modules",

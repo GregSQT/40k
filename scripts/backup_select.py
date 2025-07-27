@@ -64,6 +64,7 @@ else:
 
     ### frontend
         "frontend/vite.config.ts",
+        "frontend/tsconfig.json",
 
     ### frontend/public/config
         "frontend/public/config/action_definitions.json",  # Action Definitions
@@ -143,7 +144,11 @@ else:
         "frontend/src/utils/CombatSequenceManager.ts",
         "frontend/src/utils/gameHelpers.ts",
         "frontend/src/utils/probabilityCalculator.ts",
-        "frontend/src/utils/ShootingSequenceManager.ts"
+        "frontend/src/utils/ShootingSequenceManager.ts",
+
+        # shared
+        "shared/gameRules.py",
+        "shared/gameRules.ts"
     ]
 
 logfile = os.path.join(DEST_ROOT, "backup.log")
