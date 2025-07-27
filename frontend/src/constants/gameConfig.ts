@@ -65,7 +65,12 @@ export const MODES = {
 
 // API Configuration
 export const API_CONFIG = {
-  BASE_URL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
+  BASE_URL: (() => {
+    if (process.env.REACT_APP_API_URL === undefined) {
+      throw new Error('REACT_APP_API_URL environment variable is required but was not set');
+    }
+    return process.env.REACT_APP_API_URL;
+  })(),
   ENDPOINTS: {
     AI_ACTION: '/ai/action',
   },
@@ -135,7 +140,12 @@ export const A11Y = {
 // Development Configuration
 export const DEV_CONFIG = {
   ENABLE_LOGGING: process.env.NODE_ENV === 'development',
-  LOG_LEVEL: process.env.REACT_APP_LOG_LEVEL || 'info',
+  LOG_LEVEL: (() => {
+    if (process.env.REACT_APP_LOG_LEVEL === undefined) {
+      throw new Error('REACT_APP_LOG_LEVEL environment variable is required but was not set');
+    }
+    return process.env.REACT_APP_LOG_LEVEL;
+  })(),
   ENABLE_PERFORMANCE_MONITORING: false,
   ENABLE_ERROR_REPORTING: process.env.NODE_ENV === 'production',
 } as const;
