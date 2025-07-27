@@ -570,7 +570,86 @@ class W40KEnv(gym.Env):
             return -0.1  # Invalid phase penalty
         
         return reward
+
+    def _record_detailed_shooting_action(self, shooter, target, shooting_result, old_hp):
+        """Record detailed shooting action with all dice rolls."""
+        if not hasattr(self, 'detailed_action_log'):
+            self.detailed_action_log = []
         
+        action_record = {
+            "turn": self.current_turn,
+            "phase": self.current_phase,
+            "action_type": "shooting",
+            "shooter": {
+                "id": shooter["id"],
+                "name": shooter.get("name", f"Unit_{shooter['id']}"),
+                "position": {"col": shooter["col"], "row": shooter["row"]},
+                "stats": {
+                    "rng_nb": shooter.get("rng_nb", 1),
+                    "rng_atk": shooter.get("rng_atk", 4),
+                    "rng_str": shooter.get("rng_str", 4),
+                    "rng_ap": shooter.get("rng_ap", 0),
+                    "rng_dmg": shooter.get("rng_dmg", 1)
+                }
+            },
+            "target": {
+                "id": target["id"],
+                "name": target.get("name", f"Unit_{target['id']}"),
+                "position": {"col": target["col"], "row": target["row"]},
+                "stats": {
+                    "t": target.get("t", 4),
+                    "armor_save": target.get("armor_save", 4),
+                    "invul_save": target.get("invul_save", 0)
+                },
+                "hp_before": old_hp,
+                "hp_after": target["cur_hp"]
+            },
+            "shooting_summary": shooting_result["summary"],
+            "total_damage": shooting_result["totalDamage"]
+        }
+        
+        self.detailed_action_log.append(action_record)
+
+    def _record_detailed_combat_action(self, attacker, target, combat_result, old_hp):
+        """Record detailed combat action with all dice rolls."""
+        if not hasattr(self, 'detailed_action_log'):
+            self.detailed_action_log = []
+        
+        action_record = {
+            "turn": self.current_turn,
+            "phase": self.current_phase,
+            "action_type": "combat",
+            "attacker": {
+                "id": attacker["id"],
+                "name": attacker.get("name", f"Unit_{attacker['id']}"),
+                "position": {"col": attacker["col"], "row": attacker["row"]},
+                "stats": {
+                    "cc_nb": attacker.get("cc_nb", 1),
+                    "cc_atk": attacker.get("cc_atk", 4),
+                    "cc_str": attacker.get("cc_str", 4),
+                    "cc_ap": attacker.get("cc_ap", 0),
+                    "cc_dmg": attacker.get("cc_dmg", 1)
+                }
+            },
+            "target": {
+                "id": target["id"],
+                "name": target.get("name", f"Unit_{target['id']}"),
+                "position": {"col": target["col"], "row": target["row"]},
+                "stats": {
+                    "t": target.get("t", 4),
+                    "armor_save": target.get("armor_save", 4),
+                    "invul_save": target.get("invul_save", 0)
+                },
+                "hp_before": old_hp,
+                "hp_after": target["cur_hp"]
+            },
+            "combat_summary": combat_result["summary"],
+            "total_damage": combat_result["totalDamage"],
+            "attacks_detail": combat_result["attackDetails"]  # All individual dice rolls
+        }
+        
+        self.detailed_action_log.append(action_record)
+
     def step(self, action):
         """Execute one step in the environment."""
         
@@ -781,6 +860,10 @@ class W40KEnv(gym.Env):
                 total_damage = result["totalDamage"]
                 target["cur_hp"] = max(0, old_hp - total_damage)
 
+                # Enhanced logging: capture all dice roll details
+                if self.save_replay:
+                    self._record_detailed_shooting_action(unit, target, result, old_hp)
+
                 # Base ranged attack reward (scaled by damage dealt)
                 reward = unit_rewards.get("ranged_attack") * total_damage if total_damage > 0 else unit_rewards.get("ranged_attack", 0) * 0.1
 
@@ -835,7 +918,7 @@ class W40KEnv(gym.Env):
             return unit_rewards.get("wait")
 
     def _execute_combat_action(self, unit, action_type):
-        """Execute melee attack: only action_type==6 attacks following AI_GAME.md."""
+        """Execute melee attack using dice-based system: only action_type==6 attacks following AI_GAME.md."""
         unit_rewards = self._get_unit_reward_config(unit)
 
         # Only action 6 attacks in combat phase; action 7 waits
@@ -843,15 +926,26 @@ class W40KEnv(gym.Env):
             targets = self._get_combat_targets(unit)
             if targets:
                 target = targets[0]
-                damage = unit["cc_dmg"]
                 old_hp = target["cur_hp"]
-                target["cur_hp"] = max(0, old_hp - damage)
+                
+                # Execute dice-based combat sequence
+                from shared.gameRules import execute_combat_sequence
+                result = execute_combat_sequence(unit, target)
+                total_damage = result["totalDamage"]
+                target["cur_hp"] = max(0, old_hp - total_damage)
 
-                reward = unit_rewards.get("attack")
+                # Enhanced logging: capture all dice roll details
+                if self.save_replay:
+                    self._record_detailed_combat_action(unit, target, result, old_hp)
+
+                # Base combat attack reward (scaled by damage dealt)
+                reward = unit_rewards.get("attack") * total_damage if total_damage > 0 else unit_rewards.get("attack", 0) * 0.1
+
+                # Kill bonuses
                 if target["cur_hp"] <= 0:
                     target["alive"] = False
                     reward += unit_rewards.get("enemy_killed_m")
-                    if old_hp == damage:
+                    if old_hp == total_damage:
                         reward += unit_rewards.get("enemy_killed_no_overkill_m") - unit_rewards.get("enemy_killed_m")
                     if self._was_lowest_hp_target(target, targets):
                         reward += unit_rewards.get("enemy_killed_lowests_hp_m") - unit_rewards.get("enemy_killed_m")

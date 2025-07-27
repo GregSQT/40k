@@ -145,6 +145,97 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
 
 def execute_combat_sequence(attacker: Dict[str, Any], target: Dict[str, Any]) -> Dict[str, Any]:
     """Execute combat sequence (EXACT from frontend logic)."""
+    # Step 1: Number of attacks
+    if "cc_nb" not in attacker:
+        raise ValueError("attacker.cc_nb is required")
+    number_of_attacks = attacker["cc_nb"]
+
+    total_damage = 0
+    hits = 0
+    wounds = 0
+    failed_saves = 0
+    
+    # Detailed attack tracking for replay
+    attack_details = []
+
+    # Process each attack
+    for attack in range(1, number_of_attacks + 1):
+        attack_result = {
+            "attack_number": attack,
+            "hit_roll": 0,
+            "hit_success": False,
+            "wound_roll": 0,
+            "wound_success": False,
+            "save_roll": 0,
+            "save_success": False,
+            "damage_dealt": 0
+        }
+        
+        # Step 2: Hit roll
+        hit_roll = roll_d6()
+        attack_result["hit_roll"] = hit_roll
+        if "cc_atk" not in attacker:
+            raise ValueError("attacker.cc_atk is required")
+        hit_target = attacker["cc_atk"]
+        did_hit = hit_roll >= hit_target
+        attack_result["hit_success"] = did_hit
+        
+        if not did_hit:
+            attack_details.append(attack_result)
+            continue  # Miss - next attack
+        hits += 1
+        
+        # Step 3: Wound roll  
+        wound_roll = roll_d6()
+        attack_result["wound_roll"] = wound_roll
+        if "cc_str" not in attacker:
+            raise ValueError("attacker.cc_str is required")
+        if "t" not in target:
+            raise ValueError("target.t is required")
+        wound_target = calculate_wound_target(attacker["cc_str"], target["t"])
+        did_wound = wound_roll >= wound_target
+        attack_result["wound_success"] = did_wound
+        
+        if not did_wound:
+            attack_details.append(attack_result)
+            continue  # Failed to wound - next attack
+        wounds += 1
+        
+        # Step 4: Armor save
+        save_roll = roll_d6()
+        attack_result["save_roll"] = save_roll
+        base_armor_save = target["armor_save"]
+        invul_save = target.get("invul_save", 0)
+        armor_penetration = attacker["cc_ap"]
+        
+        save_target = calculate_save_target(base_armor_save, invul_save, armor_penetration)
+        saved_wound = save_roll >= save_target
+        attack_result["save_success"] = saved_wound
+        
+        if saved_wound:
+            attack_details.append(attack_result)
+            continue  # Save successful - next attack
+        failed_saves += 1
+        
+        # Step 5: Inflict damage
+        if "cc_dmg" not in attacker:
+            raise ValueError("attacker.cc_dmg is required")
+        damage = attacker["cc_dmg"]
+        total_damage += damage
+        attack_result["damage_dealt"] = damage
+        
+        attack_details.append(attack_result)
+
+    return {
+        "totalDamage": total_damage,
+        "summary": {
+            "totalAttacks": number_of_attacks,
+            "hits": hits,
+            "wounds": wounds,
+            "failedSaves": failed_saves
+        },
+        "attackDetails": attack_details  # NEW: Detailed dice roll information
+    }
     # Get number of attacks
     if "cc_nb" not in attacker:
         raise ValueError("attacker.cc_nb is required")

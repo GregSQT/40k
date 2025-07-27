@@ -142,6 +142,11 @@ class WebReplayLogger:
         web_event["event_flags"]["reward"] = reward
         web_event["event_flags"]["description"] = description
         
+        # Enhanced: Add detailed action data if available
+        if hasattr(self.env, 'detailed_action_log') and self.env.detailed_action_log:
+            latest_action = self.env.detailed_action_log[-1]
+            web_event["detailed_action_data"] = latest_action
+        
         ai_units_alive = sum(1 for u in post_action_units if u.get("player", 0) == 1 and u.get("alive", True))
         enemy_units_alive = sum(1 for u in post_action_units if u.get("player", 0) == 0 and u.get("alive", True))
         
