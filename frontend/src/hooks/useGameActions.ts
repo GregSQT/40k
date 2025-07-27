@@ -1,5 +1,5 @@
 // src/hooks/useGameActions.ts
-import { useCallback } from 'react';
+import React, { useCallback } from 'react';
 import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState, TargetPreview, CombatSubPhase, PlayerId } from '../types/game';
 import { calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability, calculateCombatHitProbability, calculateCombatWoundProbability, calculateCombatSaveProbability, calculateCombatOverallProbability } from '../utils/probabilityCalculator';
 import { areUnitsAdjacent, isUnitInRange, hasLineOfSight, offsetToCube, cubeDistance, getHexLine } from '../utils/gameHelpers';
@@ -1110,21 +1110,50 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
   }, [actions, findUnit, gameLog, gameState.currentTurn]);
 
   const moveCharger = useCallback((chargerId: UnitId, destCol: number, destRow: number) => {
-    const charger = findUnit(chargerId);
-    if (!charger) {
-      return;
-    }
+    console.log(`🎯 moveCharger CALLED with: chargerId=${chargerId}, destCol=${destCol}, destRow=${destRow}`);
+    
+    try {
+      const charger = findUnit(chargerId);
+      console.log(`🎯 findUnit result:`, charger ? `found unit ${charger.name}` : 'unit not found');
+      
+      if (!charger) {
+        console.error(`🎯 moveCharger FAILED: charger not found for id ${chargerId}`);
+        return;
+      }
+      
+      console.log(`🎯 Unit ${charger.name} CHARGED from (${charger.col}, ${charger.row}) to (${destCol}, ${destRow})`);
     
     if (gameLog) {
       gameLog.logMessage(`Unit ${charger.name} CHARGED from (${charger.col}, ${charger.row}) to (${destCol}, ${destRow})`, gameState.currentTurn);
     }
     
+    // Move the unit to the destination
     actions.updateUnit(chargerId, { col: destCol, row: destRow, hasChargedThisTurn: true });
+    
+    // Clear the charge roll
     actions.resetUnitChargeRoll(chargerId);
+    
+    // Mark unit as having charged (end activation)
     actions.addChargedUnit(chargerId);
-    actions.setSelectedUnitId(null);
-    actions.setMode("select");
-  }, [actions, findUnit, gameLog, gameState.currentTurn, units]);
+    
+    // CRITICAL: Reset all state properly with forced batching
+    console.log(`🎯 BEFORE STATE RESET: selectedUnitId=${selectedUnitId}, mode=${gameState.mode}`);
+    
+    // Force immediate state reset with React.unstable_batchedUpdates if available
+    const batchedUpdates = (React as any).unstable_batchedUpdates || ((fn: () => void) => fn());
+    
+    batchedUpdates(() => {
+      actions.setSelectedUnitId(null);
+      actions.setMode("select");
+    });
+    
+    console.log(`🎯 Charge complete, state reset commands sent`);
+    
+    // Force verification after a frame
+    setTimeout(() => {
+      console.log(`🎯 VERIFICATION: selectedUnitId should be null, mode should be select`);
+    }, 16);
+  }, [actions, findUnit, gameLog, gameState.currentTurn, selectedUnitId, gameState.mode]);
 
   const cancelCharge = useCallback(() => {
     if (selectedUnitId !== null) {

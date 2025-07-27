@@ -3,6 +3,7 @@
 import type { UnitId } from '../types/game';
 
 let globalClickHandler: ((e: Event) => void) | null = null;
+let globalHexClickHandler: ((e: Event) => void) | null = null;
 
 export function setupBoardClickHandler(callbacks: {
   onSelectUnit(unitId: number | null): void;
@@ -16,8 +17,14 @@ export function setupBoardClickHandler(callbacks: {
   onStartMovePreview?(unitId: UnitId, col: number, row: number): void;
 }) {
 
+  // Remove existing unit click handler
   if (globalClickHandler) {
     window.removeEventListener('boardUnitClick', globalClickHandler);
+  }
+
+  // Remove existing hex click handler
+  if (globalHexClickHandler) {
+    window.removeEventListener('boardHexClick', globalHexClickHandler);
   }
 
   globalClickHandler = (e: Event) => {
@@ -65,8 +72,7 @@ export function setupBoardClickHandler(callbacks: {
   
   window.addEventListener('boardCancelCharge', cancelChargeHandler);
   
-  // Handle hex clicks
-  const hexClickHandler = (e: Event) => {
+  globalHexClickHandler = (e: Event) => {
     console.log(`🖱️ boardClickHandler received hex click:`, (e as CustomEvent).detail);
     const { col, row, phase, mode, selectedUnitId } = (e as CustomEvent<{
       col: number;
@@ -93,7 +99,7 @@ export function setupBoardClickHandler(callbacks: {
     }
   };
   
-  window.addEventListener('boardHexClick', hexClickHandler);
+  window.addEventListener('boardHexClick', globalHexClickHandler);
 }
 
 ;(window as any).setupBoardClickHandler = setupBoardClickHandler;
