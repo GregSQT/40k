@@ -195,6 +195,9 @@ body {
   flex-direction: column;
   gap: var(--spacing-xl);
   width: 100%;
+  max-width: 900px;
+  margin-left: var(--spacing-lg);
+  margin-top: 60px; /* Push tables below navigation buttons */
 }
 
 .unit-status-table-container {

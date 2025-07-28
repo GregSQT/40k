@@ -23,7 +23,7 @@ function Navigation() {
   });
 
   return (
-    <nav style={{ position: 'absolute', top: '16px', right: '16px', display: 'flex', gap: '8px' }}>
+    <nav style={{ position: 'fixed', top: '8px', right: '16px', display: 'flex', gap: '8px', zIndex: 1000 }}>
       <button onClick={() => window.location.href = '/game'} style={getButtonStyle('/game')}>PvP</button>
       <button onClick={() => window.location.href = '/pve'} style={getButtonStyle('/pve')}>PvE</button>
       <button onClick={() => window.location.href = '/replay'} style={getButtonStyle('/replay')}>Replay</button>
@@ -43,7 +43,11 @@ export default function App() {
           <HomePage />
         </div>
       )} />
-      <Route path="/game" element={<GamePage />} />
+      <Route path="/game" element={(
+        <div style={{ paddingTop: '56px' }}>
+          <GamePage />
+        </div>
+      )} />
       <Route path="/replay" element={(
         <div style={{ paddingTop: '56px' }}>
           <ReplayPage />

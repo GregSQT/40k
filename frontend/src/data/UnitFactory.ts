@@ -85,8 +85,6 @@ async function discoverUnitsInFaction(faction: string): Promise<string[]> {
 }
 
 // Rest of the interface and functions remain the same...
-export type UnitType = string; // Add missing UnitType export
-
 export interface Unit {
   id: number;
   name: string;

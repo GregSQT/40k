@@ -483,7 +483,7 @@ export function isValidMove(
 
 // Debugging utilities
 export function logGameState(units: Unit[], phase: string, currentPlayer: number): void {
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+  if (process.env.NODE_ENV === 'development') {
     console.group(`Game State - Phase: ${phase}, Player: ${currentPlayer}`);
     units.forEach(unit => {
       const hp = unit.CUR_HP ?? unit.HP_MAX;
@@ -491,107 +491,4 @@ export function logGameState(units: Unit[], phase: string, currentPlayer: number
     });
     console.groupEnd();
   }
-}
-
-// Centralized attack preview calculation function (EXACT shooting phase LoS logic from Board.tsx)
-export function calculateAttackPreview(
-  attackFromCol: number,
-  attackFromRow: number,
-  range: number,
-  units: Unit[],
-  previewUnit: Unit,
-  wallHexes: [number, number][] | undefined,
-  BOARD_COLS: number,
-  BOARD_ROWS: number
-): {
-  attackCells: { col: number; row: number }[];
-  coverCells: { col: number; row: number }[];
-  blockedTargets: Set<string>;
-  coverTargets: Set<string>;
-} {
-  const attackCells: { col: number; row: number }[] = [];
-  const coverCells: { col: number; row: number }[] = [];
-  const blockedTargets = new Set<string>();
-  const coverTargets = new Set<string>();
-
-  const centerCube = offsetToCube(attackFromCol, attackFromRow);
-  
-  // First, find all enemies in range and mark cover paths (EXACT shooting phase logic)
-  const coverPathHexes = new Set<string>();
-  const enemyUnits = units.filter(u => u.player !== previewUnit.player);
-  
-  // First process actual enemy units
-  for (const enemy of enemyUnits) {
-    const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
-    if (distance > 0 && distance <= range) {
-      
-      const lineOfSight = hasLineOfSight(
-        { col: attackFromCol, row: attackFromRow },
-        { col: enemy.col, row: enemy.row },
-        wallHexes || []
-      );
-      
-      
-      if (lineOfSight.canSee && lineOfSight.inCover) {
-        // Mark this enemy as in cover
-        coverCells.push({ col: enemy.col, row: enemy.row });
-        coverTargets.add(`${enemy.col},${enemy.row}`);
-        
-        // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
-        const pathHexes = getHexLine(attackFromCol, attackFromRow, enemy.col, enemy.row);
-        const wallHexSet = new Set<string>(
-          (wallHexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
-        );
-        pathHexes.forEach(hex => {
-          const hexKey = `${hex.col},${hex.row}`;
-          if (!wallHexSet.has(hexKey)) {
-            coverPathHexes.add(hexKey);
-          }
-        });
-      } else if (lineOfSight.canSee) {
-        // Clear line of sight enemy
-        attackCells.push({ col: enemy.col, row: enemy.row });
-      } else {
-        // Blocked enemy
-        blockedTargets.add(`${enemy.col},${enemy.row}`);
-      }
-    }
-  }
-  
-  // Now show all hexes in range with appropriate colors (EXACT shooting phase logic from Board.tsx)
-  for (let col = 0; col < BOARD_COLS; col++) {
-    for (let row = 0; row < BOARD_ROWS; row++) {
-      const targetCube = offsetToCube(col, row);
-      const dist = cubeDistance(centerCube, targetCube);
-      if (dist > 0 && dist <= range) {
-        const hexKey = `${col},${row}`;
-        const hasEnemy = units.some(u => 
-          u.player !== previewUnit.player && 
-          u.col === col && 
-          u.row === row
-        );
-        
-        if (!hasEnemy) {
-          // For empty hexes, show orange if part of cover path, red if clear (EXACT shooting phase logic)
-          if (coverPathHexes.has(hexKey)) {
-            coverCells.push({ col, row });
-          } else {
-            const lineOfSight = hasLineOfSight(
-              { col: attackFromCol, row: attackFromRow },
-              { col, row },
-              wallHexes || []
-            );
-            
-            if (lineOfSight.canSee && !lineOfSight.inCover) {
-              attackCells.push({ col, row });
-            } else if (lineOfSight.canSee && lineOfSight.inCover) {
-              coverCells.push({ col, row });
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return { attackCells, coverCells, blockedTargets, coverTargets };
 }

@@ -1,6 +1,5 @@
 // frontend/src/utils/ShootingSequenceManager.ts
 import { Unit, UnitId, SingleShotState } from '../types/game';
-import { rollD6, calculateWoundTarget, calculateSaveTarget } from '../../../shared/gameRules';
 
 export interface SingleShotResult {
   hitRoll: number;
@@ -73,7 +72,7 @@ export class SingleShotSequenceManager {
   processHitRoll(shooter: Unit): void {
     if (!this.state || this.state.currentStep !== 'hit_roll') return;
 
-    const hitRoll = rollD6();
+    const hitRoll = this.rollD6();
     if (shooter.RNG_ATK === undefined) {
       throw new Error('shooter.RNG_ATK is required');
     }
@@ -103,14 +102,14 @@ export class SingleShotSequenceManager {
   processWoundRoll(shooter: Unit, target: Unit): void {
     if (!this.state || this.state.currentStep !== 'wound_roll') return;
 
-    const woundRoll = rollD6();
+    const woundRoll = this.rollD6();
     if (shooter.RNG_STR === undefined) {
-      throw new Error('shooter.RNG_STR is required');
+      throw new Error('tshooter.RNG_STR is required');
     }
     if (target.T === undefined) {
       throw new Error('target.T is required');
     }
-    const woundTarget = calculateWoundTarget(shooter.RNG_STR, target.T);
+    const woundTarget = this.calculateWoundTarget(shooter.RNG_STR, target.T);
     const woundSuccess = woundRoll >= woundTarget;
 
     this.state.stepResults.woundRoll = woundRoll;
@@ -138,7 +137,7 @@ export class SingleShotSequenceManager {
   processSaveRoll(shooter: Unit, target: Unit): void {
     if (!this.state || this.state.currentStep !== 'save_roll') return;
 
-    const saveRoll = rollD6();
+    const saveRoll = this.rollD6();
     if (target.ARMOR_SAVE === undefined) {
       throw new Error('target.ARMOR_SAVE is required');
     }
@@ -148,7 +147,7 @@ export class SingleShotSequenceManager {
     if (shooter.RNG_AP === undefined) {
       throw new Error('shooter.RNG_AP is required');
     }
-    const saveTarget = calculateSaveTarget(
+    const saveTarget = this.calculateSaveTarget(
       target.ARMOR_SAVE,
       target.INVUL_SAVE,
       shooter.RNG_AP
@@ -233,11 +232,37 @@ export class SingleShotSequenceManager {
     return this.state;
   }
 
-  // rollD6 method removed - now using shared function
+  /**
+   * Roll a D6
+   */
+  private rollD6(): number {
+    return Math.floor(Math.random() * 6) + 1;
+  }
 
-  // calculateWoundTarget method removed - now using shared function
+  /**
+   * Calculate wound target based on strength vs toughness
+   */
+  private calculateWoundTarget(strength: number, toughness: number): number {
+    if (strength >= toughness * 2) return 2; // S >= 2*T: wound on 2+
+    if (strength > toughness) return 3;       // S > T: wound on 3+
+    if (strength === toughness) return 4;     // S = T: wound on 4+
+    if (strength < toughness) return 5;       // S < T: wound on 5+
+    return 6; // S <= T/2: wound on 6+
+  }
 
-  // calculateSaveTarget method removed - now using shared function
+  /**
+   * Calculate save target accounting for AP and invulnerable saves
+   */
+  private calculateSaveTarget(armorSave: number, invulSave: number, armorPenetration: number): number {
+    const modifiedArmor = armorSave + armorPenetration;
+    
+    // Use invulnerable save if it's better than modified armor save (and invul > 0)
+    if (invulSave > 0 && invulSave < modifiedArmor) {
+      return invulSave;
+    }
+    
+    return modifiedArmor;
+  }
 
   /**
    * Notify state change to subscribers

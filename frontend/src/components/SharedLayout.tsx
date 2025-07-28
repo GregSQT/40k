@@ -40,7 +40,7 @@ const Navigation: React.FC = () => {
   });
 
   return (
-    <nav style={{ position: 'absolute', top: '16px', right: '16px', display: 'flex', gap: '8px' }}>
+    <nav style={{ display: 'flex', gap: '8px' }}>
       <button onClick={() => window.location.href = '/game'} style={getButtonStyle('/game')}>PvP</button>
       <button onClick={() => window.location.href = '/pve'} style={getButtonStyle('/pve')}>PvE</button>
       <button onClick={() => window.location.href = '/replay'} style={getButtonStyle('/replay')}>Replay</button>
@@ -147,11 +147,26 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
 }) => {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      {/* Navigation */}
-      <Navigation />
+      {/* Navigation Bar - Full width at top */}
+      <div style={{ 
+        position: 'fixed', 
+        top: 0, 
+        left: 0, 
+        right: 0, 
+        height: '48px', 
+        backgroundColor: '#1f2937', 
+        borderBottom: '1px solid #374151',
+        display: 'flex',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        paddingRight: '16px',
+        zIndex: 1000
+      }}>
+        <Navigation />
+      </div>
       
       {/* Main Content */}
-      <div style={{ paddingTop: '56px' }}>
+      <div style={{ paddingTop: '48px' }}>
         {/* Replay Controls (if enabled) */}
         {showReplayControls && replayControls && (
           <ReplayControls {...replayControls} />
@@ -159,7 +174,7 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
         
         <div style={{ 
           display: 'flex', 
-          height: 'calc(100vh - 56px)',
+          height: 'calc(100vh - 48px)',
           backgroundColor: '#222'
         }}>
           {/* Left Column: Game Board */}
