@@ -107,10 +107,17 @@ export const GameController: React.FC<GameControllerProps> = ({
   const eligibleUnitIds = React.useMemo(() => {
     if (!boardConfig) return [];
     
-    return gameState.units.filter(unit => {
+    const eligible = gameState.units.filter(unit => {
       // Call the ACTUAL isUnitEligible function from useGameActions (single source of truth)
-      return originalGameActions.isUnitEligible(unit);
+      const isEligible = originalGameActions.isUnitEligible(unit);
+      if (gameState.phase === 'shoot' && unit.player === gameState.currentPlayer) {
+        console.log(`🎯 Eligibility check: ${unit.name} - SHOOT_LEFT: ${unit.SHOOT_LEFT}, eligible: ${isEligible}`);
+      }
+      return isEligible;
     }).map(unit => unit.id);
+    
+    console.log(`🎯 Eligible units in ${gameState.phase} phase:`, eligible);
+    return eligible;
   }, [gameState.units, boardConfig, originalGameActions.isUnitEligible, gameState.phase, gameState.currentPlayer, gameState.unitsMoved, gameState.unitsCharged, gameState.unitsAttacked, gameState.unitsFled]);
 
   // Handle AI player behavior
@@ -248,6 +255,7 @@ export const GameController: React.FC<GameControllerProps> = ({
               onStartAttackPreview={gameActions.startAttackPreview}
               onConfirmMove={gameActions.confirmMove}
               onCancelMove={gameActions.cancelMove}
+              onDirectMove={gameActions.directMove}
               onShoot={gameActions.handleShoot}
               onCombatAttack={gameActions.handleCombatAttack}
               onCharge={gameActions.handleCharge}

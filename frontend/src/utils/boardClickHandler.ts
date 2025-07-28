@@ -15,6 +15,7 @@ export function setupBoardClickHandler(callbacks: {
   onValidateCharge?(chargerId: UnitId): void;
   onMoveCharger?(chargerId: UnitId, destCol: number, destRow: number): void;
   onStartMovePreview?(unitId: UnitId, col: number, row: number): void;
+  onDirectMove?(unitId: UnitId, col: number, row: number): void;
 }) {
 
   // Remove existing unit click handler
@@ -89,9 +90,13 @@ export function setupBoardClickHandler(callbacks: {
     } else {
       console.error(`🟠 onMoveCharger callback is missing!`);
     }
-    } else if (mode === 'select' && selectedUnitId !== null) {
-      if (callbacks.onStartMovePreview) {
+    } else if (mode === 'select' && selectedUnitId !== null && phase === 'move') {
+      // In move phase, clicking green hex should directly move the unit
+      if (callbacks.onDirectMove) {
+        callbacks.onDirectMove(selectedUnitId, col, row);
+      } else if (callbacks.onStartMovePreview) {
         callbacks.onStartMovePreview(selectedUnitId, col, row);
+        callbacks.onConfirmMove();
       }
     } else if (mode === 'movePreview') {
       callbacks.onConfirmMove();

@@ -27,6 +27,7 @@ interface GameBoardProps {
   getChargeDestinations: (unitId: UnitId) => { col: number; row: number }[];
   onSelectUnit: (id: UnitId | null) => void;
   onStartMovePreview: (unitId: UnitId, col: number, row: number) => void;
+  onDirectMove: (unitId: UnitId, col: number, row: number) => void;
   onStartAttackPreview: (unitId: UnitId, col: number, row: number) => void;
   onConfirmMove: () => void;
   onCancelMove: () => void;
@@ -60,7 +61,9 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         onConfirmMove:  props.onConfirmMove,
         onCancelCharge: props.onCancelCharge,
         onValidateCharge: props.onValidateCharge,
-        onMoveCharger:    props.onMoveCharger
+        onMoveCharger:    props.onMoveCharger,
+        onStartMovePreview: props.onStartMovePreview,
+        onDirectMove: handleDirectMove
       });
     }, [
       props.onSelectUnit,
@@ -95,6 +98,16 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
       props.onStartMovePreview(numUnitId, numCol, numRow);
     }
   };
+
+  const handleDirectMove = (unitId: number | string, col: number | string, row: number | string) => {
+    const numUnitId = typeof unitId === 'string' ? parseInt(unitId, 10) : unitId;
+    const numCol = typeof col === 'string' ? parseInt(col, 10) : col;
+    const numRow = typeof row === 'string' ? parseInt(row, 10) : row;
+    
+    if (!isNaN(numUnitId) && !isNaN(numCol) && !isNaN(numRow)) {
+      props.onDirectMove(numUnitId, numCol, numRow);
+    }
+  };
   
   return (
     <div className="game-board w-full flex flex-col">
@@ -116,6 +129,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         gameState={props.gameState}
         onSelectUnit={handleSelectUnit}
         onStartMovePreview={handleStartMovePreview}
+        onDirectMove={handleDirectMove}
         onStartAttackPreview={props.onStartAttackPreview}
         onConfirmMove={props.onConfirmMove}
         onCancelMove={props.onCancelMove}

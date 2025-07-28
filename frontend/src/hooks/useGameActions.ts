@@ -131,9 +131,17 @@ export const useGameActions = ({
         return !unitsMoved.includes(unit.id);
       case "shoot":
         if (unitsMoved.includes(unit.id)) {
+          console.log(`🔍 Unit ${unit.name} not eligible: already moved this phase`);
           return false;
         }
+        // NEW RULE: Units that fled cannot shoot
         if (unitsFled.includes(unit.id)) {
+          console.log(`🔍 Unit ${unit.name} not eligible: unit fled`);
+          return false;
+        }
+        // CRITICAL: Check if unit has shots remaining
+        if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) {
+          console.log(`🔍 Unit ${unit.name} not eligible: SHOOT_LEFT = ${unit.SHOOT_LEFT}`);
           return false;
         }
         // Check if unit is adjacent to any enemy (engaged in combat)
@@ -252,6 +260,7 @@ export const useGameActions = ({
 
     // Special handling for shoot phase
     if (phase === "shoot") {
+      console.log(`🎯 Selecting unit ${unit.name} for shooting - not adding to unitsMoved yet`);
       // Always show the attack preview…
       actions.setMovePreview(null);
       actions.setAttackPreview({ unitId, col: unit.col, row: unit.row });
@@ -677,13 +686,7 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
           currentTargetPreview.targetId === targetId && 
           currentTargetPreview.shooterId === shooterId) {
         // Second click - execute shooting
-        // NEW: IMMEDIATE PROTECTION - Only for single shot units (RNG_NB = 1)
-        // Multi-shot units need to complete all shots before being marked as moved
-        if (shooter.RNG_NB === 1) {
-          actions.addMovedUnit(shooterId);
-        }
-        
-        // Clear preview
+        // Clear preview first
         if (currentTargetPreview.blinkTimer) {
           clearInterval(currentTargetPreview.blinkTimer);
         }
@@ -794,33 +797,20 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
         const currentShotsLeft = currentShooter.SHOOT_LEFT;
         const newShotsLeft = currentShotsLeft - 1;
         actions.updateUnit(shooterId, { SHOOT_LEFT: newShotsLeft });
+        console.log(`🔫 Unit ${shooter.name} shots: ${currentShotsLeft} → ${newShotsLeft}`);
         
         // Check if more shots remaining
         if (newShotsLeft > 0) {
-          // Stay in attack mode for target reselection
+          // Keep unit selected and in attack mode for target reselection
           actions.setAttackPreview({ unitId: shooterId, col: shooter.col, row: shooter.row });
           actions.setMode("attackPreview");
+          // Don't mark as moved yet - unit still has shots left
         } else {
-          // Mark as moved and end shooting
+          // All shots used - mark as moved and end shooting
           actions.addMovedUnit(shooterId);
           actions.setAttackPreview(null);
           actions.setSelectedUnitId(null);
           actions.setMode("select");
-          
-          // CRITICAL FIX: Force immediate phase transition check
-          // This prevents the React state timing issue
-          setTimeout(() => {
-            const playerUnits = units.filter(u => u.player === currentPlayer);
-            const stillShootable = playerUnits.some(unit => {
-              if (unit.id === shooterId) return false; // This unit just finished
-              if (unit.SHOOT_LEFT !== undefined && unit.SHOOT_LEFT > 0) return true;
-              return false;
-            });
-            
-            if (!stillShootable) {
-              // The usePhaseTransition hook will handle the actual transition
-            }
-          }, 100);
         }
       } else {
         // First click - start preview
@@ -1230,6 +1220,38 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
     actions.setMode("select");
   }, [actions, findUnit, gameLog, gameState.currentTurn, units]);
 
+  const directMove = useCallback((unitId: UnitId, col: number, row: number) => {
+    const unit = findUnit(unitId);
+    if (!unit || !isUnitEligible(unit) || phase !== "move") return;
+
+    // Check if unit is fleeing (was adjacent to enemy at start of move, ends move not adjacent)
+    const enemyUnits = units.filter(u => u.player !== unit.player);
+    const wasAdjacentToEnemy = enemyUnits.some(enemy => 
+      Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
+    );
+    
+    if (wasAdjacentToEnemy) {
+      const willBeAdjacentToEnemy = enemyUnits.some(enemy => 
+        Math.max(Math.abs(col - enemy.col), Math.abs(row - enemy.row)) === 1
+      );
+      
+      if (!willBeAdjacentToEnemy) {
+        actions.addFledUnit(unitId);
+      }
+    }
+
+    // Log the move action
+    if (gameLog) {
+      gameLog.logMoveAction(unit, unit.col, unit.row, col, row, gameState.currentTurn);
+    }
+
+    // Move the unit directly
+    actions.updateUnit(unitId, { col, row });
+    actions.addMovedUnit(unitId);
+    actions.setSelectedUnitId(null);
+    actions.setMode("select");
+  }, [findUnit, isUnitEligible, phase, units, actions, gameLog, gameState.currentTurn]);
+
   // Calculate valid charge destinations for a unit (used by Board.tsx)
   const getChargeDestinations = useCallback((unitId: UnitId): { col: number; row: number }[] => {
     const unit = findUnit(unitId);
@@ -1359,6 +1381,7 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
     validateCharge,
     isUnitEligible, // Expose the eligibility function
     getChargeDestinations, // Expose the charge destinations function
+    directMove, // Expose the direct move function
     rollD6,
   };
 };

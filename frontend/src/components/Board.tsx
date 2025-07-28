@@ -34,6 +34,7 @@ type BoardProps = {
   attackPreview: { unitId: number; col: number; row: number } | null;
   onSelectUnit: (id: number | string | null) => void;
   onStartMovePreview: (unitId: number | string, col: number | string, row: number | string) => void;
+  onDirectMove: (unitId: number | string, col: number | string, row: number | string) => void;
   onStartAttackPreview: (unitId: number, col: number, row: number) => void;
   onConfirmMove: () => void;
   onCancelMove: () => void;
@@ -69,6 +70,7 @@ export default function Board({
   attackPreview,
   onSelectUnit,
   onStartMovePreview,
+  onDirectMove,
   onStartAttackPreview,
   onConfirmMove,
   onCancelMove,
@@ -109,6 +111,7 @@ export default function Board({
   const stableCallbacks = useRef<{
     onSelectUnit: (id: number | string | null) => void;
     onStartMovePreview: (unitId: number | string, col: number | string, row: number | string) => void;
+    onDirectMove: (unitId: number | string, col: number | string, row: number | string) => void;
     onStartAttackPreview: (unitId: number, col: number, row: number) => void;
     onConfirmMove: () => void;
     onCancelMove: () => void;
@@ -122,6 +125,7 @@ export default function Board({
   }>({
     onSelectUnit,
     onStartMovePreview,
+    onDirectMove,
     onStartAttackPreview,
     onConfirmMove,
     onCancelMove,
@@ -134,10 +138,11 @@ export default function Board({
     onLogChargeRoll
   });
 
-  // Update refs when props change but don't trigger re-render
+  // Update refs when props change but don't trigger re-render - MOVE THIS BEFORE useEffect
   stableCallbacks.current = {
     onSelectUnit,
     onStartMovePreview,
+    onDirectMove,
     onStartAttackPreview,
     onConfirmMove,
     onCancelMove,
@@ -149,6 +154,9 @@ export default function Board({
     onValidateCharge,
     onLogChargeRoll
   };
+  
+  // Remove debug log
+  
   // ✅ HOOK 2.5: Add shooting preview state management with React state
   // ✅ REMOVE ALL ANIMATION STATE - This is causing the re-render loop
   // const [hpAnimationState, setHpAnimationState] = useState<boolean>(false);
@@ -321,6 +329,7 @@ export default function Board({
     containerRef.current.appendChild(canvas);
 
     // Set up board click handler to prevent event conflicts
+    // Set up board click handler to prevent event conflicts
     setupBoardClickHandler({
       onSelectUnit: stableCallbacks.current.onSelectUnit,
       onStartAttackPreview: (shooterId: number) => {
@@ -334,7 +343,8 @@ export default function Board({
       onConfirmMove: stableCallbacks.current.onConfirmMove,
       onCancelCharge: stableCallbacks.current.onCancelCharge,
       onMoveCharger: stableCallbacks.current.onMoveCharger,
-      onStartMovePreview: stableCallbacks.current.onStartMovePreview,
+      onStartMovePreview: onStartMovePreview,
+      onDirectMove: onDirectMove,
     });
 
     // Right click cancels move/attack preview
