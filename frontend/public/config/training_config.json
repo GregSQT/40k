@@ -51,7 +51,8 @@
       "target_update_interval": 1000,
       "exploration_fraction": 0.3,
       "exploration_final_eps": 0.02,
-      "tensorboard_log": "./tensorboard/"
+      "tensorboard_log": "./tensorboard/",
+      "device": "cuda"
       },
     "replay_config": {
       "default_file": "ai/event_log/train_best_game_replay.json",
