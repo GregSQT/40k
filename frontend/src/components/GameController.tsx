@@ -1,5 +1,6 @@
 // src/components/GameController.tsx
 import React from "react";
+import { useLocation } from 'react-router-dom';
 import { ErrorBoundary } from "./ErrorBoundary";
 import { UnitStatusTable } from "./UnitStatusTable";
 import { GameBoard } from "./GameBoard";
@@ -15,6 +16,29 @@ import { Unit } from "../types/game";
 import { useState, useEffect } from "react";
 import { createUnit, getAvailableUnitTypes } from "../data/UnitFactory";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
+
+const Navigation: React.FC = () => {
+  const location = useLocation();
+  
+  const getButtonStyle = (path: string) => ({
+    padding: '10px 18px',
+    backgroundColor: location.pathname === path ? '#1e40af' : '#64748b',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    marginRight: '8px',
+    cursor: 'pointer',
+    fontWeight: location.pathname === path ? 'bold' : 'normal'
+  });
+
+  return (
+    <nav style={{ display: 'flex', gap: '8px', marginBottom: '4px', paddingTop: '0px', marginTop: '0px', justifyContent: 'flex-end' }}>
+      <button onClick={() => window.location.href = '/game'} style={getButtonStyle('/game')}>PvP</button>
+      <button onClick={() => window.location.href = '/pve'} style={getButtonStyle('/pve')}>PvE</button>
+      <button onClick={() => window.location.href = '/replay'} style={getButtonStyle('/replay')}>Replay</button>
+    </nav>
+  );
+};
 
 interface GameControllerProps {
   initialUnits?: Unit[];  // Make optional
@@ -277,7 +301,8 @@ export const GameController: React.FC<GameControllerProps> = ({
           </ErrorBoundary>
           </div>
 
-          <div className="unit-status-tables">
+          <div className="unit-status-tables" style={{ paddingTop: '0px', marginTop: '0px', gap: '12px' }}>
+            <Navigation />
             <TurnPhaseTracker 
               currentTurn={gameState.currentTurn} 
               currentPhase={gameState.phase}

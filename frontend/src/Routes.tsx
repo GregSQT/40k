@@ -23,7 +23,7 @@ function Navigation() {
   });
 
   return (
-    <nav style={{ position: 'fixed', top: '8px', right: '16px', display: 'flex', gap: '8px', zIndex: 1000 }}>
+    <nav style={{ display: 'none' }}>
       <button onClick={() => window.location.href = '/game'} style={getButtonStyle('/game')}>PvP</button>
       <button onClick={() => window.location.href = '/pve'} style={getButtonStyle('/pve')}>PvE</button>
       <button onClick={() => window.location.href = '/replay'} style={getButtonStyle('/replay')}>Replay</button>
@@ -39,17 +39,17 @@ export default function App() {
       {/* Redirect root path directly to game mode */}
       <Route path="/" element={<Navigate to="/game" replace />} />
       <Route path="/home" element={(
-        <div style={{ paddingTop: '56px' }}>
+        <div>
           <HomePage />
         </div>
       )} />
       <Route path="/game" element={(
-        <div style={{ paddingTop: '56px' }}>
+        <div>
           <GamePage />
         </div>
       )} />
       <Route path="/replay" element={(
-        <div style={{ paddingTop: '56px' }}>
+        <div>
           <ReplayPage />
         </div>
       )} />

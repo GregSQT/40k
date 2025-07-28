@@ -29,7 +29,7 @@ const Navigation: React.FC = () => {
   const location = useLocation();
   
   const getButtonStyle = (path: string) => ({
-    padding: '8px 16px',
+    padding: '10px 18px',
     backgroundColor: location.pathname === path ? '#1e40af' : '#64748b',
     color: 'white',
     border: 'none',
@@ -40,7 +40,7 @@ const Navigation: React.FC = () => {
   });
 
   return (
-    <nav style={{ display: 'flex', gap: '8px' }}>
+    <nav style={{ display: 'flex', gap: '8px', marginBottom: '20px', justifyContent: 'flex-start', paddingTop: '8px' }}>
       <button onClick={() => window.location.href = '/game'} style={getButtonStyle('/game')}>PvP</button>
       <button onClick={() => window.location.href = '/pve'} style={getButtonStyle('/pve')}>PvE</button>
       <button onClick={() => window.location.href = '/replay'} style={getButtonStyle('/replay')}>Replay</button>
@@ -147,26 +147,10 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
 }) => {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      {/* Navigation Bar - Full width at top */}
-      <div style={{ 
-        position: 'fixed', 
-        top: 0, 
-        left: 0, 
-        right: 0, 
-        height: '48px', 
-        backgroundColor: '#1f2937', 
-        borderBottom: '1px solid #374151',
-        display: 'flex',
-        justifyContent: 'flex-end',
-        alignItems: 'center',
-        paddingRight: '16px',
-        zIndex: 1000
-      }}>
-        <Navigation />
-      </div>
+      {/* Navigation removed from fixed top position */}
       
       {/* Main Content */}
-      <div style={{ paddingTop: '48px' }}>
+      <div>
         {/* Replay Controls (if enabled) */}
         {showReplayControls && replayControls && (
           <ReplayControls {...replayControls} />
@@ -174,7 +158,7 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
         
         <div style={{ 
           display: 'flex', 
-          height: 'calc(100vh - 48px)',
+          height: '100vh',
           backgroundColor: '#222'
         }}>
           {/* Left Column: Game Board */}
@@ -186,16 +170,17 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
             {children}
           </div>
 
-          {/* Right Column: Turn Tracker + Unit Status Tables */}
+          {/* Right Column: Navigation + Turn Tracker + Unit Status Tables */}
           <div style={{ 
             width: '450px', 
-            padding: '16px', 
+            padding: '8px 16px 16px 16px', 
             backgroundColor: '#444',
             overflow: 'auto',
             display: 'flex',
             flexDirection: 'column',
-            gap: '20px'
+            gap: '16px'
           }}>
+            <Navigation />
             <TurnPhaseTracker 
               currentTurn={currentTurn}
               currentPhase={currentPhase}
