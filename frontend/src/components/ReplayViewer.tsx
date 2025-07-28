@@ -132,11 +132,18 @@ const UNIT_REGISTRY: Record<string, any> = {};
 const initializeUnitRegistry = async () => {
   try {
     // Load unit registry configuration
+    console.log('🔍 Fetching unit registry from /config/unit_registry.json');
     const registryResponse = await fetch('/config/unit_registry.json');
+    console.log('🔍 Registry response status:', registryResponse.status, registryResponse.statusText);
+    
     if (!registryResponse.ok) {
       throw new Error(`Failed to load unit registry: ${registryResponse.statusText}`);
     }
-    const unitConfig = await registryResponse.json();
+    
+    const text = await registryResponse.text();
+    console.log('🔍 Raw registry response (first 200 chars):', text.substring(0, 200));
+    
+    const unitConfig = JSON.parse(text);
     
     // Dynamically import each unit class
     for (const [unitType, unitPath] of Object.entries(unitConfig.units)) {
@@ -792,200 +799,106 @@ const validateUnitRegistry = () => {
     );
   }
 
-  // Main render - Layout matching replay layout image
+  // Main render - Standard layout: Board left, Controls right
   return (
-    <div className="h-screen bg-gray-100" style={{display: 'flex'}}>
-      {/* Left Column: Game Board */}
-      <div className="flex flex-col overflow-hidden bg-white" style={{flex: '0 0 auto', width: 'calc(100vw - 450px)', maxWidth: '800px'}}>
-        {/* Top Section: Turn and Phase Progress */}
-        <div className="bg-white p-4 border-b shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h2 className="text-lg font-semibold">
-                Turn {getCurrentTurn()} - Phase Progress
-              </h2>
-              <div className="text-xs text-gray-500 mt-1">
-                {replayFile?.split('/').pop()?.replace('.json', '') || 'Unknown replay'}
-              </div>
-            </div>
-            <div className="text-sm text-gray-600">
-              Step {currentStep + 1} of {replayData?.actions.length || 0}
-            </div>
-          </div>
-          
-          {/* Phase Buttons - AI_GAME.md: move → shoot → charge → combat */}
-          <div className="flex space-x-2">
-            <button className={getPhaseButtonClass('move')}>
-              {isPhaseCompleted('move', getCurrentTurn(), currentStep) ? '✓' : ''} MOVE
-            </button>
-            <button className={getPhaseButtonClass('shoot')}>
-              {isPhaseCompleted('shoot', getCurrentTurn(), currentStep) ? '✓' : ''} SHOOT
-            </button>
-            <button className={getPhaseButtonClass('charge')}>
-              {isPhaseCompleted('charge', getCurrentTurn(), currentStep) ? '✓' : ''} CHARGE
-            </button>
-            <button className={getPhaseButtonClass('combat')}>
-              {isPhaseCompleted('combat', getCurrentTurn(), currentStep) ? '✓' : ''} COMBAT
-            </button>
-          </div>
-        </div>
-        
-        {/* Board Section - AI_INSTRUCTIONS.md: Same board as game feature */}
-        <div className="flex-1 p-4 overflow-auto bg-gray-50">
+    <div className="game-controller">
+      <div className="board-and-sidebar">
+        {/* Left: Game Board */}
+        <div className="board-container">
           <div 
             ref={boardRef} 
-            className="w-full h-full flex items-center justify-center"
-            style={{ minHeight: '600px' }}
+            className="board"
           />
         </div>
         
-        {/* Bottom Section: Control Panel */}
-        <div className="bg-white p-4 border-t shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-2">
+        {/* Right: Replay Controls and Features */}
+        <div className="sidebar">
+          {/* Turn Navigation */}
+          <div className="turn-navigation">
+            {[1, 2, 3, 4, 5].map(turn => (
               <button
-                onClick={prevStep}
-                disabled={currentStep === 0}
-                className="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                key={turn}
+                className={`turn-button ${getCurrentTurn() === turn ? 'active' : ''}`}
               >
-                ← Prev
+                Turn {turn}
               </button>
-              
-              <button
-                onClick={togglePlay}
-                className={`px-4 py-2 rounded font-medium ${
-                  isPlaying 
-                    ? 'bg-red-600 text-white hover:bg-red-700' 
-                    : 'bg-green-600 text-white hover:bg-green-700'
-                }`}
-              >
-                {isPlaying ? '⏸ Pause' : '▶ Play'}
-              </button>
-              
-              <button
-                onClick={nextStep}
-                disabled={!replayData || currentStep >= replayData.actions.length - 1}
-                className="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Next →
-              </button>
+            ))}
+          </div>
+          
+          {/* Phase Buttons */}
+          <div className="phase-buttons">
+            <button className={getPhaseButtonClass('move')}>Move</button>
+            <button className={getPhaseButtonClass('shoot')}>Shoot</button>
+            <button className={getPhaseButtonClass('charge')}>Charge</button>
+            <button className={getPhaseButtonClass('combat')}>Combat</button>
+          </div>
+          
+          {/* Replay Controls */}
+          <div className="replay-controls" style={{padding: '1rem', borderBottom: '1px solid #333'}}>
+            <div style={{display: 'flex', gap: '0.5rem', marginBottom: '0.5rem'}}>
+              <button onClick={prevStep} disabled={currentStep === 0} style={{padding: '0.5rem', background: '#555', color: 'white', border: 'none', borderRadius: '4px'}}>⏮</button>
+              <button onClick={togglePlay} style={{padding: '0.5rem', background: isPlaying ? '#dc2626' : '#16a34a', color: 'white', border: 'none', borderRadius: '4px'}}>{isPlaying ? '⏸' : '▶'}</button>
+              <button onClick={nextStep} disabled={!replayData || currentStep >= replayData.actions.length - 1} style={{padding: '0.5rem', background: '#555', color: 'white', border: 'none', borderRadius: '4px'}}>⏭</button>
             </div>
-            
-            <div className="flex items-center space-x-2">
-              <label className="text-sm text-gray-600">Speed:</label>
-              <select
-                value={playSpeed}
-                onChange={(e) => setPlaySpeed(Number(e.target.value))}
-                className="px-2 py-1 border rounded text-sm"
-              >
-                <option value={2000}>0.5x</option>
-                <option value={1000}>1x</option>
-                <option value={500}>2x</option>
-                <option value={250}>4x</option>
-              </select>
+            <div style={{fontSize: '0.875rem', color: '#888', marginBottom: '0.5rem'}}>
+              Step {currentStep + 1} of {replayData?.actions.length || 0}
+            </div>
+            <div style={{width: '100%', height: '8px', background: '#333', borderRadius: '4px', overflow: 'hidden'}}>
+              <div
+                style={{
+                  height: '100%',
+                  background: '#3b82f6',
+                  width: replayData ? `${((currentStep + 1) / replayData.actions.length) * 100}%` : '0%',
+                  transition: 'width 0.2s'
+                }}
+              />
             </div>
           </div>
           
-          {/* Progress Bar */}
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div
-              className="bg-blue-600 h-2 rounded-full transition-all duration-200"
-              style={{
-                width: replayData ? `${((currentStep + 1) / replayData.actions.length) * 100}%` : '0%'
-              }}
-            />
+          {/* Combat Log - Replace "Replay loaded" */}
+          <div className="game-log">
+            <div className="game-log__header">
+              <h3 className="game-log__title">Combat Log</h3>
+              <div className="game-log__count">
+                {battleLog.length} events
+              </div>
+            </div>
+            <div className="game-log__content">
+              {battleLog.length === 0 ? (
+                <div className="game-log__empty">No actions yet...</div>
+              ) : (
+                <div className="game-log__events">
+                  {battleLog.slice(0, currentStep + 1).map((event, index) => (
+                    <div 
+                      key={index}
+                      className={`game-log-entry ${index === currentStep ? 'game-log-entry--active' : ''}`}
+                      onClick={() => setCurrentStep(index)}
+                    >
+                      <div className="game-log-entry__single-line">
+                        <span className="game-log-entry__icon">🎯</span>
+                        <span className="game-log-entry__reward">
+                          {((event as any).reward !== undefined) ? (
+                            <span className={((event as any).reward || 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
+                              {((event as any).reward || 0) >= 0 ? '+' : ''}{((event as any).reward || 0)?.toFixed(1)}
+                            </span>
+                          ) : '-'}
+                        </span>
+                        <span className="game-log-entry__turn">T{event.turn}</span>
+                        <span className={`game-log-entry__player ${event.player === 0 ? 'game-log-entry__player--blue' : 'game-log-entry__player--red'}`}>
+                          P{event.player}
+                        </span>
+                        <span className="game-log-entry__message">
+                          {event.description || `Action ${(event as any).action_type} by unit ${(event as any).unit_id}`}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
-      
-        {/* Right Column: Battle Log - Clean dedicated column */}
-        <div className="flex flex-col bg-gray-700 text-white" style={{width: '450px', flexShrink: 0}}>
-          {/* Header - Dark style matching image */}
-          <div className="p-3 bg-gray-800 border-b border-gray-600">
-            <h3 className="text-lg font-semibold flex items-center">
-              <span className="mr-2">✕</span>
-              Battle Log
-            </h3>
-          </div>
-          
-          {/* Battle Log Content - Full height scrollable */}
-          <div className="flex-1 overflow-y-auto p-3">
-            {(() => {
-              console.log('🔍 Debug battleLog:', battleLog.length, 'currentStep:', currentStep, 'battleLog data:', battleLog);
-              return null;
-            })()}
-            {battleLog.length === 0 ? (
-              <div className="text-gray-400 text-sm">No actions yet...</div>
-            ) : (
-              <div className="space-y-4">
-                {/* Table format for battle log */}
-                <div className="bg-gray-800 rounded-lg border border-gray-600 overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead className="bg-gray-900 border-b border-gray-600">
-                      <tr>
-                        <th className="text-center p-1 font-semibold text-gray-300 w-8">Turn</th>
-                        <th className="text-center p-1 font-semibold text-gray-300 w-8">Player</th>
-                        <th className="text-center p-1 font-semibold text-gray-300 w-10">Phase</th>
-                        <th className="text-center p-1 font-semibold text-gray-300 w-8">Unit</th>
-                        <th className="text-center p-1 font-semibold text-gray-300 w-12">Type</th>
-                        <th className="text-center p-1 font-semibold text-gray-300 w-16">Reward</th>
-                        <th className="text-center p-1 font-semibold text-gray-300" style={{width: '600px', minWidth: '200px'}}>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {battleLog.slice(0, currentStep + 1).map((event, index) => (
-                        <tr 
-                          key={index}
-                          className={`border-b border-gray-600 cursor-pointer transition-colors ${
-                            index === currentStep 
-                              ? 'bg-blue-600 font-medium' 
-                              : 'hover:bg-gray-600'
-                          }`}
-                          onClick={() => setCurrentStep(index)}
-                        >
-                          <td className="p-1 text-gray-300 text-center">{event.turn || 'N/A'}</td>
-                          <td className="p-1 text-gray-300 text-center">{event.player}</td>
-                          <td className="p-1 text-gray-300 capitalize">{event.phase || 'unknown'}</td>
-                          <td className="p-1 text-gray-300 text-center">{(event as any).unit_id}</td>
-                          <td className="p-1 text-gray-300">{(event as any).unit_type}</td>
-                          <td className="p-1 text-gray-300 text-right">
-                            {((event as any).reward !== undefined || (event as any).penalty_amount !== undefined) ? (
-                              <span className={((event as any).reward || (event as any).penalty_amount || 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
-                                {((event as any).reward || (event as any).penalty_amount || 0) >= 0 ? '+' : ''}{((event as any).reward || (event as any).penalty_amount || 0)?.toFixed(1)}
-                              </span>
-                            ) : (
-                              <span className="text-gray-500">-</span>
-                            )}
-                          </td>
-                          <td className="p-1 text-gray-300" style={{width: '600px', minWidth: '200px'}}>
-                            <div className="text-white" style={{wordWrap: 'break-word'}}>
-                              {event.description || (event as any).penalty_type || `Action ${(event as any).action_type} by unit ${(event as any).unit_id}`}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          {/* Game Info Footer */}
-          {replayData && (
-            <div className="p-3 border-t border-gray-600 bg-gray-800">
-              <div className="grid grid-cols-2 gap-2 text-xs text-gray-300 mb-2">
-                <div>Winner: Player {replayData.game_info?.winner}</div>
-                <div>Total Turns: {replayData.game_info?.total_turns}</div>
-                <div>AI Units: {replayData.game_info?.ai_units_final}</div>
-                <div>Enemy Units: {replayData.game_info?.enemy_units_final}</div>
-              </div>
-              <div className="text-xs text-gray-400 pt-2 border-t border-gray-700 whitespace-nowrap overflow-hidden text-ellipsis">
-                Log file: {replayFile}
-              </div>
-            </div>
-          )}
-        </div>
     </div>
   );
 };

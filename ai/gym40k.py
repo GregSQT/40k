@@ -303,11 +303,26 @@ class W40KEnv(gym.Env):
         raise FileNotFoundError("Rewards configuration not found. AI_INSTRUCTIONS.md requires all rewards come from config files.")
 
     def _get_unit_reward_config(self, unit):
-        """Get reward configuration for specific unit type."""
+        """Get reward configuration for specific unit type with proper agent mapping."""
+        unit_type = unit.get("unit_type", "")
+        
+        # Get the agent key from unit registry
+        if hasattr(self, 'unit_registry'):
+            agent_key = self.unit_registry.get_model_key(unit_type)
+            if agent_key and agent_key in self.rewards_config:
+                return self.rewards_config.get(agent_key, {})
+        
+        # Fallback to old system with corrected naming
         if unit.get("is_ranged", False):
-            return self.rewards_config.get("SpaceMarineRanged", {})
+            # Try corrected agent names first, then fallback to old names
+            return (self.rewards_config.get("SpaceMarine_Ranged", {}) or 
+                   self.rewards_config.get("Tyranid_Ranged", {}) or
+                   self.rewards_config.get("SpaceMarineRanged", {}))
         else:
-            return self.rewards_config.get("SpaceMarineMelee", {})
+            # Try corrected agent names first, then fallback to old names  
+            return (self.rewards_config.get("SpaceMarine_Melee", {}) or
+                   self.rewards_config.get("Tyranid_Melee", {}) or
+                   self.rewards_config.get("SpaceMarineMelee", {}))
 
     def reset(self, seed=None, options=None):
         """Reset environment to initial state."""

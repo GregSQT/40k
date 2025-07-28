@@ -18,38 +18,59 @@ const configFiles = [
   'game_config.json',
   'scenario.json',
   'unit_definitions.json',
-  'action_definitions.json'
+  'action_definitions.json',
+  'unit_registry.json'
 ];
 
-console.log('🔧 Copying config files from backend to frontend...');
+async function copyConfigs() {
+  console.log('🔧 Copying config files from backend to frontend...');
 
-// Ensure target directory exists
-if (!existsSync(targetDir)) {
-  mkdirSync(targetDir, { recursive: true });
-  console.log(`✅ Created directory: ${targetDir}`);
+  // Ensure target directory exists
+  if (!existsSync(targetDir)) {
+    mkdirSync(targetDir, { recursive: true });
+    console.log(`✅ Created directory: ${targetDir}`);
+  }
+
+  // Generate unit_registry.json if it doesn't exist
+  const unitRegistrySource = join(configDir, 'unit_registry.json');
+  if (!existsSync(unitRegistrySource)) {
+    console.log('🔧 Generating unit_registry.json...');
+    const { execSync } = await import('child_process');
+    execSync('python ai/unit_registry.py', { 
+      cwd: projectRoot,
+      stdio: 'inherit'
+    });
+    console.log('✅ Generated unit_registry.json');
+  }
+
+  // Copy each config file
+  let copiedCount = 0;
+  let skippedCount = 0;
+
+  configFiles.forEach(filename => {
+    const sourcePath = join(configDir, filename);
+    const targetPath = join(targetDir, filename);
+    
+    if (existsSync(sourcePath)) {
+      try {
+        copyFileSync(sourcePath, targetPath);
+        console.log(`✅ Copied: ${filename}`);
+        copiedCount++;
+      } catch (error) {
+        console.error(`❌ Failed to copy ${filename}:`, error.message);
+      }
+    } else {
+      console.log(`⚠️  Skipped: ${filename} (source not found)`);
+      skippedCount++;
+    }
+  });
+
+  console.log(`🎯 Config sync complete: ${copiedCount} copied, ${skippedCount} skipped`);
+  console.log('   Frontend configs are now up-to-date with backend!');
 }
 
-// Copy each config file
-let copiedCount = 0;
-let skippedCount = 0;
-
-configFiles.forEach(filename => {
-  const sourcePath = join(configDir, filename);
-  const targetPath = join(targetDir, filename);
-  
-  if (existsSync(sourcePath)) {
-    try {
-      copyFileSync(sourcePath, targetPath);
-      console.log(`✅ Copied: ${filename}`);
-      copiedCount++;
-    } catch (error) {
-      console.error(`❌ Failed to copy ${filename}:`, error.message);
-    }
-  } else {
-    console.log(`⚠️  Skipped: ${filename} (source not found)`);
-    skippedCount++;
-  }
+// Run the async function
+copyConfigs().catch(error => {
+  console.error('❌ Config copy failed:', error);
+  process.exit(1);
 });
-
-console.log(`🎯 Config sync complete: ${copiedCount} copied, ${skippedCount} skipped`);
-console.log('   Frontend configs are now up-to-date with backend!');

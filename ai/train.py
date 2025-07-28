@@ -383,8 +383,9 @@ def test_scenario_manager_integration():
         return False
 
 def start_multi_agent_orchestration(config, total_episodes: int, training_config_name: str = "default",
-                                   rewards_config_name: str = "default", max_concurrent: int = None):
-    """Start multi-agent orchestration training."""
+                                   rewards_config_name: str = "default", max_concurrent: int = None,
+                                   training_phase: str = None):
+    """Start multi-agent orchestration training with optional phase specification."""
     print("🎮 Starting Multi-Agent Orchestration Training")
     
     try:
@@ -392,7 +393,8 @@ def start_multi_agent_orchestration(config, total_episodes: int, training_config
         results = trainer.start_balanced_training(
             total_episodes=total_episodes,
             training_config_name=training_config_name,
-            rewards_config_name=rewards_config_name
+            rewards_config_name=rewards_config_name,
+            training_phase=training_phase
         )
         
         print(f"✅ Orchestration completed: {results['total_matchups']} matchups")
@@ -456,6 +458,8 @@ def main():
                        help="Total episodes for multi-agent orchestration")
     parser.add_argument("--max-concurrent", type=int, default=None,
                        help="Maximum concurrent training sessions")
+    parser.add_argument("--training-phase", type=str, choices=["solo", "cross_faction", "full_composition"],
+                       help="Specific training phase for 3-phase training plan")
     parser.add_argument("--test-integration", action="store_true",
                        help="Test scenario manager integration")
     
@@ -473,6 +477,16 @@ def main():
     print()
     
     try:
+        # Sync configs to frontend automatically
+        print("🔧 Syncing configs to frontend...")
+        try:
+            subprocess.run(['node', 'scripts/copy-configs.js'], 
+                         cwd=project_root, check=True, capture_output=True, text=True)
+            print("✅ Configs synced to frontend")
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ Config sync failed: {e.stderr}")
+            print("   Continuing with training...")
+        
         # Setup environment and configuration
         config = get_config_loader()
         
@@ -491,7 +505,8 @@ def main():
                 total_episodes=args.total_episodes,
                 training_config_name=args.training_config,
                 rewards_config_name=args.rewards_config,
-                max_concurrent=args.max_concurrent
+                max_concurrent=args.max_concurrent,
+                training_phase=args.training_phase
             )
             return 0 if results else 1
 

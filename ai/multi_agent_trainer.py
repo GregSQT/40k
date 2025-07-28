@@ -169,21 +169,29 @@ class MultiAgentTrainer:
             )
 
     def start_balanced_training(self, total_episodes: int, training_config_name: str = "default",
-                               rewards_config_name: str = "default") -> Dict[str, Any]:
+                               rewards_config_name: str = "default", training_phase: str = None) -> Dict[str, Any]:
         """
         Start balanced multi-agent training following scenario manager rotation.
+        Supports 3-phase training plan: solo -> cross_faction -> full_composition
         Returns training orchestration summary.
         """
         print(f"🚀 Starting balanced multi-agent training")
         print(f"📊 Total episodes: {total_episodes}")
         print(f"⚙️ Training config: {training_config_name}")
         print(f"🎯 Rewards config: {rewards_config_name}")
+        if training_phase:
+            print(f"🎯 Training phase: {training_phase}")
         
         # Clean up previous session scenarios
         self._cleanup_previous_session_scenarios()
         
-        # Generate balanced training rotation
-        training_rotation = self.scenario_manager.get_balanced_training_rotation(total_episodes)
+        # Generate phase-specific training rotation
+        if training_phase:
+            training_rotation = self.scenario_manager.get_phase_based_training_rotation(
+                total_episodes, training_phase
+            )
+        else:
+            training_rotation = self.scenario_manager.get_balanced_training_rotation(total_episodes)
         
         if not training_rotation:
             raise ValueError("No training rotation generated - need at least 2 agents")

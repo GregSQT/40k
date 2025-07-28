@@ -151,7 +151,14 @@ else:
 
         # shared
         "shared/gameRules.py",
-        "shared/gameRules.ts"
+        "shared/gameRules.ts",
+
+######################################################################################################
+##### scripts files
+######################################################################################################
+
+        "scripts/backup_select.py",  # Backup script
+        "scripts/copy-configs.js"
     ]
 
 logfile = os.path.join(DEST_ROOT, "backup.log")

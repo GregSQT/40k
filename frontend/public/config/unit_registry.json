@@ -1,0 +1,10 @@
+﻿{
+    "units":  {
+                  "Termagant":  "tyranid/Termagant",
+                  "CaptainGravis":  "spaceMarine/CaptainGravis",
+                  "AssaultIntercessor":  "spaceMarine/AssaultIntercessor",
+                  "Hormagaunt":  "tyranid/Hormagaunt",
+                  "Intercessor":  "spaceMarine/Intercessor",
+                  "Carnifex":  "tyranid/Carnifex"
+              }
+}

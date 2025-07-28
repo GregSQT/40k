@@ -305,6 +305,81 @@ class ScenarioManager:
         if num_agents < 2:
             print("⚠️ Need at least 2 agents for training rotation")
             return matchups
+
+    def get_phase_based_training_rotation(self, total_episodes: int, phase: str) -> List[TrainingMatchup]:
+        """
+        Generate phase-specific training rotation for 3-phase training plan.
+        
+        Phase 1 (solo): Solo scenarios only (same agent vs same agent)
+        Phase 2 (cross_faction): Cross-faction and mixed scenarios  
+        Phase 3 (full_composition): Full team composition scenarios
+        
+        Returns list of training matchups filtered by phase.
+        """
+        matchups = []
+        
+        if phase == "solo":
+            # Phase 1: Individual Agent Specialization
+            solo_scenarios = [name for name, template in self.scenario_templates.items() 
+                            if template.training_focus == "solo"]
+            
+            episodes_per_agent = total_episodes // len(self.available_agents)
+            
+            for agent in self.available_agents:
+                scenario_name = f"solo_{agent.lower()}"
+                if scenario_name in solo_scenarios:
+                    matchups.append(TrainingMatchup(
+                        player_0_agent=agent,
+                        player_1_agent=agent,  # Same agent training
+                        scenario_template=scenario_name,
+                        expected_duration=episodes_per_agent,
+                        priority=2.0
+                    ))
+                else:
+                    print(f"⚠️ Missing solo scenario for {agent}: {scenario_name}")
+        
+        elif phase == "cross_faction":
+            # Phase 2: Cross-Faction Tactical Learning
+            cross_scenarios = [name for name, template in self.scenario_templates.items() 
+                             if template.training_focus in ["cross_faction", "mixed"]]
+            
+            episodes_per_matchup = total_episodes // len(cross_scenarios) if cross_scenarios else 0
+            
+            for scenario_name in cross_scenarios:
+                template = self.scenario_templates[scenario_name]
+                agent_keys = list(template.agent_compositions.keys())
+                
+                if len(agent_keys) >= 2:
+                    matchups.append(TrainingMatchup(
+                        player_0_agent=agent_keys[0],
+                        player_1_agent=agent_keys[1],
+                        scenario_template=scenario_name,
+                        expected_duration=episodes_per_matchup,
+                        priority=1.5
+                    ))
+        
+        elif phase == "full_composition":
+            # Phase 3: Full Composition Mastery
+            full_scenarios = [name for name, template in self.scenario_templates.items() 
+                            if "new_composition" in name or template.training_focus == "balanced"]
+            
+            episodes_per_scenario = total_episodes // len(full_scenarios) if full_scenarios else 0
+            
+            for scenario_name in full_scenarios:
+                template = self.scenario_templates[scenario_name]
+                agent_keys = list(template.agent_compositions.keys())
+                
+                if len(agent_keys) >= 2:
+                    matchups.append(TrainingMatchup(
+                        player_0_agent=agent_keys[0],
+                        player_1_agent=agent_keys[1],
+                        scenario_template=scenario_name,
+                        expected_duration=episodes_per_scenario,
+                        priority=1.0
+                    ))
+        
+        print(f"🎯 Generated {len(matchups)} phase-specific matchups for phase: {phase}")
+        return matchups
         
         # Episodes per agent pair
         episodes_per_pair = total_episodes // (num_agents * (num_agents - 1))
