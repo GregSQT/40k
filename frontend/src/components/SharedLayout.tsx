@@ -2,6 +2,7 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
+import { ErrorBoundary } from './ErrorBoundary';
 
 interface ReplayControlsProps {
   onFileSelect: (file: File) => void;
@@ -21,15 +22,18 @@ interface SharedLayoutProps {
   maxTurns?: number;
   showReplayControls?: boolean;
   replayControls?: ReplayControlsProps;
-  children: React.ReactNode;
-  rightColumnContent?: React.ReactNode; // NEW: For unit status tables
+  children: React.ReactNode; // Left column content (game board)
+  rightColumnContent: React.ReactNode; // Right column content (varies by page)
+  className?: string;
+  showNavigation?: boolean; // Allow hiding navigation if needed
+  showTurnTracker?: boolean; // Allow hiding turn tracker if needed
 }
 
 const Navigation: React.FC = () => {
   const location = useLocation();
   
   const getButtonStyle = (path: string) => ({
-    padding: '10px 18px',
+    padding: '8px 16px',
     backgroundColor: location.pathname === path ? '#1e40af' : '#64748b',
     color: 'white',
     border: 'none',
@@ -40,7 +44,7 @@ const Navigation: React.FC = () => {
   });
 
   return (
-    <nav style={{ display: 'flex', gap: '8px', marginBottom: '20px', justifyContent: 'flex-start', paddingTop: '8px' }}>
+    <nav style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
       <button onClick={() => window.location.href = '/game'} style={getButtonStyle('/game')}>PvP</button>
       <button onClick={() => window.location.href = '/pve'} style={getButtonStyle('/pve')}>PvE</button>
       <button onClick={() => window.location.href = '/replay'} style={getButtonStyle('/replay')}>Replay</button>
@@ -143,56 +147,38 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
   showReplayControls = false,
   replayControls,
   children,
-  rightColumnContent
+  rightColumnContent,
+  className,
+  showNavigation = true,
+  showTurnTracker = true
 }) => {
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      {/* Navigation removed from fixed top position */}
-      
-      {/* Main Content */}
-      <div>
-        {/* Replay Controls (if enabled) */}
+    <div className={`min-h-screen bg-gray-900 ${className || ''}`} style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        {/* Replay Controls (if enabled) - positioned above main content */}
         {showReplayControls && replayControls && (
           <ReplayControls {...replayControls} />
         )}
         
-        <div style={{ 
-          display: 'flex', 
-          height: '100vh',
-          backgroundColor: '#222'
-        }}>
-          {/* Left Column: Game Board */}
-          <div style={{ 
-            flex: '1', 
-            maxWidth: '800px', 
-            padding: '16px'
-          }}>
+        <div className="game-area">
+          <div className="game-board-section">
             {children}
           </div>
 
-          {/* Right Column: Navigation + Turn Tracker + Unit Status Tables */}
-          <div style={{ 
-            width: '450px', 
-            padding: '8px 16px 16px 16px', 
-            backgroundColor: '#444',
-            overflow: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px'
-          }}>
-            <Navigation />
-            <TurnPhaseTracker 
-              currentTurn={currentTurn}
-              currentPhase={currentPhase}
-              maxTurns={maxTurns}
-              className="turn-phase-tracker-right"
-            />
-            
-            {/* Unit status tables and game log */}
+          <div className="unit-status-tables">
+            {showNavigation && <Navigation />}
+            {showTurnTracker && (
+              <TurnPhaseTracker 
+                currentTurn={currentTurn}
+                currentPhase={currentPhase}
+                maxTurns={maxTurns}
+                className="turn-phase-tracker-right"
+              />
+            )}
             {rightColumnContent}
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 };

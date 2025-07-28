@@ -1,7 +1,7 @@
 ﻿// frontend/src/pages/GamePage.tsx
 import React from "react";
-import App from "../App";
+import { GameController } from "../components/GameController";
 
 export default function GamePage() {
-  return <App />;
+  return <GameController />;
 }

@@ -239,10 +239,10 @@ export const GameController: React.FC<GameControllerProps> = ({
   }, [gameState.selectedUnitId]);
 
   return (
-    <div className={`game-controller ${className}`}>
+    <div className={`game-controller ${className || ''}`} style={{ background: '#222', minHeight: '100vh' }}>
       <main className="main-content">
 
-        <div className="game-area">
+        <div className="game-area" style={{ display: 'flex', gap: '16px' }}>
           <div className="game-board-section">
             <ErrorBoundary fallback={<div>Failed to load game board</div>}>
             <GameBoard

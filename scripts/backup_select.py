@@ -89,6 +89,7 @@ else:
         "frontend/src/components/GameBoard.tsx",
         "frontend/src/components/GameController.tsx",
         "frontend/src/components/GameLog.tsx",
+        "frontend/src/components/GameRightColumn.tsx",
         "frontend/src/components/GameStatus.tsx",
         "frontend/src/components/ReplayBoard.tsx",
         "frontend/src/components/ReplayViewer.tsx",

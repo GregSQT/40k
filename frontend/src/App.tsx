@@ -54,11 +54,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-900">
-      <div className="app-container">
-        <ErrorBoundary>
-          <GameController initialUnits={initialUnits} />
-        </ErrorBoundary>
-      </div>
+      <ErrorBoundary>
+        <GameController initialUnits={initialUnits} />
+      </ErrorBoundary>
     </div>
   );
 }

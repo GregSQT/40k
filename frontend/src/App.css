@@ -1008,3 +1008,10 @@ textarea:focus {
     font-size: 11px;
   }
 }
+
+.game-controller {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-primary);
+}
