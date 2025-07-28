@@ -213,10 +213,8 @@ export const useGameActions = ({
         // For CC_RNG = 1, units must be exactly distance 1 (adjacent) to enemies
         const hasAdjacentEnemy = actualEnemyUnits.some(enemy => {
           const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
-          console.log(`[COMBAT DEBUG] Unit ${unit.id} (player ${unit.player}) at (${unit.col},${unit.row}) vs Enemy ${enemy.id} (player ${enemy.player}) at (${enemy.col},${enemy.row}): distance = ${distance}, combatRange = ${combatRange}`);
           return distance === combatRange; // Must be exactly at combat range (adjacent for CC_RNG=1)
         });
-        console.log(`[COMBAT DEBUG] Unit ${unit.id} hasAdjacentEnemy: ${hasAdjacentEnemy}`);
         return hasAdjacentEnemy;
       default:
         return false;
@@ -256,6 +254,11 @@ export const useGameActions = ({
 
     // Special handling for move phase - second click marks as moved (or chose not to move)
     if (phase === "move" && selectedUnitId === unitId) {
+      // Log the "no move" decision
+      if (gameLog) {
+        gameLog.logNoMoveAction(unit, gameState.currentTurn);
+      }
+      
       actions.addMovedUnit(unitId);
       actions.setSelectedUnitId(null);
       actions.setMovePreview(null);
@@ -313,9 +316,9 @@ export const useGameActions = ({
         
         const canCharge = enemiesInRange.length > 0;
 
-        // Log the charge roll with correct format
+        // Log the charge roll with correct format using proper addEvent method
         if (gameLog) {
-          // Create a proper charge event instead of using non-existent logMessage
+          // Use the internal addEvent method to ensure proper ordering (newest first)
           const chargeEvent = {
             id: `charge-roll-${Date.now()}-${unit.id}`,
             timestamp: new Date(),
@@ -329,7 +332,7 @@ export const useGameActions = ({
             unitType: unit.type,
             unitId: unit.id
           };
-          gameLog.events.push(chargeEvent);
+          gameLog.events.unshift(chargeEvent);
         }
         
         // Show popup with exact format required
@@ -366,7 +369,7 @@ export const useGameActions = ({
               unitType: unit.type,
               unitId: unit.id
             };
-            gameLog.events.push(cancelEvent);
+            gameLog.events.unshift(cancelEvent);
           }
           actions.resetUnitChargeRoll(unitId);
           actions.addChargedUnit(unitId);
@@ -773,7 +776,9 @@ interface ShootingResult {
     const attacker = findUnit(attackerId);
     const target = findUnit(targetId);
     
-    if (!attacker || !target) return;
+    if (!attacker || !target) {
+      return;
+    }
 
     // PREVENT FRIENDLY FIRE: Cannot attack friendly units
     if (target.player === attacker.player) {
@@ -789,7 +794,9 @@ interface ShootingResult {
       throw new Error(`attacker.CC_RNG is required but was undefined for unit ${attacker.id}`);
     }
     const combatRange = attacker.CC_RNG;
-    if (distance > combatRange) return;
+    if (distance > combatRange) {
+      return;
+    }
 
     // Initialize ATTACK_LEFT if not set
     if (attacker.ATTACK_LEFT === undefined) {
@@ -819,12 +826,12 @@ interface ShootingResult {
 
         // Hit Roll
         const hitRoll = Math.floor(Math.random() * 6) + 1;
-    if (attacker.CC_ATK === undefined) {
-      throw new Error(`attacker.CC_ATK is required but was undefined for unit ${attacker.id}`);
-    }
-    const hitSuccess = hitRoll >= attacker.CC_ATK;
+        if (attacker.CC_ATK === undefined) {
+          throw new Error(`attacker.CC_ATK is required but was undefined for unit ${attacker.id}`);
+        }
+        const hitSuccess = hitRoll >= attacker.CC_ATK;
 
-    if (!hitSuccess) {
+        if (!hitSuccess) {
       if (gameLog) {
         const combatDetails = [{
           shotNumber: 1,
@@ -840,6 +847,7 @@ interface ShootingResult {
           damageDealt: 0
         }];
         gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
+      } else {
       }
 
       // Miss - decrease attacks and end
@@ -854,94 +862,94 @@ interface ShootingResult {
         actions.setMode("select");
       }
       return;
-    }
+        }
 
-    // Wound Roll
-    const woundRoll = Math.floor(Math.random() * 6) + 1;
-    if (attacker.CC_STR === undefined) {
-      throw new Error(`attacker.CC_STR is required but was undefined for unit ${attacker.id}`);
-    }
-    if (target.T === undefined) {
-      throw new Error(`target.T is required but was undefined for unit ${target.id}`);
-    }
-    
-    const attackerStr = attacker.CC_STR;
-    const targetT = target.T;
-    const woundTarget = attackerStr >= targetT * 2 ? 2 : 
-                      attackerStr > targetT ? 3 : 
-                      attackerStr === targetT ? 4 : 
-                      attackerStr < targetT ? 5 : 6;
-    const woundSuccess = woundRoll >= woundTarget;
+        // Wound Roll
+        const woundRoll = Math.floor(Math.random() * 6) + 1;
+        if (attacker.CC_STR === undefined) {
+          throw new Error(`attacker.CC_STR is required but was undefined for unit ${attacker.id}`);
+        }
+        if (target.T === undefined) {
+          throw new Error(`target.T is required but was undefined for unit ${target.id}`);
+        }
+        
+        const attackerStr = attacker.CC_STR;
+        const targetT = target.T;
+        const woundTarget = attackerStr >= targetT * 2 ? 2 : 
+                          attackerStr > targetT ? 3 : 
+                          attackerStr === targetT ? 4 : 
+                          attackerStr < targetT ? 5 : 6;
+        const woundSuccess = woundRoll >= woundTarget;
 
-    if (!woundSuccess) {
-      if (gameLog) {
-        const combatDetails = [{
-          shotNumber: 1,
-          attackRoll: hitRoll,
-          strengthRoll: woundRoll,
-          hitResult: 'HIT' as 'HIT' | 'MISS',
-          strengthResult: 'FAILED' as 'SUCCESS' | 'FAILED',
-          hitTarget: attacker.CC_ATK,
-          woundTarget: woundTarget,
-          saveTarget: undefined,
-          saveRoll: undefined,
-          saveSuccess: undefined,
-          damageDealt: 0
-        }];
-        gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
-      }
+        if (!woundSuccess) {
+          if (gameLog) {
+            const combatDetails = [{
+              shotNumber: 1,
+              attackRoll: hitRoll,
+              strengthRoll: woundRoll,
+              hitResult: 'HIT' as 'HIT' | 'MISS',
+              strengthResult: 'FAILED' as 'SUCCESS' | 'FAILED',
+              hitTarget: attacker.CC_ATK,
+              woundTarget: woundTarget,
+              saveTarget: undefined,
+              saveRoll: undefined,
+              saveSuccess: undefined,
+              damageDealt: 0
+            }];
+            gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
+          }
 
-      // No wound - decrease attacks and end
-      if (attacker.ATTACK_LEFT === undefined) {
-      throw new Error(`attacker.ATTACK_LEFT is required but was undefined for unit ${attacker.id}`);
-    }
-      const currentAttacks = attacker.ATTACK_LEFT;
-      actions.updateUnit(attackerId, { ATTACK_LEFT: currentAttacks - 1 });
-      if (currentAttacks - 1 <= 0) {
-        actions.addAttackedUnit(attackerId);
-        actions.setSelectedUnitId(null);
-        actions.setMode("select");
-      }
-      return;
-    }
+          // No wound - decrease attacks and end
+          if (attacker.ATTACK_LEFT === undefined) {
+            throw new Error(`attacker.ATTACK_LEFT is required but was undefined for unit ${attacker.id}`);
+          }
+          const currentAttacks = attacker.ATTACK_LEFT;
+          actions.updateUnit(attackerId, { ATTACK_LEFT: currentAttacks - 1 });
+          if (currentAttacks - 1 <= 0) {
+            actions.addAttackedUnit(attackerId);
+            actions.setSelectedUnitId(null);
+            actions.setMode("select");
+          }
+          return;
+        }
 
-    const saveRoll = Math.floor(Math.random() * 6) + 1;
-    if (target.ARMOR_SAVE === undefined) {
-      throw new Error(`target.ARMOR_SAVE is required but was undefined for unit ${target.id}`);
-    }
-    if (attacker.CC_AP === undefined) {
-      throw new Error(`attacker.CC_AP is required but was undefined for unit ${attacker.id}`);
-    }
-    
-    const modifiedArmor = target.ARMOR_SAVE + attacker.CC_AP;
-    if (target.INVUL_SAVE === undefined) {
-      throw new Error(`target.INVUL_SAVE is required but was undefined for unit ${target.id}`);
-    }
-    const invulSave = target.INVUL_SAVE;
-    const saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
-    const saveSuccess = saveRoll >= saveTarget;
+        const saveRoll = Math.floor(Math.random() * 6) + 1;
+        if (target.ARMOR_SAVE === undefined) {
+          throw new Error(`target.ARMOR_SAVE is required but was undefined for unit ${target.id}`);
+        }
+        if (attacker.CC_AP === undefined) {
+          throw new Error(`attacker.CC_AP is required but was undefined for unit ${attacker.id}`);
+        }
+        
+        const modifiedArmor = target.ARMOR_SAVE + attacker.CC_AP;
+        if (target.INVUL_SAVE === undefined) {
+          throw new Error(`target.INVUL_SAVE is required but was undefined for unit ${target.id}`);
+        }
+        const invulSave = target.INVUL_SAVE;
+        const saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
+        const saveSuccess = saveRoll >= saveTarget;
 
-    const damageDealt = saveSuccess ? 0 : (attacker.CC_DMG);
+        const damageDealt = saveSuccess ? 0 : (attacker.CC_DMG);
 
-    if (attacker.ATTACK_LEFT === undefined) throw new Error(`attacker.ATTACK_LEFT is undefined for unit ${attacker.name}`);
+        if (attacker.ATTACK_LEFT === undefined) throw new Error(`attacker.ATTACK_LEFT is undefined for unit ${attacker.name}`);
 
-    // Log the combat action FIRST (regardless of damage)
-    if (gameLog) {
-      const combatDetails = [{
-        shotNumber: 1,
-        attackRoll: hitRoll,
-        strengthRoll: woundRoll,
-        hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
-        strengthResult: woundSuccess ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
-        hitTarget: attacker.CC_ATK,
-        woundTarget: hitSuccess ? woundTarget : undefined,
-        saveTarget: (hitSuccess && woundSuccess) ? saveTarget : undefined,
-        saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
-        saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
-        damageDealt: damageDealt
-      }];
-      gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
-    }
+        // Log the combat action FIRST (regardless of damage)
+        if (gameLog) {
+          const combatDetails = [{
+            shotNumber: 1,
+            attackRoll: hitRoll,
+            strengthRoll: woundRoll,
+            hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
+            strengthResult: woundSuccess ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
+            hitTarget: attacker.CC_ATK,
+            woundTarget: hitSuccess ? woundTarget : undefined,
+            saveTarget: (hitSuccess && woundSuccess) ? saveTarget : undefined,
+            saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
+            saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
+            damageDealt: damageDealt
+          }];
+          gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
+        }
 
     if (damageDealt > 0) {
       if (target.CUR_HP === undefined) {
@@ -1054,7 +1062,7 @@ interface ShootingResult {
         unitType: charger.type,
         unitId: charger.id
       };
-      gameLog.events.push(chargeEvent);
+      gameLog.events.unshift(chargeEvent);
     }
     
     // Move unit to destination

@@ -33,11 +33,12 @@ export interface GameLogEvent {
 interface GameLogProps {
   events: GameLogEvent[];
   maxEvents?: number;
+  getElapsedTime: (timestamp: Date) => string;
 }
 
-export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5 }) => {
+export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElapsedTime }) => {
   // Display all events (newest first) - maxEvents now controls visual height via CSS
-  const displayedEvents = [...events].reverse();
+  const displayedEvents = [...events];
 
   const getEventIcon = (type: GameLogEvent['type']): string => {
     switch (type) {
@@ -80,11 +81,7 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5 }) => {
   };
 
   const formatTime = (timestamp: Date): string => {
-    return timestamp.toLocaleTimeString('en-US', { 
-      hour12: false, 
-      minute: '2-digit', 
-      second: '2-digit' 
-    });
+    return getElapsedTime(timestamp);
   };
 
   return (
@@ -118,6 +115,11 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5 }) => {
                   {event.turnNumber && (
                     <span className="game-log-entry__turn">
                       T{event.turnNumber}
+                    </span>
+                  )}
+                  {event.player !== undefined && (
+                    <span className={`game-log-entry__player ${event.player === 0 ? 'game-log-entry__player--blue' : 'game-log-entry__player--red'}`}>
+                      {event.player === 0 ? 'P1' : 'P2'}
                     </span>
                   )}
                   <span className="game-log-entry__message">

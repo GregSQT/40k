@@ -854,6 +854,22 @@ textarea:focus {
   border-radius: var(--radius-sm);
 }
 
+.game-log-entry__player {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: white;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+}
+
+.game-log-entry__player--blue {
+  background: #244488; /* Same blue as unit status table */
+}
+
+.game-log-entry__player--red {
+  background: #dc2626; /* Same red as unit status table */
+}
+
 .game-log-entry__message {
   font-size: var(--font-size-sm);
   line-height: 1.4;

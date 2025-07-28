@@ -313,6 +313,7 @@ export const GameController: React.FC<GameControllerProps> = ({
             <ErrorBoundary fallback={<div>Failed to load game log</div>}>
               <GameLog 
                 events={gameLog.events}
+                getElapsedTime={gameLog.getElapsedTime}
               />
             </ErrorBoundary>
           </div>

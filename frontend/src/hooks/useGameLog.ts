@@ -6,6 +6,7 @@ import { Unit } from '../types/game';
 export const useGameLog = () => {
   const [events, setEvents] = useState<GameLogEvent[]>([]);
   const eventIdCounter = useRef(0);
+  const gameStartTime = useRef<Date | null>(null);
 
   const generateEventId = (): string => {
     eventIdCounter.current += 1;
@@ -13,10 +14,17 @@ export const useGameLog = () => {
   };
 
   const addEvent = useCallback((event: Omit<GameLogEvent, 'id' | 'timestamp'>) => {
+    const currentTime = new Date();
+    
+    // Set game start time on first event
+    if (gameStartTime.current === null) {
+      gameStartTime.current = currentTime;
+    }
+    
     const newEvent: GameLogEvent = {
       ...event,
       id: generateEventId(),
-      timestamp: new Date(),
+      timestamp: currentTime,
     };
     
     setEvents(prevEvents => [newEvent, ...prevEvents]);
@@ -74,6 +82,18 @@ export const useGameLog = () => {
       message: `Unit ${unit.name} ${unit.id} cancelled its move action`,
       turnNumber,
       unitType: unit.name,
+      unitId: unit.id,
+      player: unit.player,
+    });
+  }, [addEvent]);
+
+  // No move action
+  const logNoMoveAction = useCallback((unit: Unit, turnNumber: number) => {
+    addEvent({
+      type: 'move',
+      message: `Unit ${unit.id} NO MOVE`,
+      turnNumber,
+      unitType: unit.type,
       unitId: unit.id,
       player: unit.player,
     });
@@ -176,11 +196,29 @@ export const useGameLog = () => {
     eventIdCounter.current = 0;
   }, []);
 
+  // Calculate elapsed time from game start
+  const getElapsedTime = useCallback((timestamp: Date): string => {
+    if (gameStartTime.current === null) {
+      return '00:00:00';
+    }
+    
+    const elapsedMs = timestamp.getTime() - gameStartTime.current.getTime();
+    const elapsedSeconds = Math.floor(elapsedMs / 1000);
+    
+    const hours = Math.floor(elapsedSeconds / 3600);
+    const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+    const seconds = elapsedSeconds % 60;
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }, []);
+
   return {
     events,
+    getElapsedTime,
     logTurnStart,
     logPhaseChange,
     logMoveAction,
+    logNoMoveAction,
     logMoveCancellation,
     logShootingAction,
     logChargeAction,
