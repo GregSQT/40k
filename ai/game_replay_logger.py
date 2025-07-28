@@ -73,8 +73,9 @@ class GameReplayLogger:
         # Normalize action to integer
         action_int = self._normalize_action(action)
         
-        # Detect changes
-        changes = self._detect_unit_changes(pre_action_units, post_action_units)
+        # Generate combat log formatted entry (this now handles change detection internally)
+        self._generate_combat_log_entry(action_int, reward, pre_action_units, post_action_units, 
+                                      acting_unit_id, target_unit_id, description)
         
         # Create state snapshot
         state = self._create_game_state_snapshot(
@@ -86,13 +87,8 @@ class GameReplayLogger:
             reward=reward
         )
         
-        # Add change detection
-        state["event_flags"].update({
-            "movement_occurred": changes["movement_occurred"],
-            "combat_occurred": changes["combat_occurred"],
-            "units_destroyed": changes["units_destroyed"],
-            "hp_changes": changes["hp_changes"]
-        })
+        # Combat log entry now handles all change detection centrally
+        # No longer need separate change flags in state
         
         # Enhanced description
         if not description:
@@ -100,10 +96,6 @@ class GameReplayLogger:
             description = f"AI performs {action_name}"
         
         state["event_flags"]["description"] = description
-        
-        # ADD: Generate combat log formatted entry
-        self._generate_combat_log_entry(action_int, reward, pre_action_units, post_action_units, 
-                                      acting_unit_id, target_unit_id, description)
         
         self.game_states.append(state)
         self._update_turn_phase()
@@ -129,12 +121,21 @@ class GameReplayLogger:
         if target_unit_id is not None:
             target_unit = next((u for u in post_action_units if u.get("id") == target_unit_id), None)
         
-        # Create combat log entry with game format
-        changes = self._detect_unit_changes(pre_action_units, post_action_units)
+        # Calculate position changes for movement actions (centralized position tracking)
+        start_hex = None
+        end_hex = None
+        if event_type == "move" and acting_unit_id is not None:
+            pre_unit = next((u for u in pre_action_units if u.get("id") == acting_unit_id), None)
+            post_unit = next((u for u in post_action_units if u.get("id") == acting_unit_id), None)
+            if pre_unit and post_unit:
+                start_hex = f"({pre_unit.get('col', 0)}, {pre_unit.get('row', 0)})"
+                end_hex = f"({post_unit.get('col', 0)}, {post_unit.get('row', 0)})"
+        
+        # Create combat log entry with game format including position data
         combat_entry = {
             "id": len(self.combat_log_entries) + 1,
             "type": event_type,
-            "message": self._format_combat_message(event_type, acting_unit, target_unit, action_int, self._detect_unit_changes(pre_action_units, post_action_units)),
+            "message": self._format_combat_message(event_type, acting_unit, target_unit, action_int, start_hex, end_hex),
             "reward": reward,  # REPLACE timestamp with reward
             "turnNumber": self.current_turn,
             "phase": self.current_phase,
@@ -143,16 +144,19 @@ class GameReplayLogger:
             "unitId": acting_unit.get("id") if acting_unit else None,
             "targetUnitType": target_unit.get("type") if target_unit else None,
             "targetUnitId": target_unit.get("id") if target_unit else None,
+            "startHex": start_hex,  # Add position tracking
+            "endHex": end_hex,      # Add position tracking
             "actionName": self.action_names.get(action_int, f"action_{action_int}"),
             "shootDetails": self._extract_shooting_details(pre_action_units, post_action_units, acting_unit_id, target_unit_id)
         }
         
         self.combat_log_entries.append(combat_entry)
         
-        # Print combat log entry for immediate visibility during training
+        # Print combat log entry for immediate visibility during training with action name
         reward_str = f"+{reward:.2f}" if reward >= 0 else f"{reward:.2f}"
         player_str = f"P{combat_entry['player']}"
-        print(f"🎯 [{player_str}] T{self.current_turn} {self.current_phase.upper()}: {combat_entry['message']} (R: {reward_str})")
+        action_name = self.action_names.get(action_int, f"action_{action_int}")
+        print(f"🎯 [{player_str}] T{self.current_turn} {self.current_phase.upper()}: {combat_entry['message']} (R: {reward_str}) [{action_name}]")
     
     def capture_game_end(self, winner: str, final_reward: float):
         """Capture the final game state."""
@@ -224,38 +228,6 @@ class GameReplayLogger:
         }
         
         return state
-    
-    def _detect_unit_changes(self, pre_units: List[Dict], post_units: List[Dict]) -> Dict[str, Any]:
-        """Detect what changed between pre and post action states."""
-        changes = {
-            "movement_occurred": False,
-            "combat_occurred": False,
-            "units_destroyed": [],
-            "hp_changes": []
-        }
-        
-        # Check for position changes
-        for i, (pre, post) in enumerate(zip(pre_units, post_units)):
-            if pre.get("row") != post.get("row") or pre.get("col") != post.get("col"):
-                changes["movement_occurred"] = True
-            
-            # Check for HP changes
-            pre_hp = pre.get("hp", 0)
-            post_hp = post.get("hp", 0)
-            if pre_hp != post_hp:
-                changes["combat_occurred"] = True
-                changes["hp_changes"].append({
-                    "unit_id": i,
-                    "hp_before": pre_hp,
-                    "hp_after": post_hp,
-                    "damage_taken": pre_hp - post_hp
-                })
-            
-            # Check for destroyed units
-            if pre.get("alive", True) and not post.get("alive", True):
-                changes["units_destroyed"].append(i)
-        
-        return changes
     
     def _get_unit_color(self, unit: Dict) -> int:
         """Get color for unit based on player and type."""
@@ -390,7 +362,7 @@ class GameReplayLogger:
         return action_type_map.get(action_int, "default")
     
     def _format_combat_message(self, event_type: str, acting_unit: Optional[Dict], target_unit: Optional[Dict], 
-                             action_int: int, changes: Dict) -> str:
+                             action_int: int, start_hex: Optional[str] = None, end_hex: Optional[str] = None) -> str:
         """Format combat message similar to game frontend."""
         action_name = self.action_names.get(action_int, f"action_{action_int}")
         
@@ -405,7 +377,10 @@ class GameReplayLogger:
             return f"Unit {acting_unit.get('id', '?')} CHARGED unit {target_unit.get('id', '?')}"
         
         if event_type == "move" and acting_unit:
-            return f"Unit {acting_unit.get('id', '?')} moved ({action_name})"
+            if start_hex and end_hex:
+                return f"Unit {acting_unit.get('id', '?')} MOVED from {start_hex} to {end_hex}"
+            else:
+                return f"Unit {acting_unit.get('id', '?')} moved ({action_name})"
         
         if event_type == "phase_change":
             return f"Phase advanced - {action_name}"
