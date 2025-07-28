@@ -256,50 +256,47 @@ export const GameController: React.FC<GameControllerProps> = ({
     previousSelectedUnit.current = gameState.selectedUnitId;
   }, [gameState.selectedUnitId]);
 
-  // Unit status tables for right column
-  const rightColumnContent = (
-    <>
-      <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
-        <UnitStatusTable
-          units={gameState.units}
-          player={0}
-          selectedUnitId={gameState.selectedUnitId}
-          clickedUnitId={clickedUnitId}
-          onSelectUnit={(unitId) => {
-            gameActions.selectUnit(unitId);
-            setClickedUnitId(null);
-          }}
-        />
-      </ErrorBoundary>
-
-      <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
-        <UnitStatusTable
-          units={gameState.units}
-          player={1}
-          selectedUnitId={gameState.selectedUnitId}
-          clickedUnitId={clickedUnitId}
-          onSelectUnit={(unitId) => {
-            gameActions.selectUnit(unitId);
-            setClickedUnitId(null);
-          }}
-        />
-      </ErrorBoundary>
-
-      <ErrorBoundary fallback={<div>Failed to load game log</div>}>
-        <GameLog 
-          events={gameLog.events}
-        />
-      </ErrorBoundary>
-    </>
-  );
-
   return (
     <SharedLayout
       currentTurn={gameState.currentTurn}
       currentPhase={gameState.phase}
       maxTurns={5}
       showReplayControls={false}
-      rightColumnContent={rightColumnContent}
+      rightColumnContent={
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: '100%' }}>
+          <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
+            <UnitStatusTable
+              units={gameUnits}
+              player={0}
+              selectedUnitId={gameState.selectedUnitId}
+              clickedUnitId={clickedUnitId}
+              onSelectUnit={(unitId) => {
+                gameActions.selectUnit(unitId);
+                setClickedUnitId(null);
+              }}
+            />
+          </ErrorBoundary>
+
+          <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
+            <UnitStatusTable
+              units={gameUnits}
+              player={1}
+              selectedUnitId={gameState.selectedUnitId}
+              clickedUnitId={clickedUnitId}
+              onSelectUnit={(unitId) => {
+                gameActions.selectUnit(unitId);
+                setClickedUnitId(null);
+              }}
+            />
+          </ErrorBoundary>
+
+          <ErrorBoundary fallback={<div>Failed to load game log</div>}>
+            <GameLog 
+              events={gameLog.events}
+            />
+          </ErrorBoundary>
+        </div>
+      }
     >
       <ErrorBoundary fallback={<div>Failed to load game board</div>}>
         <GameBoard
