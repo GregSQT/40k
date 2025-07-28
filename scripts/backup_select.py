@@ -39,6 +39,7 @@ else:
 
     ### ai
         "ai/evaluate.py",
+        "ai/game_replay_logger.py",
         "ai/gym40k.py",
         "ai/multi_agent_trainer.py",
         "ai/scenario.json",

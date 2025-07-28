@@ -69,7 +69,7 @@ class GameReplayLogger:
     def capture_action_state(self, action, reward: float, pre_action_units: List[Dict], 
                            post_action_units: List[Dict], acting_unit_id: Optional[int] = None,
                            target_unit_id: Optional[int] = None, description: str = ""):
-        """Capture game state after an action."""
+        """Capture game state after an action with combat log format."""
         # Normalize action to integer
         action_int = self._normalize_action(action)
         
@@ -101,8 +101,58 @@ class GameReplayLogger:
         
         state["event_flags"]["description"] = description
         
+        # ADD: Generate combat log formatted entry
+        self._generate_combat_log_entry(action_int, reward, pre_action_units, post_action_units, 
+                                      acting_unit_id, target_unit_id, description)
+        
         self.game_states.append(state)
         self._update_turn_phase()
+    
+    def _generate_combat_log_entry(self, action_int: int, reward: float, pre_action_units: List[Dict], 
+                                 post_action_units: List[Dict], acting_unit_id: Optional[int] = None,
+                                 target_unit_id: Optional[int] = None, description: str = ""):
+        """Generate combat log entry with same format as game frontend."""
+        # Initialize combat log if not exists
+        if not hasattr(self, 'combat_log_entries'):
+            self.combat_log_entries = []
+        
+        # Determine event type based on action
+        event_type = self._get_event_type_from_action(action_int, pre_action_units, post_action_units)
+        
+        # Find acting unit
+        acting_unit = None
+        if acting_unit_id is not None:
+            acting_unit = next((u for u in post_action_units if u.get("id") == acting_unit_id), None)
+        
+        # Find target unit
+        target_unit = None
+        if target_unit_id is not None:
+            target_unit = next((u for u in post_action_units if u.get("id") == target_unit_id), None)
+        
+        # Create combat log entry with game format
+        changes = self._detect_unit_changes(pre_action_units, post_action_units)
+        combat_entry = {
+            "id": len(self.combat_log_entries) + 1,
+            "type": event_type,
+            "message": self._format_combat_message(event_type, acting_unit, target_unit, action_int, self._detect_unit_changes(pre_action_units, post_action_units)),
+            "reward": reward,  # REPLACE timestamp with reward
+            "turnNumber": self.current_turn,
+            "phase": self.current_phase,
+            "player": acting_unit.get("player", 1) if acting_unit else 1,
+            "unitType": acting_unit.get("type", "unknown") if acting_unit else "unknown",
+            "unitId": acting_unit.get("id") if acting_unit else None,
+            "targetUnitType": target_unit.get("type") if target_unit else None,
+            "targetUnitId": target_unit.get("id") if target_unit else None,
+            "actionName": self.action_names.get(action_int, f"action_{action_int}"),
+            "shootDetails": self._extract_shooting_details(pre_action_units, post_action_units, acting_unit_id, target_unit_id)
+        }
+        
+        self.combat_log_entries.append(combat_entry)
+        
+        # Print combat log entry for immediate visibility during training
+        reward_str = f"+{reward:.2f}" if reward >= 0 else f"{reward:.2f}"
+        player_str = f"P{combat_entry['player']}"
+        print(f"🎯 [{player_str}] T{self.current_turn} {self.current_phase.upper()}: {combat_entry['message']} (R: {reward_str})")
     
     def capture_game_end(self, winner: str, final_reward: float):
         """Capture the final game state."""
@@ -277,9 +327,11 @@ class GameReplayLogger:
                 "duration_minutes": len(self.game_states) * 0.1,
                 "training_context": getattr(self, 'training_context', {}),
                 "format_version": "2.0",
-                "replay_type": "training_enhanced"
+                "replay_type": "training_enhanced",
+                "total_combat_log_entries": len(getattr(self, 'combat_log_entries', []))
             },
             "game_states": self.game_states,
+            "combat_log": getattr(self, 'combat_log_entries', []),  # ADD: Include combat log
             "training_summary": self._generate_training_summary()
         }
         
@@ -293,6 +345,106 @@ class GameReplayLogger:
         print(f"   📊 {len(self.game_states)} game states captured")
         print(f"   🎮 {self.current_turn} turns played")
         print(f"   💯 Final reward: {episode_reward:.2f}")
+
+    def _get_event_type_from_action(self, action_int: int, pre_action_units: List[Dict], post_action_units: List[Dict]) -> str:
+        """Determine event type based on action and unit changes."""
+        # Check for unit deaths first
+        pre_alive = set(u.get("id") for u in pre_action_units if u.get("alive", True))
+        post_alive = set(u.get("id") for u in post_action_units if u.get("alive", True))
+        if len(post_alive) < len(pre_alive):
+            return "death"
+        
+        # Check for HP changes (combat/shooting)
+        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
+            if pre_unit.get("hp", 0) > post_unit.get("hp", 0):
+                # Damage occurred - determine if shooting or combat
+                if action_int in [3, 4]:  # shoot_closest, shoot_weakest
+                    return "shoot"
+                elif action_int in [7]:  # attack_adjacent
+                    return "combat"
+        
+        # Check for movement
+        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
+            if (pre_unit.get("col") != post_unit.get("col") or 
+                pre_unit.get("row") != post_unit.get("row")):
+                if action_int in [5]:  # charge_closest
+                    return "charge"
+                else:
+                    return "move"
+        
+        # Check for phase changes
+        if action_int == 6:  # wait action usually advances phase
+            return "phase_change"
+        
+        # Default based on action type
+        action_type_map = {
+            0: "move",      # move_closer
+            1: "move",      # move_away
+            2: "move",      # move_safe
+            3: "shoot",     # shoot_closest
+            4: "shoot",     # shoot_weakest
+            5: "charge",    # charge_closest
+            6: "phase_change",  # wait
+            7: "combat"     # attack_adjacent
+        }
+        return action_type_map.get(action_int, "default")
+    
+    def _format_combat_message(self, event_type: str, acting_unit: Optional[Dict], target_unit: Optional[Dict], 
+                             action_int: int, changes: Dict) -> str:
+        """Format combat message similar to game frontend."""
+        action_name = self.action_names.get(action_int, f"action_{action_int}")
+        
+        if event_type == "death" and target_unit:
+            return f"Unit {target_unit.get('id', '?')} ({target_unit.get('unit_type', 'unknown')}) DIED!"
+        
+        if event_type in ["shoot", "combat"] and acting_unit and target_unit:
+            verb = "SHOT at" if event_type == "shoot" else "FOUGHT"
+            return f"Unit {acting_unit.get('id', '?')} {verb} unit {target_unit.get('id', '?')}"
+        
+        if event_type == "charge" and acting_unit and target_unit:
+            return f"Unit {acting_unit.get('id', '?')} CHARGED unit {target_unit.get('id', '?')}"
+        
+        if event_type == "move" and acting_unit:
+            return f"Unit {acting_unit.get('id', '?')} moved ({action_name})"
+        
+        if event_type == "phase_change":
+            return f"Phase advanced - {action_name}"
+        
+        # Fallback
+        return f"AI performs {action_name}"
+    
+    def _extract_shooting_details(self, pre_action_units: List[Dict], post_action_units: List[Dict], 
+                                acting_unit_id: Optional[int], target_unit_id: Optional[int]) -> Optional[List[Dict]]:
+        """Extract shooting details if available (for compatibility with game format)."""
+        if not acting_unit_id or not target_unit_id:
+            return None
+        
+        # Find units
+        pre_target = next((u for u in pre_action_units if u.get("id") == target_unit_id), None)
+        post_target = next((u for u in post_action_units if u.get("id") == target_unit_id), None)
+        
+        if not pre_target or not post_target:
+            return None
+        
+        # Calculate damage
+        damage = pre_target.get("hp", 0) - post_target.get("hp", 0)
+        if damage <= 0:
+            return None
+        
+        # Create basic shooting detail (simplified for training)
+        return [{
+            "shotNumber": 1,
+            "attackRoll": 6,  # Simplified - assume hit
+            "strengthRoll": 6,  # Simplified - assume wound
+            "hitResult": "HIT",
+            "strengthResult": "SUCCESS",
+            "hitTarget": 4,
+            "woundTarget": 4,
+            "saveTarget": 4,
+            "saveRoll": 2,  # Simplified - assume failed save
+            "saveSuccess": False,
+            "damageDealt": damage
+        }]
 
     def _generate_training_summary(self) -> Dict[str, Any]:
         """Generate summary of training data from this episode."""
