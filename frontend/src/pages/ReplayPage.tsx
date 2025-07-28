@@ -1,12 +1,21 @@
 ﻿// frontend/src/pages/ReplayPage.tsx
-import React from 'react';
+import React, { useState, useRef } from 'react';
+import { SharedLayout } from '../components/SharedLayout';
 import { ReplayViewer } from '../components/ReplayViewer';
+import { TurnPhaseTracker } from '../components/TurnPhaseTracker';
+import { ErrorBoundary } from '../components/ErrorBoundary';
+import "../App.css";
 
 export const ReplayPage: React.FC = () => {
-  const [replayFile, setReplayFile] = React.useState<string | null>(null);
-  const [selectedFileName, setSelectedFileName] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [replayFile, setReplayFile] = useState<string | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [totalSteps, setTotalSteps] = useState(0);
+  const [currentTurn, setCurrentTurn] = useState(1);
+  const [currentPhase, setCurrentPhase] = useState('move');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Handle file selection from Windows explorer
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -35,6 +44,7 @@ export const ReplayPage: React.FC = () => {
       setReplayFile(fileUrl);
       setSelectedFileName(file.name);
       setError(null);
+      setCurrentStep(0);
       console.log(`✅ Selected replay file: ${file.name}`);
     }
   };
@@ -44,26 +54,59 @@ export const ReplayPage: React.FC = () => {
     fileInputRef.current?.click();
   };
 
-  if (error && !replayFile) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white text-center max-w-md">
-          <div className="text-red-500 text-xl mb-4">⚠️ File Selection Error</div>
-          <div className="text-gray-300 mb-4">{error}</div>
+  // Replay control handlers
+  const handlePlayPause = () => {
+    setIsPlaying(!isPlaying);
+  };
+
+  const handlePrevious = () => {
+    if (currentStep > 0) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
+
+  const handleNext = () => {
+    if (currentStep < totalSteps - 1) {
+      setCurrentStep(currentStep + 1);
+    }
+  };
+
+  const handleReset = () => {
+    setCurrentStep(0);
+    setIsPlaying(false);
+  };
+
+  // File Selection Controls Component
+  const FileSelectionControls: React.FC = () => (
+    <div className="unit-status-table-container" style={{ marginBottom: '16px' }}>
+      <div style={{ padding: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
           <button
             onClick={openFileBrowser}
-            className="px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#1e40af',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
           >
-            Browse for Replay Files
+            📁 Browse Replay Files
           </button>
+          {selectedFileName && (
+            <span style={{ fontSize: '12px', color: '#888' }}>
+              {selectedFileName}
+            </span>
+          )}
         </div>
+        {error && (
+          <div style={{ fontSize: '12px', color: '#ff4444', marginTop: '4px' }}>
+            {error}
+          </div>
+        )}
       </div>
-    );
-  }
-
-  return (
-    <div className="h-screen bg-gray-900 flex flex-col">
-      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -71,58 +114,144 @@ export const ReplayPage: React.FC = () => {
         onChange={handleFileSelect}
         style={{ display: 'none' }}
       />
+    </div>
+  );
 
-      {/* File Selection Header */}
-      <div className="bg-gray-800 border-b border-gray-700 p-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-white">Replay Viewer</h1>
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={openFileBrowser}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-            >
-              Browse Files
-            </button>
-          </div>
+  // Replay Controls Component
+  const ReplayControls: React.FC = () => (
+    <div className="unit-status-table-container" style={{ marginBottom: '16px' }}>
+      <div style={{ padding: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+          <button
+            onClick={handleReset}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: '#64748b',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+            title="Reset to beginning"
+          >
+            ⏮️
+          </button>
+          <button
+            onClick={handlePrevious}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: '#64748b',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+            title="Previous step"
+          >
+            ⏪
+          </button>
+          <button
+            onClick={handlePlayPause}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: isPlaying ? '#dc2626' : '#16a34a',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? '⏸️' : '▶️'}
+          </button>
+          <button
+            onClick={handleNext}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: '#64748b',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+            title="Next step"
+          >
+            ⏩
+          </button>
         </div>
-
-        {/* Current File Info */}
-        {selectedFileName && (
-          <div className="mt-2 text-sm text-gray-400">
-            Current file: {selectedFileName}
-          </div>
-        )}
-
-        {/* Error Display */}
-        {error && replayFile && (
-          <div className="mt-2 text-sm text-red-400">
-            {error}
-          </div>
-        )}
-      </div>
-
-      {/* Replay Viewer or Instructions */}
-      <div className="flex-1">
-        {replayFile ? (
-          <ReplayViewer replayFile={replayFile} />
-        ) : (
-          <div className="h-full flex items-center justify-center">
-            <div className="text-center text-gray-400">
-              <div className="text-xl mb-4">No replay file selected</div>
-              <button
-                onClick={openFileBrowser}
-                className="px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-              >
-                Browse for Replay Files
-              </button>
-              <div className="text-sm mt-4">
-                <div>Select JSON files from ai/Event_log/ directory</div>
-              </div>
-            </div>
-          </div>
-        )}
+        <div style={{ fontSize: '12px', color: '#888', textAlign: 'center' }}>
+          Step {currentStep + 1} of {totalSteps}
+        </div>
       </div>
     </div>
+  );
+
+  // Right column content
+  const rightColumnContent = (
+    <>
+      <FileSelectionControls />
+      <ReplayControls />
+      <TurnPhaseTracker 
+        currentTurn={currentTurn} 
+        currentPhase={currentPhase}
+        className="turn-phase-tracker-right"
+        maxTurns={5}
+      />
+      <ErrorBoundary fallback={<div>Failed to load replay info</div>}>
+        <div className="unit-status-table-container">
+          <div style={{ padding: '12px', textAlign: 'center', color: '#888' }}>
+            {replayFile ? 'Replay loaded' : 'No replay file selected'}
+          </div>
+        </div>
+      </ErrorBoundary>
+    </>
+  );
+
+  // No file selected state
+  if (!replayFile) {
+    return (
+      <SharedLayout rightColumnContent={rightColumnContent}>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          height: '100%',
+          minHeight: '400px',
+          color: '#888',
+          textAlign: 'center',
+          flexDirection: 'column',
+          gap: '16px'
+        }}>
+          <div style={{ fontSize: '18px' }}>No replay file selected</div>
+          <button
+            onClick={openFileBrowser}
+            style={{
+              padding: '12px 24px',
+              backgroundColor: '#1e40af',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '16px',
+              fontWeight: 'bold'
+            }}
+          >
+            Browse for Replay Files
+          </button>
+          <div style={{ fontSize: '12px', color: '#555' }}>
+            Select JSON files from ai/Event_log/ directory
+          </div>
+        </div>
+      </SharedLayout>
+    );
+  }
+
+  // Main replay view
+  return (
+    <SharedLayout rightColumnContent={rightColumnContent}>
+      <ReplayViewer replayFile={replayFile} />
+    </SharedLayout>
   );
 }
 
