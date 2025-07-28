@@ -72,6 +72,74 @@ def calculate_save_target(armor_save: int, invul_save: int, armor_penetration: i
 
 def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], target_in_cover: bool = False) -> Dict[str, Any]:
     """Execute complete shooting sequence (EXACT from frontend logic)."""
+    
+    # Validate required shooter stats
+    if "rng_nb" not in shooter:
+        raise ValueError("shooter.rng_nb is required")
+    if "rng_atk" not in shooter:
+        raise ValueError("shooter.rng_atk is required")
+    if "rng_str" not in shooter:
+        raise ValueError("shooter.rng_str is required")
+    if "rng_ap" not in shooter:
+        raise ValueError("shooter.rng_ap is required")
+    if "rng_dmg" not in shooter:
+        raise ValueError("shooter.rng_dmg is required")
+    
+    # Validate required target stats
+    if "t" not in target:
+        raise ValueError("target.t is required")
+    if "armor_save" not in target:
+        raise ValueError("target.armor_save is required")
+    if "invul_save" not in target:
+        raise ValueError("target.invul_save is required")
+    
+    number_of_shots = shooter["rng_nb"]
+    total_damage = 0
+    hits = 0
+    wounds = 0
+    failed_saves = 0
+    
+    # Process each shot
+    for shot in range(1, number_of_shots + 1):
+        # Hit roll
+        hit_roll = roll_d6()
+        hit_target = shooter["rng_atk"]
+        did_hit = hit_roll >= hit_target
+        
+        if not did_hit:
+            continue  # Miss - next shot
+        hits += 1
+        
+        # Wound roll
+        wound_roll = roll_d6()
+        wound_target = calculate_wound_target(shooter["rng_str"], target["t"])
+        did_wound = wound_roll >= wound_target
+        
+        if not did_wound:
+            continue  # Failed to wound - next shot
+        wounds += 1
+        
+        # Save roll
+        save_roll = roll_d6()
+        save_target = calculate_save_target(target["armor_save"], target["invul_save"], shooter["rng_ap"])
+        saved_wound = save_roll >= save_target
+        
+        if saved_wound:
+            continue  # Save successful - next shot
+        failed_saves += 1
+        
+        # Inflict damage
+        total_damage += shooter["rng_dmg"]
+    
+    return {
+        "totalDamage": total_damage,
+        "summary": {
+            "totalShots": number_of_shots,
+            "hits": hits,
+            "wounds": wounds,
+            "failedSaves": failed_saves
+        }
+    }
     # Step 1: Number of shots
     if "rng_nb" not in shooter:
         raise ValueError("shooter.rng_nb is required")

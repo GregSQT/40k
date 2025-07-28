@@ -4,6 +4,7 @@ import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState
 import { calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability, calculateCombatHitProbability, calculateCombatWoundProbability, calculateCombatSaveProbability, calculateCombatOverallProbability } from '../utils/probabilityCalculator';
 import { areUnitsAdjacent, isUnitInRange, hasLineOfSight, offsetToCube, cubeDistance, getHexLine } from '../utils/gameHelpers';
 import { singleShotSequenceManager } from '../utils/ShootingSequenceManager';
+import { rollD6, calculateWoundTarget, calculateSaveTarget } from '../../../shared/gameRules';
 
 interface UseGameActionsParams {
   gameState: GameState;
@@ -480,114 +481,9 @@ interface ShootingResult {
   };
 }
 
-// Dice rolling function
-  const rollD6 = (): number => {
-    return Math.floor(Math.random() * 6) + 1;
-  };
+// Local duplicate functions removed - now using shared gameRules imports
 
-// Calculate wound target based on strength vs toughness
-const calculateWoundTarget = (strength: number, toughness: number): number => {
-  if (strength * 2 <= toughness) return 6;      // S*2 <= T: wound on 6+
-  if (strength < toughness) return 5;           // S < T: wound on 5+
-  if (strength === toughness) return 4;         // S = T: wound on 4+
-  if (strength > toughness) return 3;           // S > T: wound on 3+
-  if (strength * 2 >= toughness) return 2;     // S*2 >= T: wound on 2+
-  return 6; // fallback
-};
-
-// Calculate save target accounting for AP and invulnerable saves
-const calculateSaveTarget = (armorSave: number, invulSave: number, armorPenetration: number): number => {
-  const modifiedArmor = armorSave + armorPenetration;
-  
-  // Use invulnerable save if it's better than modified armor save (and invul > 0)
-  if (invulSave > 0 && invulSave < modifiedArmor) {
-    return invulSave;
-  }
-  
-  return modifiedArmor;
-};
-
-// Execute complete shooting sequence
-const executeShootingSequence = (shooter: any, target: any, targetInCover: boolean = false): ShootingResult => {
-  // Step 1: Number of shots
-  if (shooter.RNG_NB === undefined) {
-       throw new Error('shooter.RNG_NB is required');
-     }
-     const numberOfShots = shooter.RNG_NB;
-  
-  let totalDamage = 0;
-  let hits = 0;
-  let wounds = 0;
-  let failedSaves = 0;
-
-  // Process each shot
-  for (let shot = 1; shot <= numberOfShots; shot++) {
-    // Step 2: Range check (already validated before calling)
-    
-    // Step 3: Hit roll
-    const hitRoll = rollD6();
-    if (shooter.RNG_ATK === undefined) {
-      throw new Error('shooter.RNG_ATK is required');
-    }
-    const hitTarget = shooter.RNG_ATK;
-    const didHit = hitRoll >= hitTarget;
-    
-    if (!didHit) continue; // Miss - next shot
-    hits++;
-    
-    // Step 4: Wound roll  
-    const woundRoll = rollD6();
-    if (shooter.RNG_STR === undefined) {
-      throw new Error('shooter.RNG_STR is required');
-    }
-    if (target.T === undefined) {
-      throw new Error('target.T is required');
-    }
-   const woundTarget = calculateWoundTarget(shooter.RNG_STR, target.T);
-    const didWound = woundRoll >= woundTarget;
-    
-    if (!didWound) continue; // Failed to wound - next shot
-    wounds++;
-    
-    // Step 5: Armor save (with cover bonus)
-    const saveRoll = rollD6();
-    let baseArmorSave = target.ARMOR_SAVE;
-    let invulSave = target.INVUL_SAVE;
-    let armorPenetration = shooter.RNG_AP;
-    
-    // Apply cover bonus - +1 to armor save (better save)
-    if (targetInCover) {
-      baseArmorSave = Math.max(2, baseArmorSave - 1); // Improve armor save by 1, minimum 2+
-      // Note: Invulnerable saves are not affected by cover
-    }
-    
-    const saveTarget = calculateSaveTarget(
-      baseArmorSave, 
-      invulSave, 
-      armorPenetration
-    );
-    const savedWound = saveRoll >= saveTarget;
-    
-    if (savedWound) continue; // Save successful - next shot
-    failedSaves++;
-    
-    // Step 6: Inflict damage
-    if (shooter.RNG_DMG === undefined) {
-      throw new Error('shooter.RNG_DMG is required');
-    }
-    totalDamage += shooter.RNG_DMG;
-  }
-
-  return {
-    totalDamage,
-    summary: {
-      totalShots: numberOfShots,
-      hits,
-      wounds,
-      failedSaves
-    }
-  };
-};
+// executeShootingSequence removed - now using shared gameRules if needed
   //
   const handleShoot = useCallback((shooterId: UnitId, targetId: UnitId) => {
     if (unitsMoved.includes(shooterId)) {
@@ -1373,6 +1269,6 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
     isUnitEligible, // Expose the eligibility function
     getChargeDestinations, // Expose the charge destinations function
     directMove, // Expose the direct move function
-    rollD6,
+    // rollD6 removed - now using shared gameRules import
   };
 };
