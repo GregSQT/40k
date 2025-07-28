@@ -1,6 +1,7 @@
 // src/components/GameController.tsx
 import React from "react";
 import { useLocation } from 'react-router-dom';
+import { SharedLayout } from "./SharedLayout";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { UnitStatusTable } from "./UnitStatusTable";
 import { GameBoard } from "./GameBoard";
@@ -16,29 +17,6 @@ import { Unit } from "../types/game";
 import { useState, useEffect } from "react";
 import { createUnit, getAvailableUnitTypes } from "../data/UnitFactory";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
-
-const Navigation: React.FC = () => {
-  const location = useLocation();
-  
-  const getButtonStyle = (path: string) => ({
-    padding: '10px 18px',
-    backgroundColor: location.pathname === path ? '#1e40af' : '#64748b',
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    marginRight: '8px',
-    cursor: 'pointer',
-    fontWeight: location.pathname === path ? 'bold' : 'normal'
-  });
-
-  return (
-    <nav style={{ display: 'flex', gap: '8px', marginBottom: '4px', paddingTop: '0px', marginTop: '0px', justifyContent: 'flex-end' }}>
-      <button onClick={() => window.location.href = '/game'} style={getButtonStyle('/game')}>PvP</button>
-      <button onClick={() => window.location.href = '/pve'} style={getButtonStyle('/pve')}>PvE</button>
-      <button onClick={() => window.location.href = '/replay'} style={getButtonStyle('/replay')}>Replay</button>
-    </nav>
-  );
-};
 
 interface GameControllerProps {
   initialUnits?: Unit[];  // Make optional
@@ -238,112 +216,107 @@ export const GameController: React.FC<GameControllerProps> = ({
     previousSelectedUnit.current = gameState.selectedUnitId;
   }, [gameState.selectedUnitId]);
 
+  const rightColumnContent = (
+    <>
+      <TurnPhaseTracker 
+        currentTurn={gameState.currentTurn} 
+        currentPhase={gameState.phase}
+        className="turn-phase-tracker-right"
+      />
+      <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
+        <UnitStatusTable
+          units={gameState.units}
+          player={0}
+          selectedUnitId={gameState.selectedUnitId}
+          clickedUnitId={clickedUnitId}
+          onSelectUnit={(unitId) => {
+            gameActions.selectUnit(unitId);
+            setClickedUnitId(null);
+          }}
+        />
+      </ErrorBoundary>
+
+      <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
+        <UnitStatusTable
+          units={gameState.units}
+          player={1}
+          selectedUnitId={gameState.selectedUnitId}
+          clickedUnitId={clickedUnitId}
+          onSelectUnit={(unitId) => {
+            gameActions.selectUnit(unitId);
+            setClickedUnitId(null);
+          }}
+        />
+      </ErrorBoundary>
+
+      {/* Game Log Component */}
+      <ErrorBoundary fallback={<div>Failed to load game log</div>}>
+        <GameLog 
+          events={gameLog.events}
+          getElapsedTime={gameLog.getElapsedTime}
+        />
+      </ErrorBoundary>
+    </>
+  );
+
   return (
-    <div className={`game-controller ${className || ''}`} style={{ background: '#222', minHeight: '100vh' }}>
-      <main className="main-content">
-
-        <div className="game-area" style={{ display: 'flex', gap: '16px' }}>
-          <div className="game-board-section">
-            <ErrorBoundary fallback={<div>Failed to load game board</div>}>
-            <GameBoard
-              units={gameState.units}
-              selectedUnitId={gameState.selectedUnitId}
-              phase={gameState.phase}
-              eligibleUnitIds={eligibleUnitIds}
-              mode={gameState.mode}
-              movePreview={movePreview}
-              attackPreview={attackPreview}
-              currentPlayer={gameState.currentPlayer}
-              unitsMoved={gameState.unitsMoved}
-              unitsCharged={gameState.unitsCharged}
-              unitsAttacked={gameState.unitsAttacked}
-              unitsFled={gameState.unitsFled}
-              combatSubPhase={gameState.combatSubPhase}
-              combatActivePlayer={gameState.combatActivePlayer}
-              currentTurn={gameState.currentTurn}
-              gameState={gameState}
-              getChargeDestinations={gameActions.getChargeDestinations}
-              onSelectUnit={(unitId) => {
-                if (unitId === null) return;
-                gameActions.selectUnit(unitId);
-                setClickedUnitId(null);
-              }}
-              onStartMovePreview={gameActions.startMovePreview}
-              onStartAttackPreview={gameActions.startAttackPreview}
-              onConfirmMove={gameActions.confirmMove}
-              onCancelMove={gameActions.cancelMove}
-              onDirectMove={gameActions.directMove}
-              onShoot={gameActions.handleShoot}
-              onCombatAttack={gameActions.handleCombatAttack}
-              onCharge={gameActions.handleCharge}
-              onMoveCharger={gameActions.moveCharger}
-              onCancelCharge={gameActions.cancelCharge}
-              onValidateCharge={gameActions.validateCharge}
-              shootingPhaseState={shootingPhaseState}
-              targetPreview={gameState.targetPreview}
-              onCancelTargetPreview={() => {
-                if (gameState.targetPreview?.blinkTimer) {
-                  clearInterval(gameState.targetPreview.blinkTimer);
-                }
-                actions.setTargetPreview(null);
-                
-                // Keep the unit selected and stay in attackPreview mode (red hexes)
-                if (gameState.selectedUnitId) {
-                  const selectedUnit = gameState.units.find(u => u.id === gameState.selectedUnitId);
-                  if (selectedUnit) {
-                    actions.setAttackPreview({ unitId: gameState.selectedUnitId, col: selectedUnit.col, row: selectedUnit.row });
-                    actions.setMode("attackPreview");
-                  }
-                }
-              }}
-              chargeRollPopup={chargeRollPopup}
-            />
-          </ErrorBoundary>
-          </div>
-
-          <div className="unit-status-tables" style={{ paddingTop: '0px', marginTop: '0px', gap: '12px' }}>
-            <Navigation />
-            <TurnPhaseTracker 
-              currentTurn={gameState.currentTurn} 
-              currentPhase={gameState.phase}
-              className="turn-phase-tracker-right"
-            />
-            <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
-              <UnitStatusTable
-                units={gameState.units}
-                player={0}
-                selectedUnitId={gameState.selectedUnitId}
-                clickedUnitId={clickedUnitId}
-                onSelectUnit={(unitId) => {
-                  gameActions.selectUnit(unitId);
-                  setClickedUnitId(null);
-                }}
-              />
-            </ErrorBoundary>
-
-            <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
-              <UnitStatusTable
-                units={gameState.units}
-                player={1}
-                selectedUnitId={gameState.selectedUnitId}
-                clickedUnitId={clickedUnitId}
-                onSelectUnit={(unitId) => {
-                  gameActions.selectUnit(unitId);
-                  setClickedUnitId(null);
-                }}
-              />
-            </ErrorBoundary>
-
-            {/* Game Log Component */}
-            <ErrorBoundary fallback={<div>Failed to load game log</div>}>
-              <GameLog 
-                events={gameLog.events}
-                getElapsedTime={gameLog.getElapsedTime}
-              />
-            </ErrorBoundary>
-          </div>
-        </div>
-      </main>
-    </div>
+    <SharedLayout 
+      className={className}
+      rightColumnContent={rightColumnContent}
+    >
+      <GameBoard
+        units={gameState.units}
+        selectedUnitId={gameState.selectedUnitId}
+        phase={gameState.phase}
+        eligibleUnitIds={eligibleUnitIds}
+        mode={gameState.mode}
+        movePreview={movePreview}
+        attackPreview={attackPreview}
+        currentPlayer={gameState.currentPlayer}
+        unitsMoved={gameState.unitsMoved}
+        unitsCharged={gameState.unitsCharged}
+        unitsAttacked={gameState.unitsAttacked}
+        unitsFled={gameState.unitsFled}
+        combatSubPhase={gameState.combatSubPhase}
+        combatActivePlayer={gameState.combatActivePlayer}
+        currentTurn={gameState.currentTurn}
+        gameState={gameState}
+        getChargeDestinations={gameActions.getChargeDestinations}
+        onSelectUnit={(unitId) => {
+          if (unitId === null) return;
+          gameActions.selectUnit(unitId);
+          setClickedUnitId(null);
+        }}
+        onStartMovePreview={gameActions.startMovePreview}
+        onStartAttackPreview={gameActions.startAttackPreview}
+        onConfirmMove={gameActions.confirmMove}
+        onCancelMove={gameActions.cancelMove}
+        onDirectMove={gameActions.directMove}
+        onShoot={gameActions.handleShoot}
+        onCombatAttack={gameActions.handleCombatAttack}
+        onCharge={gameActions.handleCharge}
+        onMoveCharger={gameActions.moveCharger}
+        onCancelCharge={gameActions.cancelCharge}
+        onValidateCharge={gameActions.validateCharge}
+        shootingPhaseState={shootingPhaseState}
+        targetPreview={gameState.targetPreview}
+        onCancelTargetPreview={() => {
+          if (gameState.targetPreview?.blinkTimer) {
+            clearInterval(gameState.targetPreview.blinkTimer);
+          }
+          actions.setTargetPreview(null);
+          
+          // Keep the unit selected and stay in attackPreview mode (red hexes)
+          if (gameState.selectedUnitId) {
+            const selectedUnit = gameState.units.find(u => u.id === gameState.selectedUnitId);
+            if (selectedUnit) {
+              actions.setAttackPreview({ unitId: gameState.selectedUnitId, col: selectedUnit.col, row: selectedUnit.row });
+              actions.setMode("attackPreview");
+            }
+          }
+        }}
+        chargeRollPopup={chargeRollPopup}
+      />
+    </SharedLayout>
   );
 };
