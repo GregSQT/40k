@@ -192,6 +192,8 @@ export const useGameActions = ({
           if (unit.player !== currentPlayer) return false;
           if (!unit.hasChargedThisTurn) return false;
         } else if (gameState.combatSubPhase === "alternating_combat") {
+          // CRITICAL FIX: Check combatActivePlayer correctly
+          if (gameState.combatActivePlayer === undefined) return false;
           if (unit.player !== gameState.combatActivePlayer) return false;
           if (unit.hasChargedThisTurn) return false;
         } else {
@@ -200,11 +202,22 @@ export const useGameActions = ({
           }
         }
         
+        // CRITICAL FIX: Filter enemies correctly based on the unit's player, not currentPlayer
+        const actualEnemyUnits = units.filter(u => u.player !== unit.player);
+        
         if (unit.CC_RNG === undefined) {
           throw new Error('unit.CC_RNG is required');
         }
         const combatRange = unit.CC_RNG;
-        return enemyUnits.some(enemy => isUnitInRange(unit, enemy, combatRange));
+        // CRITICAL FIX: Only units adjacent to enemies should be eligible for combat
+        // For CC_RNG = 1, units must be exactly distance 1 (adjacent) to enemies
+        const hasAdjacentEnemy = actualEnemyUnits.some(enemy => {
+          const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
+          console.log(`[COMBAT DEBUG] Unit ${unit.id} (player ${unit.player}) at (${unit.col},${unit.row}) vs Enemy ${enemy.id} (player ${enemy.player}) at (${enemy.col},${enemy.row}): distance = ${distance}, combatRange = ${combatRange}`);
+          return distance === combatRange; // Must be exactly at combat range (adjacent for CC_RNG=1)
+        });
+        console.log(`[COMBAT DEBUG] Unit ${unit.id} hasAdjacentEnemy: ${hasAdjacentEnemy}`);
+        return hasAdjacentEnemy;
       default:
         return false;
     }

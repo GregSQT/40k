@@ -14,7 +14,7 @@ export class Intercessor extends SpaceMarineRangedUnit {
   static OC = 2;               // Operative Control
   static VALUE = 20;           // Unit value
   // RANGE WEAPON
-  static RNG_RNG = 24;         // Range attack : range - 24
+  static RNG_RNG = 1;         // Range attack : range - 24
   static RNG_NB = 2;           // Range attack : number of attacks - 2
   static RNG_ATK = 3;          // Range attack : To Hit score
   static RNG_STR = 4;          // Range attack Strength

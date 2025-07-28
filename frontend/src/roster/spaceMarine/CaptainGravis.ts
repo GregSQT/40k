@@ -15,7 +15,7 @@ export class CaptainGravis extends SpaceMarineMeleeUnit {
   static OC = 1;               // Operative Control
   static VALUE = 100;          // Unit value
   // RANGE WEAPON
-  static RNG_RNG = 12;         // Range attack : range - 12
+  static RNG_RNG = 1;         // Range attack : range - 12
   static RNG_NB = 1;           // Range attack : number of attacks - 3
   static RNG_ATK = 2;          // Range attack : To Hit score
   static RNG_STR = 4;          // Range attack Strength

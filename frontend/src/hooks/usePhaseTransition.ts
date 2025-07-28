@@ -49,17 +49,8 @@ export const usePhaseTransition = ({
     if (phase !== "combat" || combatSubPhase !== "charged_units") return false;
     
     const activePlayerUnits = units.filter(u => u.player === currentPlayer);
-    const eligibleChargedUnits = activePlayerUnits.filter(unit => {
-      if (unitsAttacked.includes(unit.id)) return false;
-      if (!unit.hasChargedThisTurn) return false;
-      // Check if unit has enemies in combat range
-      const enemyUnits = units.filter(u => u.player !== currentPlayer);
-      const combatRange = unit.CC_RNG || 1;
-      return enemyUnits.some(enemy => {
-        const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
-        return distance <= combatRange;
-      });
-    });
+    // Use the authoritative isUnitEligible function instead of duplicate logic
+    const eligibleChargedUnits = activePlayerUnits.filter(unit => isUnitEligible(unit));
     
     const shouldTransition = eligibleChargedUnits.length === 0;
     
@@ -75,17 +66,8 @@ export const usePhaseTransition = ({
     
     for (const player of allPlayers) {
       const playerUnits = units.filter(u => u.player === player);
-      const eligibleUnits = playerUnits.filter(unit => {
-        if (unitsAttacked.includes(unit.id)) return false;
-        if (unit.hasChargedThisTurn) return false; // Non-charged units only in alternating phase
-        // Check if unit has enemies in combat range
-        const enemyUnits = units.filter(u => u.player !== player);
-        const combatRange = unit.CC_RNG || 1;
-        return enemyUnits.some(enemy => {
-          const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
-          return distance <= combatRange;
-        });
-      });
+      // Use the authoritative isUnitEligible function instead of duplicate logic
+      const eligibleUnits = playerUnits.filter(unit => isUnitEligible(unit));
       
       if (eligibleUnits.length > 0) return false; // Still has eligible units
     }
@@ -326,33 +308,23 @@ export const usePhaseTransition = ({
     unitsAttacked, // This should trigger re-evaluation when units finish attacking
   ]);
 
-  // Handle alternating player switching in combat
+  // Handle alternating player switching in combat - ONLY when a unit actually attacks
   useEffect(() => {
     if (phase === "combat" && combatSubPhase === "alternating_combat" && combatActivePlayer !== undefined) {
-      // Check if current combat player has no eligible units
+      // Only check for player switching when unitsAttacked changes (not continuously)
+      // This prevents interference with unit selection
       const currentCombatPlayerUnits = units.filter(u => u.player === combatActivePlayer);
-      const hasEligibleUnits = currentCombatPlayerUnits.some(unit => {
-        if (unitsAttacked.includes(unit.id)) return false;
-        if (unit.hasChargedThisTurn) return false; // Non-charged units only
-        
-        const enemyUnits = units.filter(u => u.player !== combatActivePlayer);
-        const combatRange = unit.CC_RNG || 1;
-        return enemyUnits.some(enemy => {
-          const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
-          return distance <= combatRange;
-        });
-      });
+      // Use the authoritative isUnitEligible function instead of duplicate logic
+      const hasEligibleUnits = currentCombatPlayerUnits.some(unit => isUnitEligible(unit));
       
       if (!hasEligibleUnits) {
-        // Switch to other player
+        // Switch to other player immediately (no delay that interferes with selection)
         const otherPlayer = combatActivePlayer === 0 ? 1 : 0;
-        setTimeout(() => {
-          actions.setCombatActivePlayer(otherPlayer);
-          actions.setSelectedUnitId(null);
-        }, 500);
+        actions.setCombatActivePlayer(otherPlayer);
+        actions.setSelectedUnitId(null);
       }
     }
-  }, [phase, combatSubPhase, combatActivePlayer, units, unitsAttacked, actions]);
+  }, [phase, combatSubPhase, combatActivePlayer, unitsAttacked, actions, isUnitEligible]); // Include isUnitEligible dependency
 
   return {
     // Expose transition functions for manual control if needed
