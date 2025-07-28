@@ -158,7 +158,7 @@ class W40KEnv(gym.Env):
                     unit = copy.deepcopy(self.unit_definitions[unit_type])
             
                     # Validate required attributes - raise error if missing per AI_INSTRUCTIONS.md
-                    required_attrs = ["hp_max", "move", "rng_rng", "rng_dmg", "cc_dmg", "is_ranged", "is_melee"]
+                    required_attrs = ["hp_max", "move", "rng_rng", "rng_dmg", "cc_dmg", "cc_nb", "cc_atk", "cc_str", "cc_ap", "is_ranged", "is_melee"]
                     for attr in required_attrs:
                         if attr not in unit:
                             raise KeyError(f"Unit definition for '{unit_type}' missing required attribute '{attr}'")
@@ -248,6 +248,7 @@ class W40KEnv(gym.Env):
                             static_props = {
                                 'HP_MAX': 'hp_max', 'MOVE': 'move', 'RNG_RNG': 'rng_rng', 'RNG_DMG': 'rng_dmg', 'CC_DMG': 'cc_dmg',
                                 'RNG_NB': 'rng_nb', 'RNG_ATK': 'rng_atk', 'RNG_STR': 'rng_str', 'RNG_AP': 'rng_ap',
+                                'CC_NB': 'cc_nb', 'CC_ATK': 'cc_atk', 'CC_STR': 'cc_str', 'CC_AP': 'cc_ap',
                                 'T': 't', 'ARMOR_SAVE': 'armor_save', 'INVUL_SAVE': 'invul_save',
                                 'SIZE_RADIUS': 'size_radius'  # New: Extract size_radius if defined in TS
                             }
@@ -494,6 +495,14 @@ class W40KEnv(gym.Env):
                     return True
         return False
     
+    def _has_enemies_in_move_range(self, unit):
+        """Check if unit has enemies within MOVE range per AI_GAME.md."""
+        for enemy in self.enemy_units:
+            if enemy["alive"]:
+                if is_unit_in_range(unit, enemy, unit.get("move", 0)):
+                    return True
+        return False
+    
     def get_agent_units(self, agent_key: str) -> List:
         """Get all units controlled by a specific agent."""
         return [u for u in self.ai_units if u["alive"] and 
@@ -519,6 +528,8 @@ class W40KEnv(gym.Env):
                 if is_unit_in_range(unit, enemy, combat_range):
                     return True
         return False
+
+    def _execute_action_with_phase(self, unit, action_type):
         """Execute action with current phase context and AI_GAME.md tracking."""
         unit_rewards = self._get_unit_reward_config(unit)
         

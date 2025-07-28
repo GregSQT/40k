@@ -92,6 +92,7 @@ else:
         "frontend/src/components/GameStatus.tsx",
         "frontend/src/components/ReplayBoard.tsx",
         "frontend/src/components/ReplayViewer.tsx",
+        "frontend/src/components/SharedLayout.tsx",
         "frontend/src/components/SingleShotDisplay.tsx",
         "frontend/src/components/TurnPhaseTracker.tsx",
         "frontend/src/components/UnitRenderer.tsx",
