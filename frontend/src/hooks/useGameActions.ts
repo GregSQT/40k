@@ -130,20 +130,11 @@ export const useGameActions = ({
       case "move":
         return !unitsMoved.includes(unit.id);
       case "shoot":
-        if (unitsMoved.includes(unit.id)) {
-          console.log(`🔍 Unit ${unit.name} not eligible: already moved this phase`);
-          return false;
-        }
+        if (unitsMoved.includes(unit.id)) return false;
         // NEW RULE: Units that fled cannot shoot
-        if (unitsFled.includes(unit.id)) {
-          console.log(`🔍 Unit ${unit.name} not eligible: unit fled`);
-          return false;
-        }
+        if (unitsFled.includes(unit.id)) return false;
         // CRITICAL: Check if unit has shots remaining
-        if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) {
-          console.log(`🔍 Unit ${unit.name} not eligible: SHOOT_LEFT = ${unit.SHOOT_LEFT}`);
-          return false;
-        }
+        if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) return false;
         // Check if unit is adjacent to any enemy (engaged in combat)
         const hasAdjacentEnemyShoot = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         if (hasAdjacentEnemyShoot) return false;
@@ -260,7 +251,7 @@ export const useGameActions = ({
 
     // Special handling for shoot phase
     if (phase === "shoot") {
-      console.log(`🎯 Selecting unit ${unit.name} for shooting - not adding to unitsMoved yet`);
+      // Selecting unit for shooting - not adding to unitsMoved yet
       // Always show the attack preview…
       actions.setMovePreview(null);
       actions.setAttackPreview({ unitId, col: unit.col, row: unit.row });
@@ -797,7 +788,7 @@ const executeShootingSequence = (shooter: any, target: any, targetInCover: boole
         const currentShotsLeft = currentShooter.SHOOT_LEFT;
         const newShotsLeft = currentShotsLeft - 1;
         actions.updateUnit(shooterId, { SHOOT_LEFT: newShotsLeft });
-        console.log(`🔫 Unit ${shooter.name} shots: ${currentShotsLeft} → ${newShotsLeft}`);
+        // Unit shots decremented
         
         // Check if more shots remaining
         if (newShotsLeft > 0) {

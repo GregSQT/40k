@@ -384,12 +384,7 @@ export class UnitRenderer {
   private renderShootingCounter(unitIconScale: number): void {
     const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled, mode, selectedUnitId, isEligible } = this.props;
     
-    console.log(`🎯 Shooting counter for ${unit.name}: phase=${phase}, mode=${mode}, isEligible=${isEligible}, SHOOT_LEFT=${unit.SHOOT_LEFT}, selectedUnitId=${selectedUnitId}`);
-    
-    if (phase !== 'shoot' || unit.player !== currentPlayer) {
-      console.log(`🎯 ${unit.name} counter hidden: wrong phase or player`);
-      return;
-    }
+    if (phase !== 'shoot' || unit.player !== currentPlayer) return;
     
     // NEW RULE: Hide shooting counter for units that fled
     if (unitsFled && unitsFled.includes(unit.id)) {
@@ -397,10 +392,7 @@ export class UnitRenderer {
     }
     
     // TEMPORARY: Show counter if unit has shots, regardless of isEligible prop
-    if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) {
-      console.log(`🎯 ${unit.name} counter hidden: no shots left (SHOOT_LEFT=${unit.SHOOT_LEFT})`);
-      return;
-    }
+    if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) return;
     // TODO: Fix the isEligible prop synchronization issue
     // if (!this.props.isEligible) {
     //   console.log(`🎯 ${unit.name} counter hidden: isEligible=false (but SHOOT_LEFT=${unit.SHOOT_LEFT})`);

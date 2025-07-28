@@ -107,17 +107,10 @@ export const GameController: React.FC<GameControllerProps> = ({
   const eligibleUnitIds = React.useMemo(() => {
     if (!boardConfig) return [];
     
-    const eligible = gameState.units.filter(unit => {
+    return gameState.units.filter(unit => {
       // Call the ACTUAL isUnitEligible function from useGameActions (single source of truth)
-      const isEligible = originalGameActions.isUnitEligible(unit);
-      if (gameState.phase === 'shoot' && unit.player === gameState.currentPlayer) {
-        console.log(`🎯 Eligibility check: ${unit.name} - SHOOT_LEFT: ${unit.SHOOT_LEFT}, eligible: ${isEligible}`);
-      }
-      return isEligible;
+      return originalGameActions.isUnitEligible(unit);
     }).map(unit => unit.id);
-    
-    console.log(`🎯 Eligible units in ${gameState.phase} phase:`, eligible);
-    return eligible;
   }, [gameState.units, boardConfig, originalGameActions.isUnitEligible, gameState.phase, gameState.currentPlayer, gameState.unitsMoved, gameState.unitsCharged, gameState.unitsAttacked, gameState.unitsFled]);
 
   // Handle AI player behavior
