@@ -20,10 +20,20 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   const { gameConfig } = useGameConfig();
   
   // Use phases from props or require from config
-  const phases = phasesProp || (gameConfig?.gameplay?.phase_order) || ['move', 'shoot', 'charge', 'combat'];
+  const phases = phasesProp || (() => {
+    if (!gameConfig?.gameplay?.phase_order) {
+      throw new Error('gameConfig.gameplay.phase_order is required but was not provided');
+    }
+    return gameConfig.gameplay.phase_order;
+  })();
   
   // Use maxTurns from props or require from config
-  const effectiveMaxTurns = maxTurns || gameConfig?.game_rules?.max_turns || 5;
+  const effectiveMaxTurns = maxTurns || (() => {
+    if (!gameConfig?.game_rules?.max_turns) {
+      throw new Error('gameConfig.game_rules.max_turns is required but was not provided');
+    }
+    return gameConfig.game_rules.max_turns;
+  })();
   
   // Generate turn numbers array (1-5 turns max for game)
   const maxGameTurns = 5;

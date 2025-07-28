@@ -46,7 +46,33 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
   // Type-safe wrapper for Board component
   // Convert string/number IDs to proper number type for Board component
   
-    // Remove this entire useEffect - Board.tsx handles the click handler setup
+    React.useEffect(() => {
+      setupBoardClickHandler({
+        onSelectUnit: props.onSelectUnit,
+        onStartAttackPreview: (shooterId) => {
+          const unit = props.units.find(u => u.id === shooterId);
+          if (unit) {
+            props.onStartAttackPreview(shooterId, unit.col, unit.row);
+          }
+        },
+        onShoot:        props.onShoot,
+        onCombatAttack: props.onCombatAttack,
+        onConfirmMove:  props.onConfirmMove,
+        onCancelCharge: props.onCancelCharge,
+        onValidateCharge: props.onValidateCharge,
+        onMoveCharger:    props.onMoveCharger
+      });
+    }, [
+      props.onSelectUnit,
+      props.onStartAttackPreview,
+      props.onShoot,
+      props.onCombatAttack,
+      props.onConfirmMove,
+      props.onCancelCharge,
+      props.onValidateCharge,
+      props.onMoveCharger,
+      props.units
+    ]);
 
 
 

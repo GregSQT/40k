@@ -1,158 +1,129 @@
 ﻿// frontend/src/pages/ReplayPage.tsx
-import React, { useState, useCallback } from 'react';
-import { SharedLayout } from '../components/SharedLayout';
+import React from 'react';
 import { ReplayViewer } from '../components/ReplayViewer';
 
 export const ReplayPage: React.FC = () => {
-  const [replayFile, setReplayFile] = useState<string | null>(null);
-  const [selectedFileName, setSelectedFileName] = useState<string | undefined>(undefined);
-  const [currentStep, setCurrentStep] = useState(0);
-  const [totalSteps, setTotalSteps] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTurn, setCurrentTurn] = useState(1);
-  const [currentPhase, setCurrentPhase] = useState('move');
-  
-  // Auto-play interval
-  const [playInterval, setPlayInterval] = useState<NodeJS.Timeout | null>(null);
+  const [replayFile, setReplayFile] = React.useState<string | null>(null);
+  const [selectedFileName, setSelectedFileName] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Handle file selection
-  const handleFileSelect = useCallback((file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const content = e.target?.result as string;
-        const data = JSON.parse(content);
-        
-        // Create blob URL for ReplayViewer
-        const blob = new Blob([content], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        
-        setReplayFile(url);
-        setSelectedFileName(file.name);
-        setCurrentStep(0);
-        setTotalSteps(data.events?.length || data.actions?.length || 0);
-        setIsPlaying(false);
-        
-        // Clear any existing interval
-        if (playInterval) {
-          clearInterval(playInterval);
-          setPlayInterval(null);
-        }
-      } catch (error) {
-        console.error('Error parsing replay file:', error);
-        alert('Invalid replay file format');
+  // Handle file selection from Windows explorer
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (!file.name.endsWith('.json')) {
+        setError('Please select a JSON file');
+        return;
       }
-    };
-    reader.readAsText(file);
-  }, [playInterval]);
 
-  // Control handlers
-  const handlePlayPause = useCallback(() => {
-    if (isPlaying) {
-      // Pause
-      if (playInterval) {
-        clearInterval(playInterval);
-        setPlayInterval(null);
+      // Check if it's a replay file based on naming patterns
+      const isReplayFile = file.name.startsWith('training_replay_') ||
+                          file.name.startsWith('phase_based_replay_') ||
+                          file.name.includes('_vs_') ||
+                          file.name.startsWith('replay_') ||
+                          file.name.startsWith('training_');
+
+      if (!isReplayFile) {
+        setError('Please select a valid replay JSON file');
+        return;
       }
-      setIsPlaying(false);
-    } else {
-      // Play
-      if (currentStep < totalSteps - 1) {
-        const interval = setInterval(() => {
-          setCurrentStep(prev => {
-            if (prev >= totalSteps - 1) {
-              clearInterval(interval);
-              setIsPlaying(false);
-              return prev;
-            }
-            return prev + 1;
-          });
-        }, 1000); // 1 second per step
-        
-        setPlayInterval(interval);
-        setIsPlaying(true);
-      }
+
+      // Create file URL for local file access
+      const fileUrl = URL.createObjectURL(file);
+      setReplayFile(fileUrl);
+      setSelectedFileName(file.name);
+      setError(null);
+      console.log(`✅ Selected replay file: ${file.name}`);
     }
-  }, [isPlaying, playInterval, currentStep, totalSteps]);
+  };
 
-  const handlePrevious = useCallback(() => {
-    setCurrentStep(prev => Math.max(0, prev - 1));
-    if (isPlaying) {
-      setIsPlaying(false);
-      if (playInterval) {
-        clearInterval(playInterval);
-        setPlayInterval(null);
-      }
-    }
-  }, [isPlaying, playInterval]);
+  // Open file browser
+  const openFileBrowser = () => {
+    fileInputRef.current?.click();
+  };
 
-  const handleNext = useCallback(() => {
-    setCurrentStep(prev => Math.min(totalSteps - 1, prev + 1));
-    if (isPlaying) {
-      setIsPlaying(false);
-      if (playInterval) {
-        clearInterval(playInterval);
-        setPlayInterval(null);
-      }
-    }
-  }, [isPlaying, playInterval, totalSteps]);
-
-  const handleReset = useCallback(() => {
-    setCurrentStep(0);
-    setIsPlaying(false);
-    if (playInterval) {
-      clearInterval(playInterval);
-      setPlayInterval(null);
-    }
-  }, [playInterval]);
-
-  // Cleanup interval on unmount
-  React.useEffect(() => {
-    return () => {
-      if (playInterval) {
-        clearInterval(playInterval);
-      }
-    };
-  }, [playInterval]);
+  if (error && !replayFile) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-white text-center max-w-md">
+          <div className="text-red-500 text-xl mb-4">⚠️ File Selection Error</div>
+          <div className="text-gray-300 mb-4">{error}</div>
+          <button
+            onClick={openFileBrowser}
+            className="px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+          >
+            Browse for Replay Files
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <SharedLayout
-      currentTurn={currentTurn}
-      currentPhase={currentPhase}
-      maxTurns={5}
-      showReplayControls={true}
-      replayControls={{
-        onFileSelect: handleFileSelect,
-        onPlayPause: handlePlayPause,
-        onPrevious: handlePrevious,
-        onNext: handleNext,
-        onReset: handleReset,
-        isPlaying,
-        currentStep,
-        totalSteps,
-        selectedFileName
-      }}
-    >
-      {replayFile ? (
-        <ReplayViewer 
-          replayFile={replayFile}
-          externalStep={currentStep}
-          onStepChange={setCurrentStep}
-          onTurnChange={setCurrentTurn}
-          onPhaseChange={setCurrentPhase}
-        />
-      ) : (
-        <div className="h-full flex items-center justify-center">
-          <div className="text-center text-gray-400">
-            <div className="text-xl mb-4">No replay file selected</div>
-            <div className="text-sm">
-              Use the "Browse Replay Files" button above to select a JSON file from ai/event_log/ directory
-            </div>
+    <div className="h-screen bg-gray-900 flex flex-col">
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        onChange={handleFileSelect}
+        style={{ display: 'none' }}
+      />
+
+      {/* File Selection Header */}
+      <div className="bg-gray-800 border-b border-gray-700 p-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold text-white">Replay Viewer</h1>
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={openFileBrowser}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+            >
+              Browse Files
+            </button>
           </div>
         </div>
-      )}
-    </SharedLayout>
+
+        {/* Current File Info */}
+        {selectedFileName && (
+          <div className="mt-2 text-sm text-gray-400">
+            Current file: {selectedFileName}
+          </div>
+        )}
+
+        {/* Error Display */}
+        {error && replayFile && (
+          <div className="mt-2 text-sm text-red-400">
+            {error}
+          </div>
+        )}
+      </div>
+
+      {/* Replay Viewer or Instructions */}
+      <div className="flex-1">
+        {replayFile ? (
+          <ReplayViewer replayFile={replayFile} />
+        ) : (
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center text-gray-400">
+              <div className="text-xl mb-4">No replay file selected</div>
+              <button
+                onClick={openFileBrowser}
+                className="px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+              >
+                Browse for Replay Files
+              </button>
+              <div className="text-sm mt-4">
+                <div>Select JSON files from ai/Event_log/ directory</div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
-};
+}
 
 export default ReplayPage;

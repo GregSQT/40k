@@ -85,18 +85,10 @@ interface ScenarioConfig {
 
 interface ReplayViewerProps {
   replayFile?: string;
-  externalStep?: number;           // NEW: External step control
-  onStepChange?: (step: number) => void;    // NEW: Notify parent of step changes
-  onTurnChange?: (turn: number) => void;    // NEW: Notify parent of turn changes  
-  onPhaseChange?: (phase: string) => void;  // NEW: Notify parent of phase changes
 }
 
 export const ReplayViewer: React.FC<ReplayViewerProps> = ({ 
-  replayFile = 'ai/event_log/train_best_game_replay.json',
-  externalStep,
-  onStepChange,
-  onTurnChange,
-  onPhaseChange
+  replayFile = 'ai/event_log/train_best_game_replay.json' 
 }) => {
   // AI_INSTRUCTIONS.md: Use same config hook as Board.tsx
   const { boardConfig, loading: configLoading, error: configError } = useGameConfig();
@@ -109,9 +101,6 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   const [currentStep, setCurrentStep] = useState(0);
   const [currentUnits, setCurrentUnits] = useState<ReplayUnit[]>([]);
   const [currentEvent, setCurrentEvent] = useState<ReplayEvent | null>(null);
-
-  // Use external step control when provided
-  const effectiveCurrentStep = externalStep !== undefined ? externalStep : currentStep;
   const [battleLog, setBattleLog] = useState<ReplayEvent[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed, setPlaySpeed] = useState(1000); // ms per step
@@ -124,23 +113,6 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   
   // Auto-play interval
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Notify parent of step changes when using internal control
-  useEffect(() => {
-    if (onStepChange && externalStep === undefined) {
-      onStepChange(currentStep);
-    }
-  }, [currentStep, onStepChange, externalStep]);
-
-  // Notify parent of turn/phase changes
-  useEffect(() => {
-    if (onTurnChange) {
-      onTurnChange(getCurrentTurn());
-    }
-    if (onPhaseChange) {
-      onPhaseChange(getCurrentPhase());
-    }
-  }, [effectiveCurrentStep, onTurnChange, onPhaseChange]);
 
 // Action type mapping from the replay file format
 const ACTION_TYPE_MAPPING: Record<string, { name: string; type: string }> = {
@@ -820,12 +792,200 @@ const validateUnitRegistry = () => {
     );
   }
 
-  // Main render - Just the board (layout handled by SharedLayout)
+  // Main render - Layout matching replay layout image
   return (
-    <div 
-      ref={boardRef} 
-      className="w-full h-full flex items-center justify-center"
-      style={{ minHeight: '600px' }}
-    />
+    <div className="h-screen bg-gray-100" style={{display: 'flex'}}>
+      {/* Left Column: Game Board */}
+      <div className="flex flex-col overflow-hidden bg-white" style={{flex: '0 0 auto', width: 'calc(100vw - 450px)', maxWidth: '800px'}}>
+        {/* Top Section: Turn and Phase Progress */}
+        <div className="bg-white p-4 border-b shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-lg font-semibold">
+                Turn {getCurrentTurn()} - Phase Progress
+              </h2>
+              <div className="text-xs text-gray-500 mt-1">
+                {replayFile?.split('/').pop()?.replace('.json', '') || 'Unknown replay'}
+              </div>
+            </div>
+            <div className="text-sm text-gray-600">
+              Step {currentStep + 1} of {replayData?.actions.length || 0}
+            </div>
+          </div>
+          
+          {/* Phase Buttons - AI_GAME.md: move → shoot → charge → combat */}
+          <div className="flex space-x-2">
+            <button className={getPhaseButtonClass('move')}>
+              {isPhaseCompleted('move', getCurrentTurn(), currentStep) ? '✓' : ''} MOVE
+            </button>
+            <button className={getPhaseButtonClass('shoot')}>
+              {isPhaseCompleted('shoot', getCurrentTurn(), currentStep) ? '✓' : ''} SHOOT
+            </button>
+            <button className={getPhaseButtonClass('charge')}>
+              {isPhaseCompleted('charge', getCurrentTurn(), currentStep) ? '✓' : ''} CHARGE
+            </button>
+            <button className={getPhaseButtonClass('combat')}>
+              {isPhaseCompleted('combat', getCurrentTurn(), currentStep) ? '✓' : ''} COMBAT
+            </button>
+          </div>
+        </div>
+        
+        {/* Board Section - AI_INSTRUCTIONS.md: Same board as game feature */}
+        <div className="flex-1 p-4 overflow-auto bg-gray-50">
+          <div 
+            ref={boardRef} 
+            className="w-full h-full flex items-center justify-center"
+            style={{ minHeight: '600px' }}
+          />
+        </div>
+        
+        {/* Bottom Section: Control Panel */}
+        <div className="bg-white p-4 border-t shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={prevStep}
+                disabled={currentStep === 0}
+                className="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ← Prev
+              </button>
+              
+              <button
+                onClick={togglePlay}
+                className={`px-4 py-2 rounded font-medium ${
+                  isPlaying 
+                    ? 'bg-red-600 text-white hover:bg-red-700' 
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                }`}
+              >
+                {isPlaying ? '⏸ Pause' : '▶ Play'}
+              </button>
+              
+              <button
+                onClick={nextStep}
+                disabled={!replayData || currentStep >= replayData.actions.length - 1}
+                className="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next →
+              </button>
+            </div>
+            
+            <div className="flex items-center space-x-2">
+              <label className="text-sm text-gray-600">Speed:</label>
+              <select
+                value={playSpeed}
+                onChange={(e) => setPlaySpeed(Number(e.target.value))}
+                className="px-2 py-1 border rounded text-sm"
+              >
+                <option value={2000}>0.5x</option>
+                <option value={1000}>1x</option>
+                <option value={500}>2x</option>
+                <option value={250}>4x</option>
+              </select>
+            </div>
+          </div>
+          
+          {/* Progress Bar */}
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div
+              className="bg-blue-600 h-2 rounded-full transition-all duration-200"
+              style={{
+                width: replayData ? `${((currentStep + 1) / replayData.actions.length) * 100}%` : '0%'
+              }}
+            />
+          </div>
+        </div>
+      </div>
+      
+        {/* Right Column: Battle Log - Clean dedicated column */}
+        <div className="flex flex-col bg-gray-700 text-white" style={{width: '450px', flexShrink: 0}}>
+          {/* Header - Dark style matching image */}
+          <div className="p-3 bg-gray-800 border-b border-gray-600">
+            <h3 className="text-lg font-semibold flex items-center">
+              <span className="mr-2">✕</span>
+              Battle Log
+            </h3>
+          </div>
+          
+          {/* Battle Log Content - Full height scrollable */}
+          <div className="flex-1 overflow-y-auto p-3">
+            {(() => {
+              console.log('🔍 Debug battleLog:', battleLog.length, 'currentStep:', currentStep, 'battleLog data:', battleLog);
+              return null;
+            })()}
+            {battleLog.length === 0 ? (
+              <div className="text-gray-400 text-sm">No actions yet...</div>
+            ) : (
+              <div className="space-y-4">
+                {/* Table format for battle log */}
+                <div className="bg-gray-800 rounded-lg border border-gray-600 overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-900 border-b border-gray-600">
+                      <tr>
+                        <th className="text-center p-1 font-semibold text-gray-300 w-8">Turn</th>
+                        <th className="text-center p-1 font-semibold text-gray-300 w-8">Player</th>
+                        <th className="text-center p-1 font-semibold text-gray-300 w-10">Phase</th>
+                        <th className="text-center p-1 font-semibold text-gray-300 w-8">Unit</th>
+                        <th className="text-center p-1 font-semibold text-gray-300 w-12">Type</th>
+                        <th className="text-center p-1 font-semibold text-gray-300 w-16">Reward</th>
+                        <th className="text-center p-1 font-semibold text-gray-300" style={{width: '600px', minWidth: '200px'}}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {battleLog.slice(0, currentStep + 1).map((event, index) => (
+                        <tr 
+                          key={index}
+                          className={`border-b border-gray-600 cursor-pointer transition-colors ${
+                            index === currentStep 
+                              ? 'bg-blue-600 font-medium' 
+                              : 'hover:bg-gray-600'
+                          }`}
+                          onClick={() => setCurrentStep(index)}
+                        >
+                          <td className="p-1 text-gray-300 text-center">{event.turn || 'N/A'}</td>
+                          <td className="p-1 text-gray-300 text-center">{event.player}</td>
+                          <td className="p-1 text-gray-300 capitalize">{event.phase || 'unknown'}</td>
+                          <td className="p-1 text-gray-300 text-center">{(event as any).unit_id}</td>
+                          <td className="p-1 text-gray-300">{(event as any).unit_type}</td>
+                          <td className="p-1 text-gray-300 text-right">
+                            {((event as any).reward !== undefined || (event as any).penalty_amount !== undefined) ? (
+                              <span className={((event as any).reward || (event as any).penalty_amount || 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                {((event as any).reward || (event as any).penalty_amount || 0) >= 0 ? '+' : ''}{((event as any).reward || (event as any).penalty_amount || 0)?.toFixed(1)}
+                              </span>
+                            ) : (
+                              <span className="text-gray-500">-</span>
+                            )}
+                          </td>
+                          <td className="p-1 text-gray-300" style={{width: '600px', minWidth: '200px'}}>
+                            <div className="text-white" style={{wordWrap: 'break-word'}}>
+                              {event.description || (event as any).penalty_type || `Action ${(event as any).action_type} by unit ${(event as any).unit_id}`}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {/* Game Info Footer */}
+          {replayData && (
+            <div className="p-3 border-t border-gray-600 bg-gray-800">
+              <div className="grid grid-cols-2 gap-2 text-xs text-gray-300 mb-2">
+                <div>Winner: Player {replayData.game_info?.winner}</div>
+                <div>Total Turns: {replayData.game_info?.total_turns}</div>
+                <div>AI Units: {replayData.game_info?.ai_units_final}</div>
+                <div>Enemy Units: {replayData.game_info?.enemy_units_final}</div>
+              </div>
+              <div className="text-xs text-gray-400 pt-2 border-t border-gray-700 whitespace-nowrap overflow-hidden text-ellipsis">
+                Log file: {replayFile}
+              </div>
+            </div>
+          )}
+        </div>
+    </div>
   );
 };

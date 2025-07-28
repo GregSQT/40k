@@ -438,7 +438,6 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
         col: unitDef.col,
         row: unitDef.row,
         color: unitDef.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1,
-        BASE: 1, // Default BASE value since unit classes don't define it
         MOVE: stats.MOVE,
         HP_MAX: stats.HP_MAX,
         CUR_HP: stats.HP_MAX,
@@ -607,8 +606,11 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
       <Board
         units={currentUnits as Unit[]}
         selectedUnitId={null}
-        eligibleUnitIds={[]}
         mode="replay"
+        isReplayMode={true}
+        replayData={replayData as any}
+        currentStep={currentStep}
+        actingUnitId={actingUnitId}
         movePreview={null}
         attackPreview={null}
         currentPlayer={0}
@@ -616,21 +618,6 @@ export const ReplayBoard: React.FC<ReplayBoardProps> = ({
         unitsCharged={[]}
         unitsAttacked={[]}
         phase="move"
-        getChargeDestinations={() => []} // No charge destinations in replay mode
-        gameState={{
-          units: currentUnits,
-          currentPlayer: 0,
-          phase: "move",
-          mode: "select",
-          selectedUnitId: null,
-          unitsMoved: [],
-          unitsCharged: [],
-          unitsAttacked: [],
-          unitsFled: [],
-          targetPreview: null,
-          currentTurn: 1,
-          unitChargeRolls: {}
-        }}
         onSelectUnit={() => {}} // No interaction in replay mode
         onStartMovePreview={() => {}} // No interaction in replay mode
         onStartAttackPreview={() => {}} // No interaction in replay mode

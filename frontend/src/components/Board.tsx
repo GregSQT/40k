@@ -6,7 +6,7 @@ import { useGameConfig } from '../hooks/useGameConfig';
 import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
 import { renderUnit } from './UnitRenderer';
-import { isMovementBlocked, hasLineOfSight, isChargeBlocked, offsetToCube, cubeDistance, getHexLine, calculateAttackPreview } from '../utils/gameHelpers';
+import { isMovementBlocked, hasLineOfSight, isChargeBlocked, offsetToCube, cubeDistance, getHexLine } from '../utils/gameHelpers';
 
 // Import hex coordinate functions from gameHelpers (no duplication)
 
@@ -23,7 +23,7 @@ function getHexPolygonPoints(cx: number, cy: number, size: number) {
   return Array.from({ length: 6 }, (_, i) => hexCorner(cx, cy, size, i)).flat();
 }
 
-type Mode = "select" | "movePreview" | "attackPreview" | "chargePreview" | "replay";
+type Mode = "select" | "movePreview" | "attackPreview" | "chargePreview";
 
 type BoardProps = {
   units: Unit[];
@@ -665,48 +665,83 @@ export default function Board({
             }
             range = previewUnit.RNG_RNG;
             
-            // During move phase with movePreview, show red RNG_RNG hexes around new position (using centralized function)
-            if (phase === "move" && mode === "movePreview") {
-              const previewResults = calculateAttackPreview(
-                attackFromCol,
-                attackFromRow,
-                range,
-                units,
-                previewUnit,
-                boardConfig.wall_hexes,
-                BOARD_COLS,
-                BOARD_ROWS
-              );
+            // During shooting phase, show different colored hexes based on line of sight
+            if (phase === "shoot") {
+              // First, find all enemies in range and mark cover paths
+              const coverPathHexes = new Set<string>();
+              const enemyUnits = units.filter(u => u.player !== previewUnit!.player);
               
-              attackCells.push(...previewResults.attackCells);
-              coverCells.push(...previewResults.coverCells);
-              for (const target of previewResults.blockedTargets) {
-                blockedTargets.add(target);
+              // First process actual enemy units
+              for (const enemy of enemyUnits) {
+                const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
+                if (distance > 0 && distance <= range) {
+                  
+                  const lineOfSight = hasLineOfSight(
+                    { col: attackFromCol, row: attackFromRow },
+                    { col: enemy.col, row: enemy.row },
+                    boardConfig.wall_hexes || []
+                  );
+                  
+                  
+                  if (lineOfSight.canSee && lineOfSight.inCover) {
+                    // Mark this enemy as in cover
+                    coverCells.push({ col: enemy.col, row: enemy.row });
+                    coverTargets.add(`${enemy.col},${enemy.row}`);
+                    
+                    // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
+                    const pathHexes = getHexLine(attackFromCol, attackFromRow, enemy.col, enemy.row);
+                    const wallHexSet = new Set<string>(
+                      (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+                    );
+                    pathHexes.forEach(hex => {
+                      const hexKey = `${hex.col},${hex.row}`;
+                      if (!wallHexSet.has(hexKey)) {
+                        coverPathHexes.add(hexKey);
+                      }
+                    });
+                  } else if (lineOfSight.canSee) {
+                    // Clear line of sight enemy
+                    attackCells.push({ col: enemy.col, row: enemy.row });
+                  } else {
+                    // Blocked enemy
+                    blockedTargets.add(`${enemy.col},${enemy.row}`);
+                  }
+                }
               }
-              for (const target of previewResults.coverTargets) {
-                coverTargets.add(target);
-              }
-            }
-            // During shooting phase, show different colored hexes based on line of sight (using centralized function)
-            else if (phase === "shoot") {
-              const shootingResults = calculateAttackPreview(
-                attackFromCol,
-                attackFromRow,
-                range,
-                units,
-                previewUnit,
-                boardConfig.wall_hexes,
-                BOARD_COLS,
-                BOARD_ROWS
-              );
               
-              attackCells.push(...shootingResults.attackCells);
-              coverCells.push(...shootingResults.coverCells);
-              for (const target of shootingResults.blockedTargets) {
-                blockedTargets.add(target);
-              }
-              for (const target of shootingResults.coverTargets) {
-                coverTargets.add(target);
+              // Now show all hexes in range with appropriate colors
+              for (let col = 0; col < BOARD_COLS; col++) {
+                for (let row = 0; row < BOARD_ROWS; row++) {
+                  const targetCube = offsetToCube(col, row);
+                  const dist = cubeDistance(centerCube, targetCube);
+                  if (dist > 0 && dist <= range) {
+                    const hexKey = `${col},${row}`;
+                    const hasEnemy = units.some(u => 
+                      u.player !== previewUnit!.player && 
+                      u.col === col && 
+                      u.row === row
+                    );
+                    
+                    if (!hasEnemy) {
+                      // For empty hexes, show orange if part of cover path, red if clear
+                      if (coverPathHexes.has(hexKey)) {
+                        coverCells.push({ col, row });
+                      } else {
+                        const lineOfSight = hasLineOfSight(
+                          { col: attackFromCol, row: attackFromRow },
+                          { col, row },
+                          boardConfig.wall_hexes || []
+                        );
+                        
+                        if (lineOfSight.canSee && !lineOfSight.inCover) {
+                          attackCells.push({ col, row });
+                        } else if (lineOfSight.canSee && lineOfSight.inCover) {
+                          coverCells.push({ col, row });
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
