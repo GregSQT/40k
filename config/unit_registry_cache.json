@@ -186,11 +186,15 @@
     "SpaceMarine"
   ],
   "roles": [
-    "Melee",
-    "Ranged"
+    "Ranged",
+    "Melee"
   ],
   "faction_role_combinations": [
     [
+      "SpaceMarine",
+      "Ranged"
+    ],
+    [
       "Tyranid",
       "Ranged"
     ],
@@ -201,27 +205,27 @@
     [
       "Tyranid",
       "Melee"
-    ],
-    [
-      "SpaceMarine",
-      "Ranged"
     ]
   ],
   "faction_role_matrix": {
     "Tyranid": [],
     "SpaceMarine": [],
-    "SpaceMarine_Melee": [
-      "AssaultIntercessor",
+    "SpaceMarine_Infantry_Elite_MeleeSwarm": [
+      "AssaultIntercessor"
+    ],
+    "SpaceMarine_Infantry_LeaderElite_MeleeElite": [
       "CaptainGravis"
     ],
-    "SpaceMarine_Ranged": [
+    "SpaceMarine_Infantry_Elite_RangedSwarm": [
       "Intercessor"
     ],
-    "Tyranid_Melee": [
-      "Carnifex",
+    "Tyranid_Infantry_Elite_MeleeElite": [
+      "Carnifex"
+    ],
+    "Tyranid_Infantry_Swarm_MeleeSwarm": [
       "Hormagaunt"
     ],
-    "Tyranid_Ranged": [
+    "Tyranid_Infantry_Swarm_RangedSwarm": [
       "Termagant"
     ]
   }

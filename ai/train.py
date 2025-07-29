@@ -28,6 +28,7 @@ from stable_baselines3.common.monitor import Monitor
 from ai.scenario_manager import ScenarioManager
 from ai.multi_agent_trainer import MultiAgentTrainer
 from config_loader import get_config_loader
+from ai.game_replay_logger import GameReplayIntegration
 import torch
 
 class ReplaySavingWrapper:
@@ -119,10 +120,13 @@ def create_model(config, training_config_name="default", rewards_config_name="de
     if not os.path.isfile(scenario_file):
         raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
     base_env = W40KEnv(rewards_config=rewards_config_name, training_config_name=training_config_name)
-    env = Monitor(base_env)
+    
+    # Enhance environment with our advanced replay logger BEFORE Monitor wrapping
+    enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
+    env = Monitor(enhanced_env)
     
     # Store reference to base environment for replay access
-    env.unwrapped.base_env = base_env
+    env.unwrapped.base_env = enhanced_env
     
     model_path = config.get_model_path()
     
@@ -183,10 +187,13 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     base_env = W40KEnv(rewards_config=rewards_config_name, 
                       training_config_name=training_config_name,
                       controlled_agent=agent_key)
-    env = Monitor(base_env)
+    
+    # Enhance environment with our advanced replay logger BEFORE Monitor wrapping
+    enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
+    env = Monitor(enhanced_env)
     
     # Store reference to base environment for replay access
-    env.unwrapped.base_env = base_env
+    env.unwrapped.base_env = enhanced_env
     
     # Agent-specific model path
     model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
@@ -226,8 +233,11 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     
     # Evaluation callback - test model periodically (use default scenario for consistency)
     base_eval_env = W40KEnv(rewards_config="default", training_config_name=training_config_name, scenario_file=None)
-    eval_env = Monitor(base_eval_env)
-    eval_env.unwrapped.base_env = base_eval_env
+    
+    # Enhance evaluation environment with our advanced replay logger
+    enhanced_eval_env = GameReplayIntegration.enhance_training_env(base_eval_env)
+    eval_env = Monitor(enhanced_eval_env)
+    eval_env.unwrapped.base_env = enhanced_eval_env
     eval_freq=training_config['eval_freq']
     total_timesteps = training_config['total_timesteps']
     

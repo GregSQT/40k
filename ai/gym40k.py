@@ -323,17 +323,22 @@ class W40KEnv(gym.Env):
             if agent_key and agent_key in self.rewards_config:
                 return self.rewards_config.get(agent_key, {})
         
-        # Fallback to old system with corrected naming
-        if unit.get("is_ranged", False):
-            # Try corrected agent names first, then fallback to old names
-            return (self.rewards_config.get("SpaceMarine_Ranged", {}) or 
-                   self.rewards_config.get("Tyranid_Ranged", {}) or
-                   self.rewards_config.get("SpaceMarineRanged", {}))
+        # Fallback to new agent naming system
+        unit_type = unit.get("unit_type", "")
+        
+        # Map specific units to new agent types
+        if unit_type == "Intercessor":
+            return self.rewards_config.get("SpaceMarine_Infantry_Ranged", {})
+        elif unit_type == "AssaultIntercessor":
+            return self.rewards_config.get("SpaceMarine_Infantry_Melee", {})
+        elif unit_type == "CaptainGravis":
+            return self.rewards_config.get("SpaceMarine_Leader_Melee", {})
+        elif unit.get("is_ranged", False):
+            # Tyranid ranged fallback
+            return self.rewards_config.get("Tyranid_Ranged", {})
         else:
-            # Try corrected agent names first, then fallback to old names  
-            return (self.rewards_config.get("SpaceMarine_Melee", {}) or
-                   self.rewards_config.get("Tyranid_Melee", {}) or
-                   self.rewards_config.get("SpaceMarineMelee", {}))
+            # Tyranid melee fallback
+            return self.rewards_config.get("Tyranid_Melee", {})
 
     def reset(self, seed=None, options=None):
         """Reset environment to initial state."""

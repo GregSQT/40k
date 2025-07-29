@@ -53,14 +53,16 @@ async function discoverUnitsFromRoster(): Promise<UnitRegistryConfig> {
     "AssaultIntercessor": "spaceMarine/AssaultIntercessor", 
     "SpaceMarineMeleeUnit": "spaceMarine/SpaceMarineMeleeUnit",
     "SpaceMarineRangedUnit": "spaceMarine/SpaceMarineRangedUnit",
+    "CaptainGravis": "spaceMarine/CaptainGravis",
     
     // Tyranids  
     "Termagant": "tyranid/Termagant",
     "Hormagaunt": "tyranid/Hormagaunt",
+    "Carnifex": "tyranid/Carnifex",
     
     // Add more as they become available
-    // "Carnifex": "tyranid/Carnifex",
-    // "CaptainGravis": "spaceMarine/CaptainGravis",
+    
+    
   };
   
   return { units: knownUnits };

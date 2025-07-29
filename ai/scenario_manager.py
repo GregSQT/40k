@@ -238,20 +238,35 @@ class ScenarioManager:
         scenario_units = []
         unit_id = 1
         
-        # Generate units for player 0 - Multiple units for better battles
-        agent_0_units = self.unit_registry.get_units_for_model(player_0_agent)
+        # Generate units for player 0 - Use template composition if specified
+        if player_0_agent in template.agent_compositions:
+            agent_0_units = template.agent_compositions[player_0_agent]
+            print(f"🎯 Using template composition for {player_0_agent}: {agent_0_units}")
+        else:
+            agent_0_units = self.unit_registry.get_units_for_model(player_0_agent)
+            print(f"⚠️ No template composition found for {player_0_agent}, using registry: {agent_0_units}")
+        
         if not agent_0_units:
             raise ValueError(f"No units found for agent: {player_0_agent}")
         
-        deployment_0 = template.deployment_zones.get(0, [(0, 0), (1, 0)])  # Ensure multiple positions
+        # CRITICAL FIX: Handle string keys from JSON properly
+        deployment_0 = template.deployment_zones.get(0) or template.deployment_zones.get("0", [(0, 0), (1, 0)])
         units_per_player = units_per_player_setup  # Deploy 2 units per player for better battles
         
-        # Validate enough deployment positions
+        # Validate enough deployment positions with detailed error
         if len(deployment_0) < units_per_player:
-            raise ValueError(f"Not enough deployment positions for player 0: need {units_per_player}, got {len(deployment_0)} in template {template_name}")
+            raise ValueError(f"SCENARIO GENERATION ERROR: Template '{template_name}' has insufficient deployment positions for player 0: need {units_per_player}, got {len(deployment_0)}. Positions: {deployment_0}")
+        
+        # Validate positions are unique
+        position_set = set(tuple(pos) for pos in deployment_0[:units_per_player])
+        if len(position_set) != units_per_player:
+            raise ValueError(f"SCENARIO GENERATION ERROR: Template '{template_name}' has duplicate deployment positions for player 0: {deployment_0[:units_per_player]}")
         
         for i in range(units_per_player):
             pos = deployment_0[i]  # Use unique positions - NO CYCLING
+            # Additional validation: ensure position is valid
+            if not isinstance(pos, (list, tuple)) or len(pos) != 2:
+                raise ValueError(f"SCENARIO GENERATION ERROR: Invalid position format in template '{template_name}': {pos}")
             unit_type = agent_0_units[i % len(agent_0_units)]  # Cycle through unit types
             scenario_units.append({
                 "id": unit_id,
@@ -262,19 +277,34 @@ class ScenarioManager:
             })
             unit_id += 1
         
-        # Generate units for player 1 - Multiple units for better battles
-        agent_1_units = self.unit_registry.get_units_for_model(player_1_agent)
+        # Generate units for player 1 - Use template composition if specified
+        if player_1_agent in template.agent_compositions:
+            agent_1_units = template.agent_compositions[player_1_agent]
+            print(f"🎯 Using template composition for {player_1_agent}: {agent_1_units}")
+        else:
+            agent_1_units = self.unit_registry.get_units_for_model(player_1_agent)
+            print(f"⚠️ No template composition found for {player_1_agent}, using registry: {agent_1_units}")
+        
         if not agent_1_units:
             raise ValueError(f"No units found for agent: {player_1_agent}")
         
-        deployment_1 = template.deployment_zones.get(1, [(23, 17), (22, 17)])  # Ensure multiple positions
+        # CRITICAL FIX: Handle string keys from JSON properly  
+        deployment_1 = template.deployment_zones.get(1) or template.deployment_zones.get("1", [(23, 17), (22, 17)])
         
-        # Validate enough deployment positions
+        # Validate enough deployment positions with detailed error
         if len(deployment_1) < units_per_player:
-            raise ValueError(f"Not enough deployment positions for player 1: need {units_per_player}, got {len(deployment_1)} in template {template_name}")
+            raise ValueError(f"SCENARIO GENERATION ERROR: Template '{template_name}' has insufficient deployment positions for player 1: need {units_per_player}, got {len(deployment_1)}. Positions: {deployment_1}")
+        
+        # Validate positions are unique
+        position_set = set(tuple(pos) for pos in deployment_1[:units_per_player])
+        if len(position_set) != units_per_player:
+            raise ValueError(f"SCENARIO GENERATION ERROR: Template '{template_name}' has duplicate deployment positions for player 1: {deployment_1[:units_per_player]}")
         
         for i in range(units_per_player):
             pos = deployment_1[i]  # Use unique positions - NO CYCLING
+            # Additional validation: ensure position is valid
+            if not isinstance(pos, (list, tuple)) or len(pos) != 2:
+                raise ValueError(f"SCENARIO GENERATION ERROR: Invalid position format in template '{template_name}': {pos}")
             unit_type = agent_1_units[i % len(agent_1_units)]  # Cycle through unit types
             scenario_units.append({
                 "id": unit_id,
@@ -285,6 +315,24 @@ class ScenarioManager:
             })
             unit_id += 1
         
+        # FINAL VALIDATION: Check for position conflicts in generated scenario
+        position_conflicts = {}
+        for unit in scenario_units:
+            pos_key = f"{unit['col']},{unit['row']}"
+            if pos_key not in position_conflicts:
+                position_conflicts[pos_key] = []
+            position_conflicts[pos_key].append(f"Unit_{unit['id']}_{unit['unit_type']}")
+        
+        # Report any conflicts
+        conflicts_found = False
+        for pos, units_at_pos in position_conflicts.items():
+            if len(units_at_pos) > 1:
+                conflicts_found = True
+                print(f"❌ SCENARIO CONFLICT DETECTED at position {pos}: {units_at_pos}")
+        
+        if conflicts_found:
+            raise ValueError(f"SCENARIO GENERATION FAILED: Unit position conflicts detected in template '{template_name}'. Check deployment zones.")
+        
         # Create scenario metadata
         scenario = {
             "metadata": {
@@ -294,11 +342,14 @@ class ScenarioManager:
                 "board_size": list(template.board_size),
                 "difficulty": template.difficulty,
                 "training_focus": template.training_focus,
-                "generated_timestamp": self._get_timestamp()
+                "generated_timestamp": self._get_timestamp(),
+                "units_generated": len(scenario_units),
+                "validation_passed": True
             },
             "units": scenario_units
         }
         
+        print(f"✅ Scenario '{template_name}' generated successfully: {len(scenario_units)} units, no conflicts")
         return scenario
 
     def get_balanced_training_rotation(self, total_episodes: int) -> List[TrainingMatchup]:

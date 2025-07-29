@@ -173,27 +173,139 @@ class UnitRegistry:
         return properties
     
     def _build_faction_role_matrix(self):
-        """Build the faction-role matrix for model creation."""
+        """Build the faction-role matrix with custom agent mappings."""
+        # Initialize faction containers
         for faction in self.factions:
             self.faction_role_matrix[faction] = []
-            
+        
+        # Advanced 4-part agent mapping: Faction_MoveType_TankingLevel_AttackTypeTarget
         for unit_type, unit_data in self.units.items():
             faction = unit_data['faction']
             role = unit_data['role']
-            faction_role_key = f"{faction}_{role}"
             
-            if faction_role_key not in self.faction_role_matrix:
-                self.faction_role_matrix[faction_role_key] = []
+            # Generate 4-part agent key based on unit characteristics
+            agent_key = self._generate_advanced_agent_key(unit_type, unit_data)
             
-            self.faction_role_matrix[faction_role_key].append(unit_type)
+            # Add to matrix
+            if agent_key not in self.faction_role_matrix:
+                self.faction_role_matrix[agent_key] = []
+            
+            self.faction_role_matrix[agent_key].append(unit_type)
+        
+        print(f"🎯 Built faction-role matrix: {list(self.faction_role_matrix.keys())}")
+    
+    def _generate_advanced_agent_key(self, unit_type: str, unit_data: Dict) -> str:
+        """Generate 4-part agent key: Faction_MoveType_TankingLevel_AttackTypeTarget"""
+        faction = unit_data['faction']
+        role = unit_data['role']  # "Melee" or "Ranged"
+        
+        # Determine MoveType based on unit characteristics
+        move_type = self._determine_move_type(unit_type, unit_data)
+        
+        # Determine TankingLevel based on survivability
+        tanking_level = self._determine_tanking_level(unit_type, unit_data)
+        
+        # Determine AttackTypeTarget based on role and intended targets
+        attack_target = self._determine_attack_target(unit_type, unit_data, role)
+        
+        return f"{faction}_{move_type}_{tanking_level}_{attack_target}"
+    
+    def _determine_move_type(self, unit_type: str, unit_data: Dict) -> str:
+        """Determine movement type based on unit characteristics."""
+        # Check for vehicle keywords
+        if any(keyword in unit_type.lower() for keyword in ['tank', 'predator', 'rhino', 'vehicle']):
+            return "Vehicle"
+        
+        # Check for jump/fly keywords
+        if any(keyword in unit_type.lower() for keyword in ['jump', 'fly', 'assault']):
+            # For now, Assault units are still Infantry until we add actual jump pack units
+            return "Infantry"
+        
+        # Check for bike keywords
+        if any(keyword in unit_type.lower() for keyword in ['bike', 'speeder']):
+            return "Bike"
+        
+        # Default to Infantry for current units
+        return "Infantry"
+    
+    def _determine_tanking_level(self, unit_type: str, unit_data: Dict) -> str:
+        """Determine tanking level based on wounds and armor."""
+        hp_max = unit_data.get('HP_MAX', 2)
+        armor_save = unit_data.get('ARMOR_SAVE', 4)
+        invul_save = unit_data.get('INVUL_SAVE', 0)
+        
+        # Determine if this is a leader unit
+        is_leader = any(keyword in unit_type.lower() for keyword in ['captain', 'commander', 'leader', 'hq'])
+        
+        if hp_max == 1:
+            return "Swarm"
+        elif hp_max <= 3 and armor_save >= 4:
+            if is_leader:
+                return "LeaderTroop"
+            else:
+                return "Troop"
+        elif hp_max >= 4 or armor_save <= 3 or invul_save > 0:
+            if is_leader:
+                return "LeaderElite"
+            else:
+                return "Elite"
+        elif hp_max >= 10:
+            if hp_max >= 16:
+                return "VehicleHeavy"
+            elif hp_max >= 11:
+                return "VehicleMedium"
+            else:
+                return "VehicleLight"
+        else:
+            return "Troop"  # Default fallback
+    
+    def _determine_attack_target(self, unit_type: str, unit_data: Dict, role: str) -> str:
+        """Determine attack type and preferred target based on weapons and role."""
+        rng_dmg = unit_data.get('RNG_DMG', 0)
+        cc_dmg = unit_data.get('CC_DMG', 0)
+        rng_rng = unit_data.get('RNG_RNG', 0)
+        rng_str = unit_data.get('RNG_STR', 4)
+        cc_str = unit_data.get('CC_STR', 4)
+        
+        # Determine primary attack type
+        if role == "Ranged" or rng_dmg > cc_dmg:
+            attack_type = "Ranged"
+            primary_strength = rng_str
+            primary_damage = rng_dmg
+        else:
+            attack_type = "Melee"
+            primary_strength = cc_str
+            primary_damage = cc_dmg
+        
+        # Determine target preference based on weapon characteristics
+        if primary_damage == 1 and primary_strength <= 4:
+            target_type = "Swarm"  # Anti-infantry weapons
+        elif primary_damage <= 2 and primary_strength <= 5:
+            target_type = "Troop"  # Standard infantry weapons
+        elif primary_damage >= 2 or primary_strength >= 6:
+            target_type = "Elite"  # High-damage weapons for elite targets
+        else:
+            target_type = "Troop"  # Default
+        
+        # Special cases for specific units
+        if unit_type == "Termagant":
+            target_type = "Swarm"  # Termagants specialize in anti-swarm
+        elif unit_type == "Intercessor":
+            target_type = "Swarm"  # Intercessors are good at clearing weak targets
+        elif unit_type == "CaptainGravis":
+            target_type = "Elite"  # Captains hunt elite targets
+        elif unit_type == "Carnifex":
+            target_type = "Elite"  # Carnifex breaks elite units
+        
+        return f"{attack_type}{target_type}"
     
     def get_model_key(self, unit_type: str) -> str:
-        """Get the model key for a given unit type."""
+        """Get the model key for a given unit type using 4-part advanced mapping."""
         if unit_type not in self.units:
             raise ValueError(f"Unknown unit type: {unit_type}")
         
         unit_data = self.units[unit_type]
-        return f"{unit_data['faction']}_{unit_data['role']}"
+        return self._generate_advanced_agent_key(unit_type, unit_data)
     
     def get_required_models(self) -> List[str]:
         """Get list of all required model keys."""
