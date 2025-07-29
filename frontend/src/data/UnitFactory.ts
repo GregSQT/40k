@@ -93,7 +93,6 @@ export interface Unit {
   col: number;
   row: number;
   color: number;
-  BASE: number;
   MOVE: number;
   HP_MAX: number;
   RNG_RNG: number;
@@ -158,7 +157,6 @@ export function createUnit(params: {
     col: params.col,
     row: params.row,
     color: params.color,
-    BASE: UnitClass.BASE,
     MOVE: UnitClass.MOVE,
     HP_MAX: UnitClass.HP_MAX,
     RNG_RNG: UnitClass.RNG_RNG,

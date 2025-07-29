@@ -50,6 +50,7 @@ interface ReplayUnit {
   RNG_DMG: number;
   CC_DMG: number;
   ICON: string;
+  ICON_SCALE?: number;
 }
 
 interface ReplayData {
@@ -333,7 +334,8 @@ const validateUnitRegistry = () => {
       RNG_RNG: UnitClass.RNG_RNG,
       RNG_DMG: UnitClass.RNG_DMG,
       CC_DMG: UnitClass.CC_DMG,
-      ICON: UnitClass.ICON
+      ICON: UnitClass.ICON,
+      ICON_SCALE: UnitClass.ICON_SCALE
     };
   }, []);
   useEffect(() => {
@@ -430,7 +432,7 @@ const validateUnitRegistry = () => {
               RNG_DMG: stats.RNG_DMG,
               CC_DMG: stats.CC_DMG,
               ICON: `icons/${unit.unit_type}${unit.player === 0 ? '_red' : ''}.webp`,
-              BASE: stats.HP_MAX  // Add missing BASE property
+              ICON_SCALE: stats.ICON_SCALE
             };
           });
           console.log('✅ Processed units:', processedUnits);
@@ -532,8 +534,7 @@ const validateUnitRegistry = () => {
           ...unit,
           name: unit.unit_type,
           type: unit.unit_type,
-          color: unit.COLOR,
-          BASE: unit.HP_MAX
+          color: unit.COLOR
         };
 
         renderUnit({
@@ -544,15 +545,14 @@ const validateUnitRegistry = () => {
           boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-          phase: 'move', mode: 'normal', currentPlayer: 0, selectedUnitId: null, 
+          phase: 'move', mode: 'select', currentPlayer: 0, selectedUnitId: null, 
           unitsMoved: [], unitsCharged: [], unitsAttacked: [], unitsFled: [],
           combatSubPhase: undefined, combatActivePlayer: undefined,
           units: units.map(u => ({
             ...u,
             name: u.unit_type,
             type: u.unit_type,
-            color: u.COLOR,
-            BASE: u.HP_MAX
+            color: u.COLOR
           })), chargeTargets: [], combatTargets: [], targetPreview: null,
           onConfirmMove: () => {}, parseColor
         });
@@ -678,7 +678,8 @@ const validateUnitRegistry = () => {
           RNG_RNG: stats.RNG_RNG,
           RNG_DMG: stats.RNG_DMG,
           CC_DMG: stats.CC_DMG,
-          ICON: unit.player === 0 ? `icons/${unit.unit_type}_red.webp` : stats.ICON
+          ICON: unit.player === 0 ? `icons/${unit.unit_type}_red.webp` : stats.ICON,
+          ICON_SCALE: stats.ICON_SCALE
         };
       });
       

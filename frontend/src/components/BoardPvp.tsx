@@ -785,6 +785,22 @@ export default function Board({
         onCancelTargetPreview
       });
 
+      // ✅ SETUP BOARD INTERACTIONS using shared BoardInteractions component
+      setupBoardInteractions(app, boardConfig, {
+        phase,
+        mode,
+        selectedUnitId,
+        units,
+        availableCells,
+        attackCells,
+        coverCells,
+        chargeCells,
+        onCancelCharge,
+        onCancelMove,
+        targetPreview,
+        onCancelTargetPreview
+      });
+
       // ✅ UNIFIED UNIT RENDERING USING COMPONENT
       for (const unit of units) {
         const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;

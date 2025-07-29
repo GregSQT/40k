@@ -19,7 +19,6 @@ export interface Unit {
   col: number;
   row: number;
   color: number;
-  BASE: number;
   MOVE: number;
   HP_MAX: number;
   CUR_HP?: number;
