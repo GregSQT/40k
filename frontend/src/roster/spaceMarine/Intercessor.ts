@@ -28,6 +28,11 @@ export class Intercessor extends SpaceMarineRangedUnit {
   static CC_AP = 0;            // Melee attack Armor penetration
   static CC_DMG = 1;           // Melee attack : damages
 
+  // AI CLASSIFICATION
+  static TANKING_LEVEL = "Troop";      // Troop: 2 wounds, 3+ save
+  static MOVE_TYPE = "Infantry";       // Standard infantry movement
+  static TARGET_TYPE = "Swarm";        // RangedSwarm specialist - bolt rifles vs hordes
+
   static ICON = "/icons/Intercessor.webp"; // Path relative to public folder
   static ICON_SCALE = 1.6;     // Size of the icon
 

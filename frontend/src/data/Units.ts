@@ -2,7 +2,7 @@
 
 import { createUnit } from "@data/UnitFactory";
 
-export type { UnitType, Unit } from "@data/UnitFactory";
+export type { Unit } from "@data/UnitFactory";
 
 export const initialUnits = [
   // AI units

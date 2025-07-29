@@ -28,6 +28,11 @@ export class Hormagaunt extends TyranidMeleeUnit {
   static CC_AP = 1;            // Melee attack Armor penetration
   static CC_DMG = 1;           // Melee attack : damages
 
+  // AI CLASSIFICATION
+  static TANKING_LEVEL = "Swarm";      // Swarm: 1 wound, fragile
+  static MOVE_TYPE = "Infantry";       // Fast infantry movement
+  static TARGET_TYPE = "Swarm";        // MeleeSwarm specialist - mob assault
+
   static ICON = "/icons/Hormagaunt.webp"; // Path relative to public folder
   static ICON_SCALE = 1.4;     // Size of the icon
 

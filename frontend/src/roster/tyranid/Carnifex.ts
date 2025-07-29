@@ -1,4 +1,4 @@
-// frontend/src/roster/spaceMarine/Carnifex.ts
+// frontend/src/roster/tyranid/Carnifex.ts
 
 import { TyranidMeleeUnit } from "./TyranidMeleeUnit";
 
@@ -27,6 +27,11 @@ export class Carnifex extends TyranidMeleeUnit {
   static CC_STR = 9;           // Melee attack Strength
   static CC_AP = 2;            // Melee attack Armor penetration
   static CC_DMG = 3;           // Melee attack : damages
+
+  // AI CLASSIFICATION
+  static TANKING_LEVEL = "Elite";      // Elite: 8 wounds, 2+ save - heavy armor
+  static MOVE_TYPE = "Infantry";       // Monster movement (treated as infantry)
+  static TARGET_TYPE = "Elite";        // MeleeElite specialist - monster vs elite
 
   static ICON = "/icons/Carnifex.webp"; // Path relative to public folder
   static ICON_SCALE = 2.5;     // Size of the icon

@@ -29,6 +29,11 @@ export class CaptainGravis extends SpaceMarineMeleeUnit {
   static CC_AP = 2;            // Melee attack Armor penetration
   static CC_DMG = 2;           // Melee attack : damages
 
+  // AI CLASSIFICATION
+  static TANKING_LEVEL = "LeaderElite"; // LeaderElite: 6+ wounds, 3+ save + invul
+  static MOVE_TYPE = "Infantry";        // Standard infantry movement
+  static TARGET_TYPE = "Elite";         // MeleeElite specialist - hunt elite targets
+
   static ICON = "/icons/CaptainGravis.webp"; // Path relative to public folder
   static ICON_SCALE = 1.8;     // Size of the icon
 

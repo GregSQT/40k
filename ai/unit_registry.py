@@ -199,14 +199,10 @@ class UnitRegistry:
         faction = unit_data['faction']
         role = unit_data['role']  # "Melee" or "Ranged"
         
-        # Determine MoveType based on unit characteristics
-        move_type = self._determine_move_type(unit_type, unit_data)
-        
-        # Determine TankingLevel based on survivability
-        tanking_level = self._determine_tanking_level(unit_type, unit_data)
-        
-        # Determine AttackTypeTarget based on role and intended targets
-        attack_target = self._determine_attack_target(unit_type, unit_data, role)
+        # Get all required properties - will raise errors if missing
+        move_type = self._get_move_type(unit_type, unit_data)
+        tanking_level = self._get_tanking_level(unit_type, unit_data)
+        attack_target = self._get_attack_target(unit_type, unit_data, role)
         
         return f"{faction}_{move_type}_{tanking_level}_{attack_target}"
     
@@ -228,76 +224,25 @@ class UnitRegistry:
         # Default to Infantry for current units
         return "Infantry"
     
-    def _determine_tanking_level(self, unit_type: str, unit_data: Dict) -> str:
-        """Determine tanking level based on wounds and armor."""
-        hp_max = unit_data.get('HP_MAX', 2)
-        armor_save = unit_data.get('ARMOR_SAVE', 4)
-        invul_save = unit_data.get('INVUL_SAVE', 0)
-        
-        # Determine if this is a leader unit
-        is_leader = any(keyword in unit_type.lower() for keyword in ['captain', 'commander', 'leader', 'hq'])
-        
-        if hp_max == 1:
-            return "Swarm"
-        elif hp_max <= 3 and armor_save >= 4:
-            if is_leader:
-                return "LeaderTroop"
-            else:
-                return "Troop"
-        elif hp_max >= 4 or armor_save <= 3 or invul_save > 0:
-            if is_leader:
-                return "LeaderElite"
-            else:
-                return "Elite"
-        elif hp_max >= 10:
-            if hp_max >= 16:
-                return "VehicleHeavy"
-            elif hp_max >= 11:
-                return "VehicleMedium"
-            else:
-                return "VehicleLight"
-        else:
-            return "Troop"  # Default fallback
+    def _get_tanking_level(self, unit_type: str, unit_data: Dict) -> str:
+        """Get tanking level from unit data - must be explicitly defined in TypeScript."""
+        if 'TANKING_LEVEL' not in unit_data:
+            raise ValueError(f"Unit {unit_type} missing required TANKING_LEVEL property in TypeScript file")
+        return unit_data['TANKING_LEVEL']
+
+    def _get_move_type(self, unit_type: str, unit_data: Dict) -> str:
+        """Get movement type from unit data - must be explicitly defined in TypeScript."""
+        if 'MOVE_TYPE' not in unit_data:
+            raise ValueError(f"Unit {unit_type} missing required MOVE_TYPE property in TypeScript file")
+        return unit_data['MOVE_TYPE']
     
-    def _determine_attack_target(self, unit_type: str, unit_data: Dict, role: str) -> str:
-        """Determine attack type and preferred target based on weapons and role."""
-        rng_dmg = unit_data.get('RNG_DMG', 0)
-        cc_dmg = unit_data.get('CC_DMG', 0)
-        rng_rng = unit_data.get('RNG_RNG', 0)
-        rng_str = unit_data.get('RNG_STR', 4)
-        cc_str = unit_data.get('CC_STR', 4)
+    def _get_attack_target(self, unit_type: str, unit_data: Dict, role: str) -> str:
+        """Get attack type and target from unit data - must be explicitly defined in TypeScript."""
+        if 'TARGET_TYPE' not in unit_data:
+            raise ValueError(f"Unit {unit_type} missing required TARGET_TYPE property in TypeScript file")
         
-        # Determine primary attack type
-        if role == "Ranged" or rng_dmg > cc_dmg:
-            attack_type = "Ranged"
-            primary_strength = rng_str
-            primary_damage = rng_dmg
-        else:
-            attack_type = "Melee"
-            primary_strength = cc_str
-            primary_damage = cc_dmg
-        
-        # Determine target preference based on weapon characteristics
-        if primary_damage == 1 and primary_strength <= 4:
-            target_type = "Swarm"  # Anti-infantry weapons
-        elif primary_damage <= 2 and primary_strength <= 5:
-            target_type = "Troop"  # Standard infantry weapons
-        elif primary_damage >= 2 or primary_strength >= 6:
-            target_type = "Elite"  # High-damage weapons for elite targets
-        else:
-            target_type = "Troop"  # Default
-        
-        # Special cases for specific units
-        if unit_type == "Termagant":
-            target_type = "Swarm"  # Termagants specialize in anti-swarm
-        elif unit_type == "Intercessor":
-            target_type = "Swarm"  # Intercessors are good at clearing weak targets
-        elif unit_type == "CaptainGravis":
-            target_type = "Elite"  # Captains hunt elite targets
-        elif unit_type == "Carnifex":
-            target_type = "Elite"  # Carnifex breaks elite units
-        
-        return f"{attack_type}{target_type}"
+        # Combine role (Melee/Ranged) with target type (Swarm/Troop/Elite)
+        return f"{role}{unit_data['TARGET_TYPE']}"
     
     def get_model_key(self, unit_type: str) -> str:
         """Get the model key for a given unit type using 4-part advanced mapping."""
@@ -308,8 +253,12 @@ class UnitRegistry:
         return self._generate_advanced_agent_key(unit_type, unit_data)
     
     def get_required_models(self) -> List[str]:
-        """Get list of all required model keys."""
-        return [f"{faction}_{role}" for faction, role in self.faction_role_combinations]
+        """Get list of all required model keys using 4-part agent keys."""
+        model_keys = set()
+        for unit_type, unit_data in self.units.items():
+            agent_key = self._generate_advanced_agent_key(unit_type, unit_data)
+            model_keys.add(agent_key)
+        return sorted(list(model_keys))
     
     def get_all_model_keys(self) -> List[str]:
         """Get all available model keys (alias for get_required_models)."""

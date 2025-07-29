@@ -28,6 +28,11 @@ export class AssaultIntercessor extends SpaceMarineMeleeUnit {
   static CC_AP = 1;            // Melee attack Armor penetration
   static CC_DMG = 1;           // Melee attack : damages
 
+  // AI CLASSIFICATION
+  static TANKING_LEVEL = "Troop";      // Troop: 2 wounds, 3+ save
+  static MOVE_TYPE = "Infantry";       // Standard infantry movement
+  static TARGET_TYPE = "Troop";        // MeleeTroop specialist - backbone melee
+
   static ICON = "/icons/AssaultIntercessor.webp"; // Path relative to public folder
   static ICON_SCALE = 1.6;     // Size of the icon
  
