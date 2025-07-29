@@ -84,7 +84,10 @@ else:
 
         # Frontend/src/components
         "frontend/src/components/Board.tsx",
-        "frontend/src/components/BoardRenderer.tsx",
+        "frontend/src/components/BoardDisplay.tsx",
+        "frontend/src/components/BoardInteractions.tsx",
+        "frontend/src/components/BoardPvp.tsx",
+        "frontend/src/components/BoardReplay.tsx",
         "frontend/src/components/CombatLogComponent.tsx",
         "frontend/src/components/DiceRollComponent.tsx",
         "frontend/src/components/ErrorBoundary.tsx",
@@ -94,7 +97,6 @@ else:
         "frontend/src/components/GameRightColumn.tsx",
         "frontend/src/components/GameStatus.tsx",
         "frontend/src/components/ReplayBoard.tsx",
-        "frontend/src/components/ReplayViewer.tsx",
         "frontend/src/components/SharedLayout.tsx",
         "frontend/src/components/SingleShotDisplay.tsx",
         "frontend/src/components/TurnPhaseTracker.tsx",

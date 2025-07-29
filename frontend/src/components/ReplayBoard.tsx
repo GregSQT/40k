@@ -39,7 +39,7 @@ const ReplayErrorBoundary: React.FC<{children: React.ReactNode}> = ({ children }
   return <>{children}</>;
 };
 
-// Use ReplayViewer interfaces exactly - NO local interface redefinition
+// Use BoardReplay interfaces exactly - NO local interface redefinition
 interface ReplayUnit extends Unit {
   alive?: boolean;
 }
