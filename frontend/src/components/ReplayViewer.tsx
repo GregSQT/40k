@@ -3,6 +3,9 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as PIXI from 'pixi.js-legacy';
 import { useGameConfig } from '../hooks/useGameConfig';
 import type { Unit } from '../types/game';
+import SharedLayout from './SharedLayout';
+import { TurnPhaseTracker } from './TurnPhaseTracker';
+import { renderUnit } from './UnitRenderer';
 
 // AI_GAME.md: Strict type definitions following game mechanisms
 interface ReplayEvent {
@@ -88,15 +91,21 @@ interface ReplayViewerProps {
 }
 
 export const ReplayViewer: React.FC<ReplayViewerProps> = ({ 
-  replayFile = 'ai/event_log/train_best_game_replay.json' 
+  replayFile: propReplayFile = null
 }) => {
   // AI_INSTRUCTIONS.md: Use same config hook as Board.tsx
   const { boardConfig, loading: configLoading, error: configError } = useGameConfig();
   
+  // File selection state
+  const [replayFile, setReplayFile] = useState<string | null>(propReplayFile);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   // State management
   const [replayData, setReplayData] = useState<ReplayData | null>(null);
   const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!!propReplayFile);
   const [error, setError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [currentUnits, setCurrentUnits] = useState<ReplayUnit[]>([]);
@@ -127,6 +136,42 @@ const ACTION_TYPE_MAPPING: Record<string, { name: string; type: string }> = {
   "-1": { name: "Phase Penalty", type: "penalty" }
 };
 const UNIT_REGISTRY: Record<string, any> = {};
+
+// File selection handlers
+const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const file = event.target.files?.[0];
+  if (file) {
+    // Validate file type
+    if (!file.name.endsWith('.json')) {
+      setFileError('Please select a JSON file');
+      return;
+    }
+
+    // Check if it's a replay file based on naming patterns
+    const isReplayFile = file.name.startsWith('training_replay_') ||
+                        file.name.startsWith('phase_based_replay_') ||
+                        file.name.includes('_vs_') ||
+                        file.name.startsWith('replay_') ||
+                        file.name.startsWith('training_');
+
+    if (!isReplayFile) {
+      setFileError('Please select a valid replay JSON file');
+      return;
+    }
+
+    // Create file URL for local file access
+    const fileUrl = URL.createObjectURL(file);
+    setReplayFile(fileUrl);
+    setSelectedFileName(file.name);
+    setFileError(null);
+    setCurrentStep(0);
+    console.log(`✅ Selected replay file: ${file.name}`);
+  }
+};
+
+const openFileBrowser = () => {
+  fileInputRef.current?.click();
+};
 
 // Dynamic unit registry initialization
 const initializeUnitRegistry = async () => {
@@ -237,6 +282,13 @@ const validateUnitRegistry = () => {
       setCurrentStep(0);
       setBattleLog([]);
       setCurrentEvent(null);
+      
+      // Skip loading if no file selected
+      if (!replayFile) {
+        setLoading(false);
+        return;
+      }
+      
       console.log(`🔄 Loading new replay file: ${replayFile}`);
       
       try {
@@ -351,17 +403,21 @@ const validateUnitRegistry = () => {
     };
     
     loadReplayData();
-  }, [replayFile, configLoading, configError, getUnitStats, registryInitialized]);
+  }, [replayFile, configLoading, configError, getUnitStats, registryInitialized, boardConfig]);
 
-  // AI_INSTRUCTIONS.md: Same hex calculations as Board.tsx
+  // Same hex calculations as Board.tsx
   const getHexCenter = useCallback((col: number, row: number): { x: number, y: number } => {
     if (!scenario) return { x: 0, y: 0 };
     
-    const hexWidth = 1.5 * scenario.board.hex_radius;
-    const hexHeight = Math.sqrt(3) * scenario.board.hex_radius;
+    const HEX_RADIUS = scenario.board.hex_radius;
+    const MARGIN = scenario.board.margin;
+    const HEX_WIDTH = 1.5 * HEX_RADIUS;
+    const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+    const HEX_HORIZ_SPACING = HEX_WIDTH;
+    const HEX_VERT_SPACING = HEX_HEIGHT;
     
-    const x = scenario.board.margin + col * hexWidth + scenario.board.hex_radius;
-    const y = scenario.board.margin + row * hexHeight + (col % 2) * (hexHeight / 2) + scenario.board.hex_radius;
+    const x = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+    const y = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
     
     return { x, y };
   }, [scenario]);
@@ -376,45 +432,99 @@ const validateUnitRegistry = () => {
     return points;
   }, []);
 
-  // AI_INSTRUCTIONS.md: Same board rendering as Board.tsx - PIXI.js Canvas only
+  // Parse colors from config - same as Board.tsx
+  const parseColor = useCallback((colorStr: string): number => {
+    return parseInt(colorStr.replace('0x', ''), 16);
+  }, []);
+
+  // Helper to get hex polygon points
+  const getHexPolygonPoints = useCallback((centerX: number, centerY: number, radius: number): number[] => {
+    const points: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i;
+      points.push(centerX + radius * Math.cos(angle), centerY + radius * Math.sin(angle));
+    }
+    return points;
+  }, []);
+
+  // Draw board with all details - same as Board.tsx
   const drawBoard = useCallback((app: PIXI.Application) => {
-    if (!scenario || !app.stage) return;
+    if (!scenario || !app.stage || !boardConfig) return;
     
     try {
       // Clear previous board drawings
-      app.stage.children.filter(child => child.name === 'hex').forEach(hex => {
+      app.stage.children.filter(child => child.name === 'hex' || child.name === 'hex-label').forEach(hex => {
         app.stage.removeChild(hex);
       });
+      
+      const HEX_RADIUS = scenario.board.hex_radius;
+      const MARGIN = scenario.board.margin;
+      const HEX_WIDTH = 1.5 * HEX_RADIUS;
+      const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+      const HEX_HORIZ_SPACING = HEX_WIDTH;
+      const HEX_VERT_SPACING = HEX_HEIGHT;
+      
+      // Get objective zones and other config
+      const objectiveHexes = boardConfig.objective_hexes || [];
+      const OBJECTIVE_ZONE_COLOR = parseColor(boardConfig.colors.objective_zone || '0xFF8800');
       
       // Draw hex grid using same logic as Board.tsx
       for (let row = 0; row < scenario.board.rows; row++) {
         for (let col = 0; col < scenario.board.cols; col++) {
-          const center = getHexCenter(col, row);
+          const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          const points = getHexPolygonPoints(centerX, centerY, HEX_RADIUS);
+          
+          // Check if this hex is an objective zone
+          const isObjectiveZone = objectiveHexes.some(([objCol, objRow]: [number, number]) => objCol === col && objRow === row);
+          
+          // Create base hex
           const hexGraphics = new PIXI.Graphics();
           hexGraphics.name = 'hex';
           
-          // Same hex styling as Board.tsx
           const isEven = (col + row) % 2 === 0;
-          hexGraphics.beginFill(isEven ? scenario.colors.cell_even : scenario.colors.cell_odd);
+          let cellColor = isEven ? scenario.colors.cell_even : scenario.colors.cell_odd;
+          
+          // Override color for objective zones
+          if (isObjectiveZone) {
+            cellColor = OBJECTIVE_ZONE_COLOR;
+          }
+          
+          hexGraphics.beginFill(cellColor);
           hexGraphics.lineStyle(1, scenario.colors.cell_border);
-          hexGraphics.drawPolygon(getHexPolygonPoints(scenario.board.hex_radius));
+          hexGraphics.drawPolygon(points);
           hexGraphics.endFill();
           
-          hexGraphics.position.set(center.x, center.y);
           app.stage.addChild(hexGraphics);
+          
+          // Add coordinate labels like Board.tsx
+          const colLetter = String.fromCharCode(65 + col); // A, B, C, etc.
+          const rowNumber = row + 1;
+          const coordText = `${colLetter}${rowNumber}`;
+          
+          const labelText = new PIXI.Text(coordText, {
+            fontSize: 8,
+            fill: 0x888888,
+            align: 'center',
+            fontWeight: 'normal',
+          });
+          labelText.name = 'hex-label';
+          labelText.anchor.set(0.5);
+          labelText.position.set(centerX, centerY + HEX_RADIUS * 0.7);
+          app.stage.addChild(labelText);
         }
       }
       
-      console.log(`✅ Board drawn: ${scenario.board.rows}x${scenario.board.cols} hexes`);
+      console.log(`✅ Board drawn: ${scenario.board.rows}x${scenario.board.cols} hexes with coordinates and objectives`);
     } catch (error) {
       console.error('❌ Error drawing board:', error);
       throw error;
     }
-  }, [scenario, getHexCenter, getHexPolygonPoints]);
+  }, [scenario, boardConfig, parseColor, getHexCenter, getHexPolygonPoints]);
 
-  // Draw units with Board.tsx layout
+  // Draw units using UnitRenderer - same as Board.tsx
   const drawUnits = useCallback((app: PIXI.Application, units: ReplayUnit[]) => {
-    if (!scenario || !app.stage) return;
+    if (!scenario || !app.stage || !boardConfig?.display) return;
     
     try {
       // Clear previous unit sprites
@@ -424,130 +534,97 @@ const validateUnitRegistry = () => {
       });
       unitSpritesRef.current.clear();
       
-      // Draw each alive unit using Board.tsx style
+      const displayConfig = boardConfig.display;
+      const HEX_RADIUS = scenario.board.hex_radius;
+      const MARGIN = scenario.board.margin;
+      const HEX_WIDTH = 1.5 * HEX_RADIUS;
+      const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+      const HEX_HORIZ_SPACING = HEX_WIDTH;
+      const HEX_VERT_SPACING = HEX_HEIGHT;
+      
+      // Extract all needed constants like Board.tsx
+      const ICON_SCALE = displayConfig.icon_scale || 1;
+      const ELIGIBLE_OUTLINE_WIDTH = displayConfig.eligible_outline_width || 2;
+      const ELIGIBLE_COLOR = parseColor(boardConfig.colors.eligible || '0x00FF00');
+      const ELIGIBLE_OUTLINE_ALPHA = displayConfig.eligible_outline_alpha || 0.8;
+      const HP_BAR_WIDTH_RATIO = displayConfig.hp_bar_width_ratio || 1.4;
+      const HP_BAR_HEIGHT = displayConfig.hp_bar_height || 7;
+      const UNIT_CIRCLE_RADIUS_RATIO = displayConfig.unit_circle_radius_ratio || 0.6;
+      const UNIT_TEXT_SIZE = displayConfig.unit_text_size || 8;
+      const SELECTED_BORDER_WIDTH = displayConfig.selected_border_width || 3;
+      const CHARGE_TARGET_BORDER_WIDTH = displayConfig.charge_target_border_width || 2;
+      const DEFAULT_BORDER_WIDTH = displayConfig.default_border_width || 1;
+      
+      // Draw each alive unit using UnitRenderer
       units.filter(unit => unit.alive).forEach(unit => {
-        const center = getHexCenter(unit.col, unit.row);
+        const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
         
-        // Unit circle background
-        const unitCircle = new PIXI.Graphics();
-        unitCircle.beginFill(unit.player === 0 ? scenario.colors.player_0 : scenario.colors.player_1);
-        unitCircle.lineStyle(2, 0x000000);
-        unitCircle.drawCircle(center.x, center.y, scenario.board.hex_radius * 0.6);
-        unitCircle.endFill();
-        app.stage.addChild(unitCircle);
-        
-        // Icon rendering from Board.tsx with error handling
-        if (unit.ICON) {
-          try {
-            const texture = PIXI.Texture.from(unit.ICON);
-            const sprite = new PIXI.Sprite(texture);
-            sprite.anchor.set(0.5);
-            sprite.position.set(center.x, center.y);
-            sprite.width = scenario.board.hex_radius * 1.2; // Icon scale from Board.tsx
-            sprite.height = scenario.board.hex_radius * 1.2;
-            app.stage.addChild(sprite);
-          } catch (iconError) {
-            console.warn(`Failed to load icon ${unit.ICON}:`, iconError);
-            // Fallback to text if icon fails - show unit type clearly
-            const displayText = unit.unit_type.length > 8 ? unit.unit_type.substring(0, 8) : unit.unit_type;
-            const unitText = new PIXI.Text(displayText, {
-              fontSize: 8,
-              fill: 0xffffff,
-              align: "center",
-              fontWeight: "bold",
-            });
-            unitText.anchor.set(0.5);
-            unitText.position.set(center.x, center.y);
-            app.stage.addChild(unitText);
-          }
-        } else {
-          // No icon - use text fallback
-          const displayText = unit.unit_type.length > 8 ? unit.unit_type.substring(0, 8) : unit.unit_type;
-          const unitText = new PIXI.Text(displayText, {
-            fontSize: 8,
-            fill: 0xffffff,
-            align: "center",
-            fontWeight: "bold",
-          });
-          unitText.anchor.set(0.5);
-          unitText.position.set(center.x, center.y);
-          app.stage.addChild(unitText);
-        }
-        
-        // HP bar using Board.tsx HP slices
-        const currentHP = unit.CUR_HP !== undefined ? unit.CUR_HP : unit.hp_current;
-        const maxHP = unit.HP_MAX !== undefined ? unit.HP_MAX : unit.hp_max;
-        
-        if (maxHP > 0) {
-          const HP_BAR_WIDTH = scenario.board.hex_radius * 1.4;
-          const HP_BAR_HEIGHT = 7;
-          const HP_BAR_Y_OFFSET = scenario.board.hex_radius * 0.85;
-
-          const barX = center.x - HP_BAR_WIDTH / 2;
-          const barY = center.y - HP_BAR_Y_OFFSET - HP_BAR_HEIGHT;
-
-          // Draw background (gray)
-          const barBg = new PIXI.Graphics();
-          barBg.beginFill(0x222222, 1);
-          barBg.drawRoundedRect(barX, barY, HP_BAR_WIDTH, HP_BAR_HEIGHT, 3);
-          barBg.endFill();
-          app.stage.addChild(barBg);
-          
-          // Draw HP slices like Board.tsx
-          const hp = Math.max(0, currentHP);
-          const sliceWidth = HP_BAR_WIDTH / maxHP;
-          
-          for (let i = 0; i < maxHP; i++) {
-            const slice = new PIXI.Graphics();
-            const color = i < hp ? 0x00ff00 : 0x444444; // Green if current HP, dark gray if lost
-            
-            slice.beginFill(color, 1);
-            slice.drawRoundedRect(
-              barX + i * sliceWidth + 1, // Small gap between slices
-              barY + 1,
-              sliceWidth - 2, // Slightly smaller to create gaps
-              HP_BAR_HEIGHT - 2,
-              2
-            );
-            slice.endFill();
-            app.stage.addChild(slice);
-          }
-        }
+        renderUnit({
+          unit, centerX, centerY, app,
+          isPreview: false,
+          previewType: undefined,
+          isEligible: false,
+          boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
+          HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
+          SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
+          phase: 'move', mode: 'normal', currentPlayer: 0, selectedUnitId: null, 
+          unitsMoved: [], unitsCharged: [], unitsAttacked: [], unitsFled: [],
+          combatSubPhase: undefined, combatActivePlayer: undefined,
+          units, chargeTargets: [], combatTargets: [], targetPreview: null,
+          onConfirmMove: () => {}, parseColor
+        });
       });
       
-      console.log(`✅ Drew ${units.filter(u => u.alive).length} units`);
+      console.log(`✅ Drew ${units.filter(u => u.alive).length} units using UnitRenderer`);
     } catch (error) {
       console.error('❌ Error drawing units:', error);
       throw error;
     }
-  }, [scenario, getHexCenter]);
+  }, [scenario, boardConfig, parseColor]);
 
   // Initialize PIXI application - AI_INSTRUCTIONS.md: PIXI.js Canvas renderer
   useEffect(() => {
     if (!boardRef.current || !scenario?.board || !replayData) return;
     
     try {
-      // Calculate canvas dimensions
-      const canvasWidth = scenario.board.cols * scenario.board.hex_radius * 1.5 + scenario.board.margin * 2;
-      const canvasHeight = scenario.board.rows * scenario.board.hex_radius * 1.75 + scenario.board.margin * 2;
+      // Calculate canvas dimensions - same as Board.tsx
+      const BOARD_COLS = scenario.board.cols;
+      const BOARD_ROWS = scenario.board.rows;
+      const HEX_RADIUS = scenario.board.hex_radius;
+      const MARGIN = scenario.board.margin;
+      const HEX_WIDTH = 1.5 * HEX_RADIUS;
+      const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+      const HEX_HORIZ_SPACING = HEX_WIDTH;
+      const HEX_VERT_SPACING = HEX_HEIGHT;
       
-      // AI_INSTRUCTIONS.md: Always use Canvas renderer, never WebGL
-      const app = new PIXI.Application({
+      const gridWidth = (BOARD_COLS - 1) * HEX_HORIZ_SPACING + HEX_WIDTH;
+      const gridHeight = (BOARD_ROWS - 1) * HEX_VERT_SPACING + HEX_HEIGHT;
+      const canvasWidth = gridWidth + 2 * MARGIN;
+      const canvasHeight = gridHeight + 2 * MARGIN;
+      
+      // Use same PIXI config as Board.tsx for consistent appearance
+      const displayConfig = boardConfig?.display;
+      const pixiConfig = {
         width: canvasWidth,
         height: canvasHeight,
         backgroundColor: scenario.colors.background,
-        antialias: true,
-        forceCanvas: true, // Enforce Canvas renderer
-        resolution: 1,
-        autoDensity: true,
-      });
+        antialias: displayConfig?.antialias ?? true,
+        powerPreference: "high-performance" as WebGLPowerPreference,
+        resolution: displayConfig?.resolution === "auto" ? 
+          (window.devicePixelRatio || 1) : (displayConfig?.resolution ?? 1),
+        autoDensity: displayConfig?.autoDensity ?? true,
+      };
       
-      // Setup canvas styling
+      const app = new PIXI.Application(pixiConfig);
+      app.stage.sortableChildren = true;
+      
+      // Setup canvas styling - same as Board.tsx
       const canvas = app.view as HTMLCanvasElement;
-      canvas.style.width = '100%';
+      canvas.style.display = 'block';
+      canvas.style.maxWidth = '100%';
       canvas.style.height = 'auto';
-      canvas.style.maxWidth = '800px';
-      canvas.style.border = '1px solid #333';
+      canvas.style.border = displayConfig?.canvas_border ?? '1px solid #333';
       
       // Clear container and append canvas
       boardRef.current.innerHTML = '';
@@ -741,6 +818,29 @@ const validateUnitRegistry = () => {
     setIsPlaying(prev => !prev);
   };
 
+  const goToTurn = (targetTurn: number) => {
+    if (!replayData?.actions) return;
+    
+    // Find the first action of the target turn
+    const actionIndex = replayData.actions.findIndex(action => action.turn === targetTurn);
+    if (actionIndex !== -1) {
+      setCurrentStep(actionIndex);
+      setIsPlaying(false);
+    }
+  };
+
+  const goToStart = () => {
+    setCurrentStep(0);
+    setIsPlaying(false);
+  };
+
+  const goToEnd = () => {
+    if (replayData && replayData.actions.length > 0) {
+      setCurrentStep(replayData.actions.length - 1);
+      setIsPlaying(false);
+    }
+  };
+
   const getCurrentPhase = (): string => {
     if (!currentEvent) return 'move';
     return currentEvent.phase || 'move';
@@ -751,154 +851,287 @@ const validateUnitRegistry = () => {
     return currentEvent.turn || 1;
   };
 
-  // Phase button styling with proper active state
-  const getPhaseButtonClass = (phase: string) => {
-    const baseClass = "px-3 py-1 text-sm font-medium rounded transition-colors ";
-    const currentPhase = getCurrentPhase();
-    const isActive = currentPhase === phase;
-    
-    // Show completed phases with checkmark
-    const isCompleted = isPhaseCompleted(phase, getCurrentTurn(), currentStep);
-    
-    if (isActive) {
-      return baseClass + "bg-blue-600 text-white font-bold";
-    } else if (isCompleted) {
-      return baseClass + "bg-green-600 text-white";
-    } else {
-      return baseClass + "bg-gray-200 text-gray-700 hover:bg-gray-300";
-    }
-  };
+  // Remove these unused functions
 
-  // Helper function to check if a phase is completed in current turn
-  const isPhaseCompleted = (phase: string, currentTurn: number, currentStep: number): boolean => {
-    if (!replayData?.actions) return false;
-    
-    // Check if there are any actions of this phase type in the current turn that are before or at current step
-    const phaseActionsInTurn = replayData.actions.slice(0, currentStep + 1).filter(action => 
-      action.turn === currentTurn && action.phase === phase
+  // No file selected state
+  if (!replayFile) {
+    const noFileRightContent = (
+      <div className="unit-status-table-container">
+        <div style={{ padding: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+            <button
+              onClick={openFileBrowser}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#1e40af',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              📁 Browse Replay Files
+            </button>
+            {selectedFileName && (
+              <span style={{ fontSize: '12px', color: '#888' }}>
+                {selectedFileName}
+              </span>
+            )}
+          </div>
+          {fileError && (
+            <div style={{ fontSize: '12px', color: '#ff4444', marginTop: '4px' }}>
+              {fileError}
+            </div>
+          )}
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          onChange={handleFileSelect}
+          style={{ display: 'none' }}
+        />
+      </div>
     );
-    
-    return phaseActionsInTurn.length > 0;
-  };
+
+    return (
+      <SharedLayout rightColumnContent={noFileRightContent}>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          height: '100%',
+          minHeight: '400px',
+          color: '#888',
+          textAlign: 'center',
+          flexDirection: 'column',
+          gap: '16px'
+        }}>
+          <div style={{ fontSize: '18px' }}>No replay file selected</div>
+          <button
+            onClick={openFileBrowser}
+            style={{
+              padding: '12px 24px',
+              backgroundColor: '#1e40af',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '16px',
+              fontWeight: 'bold'
+            }}
+          >
+            Browse for Replay Files
+          </button>
+          <div style={{ fontSize: '12px', color: '#555' }}>
+            Select JSON files from ai/Event_log/ directory
+          </div>
+        </div>
+      </SharedLayout>
+    );
+  }
 
   // Loading state
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-lg">Loading replay...</div>
-      </div>
+      <SharedLayout rightColumnContent={
+        <div className="flex items-center justify-center h-96">
+          <div className="text-lg">Loading replay...</div>
+        </div>
+      }>
+        <div className="flex items-center justify-center h-96">
+          <div className="text-lg">Loading replay...</div>
+        </div>
+      </SharedLayout>
     );
   }
 
   // Error state
   if (error) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-red-600">Error: {error}</div>
-      </div>
+      <SharedLayout rightColumnContent={
+        <div className="flex items-center justify-center h-96">
+          <div className="text-red-600">Error: {error}</div>
+        </div>
+      }>
+        <div className="flex items-center justify-center h-96">
+          <div className="text-red-600">Error: {error}</div>
+        </div>
+      </SharedLayout>
     );
   }
 
-  // Main render - Standard layout: Board left, Controls right
-  return (
-    <div className="game-controller">
-      <div className="board-and-sidebar">
-        {/* Left: Game Board */}
-        <div className="board-container">
-          <div 
-            ref={boardRef} 
-            className="board"
-          />
+  // Merge all controls into a single column like the right side version
+  const rightColumnContent = (
+    <>
+      {/* File Browser Controls */}
+      <div className="unit-status-table-container" style={{ marginBottom: '16px' }}>
+        <div style={{ padding: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+            <button
+              onClick={openFileBrowser}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#1e40af',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              📁 Browse Replay Files
+            </button>
+            {selectedFileName && (
+              <span style={{ fontSize: '12px', color: '#888' }}>
+                {selectedFileName}
+              </span>
+            )}
+          </div>
+          {fileError && (
+            <div style={{ fontSize: '12px', color: '#ff4444', marginTop: '4px' }}>
+              {fileError}
+            </div>
+          )}
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          onChange={handleFileSelect}
+          style={{ display: 'none' }}
+        />
+      </div>
+
+      {/* Combined Replay Controls with Turn/Phase Navigation */}
+      <div className="replay-controls">
+        {/* Playback Controls */}
+        <div className="replay-controls__buttons">
+          <button 
+            className="btn btn--secondary" 
+            onClick={goToStart} 
+            disabled={currentStep === 0}
+            title="Back to the start"
+          >
+            ⏮⏮
+          </button>
+          <button 
+            className="btn btn--secondary" 
+            onClick={prevStep} 
+            disabled={currentStep === 0}
+            title="Previous step"
+          >
+            ⏮
+          </button>
+          <button 
+            className="btn btn--primary" 
+            onClick={togglePlay}
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? '⏸' : '▶'}
+          </button>
+          <button 
+            className="btn btn--secondary" 
+            onClick={nextStep} 
+            disabled={!replayData || currentStep >= replayData.actions.length - 1}
+            title="Next step"
+          >
+            ⏭
+          </button>
+          <button 
+            className="btn btn--secondary" 
+            onClick={goToEnd} 
+            disabled={!replayData || currentStep >= replayData.actions.length - 1}
+            title="Last step"
+          >
+            ⏭⏭
+          </button>
         </div>
         
-        {/* Right: Replay Controls and Features */}
-        <div className="sidebar">
-          {/* Turn Navigation */}
-          <div className="turn-navigation">
-            {[1, 2, 3, 4, 5].map(turn => (
-              <button
-                key={turn}
-                className={`turn-button ${getCurrentTurn() === turn ? 'active' : ''}`}
-              >
-                Turn {turn}
-              </button>
-            ))}
-          </div>
-          
-          {/* Phase Buttons */}
-          <div className="phase-buttons">
-            <button className={getPhaseButtonClass('move')}>Move</button>
-            <button className={getPhaseButtonClass('shoot')}>Shoot</button>
-            <button className={getPhaseButtonClass('charge')}>Charge</button>
-            <button className={getPhaseButtonClass('combat')}>Combat</button>
-          </div>
-          
-          {/* Replay Controls */}
-          <div className="replay-controls" style={{padding: '1rem', borderBottom: '1px solid #333'}}>
-            <div style={{display: 'flex', gap: '0.5rem', marginBottom: '0.5rem'}}>
-              <button onClick={prevStep} disabled={currentStep === 0} style={{padding: '0.5rem', background: '#555', color: 'white', border: 'none', borderRadius: '4px'}}>⏮</button>
-              <button onClick={togglePlay} style={{padding: '0.5rem', background: isPlaying ? '#dc2626' : '#16a34a', color: 'white', border: 'none', borderRadius: '4px'}}>{isPlaying ? '⏸' : '▶'}</button>
-              <button onClick={nextStep} disabled={!replayData || currentStep >= replayData.actions.length - 1} style={{padding: '0.5rem', background: '#555', color: 'white', border: 'none', borderRadius: '4px'}}>⏭</button>
-            </div>
-            <div style={{fontSize: '0.875rem', color: '#888', marginBottom: '0.5rem'}}>
-              Step {currentStep + 1} of {replayData?.actions.length || 0}
-            </div>
-            <div style={{width: '100%', height: '8px', background: '#333', borderRadius: '4px', overflow: 'hidden'}}>
-              <div
-                style={{
-                  height: '100%',
-                  background: '#3b82f6',
-                  width: replayData ? `${((currentStep + 1) / replayData.actions.length) * 100}%` : '0%',
-                  transition: 'width 0.2s'
-                }}
-              />
-            </div>
-          </div>
-          
-          {/* Combat Log - Replace "Replay loaded" */}
-          <div className="game-log">
-            <div className="game-log__header">
-              <h3 className="game-log__title">Combat Log</h3>
-              <div className="game-log__count">
-                {battleLog.length} events
-              </div>
-            </div>
-            <div className="game-log__content">
-              {battleLog.length === 0 ? (
-                <div className="game-log__empty">No actions yet...</div>
-              ) : (
-                <div className="game-log__events">
-                  {battleLog.slice(0, currentStep + 1).map((event, index) => (
-                    <div 
-                      key={index}
-                      className={`game-log-entry ${index === currentStep ? 'game-log-entry--active' : ''}`}
-                      onClick={() => setCurrentStep(index)}
-                    >
-                      <div className="game-log-entry__single-line">
-                        <span className="game-log-entry__icon">🎯</span>
-                        <span className="game-log-entry__reward">
-                          {((event as any).reward !== undefined) ? (
-                            <span className={((event as any).reward || 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
-                              {((event as any).reward || 0) >= 0 ? '+' : ''}{((event as any).reward || 0)?.toFixed(1)}
-                            </span>
-                          ) : '-'}
-                        </span>
-                        <span className="game-log-entry__turn">T{event.turn}</span>
-                        <span className={`game-log-entry__player ${event.player === 0 ? 'game-log-entry__player--blue' : 'game-log-entry__player--red'}`}>
-                          P{event.player}
-                        </span>
-                        <span className="game-log-entry__message">
-                          {event.description || `Action ${(event as any).action_type} by unit ${(event as any).unit_id}`}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+        {/* Progress Info */}
+        <div className="replay-controls__info">
+          Step {currentStep + 1} of {replayData?.actions.length || 0}
+        </div>
+        
+        {/* Progress Bar */}
+        <div className="replay-controls__progress-bar">
+          <div
+            className="replay-controls__progress-fill"
+            style={{
+              width: replayData ? `${((currentStep + 1) / replayData.actions.length) * 100}%` : '0%'
+            }}
+          />
         </div>
       </div>
-    </div>
+
+      {/* Turn and Phase Tracker - Same as main game */}
+      <TurnPhaseTracker 
+        currentTurn={getCurrentTurn()} 
+        currentPhase={getCurrentPhase()}
+        className="turn-phase-tracker-right"
+        maxTurns={5}
+      />
+
+      {/* Training Log */}
+      <div className="game-log">
+        <div className="game-log__header">
+          <h3 className="game-log__title">Training Log</h3>
+          <div className="game-log__count">
+            {battleLog.length} actions
+          </div>
+        </div>
+        <div className="game-log__content">
+          {battleLog.length === 0 ? (
+            <div className="game-log__empty">No actions yet...</div>
+          ) : (
+            <div className="game-log__events">
+              {battleLog.slice(0, currentStep + 1).reverse().map((event, reverseIndex) => {
+                const originalIndex = currentStep - reverseIndex;
+                return (
+                  <div 
+                    key={originalIndex}
+                    className={`game-log-entry ${originalIndex === currentStep ? 'game-log-entry--active' : ''}`}
+                    onClick={() => setCurrentStep(originalIndex)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className="game-log-entry__single-line">
+                      <span className="game-log-entry__icon">🎯</span>
+                      <span className="game-log-entry__reward">
+                        {((event as any).reward !== undefined) ? (
+                          <span 
+                            className={`game-log-entry__reward-value ${((event as any).reward || 0) >= 0 ? 'game-log-entry__reward-value--positive' : 'game-log-entry__reward-value--negative'}`}
+                          >
+                            {((event as any).reward || 0) >= 0 ? '+' : ''}{((event as any).reward || 0)?.toFixed(1)}
+                          </span>
+                        ) : (
+                          <span className="game-log-entry__reward-value--none">-</span>
+                        )}
+                      </span>
+                      <span className="game-log-entry__turn">T{event.turn}</span>
+                      <span className={`game-log-entry__player ${event.player === 0 ? 'game-log-entry__player--blue' : 'game-log-entry__player--red'}`}>
+                        P{event.player}
+                      </span>
+                      <span className="game-log-entry__message">
+                        {event.description || `Action ${(event as any).action_type} by unit ${(event as any).unit_id}`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+
+  return (
+    <SharedLayout rightColumnContent={rightColumnContent}>
+      <div 
+        ref={boardRef} 
+        className="board"
+      />
+    </SharedLayout>
   );
 };
