@@ -5,6 +5,8 @@ import { useGameConfig } from '../hooks/useGameConfig';
 import type { Unit } from '../types/game';
 import SharedLayout from './SharedLayout';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
+import { UnitStatusTable } from './UnitStatusTable';
+import { ErrorBoundary } from './ErrorBoundary';
 import { renderUnit } from './UnitRenderer';
 import { drawBoard } from './BoardDisplay';
 
@@ -62,6 +64,12 @@ interface ReplayData {
     ai_units_final: number;
     enemy_units_final: number;
   };
+  metadata?: {
+    template?: string;
+    player_0_agent?: string;
+    player_1_agent?: string;
+    [key: string]: any;
+  };
   initial_state: {
     units: ReplayUnit[];
     board_size: [number, number];
@@ -99,6 +107,9 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed, setPlaySpeed] = useState(1000); // ms per step
   const [registryInitialized, setRegistryInitialized] = useState(false);
+  
+  // Acting unit ID for automatic highlighting
+  const [actingUnitId, setActingUnitId] = useState<number | null>(null);
   
   // PIXI.js refs - AI_INSTRUCTIONS.md: Use PIXI.js Canvas
   const boardRef = useRef<HTMLDivElement>(null);
@@ -179,8 +190,6 @@ const EmptyBoardPreview: React.FC<{ boardConfig: any }> = ({ boardConfig }) => {
       // Draw board using shared BoardRenderer
       drawBoard(app, boardConfig as any);
       
-      console.log('✅ Board preview initialized');
-      
       // Cleanup function
       return () => {
         if (pixiAppRef.current) {
@@ -239,7 +248,6 @@ const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSelectedFileName(file.name);
     setFileError(null);
     setCurrentStep(0);
-    console.log(`✅ Selected replay file: ${file.name}`);
   }
 };
 
@@ -251,16 +259,13 @@ const openFileBrowser = () => {
 const initializeUnitRegistry = async () => {
   try {
     // Load unit registry configuration
-    console.log('🔍 Fetching unit registry from /config/unit_registry.json');
     const registryResponse = await fetch('/config/unit_registry.json');
-    console.log('🔍 Registry response status:', registryResponse.status, registryResponse.statusText);
     
     if (!registryResponse.ok) {
       throw new Error(`Failed to load unit registry: ${registryResponse.statusText}`);
     }
     
     const text = await registryResponse.text();
-    console.log('🔍 Raw registry response (first 200 chars):', text.substring(0, 200));
     
     const unitConfig = JSON.parse(text);
     
@@ -283,15 +288,12 @@ const initializeUnitRegistry = async () => {
         });
         
         UNIT_REGISTRY[unitType] = UnitClass;
-        console.log(`✅ Registered unit: ${unitType}`);
         
       } catch (importError) {
         console.error(`❌ Failed to import unit ${unitType}:`, importError);
         throw importError;
       }
     }
-    
-    console.log('✅ Unit registry initialized with types:', Object.keys(UNIT_REGISTRY));
   } catch (error) {
     console.error('❌ Failed to initialize unit registry:', error);
     throw error;
@@ -333,7 +335,18 @@ const validateUnitRegistry = () => {
       HP_MAX: UnitClass.HP_MAX,
       RNG_RNG: UnitClass.RNG_RNG,
       RNG_DMG: UnitClass.RNG_DMG,
+      RNG_NB: UnitClass.RNG_NB,
+      RNG_ATK: UnitClass.RNG_ATK,
+      RNG_STR: UnitClass.RNG_STR,
+      RNG_AP: UnitClass.RNG_AP,
       CC_DMG: UnitClass.CC_DMG,
+      CC_NB: UnitClass.CC_NB,
+      CC_ATK: UnitClass.CC_ATK,
+      CC_STR: UnitClass.CC_STR,
+      CC_AP: UnitClass.CC_AP,
+      CC_RNG: UnitClass.CC_RNG,
+      T: UnitClass.T,
+      ARMOR_SAVE: UnitClass.ARMOR_SAVE,
       ICON: UnitClass.ICON,
       ICON_SCALE: UnitClass.ICON_SCALE
     };
@@ -392,18 +405,13 @@ const validateUnitRegistry = () => {
             throw new Error(`Failed to load replay file: ${replayResponse.statusText}`);
           }
           replay = await replayResponse.json();
-        }
-        
-        console.log('📦 Raw replay data:', replay);
-        console.log('📦 Initial state units:', replay.initial_state?.units);
-        console.log('📦 Actions:', replay.actions?.length);
+        };
         
         setReplayData(replay);
         
         // Process initial units with proper mapping
         if (replay.initial_state?.units) {
           const processedUnits: ReplayUnit[] = replay.initial_state.units.map((unit: any) => {
-            console.log('Processing unit:', unit);
             const stats = getUnitStats(unit.unit_type);
             return {
               id: unit.id,
@@ -431,11 +439,25 @@ const validateUnitRegistry = () => {
               RNG_RNG: stats.RNG_RNG,
               RNG_DMG: stats.RNG_DMG,
               CC_DMG: stats.CC_DMG,
-              ICON: `icons/${unit.unit_type}${unit.player === 0 ? '_red' : ''}.webp`,
+              ICON: stats.ICON,
               ICON_SCALE: stats.ICON_SCALE
             };
           });
-          console.log('✅ Processed units:', processedUnits);
+          
+          // Check for initial position conflicts in scenario
+          const initialPositions = new Map<string, any[]>();
+          processedUnits.forEach(unit => {
+            const key = `${unit.col},${unit.row}`;
+            if (!initialPositions.has(key)) initialPositions.set(key, []);
+            initialPositions.get(key)!.push({id: unit.id, type: unit.unit_type});
+          });
+          
+          initialPositions.forEach((unitsAtPos, pos) => {
+            if (unitsAtPos.length > 1) {
+              console.error(`❌ SCENARIO BUG: Multiple units spawned at initial position ${pos}:`, unitsAtPos);
+            }
+          });
+          
           setCurrentUnits(processedUnits);
         } else {
           console.error('❌ No initial_state.units found in replay data');
@@ -443,8 +465,6 @@ const validateUnitRegistry = () => {
         
         setBattleLog([]);
         setCurrentStep(0);
-        
-        console.log('✅ Replay data loaded successfully');
       } catch (err) {
         console.error('❌ Error loading replay:', err);
         setError(err instanceof Error ? err.message : 'Failed to load replay');
@@ -493,7 +513,7 @@ const validateUnitRegistry = () => {
   // Using shared BoardRenderer - no duplicate code!
 
   // Draw units using UnitRenderer - same as Board.tsx
-  const drawUnits = useCallback((app: PIXI.Application, units: ReplayUnit[]) => {
+  const drawUnits = useCallback((app: PIXI.Application, units: ReplayUnit[], highlightUnitId: number | null = null) => {
     if (!scenario || !app.stage || !boardConfig?.display) return;
     
     try {
@@ -531,17 +551,30 @@ const validateUnitRegistry = () => {
         const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
         
         const unitForRenderer = {
-          ...unit,
+          id: unit.id,
           name: unit.unit_type,
           type: unit.unit_type,
-          color: unit.COLOR
+          unit_type: unit.unit_type,
+          player: unit.player,
+          col: unit.col,
+          row: unit.row,
+          color: unit.COLOR,
+          alive: unit.alive,
+          CUR_HP: unit.CUR_HP,
+          HP_MAX: unit.HP_MAX,
+          MOVE: unit.MOVE,
+          RNG_RNG: unit.RNG_RNG,
+          RNG_DMG: unit.RNG_DMG,
+          CC_DMG: unit.CC_DMG,
+          ICON: unit.ICON, // Use the ICON from stats (should be correct)
+          ICON_SCALE: unit.ICON_SCALE
         };
 
         renderUnit({
           unit: unitForRenderer, centerX, centerY, app,
           isPreview: false,
           previewType: undefined,
-          isEligible: false,
+          isEligible: unit.id === highlightUnitId, // Highlight acting unit with green circle
           boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
@@ -557,8 +590,6 @@ const validateUnitRegistry = () => {
           onConfirmMove: () => {}, parseColor
         });
       });
-      
-      console.log(`✅ Drew ${units.filter(u => u.alive).length} units using UnitRenderer`);
     } catch (error) {
       console.error('❌ Error drawing units:', error);
       throw error;
@@ -617,9 +648,7 @@ const validateUnitRegistry = () => {
       
       // Draw initial board and units using shared BoardRenderer
       drawBoard(app, boardConfig! as any);
-      drawUnits(app, currentUnits);
-      
-      console.log('✅ PIXI Canvas application initialized for replay');
+      drawUnits(app, currentUnits, actingUnitId);
       
       // Cleanup function
       return () => {
@@ -634,14 +663,11 @@ const validateUnitRegistry = () => {
       console.error('❌ Error initializing PIXI application:', error);
       setError('Failed to initialize board display');
     }
-  }, [scenario, replayData, drawUnits, currentUnits]);
+  }, [scenario, replayData, drawUnits, currentUnits, actingUnitId]);
 
   // Update game state based on current step
   useEffect(() => {
     if (!replayData || currentStep < 0) return;
-    
-    console.log('🔄 Updating game state for step:', currentStep);
-    console.log('🔄 Available actions:', replayData.actions?.length);
     
     try {
       // Reset to initial state
@@ -678,7 +704,7 @@ const validateUnitRegistry = () => {
           RNG_RNG: stats.RNG_RNG,
           RNG_DMG: stats.RNG_DMG,
           CC_DMG: stats.CC_DMG,
-          ICON: unit.player === 0 ? `icons/${unit.unit_type}_red.webp` : stats.ICON,
+          ICON: stats.ICON,
           ICON_SCALE: stats.ICON_SCALE
         };
       });
@@ -688,21 +714,31 @@ const validateUnitRegistry = () => {
       // Apply actions up to current step
       for (let i = 0; i <= currentStep && i < (replayData.actions?.length || 0); i++) {
         const event = replayData.actions[i];
-        console.log('📝 Processing event:', i, event);
         
         // Apply action effects based on the actual replay format
         if ((event as any).action_type !== undefined && (event as any).position) {
           const actionInfo = ACTION_TYPE_MAPPING[(event as any).action_type];
           
-          // Handle movement actions (0, 1, 2)
-          if ([0, 1, 2].includes((event as any).action_type)) {
-            const unit = newUnits.find(u => u.id === (event as any).unit_id);
-            if (unit && (event as any).position) {
-              console.log(`🚶 Moving unit ${unit.id} from (${unit.col},${unit.row}) to (${(event as any).position[0]},${(event as any).position[1]})`);
-              unit.col = (event as any).position[0];
-              unit.row = (event as any).position[1];
+        // Handle movement actions (0, 1, 2, 3)
+        if ([0, 1, 2, 3].includes((event as any).action_type)) {
+          const unit = newUnits.find(u => u.id === (event as any).unit_id);
+          if (unit && (event as any).position) {
+            
+            // Check if target position is occupied
+            const targetCol = (event as any).position[0];
+            const targetRow = (event as any).position[1];
+            const occupiedBy = newUnits.find(u => u.id !== unit.id && u.col === targetCol && u.row === targetRow && u.alive);
+            
+            if (occupiedBy) {
+              console.error(`❌ COLLISION: Unit ${unit.id} trying to move to (${targetCol},${targetRow}) occupied by unit ${occupiedBy.id}`);
+              // Don't move if position is occupied
+              return;
             }
+            
+            unit.col = targetCol;
+            unit.row = targetRow;
           }
+        }
           
           // Handle HP changes from the replay data
           if ((event as any).hp !== undefined) {
@@ -733,16 +769,19 @@ const validateUnitRegistry = () => {
           }
         });
       }
-      
-      console.log('✅ Final units state:', newUnits);
       setCurrentUnits(newUnits);
       setBattleLog(newBattleLog);
       setCurrentEvent(replayData.actions?.[currentStep] || null);
       
+      // Set acting unit ID for highlighting
+      const currentAction = replayData.actions?.[currentStep];
+      setActingUnitId(currentAction ? (currentAction as any).unit_id : null);
+      
       // Update PIXI display
       if (pixiAppRef.current) {
-        console.log('🎨 Updating PIXI display');
-        drawUnits(pixiAppRef.current, newUnits);
+        const currentAction = replayData.actions?.[currentStep];
+        const currentActingUnitId = currentAction ? (currentAction as any).unit_id : null;
+        drawUnits(pixiAppRef.current, newUnits, currentActingUnitId);
       }
       
     } catch (error) {
@@ -859,6 +898,11 @@ const validateUnitRegistry = () => {
             {selectedFileName && (
               <span style={{ fontSize: '12px', color: '#888' }}>
                 {selectedFileName}
+                {replayData?.metadata?.template && (
+                  <span style={{ color: '#4ade80', marginLeft: '8px' }}>
+                    [{replayData.metadata.template}]
+                  </span>
+                )}
               </span>
             )}
           </div>
@@ -946,6 +990,11 @@ const validateUnitRegistry = () => {
             {selectedFileName && (
               <span style={{ fontSize: '12px', color: '#888' }}>
                 {selectedFileName}
+                {replayData?.metadata?.template && (
+                  <span style={{ color: '#4ade80', marginLeft: '8px' }}>
+                    [{replayData.metadata.template}]
+                  </span>
+                )}
               </span>
             )}
           </div>
@@ -1032,6 +1081,83 @@ const validateUnitRegistry = () => {
         className="turn-phase-tracker-right"
         maxTurns={5}
       />
+
+      {/* Unit Status Tables for both players - only render when registry is initialized */}
+      {registryInitialized && (
+        <>
+          <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
+            <UnitStatusTable
+              units={currentUnits.map(unit => {
+                const stats = getUnitStats(unit.unit_type);
+                return {
+                  ...unit,
+                  name: unit.unit_type,
+                  type: unit.unit_type,
+                  color: unit.COLOR,
+                  // Use getUnitStats which works correctly - NO DEFAULTS
+                  MOVE: stats.MOVE,
+                  HP_MAX: stats.HP_MAX,
+                  RNG_RNG: stats.RNG_RNG,
+                  RNG_DMG: stats.RNG_DMG,
+                  RNG_NB: stats.RNG_NB,
+                  RNG_ATK: stats.RNG_ATK,
+                  RNG_STR: stats.RNG_STR,
+                  RNG_AP: stats.RNG_AP,
+                  CC_DMG: stats.CC_DMG,
+                  CC_NB: stats.CC_NB,
+                  CC_ATK: stats.CC_ATK,
+                  CC_STR: stats.CC_STR,
+                  CC_AP: stats.CC_AP,
+                  CC_RNG: stats.CC_RNG,
+                  T: stats.T,
+                  ARMOR_SAVE: stats.ARMOR_SAVE,
+                  SHOOT_LEFT: stats.RNG_NB
+                };
+              })}
+              player={0}
+              selectedUnitId={actingUnitId}
+              clickedUnitId={actingUnitId}
+              onSelectUnit={() => {}} // No manual selection in replay mode
+            />
+          </ErrorBoundary>
+
+          <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
+            <UnitStatusTable
+              units={currentUnits.map(unit => {
+                const stats = getUnitStats(unit.unit_type);
+                return {
+                  ...unit,
+                  name: unit.unit_type,
+                  type: unit.unit_type,
+                  color: unit.COLOR,
+                  // Use getUnitStats which works correctly - NO DEFAULTS
+                  MOVE: stats.MOVE,
+                  HP_MAX: stats.HP_MAX,
+                  RNG_RNG: stats.RNG_RNG,
+                  RNG_DMG: stats.RNG_DMG,
+                  RNG_NB: stats.RNG_NB,
+                  RNG_ATK: stats.RNG_ATK,
+                  RNG_STR: stats.RNG_STR,
+                  RNG_AP: stats.RNG_AP,
+                  CC_DMG: stats.CC_DMG,
+                  CC_NB: stats.CC_NB,
+                  CC_ATK: stats.CC_ATK,
+                  CC_STR: stats.CC_STR,
+                  CC_AP: stats.CC_AP,
+                  CC_RNG: stats.CC_RNG,
+                  T: stats.T,
+                  ARMOR_SAVE: stats.ARMOR_SAVE,
+                  SHOOT_LEFT: stats.RNG_NB
+                };
+              })}
+              player={1}
+              selectedUnitId={actingUnitId}
+              clickedUnitId={actingUnitId}
+              onSelectUnit={() => {}} // No manual selection in replay mode
+            />
+          </ErrorBoundary>
+        </>
+      )}
 
       {/* Training Log - Same format as PvP Game Log */}
       <div className="game-log">

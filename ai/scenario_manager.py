@@ -246,8 +246,12 @@ class ScenarioManager:
         deployment_0 = template.deployment_zones.get(0, [(0, 0), (1, 0)])  # Ensure multiple positions
         units_per_player = units_per_player_setup  # Deploy 2 units per player for better battles
         
+        # Validate enough deployment positions
+        if len(deployment_0) < units_per_player:
+            raise ValueError(f"Not enough deployment positions for player 0: need {units_per_player}, got {len(deployment_0)} in template {template_name}")
+        
         for i in range(units_per_player):
-            pos = deployment_0[i % len(deployment_0)]  # Cycle through positions
+            pos = deployment_0[i]  # Use unique positions - NO CYCLING
             unit_type = agent_0_units[i % len(agent_0_units)]  # Cycle through unit types
             scenario_units.append({
                 "id": unit_id,
@@ -265,8 +269,12 @@ class ScenarioManager:
         
         deployment_1 = template.deployment_zones.get(1, [(23, 17), (22, 17)])  # Ensure multiple positions
         
+        # Validate enough deployment positions
+        if len(deployment_1) < units_per_player:
+            raise ValueError(f"Not enough deployment positions for player 1: need {units_per_player}, got {len(deployment_1)} in template {template_name}")
+        
         for i in range(units_per_player):
-            pos = deployment_1[i % len(deployment_1)]  # Cycle through positions
+            pos = deployment_1[i]  # Use unique positions - NO CYCLING
             unit_type = agent_1_units[i % len(agent_1_units)]  # Cycle through unit types
             scenario_units.append({
                 "id": unit_id,

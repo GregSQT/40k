@@ -214,6 +214,17 @@ class W40KEnv(gym.Env):
         # Replay tracking
         self.replay_data = []
         self.save_replay = True
+        
+        # Store scenario metadata for replay
+        self.scenario_metadata = None
+        if scenario_file and os.path.exists(scenario_file):
+            try:
+                with open(scenario_file, 'r') as f:
+                    scenario_data = json.load(f)
+                if isinstance(scenario_data, dict) and "metadata" in scenario_data:
+                    self.scenario_metadata = scenario_data["metadata"]
+            except Exception:
+                pass  # Don't fail if metadata is missing
 
     def _load_unit_definitions(self):
         """Load unit definitions from TypeScript files exactly like the original."""
@@ -1690,15 +1701,21 @@ class W40KEnv(gym.Env):
         # Ensure directory exists
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         
+        # Include scenario template info if available
+        scenario_name = "phase_based_training"  # Default fallback
+        if self.scenario_metadata and "template" in self.scenario_metadata:
+            scenario_name = self.scenario_metadata["template"]
+        
         replay_structure = {
             "game_info": {
-                "scenario": "phase_based_training",
+                "scenario": scenario_name,
                 "ai_behavior": "phase_based_following_AI_GAME_OVERVIEW",
                 "total_turns": self.current_turn,
                 "winner": self.winner,
                 "ai_units_final": len([u for u in self.ai_units if u["alive"]]),
                 "enemy_units_final": len([u for u in self.enemy_units if u["alive"]])
             },
+            "metadata": self.scenario_metadata if self.scenario_metadata else {},   
             "initial_state": {
                 "units": [
                     {

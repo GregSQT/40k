@@ -10,6 +10,34 @@ import numpy as np
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
+def format_game_log_message(event_type: str, acting_unit: Optional[Dict], target_unit: Optional[Dict], 
+                           start_hex: Optional[str] = None, end_hex: Optional[str] = None) -> str:
+    """Format game log messages exactly like useGameLog.ts frontend."""
+    
+    if event_type == "death" and target_unit:
+        return f"Unit {target_unit.get('id', '?')} ({target_unit.get('unit_type', 'unknown')}) DIED !"
+    
+    if event_type == "shoot" and acting_unit and target_unit:
+        return f"Unit {acting_unit.get('id', '?')} SHOT at unit {target_unit.get('id', '?')}"
+    
+    if event_type == "combat" and acting_unit and target_unit:
+        return f"Unit {acting_unit.get('id', '?')} FOUGHT unit {target_unit.get('id', '?')}"
+    
+    if event_type == "charge" and acting_unit and target_unit:
+        if start_hex and end_hex:
+            return f"Unit {acting_unit.get('id', '?')} CHARGED unit {target_unit.get('id', '?')} from {start_hex} to {end_hex}"
+        else:
+            return f"Unit {acting_unit.get('id', '?')} CHARGED unit {target_unit.get('id', '?')}"
+    
+    if event_type == "move" and acting_unit:
+        if start_hex and end_hex:
+            return f"Unit {acting_unit.get('id', '?')} MOVED from {start_hex} to {end_hex}"
+        else:
+            return f"Unit {acting_unit.get('id', '?')} NO MOVE"
+    
+    # Fallback for unknown event types
+    return "Unknown action"
+
 class GameReplayLogger:
     def __init__(self, env):
         """Initialize with the W40K environment."""
@@ -366,30 +394,9 @@ class GameReplayLogger:
     
     def _format_combat_message(self, event_type: str, acting_unit: Optional[Dict], target_unit: Optional[Dict], 
                              action_int: int, start_hex: Optional[str] = None, end_hex: Optional[str] = None) -> str:
-        """Format combat message similar to game frontend."""
-        action_name = self.action_names.get(action_int, f"action_{action_int}")
-        
-        if event_type == "death" and target_unit:
-            return f"Unit {target_unit.get('id', '?')} ({target_unit.get('unit_type', 'unknown')}) DIED!"
-        
-        if event_type in ["shoot", "combat"] and acting_unit and target_unit:
-            verb = "SHOT at" if event_type == "shoot" else "FOUGHT"
-            return f"Unit {acting_unit.get('id', '?')} {verb} unit {target_unit.get('id', '?')}"
-        
-        if event_type == "charge" and acting_unit and target_unit:
-            return f"Unit {acting_unit.get('id', '?')} CHARGED unit {target_unit.get('id', '?')}"
-        
-        if event_type == "move" and acting_unit:
-            if start_hex and end_hex:
-                return f"Unit {acting_unit.get('id', '?')} MOVED from {start_hex} to {end_hex}"
-            else:
-                return f"Unit {acting_unit.get('id', '?')} moved ({action_name})"
-        
-        if event_type == "phase_change":
-            return f"Phase advanced - {action_name}"
-        
-        # Fallback
-        return f"AI performs {action_name}"
+        """Format combat message using centralized formatting function."""
+        # Use the centralized formatting function for standard messages
+        return format_game_log_message(event_type, acting_unit, target_unit, start_hex, end_hex)
     
     def _extract_shooting_details(self, pre_action_units: List[Dict], post_action_units: List[Dict], 
                                 acting_unit_id: Optional[int], target_unit_id: Optional[int]) -> Optional[List[Dict]]:
