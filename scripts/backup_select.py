@@ -138,15 +138,17 @@ else:
         "frontend/src/types/replay.ts",
 
         # Frontend/src/roster/spaceMarine
-        "frontend/src/roster/spaceMarine/SpaceMarineMeleeUnit.ts",
-        "frontend/src/roster/spaceMarine/SpaceMarineRangedUnit.ts",
+        "frontend/src/roster/spaceMarine/SpaceMarineInfantryLeaderEliteMeleeElite.ts",
+        "frontend/src/roster/spaceMarine/SpaceMarineInfantryTroopMeleeTroop.ts",
+        "frontend/src/roster/spaceMarine/SpaceMarineInfantryTroopRangedSwarm.ts",
         "frontend/src/roster/spaceMarine/Intercessor.ts",
         "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
         "frontend/src/roster/spaceMarine/CaptainGravis.ts",
 
         # Frontend/src/roster/tyranid
-        "frontend/src/roster/tyranid/TyranidMeleeUnit.ts",
-        "frontend/src/roster/tyranid/TyranidRangedUnit.ts",
+        "frontend/src/roster/tyranid/SpaceMarineInfantryTroopMeleeTroop.ts.ts",
+        "frontend/src/roster/tyranid/TyranidInfantrySwarmMeleeSwarm.ts",
+        "frontend/src/roster/tyranid/TyranidInfantrySwarmRangedSwarm.ts",
         "frontend/src/roster/tyranid/Termagant.ts",
         "frontend/src/roster/tyranid/Hormagaunt.ts",
         "frontend/src/roster/tyranid/Carnifex.ts",
