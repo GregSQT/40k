@@ -56,7 +56,7 @@ def is_unit_in_range(attacker, target, range_value):
 class W40KEnv(gym.Env):
     """Phase-based W40K environment following AI_GAME_OVERVIEW.md specifications exactly."""
 
-    def __init__(self, rewards_config="default", training_config_name="default", 
+    def __init__(self, rewards_config=None, training_config_name="default", 
              controlled_agent=None, active_agents=None, scenario_file=None, unit_registry=None):
         super().__init__()
 
@@ -73,10 +73,8 @@ class W40KEnv(gym.Env):
         # Load configuration
         self.config = get_config_loader()
         
-        # Load rewards configuration
-        self.rewards_config_name = rewards_config
-        self.rewards_config = None
-        self._load_rewards_config()
+        # Load rewards configuration (unit-type-based)
+        self.rewards_config = self.config.load_rewards_config()
         
         # Load unit definitions from TypeScript files
         self.unit_definitions = self._load_unit_definitions()
@@ -288,10 +286,13 @@ class W40KEnv(gym.Env):
                                 unit_data['is_ranged'] = False
                                 unit_data['is_melee'] = True
                             else:
-                                unit_data['is_ranged'] = unit_data.get('rng_rng', 0) > 1
-                                unit_data['is_melee'] = unit_data.get('cc_dmg', 0) > 0
+                                # Must determine from actual weapon stats (no defaults)
+                                if 'rng_rng' not in unit_data or 'cc_dmg' not in unit_data:
+                                    raise KeyError(f"Unit '{unit_name}' missing weapon stats to determine is_ranged/is_melee")
+                                unit_data['is_ranged'] = unit_data['rng_rng'] > 1
+                                unit_data['is_melee'] = unit_data['cc_dmg'] > 0
                             
-                            # Default size_radius to 1 if not specified
+                            # size_radius defaults to 1 for hex-based gameplay (standard unit size)
                             if 'size_radius' not in unit_data:
                                 unit_data['size_radius'] = 1
                             
@@ -303,16 +304,12 @@ class W40KEnv(gym.Env):
         # Reduced verbosity - unit loading completed silently
         return definitions
 
-    def _load_rewards_config(self):
-        """Load rewards configuration using config_loader."""
-        self.rewards_config = self.config.load_rewards_config(self.rewards_config_name)
-
     def _get_default_rewards(self):
         """Removed following AI_INSTRUCTIONS.md - all rewards must come from config files."""
         raise FileNotFoundError("Rewards configuration not found. AI_INSTRUCTIONS.md requires all rewards come from config files.")
 
     def _get_unit_reward_config(self, unit):
-        """Get reward configuration for specific unit type with proper agent mapping."""
+        """Get reward configuration for specific unit type."""
         unit_type = unit.get("unit_type", "")
         
         # Get the agent key from unit registry
@@ -321,22 +318,27 @@ class W40KEnv(gym.Env):
             if agent_key and agent_key in self.rewards_config:
                 return self.rewards_config.get(agent_key, {})
         
-        # Fallback to new agent naming system
-        unit_type = unit.get("unit_type", "")
+        # Try direct unit type lookup first
+        if unit_type in self.rewards_config:
+            return self.rewards_config.get(unit_type, {})
         
-        # Map specific units to new agent types
-        if unit_type == "Intercessor":
-            return self.rewards_config.get("SpaceMarine_Infantry_Ranged", {})
+        # Map unit types to agent keys (correct mapping)
+        if unit_type == "CaptainGravis":
+            return self.rewards_config.get("SpaceMarine_Infantry_LeaderElite_MeleeElite", {})
         elif unit_type == "AssaultIntercessor":
-            return self.rewards_config.get("SpaceMarine_Infantry_Melee", {})
-        elif unit_type == "CaptainGravis":
-            return self.rewards_config.get("SpaceMarine_Leader_Melee", {})
-        elif unit.get("is_ranged", False):
-            # Tyranid ranged fallback
-            return self.rewards_config.get("Tyranid_Ranged", {})
-        else:
-            # Tyranid melee fallback
-            return self.rewards_config.get("Tyranid_Melee", {})
+            return self.rewards_config.get("SpaceMarine_Infantry_Troop_MeleeTroop", {})
+        elif unit_type == "Intercessor":
+            return self.rewards_config.get("SpaceMarine_Infantry_Troop_RangedSwarm", {})
+        elif unit_type == "Carnifex":
+            return self.rewards_config.get("Tyranid_Infantry_Elite_MeleeElite", {})
+        elif unit_type == "Hormagaunt":
+            return self.rewards_config.get("Tyranid_Infantry_Swarm_MeleeSwarm", {})
+        elif unit_type == "Termagant":
+            return self.rewards_config.get("Tyranid_Infantry_Swarm_RangedSwarm", {})
+        
+        # No match found - raise error with available types
+        available_types = list(self.rewards_config.keys())
+        raise KeyError(f"Unit type '{unit_type}' not found in rewards config. Available unit types: {available_types}")
 
     def reset(self, seed=None, options=None):
         """Reset environment to initial state."""
@@ -391,14 +393,14 @@ class W40KEnv(gym.Env):
                 "has_charged": False,
                 "has_attacked": False,
                 "ICON": icon_name,
-                # Add default values for missing shooting attributes
-                "rng_nb": unit.get("rng_nb", 1),
-                "rng_atk": unit.get("rng_atk", 4),
-                "rng_str": unit.get("rng_str", 4),
-                "rng_ap": unit.get("rng_ap", 0),
-                "t": unit.get("t", 4),
-                "armor_save": unit.get("armor_save", 5),
-                "invul_save": unit.get("invul_save", 0)
+                # All shooting attributes must be defined (no defaults)
+                "rng_nb": unit["rng_nb"],
+                "rng_atk": unit["rng_atk"],
+                "rng_str": unit["rng_str"],
+                "rng_ap": unit["rng_ap"],
+                "t": unit["t"],
+                "armor_save": unit["armor_save"],
+                "invul_save": unit["invul_save"]
             })
             self.units.append(unit)
         
@@ -551,7 +553,7 @@ class W40KEnv(gym.Env):
 
     def _has_enemies_in_combat_range(self, unit):
         """Check if unit has enemies within CC_RNG combat range per AI_GAME.md."""
-        combat_range = unit.get("cc_rng", 1)  # Default to 1 if not specified
+        combat_range = unit.get("cc_rng", 1)  # Combat range 1 is W40K standard
         for enemy in self.enemy_units:
             if enemy["alive"]:
                 if is_unit_in_range(unit, enemy, combat_range):

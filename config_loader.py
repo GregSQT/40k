@@ -110,18 +110,18 @@ class ConfigLoader:
             raise KeyError(f"max_steps_per_episode missing from training config '{training_config_name}'")
         return training_config["max_steps_per_episode"]
 
-    def get_reward_value(self, unit_type: str, action: str, rewards_config_name: str = "default") -> float:
+    def get_reward_value(self, unit_type: str, action: str) -> float:
         """Get specific reward value - raises error if missing."""
-        rewards_config = self.load_rewards_config(rewards_config_name)
+        rewards_config = self.load_rewards_config()
         
         if unit_type not in rewards_config:
             available_types = list(rewards_config.keys())
-            raise KeyError(f"Unit type '{unit_type}' not found in rewards config '{rewards_config_name}'. Available: {available_types}")
+            raise KeyError(f"Unit type '{unit_type}' not found in rewards config. Available: {available_types}")
         
         unit_rewards = rewards_config[unit_type]
         if action not in unit_rewards:
             available_actions = list(unit_rewards.keys())
-            raise KeyError(f"Action '{action}' not found for unit type '{unit_type}' in rewards config '{rewards_config_name}'. Available: {available_actions}")
+            raise KeyError(f"Action '{action}' not found for unit type '{unit_type}'. Available: {available_actions}")
         
         return unit_rewards[action]    
      
@@ -142,13 +142,9 @@ class ConfigLoader:
         except KeyError:
             raise KeyError(f"Training config '{name}' not found in training_config.json")
 
-    def load_rewards_config(self, name: str = "default") -> Dict[str, Any]:
-        """Load a named rewards configuration from rewards_config.json."""
-        configs = self.load_config("rewards_config")
-        try:
-            return configs[name]
-        except KeyError:
-            raise KeyError(f"Rewards config '{name}' not found in rewards_config.json")
+    def load_rewards_config(self, name: str = None) -> Dict[str, Any]:
+        """Load rewards configuration directly (unit-type-based approach)."""
+        return self.load_config("rewards_config")
     
     def get_board_config(self) -> Dict[str, Any]:
         """Get board configuration."""

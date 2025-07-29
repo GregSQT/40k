@@ -143,8 +143,8 @@ def create_model(config, training_config_name="default", rewards_config_name="de
         try:
             model = DQN.load(model_path, env=env, device=device)
             # Update any model parameters that might have changed
-            model.tensorboard_log = model_params.get("tensorboard_log", "./tensorboard/")
-            model.verbose = model_params.get("verbose", 1)
+            model.tensorboard_log = model_params["tensorboard_log"]
+            model.verbose = model_params["verbose"]
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
@@ -211,7 +211,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         try:
             model = DQN.load(model_path, env=env, device=device)
             model.tensorboard_log = model_params.get("tensorboard_log", "./tensorboard/")
-            model.verbose = model_params.get("verbose", 1)
+            model.verbose = model_params["verbose"]
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
@@ -232,7 +232,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     callbacks = []
     
     # Evaluation callback - test model periodically (use default scenario for consistency)
-    base_eval_env = W40KEnv(rewards_config="default", training_config_name=training_config_name, scenario_file=None)
+    base_eval_env = W40KEnv(training_config_name=training_config_name, scenario_file=None)
     
     # Enhance evaluation environment with our advanced replay logger
     enhanced_eval_env = GameReplayIntegration.enhance_training_env(base_eval_env)

@@ -21,7 +21,7 @@ export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
   static RNG_AP = 0;           // Range attack Armor penetration
   static RNG_DMG = 0;          // Range attack : damages
   // MELEE WEAPON
-  static CC_NB = 1;            // Melee attack : number of attacks - 3
+  static CC_NB = 3;            // Melee attack : number of attacks - 3
   static CC_RNG = 1;           // Melee attack : range
   static CC_ATK = 4;           // Melee attack : score
   static CC_STR = 3;           // Melee attack Strength

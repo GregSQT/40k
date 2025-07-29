@@ -138,7 +138,6 @@ class MultiAgentTrainer:
         
         # Load training configuration
         self.training_config = self.config.load_training_config("default")
-        self.rewards_config = self.config.load_rewards_config("default")
         
         # Initialize agent states
         self._initialize_agent_states()
@@ -212,9 +211,12 @@ class MultiAgentTrainer:
         
         print(f"🔄 Executing {len(training_rotation)} training matchups...")
         
+        # Update instance config to use the requested training config
+        self.training_config = self.config.load_training_config(training_config_name)
+        
         # Load training config to show timesteps info
         training_config = self.config.load_training_config(training_config_name)
-        timesteps_per_session = training_config.get("total_timesteps", 1000)
+        timesteps_per_session = training_config["total_timesteps"]  # No fallback - must be configured
         total_timesteps = len(training_rotation) * timesteps_per_session
         
         print(f"📊 Episodes per matchup: {episodes_per_pair}")
@@ -543,12 +545,11 @@ class MultiAgentTrainer:
         training_config = self.config.load_training_config(training_config_name)
         model_params = training_config["model_params"]
         
-        # Set verbose=0 to reduce SB3 logging
+        # Override verbose setting from config for multi-agent training
         model_params["verbose"] = 0
         
         # Create agent-specific environment with generated scenario and shared registry
         base_env = W40KEnv(
-            rewards_config=rewards_config_name,
             training_config_name=training_config_name,
             controlled_agent=agent_key,
             scenario_file=scenario_path,
@@ -566,7 +567,7 @@ class MultiAgentTrainer:
         if os.path.exists(model_path):
             model = DQN.load(model_path, env=env)
             # Update model parameters for continued training
-            model.tensorboard_log = model_params.get("tensorboard_log", "./tensorboard/")
+            model.tensorboard_log = model_params["tensorboard_log"]
         else:
             model = DQN(env=env, **model_params)
         

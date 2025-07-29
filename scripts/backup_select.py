@@ -146,7 +146,7 @@ else:
         "frontend/src/roster/spaceMarine/CaptainGravis.ts",
 
         # Frontend/src/roster/tyranid
-        "frontend/src/roster/tyranid/SpaceMarineInfantryTroopMeleeTroop.ts.ts",
+        "frontend/src/roster/tyranid/TyranidInfantryEliteMeleeElite.ts",
         "frontend/src/roster/tyranid/TyranidInfantrySwarmMeleeSwarm.ts",
         "frontend/src/roster/tyranid/TyranidInfantrySwarmRangedSwarm.ts",
         "frontend/src/roster/tyranid/Termagant.ts",
