@@ -1,8 +1,8 @@
 // frontend/src/roster/spaceMarine/Intercessor.ts
 //
-import { SpaceMarineRangedUnit } from "./SpaceMarineRangedUnit";
+import { SpaceMarineInfantryTroopRangedSwarm } from "./SpaceMarineInfantryTroopRangedSwarm";
 
-export class Intercessor extends SpaceMarineRangedUnit {
+export class Intercessor extends SpaceMarineInfantryTroopRangedSwarm {
   static NAME = "Intercessor";
   // BASE
   static MOVE = 6;             // Move distance

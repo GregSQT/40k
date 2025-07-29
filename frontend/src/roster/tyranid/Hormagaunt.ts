@@ -1,8 +1,8 @@
 // frontend/src/roster/tyranid/Hormagaunt.ts
 
-import { TyranidMeleeUnit, REWARDS_MELEE } from "./TyranidMeleeUnit";
+import { TyranidInfantrySwarmMeleeSwarm } from "./TyranidInfantrySwarmMeleeSwarm";
 
-export class Hormagaunt extends TyranidMeleeUnit {
+export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
   static NAME = "Hormagaunt";
   // BASE
   static MOVE = 10;             // Move distance

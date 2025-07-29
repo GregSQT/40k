@@ -1,8 +1,8 @@
 // frontend/src/roster/tyranid/Carnifex.ts
 
-import { TyranidMeleeUnit } from "./TyranidMeleeUnit";
+import { TyranidInfantryEliteMeleeElite } from "./TyranidInfantryEliteMeleeElite";
 
-export class Carnifex extends TyranidMeleeUnit {
+export class Carnifex extends TyranidInfantryEliteMeleeElite {
   static NAME = "Carnifex";
   // BASE
   static MOVE = 8;             // Move distance

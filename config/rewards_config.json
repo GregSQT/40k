@@ -1,1226 +1,284 @@
 {
-  "simplified": {
-    "description": "Simplified reward system for Phase 1 training - basic mechanics only",
-    "SpaceMarine_Ranged": {
+  "description": "4-part agent reward system with faction-specific behaviors - fully migrated from legacy 2-part system",
+  
+  "SpaceMarine_Infantry_Troop_RangedSwarm": {
+    "base_actions": {
       "move_close": 0.1,
       "move_away": 0.3,
-      "move_to_safe": 0.4,
-      "move_to_rng": 0.8,
-      "move_to_charge": 0.1,
-      "move_to_rng_charge": 0.2,
+      "move_to_charge": 0.0,
+      "move_to_los": 0.4,
       "ranged_attack": 0.5,
-      "enemy_killed_r": 1.0,
-      "enemy_killed_lowests_hp_r": 1.2,
-      "enemy_killed_no_overkill_r": 1.5,
-      "charge_success": 0.2,
-      "being_charged": -0.8,
-      "attack": 0.3,
-      "enemy_killed_m": 0.5,
-      "enemy_killed_lowests_hp_m": 0.7,
-      "enemy_killed_no_overkill_m": 0.9,
-      "loose_hp": -0.5,
-      "killed_in_melee": -1.0,
-      "win": 2.0,
-      "lose": -2.0,
-      "atk_wasted_r": -0.8,
-      "atk_wasted_m": -0.8,
-      "wait": -0.3,
-      "friendly_fire_penalty": -2.0
-    },
-    "SpaceMarine_Melee": {
-      "move_close": 0.4,
-      "move_away": -0.4,
-      "move_to_safe": 0.1,
-      "move_to_rng": 0.2,
-      "move_to_charge": 0.8,
-      "move_to_rng_charge": 1.0,
-      "ranged_attack": 0.2,
-      "enemy_killed_r": 0.3,
-      "enemy_killed_lowests_hp_r": 0.5,
-      "enemy_killed_no_overkill_r": 0.7,
-      "charge_success": 1.0,
-      "being_charged": -0.5,
-      "attack": 0.5,
-      "enemy_killed_m": 1.0,
-      "enemy_killed_lowests_hp_m": 1.2,
-      "enemy_killed_no_overkill_m": 1.5,
-      "loose_hp": -0.3,
-      "killed_in_melee": -0.6,
-      "win": 2.0,
-      "lose": -2.0,
-      "atk_wasted_r": -0.5,
-      "atk_wasted_m": -0.8,
-      "wait": -0.3,
-      "friendly_fire_penalty": -2.0
-    },
-    "SpaceMarine_Infantry_Ranged": {
-      "move_close": 0.1,
-      "move_away": 0.4,
-      "move_to_safe": 0.6,
-      "move_to_rng": 0.8,
-      "move_to_charge": 0.2,
-      "move_to_rng_charge": 0.3,
-      "ranged_attack": 0.4,
-      "enemy_killed_r": 0.8,
-      "enemy_killed_lowests_hp_r": 1.0,
-      "enemy_killed_no_overkill_r": 1.2,
-      "charge_success": 0.3,
-      "being_charged": -0.6,
-      "attack": 0.4,
-      "enemy_killed_m": 0.4,
-      "enemy_killed_lowests_hp_m": 0.6,
-      "enemy_killed_no_overkill_m": 0.8,
-      "loose_hp": -0.4,
-      "killed_in_melee": -0.8,
-      "win": 1.5,
-      "lose": -1.5,
-      "atk_wasted_r": -0.8,
-      "atk_wasted_m": -0.8,
-      "wait": -0.4,
-      "friendly_fire_penalty": -2.0
-    },
-    "SpaceMarine_Infantry_Melee": {
-      "move_close": 0.3,
-      "move_away": -0.3,
-      "move_to_safe": 0.2,
-      "move_to_rng": 0.4,
-      "move_to_charge": 0.8,
-      "move_to_rng_charge": 1.0,
-      "ranged_attack": 0.3,
-      "enemy_killed_r": 0.4,
-      "enemy_killed_lowests_hp_r": 0.6,
-      "enemy_killed_no_overkill_r": 0.8,
-      "charge_success": 0.8,
-      "being_charged": -0.5,
-      "attack": 0.6,
-      "enemy_killed_m": 0.8,
-      "enemy_killed_lowests_hp_m": 1.0,
-      "enemy_killed_no_overkill_m": 1.2,
-      "loose_hp": -0.2,
-      "killed_in_melee": -0.4,
-      "win": 1.5,
-      "lose": -1.5,
-      "atk_wasted_r": -0.6,
-      "atk_wasted_m": -0.8,
-      "wait": -0.4,
-      "friendly_fire_penalty": -2.0
-    },
-    "SpaceMarine_Leader_Melee": {
-      "move_close": 0.3,
-      "move_away": -0.05,
-      "move_to_safe": 0.4,
-      "move_to_rng": 0.5,
-      "move_to_charge": 0.8,
-      "move_to_rng_charge": 1.0,
-      "ranged_attack": 0.4,
-      "enemy_killed_r": 0.8,
-      "enemy_killed_lowests_hp_r": 1.0,
-      "enemy_killed_no_overkill_r": 1.2,
-      "charge_success": 0.8,
+      "melee_attack": 0.1,
+      "charge_success": 0.1,
       "being_charged": -0.3,
-      "attack": 0.7,
-      "enemy_killed_m": 1.0,
-      "enemy_killed_lowests_hp_m": 1.2,
-      "enemy_killed_no_overkill_m": 1.5,
-      "loose_hp": -0.1,
-      "killed_in_melee": -0.2,
-      "win": 2.0,
-      "lose": -2.0,
-      "atk_wasted_r": -0.4,
-      "atk_wasted_m": -0.6,
-      "wait": -0.2,
-      "friendly_fire_penalty": -2.0,
-      "leadership_bonus": 0.5,
-      "survive_damage": 0.3,
-      "tank_damage": 0.4
+      "wait": -0.2
     },
-    "Tyranid_Ranged": {
-      "move_close": 0.5,
-      "move_away": 0.2,
-      "move_to_safe": 0.3,
-      "move_to_rng": 0.8,
-      "move_to_charge": 0.1,
-      "move_to_rng_charge": 0.1,
-      "ranged_attack": 0.6,
-      "enemy_killed_r": 1.2,
-      "enemy_killed_lowests_hp_r": 1.4,
-      "enemy_killed_no_overkill_r": 1.8,
-      "charge_success": 0.2,
-      "being_charged": -0.6,
-      "attack": 0.3,
-      "enemy_killed_m": 0.6,
-      "enemy_killed_lowests_hp_m": 0.8,
-      "enemy_killed_no_overkill_m": 1.0,
-      "loose_hp": -0.2,
-      "killed_in_melee": -0.4,
-      "win": 2.0,
-      "lose": -2.0,
-      "atk_wasted_r": -0.6,
-      "atk_wasted_m": -0.6,
-      "wait": -0.2,
-      "friendly_fire_penalty": -2.0,
-      "swarm_coordination": 0.3,
-      "pack_hunting": 0.4
+    "target_type_bonuses": {
+      "vs_melee": 0.1,
+      "vs_ranged": 0.0,
+      "vs_swarm": 0.2,
+      "vs_troop": 0.1,
+      "vs_elite": 0.0,
+      "vs_vehicle": -0.1,
+      "vs_heavy": -0.2
     },
-    "Tyranid_Melee": {
-      "move_close": 0.8,
-      "move_away": -0.6,
-      "move_to_safe": -0.2,
-      "move_to_rng": -0.2,
-      "move_to_charge": 1.0,
-      "move_to_rng_charge": 1.2,
-      "ranged_attack": -0.8,
-      "enemy_killed_r": -0.8,
-      "enemy_killed_lowests_hp_r": -0.8,
-      "enemy_killed_no_overkill_r": -0.8,
-      "charge_success": 1.5,
-      "being_charged": -0.4,
-      "attack": 0.8,
-      "enemy_killed_m": 1.5,
-      "enemy_killed_lowests_hp_m": 1.8,
-      "enemy_killed_no_overkill_m": 2.0,
-      "loose_hp": -0.1,
-      "killed_in_melee": -0.2,
-      "win": 2.0,
-      "lose": -2.0,
-      "atk_wasted_r": -0.4,
-      "atk_wasted_m": -0.8,
-      "wait": -0.2,
-      "friendly_fire_penalty": -2.0,
-      "swarm_coordination": 0.5,
-      "pack_hunting": 0.8,
-      "flanking_bonus": 0.6
-    }
-  },
-  
-  "balanced": {
-    "description": "Balanced reward system for Phase 2 training - tactical complexity",
-    "SpaceMarine_Ranged": {
-      "move_close": 0.1,
-      "move_away": 0.4,
-      "move_to_safe": 0.6,
-      "move_to_rng": 0.8,
-      "move_to_charge": 0.2,
-      "move_to_rng_charge": 0.3,
-      "ranged_attack": 0.4,
-      "enemy_killed_r": 0.8,
-      "enemy_killed_lowests_hp_r": 1.0,
-      "enemy_killed_no_overkill_r": 1.2,
-      "charge_success": 0.3,
-      "being_charged": -0.6,
-      "attack": 0.4,
-      "enemy_killed_m": 0.4,
-      "enemy_killed_lowests_hp_m": 0.6,
-      "enemy_killed_no_overkill_m": 0.8,
-      "loose_hp": -0.4,
-      "killed_in_melee": -0.8,
-      "win": 1.5,
-      "lose": -1.5,
-      "atk_wasted_r": -0.8,
-      "atk_wasted_m": -0.8,
-      "wait": -0.4,
-      "friendly_fire_penalty": -2.0,
-      "terrain_usage": 0.3,
-      "overwatch_positioning": 0.4,
-      "target_prioritization": 0.5,
-      "formation_maintenance": 0.3,
-      "elite_target_focus": 0.6
+    "result_bonuses": {
+      "kill_target": 0.2,
+      "wound_target": 0.1,
+      "no_overkill": 0.1,
+      "target_lowest_hp": 0.1
     },
-    "SpaceMarine_Melee": {
-      "move_close": 0.3,
-      "move_away": -0.3,
-      "move_to_safe": 0.2,
-      "move_to_rng": 0.4,
-      "move_to_charge": 0.8,
-      "move_to_rng_charge": 1.0,
-      "ranged_attack": 0.3,
-      "enemy_killed_r": 0.4,
-      "enemy_killed_lowests_hp_r": 0.6,
-      "enemy_killed_no_overkill_r": 0.8,
-      "charge_success": 0.8,
-      "being_charged": -0.5,
-      "attack": 0.6,
-      "enemy_killed_m": 0.8,
-      "enemy_killed_lowests_hp_m": 1.0,
-      "enemy_killed_no_overkill_m": 1.2,
-      "loose_hp": -0.2,
-      "killed_in_melee": -0.4,
-      "win": 1.5,
-      "lose": -1.5,
-      "atk_wasted_r": -0.6,
-      "atk_wasted_m": -0.8,
-      "wait": -0.4,
-      "friendly_fire_penalty": -2.0,
-      "terrain_usage": 0.2,
-      "charge_timing": 0.5,
-      "target_prioritization": 0.6,
-      "formation_maintenance": 0.4,
-      "elite_unit_survival": 0.5
+    "adaptive_bonuses": {
+      "step_up_when_covered": 0.05,
+      "step_down_when_needed": 0.05
     },
-    "Tyranid_Ranged": {
-      "move_close": 0.4,
-      "move_away": 0.2,
-      "move_to_safe": 0.3,
-      "move_to_rng": 0.6,
-      "move_to_charge": 0.2,
-      "move_to_rng_charge": 0.2,
-      "ranged_attack": 0.5,
-      "enemy_killed_r": 1.0,
-      "enemy_killed_lowests_hp_r": 1.2,
-      "enemy_killed_no_overkill_r": 1.5,
-      "charge_success": 0.3,
-      "being_charged": -0.4,
-      "attack": 0.4,
-      "enemy_killed_m": 0.6,
-      "enemy_killed_lowests_hp_m": 0.8,
-      "enemy_killed_no_overkill_m": 1.0,
-      "loose_hp": -0.2,
-      "killed_in_melee": -0.4,
-      "win": 1.5,
-      "lose": -1.5,
-      "atk_wasted_r": -0.6,
-      "atk_wasted_m": -0.6,
-      "wait": -0.3,
-      "friendly_fire_penalty": -2.0,
-      "swarm_coordination": 0.4,
-      "pack_hunting": 0.5,
-      "flanking_bonus": 0.3,
-      "target_prioritization": 0.4,
-      "formation_maintenance": 0.3
+    "situational_modifiers": {
+      "win": 0.8,
+      "lose": -0.8,
+      "friendly_fire_penalty": -0.5,
+      "attack_wasted": -0.3
     },
-    "Tyranid_Melee": {
-      "move_close": 0.6,
-      "move_away": -0.4,
-      "move_to_safe": -0.1,
-      "move_to_rng": -0.1,
-      "move_to_charge": 0.8,
-      "move_to_rng_charge": 1.0,
-      "ranged_attack": -0.6,
-      "enemy_killed_r": -0.6,
-      "enemy_killed_lowests_hp_r": -0.6,
-      "enemy_killed_no_overkill_r": -0.6,
-      "charge_success": 1.2,
-      "being_charged": -0.3,
-      "attack": 0.6,
-      "enemy_killed_m": 1.2,
-      "enemy_killed_lowests_hp_m": 1.5,
-      "enemy_killed_no_overkill_m": 1.8,
-      "loose_hp": -0.1,
-      "killed_in_melee": -0.2,
-      "win": 1.5,
-      "lose": -1.5,
-      "atk_wasted_r": -0.3,
-      "atk_wasted_m": -0.6,
-      "wait": -0.3,
-      "friendly_fire_penalty": -2.0,
-      "swarm_coordination": 0.5,
-      "pack_hunting": 0.7,
-      "flanking_bonus": 0.4,
-      "elite_target_priority": 0.6,
-      "tank_positioning": 0.3,
-      "area_denial": 0.4,
-      "charge_combat_priority": 0.5,
-      "alternating_combat_timing": 0.3
+    "tactical_bonuses": {
+      "formation_cohesion": 0.1,
+      "combined_arms_support": 0.1,
+      "anti_swarm_specialist": 0.1,
+      "suppression_fire": 0.1
     }
   },
 
-  "default": {
-    "description": "Original sophisticated reward system for Phase 3 training - full tactical depth",
-    "SpaceMarine_Ranged": {
-      "move_close": 0.1,
-      "move_away": 0.2,
-      "move_to_safe": 0.4,
-      "move_to_rng": 0.6,
-      "move_to_charge": 0.1,
-      "move_to_rng_charge": 0.05,
-      "ranged_attack": 0.2,
-      "enemy_killed_r": 0.4,
-      "enemy_killed_lowests_hp_r": 0.6,
-      "enemy_killed_no_overkill_r": 0.8,
-      "charge_success": 0.1,
-      "being_charged": -0.5,
-      "attack": 0.2,
-      "enemy_killed_m": 0.2,
-      "enemy_killed_lowests_hp_m": 0.3,
-      "enemy_killed_no_overkill_m": 0.4,
-      "loose_hp": -0.2,
-      "killed_in_melee": -0.4,
-      "win": 0.9,
-      "lose": -0.9,
-      "atk_wasted_r": -0.5,
-      "atk_wasted_m": -0.5,
-      "wait": -0.5,
-      "friendly_fire_penalty": -1.0,
-      "terrain_usage": 0.2,
-      "overwatch_positioning": 0.3,
-      "target_prioritization": 0.4,
-      "formation_maintenance": 0.2,
-      "elite_target_focus": 0.5,
-      "range_optimization": 0.3,
-      "suppression_tactics": 0.2,
-      "defensive_positioning": 0.4
-    },
-    "SpaceMarine_Melee": {
+  "SpaceMarine_Infantry_Troop_MeleeTroop": {
+    "base_actions": {
       "move_close": 0.2,
-      "move_away": -0.2,
-      "move_to_safe": -0.2,
-      "move_to_rng": 0.3,
-      "move_to_charge": 0.4,
-      "move_to_rng_charge": 0.6,
-      "ranged_attack": 0.2,
-      "enemy_killed_r": 0.2,
-      "enemy_killed_lowests_hp_r": 0.3,
-      "enemy_killed_no_overkill_r": 0.4,
-      "charge_success": 0.5,
-      "being_charged": -0.5,
-      "attack": 0.2,
-      "enemy_killed_m": 0.4,
-      "enemy_killed_lowests_hp_m": 0.6,
-      "enemy_killed_no_overkill_m": 0.8,
-      "loose_hp": -0.1,
-      "killed_in_melee": -0.2,
-      "win": 0.9,
-      "lose": -0.9,
-      "atk_wasted_r": -0.5,
-      "atk_wasted_m": -0.5,
-      "wait": -0.5,
-      "friendly_fire_penalty": -1.0,
-      "terrain_usage": 0.1,
-      "charge_timing": 0.4,
-      "target_prioritization": 0.5,
-      "formation_maintenance": 0.3,
-      "elite_unit_survival": 0.4,
-      "battlefield_control": 0.3,
-      "counter_charge": 0.3,
-      "tactical_withdrawal": 0.2
-    },
-    "Tyranid_Ranged": {
-      "move_close": 0.3,
-      "move_away": 0.1,
-      "move_to_safe": 0.2,
-      "move_to_rng": 0.4,
-      "move_to_charge": 0.05,
-      "move_to_rng_charge": 0.05,
-      "ranged_attack": 0.3,
-      "enemy_killed_r": 0.5,
-      "enemy_killed_lowests_hp_r": 0.7,
-      "enemy_killed_no_overkill_r": 0.9,
-      "charge_success": 0.1,
-      "being_charged": -0.3,
-      "attack": 0.2,
-      "enemy_killed_m": 0.3,
-      "enemy_killed_lowests_hp_m": 0.4,
-      "enemy_killed_no_overkill_m": 0.5,
-      "loose_hp": -0.1,
-      "killed_in_melee": -0.2,
-      "win": 0.9,
-      "lose": -0.9,
-      "atk_wasted_r": -0.3,
-      "atk_wasted_m": -0.3,
-      "wait": -0.3,
-      "friendly_fire_penalty": -1.0,
-      "swarm_coordination": 0.2,
-      "pack_hunting": 0.3,
-      "flanking_bonus": 0.2,
-      "target_prioritization": 0.3,
-      "formation_maintenance": 0.2,
-      "mass_fire_coordination": 0.4,
-      "elite_elimination": 0.5
-    },
-    "Tyranid_Melee": {
-      "move_close": 0.4,
-      "move_away": -0.3,
-      "move_to_safe": -0.1,
-      "move_to_rng": -0.1,
-      "move_to_charge": 0.6,
-      "move_to_rng_charge": 0.7,
-      "ranged_attack": -0.5,
-      "enemy_killed_r": -0.5,
-      "enemy_killed_lowests_hp_r": -0.5,
-      "enemy_killed_no_overkill_r": -0.5,
-      "charge_success": 0.8,
-      "being_charged": -0.2,
-      "attack": 0.4,
-      "enemy_killed_m": 0.7,
-      "enemy_killed_lowests_hp_m": 0.9,
-      "enemy_killed_no_overkill_m": 1.0,
-      "loose_hp": -0.05,
-      "killed_in_melee": -0.1,
-      "win": 0.9,
-      "lose": -0.9,
-      "atk_wasted_r": -0.2,
-      "atk_wasted_m": -0.4,
-      "wait": -0.4,
-      "friendly_fire_penalty": -1.0,
-      "swarm_coordination": 0.3,
-      "pack_hunting": 0.5,
-      "flanking_bonus": 0.3,
-      "elite_target_priority": 0.4,
-      "tank_positioning": 0.2,
-      "area_denial": 0.3,
-      "charge_combat_priority": 0.3,
-      "alternating_combat_timing": 0.2,
-      "multi_unit_assault": 0.4,
-      "strategic_sacrifice": 0.2
-    }
-  },
-  
-  "advanced": {
-    "description": "Modular 4-part agent reward system with faction-specific behaviors (all values -1 to 1)",
-    
-    "SpaceMarine_Infantry_Troop_RangedSwarm": {
-      "base_actions": {
-        "move_close": 0.1,
-        "move_away": 0.3,
-        "move_to_charge": 0.0,
-        "move_to_los": 0.4,
-        "ranged_attack": 0.5,
-        "melee_attack": 0.1,
-        "charge_success": 0.1,
-        "being_charged": -0.3,
-        "wait": -0.2
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.1,
-        "vs_ranged": 0.0,
-        "vs_swarm": 0.2,
-        "vs_troop": 0.1,
-        "vs_elite": 0.0,
-        "vs_vehicle": -0.1,
-        "vs_heavy": -0.2
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.8,
-        "lose": -0.8,
-        "friendly_fire_penalty": -0.5,
-        "attack_wasted": -0.3
-      },
-      "tactical_bonuses": {
-        "formation_cohesion": 0.1,
-        "combined_arms_support": 0.1,
-        "anti_swarm_specialist": 0.1,
-        "suppression_fire": 0.1
-      }
-    },
-
-    "SpaceMarine_Infantry_Troop_MeleeTroop": {
-      "base_actions": {
-        "move_close": 0.2,
-        "move_away": -0.1,
-        "move_to_charge": 0.4,
-        "move_to_los": 0.1,
-        "ranged_attack": 0.2,
-        "melee_attack": 0.5,
-        "charge_success": 0.3,
-        "being_charged": -0.2,
-        "wait": -0.2
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.0,
-        "vs_ranged": 0.1,
-        "vs_swarm": 0.1,
-        "vs_troop": 0.2,
-        "vs_elite": 0.0,
-        "vs_vehicle": -0.1,
-        "vs_heavy": -0.2
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.8,
-        "lose": -0.8,
-        "friendly_fire_penalty": -0.5,
-        "attack_wasted": -0.3,
-        "target_in_cover_penalty": -0.1,
-        "target_exposed_bonus": 0.05
-      },
-      "tactical_bonuses": {
-        "formation_cohesion": 0.1,
-        "combined_arms_support": 0.1,
-        "troop_line_specialist": 0.1,
-        "disciplined_assault": 0.1
-      }
-    },
-
-    "SpaceMarine_Infantry_Troop_RangedElite": {
-      "base_actions": {
-        "move_close": 0.0,
-        "move_away": 0.4,
-        "move_to_charge": -0.1,
-        "move_to_los": 0.5,
-        "ranged_attack": 0.6,
-        "melee_attack": 0.2,
-        "charge_success": 0.0,
-        "being_charged": -0.4,
-        "wait": -0.2
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.2,
-        "vs_ranged": 0.0,
-        "vs_swarm": 0.0,
-        "vs_troop": 0.1,
-        "vs_elite": 0.2,
-        "vs_vehicle": 0.1,
-        "vs_heavy": 0.0
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.8,
-        "lose": -0.8,
-        "friendly_fire_penalty": -0.5,
-        "attack_wasted": -0.3,
-        "target_in_cover_penalty": -0.1,
-        "target_exposed_bonus": 0.05
-      },
-      "tactical_bonuses": {
-        "formation_cohesion": 0.1,
-        "combined_arms_support": 0.1,
-        "elite_hunter": 0.1,
-        "precision_fire": 0.1
-      }
-    },
-
-    "SpaceMarine_Infantry_Elite_MeleeElite": {
-      "base_actions": {
-        "move_close": 0.3,
-        "move_away": 0.0,
-        "move_to_charge": 0.5,
-        "move_to_los": 0.0,
-        "ranged_attack": 0.3,
-        "melee_attack": 0.6,
-        "charge_success": 0.4,
-        "being_charged": -0.1,
-        "wait": -0.1
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.0,
-        "vs_ranged": 0.2,
-        "vs_swarm": 0.0,
-        "vs_troop": 0.1,
-        "vs_elite": 0.2,
-        "vs_vehicle": 0.1,
-        "vs_heavy": 0.0
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.8,
-        "lose": -0.8,
-        "friendly_fire_penalty": -0.5,
-        "attack_wasted": -0.3,
-        "target_in_cover_penalty": -0.1,
-        "target_exposed_bonus": 0.05
-      },
-      "tactical_bonuses": {
-        "formation_cohesion": 0.1,
-        "combined_arms_support": 0.1,
-        "elite_destroyer": 0.1,
-        "tactical_flexibility": 0.1
-      }
-    },
-
-    "SpaceMarine_Infantry_LeaderTroop_RangedElite": {
-      "base_actions": {
-        "move_close": 0.2,
-        "move_away": 0.2,
-        "move_to_charge": 0.0,
-        "move_to_los": 0.5,
-        "ranged_attack": 0.6,
-        "melee_attack": 0.3,
-        "charge_success": 0.1,
-        "being_charged": -0.3,
-        "wait": -0.1
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.2,
-        "vs_ranged": 0.0,
-        "vs_swarm": -0.1,
-        "vs_troop": 0.0,
-        "vs_elite": 0.2,
-        "vs_vehicle": 0.1,
-        "vs_heavy": 0.0
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.8,
-        "lose": -0.8,
-        "friendly_fire_penalty": -0.5,
-        "attack_wasted": -0.3,
-        "target_in_cover_penalty": -0.1,
-        "target_exposed_bonus": 0.05
-      },
-      "tactical_bonuses": {
-        "formation_cohesion": 0.1,
-        "combined_arms_support": 0.1,
-        "tactical_leadership": 0.2,
-        "command_presence": 0.1
-      }
-    },
-
-    "SpaceMarine_Infantry_LeaderElite_MeleeElite": {
-      "base_actions": {
-        "move_close": 0.2,
-        "move_away": 0.1,
-        "move_to_charge": 0.4,
-        "move_to_los": 0.1,
-        "ranged_attack": 0.4,
-        "melee_attack": 0.6,
-        "charge_success": 0.4,
-        "being_charged": 0.0,
-        "wait": -0.1
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.0,
-        "vs_ranged": 0.2,
-        "vs_swarm": -0.1,
-        "vs_troop": 0.0,
-        "vs_elite": 0.2,
-        "vs_vehicle": 0.1,
-        "vs_heavy": 0.0
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.8,
-        "lose": -0.8,
-        "friendly_fire_penalty": -0.5,
-        "attack_wasted": -0.3,
-        "target_in_cover_penalty": -0.1,
-        "target_exposed_bonus": 0.05
-      },
-      "tactical_bonuses": {
-        "formation_cohesion": 0.1,
-        "combined_arms_support": 0.1,
-        "command_presence": 0.2,
-        "leadership_aura": 0.1,
-        "tactical_coordination": 0.1
-      }
-    },
-
-    "SpaceMarine_Vehicle_VehicleMedium_RangedHeavy": {
-      "base_actions": {
-        "move_close": 0.1,
-        "move_away": 0.6,
-        "move_to_charge": -0.2,
-        "move_to_los": 0.4,
-        "ranged_attack": 0.8,
-        "melee_attack": 0.1,
-        "charge_success": -0.1,
-        "being_charged": -0.5,
-        "wait": -0.1
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.1,
-        "vs_ranged": 0.0,
-        "vs_swarm": -0.2,
-        "vs_troop": -0.1,
-        "vs_elite": 0.1,
-        "vs_vehicle": 0.2,
-        "vs_heavy": 0.2
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.8,
-        "lose": -0.8,
-        "friendly_fire_penalty": -0.5,
-        "attack_wasted": -0.3,
-        "target_in_cover_penalty": -0.1,
-        "target_exposed_bonus": 0.05
-      },
-      "tactical_bonuses": {
-        "formation_cohesion": 0.1,
-        "combined_arms_support": 0.1,
-        "anti_armor_specialist": 0.2,
-        "fire_support": 0.1
-      }
-    },
-
-    "SpaceMarine_Fly_Troop_MeleeTroop": {
-      "base_actions": {
-        "move_close": 0.4,
-        "move_away": 0.2,
-        "move_to_charge": 0.5,
-        "move_to_los": 0.2,
-        "ranged_attack": 0.3,
-        "melee_attack": 0.6,
-        "charge_success": 0.5,
-        "being_charged": -0.1,
-        "wait": -0.2
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.0,
-        "vs_ranged": 0.2,
-        "vs_swarm": 0.1,
-        "vs_troop": 0.2,
-        "vs_elite": 0.1,
-        "vs_vehicle": -0.1,
-        "vs_heavy": -0.2
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.8,
-        "lose": -0.8,
-        "friendly_fire_penalty": -0.5,
-        "attack_wasted": -0.3,
-        "target_in_cover_penalty": -0.1,
-        "target_exposed_bonus": 0.05
-      },
-      "tactical_bonuses": {
-        "formation_cohesion": 0.1,
-        "combined_arms_support": 0.1,
-        "mobile_striker": 0.2,
-        "aerial_superiority": 0.1
-      }
-    },
-
-    "Tyranid_Infantry_Swarm_RangedSwarm": {
-      "base_actions": {
-        "move_close": 0.2,
-        "move_away": 0.2,
-        "move_to_charge": 0.1,
-        "move_to_los": 0.3,
-        "ranged_attack": 0.4,
-        "melee_attack": 0.2,
-        "charge_success": 0.2,
-        "being_charged": -0.2,
-        "wait": -0.3
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.1,
-        "vs_ranged": 0.0,
-        "vs_swarm": 0.2,
-        "vs_troop": 0.1,
-        "vs_elite": -0.1,
-        "vs_vehicle": -0.2,
-        "vs_heavy": -0.3
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.6,
-        "lose": -0.6,
-        "friendly_fire_penalty": -0.3,
-        "attack_wasted": -0.2,
-        "target_in_cover_penalty": -0.05,
-        "target_exposed_bonus": 0.03
-      },
-      "tactical_bonuses": {
-        "swarm_coordination": 0.2,
-        "pack_hunting": 0.1,
-        "expendable_tactics": 0.1,
-        "numerical_superiority": 0.1
-      }
-    },
-
-    "Tyranid_Infantry_Swarm_MeleeSwarm": {
-      "base_actions": {
-        "move_close": 0.4,
-        "move_away": -0.3,
-        "move_to_charge": 0.5,
-        "move_to_los": -0.1,
-        "ranged_attack": -0.2,
-        "melee_attack": 0.5,
-        "charge_success": 0.4,
-        "being_charged": -0.1,
-        "wait": -0.4
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.0,
-        "vs_ranged": 0.2,
-        "vs_swarm": 0.1,
-        "vs_troop": 0.2,
-        "vs_elite": -0.1,
-        "vs_vehicle": -0.2,
-        "vs_heavy": -0.3
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.6,
-        "lose": -0.6,
-        "friendly_fire_penalty": -0.3,
-        "attack_wasted": -0.2,
-        "target_in_cover_penalty": -0.05,
-        "target_exposed_bonus": 0.03
-      },
-      "tactical_bonuses": {
-        "swarm_coordination": 0.2,
-        "pack_hunting": 0.2,
-        "expendable_tactics": 0.1,
-        "overwhelming_assault": 0.1
-      }
-    },
-
-    "Tyranid_Infantry_Troop_MeleeTroop": {
-      "base_actions": {
-        "move_close": 0.3,
-        "move_away": -0.2,
-        "move_to_charge": 0.4,
-        "move_to_los": 0.0,
-        "ranged_attack": -0.1,
-        "melee_attack": 0.5,
-        "charge_success": 0.4,
-        "being_charged": -0.1,
-        "wait": -0.3
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.0,
-        "vs_ranged": 0.2,
-        "vs_swarm": 0.1,
-        "vs_troop": 0.2,
-        "vs_elite": 0.0,
-        "vs_vehicle": -0.1,
-        "vs_heavy": -0.2
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.7,
-        "lose": -0.7,
-        "friendly_fire_penalty": -0.3,
-        "attack_wasted": -0.2,
-        "target_in_cover_penalty": -0.05,
-        "target_exposed_bonus": 0.03
-      },
-      "tactical_bonuses": {
-        "pack_hunting": 0.2,
-        "coordinated_assault": 0.1,
-        "instinctive_behavior": 0.1,
-        "bio_weapon_synergy": 0.1
-      }
-    },
-
-    "Tyranid_Infantry_Elite_MeleeElite": {
-      "base_actions": {
-        "move_close": 0.3,
-        "move_away": -0.1,
-        "move_to_charge": 0.5,
-        "move_to_los": 0.0,
-        "ranged_attack": 0.2,
-        "melee_attack": 0.6,
-        "charge_success": 0.4,
-        "being_charged": 0.0,
-        "wait": -0.2
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.0,
-        "vs_ranged": 0.2,
-        "vs_swarm": -0.1,
-        "vs_troop": 0.1,
-        "vs_elite": 0.2,
-        "vs_vehicle": 0.1,
-        "vs_heavy": 0.0
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.8,
-        "lose": -0.8,
-        "friendly_fire_penalty": -0.4,
-        "attack_wasted": -0.3,
-        "target_in_cover_penalty": -0.1,
-        "target_exposed_bonus": 0.05
-      },
-      "tactical_bonuses": {
-        "pack_hunting": 0.2,
-        "apex_predator": 0.1,
-        "instinctive_behavior": 0.1,
-        "bio_weapon_synergy": 0.1
-      }
-    },
-
-    "Tyranid_Monster_LeaderElite_MeleeHeavy": {
-      "base_actions": {
-        "move_close": 0.2,
-        "move_away": 0.1,
-        "move_to_charge": 0.4,
-        "move_to_los": 0.1,
-        "ranged_attack": 0.3,
-        "melee_attack": 0.7,
-        "charge_success": 0.5,
-        "being_charged": 0.1,
-        "wait": -0.1
-      },
-      "target_type_bonuses": {
-        "vs_melee": 0.0,
-        "vs_ranged": 0.1,
-        "vs_swarm": -0.2,
-        "vs_troop": 0.0,
-        "vs_elite": 0.1,
-        "vs_vehicle": 0.2,
-        "vs_heavy": 0.2
-      },
-      "result_bonuses": {
-        "kill_target": 0.2,
-        "wound_target": 0.1,
-        "no_overkill": 0.1,
-        "target_lowest_hp": 0.1
-      },
-      "adaptive_bonuses": {
-        "step_up_when_covered": 0.05,
-        "step_down_when_needed": 0.05
-      },
-      "situational_modifiers": {
-        "win": 0.8,
-        "lose": -0.8,
-        "friendly_fire_penalty": -0.4,
-        "attack_wasted": -0.3,
-        "target_in_cover_penalty": -0.1,
-        "target_exposed_bonus": 0.05
-      },
-      "tactical_bonuses": {
-        "synapse_control": 0.2,
-        "hive_mind_coordination": 0.1,
-        "apex_predator": 0.2,
-        "psychic_dominance": 0.1
-      }
-    }
-  },
-
-    "SpaceMarine_Vehicle_VehicleMedium_RangedHeavy": {
-      "move_to_rng": 0.5,
-      "move_close": 0.1,
-      "move_away": 0.6,
-      "ranged_attack": 0.8,
-      "attack": 0.2,
-      "target_vehicle_ranged": 1.0,
-      "target_elite_ranged": 0.9,
-      "target_heavy_ranged": 1.0,
-      "kill_vehicle_perfect": 1.0,
-      "kill_elite_anti_armor": 0.8,
-      "long_range_superiority": 0.7,
-      "armor_penetration": 0.8,
-      "win": 1.0,
-      "lose": -1.0,
-      "wait": -0.1,
-      "anti_armor_specialist": 0.9,
-      "fire_support": 0.6
-    },
-
-    "SpaceMarine_Fly_Troop_MeleeTroop": {
-      "move_close": 0.7,
-      "move_to_charge": 0.9,
-      "move_away": 0.2,
-      "charge_success": 1.0,
-      "attack": 0.7,
-      "ranged_attack": 0.3,
-      "target_troop_melee": 1.0,
-      "target_swarm_melee": 0.8,
-      "target_elite_melee": 0.7,
-      "kill_troop_perfect": 1.0,
-      "kill_swarm_mobility": 0.8,
-      "aerial_assault": 0.9,
-      "rapid_deployment": 0.7,
-      "win": 1.0,
-      "lose": -1.0,
-      "wait": -0.2,
-      "mobile_striker": 0.8,
-      "aerial_superiority": 0.6
-    },
-
-    "Tyranid_Infantry_Swarm_RangedSwarm": {
-      "move_close": 0.3,
-      "move_to_rng": 0.5,
-      "ranged_attack": 0.6,
-      "attack": 0.2,
-      "target_swarm_ranged": 1.0,
-      "target_troop_ranged": 0.8,
-      "target_elite_ranged": 0.5,
-      "kill_swarm_perfect": 1.0,
-      "kill_troop_adaptive": 0.7,
-      "mass_fire_coordination": 0.8,
-      "numerical_superiority": 0.7,
-      "win": 1.0,
-      "lose": -1.0,
-      "wait": -0.2,
-      "swarm_tactics": 0.6,
-      "expendable_advance": 0.4
-    },
-
-    "Tyranid_Infantry_Swarm_MeleeSwarm": {
-      "move_close": 0.8,
-      "move_to_charge": 0.9,
-      "move_away": -0.4,
-      "charge_success": 1.0,
-      "attack": 0.7,
-      "ranged_attack": -0.3,
-      "target_swarm_melee": 1.0,
-      "target_troop_melee": 0.8,
-      "target_elite_melee": 0.6,
-      "kill_swarm_perfect": 1.0,
-      "kill_troop_adaptive": 0.8,
-      "swarm_charge": 0.9,
-      "overwhelming_numbers": 0.8,
-      "win": 1.0,
-      "lose": -1.0,
-      "wait": -0.2,
-      "expendable_tactics": 0.5,
-      "mob_assault": 0.7
-    },
-
-    "Tyranid_Infantry_Troop_MeleeTroop": {
-      "move_close": 0.6,
-      "move_to_charge": 0.8,
-      "move_away": -0.3,
-      "charge_success": 0.9,
-      "attack": 0.6,
-      "ranged_attack": -0.2,
-      "target_troop_melee": 1.0,
-      "target_swarm_melee": 0.7,
-      "target_elite_melee": 0.6,
-      "kill_troop_perfect": 1.0,
-      "kill_swarm_when_elite_covered": 0.7,
-      "kill_elite_when_swarm_covered": 0.6,
-      "win": 1.0,
-      "lose": -1.0,
-      "wait": -0.3,
-      "pack_hunting": 0.6,
-      "coordinated_assault": 0.5
-    },
-
-    "Tyranid_Infantry_Elite_MeleeElite": {
-      "move_close": 0.5,
-      "move_to_charge": 0.9,
       "move_away": -0.1,
-      "charge_success": 1.0,
-      "attack": 0.8,
+      "move_to_charge": 0.4,
+      "move_to_los": 0.1,
       "ranged_attack": 0.2,
-      "target_elite_melee": 1.0,
-      "target_leader_melee": 1.0,
-      "target_vehicle_melee": 0.9,
-      "kill_elite_perfect": 1.0,
-      "kill_leader_bonus": 1.0,
-      "breakthrough_assault": 0.9,
-      "area_denial": 0.7,
-      "win": 1.0,
-      "lose": -1.0,
-      "wait": -0.1,
-      "monster_rampage": 0.8,
-      "elite_destroyer": 0.9
+      "melee_attack": 0.5,
+      "charge_success": 0.3,
+      "being_charged": -0.2,
+      "wait": -0.2
     },
+    "target_type_bonuses": {
+      "vs_melee": 0.0,
+      "vs_ranged": 0.1,
+      "vs_swarm": 0.1,
+      "vs_troop": 0.2,
+      "vs_elite": 0.0,
+      "vs_vehicle": -0.1,
+      "vs_heavy": -0.2
+    },
+    "result_bonuses": {
+      "kill_target": 0.2,
+      "wound_target": 0.1,
+      "no_overkill": 0.1,
+      "target_lowest_hp": 0.1
+    },
+    "adaptive_bonuses": {
+      "step_up_when_covered": 0.05,
+      "step_down_when_needed": 0.05
+    },
+    "situational_modifiers": {
+      "win": 0.8,
+      "lose": -0.8,
+      "friendly_fire_penalty": -0.5,
+      "attack_wasted": -0.3,
+      "target_in_cover_penalty": -0.1,
+      "target_exposed_bonus": 0.05
+    },
+    "tactical_bonuses": {
+      "formation_cohesion": 0.1,
+      "combined_arms_support": 0.1,
+      "troop_line_specialist": 0.1,
+      "disciplined_assault": 0.1
+    }
+  },
 
-    "Tyranid_Monster_LeaderElite_MeleeHeavy": {
-      "move_close": 0.4,
-      "move_to_charge": 0.8,
+  "SpaceMarine_Infantry_LeaderElite_MeleeElite": {
+    "base_actions": {
+      "move_close": 0.2,
       "move_away": 0.1,
-      "charge_success": 1.0,
-      "attack": 0.9,
-      "ranged_attack": 0.3,
-      "target_heavy_melee": 1.0,
-      "target_vehicle_melee": 1.0,
-      "target_leader_melee": 0.9,
-      "kill_heavy_perfect": 1.0,
-      "kill_vehicle_smash": 1.0,
-      "synapse_control": 0.8,
-      "hive_mind_coordination": 0.7,
-      "win": 1.0,
-      "tactical_bonuses": {
-        "synapse_control": 0.2,
-        "hive_mind_coordination": 0.1,
-        "apex_predator": 0.2,
-        "psychic_dominance": 0.1
-      }
+      "move_to_charge": 0.4,
+      "move_to_los": 0.1,
+      "ranged_attack": 0.4,
+      "melee_attack": 0.6,
+      "charge_success": 0.4,
+      "being_charged": 0.0,
+      "wait": -0.1
+    },
+    "target_type_bonuses": {
+      "vs_melee": 0.0,
+      "vs_ranged": 0.2,
+      "vs_swarm": -0.1,
+      "vs_troop": 0.0,
+      "vs_elite": 0.2,
+      "vs_vehicle": 0.1,
+      "vs_heavy": 0.0
+    },
+    "result_bonuses": {
+      "kill_target": 0.2,
+      "wound_target": 0.1,
+      "no_overkill": 0.1,
+      "target_lowest_hp": 0.1
+    },
+    "adaptive_bonuses": {
+      "step_up_when_covered": 0.05,
+      "step_down_when_needed": 0.05
+    },
+    "situational_modifiers": {
+      "win": 0.8,
+      "lose": -0.8,
+      "friendly_fire_penalty": -0.5,
+      "attack_wasted": -0.3,
+      "target_in_cover_penalty": -0.1,
+      "target_exposed_bonus": 0.05
+    },
+    "tactical_bonuses": {
+      "formation_cohesion": 0.1,
+      "combined_arms_support": 0.1,
+      "command_presence": 0.2,
+      "leadership_aura": 0.1,
+      "tactical_coordination": 0.1
+    }
+  },
+
+  "Tyranid_Infantry_Swarm_RangedSwarm": {
+    "base_actions": {
+      "move_close": 0.2,
+      "move_away": 0.2,
+      "move_to_charge": 0.1,
+      "move_to_los": 0.3,
+      "ranged_attack": 0.4,
+      "melee_attack": 0.2,
+      "charge_success": 0.2,
+      "being_charged": -0.2,
+      "wait": -0.3
+    },
+    "target_type_bonuses": {
+      "vs_melee": 0.1,
+      "vs_ranged": 0.0,
+      "vs_swarm": 0.2,
+      "vs_troop": 0.1,
+      "vs_elite": -0.1,
+      "vs_vehicle": -0.2,
+      "vs_heavy": -0.3
+    },
+    "result_bonuses": {
+      "kill_target": 0.2,
+      "wound_target": 0.1,
+      "no_overkill": 0.1,
+      "target_lowest_hp": 0.1
+    },
+    "adaptive_bonuses": {
+      "step_up_when_covered": 0.05,
+      "step_down_when_needed": 0.05
+    },
+    "situational_modifiers": {
+      "win": 0.6,
+      "lose": -0.6,
+      "friendly_fire_penalty": -0.3,
+      "attack_wasted": -0.2,
+      "target_in_cover_penalty": -0.05,
+      "target_exposed_bonus": 0.03
+    },
+    "tactical_bonuses": {
+      "swarm_coordination": 0.2,
+      "pack_hunting": 0.1,
+      "expendable_tactics": 0.1,
+      "numerical_superiority": 0.1
+    }
+  },
+
+  "Tyranid_Infantry_Swarm_MeleeSwarm": {
+    "base_actions": {
+      "move_close": 0.4,
+      "move_away": -0.3,
+      "move_to_charge": 0.5,
+      "move_to_los": -0.1,
+      "ranged_attack": -0.2,
+      "melee_attack": 0.5,
+      "charge_success": 0.4,
+      "being_charged": -0.1,
+      "wait": -0.4
+    },
+    "target_type_bonuses": {
+      "vs_melee": 0.0,
+      "vs_ranged": 0.2,
+      "vs_swarm": 0.1,
+      "vs_troop": 0.2,
+      "vs_elite": -0.1,
+      "vs_vehicle": -0.2,
+      "vs_heavy": -0.3
+    },
+    "result_bonuses": {
+      "kill_target": 0.2,
+      "wound_target": 0.1,
+      "no_overkill": 0.1,
+      "target_lowest_hp": 0.1
+    },
+    "adaptive_bonuses": {
+      "step_up_when_covered": 0.05,
+      "step_down_when_needed": 0.05
+    },
+    "situational_modifiers": {
+      "win": 0.6,
+      "lose": -0.6,
+      "friendly_fire_penalty": -0.3,
+      "attack_wasted": -0.2,
+      "target_in_cover_penalty": -0.05,
+      "target_exposed_bonus": 0.03
+    },
+    "tactical_bonuses": {
+      "swarm_coordination": 0.2,
+      "pack_hunting": 0.2,
+      "expendable_tactics": 0.1,
+      "overwhelming_assault": 0.1
+    }
+  },
+
+  "Tyranid_Infantry_Elite_MeleeElite": {
+    "base_actions": {
+      "move_close": 0.3,
+      "move_away": -0.1,
+      "move_to_charge": 0.5,
+      "move_to_los": 0.0,
+      "ranged_attack": 0.2,
+      "melee_attack": 0.6,
+      "charge_success": 0.4,
+      "being_charged": 0.0,
+      "wait": -0.2
+    },
+    "target_type_bonuses": {
+      "vs_melee": 0.0,
+      "vs_ranged": 0.2,
+      "vs_swarm": -0.1,
+      "vs_troop": 0.1,
+      "vs_elite": 0.2,
+      "vs_vehicle": 0.1,
+      "vs_heavy": 0.0
+    },
+    "result_bonuses": {
+      "kill_target": 0.2,
+      "wound_target": 0.1,
+      "no_overkill": 0.1,
+      "target_lowest_hp": 0.1
+    },
+    "adaptive_bonuses": {
+      "step_up_when_covered": 0.05,
+      "step_down_when_needed": 0.05
+    },
+    "situational_modifiers": {
+      "win": 0.8,
+      "lose": -0.8,
+      "friendly_fire_penalty": -0.4,
+      "attack_wasted": -0.3,
+      "target_in_cover_penalty": -0.1,
+      "target_exposed_bonus": 0.05
+    },
+    "tactical_bonuses": {
+      "pack_hunting": 0.2,
+      "apex_predator": 0.1,
+      "instinctive_behavior": 0.1,
+      "bio_weapon_synergy": 0.1
     }
   }
+}

@@ -130,14 +130,21 @@ class UnitRegistry:
             role = 'Unknown'
         
         # Extract faction from base class name
-        # SpaceMarineMeleeUnit → SpaceMarine
-        # TyranidRangedUnit → Tyranid
-        faction_match = re.match(r'(\w+?)(Melee|Ranged|Support)Unit', base_class)
-        if faction_match:
-            faction = faction_match.group(1)
+        # Handle both 4-part and 2-part base class naming patterns
+        # 4-part: SpaceMarineInfantryTroopRangedSwarm → SpaceMarine
+        # 2-part: SpaceMarineMeleeUnit → SpaceMarine
+        if base_class.startswith('SpaceMarine'):
+            faction = 'SpaceMarine'
+        elif base_class.startswith('Tyranid'):
+            faction = 'Tyranid'
         else:
-            # Fallback to directory name
-            faction = faction_dir_name.title()
+            # Legacy pattern matching for 2-part base classes
+            faction_match = re.match(r'(\w+?)(Melee|Ranged|Support)Unit', base_class)
+            if faction_match:
+                faction = faction_match.group(1)
+            else:
+                # Fallback to directory name
+                faction = faction_dir_name.title()
         
         return faction, role
     

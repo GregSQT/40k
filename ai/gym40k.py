@@ -276,17 +276,15 @@ class W40KEnv(gym.Env):
                             else:
                                 unit_data['ICON'] = f"icons/{unit_name}.webp"  # Default fallback
                             
-                            # Determine unit type from class hierarchy
-                            if 'SpaceMarineRangedUnit' in content:
+                            # Determine unit type from class hierarchy - check 4-part classes first, then fallback to 2-part
+                            if ('SpaceMarineInfantryTroopRangedSwarm' in content or 'SpaceMarineInfantryTroopRangedElite' in content or 
+                                'SpaceMarineInfantryLeaderTroopRangedElite' in content or 'TyranidInfantrySwarmRangedSwarm' in content or
+                                'SpaceMarineRangedUnit' in content or 'TyranidRangedUnit' in content):
                                 unit_data['is_ranged'] = True
                                 unit_data['is_melee'] = False
-                            elif 'SpaceMarineMeleeUnit' in content:
-                                unit_data['is_ranged'] = False
-                                unit_data['is_melee'] = True
-                            elif 'TyranidRangedUnit' in content:
-                                unit_data['is_ranged'] = True
-                                unit_data['is_melee'] = False
-                            elif 'TyranidMeleeUnit' in content:
+                            elif ('SpaceMarineInfantryTroopMeleeTroop' in content or 'SpaceMarineInfantryLeaderEliteMeleeElite' in content or
+                                'TyranidInfantrySwarmMeleeSwarm' in content or 'TyranidInfantryEliteMeleeElite' in content or
+                                'SpaceMarineMeleeUnit' in content or 'TyranidMeleeUnit' in content):
                                 unit_data['is_ranged'] = False
                                 unit_data['is_melee'] = True
                             else:
