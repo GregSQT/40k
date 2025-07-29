@@ -30,7 +30,7 @@ interface InteractionOptions {
 
 /**
  * Sets up ALL board interactions - extracted from Board.tsx
- * Includes: hex clicks, right-click cancels, charge cancellation, event system, setupBoardClickHandler
+ * Includes: hex clicks, right-click cancels, charge cancellation, event system
  */
 export const setupBoardInteractions = (
   app: PIXI.Application, 
@@ -93,20 +93,30 @@ export const setupBoardInteractions = (
         // Calculate hex index to find the correct graphics object
         const hexIndex = row * BOARD_COLS + col;
         
-        // Find corresponding base hex and highlight hex graphics
-        const baseHex = baseHexContainer.getChildAt(hexIndex * 2) as PIXI.Graphics; // *2 because text is also added
+        // Find corresponding base hex - each hex has 2 children (graphics + text)
+        const baseHex = baseHexContainer.getChildAt(hexIndex * 2) as PIXI.Graphics;
         
-        // Find highlight hex if it exists
+        // Find highlight hex using sequential mapping based on highlight cells
         let highlightHex: PIXI.Graphics | null = null;
         if (isChargeable || isAttackable || isInCover || isAvailable) {
-          // Find the correct highlight hex by checking children
-          for (let i = 0; i < highlightContainer.children.length; i++) {
-            const child = highlightContainer.children[i] as PIXI.Graphics;
-            // This is a simplified approach - in real usage we'd need better hex tracking
-            if (child && i === Math.floor(hexIndex / 4)) { // Approximate mapping
-              highlightHex = child;
-              break;
+          // Calculate which highlight index this hex should be at
+          let highlightSeqIndex = 0;
+          for (let checkCol = 0; checkCol < BOARD_COLS; checkCol++) {
+            for (let checkRow = 0; checkRow < BOARD_ROWS; checkRow++) {
+              const checkAvailable = availableCells.some(cell => cell.col === checkCol && cell.row === checkRow);
+              const checkAttackable = attackCells.some(cell => cell.col === checkCol && cell.row === checkRow);
+              const checkInCover = coverCells.some(cell => cell.col === checkCol && cell.row === checkRow);
+              const checkChargeable = chargeCells.some(cell => cell.col === checkCol && cell.row === checkRow);
+              
+              if (checkChargeable || checkAttackable || checkInCover || checkAvailable) {
+                if (checkCol === col && checkRow === row) {
+                  highlightHex = highlightContainer.getChildAt(highlightSeqIndex) as PIXI.Graphics;
+                  break;
+                }
+                highlightSeqIndex++;
+              }
             }
+            if (highlightHex) break;
           }
         }
 

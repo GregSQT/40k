@@ -1,6 +1,6 @@
 // frontend/src/components/ReplayBoard.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import Board from './Board';
+import Board from './Board_save';
 import { Unit } from '../types/game';
 import { Intercessor } from '../roster/spaceMarine/Intercessor';
 import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';

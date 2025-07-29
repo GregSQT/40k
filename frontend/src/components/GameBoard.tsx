@@ -1,6 +1,6 @@
 // src/components/GameBoard.tsx
 import React from 'react';
-import Board from './Board';
+import Board from './Board_save';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
 import { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState, TargetPreview, CombatSubPhase, PlayerId } from '../types/game';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';

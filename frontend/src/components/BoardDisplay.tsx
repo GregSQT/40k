@@ -116,13 +116,13 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
       phase = "move"
     } = options || {};
 
-    // Create containers for hex batching (EXACT from Board.tsx)
+    // ✅ OPTIMIZED: Create containers for hex batching - EXACT from Board.tsx
     const baseHexContainer = new PIXI.Container();
     const highlightContainer = new PIXI.Container();
     baseHexContainer.name = 'baseHexes';
     highlightContainer.name = 'highlights';
 
-    // Compute objectiveHexSet (base + adjacent) - EXACT logic from Board.tsx
+    // New: Compute all objective hexes and their adjacent hexes - EXACT from Board.tsx
     const objectiveHexSet = new Set<string>();
     const baseObjectives = boardConfig.objective_hexes || [];
 
@@ -159,7 +159,7 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
       (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
     );
 
-    // Draw grid cells with container batching (EXACT from Board.tsx)
+    // Draw grid cells with container batching - EXACT from Board.tsx
     for (let col = 0; col < BOARD_COLS; col++) {
       for (let row = 0; row < BOARD_ROWS; row++) {
         const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
@@ -226,7 +226,7 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
       }
     }
 
-    // Aggressive stage cleanup - Destroy everything first, then clear
+    // ✅ AGGRESSIVE STAGE CLEANUP - Destroy everything first, then clear - EXACT from Board.tsx
     const childrenToDestroy = [...app.stage.children];
     app.stage.removeChildren();
     childrenToDestroy.forEach(child => {
@@ -235,11 +235,11 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
       }
     });
 
-    // Add containers to stage (2 objects instead of 432)
+    // ✅ ADD CONTAINERS TO STAGE (2 objects instead of 432)
     app.stage.addChild(baseHexContainer);
     app.stage.addChild(highlightContainer);
 
-    // Render line of sight indicators (EXACT from Board.tsx)
+    // ✅ RENDER LINE OF SIGHT INDICATORS - EXACT from Board.tsx
     if (phase === "shoot" && (blockedTargets.size > 0 || coverTargets.size > 0)) {
       const losContainer = new PIXI.Container();
       losContainer.name = 'line-of-sight-indicators';
@@ -280,7 +280,7 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
       app.stage.addChild(losContainer);
     }
     
-    // Render walls (EXACT from Board.tsx)
+    // ✅ RENDER WALLS - EXACT from Board.tsx
     if (boardConfig.walls && boardConfig.walls.length > 0) {
       const wallsContainer = new PIXI.Container();
       wallsContainer.name = 'walls';
