@@ -124,12 +124,15 @@ class GameReplayLogger:
         # Calculate position changes for movement actions (centralized position tracking)
         start_hex = None
         end_hex = None
-        if event_type == "move" and acting_unit_id is not None:
+        if acting_unit_id is not None:
             pre_unit = next((u for u in pre_action_units if u.get("id") == acting_unit_id), None)
             post_unit = next((u for u in post_action_units if u.get("id") == acting_unit_id), None)
             if pre_unit and post_unit:
-                start_hex = f"({pre_unit.get('col', 0)}, {pre_unit.get('row', 0)})"
-                end_hex = f"({post_unit.get('col', 0)}, {post_unit.get('row', 0)})"
+                # Check if position actually changed
+                if (pre_unit.get('col', 0) != post_unit.get('col', 0) or 
+                    pre_unit.get('row', 0) != post_unit.get('row', 0)):
+                    start_hex = f"({pre_unit.get('col', 0)}, {pre_unit.get('row', 0)})"
+                    end_hex = f"({post_unit.get('col', 0)}, {post_unit.get('row', 0)})"
         
         # Create combat log entry with game format including position data
         combat_entry = {

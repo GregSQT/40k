@@ -6,6 +6,7 @@ import type { Unit } from '../types/game';
 import SharedLayout from './SharedLayout';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
 import { renderUnit } from './UnitRenderer';
+import { drawBoard } from './BoardRenderer';
 
 // AI_GAME.md: Strict type definitions following game mechanisms
 interface ReplayEvent {
@@ -67,24 +68,7 @@ interface ReplayData {
   actions: ReplayEvent[];
 }
 
-interface ScenarioConfig {
-  board: {
-    cols: number;
-    rows: number;
-    hex_radius: number;
-    margin: number;
-  };
-  colors: {
-    background: number;
-    cell_even: number;
-    cell_odd: number;
-    cell_border: number;
-    player_0: number;
-    player_1: number;
-    hp_full: number;
-    hp_damaged: number;
-  };
-}
+// Removed ScenarioConfig interface - using BoardConfig directly
 
 interface ReplayViewerProps {
   replayFile?: string;
@@ -104,7 +88,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
   
   // State management
   const [replayData, setReplayData] = useState<ReplayData | null>(null);
-  const [scenario, setScenario] = useState<ScenarioConfig | null>(null);
+  const [scenario, setScenario] = useState<typeof boardConfig | null>(null);
   const [loading, setLoading] = useState(!!propReplayFile);
   const [error, setError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
@@ -136,6 +120,95 @@ const ACTION_TYPE_MAPPING: Record<string, { name: string; type: string }> = {
   "-1": { name: "Phase Penalty", type: "penalty" }
 };
 const UNIT_REGISTRY: Record<string, any> = {};
+
+// Component to show board preview without replay data
+const EmptyBoardPreview: React.FC<{ boardConfig: any }> = ({ boardConfig }) => {
+  const boardRef = useRef<HTMLDivElement>(null);
+  const pixiAppRef = useRef<PIXI.Application | null>(null);
+
+  useEffect(() => {
+    if (!boardRef.current || !boardConfig) return;
+
+    try {
+      // Calculate canvas dimensions - same as main board
+      const BOARD_COLS = boardConfig.cols;
+      const BOARD_ROWS = boardConfig.rows;
+      const HEX_RADIUS = boardConfig.hex_radius;
+      const MARGIN = boardConfig.margin;
+      const HEX_WIDTH = 1.5 * HEX_RADIUS;
+      const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+      const HEX_HORIZ_SPACING = HEX_WIDTH;
+      const HEX_VERT_SPACING = HEX_HEIGHT;
+      
+      const gridWidth = (BOARD_COLS - 1) * HEX_HORIZ_SPACING + HEX_WIDTH;
+      const gridHeight = (BOARD_ROWS - 1) * HEX_VERT_SPACING + HEX_HEIGHT;
+      const canvasWidth = gridWidth + 2 * MARGIN;
+      const canvasHeight = gridHeight + 2 * MARGIN;
+      
+      // Create PIXI app
+      const displayConfig = boardConfig?.display;
+      const pixiConfig = {
+        width: canvasWidth,
+        height: canvasHeight,
+        backgroundColor: parseInt(boardConfig.colors.background.replace('0x', ''), 16),
+        antialias: displayConfig?.antialias ?? true,
+        powerPreference: "high-performance" as WebGLPowerPreference,
+        resolution: displayConfig?.resolution === "auto" ? 
+          (window.devicePixelRatio || 1) : (displayConfig?.resolution ?? 1),
+        autoDensity: displayConfig?.autoDensity ?? true,
+      };
+      
+      const app = new PIXI.Application(pixiConfig);
+      app.stage.sortableChildren = true;
+      
+      // Setup canvas styling
+      const canvas = app.view as HTMLCanvasElement;
+      canvas.style.display = 'block';
+      canvas.style.maxWidth = '100%';
+      canvas.style.height = 'auto';
+      canvas.style.border = displayConfig?.canvas_border ?? '1px solid #333';
+      
+      // Clear container and append canvas
+      boardRef.current.innerHTML = '';
+      boardRef.current.appendChild(canvas);
+      
+      // Store app reference
+      pixiAppRef.current = app;
+      
+      // Draw board using shared BoardRenderer
+      drawBoard(app, boardConfig as any);
+      
+      console.log('✅ Board preview initialized');
+      
+      // Cleanup function
+      return () => {
+        if (pixiAppRef.current) {
+          pixiAppRef.current.destroy(true);
+          pixiAppRef.current = null;
+        }
+      };
+      
+    } catch (error) {
+      console.error('❌ Error initializing board preview:', error);
+    }
+  }, [boardConfig]);
+
+  if (!boardConfig) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        height: '400px',
+        color: '#888'
+      }}>
+        Loading board...
+      </div>
+    );
+  }
+
+  return <div ref={boardRef} className="board" />;
+};
 
 // File selection handlers
 const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -294,33 +367,8 @@ const validateUnitRegistry = () => {
       try {
         setLoading(true);
         
-        // AI_INSTRUCTIONS.md: Use config files - load scenario first
-        const scenarioResponse = await fetch('/config/scenario.json');
-        if (!scenarioResponse.ok) {
-          throw new Error(`Failed to load scenario: ${scenarioResponse.statusText}`);
-        }
-        const scenarioData = await scenarioResponse.json();
-        
-        // Ensure scenario has required board config
-        if (!scenarioData.board && boardConfig) {
-          scenarioData.board = {
-            cols: boardConfig.cols,
-            rows: boardConfig.rows,
-            hex_radius: boardConfig.hex_radius,
-            margin: boardConfig.margin
-          };
-          scenarioData.colors = {
-            background: parseInt(boardConfig.colors.background.replace('0x', ''), 16),
-            cell_even: parseInt(boardConfig.colors.cell_even.replace('0x', ''), 16),
-            cell_odd: parseInt(boardConfig.colors.cell_odd.replace('0x', ''), 16),
-            cell_border: parseInt(boardConfig.colors.cell_border.replace('0x', ''), 16),
-            player_0: parseInt(boardConfig.colors.player_0.replace('0x', ''), 16),
-            player_1: parseInt(boardConfig.colors.player_1.replace('0x', ''), 16),
-            hp_full: parseInt(boardConfig.colors.hp_full?.replace('0x', '') || 'ffffff', 16),
-            hp_damaged: parseInt(boardConfig.colors.hp_damaged?.replace('0x', '') || 'ff0000', 16)
-          };
-        }
-        setScenario(scenarioData);
+        // Use boardConfig directly - same as Board.tsx for perfect consistency
+        setScenario(boardConfig);
         
         // Load replay file - handle both blob URLs and file paths
         let replay;
@@ -363,7 +411,7 @@ const validateUnitRegistry = () => {
               player: unit.player,
               col: unit.col,
               row: unit.row,
-              color: unit.player === 0 ? scenarioData.colors.player_0 : scenarioData.colors.player_1,
+              color: unit.player === 0 ? parseInt(boardConfig!.colors.player_0.replace('0x', ''), 16) : parseInt(boardConfig!.colors.player_1.replace('0x', ''), 16),
               alive: true,
               hp_max: unit.hp_max,
               hp_current: unit.hp_max,
@@ -375,7 +423,7 @@ const validateUnitRegistry = () => {
               is_melee: unit.is_melee || false,
               CUR_HP: unit.hp_max,
               cur_hp: unit.hp_max,
-              COLOR: unit.player === 0 ? scenarioData.colors.player_0 : scenarioData.colors.player_1,
+              COLOR: unit.player === 0 ? parseInt(boardConfig!.colors.player_0.replace('0x', ''), 16) : parseInt(boardConfig!.colors.player_1.replace('0x', ''), 16),
               MOVE: stats.MOVE,
               HP_MAX: stats.HP_MAX,
               RNG_RNG: stats.RNG_RNG,
@@ -407,10 +455,10 @@ const validateUnitRegistry = () => {
 
   // Same hex calculations as Board.tsx
   const getHexCenter = useCallback((col: number, row: number): { x: number, y: number } => {
-    if (!scenario) return { x: 0, y: 0 };
+    if (!boardConfig) return { x: 0, y: 0 };
     
-    const HEX_RADIUS = scenario.board.hex_radius;
-    const MARGIN = scenario.board.margin;
+    const HEX_RADIUS = boardConfig.hex_radius;
+    const MARGIN = boardConfig.margin;
     const HEX_WIDTH = 1.5 * HEX_RADIUS;
     const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
     const HEX_HORIZ_SPACING = HEX_WIDTH;
@@ -422,15 +470,7 @@ const validateUnitRegistry = () => {
     return { x, y };
   }, [scenario]);
 
-  // Generate hex polygon points for PIXI graphics
-  const getHexPolygonPoints = useCallback((radius: number): number[] => {
-    const points: number[] = [];
-    for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i;
-      points.push(radius * Math.cos(angle), radius * Math.sin(angle));
-    }
-    return points;
-  }, []);
+  // Removed duplicate getHexPolygonPoints function
 
   // Parse colors from config - same as Board.tsx
   const parseColor = useCallback((colorStr: string): number => {
@@ -447,80 +487,7 @@ const validateUnitRegistry = () => {
     return points;
   }, []);
 
-  // Draw board with all details - same as Board.tsx
-  const drawBoard = useCallback((app: PIXI.Application) => {
-    if (!scenario || !app.stage || !boardConfig) return;
-    
-    try {
-      // Clear previous board drawings
-      app.stage.children.filter(child => child.name === 'hex' || child.name === 'hex-label').forEach(hex => {
-        app.stage.removeChild(hex);
-      });
-      
-      const HEX_RADIUS = scenario.board.hex_radius;
-      const MARGIN = scenario.board.margin;
-      const HEX_WIDTH = 1.5 * HEX_RADIUS;
-      const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
-      const HEX_HORIZ_SPACING = HEX_WIDTH;
-      const HEX_VERT_SPACING = HEX_HEIGHT;
-      
-      // Get objective zones and other config
-      const objectiveHexes = boardConfig.objective_hexes || [];
-      const OBJECTIVE_ZONE_COLOR = parseColor(boardConfig.colors.objective_zone || '0xFF8800');
-      
-      // Draw hex grid using same logic as Board.tsx
-      for (let row = 0; row < scenario.board.rows; row++) {
-        for (let col = 0; col < scenario.board.cols; col++) {
-          const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-          const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
-          const points = getHexPolygonPoints(centerX, centerY, HEX_RADIUS);
-          
-          // Check if this hex is an objective zone
-          const isObjectiveZone = objectiveHexes.some(([objCol, objRow]: [number, number]) => objCol === col && objRow === row);
-          
-          // Create base hex
-          const hexGraphics = new PIXI.Graphics();
-          hexGraphics.name = 'hex';
-          
-          const isEven = (col + row) % 2 === 0;
-          let cellColor = isEven ? scenario.colors.cell_even : scenario.colors.cell_odd;
-          
-          // Override color for objective zones
-          if (isObjectiveZone) {
-            cellColor = OBJECTIVE_ZONE_COLOR;
-          }
-          
-          hexGraphics.beginFill(cellColor);
-          hexGraphics.lineStyle(1, scenario.colors.cell_border);
-          hexGraphics.drawPolygon(points);
-          hexGraphics.endFill();
-          
-          app.stage.addChild(hexGraphics);
-          
-          // Add coordinate labels like Board.tsx
-          const colLetter = String.fromCharCode(65 + col); // A, B, C, etc.
-          const rowNumber = row + 1;
-          const coordText = `${colLetter}${rowNumber}`;
-          
-          const labelText = new PIXI.Text(coordText, {
-            fontSize: 8,
-            fill: 0x888888,
-            align: 'center',
-            fontWeight: 'normal',
-          });
-          labelText.name = 'hex-label';
-          labelText.anchor.set(0.5);
-          labelText.position.set(centerX, centerY + HEX_RADIUS * 0.7);
-          app.stage.addChild(labelText);
-        }
-      }
-      
-      console.log(`✅ Board drawn: ${scenario.board.rows}x${scenario.board.cols} hexes with coordinates and objectives`);
-    } catch (error) {
-      console.error('❌ Error drawing board:', error);
-      throw error;
-    }
-  }, [scenario, boardConfig, parseColor, getHexCenter, getHexPolygonPoints]);
+  // Using shared BoardRenderer - no duplicate code!
 
   // Draw units using UnitRenderer - same as Board.tsx
   const drawUnits = useCallback((app: PIXI.Application, units: ReplayUnit[]) => {
@@ -535,8 +502,8 @@ const validateUnitRegistry = () => {
       unitSpritesRef.current.clear();
       
       const displayConfig = boardConfig.display;
-      const HEX_RADIUS = scenario.board.hex_radius;
-      const MARGIN = scenario.board.margin;
+      const HEX_RADIUS = boardConfig.hex_radius;
+      const MARGIN = boardConfig.margin;
       const HEX_WIDTH = 1.5 * HEX_RADIUS;
       const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
       const HEX_HORIZ_SPACING = HEX_WIDTH;
@@ -560,8 +527,16 @@ const validateUnitRegistry = () => {
         const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
         const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
         
+        const unitForRenderer = {
+          ...unit,
+          name: unit.unit_type,
+          type: unit.unit_type,
+          color: unit.COLOR,
+          BASE: unit.HP_MAX
+        };
+
         renderUnit({
-          unit, centerX, centerY, app,
+          unit: unitForRenderer, centerX, centerY, app,
           isPreview: false,
           previewType: undefined,
           isEligible: false,
@@ -571,7 +546,13 @@ const validateUnitRegistry = () => {
           phase: 'move', mode: 'normal', currentPlayer: 0, selectedUnitId: null, 
           unitsMoved: [], unitsCharged: [], unitsAttacked: [], unitsFled: [],
           combatSubPhase: undefined, combatActivePlayer: undefined,
-          units, chargeTargets: [], combatTargets: [], targetPreview: null,
+          units: units.map(u => ({
+            ...u,
+            name: u.unit_type,
+            type: u.unit_type,
+            color: u.COLOR,
+            BASE: u.HP_MAX
+          })), chargeTargets: [], combatTargets: [], targetPreview: null,
           onConfirmMove: () => {}, parseColor
         });
       });
@@ -585,14 +566,14 @@ const validateUnitRegistry = () => {
 
   // Initialize PIXI application - AI_INSTRUCTIONS.md: PIXI.js Canvas renderer
   useEffect(() => {
-    if (!boardRef.current || !scenario?.board || !replayData) return;
+    if (!boardRef.current || !boardConfig || !replayData) return;
     
     try {
       // Calculate canvas dimensions - same as Board.tsx
-      const BOARD_COLS = scenario.board.cols;
-      const BOARD_ROWS = scenario.board.rows;
-      const HEX_RADIUS = scenario.board.hex_radius;
-      const MARGIN = scenario.board.margin;
+      const BOARD_COLS = boardConfig!.cols;
+      const BOARD_ROWS = boardConfig!.rows;
+      const HEX_RADIUS = boardConfig!.hex_radius;
+      const MARGIN = boardConfig!.margin;
       const HEX_WIDTH = 1.5 * HEX_RADIUS;
       const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
       const HEX_HORIZ_SPACING = HEX_WIDTH;
@@ -608,7 +589,7 @@ const validateUnitRegistry = () => {
       const pixiConfig = {
         width: canvasWidth,
         height: canvasHeight,
-        backgroundColor: scenario.colors.background,
+        backgroundColor: parseInt(boardConfig!.colors.background.replace('0x', ''), 16),
         antialias: displayConfig?.antialias ?? true,
         powerPreference: "high-performance" as WebGLPowerPreference,
         resolution: displayConfig?.resolution === "auto" ? 
@@ -633,8 +614,8 @@ const validateUnitRegistry = () => {
       // Store app reference
       pixiAppRef.current = app;
       
-      // Draw initial board and units
-      drawBoard(app);
+      // Draw initial board and units using shared BoardRenderer
+      drawBoard(app, boardConfig! as any);
       drawUnits(app, currentUnits);
       
       console.log('✅ PIXI Canvas application initialized for replay');
@@ -652,7 +633,7 @@ const validateUnitRegistry = () => {
       console.error('❌ Error initializing PIXI application:', error);
       setError('Failed to initialize board display');
     }
-  }, [scenario, replayData, drawBoard, drawUnits, currentUnits]);
+  }, [scenario, replayData, drawUnits, currentUnits]);
 
   // Update game state based on current step
   useEffect(() => {
@@ -678,7 +659,7 @@ const validateUnitRegistry = () => {
           player: unit.player,
           col: unit.col,
           row: unit.row,
-          color: unit.player === 0 ? scenario?.colors.player_0 || 0x0000ff : scenario?.colors.player_1 || 0xff0000,
+          color: unit.player === 0 ? parseInt(boardConfig!.colors.player_0.replace('0x', ''), 16) : parseInt(boardConfig!.colors.player_1.replace('0x', ''), 16),
           alive: true,
           hp_max: unit.hp_max,
           hp_current: unit.hp_max,
@@ -690,7 +671,7 @@ const validateUnitRegistry = () => {
           is_melee: unit.is_melee || false,
           CUR_HP: unit.hp_max,
           cur_hp: unit.hp_max,
-          COLOR: unit.player === 0 ? scenario?.colors.player_0 || 0x0000ff : scenario?.colors.player_1 || 0xff0000,
+          COLOR: unit.player === 0 ? parseInt(boardConfig!.colors.player_0.replace('0x', ''), 16) : parseInt(boardConfig!.colors.player_1.replace('0x', ''), 16),
           MOVE: stats.MOVE,
           HP_MAX: stats.HP_MAX,
           RNG_RNG: stats.RNG_RNG,
@@ -853,7 +834,7 @@ const validateUnitRegistry = () => {
 
   // Remove these unused functions
 
-  // No file selected state
+  // No file selected state - show board preview
   if (!replayFile) {
     const noFileRightContent = (
       <div className="unit-status-table-container">
@@ -884,6 +865,12 @@ const validateUnitRegistry = () => {
               {fileError}
             </div>
           )}
+          <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#333', borderRadius: '8px' }}>
+            <div style={{ fontSize: '14px', color: '#888', marginBottom: '8px' }}>Board Preview</div>
+            <div style={{ fontSize: '12px', color: '#666' }}>
+              Select a replay file to see AI training in action on this board
+            </div>
+          </div>
         </div>
         <input
           ref={fileInputRef}
@@ -895,39 +882,10 @@ const validateUnitRegistry = () => {
       </div>
     );
 
+    // Show board preview when no file is selected
     return (
       <SharedLayout rightColumnContent={noFileRightContent}>
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center', 
-          height: '100%',
-          minHeight: '400px',
-          color: '#888',
-          textAlign: 'center',
-          flexDirection: 'column',
-          gap: '16px'
-        }}>
-          <div style={{ fontSize: '18px' }}>No replay file selected</div>
-          <button
-            onClick={openFileBrowser}
-            style={{
-              padding: '12px 24px',
-              backgroundColor: '#1e40af',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '16px',
-              fontWeight: 'bold'
-            }}
-          >
-            Browse for Replay Files
-          </button>
-          <div style={{ fontSize: '12px', color: '#555' }}>
-            Select JSON files from ai/Event_log/ directory
-          </div>
-        </div>
+        <EmptyBoardPreview boardConfig={boardConfig} />
       </SharedLayout>
     );
   }
@@ -1073,7 +1031,7 @@ const validateUnitRegistry = () => {
         maxTurns={5}
       />
 
-      {/* Training Log */}
+      {/* Training Log - Same format as PvP Game Log */}
       <div className="game-log">
         <div className="game-log__header">
           <h3 className="game-log__title">Training Log</h3>
@@ -1088,32 +1046,66 @@ const validateUnitRegistry = () => {
             <div className="game-log__events">
               {battleLog.slice(0, currentStep + 1).reverse().map((event, reverseIndex) => {
                 const originalIndex = currentStep - reverseIndex;
+                const rawEvent = event as any;
+                
+                // Determine event type for proper icon and styling
+                const getEventIcon = (actionType: number): string => {
+                  const iconMap: Record<number, string> = {
+                    0: '👟', // Move North
+                    1: '👟', // Move South  
+                    2: '👟', // Move East
+                    3: '👟', // Move West
+                    4: '🎯', // Ranged Attack
+                    5: '⚡', // Charge Enemy
+                    6: '⚔️', // Melee Attack
+                    7: '⏸️', // Wait/End turn
+                  };
+                  return iconMap[actionType] || '📝';
+                };
+                
+                const getEventTypeClass = (actionType: number): string => {
+                  const classMap: Record<number, string> = {
+                    0: 'game-log-entry--move',
+                    1: 'game-log-entry--move',
+                    2: 'game-log-entry--move',
+                    3: 'game-log-entry--move',
+                    4: 'game-log-entry--shoot',
+                    5: 'game-log-entry--charge',
+                    6: 'game-log-entry--combat',
+                    7: 'game-log-entry--phase',
+                  };
+                  return classMap[actionType] || 'game-log-entry--default';
+                };
+                
                 return (
                   <div 
                     key={originalIndex}
-                    className={`game-log-entry ${originalIndex === currentStep ? 'game-log-entry--active' : ''}`}
+                    className={`game-log-entry ${getEventTypeClass(rawEvent.action_type)} ${originalIndex === currentStep ? 'game-log-entry--active' : ''}`}
                     onClick={() => setCurrentStep(originalIndex)}
                     style={{ cursor: 'pointer' }}
                   >
                     <div className="game-log-entry__single-line">
-                      <span className="game-log-entry__icon">🎯</span>
-                      <span className="game-log-entry__reward">
-                        {((event as any).reward !== undefined) ? (
-                          <span 
-                            className={`game-log-entry__reward-value ${((event as any).reward || 0) >= 0 ? 'game-log-entry__reward-value--positive' : 'game-log-entry__reward-value--negative'}`}
-                          >
-                            {((event as any).reward || 0) >= 0 ? '+' : ''}{((event as any).reward || 0)?.toFixed(1)}
-                          </span>
-                        ) : (
-                          <span className="game-log-entry__reward-value--none">-</span>
-                        )}
-                      </span>
+                      <span className="game-log-entry__icon">{getEventIcon(rawEvent.action_type)}</span>
                       <span className="game-log-entry__turn">T{event.turn}</span>
                       <span className={`game-log-entry__player ${event.player === 0 ? 'game-log-entry__player--blue' : 'game-log-entry__player--red'}`}>
                         P{event.player}
                       </span>
                       <span className="game-log-entry__message">
-                        {event.description || `Action ${(event as any).action_type} by unit ${(event as any).unit_id}`}
+                        {event.description || `${ACTION_TYPE_MAPPING[rawEvent.action_type]?.name || `Action ${rawEvent.action_type}`} by unit ${rawEvent.unit_id}`}
+                      </span>
+                      <span className="game-log-entry__reward">
+                        {(rawEvent.reward !== undefined) ? (
+                          <span 
+                            className={`game-log-entry__reward-value ${(rawEvent.reward || 0) >= 0 ? 'game-log-entry__reward-value--positive' : 'game-log-entry__reward-value--negative'}`}
+                          >
+                            {(rawEvent.reward || 0) >= 0 ? '+' : ''}{(rawEvent.reward || 0)?.toFixed(1)}
+                          </span>
+                        ) : (
+                          <span className="game-log-entry__reward-value--none">-</span>
+                        )}
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#888', marginLeft: '8px' }}>
+                        {ACTION_TYPE_MAPPING[rawEvent.action_type]?.name || `action_${rawEvent.action_type}`}
                       </span>
                     </div>
                   </div>

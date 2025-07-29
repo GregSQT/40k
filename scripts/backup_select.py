@@ -84,6 +84,7 @@ else:
 
         # Frontend/src/components
         "frontend/src/components/Board.tsx",
+        "frontend/src/components/BoardRenderer.tsx",
         "frontend/src/components/CombatLogComponent.tsx",
         "frontend/src/components/DiceRollComponent.tsx",
         "frontend/src/components/ErrorBoundary.tsx",
