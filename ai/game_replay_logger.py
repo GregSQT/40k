@@ -19,6 +19,9 @@ from shared.gameLogUtils import (
     format_move_message, 
     format_no_move_message,
     format_combat_message,
+    format_charge_message,
+    format_move_cancel_message,
+    format_charge_cancel_message,
     format_death_message,
     format_turn_start_message,
     format_phase_change_message
@@ -37,6 +40,37 @@ def format_game_log_message(event_type: str, acting_unit: Optional[Dict], target
     
     if event_type == "combat" and acting_unit and target_unit:
         return format_combat_message(acting_unit.get('id', 0), target_unit.get('id', 0))
+    
+    if event_type == "charge" and acting_unit and target_unit and start_hex and end_hex:
+        # Extract coordinates from hex string format "(x, y)"
+        try:
+            start_coords = start_hex.strip('()').split(', ')
+            end_coords = end_hex.strip('()').split(', ')
+            start_col, start_row = int(start_coords[0]), int(start_coords[1])
+            end_col, end_row = int(end_coords[0]), int(end_coords[1])
+            
+            # Use unit_type as unit name for training (PvP has actual names)
+            unit_name = acting_unit.get('unit_type', 'unknown')
+            target_name = target_unit.get('unit_type', 'unknown')
+            
+            return format_charge_message(
+                unit_name, acting_unit.get('id', 0),
+                target_name, target_unit.get('id', 0),
+                start_col, start_row, end_col, end_row
+            )
+        except:
+            # Fallback if coordinate parsing fails
+            return f"Unit {acting_unit.get('unit_type', 'unknown')} {acting_unit.get('id', '?')} CHARGED unit {target_unit.get('unit_type', 'unknown')} {target_unit.get('id', '?')} from {start_hex} to {end_hex}"
+    
+    if event_type == "move_cancel" and acting_unit:
+        # Use unit_type as unit name for training (PvP has actual unit names)
+        unit_name = acting_unit.get('unit_type', 'unknown')
+        return format_move_cancel_message(unit_name, acting_unit.get('id', 0))
+    
+    if event_type == "charge_cancel" and acting_unit:
+        # Use unit_type as unit name for training (PvP has actual unit names)
+        unit_name = acting_unit.get('unit_type', 'unknown')
+        return format_charge_cancel_message(unit_name, acting_unit.get('id', 0))
     
     if event_type == "move" and acting_unit:
         if start_hex and end_hex:

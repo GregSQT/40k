@@ -270,7 +270,7 @@ class MultiAgentTrainer:
                 with self.progress_lock:
                     self.session_progress[session_id] = {
                         'steps': 0,
-                        'total': timesteps_per_session,  # Use timesteps_per_session, not total_timesteps
+                        'total': timesteps_per_session,
                         'agent': session.agent_key,
                         'opponent': session.opponent_agent
                     }
@@ -372,7 +372,8 @@ class MultiAgentTrainer:
             
             # Execute training
             start_time = time.time()
-            total_timesteps = session.target_episodes * 200
+            training_config = self.config.load_training_config(training_config_name)
+            total_timesteps = training_config["total_timesteps"]
             
             # Add progress tracking callback
             class ProgressTracker(BaseCallback):
@@ -383,8 +384,8 @@ class MultiAgentTrainer:
                     self.last_update = 0
                 
                 def _on_step(self) -> bool:
-                    # Update every 50 steps to avoid too frequent updates
-                    if self.num_timesteps - self.last_update >= 50:
+                    # Update every 10 steps for more responsive progress tracking
+                    if self.num_timesteps - self.last_update >= 10:
                         with self.trainer.progress_lock:
                             if self.session_id in self.trainer.session_progress:
                                 self.trainer.session_progress[self.session_id]['steps'] = self.num_timesteps
@@ -582,7 +583,10 @@ class MultiAgentTrainer:
         if slowest_session:
             # Update progress bar to show slowest agent
             self.overall_pbar.n = slowest_session['steps']
-            self.overall_pbar.total = slowest_session['total']
+            # Ensure progress bar total matches what we're actually tracking
+            if self.overall_pbar.total != slowest_session['total']:
+                self.overall_pbar.total = slowest_session['total']
+                self.overall_pbar.refresh()
             self.overall_pbar.set_description(f"🐌 {slowest_session['agent'][:8]} vs {slowest_session['opponent'][:8]}")
             self.overall_pbar.set_postfix_str(f"{slowest_progress:.1%}")
             self.overall_pbar.refresh()
