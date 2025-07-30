@@ -484,7 +484,8 @@ const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
                         file.name.startsWith('phase_based_replay_') ||
                         file.name.includes('_vs_') ||
                         file.name.startsWith('replay_') ||
-                        file.name.startsWith('training_');
+                        file.name.startsWith('training_') ||
+                        file.name.startsWith('game_replay_');
 
     if (!isReplayFile) {
       setFileError('Please select a valid replay JSON file');
@@ -617,8 +618,8 @@ const validateUnitRegistry = () => {
       
       // Reset state when file changes
       setCurrentStep(0);
-      setBattleLog([]);
       setCurrentEvent(null);
+      // Don't reset battleLog here - it will be set during replay processing
       
       // Skip loading if no file selected
       if (!replayFile) {
@@ -664,8 +665,10 @@ const validateUnitRegistry = () => {
         }
         
         console.log('🎯 Using combat_log format with', replay.combat_log.length, 'entries');
+        console.log('🔍 First 3 combat_log entries:', replay.combat_log.slice(0, 3));
+        
         // Set the battle log directly from the training logger's combat_log
-        setBattleLog(replay.combat_log.map((entry: any) => ({
+        const mappedBattleLog = replay.combat_log.map((entry: any) => ({
           turn: entry.turnNumber || 1,
           phase: entry.phase || 'move',
           player: entry.player || 0,
@@ -677,7 +680,16 @@ const validateUnitRegistry = () => {
           description: entry.message,
           // Include all the training-specific data
           ...entry
-        })));
+        }));
+        
+        console.log('🔍 Mapped battleLog length:', mappedBattleLog.length);
+        console.log('🔍 First mapped entry:', mappedBattleLog[0]);
+        setBattleLog(mappedBattleLog);
+        
+        // Debug: Check if battleLog state is being reset
+        setTimeout(() => {
+          console.log('🔍 battleLog state after 100ms:', battleLog.length);
+        }, 100);
         
         // Process initial units with proper mapping
         if (replay.initial_state?.units) {
@@ -733,7 +745,7 @@ const validateUnitRegistry = () => {
           console.error('❌ No initial_state.units found in replay data');
         }
         
-        setBattleLog([]);
+        // Don't reset battleLog here - it's set by combat_log processing
         setCurrentStep(0);
       } catch (err) {
         console.error('❌ Error loading replay:', err);
@@ -1166,6 +1178,11 @@ const validateUnitRegistry = () => {
     }
   }, [currentStep, replayData, drawUnits, scenario, getUnitStats]);
 
+  // Debug: Track battleLog changes
+  useEffect(() => {
+    console.log('🔍 battleLog state changed, new length:', battleLog.length);
+  }, [battleLog]);
+
   // Auto-play functionality
   useEffect(() => {
     if (isPlaying && replayData) {
@@ -1549,8 +1566,8 @@ const validateUnitRegistry = () => {
             <div className="game-log__empty">No actions yet...</div>
           ) : (
             <div className="game-log__events">
-              {battleLog.slice().reverse().map((event, reverseIndex) => {
-                const originalIndex = battleLog.length - 1 - reverseIndex;
+              {battleLog.slice(0, currentStep + 1).reverse().map((event, reverseIndex) => {
+                const originalIndex = currentStep - reverseIndex;
                 const rawEvent = event as any;
                 
                 // Only new format (combat_log) is supported

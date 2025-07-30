@@ -214,64 +214,122 @@ class GameReplayLogger:
     def _generate_combat_log_entry(self, action_int: int, reward: float, pre_action_units: List[Dict], 
                                  post_action_units: List[Dict], acting_unit_id: Optional[int] = None,
                                  target_unit_id: Optional[int] = None, description: str = ""):
-        """Generate combat log entry with same format as game frontend."""
-        # Initialize combat log if not exists
+        """Generate combat log entry EXACTLY like PvP useGameLog.ts does."""
         if not hasattr(self, 'combat_log_entries'):
             self.combat_log_entries = []
         
-        # Determine event type based on action
-        event_type = self._get_event_type_from_action(action_int, pre_action_units, post_action_units)
-        
-        # Find acting unit
+        # FORCE find acting unit - never allow None
         acting_unit = None
         if acting_unit_id is not None:
             acting_unit = next((u for u in post_action_units if u.get("id") == acting_unit_id), None)
+            if not acting_unit:
+                acting_unit = next((u for u in pre_action_units if u.get("id") == acting_unit_id), None)
         
-        # Find target unit
+        # CRITICAL: Acting unit MUST be found - if not, this is a bug in our detection logic
+        if not acting_unit:
+            available_ids = [u.get('id') for u in post_action_units]
+            raise RuntimeError(f"CRITICAL ERROR: No acting unit found for action {action_int}, acting_unit_id={acting_unit_id}. Available unit IDs: {available_ids}. This indicates a bug in _determine_acting_unit_id method.")
+        
+        # Find target unit for shooting/combat actions
         target_unit = None
         if target_unit_id is not None:
             target_unit = next((u for u in post_action_units if u.get("id") == target_unit_id), None)
+            if not target_unit:
+                target_unit = next((u for u in pre_action_units if u.get("id") == target_unit_id), None)
         
-        # Calculate position changes for movement actions (centralized position tracking)
+        # Decode action and create log entry
+        max_actions_per_unit = 8
+        action_type = action_int % max_actions_per_unit
+        event_type = "move"
+        message = ""
         start_hex = None
         end_hex = None
-        if acting_unit_id is not None:
-            pre_unit = next((u for u in pre_action_units if u.get("id") == acting_unit_id), None)
-            post_unit = next((u for u in post_action_units if u.get("id") == acting_unit_id), None)
-            if pre_unit and post_unit:
-                # Check if position actually changed
-                if (pre_unit.get('col', 0) != post_unit.get('col', 0) or 
-                    pre_unit.get('row', 0) != post_unit.get('row', 0)):
-                    start_hex = f"({pre_unit.get('col', 0)}, {pre_unit.get('row', 0)})"
-                    end_hex = f"({post_unit.get('col', 0)}, {post_unit.get('row', 0)})"
         
-        # Create combat log entry with game format including position data
+        # Movement actions (0,1,2,6)
+        if action_type in [0, 1, 2, 6]:
+            event_type = "move"
+            pre_unit = next((u for u in pre_action_units if u.get("id") == acting_unit_id), None)
+            if not pre_unit:
+                raise RuntimeError(f"CRITICAL ERROR: No pre-action unit data found for movement action {action_int}, unit_id={acting_unit_id}. Cannot determine movement path.")
+            
+            start_col, start_row = pre_unit.get('col', 0), pre_unit.get('row', 0)
+            end_col, end_row = acting_unit.get('col', 0), acting_unit.get('row', 0)
+            
+            if start_col != end_col or start_row != end_row:
+                message = format_move_message(acting_unit['id'], start_col, start_row, end_col, end_row)
+                start_hex = f"({start_col}, {start_row})"
+                end_hex = f"({end_col}, {end_row})"
+            else:
+                message = format_no_move_message(acting_unit['id'])
+        
+        # Shooting actions (3,4) - REQUIRE target unit
+        elif action_type in [3, 4]:
+            if not target_unit:
+                raise RuntimeError(f"CRITICAL ERROR: No target unit found for shooting action {action_int} (action_type={action_type}), target_unit_id={target_unit_id}. Shooting actions MUST have a target. This indicates a bug in _determine_target_unit_id method.")
+            event_type = "shoot"
+            message = format_shooting_message(acting_unit['id'], target_unit['id'])
+        
+        # Combat action (7) - REQUIRE target unit  
+        elif action_type == 7:
+            if not target_unit:
+                raise RuntimeError(f"CRITICAL ERROR: No target unit found for combat action {action_int} (action_type=7), target_unit_id={target_unit_id}. Combat actions MUST have a target. This indicates a bug in _determine_target_unit_id method.")
+            event_type = "combat"
+            message = format_combat_message(acting_unit['id'], target_unit['id'])
+        
+        # Charge action (5) - REQUIRE target unit and movement
+        elif action_type == 5:
+            if not target_unit:
+                raise RuntimeError(f"CRITICAL ERROR: No target unit found for charge action {action_int} (action_type=5), target_unit_id={target_unit_id}. Charge actions MUST have a target. This indicates a bug in _determine_target_unit_id method.")
+            
+            pre_unit = next((u for u in pre_action_units if u.get("id") == acting_unit_id), None)
+            if not pre_unit:
+                raise RuntimeError(f"CRITICAL ERROR: No pre-action unit data found for charge action {action_int}, unit_id={acting_unit_id}. Cannot determine charge path.")
+            
+            event_type = "charge"
+            start_col, start_row = pre_unit.get('col', 0), pre_unit.get('row', 0)
+            end_col, end_row = acting_unit.get('col', 0), acting_unit.get('row', 0)
+            message = format_charge_message(
+                acting_unit.get('unit_type', 'Unit'), acting_unit['id'],
+                target_unit.get('unit_type', 'Unit'), target_unit['id'],
+                start_col, start_row, end_col, end_row
+            )
+            start_hex = f"({start_col}, {start_row})"
+            end_hex = f"({end_col}, {end_row})"
+        
+        else:
+            raise RuntimeError(f"CRITICAL ERROR: Unknown action type {action_type} for action {action_int}. Valid action types are 0-7.")
+        
+        # Create PvP-compatible log entry
+        event_id = f"event_{len(self.combat_log_entries) + 1}_{int(datetime.now().timestamp() * 1000)}"
+        
         combat_entry = {
-            "id": len(self.combat_log_entries) + 1,
+            "id": event_id,
+            "timestamp": datetime.now().isoformat(),
             "type": event_type,
-            "message": self._format_combat_message(event_type, acting_unit, target_unit, action_int, start_hex, end_hex),
-            "reward": reward,  # REPLACE timestamp with reward
+            "message": message,
             "turnNumber": self.current_turn,
             "phase": self.current_phase,
-            "player": acting_unit.get("player", 1) if acting_unit else 1,
-            "unitType": acting_unit.get("type", "unknown") if acting_unit else "unknown",
-            "unitId": acting_unit.get("id") if acting_unit else None,
-            "targetUnitType": target_unit.get("type") if target_unit else None,
+            "player": acting_unit.get("player"),
+            "unitType": acting_unit.get("unit_type"),
+            "unitId": acting_unit.get("id"),
+            "targetUnitType": target_unit.get("unit_type") if target_unit else None,
             "targetUnitId": target_unit.get("id") if target_unit else None,
-            "startHex": start_hex,  # Add position tracking
-            "endHex": end_hex,      # Add position tracking
-            "actionName": self.action_names.get(action_int, f"action_{action_int}"),
-            "shootDetails": self._extract_shooting_details(pre_action_units, post_action_units, acting_unit_id, target_unit_id)
+            "startHex": start_hex,
+            "endHex": end_hex,
+            "shootDetails": self._extract_shooting_details(pre_action_units, post_action_units, acting_unit_id, target_unit_id),
+            "reward": reward,
+            "actionName": self.action_names.get(action_int, f"action_{action_int}")
         }
         
         self.combat_log_entries.append(combat_entry)
         
         # Print combat log entry for immediate visibility during training with action name
-        if not self.quiet:
-            reward_str = f"+{reward:.2f}" if reward >= 0 else f"{reward:.2f}"
-            player_str = f"P{combat_entry['player']}"
-            action_name = self.action_names.get(action_int, f"action_{action_int}")
-            print(f"🎯 [{player_str}] T{self.current_turn} {self.current_phase.upper()}: {combat_entry['message']} (R: {reward_str}) [{action_name}]")
+        # DISABLED for less verbose training
+        # if not self.quiet:
+        #     reward_str = f"+{reward:.2f}" if reward >= 0 else f"{reward:.2f}"
+        #     player_str = f"P{combat_entry['player']}"
+        #     action_name = self.action_names.get(action_int, f"action_{action_int}")
+        #     print(f"🎯 [{player_str}] T{self.current_turn} {self.current_phase.upper()}: {combat_entry['message']} (R: {reward_str}) [{action_name}]")
     
     def capture_game_end(self, winner: str, final_reward: float):
         """Capture the final game state."""
@@ -425,11 +483,12 @@ class GameReplayLogger:
             self.combat_log_entries.append(turn_entry)
             
         # Print turn/phase changes for visibility during training
-        if not self.quiet:
-            print(f"🔄 {phase_message}")
-        if self.phase_index == 0:
-            if not self.quiet:
-                print(f"🔄 {turn_message}")
+        # DISABLED for less verbose training
+        # if not self.quiet:
+        #     print(f"🔄 {phase_message}")
+        # if self.phase_index == 0:
+        #     if not self.quiet:
+        #         print(f"🔄 {turn_message}")
 
     def set_training_context(self, timestep: int, episode_num: int, model_info: Dict[str, Any]):
         """Set current training context for this episode."""
@@ -542,35 +601,7 @@ class GameReplayLogger:
 
     def _get_event_type_from_action(self, action_int: int, pre_action_units: List[Dict], post_action_units: List[Dict]) -> str:
         """Determine event type based on action and unit changes."""
-        # Check for unit deaths first
-        pre_alive = set(u.get("id") for u in pre_action_units if u.get("alive", True))
-        post_alive = set(u.get("id") for u in post_action_units if u.get("alive", True))
-        if len(post_alive) < len(pre_alive):
-            return "death"
-        
-        # Check for HP changes (combat/shooting)
-        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
-            if pre_unit.get("hp", 0) > post_unit.get("hp", 0):
-                # Damage occurred - determine if shooting or combat
-                if action_int in [3, 4]:  # shoot_closest, shoot_weakest
-                    return "shoot"
-                elif action_int in [7]:  # attack_adjacent
-                    return "combat"
-        
-        # Check for movement
-        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
-            if (pre_unit.get("col") != post_unit.get("col") or 
-                pre_unit.get("row") != post_unit.get("row")):
-                if action_int in [5]:  # charge_closest
-                    return "charge"
-                else:
-                    return "move"
-        
-        # Check for phase changes
-        if action_int == 6:  # wait action usually advances phase
-            return "phase_change"
-        
-        # Default based on action type
+        # First, map action directly to type (more reliable than change detection)
         action_type_map = {
             0: "move",      # move_closer
             1: "move",      # move_away
@@ -578,10 +609,20 @@ class GameReplayLogger:
             3: "shoot",     # shoot_closest
             4: "shoot",     # shoot_weakest
             5: "charge",    # charge_closest
-            6: "phase_change",  # wait
+            6: "move",      # wait (often results in no movement)
             7: "combat"     # attack_adjacent
         }
-        return action_type_map.get(action_int, "default")
+        
+        # Use direct action mapping as primary method
+        event_type = action_type_map.get(action_int, "move")
+        
+        # Check for unit deaths (override other types)
+        pre_alive = set(u.get("id") for u in pre_action_units if u.get("alive", True))
+        post_alive = set(u.get("id") for u in post_action_units if u.get("alive", True))
+        if len(post_alive) < len(pre_alive):
+            return "death"
+        
+        return event_type
     
     def _format_combat_message(self, event_type: str, acting_unit: Optional[Dict], target_unit: Optional[Dict], 
                              action_int: int, start_hex: Optional[str] = None, end_hex: Optional[str] = None) -> str:
@@ -718,7 +759,8 @@ class GameReplayIntegration:
                 reward=reward,
                 pre_action_units=pre_action_units,
                 post_action_units=post_action_units,
-                acting_unit_id=env.current_player,  # Approximate
+                acting_unit_id=GameReplayIntegration._determine_acting_unit_id(env, action_int, post_action_units),
+                target_unit_id=GameReplayIntegration._determine_target_unit_id(env, action_int, pre_action_units, post_action_units),
                 description=f"AI performs {env.replay_logger.action_names.get(action_int, 'unknown action')}"
             )
             
@@ -738,6 +780,160 @@ class GameReplayIntegration:
         return env
     
     @staticmethod
+    def _determine_acting_unit_id(env, action_int: int, post_action_units: List[Dict]) -> Optional[int]:
+        """Determine which unit actually performed the action by decoding the gym action."""
+        # Decode the action to get unit index
+        max_actions_per_unit = 8  # gym40k uses 8 actions per unit
+        unit_idx = action_int // max_actions_per_unit
+        
+        # Get current player's units (not "eligible" since we're logging after action execution)
+        current_player = getattr(env, 'current_player', 1)
+        current_player_units = [u for u in post_action_units 
+                              if u.get('player') == current_player and u.get('alive', True)]
+        
+        # Validate unit index
+        if unit_idx >= len(current_player_units):
+            available_unit_ids = [u.get('id') for u in post_action_units]
+            current_player_unit_ids = [u.get('id') for u in current_player_units]
+            raise RuntimeError(f"CRITICAL ERROR in _determine_acting_unit_id: Action {action_int} decoded to unit_idx={unit_idx}, but only {len(current_player_units)} units available for player {current_player}. "
+                             f"Available unit IDs in post_action_units: {available_unit_ids}. "
+                             f"Current player {current_player} unit IDs: {current_player_unit_ids}. "
+                             f"This indicates the gym action space assumes {unit_idx + 1} units but only {len(current_player_units)} exist.")
+        
+        return current_player_units[unit_idx].get('id')
+    
+    @staticmethod
+    def _determine_target_unit_id(env, action_int: int, pre_action_units: List[Dict], post_action_units: List[Dict]) -> Optional[int]:
+        """Determine which unit was targeted by the action."""
+        max_actions_per_unit = 8
+        action_type = action_int % max_actions_per_unit
+        
+        # Actions that have targets: shooting (3,4), charge (5), combat (7)
+        if action_type not in [3, 4, 5, 7]:
+            return None
+        
+        # Method 1: Find units that took HP damage (for shooting/combat)
+        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
+            if pre_unit.get('id') != post_unit.get('id'):
+                continue
+            
+            # Check all HP field variations
+            pre_hp = pre_unit.get('cur_hp', pre_unit.get('hp', pre_unit.get('CUR_HP', pre_unit.get('HP', 0))))
+            post_hp = post_unit.get('cur_hp', post_unit.get('hp', post_unit.get('CUR_HP', post_unit.get('HP', 0))))
+            
+            if pre_hp > post_hp and post_hp >= 0:  # Unit took damage
+                return post_unit.get('id')
+        
+        # Method 2: Find units that died (alive -> dead)
+        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
+            if pre_unit.get('id') != post_unit.get('id'):
+                continue
+            if pre_unit.get('alive', True) and not post_unit.get('alive', True):
+                return post_unit.get('id')
+        
+        # Method 3: For charge actions, find unit that is now adjacent to the acting unit
+        if action_type == 5:  # charge_closest - NEVER causes damage, only moves adjacent
+            acting_unit_id = GameReplayIntegration._determine_acting_unit_id(env, action_int, post_action_units)
+            if not acting_unit_id:
+                raise RuntimeError(f"CRITICAL ERROR: Cannot determine acting unit for charge action {action_int}")
+            
+            acting_unit = next((u for u in post_action_units if u.get('id') == acting_unit_id), None)
+            if not acting_unit:
+                raise RuntimeError(f"CRITICAL ERROR: Cannot find acting unit {acting_unit_id} in post_action_units for charge action {action_int}")
+            
+            acting_player = acting_unit.get('player', 0)
+            enemy_units = [u for u in post_action_units 
+                         if u.get('player') != acting_player and u.get('alive', True)]
+            
+            if not enemy_units:
+                raise RuntimeError(f"CRITICAL ERROR: Charge action {action_int} executed but no enemy units exist. This should not be possible.")
+            
+            # Find enemy that is now adjacent (distance = 1) to the acting unit after charge
+            adjacent_enemies = []
+            for enemy in enemy_units:
+                dist = abs(acting_unit.get('col', 0) - enemy.get('col', 0)) + abs(acting_unit.get('row', 0) - enemy.get('row', 0))
+                if dist == 1:  # Adjacent after charge
+                    adjacent_enemies.append(enemy)
+            
+            if len(adjacent_enemies) == 1:
+                return adjacent_enemies[0].get('id')
+            elif len(adjacent_enemies) > 1:
+                # Multiple adjacent enemies - find the closest one (tie-breaker)
+                min_dist = float('inf')
+                closest_enemy = None
+                for enemy in adjacent_enemies:
+                    # Use more precise distance calculation as tie-breaker
+                    precise_dist = ((acting_unit.get('col', 0) - enemy.get('col', 0))**2 + 
+                                  (acting_unit.get('row', 0) - enemy.get('row', 0))**2)**0.5
+                    if precise_dist < min_dist:
+                        min_dist = precise_dist
+                        closest_enemy = enemy
+                return closest_enemy.get('id') if closest_enemy else None
+            else:
+                # No adjacent enemies after charge - this is a failed charge attempt
+                # Find the enemy the unit was trying to charge (closest enemy overall)
+                min_dist = float('inf')
+                target_enemy = None
+                for enemy in enemy_units:
+                    dist = abs(acting_unit.get('col', 0) - enemy.get('col', 0)) + abs(acting_unit.get('row', 0) - enemy.get('row', 0))
+                    if dist < min_dist:
+                        min_dist = dist
+                        target_enemy = enemy
+                
+                if not target_enemy:
+                    raise RuntimeError(f"CRITICAL ERROR: Charge action {action_int} failed to find any target enemy. Available enemies: {[e.get('id') for e in enemy_units]}")
+                
+                return target_enemy.get('id')
+        
+        # Method 4: Use gym environment's target selection logic based on action type
+        acting_unit_id = GameReplayIntegration._determine_acting_unit_id(env, action_int, post_action_units)
+        if acting_unit_id:
+            acting_unit = next((u for u in post_action_units if u.get('id') == acting_unit_id), None)
+            if acting_unit:
+                acting_player = acting_unit.get('player', 0)
+                enemy_units = [u for u in post_action_units 
+                             if u.get('player') != acting_player and u.get('alive', True)]
+                
+                if not enemy_units:
+                    # No enemies available - this should raise an error
+                    raise RuntimeError(f"CRITICAL ERROR in _determine_target_unit_id: Action {action_int} (action_type={action_type}) requires a target, but no enemy units are available. "
+                                     f"Acting unit: {acting_unit_id}, Acting player: {acting_player}. "
+                                     f"This indicates the gym environment executed a targeting action when no valid targets exist.")
+                
+                # For shoot_closest (3), charge_closest (5), or attack_adjacent (7): find closest enemy
+                if action_type in [3, 5, 7]:
+                    min_dist = float('inf')
+                    closest_enemy = None
+                    for enemy in enemy_units:
+                        dist = abs(acting_unit.get('col', 0) - enemy.get('col', 0)) + abs(acting_unit.get('row', 0) - enemy.get('row', 0))
+                        if dist < min_dist:
+                            min_dist = dist
+                            closest_enemy = enemy
+                    
+                    if not closest_enemy:
+                        raise RuntimeError(f"CRITICAL ERROR in _determine_target_unit_id: Could not find closest enemy for action {action_int} (action_type={action_type}). "
+                                         f"Enemy units exist but distance calculation failed.")
+                    return closest_enemy.get('id')
+                
+                # For shoot_weakest (4): find enemy with lowest HP
+                elif action_type == 4:
+                    min_hp = float('inf')
+                    weakest_enemy = None
+                    for enemy in enemy_units:
+                        enemy_hp = enemy.get('cur_hp', enemy.get('hp', enemy.get('CUR_HP', enemy.get('HP', 0))))
+                        if enemy_hp < min_hp:
+                            min_hp = enemy_hp
+                            weakest_enemy = enemy
+                    
+                    if not weakest_enemy:
+                        raise RuntimeError(f"CRITICAL ERROR in _determine_target_unit_id: Could not find weakest enemy for action {action_int} (action_type=4). "
+                                         f"Enemy units exist but HP comparison failed.")
+                    return weakest_enemy.get('id')
+        
+        # If we get here, target detection completely failed
+        raise RuntimeError(f"CRITICAL ERROR in _determine_target_unit_id: All target detection methods failed for action {action_int} (action_type={action_type}). "
+                         f"This indicates a fundamental bug in the target detection logic.")
+    
     @staticmethod
     def save_episode_replay(env, episode_reward: float, output_dir: str = "ai/event_log", is_best: bool = False):
         """Save the replay for this episode following AI_INSTRUCTIONS.md naming."""
