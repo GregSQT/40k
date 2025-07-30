@@ -792,7 +792,10 @@ class GameReplayIntegration:
         # Check if the gym environment tracks the last acting unit (ideal case)
         if hasattr(env, '_last_acting_unit') and env._last_acting_unit is not None:
             acting_unit_id = env._last_acting_unit.get('id')
-            target_unit_id = getattr(env, '_last_target_unit', {}).get('id') if hasattr(env, '_last_target_unit') else None
+            if hasattr(env, '_last_target_unit') and env._last_target_unit is not None:
+                target_unit_id = env._last_target_unit.get('id')
+            else:
+                target_unit_id = None
             return acting_unit_id, target_unit_id
         
         # Fallback: Look for units that changed state (moved, lost HP, changed flags)

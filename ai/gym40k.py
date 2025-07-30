@@ -67,6 +67,10 @@ class W40KEnv(gym.Env):
         self.unit_registry = unit_registry if unit_registry is not None else UnitRegistry()
         self.controlled_agent = controlled_agent  # Which agent this env controls
         self.active_agents = active_agents or []  # All active agents in training
+        
+        # Explicit unit tracking for PvP-style logging (eliminates action decoding)
+        self._last_acting_unit = None
+        self._last_target_unit = None
 
         # Initialize unit lists early to prevent AttributeError
         self.units = []
@@ -436,6 +440,10 @@ class W40KEnv(gym.Env):
         
         # Reset step counter
         self.step_count = 0
+        
+        # Clear explicit unit tracking for clean state
+        self._last_acting_unit = None
+        self._last_target_unit = None
         
         # Reset units
         # Use stored scenario path (either specified or default)
@@ -901,6 +909,11 @@ class W40KEnv(gym.Env):
         # Replay recording handled by GameReplayIntegration wrapper
         pass
         
+        # Clear explicit unit tracking after replay logging is complete
+        # (GameReplayIntegration wrapper will access these before this point)
+        self._last_acting_unit = None
+        self._last_target_unit = None
+        
         return self._get_obs(), reward, self.game_over, False, self._get_info()
 
     def _execute_action(self, unit, action_type):
@@ -927,6 +940,11 @@ class W40KEnv(gym.Env):
 
     def _execute_move_action(self, unit, action_type):
         """Execute movement following AI_GAME.md: only movement actions allowed."""
+        
+        # Set explicit tracking - PvP style (no target for movement)
+        self._last_acting_unit = unit
+        self._last_target_unit = None
+        
         unit_rewards = self._get_unit_reward_config(unit)
         
         old_col, old_row = unit["col"], unit["row"]
@@ -1028,6 +1046,11 @@ class W40KEnv(gym.Env):
             targets = self._get_shooting_targets(unit)
             if targets:
                 target = targets[0]
+                
+                # Set explicit tracking - PvP style
+                self._last_acting_unit = unit
+                self._last_target_unit = target
+                
                 old_hp = target["cur_hp"]
                 
                 # Execute dice-based shooting sequence
@@ -1069,12 +1092,20 @@ class W40KEnv(gym.Env):
             return reward
 
         elif action_type == 7:
+            # Set explicit tracking - PvP style (wait action, no target)
+            self._last_acting_unit = unit
+            self._last_target_unit = None
+            
             unit["has_shot"] = True
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
             return unit_rewards["base_actions"]["wait"]
 
         else:
+            # Set explicit tracking - PvP style (invalid action, no target)
+            self._last_acting_unit = unit
+            self._last_target_unit = None
+            
             unit["has_shot"] = True
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
@@ -1084,17 +1115,25 @@ class W40KEnv(gym.Env):
         """Execute charge: only action_type==5 charges following AI_GAME.md."""
         unit_rewards = self._get_unit_reward_config(unit)
 
-        # Only action 5 charges in charge phase; action 7 waits
         if action_type == 5:
             targets = self._get_charge_targets(unit)
             if targets:
                 target = targets[0]
+                
+                # Set explicit tracking - PvP style
+                self._last_acting_unit = unit
+                self._last_target_unit = target
+                
                 unit["col"], unit["row"] = target["col"], target["row"]
 
                 if "base_actions" not in unit_rewards or "charge_success" not in unit_rewards["base_actions"]:
                     raise KeyError(f"Missing 'base_actions.charge_success' in rewards config for unit type {unit['unit_type']}")
                 reward = unit_rewards["base_actions"]["charge_success"]
             else:
+                # Set explicit tracking - PvP style (no targets available)
+                self._last_acting_unit = unit
+                self._last_target_unit = None
+                
                 if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                     raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
                 reward = unit_rewards["base_actions"]["wait"]
@@ -1104,12 +1143,20 @@ class W40KEnv(gym.Env):
             return reward
 
         elif action_type == 7:
+            # Set explicit tracking - PvP style (wait action, no target)
+            self._last_acting_unit = unit
+            self._last_target_unit = None
+            
             unit["has_charged"] = True
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
             return unit_rewards["base_actions"]["wait"]
 
         else:
+            # Set explicit tracking - PvP style (invalid action, no target)
+            self._last_acting_unit = unit
+            self._last_target_unit = None
+            
             unit["has_charged"] = True
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
@@ -1124,6 +1171,11 @@ class W40KEnv(gym.Env):
             targets = self._get_combat_targets(unit)
             if targets:
                 target = targets[0]
+                
+                # Set explicit tracking - PvP style
+                self._last_acting_unit = unit
+                self._last_target_unit = target
+                
                 old_hp = target["cur_hp"]
                 
                 # Execute dice-based combat sequence
@@ -1157,6 +1209,10 @@ class W40KEnv(gym.Env):
                             raise KeyError(f"Missing 'result_bonuses.target_lowest_hp' in rewards config for unit type {unit['unit_type']}")
                         reward += unit_rewards["result_bonuses"]["target_lowest_hp"]
             else:
+                # Set explicit tracking - PvP style (no targets available)
+                self._last_acting_unit = unit
+                self._last_target_unit = None
+                
                 if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                     raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
                 reward = unit_rewards["base_actions"]["wait"]
@@ -1166,12 +1222,20 @@ class W40KEnv(gym.Env):
             return reward
 
         elif action_type == 7:
+            # Set explicit tracking - PvP style (wait action, no target)
+            self._last_acting_unit = unit
+            self._last_target_unit = None
+            
             unit["has_attacked"] = True
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
             return unit_rewards["base_actions"]["wait"]
 
         else:
+            # Set explicit tracking - PvP style (invalid action, no target)
+            self._last_acting_unit = unit
+            self._last_target_unit = None
+            
             unit["has_attacked"] = True
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
