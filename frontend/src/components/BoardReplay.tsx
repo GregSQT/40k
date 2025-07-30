@@ -10,6 +10,106 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { renderUnit } from './UnitRenderer';
 import { drawBoard } from './BoardDisplay';
 
+// Pathfinding utilities for move preview (adapted from BoardPvp.tsx)
+const offsetToCube = (col: number, row: number) => {
+  const x = col;
+  const z = row - ((col - (col & 1)) >> 1);
+  const y = -x - z;
+  return { x, y, z };
+};
+
+const cubeDistance = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) => {
+  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.z - b.z));
+};
+
+const calculateMovePath = (fromCol: number, fromRow: number, toCol: number, toRow: number, maxMove: number, boardConfig: any, units: ReplayUnit[]): { col: number; row: number }[] => {
+  if (!boardConfig) return [];
+  
+  const BOARD_COLS = boardConfig.cols;
+  const BOARD_ROWS = boardConfig.rows;
+  
+  const visited = new Map<string, number>();
+  const parent = new Map<string, string | null>();
+  const queue: [number, number, number][] = [[fromCol, fromRow, 0]];
+  
+  // Use cube coordinate system for proper hex neighbors
+  const cubeDirections = [
+    [1, -1, 0], [1, 0, -1], [0, 1, -1], 
+    [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+  ];
+  
+  // Collect forbidden hexes (walls + units)
+  const forbiddenSet = new Set<string>();
+  
+  // Add wall hexes
+  if (boardConfig.wall_hexes) {
+    boardConfig.wall_hexes.forEach(([col, row]: [number, number]) => {
+      forbiddenSet.add(`${col},${row}`);
+    });
+  }
+  
+  // Add unit positions (except the moving unit)
+  units.forEach(unit => {
+    if (unit.alive && !(unit.col === fromCol && unit.row === fromRow)) {
+      forbiddenSet.add(`${unit.col},${unit.row}`);
+    }
+  });
+  
+  visited.set(`${fromCol},${fromRow}`, 0);
+  parent.set(`${fromCol},${fromRow}`, null);
+  
+  while (queue.length > 0) {
+    const [col, row, steps] = queue.shift()!;
+    const key = `${col},${row}`;
+    
+    // Found destination
+    if (col === toCol && row === toRow) {
+      // Reconstruct path
+      const path: { col: number; row: number }[] = [];
+      let current: string | null = key;
+      
+      while (current !== null) {
+        const [c, r] = current.split(',').map(Number);
+        path.unshift({ col: c, row: r });
+        current = parent.get(current) || null;
+      }
+      
+      return path;
+    }
+    
+    if (steps >= maxMove) continue;
+    
+    // Explore neighbors
+    const currentCube = offsetToCube(col, row);
+    for (const [dx, dy, dz] of cubeDirections) {
+      const neighborCube = {
+        x: currentCube.x + dx,
+        y: currentCube.y + dy,
+        z: currentCube.z + dz
+      };
+      
+      const ncol = neighborCube.x;
+      const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+      const nkey = `${ncol},${nrow}`;
+      const nextSteps = steps + 1;
+      
+      if (
+        ncol >= 0 && ncol < BOARD_COLS &&
+        nrow >= 0 && nrow < BOARD_ROWS &&
+        nextSteps <= maxMove &&
+        !forbiddenSet.has(nkey) &&
+        (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
+      ) {
+        visited.set(nkey, nextSteps);
+        parent.set(nkey, key);
+        queue.push([ncol, nrow, nextSteps]);
+      }
+    }
+  }
+  
+  return []; // No path found
+};
+
 // AI_GAME.md: Strict type definitions following game mechanisms
 interface ReplayEvent {
   turn: number;
@@ -111,6 +211,16 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
   
   // Acting unit ID for automatic highlighting
   const [actingUnitId, setActingUnitId] = useState<number | null>(null);
+  
+  // Move preview state for pathfinding visualization
+  const [movePreview, setMovePreview] = useState<{
+    fromCol: number;
+    fromRow: number;
+    toCol: number;
+    toRow: number;
+    path: { col: number; row: number }[];
+    unitId: number;
+  } | null>(null);
   
   // PIXI.js refs - AI_INSTRUCTIONS.md: Use PIXI.js Canvas
   const boardRef = useRef<HTMLDivElement>(null);
@@ -534,6 +644,54 @@ const validateUnitRegistry = () => {
 
   // Using shared BoardRenderer - no duplicate code!
 
+  // Draw move preview hexes (black origin + green path)
+  const drawMovePreview = useCallback((app: PIXI.Application) => {
+    if (!movePreview || !boardConfig) return;
+    
+    const HEX_RADIUS = boardConfig.hex_radius;
+    const MARGIN = boardConfig.margin;
+    const HEX_WIDTH = 1.5 * HEX_RADIUS;
+    const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+    const HEX_HORIZ_SPACING = HEX_WIDTH;
+    const HEX_VERT_SPACING = HEX_HEIGHT;
+    
+    // Remove existing preview graphics
+    const existingPreview = app.stage.children.find(child => child.name === 'movePreview');
+    if (existingPreview) {
+      app.stage.removeChild(existingPreview);
+      existingPreview.destroy();
+    }
+    
+    const previewContainer = new PIXI.Container();
+    previewContainer.name = 'movePreview';
+    previewContainer.zIndex = 1; // Below units but above board
+    
+    // Draw black origin hex
+    const originCenter = getHexCenter(movePreview.fromCol, movePreview.fromRow);
+    const originHex = new PIXI.Graphics();
+    const originPoints = getHexPolygonPoints(originCenter.x, originCenter.y, HEX_RADIUS * 0.9);
+    originHex.beginFill(0x000000, 0.7); // Black with transparency
+    originHex.drawPolygon(originPoints);
+    originHex.endFill();
+    previewContainer.addChild(originHex);
+    
+    // Draw green path hexes (excluding origin)
+    const pathColor = parseInt(boardConfig.colors.eligible?.replace('0x', '') || '00FF00', 16);
+    movePreview.path.forEach((pathHex, index) => {
+      if (index === 0) return; // Skip origin hex
+      
+      const center = getHexCenter(pathHex.col, pathHex.row);
+      const pathHexGraphic = new PIXI.Graphics();
+      const points = getHexPolygonPoints(center.x, center.y, HEX_RADIUS * 0.8);
+      pathHexGraphic.beginFill(pathColor, 0.5); // Green with transparency
+      pathHexGraphic.drawPolygon(points);
+      pathHexGraphic.endFill();
+      previewContainer.addChild(pathHexGraphic);
+    });
+    
+    app.stage.addChild(previewContainer);
+  }, [movePreview, boardConfig, getHexCenter, getHexPolygonPoints]);
+
   // Draw units using UnitRenderer - same as Board.tsx
   const drawUnits = useCallback((app: PIXI.Application, units: ReplayUnit[], highlightUnitId: number | null = null) => {
     if (!scenario || !app.stage || !boardConfig?.display) return;
@@ -670,6 +828,7 @@ const validateUnitRegistry = () => {
       
       // Draw initial board and units using shared BoardRenderer
       drawBoard(app, boardConfig! as any);
+      drawMovePreview(app);
       drawUnits(app, currentUnits, actingUnitId);
       
       // Cleanup function
@@ -685,7 +844,7 @@ const validateUnitRegistry = () => {
       console.error('❌ Error initializing PIXI application:', error);
       setError('Failed to initialize board display');
     }
-  }, [scenario, replayData, drawUnits, currentUnits, actingUnitId]);
+  }, [scenario, replayData, drawUnits, drawMovePreview, currentUnits, actingUnitId, movePreview]);
 
   // Update game state based on current step
   useEffect(() => {
@@ -740,8 +899,40 @@ const validateUnitRegistry = () => {
       const currentActingUnitId = currentLogEntry ? (currentLogEntry as any).unitId : null;
       setActingUnitId(currentActingUnitId);
       
+      // Detect move actions and set up move preview
+      if (currentLogEntry && (currentLogEntry as any).type === 'move') {
+        const logEntry = currentLogEntry as any;
+        const movingUnit = newUnits.find(u => u.id === logEntry.unitId);
+        
+        if (movingUnit && logEntry.fromPosition && logEntry.toPosition) {
+          const [fromCol, fromRow] = logEntry.fromPosition;
+          const [toCol, toRow] = logEntry.toPosition;
+          
+          // Calculate path using pathfinding
+          const path = calculateMovePath(fromCol, fromRow, toCol, toRow, movingUnit.MOVE, boardConfig, newUnits);
+          
+          if (path.length > 0) {
+            setMovePreview({
+              fromCol,
+              fromRow,
+              toCol,
+              toRow,
+              path,
+              unitId: logEntry.unitId
+            });
+          } else {
+            setMovePreview(null);
+          }
+        } else {
+          setMovePreview(null);
+        }
+      } else {
+        setMovePreview(null);
+      }
+      
       // Update PIXI display
       if (pixiAppRef.current) {
+        drawMovePreview(pixiAppRef.current);
         drawUnits(pixiAppRef.current, newUnits, currentActingUnitId);
       }
       

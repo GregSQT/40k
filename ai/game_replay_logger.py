@@ -95,6 +95,7 @@ class GameReplayLogger:
         """Initialize with the W40K environment."""
         self.env = env
         self.game_states = []
+        self.combat_log_entries = []  # Initialize combat log immediately
         self.current_turn = 1
         self.current_phase = "move"
         self.game_metadata = {
@@ -130,7 +131,32 @@ class GameReplayLogger:
             return int(action)
     
     def capture_initial_state(self):
-        """Capture the initial game state."""
+        # Capture the initial game state."""
+        # Add initial combat log entry
+        if not hasattr(self, 'combat_log_entries'):
+            self.combat_log_entries = []
+            
+        # Add game start message
+        start_message = format_turn_start_message(1)
+        start_entry = {
+            "id": 1,
+            "type": "turn_change",
+            "message": start_message,
+            "reward": 0.0,
+            "turnNumber": 1,
+            "phase": "move",
+            "player": None,
+            "unitType": None,
+            "unitId": None,
+            "targetUnitType": None,
+            "targetUnitId": None,
+            "startHex": None,
+            "endHex": None,
+            "actionName": "game_start",
+            "shootDetails": None
+        }
+        self.combat_log_entries.append(start_entry)
+        
         initial_state = self._create_game_state_snapshot(
             action_taken=None,
             acting_unit_id=None,
@@ -431,20 +457,50 @@ class GameReplayLogger:
     
     def save_replay(self, filename: str, episode_reward: float = 0.0):
         """Save the complete game replay."""
+        # Extract initial state from first game state
+        initial_units = []
+        if self.game_states and len(self.game_states) > 0:
+            first_state = self.game_states[0]
+            for unit in first_state.get("units", []):
+                initial_units.append({
+                    "id": unit.get("id", 0),
+                    "unit_type": unit.get("unit_type", "Unknown"),
+                    "player": unit.get("player", 0),
+                    "col": unit.get("col", 0),
+                    "row": unit.get("row", 0), 
+                    "hp_max": unit.get("max_hp", 1),
+                    "move": unit.get("movement", 6),
+                    "rng_rng": 18,  # Default values for training
+                    "rng_dmg": 1,
+                    "cc_dmg": 1,
+                    "is_ranged": unit.get("unit_type") in ["Intercessor", "Termagant"],
+                    "is_melee": unit.get("unit_type") in ["AssaultIntercessor"]
+                })
+        
         replay_data = {
+            "game_info": {
+                "scenario": self.game_metadata.get("scenario", "training_episode"),
+                "ai_behavior": "phase_based_following_AI_GAME_OVERVIEW",
+                "total_turns": self.current_turn,
+                "winner": None,  # Set by capture_game_end if available
+                "ai_units_final": 0,
+                "enemy_units_final": 0
+            },
             "metadata": {
                 **self.game_metadata,
                 "total_states": len(self.game_states),
                 "final_turn": self.current_turn,
                 "episode_reward": episode_reward,
-                "duration_minutes": len(self.game_states) * 0.1,
-                "training_context": getattr(self, 'training_context', {}),
                 "format_version": "2.0",
                 "replay_type": "training_enhanced",
                 "total_combat_log_entries": len(getattr(self, 'combat_log_entries', []))
             },
+            "initial_state": {
+                "units": initial_units,
+                "board_size": self.game_metadata.get("board_size", [24, 18])
+            },
+            "combat_log": self.combat_log_entries,  # Use direct reference instead of getattr
             "game_states": self.game_states,
-            "combat_log": getattr(self, 'combat_log_entries', []),  # ADD: Include combat log
             "training_summary": self._generate_training_summary()
         }
         
@@ -458,6 +514,7 @@ class GameReplayLogger:
         print(f"   📊 {len(self.game_states)} game states captured")
         print(f"   🎮 {self.current_turn} turns played")
         print(f"   💯 Final reward: {episode_reward:.2f}")
+        print(f"   📝 {len(getattr(self, 'combat_log_entries', []))} combat log entries")
 
     def _get_event_type_from_action(self, action_int: int, pre_action_units: List[Dict], post_action_units: List[Dict]) -> str:
         """Determine event type based on action and unit changes."""
