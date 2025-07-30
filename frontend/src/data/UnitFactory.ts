@@ -6,7 +6,7 @@ let unitClassMap: Record<string, any> = {};
 let availableUnitTypes: string[] = [];
 let initialized = false;
 
-// Automatically discover all units from roster directory structure
+// Load units from config file (same approach as BoardReplay.tsx)
 async function initializeUnitRegistry(): Promise<void> {
   if (initialized) return;
   
@@ -15,45 +15,48 @@ async function initializeUnitRegistry(): Promise<void> {
     unitClassMap = {};
     availableUnitTypes = [];
     
-    // Define the roster structure to scan
-    const factionDirs = ['spaceMarine', 'tyranid']; // Add more factions as they're added
+    // Load unit registry from config file
+    const registryResponse = await fetch('/config/unit_registry.json');
     
-    for (const faction of factionDirs) {      
-      // Try to discover units in this faction directory
-      const unitFiles = await discoverUnitsInFaction(faction);
-      
-      for (const unitFile of unitFiles) {
-        try {
-          // Use @vite-ignore to suppress the dynamic import warning
-          const module = await import(/* @vite-ignore */ `../roster/${faction}/${unitFile}`);
-          
-          // Find the exported class (should match filename)
-          const className = unitFile; // e.g., "Intercessor"
-          const UnitClass = module[className];
-          
-          if (!UnitClass) {
-            console.warn(`⚠️ No class ${className} found in ${faction}/${unitFile}`);
-            continue;
-          }
-          
-          // Validate it's a proper unit class
-          if (UnitClass.MOVE && UnitClass.HP_MAX && UnitClass.ICON) {
-            unitClassMap[className] = UnitClass;
-            availableUnitTypes.push(className);
-          } else {
-            console.warn(`⚠️ ${className} missing required unit properties`);
-          }
-          
-        } catch (importError) {
-          console.warn(`⚠️ Failed to import ${faction}/${unitFile}:`, importError);
+    if (!registryResponse.ok) {
+      throw new Error(`Failed to load unit registry: ${registryResponse.statusText}`);
+    }
+    
+    const text = await registryResponse.text();
+    const unitConfig = JSON.parse(text);
+    
+    // Dynamically import each unit class using config paths
+    for (const [unitType, unitPath] of Object.entries(unitConfig.units) as [string, string][]) {
+      try {
+        const module = await import(/* @vite-ignore */ `../roster/${unitPath}.ts`);
+        const UnitClass = module[unitType] || module.default;
+        
+        if (!UnitClass) {
+          throw new Error(`Unit class ${unitType} not found in ${unitPath}`);
         }
+        
+        // Validate required properties
+        const requiredProps = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG', 'ICON'];
+        requiredProps.forEach(prop => {
+          if (UnitClass[prop] === undefined) {
+            throw new Error(`Unit ${unitType} missing required property: ${prop}`);
+          }
+        });
+        
+        unitClassMap[unitType] = UnitClass;
+        availableUnitTypes.push(unitType);
+        
+      } catch (importError) {
+        console.error(`❌ Failed to import unit ${unitType}:`, importError);
+        throw importError;
       }
     }
     
     initialized = true;
+    console.log(`✅ Unit registry initialized with ${availableUnitTypes.length} units:`, availableUnitTypes);
     
   } catch (error) {
-    console.error('❌ Failed to auto-discover units:', error);
+    console.error('❌ Failed to initialize unit registry:', error);
     throw error;
   }
 }

@@ -272,7 +272,7 @@ const initializeUnitRegistry = async () => {
     // Dynamically import each unit class
     for (const [unitType, unitPath] of Object.entries(unitConfig.units)) {
       try {
-        const module = await import(/* @vite-ignore */ `../roster/${unitPath}.ts`);
+        const module = await import(/* @vite-ignore */ `../roster/${unitPath}`);
         const UnitClass = module[unitType] || module.default;
         
         if (!UnitClass) {
@@ -893,7 +893,7 @@ const validateUnitRegistry = () => {
                 fontWeight: 'bold'
               }}
             >
-              📁 Browse Replay Files
+              📁 Replay Files
             </button>
             {selectedFileName && (
               <span style={{ fontSize: '12px', color: '#888' }}>
@@ -985,7 +985,7 @@ const validateUnitRegistry = () => {
                 fontWeight: 'bold'
               }}
             >
-              📁 Browse Replay Files
+              📁 Replay Files
             </button>
             {selectedFileName && (
               <span style={{ fontSize: '12px', color: '#888' }}>
