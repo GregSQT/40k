@@ -57,8 +57,10 @@ class W40KEnv(gym.Env):
     """Phase-based W40K environment following AI_GAME_OVERVIEW.md specifications exactly."""
 
     def __init__(self, rewards_config=None, training_config_name="default", 
-             controlled_agent=None, active_agents=None, scenario_file=None, unit_registry=None):
+             controlled_agent=None, active_agents=None, scenario_file=None, unit_registry=None, quiet=False):
         super().__init__()
+        
+        self.quiet = quiet  # Add quiet mode flag
 
         # Multi-agent support - reuse shared registry if provided
         self.unit_registry = unit_registry if unit_registry is not None else UnitRegistry()

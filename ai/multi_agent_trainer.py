@@ -383,13 +383,18 @@ class MultiAgentTrainer:
             # Save descriptive replay file using GameReplayIntegration
             replay_file_saved = None
             try:
+                # Save training analysis file
                 timestamp = time.strftime("%Y%m%d_%H%M%S") 
                 descriptive_filename = f"ai/event_log/training_{session.agent_key}_vs_{session.opponent_agent}.json"
                 
-                # Use GameReplayIntegration's save method
                 if hasattr(env.unwrapped, 'replay_logger'):
                     final_reward = test_results.get("avg_reward", 0)
-                    replay_file_saved = env.unwrapped.replay_logger.save_replay(descriptive_filename, final_reward)
+                    # Save training analysis file
+                    training_file_saved = env.unwrapped.replay_logger.save_replay(descriptive_filename, final_reward)
+                    
+                    # ALSO save standard replay viewer file using existing method
+                    replay_file_saved = GameReplayIntegration.save_episode_replay(env.unwrapped, final_reward)
+                    
                 else:
                     print(f"⚠️ GameReplayIntegration not properly initialized for session {session.session_id}")
                 
@@ -506,7 +511,8 @@ class MultiAgentTrainer:
             training_config_name=training_config_name,
             controlled_agent=agent_key,
             scenario_file=scenario_path,
-            unit_registry=self.unit_registry  # Pass shared registry
+            unit_registry=self.unit_registry,  # Pass shared registry
+            quiet=True  # Enable quiet mode for training
         )
         
         # Enhance environment with our shared GameReplayIntegration

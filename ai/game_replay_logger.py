@@ -93,9 +93,13 @@ def format_game_log_message(event_type: str, acting_unit: Optional[Dict], target
 class GameReplayLogger:
     def __init__(self, env):
         """Initialize with the W40K environment."""
+        self.quiet = getattr(env, 'quiet', False)  # Inherit quiet mode from environment
         self.env = env
         self.game_states = []
         self.combat_log_entries = []  # Initialize combat log immediately
+        # Ensure it's always a list
+        if not hasattr(self, 'combat_log_entries') or self.combat_log_entries is None:
+            self.combat_log_entries = []
         self.current_turn = 1
         self.current_phase = "move"
         self.game_metadata = {
@@ -170,7 +174,8 @@ class GameReplayLogger:
         initial_state["event_flags"]["description"] = "Initial deployment"
         
         self.game_states.append(initial_state)
-        print(f"📸 Captured initial game state with {len(self.env.units)} units")
+        if not self.quiet:
+            print(f"📸 Captured initial game state with {len(self.env.units)} units")
     
     def capture_action_state(self, action, reward: float, pre_action_units: List[Dict], 
                            post_action_units: List[Dict], acting_unit_id: Optional[int] = None,
@@ -262,10 +267,11 @@ class GameReplayLogger:
         self.combat_log_entries.append(combat_entry)
         
         # Print combat log entry for immediate visibility during training with action name
-        reward_str = f"+{reward:.2f}" if reward >= 0 else f"{reward:.2f}"
-        player_str = f"P{combat_entry['player']}"
-        action_name = self.action_names.get(action_int, f"action_{action_int}")
-        print(f"🎯 [{player_str}] T{self.current_turn} {self.current_phase.upper()}: {combat_entry['message']} (R: {reward_str}) [{action_name}]")
+        if not self.quiet:
+            reward_str = f"+{reward:.2f}" if reward >= 0 else f"{reward:.2f}"
+            player_str = f"P{combat_entry['player']}"
+            action_name = self.action_names.get(action_int, f"action_{action_int}")
+            print(f"🎯 [{player_str}] T{self.current_turn} {self.current_phase.upper()}: {combat_entry['message']} (R: {reward_str}) [{action_name}]")
     
     def capture_game_end(self, winner: str, final_reward: float):
         """Capture the final game state."""
@@ -419,9 +425,11 @@ class GameReplayLogger:
             self.combat_log_entries.append(turn_entry)
             
         # Print turn/phase changes for visibility during training
-        print(f"🔄 {phase_message}")
+        if not self.quiet:
+            print(f"🔄 {phase_message}")
         if self.phase_index == 0:
-            print(f"🔄 {turn_message}")
+            if not self.quiet:
+                print(f"🔄 {turn_message}")
 
     def set_training_context(self, timestep: int, episode_num: int, model_info: Dict[str, Any]):
         """Set current training context for this episode."""
@@ -501,7 +509,7 @@ class GameReplayLogger:
                 "units": initial_units,
                 "board_size": self.game_metadata.get("board_size", [24, 18])
             },
-            "combat_log": self.combat_log_entries,  # ✅ Use ONLY our shared format
+            "combat_log": getattr(self, 'combat_log_entries', []) or [],  # ✅ Ensure combat_log is always an array
             "game_states": self.game_states,
             "training_summary": self._generate_training_summary()
         }
