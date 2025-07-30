@@ -753,14 +753,18 @@ class GameReplayIntegration:
             # Normalize action for logging
             action_int = env.replay_logger._normalize_action(action)
             
-            # Log the action and its effects
+            # CRITICAL FIX: Use PvP-style unit identification - get actual units from gym environment
+            # instead of trying to decode from actions which fails when unit counts change
+            acting_unit_id, target_unit_id = GameReplayIntegration._get_actual_units_from_gym(env, action_int, pre_action_units, post_action_units)
+            
+            # Log the action and its effects (PvP-style approach)
             env.replay_logger.capture_action_state(
                 action=action_int,
                 reward=reward,
                 pre_action_units=pre_action_units,
                 post_action_units=post_action_units,
-                acting_unit_id=GameReplayIntegration._determine_acting_unit_id(env, action_int, post_action_units),
-                target_unit_id=GameReplayIntegration._determine_target_unit_id(env, action_int, pre_action_units, post_action_units),
+                acting_unit_id=acting_unit_id,
+                target_unit_id=target_unit_id,
                 description=f"AI performs {env.replay_logger.action_names.get(action_int, 'unknown action')}"
             )
             
@@ -780,27 +784,98 @@ class GameReplayIntegration:
         return env
     
     @staticmethod
-    def _determine_acting_unit_id(env, action_int: int, post_action_units: List[Dict]) -> Optional[int]:
+    def _get_actual_units_from_gym(env, action_int: int, pre_action_units: List[Dict], post_action_units: List[Dict]) -> tuple[Optional[int], Optional[int]]:
+        """Get actual acting and target units PvP-style, using gym environment state instead of action decoding."""
+        # Instead of decoding actions (which breaks with changing unit counts),
+        # use the gym environment's internal state to find which units actually acted
+        
+        # Check if the gym environment tracks the last acting unit (ideal case)
+        if hasattr(env, '_last_acting_unit') and env._last_acting_unit is not None:
+            acting_unit_id = env._last_acting_unit.get('id')
+            target_unit_id = getattr(env, '_last_target_unit', {}).get('id') if hasattr(env, '_last_target_unit') else None
+            return acting_unit_id, target_unit_id
+        
+        # Fallback: Look for units that changed state (moved, lost HP, changed flags)
+        acting_unit_id = None
+        target_unit_id = None
+        
+        # Find unit that moved (position changed)
+        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
+            if pre_unit.get('id') == post_unit.get('id'):
+                # Check position change
+                if (pre_unit.get('col') != post_unit.get('col') or 
+                    pre_unit.get('row') != post_unit.get('row')):
+                    acting_unit_id = post_unit.get('id')
+                    break
+                
+                # Check status flag changes (has_moved, has_shot, has_charged, has_attacked)
+                for flag in ['has_moved', 'has_shot', 'has_charged', 'has_attacked']:
+                    if not pre_unit.get(flag, False) and post_unit.get(flag, False):
+                        acting_unit_id = post_unit.get('id')
+                        break
+                if acting_unit_id:
+                    break
+        
+        # Find target unit (took damage or died)
+        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
+            if pre_unit.get('id') == post_unit.get('id'):
+                # Check HP loss
+                pre_hp = pre_unit.get('cur_hp', pre_unit.get('hp', 0))
+                post_hp = post_unit.get('cur_hp', post_unit.get('hp', 0))
+                if pre_hp > post_hp:
+                    target_unit_id = post_unit.get('id')
+                    break
+                
+                # Check if unit died
+                if pre_unit.get('alive', True) and not post_unit.get('alive', True):
+                    target_unit_id = post_unit.get('id')
+                    break
+        
+        return acting_unit_id, target_unit_id
+    
+    @staticmethod
+    def _determine_acting_unit_id(env, action_int: int, post_action_units: List[Dict], pre_action_units: List[Dict] = None) -> Optional[int]:
         """Determine which unit actually performed the action by decoding the gym action."""
         # Decode the action to get unit index
         max_actions_per_unit = 8  # gym40k uses 8 actions per unit
         unit_idx = action_int // max_actions_per_unit
         
-        # Get current player's units (not "eligible" since we're logging after action execution)
+        # Get current player
         current_player = getattr(env, 'current_player', 1)
-        current_player_units = [u for u in post_action_units 
-                              if u.get('player') == current_player and u.get('alive', True)]
         
-        # Validate unit index
-        if unit_idx >= len(current_player_units):
+        # CRITICAL FIX: Use pre-action units for action space calculation since gym calculates 
+        # action space based on units available BEFORE the action executes
+        if pre_action_units is not None:
+            # Use pre-action units to match gym's action space calculation
+            action_space_units = [u for u in pre_action_units 
+                                if u.get('player') == current_player and u.get('alive', True)]
+        else:
+            # Fallback to post-action units if pre-action not available
+            action_space_units = [u for u in post_action_units 
+                                if u.get('player') == current_player and u.get('alive', True)]
+        
+        # Validate unit index against action space calculation
+        if unit_idx >= len(action_space_units):
             available_unit_ids = [u.get('id') for u in post_action_units]
-            current_player_unit_ids = [u.get('id') for u in current_player_units]
-            raise RuntimeError(f"CRITICAL ERROR in _determine_acting_unit_id: Action {action_int} decoded to unit_idx={unit_idx}, but only {len(current_player_units)} units available for player {current_player}. "
+            current_player_unit_ids = [u.get('id') for u in action_space_units]
+            raise RuntimeError(f"CRITICAL ERROR in _determine_acting_unit_id: Action {action_int} decoded to unit_idx={unit_idx}, but only {len(action_space_units)} units were available when action space was calculated for player {current_player}. "
                              f"Available unit IDs in post_action_units: {available_unit_ids}. "
-                             f"Current player {current_player} unit IDs: {current_player_unit_ids}. "
-                             f"This indicates the gym action space assumes {unit_idx + 1} units but only {len(current_player_units)} exist.")
+                             f"Action space player {current_player} unit IDs: {current_player_unit_ids}. "
+                             f"This indicates the gym action space was calculated with {unit_idx + 1} units but only {len(action_space_units)} existed.")
         
-        return current_player_units[unit_idx].get('id')
+        # Return the actual unit ID that performed the action
+        acting_unit_id = action_space_units[unit_idx].get('id')
+        
+        # Verify the acting unit still exists in post-action units (might be dead but still findable)
+        post_acting_unit = next((u for u in post_action_units if u.get('id') == acting_unit_id), None)
+        if not post_acting_unit:
+            # Unit might have died, search in pre-action units as fallback
+            if pre_action_units:
+                pre_acting_unit = next((u for u in pre_action_units if u.get('id') == acting_unit_id), None)
+                if not pre_acting_unit:
+                    raise RuntimeError(f"CRITICAL ERROR in _determine_acting_unit_id: Acting unit {acting_unit_id} not found in either pre or post action units")
+        
+        return acting_unit_id
     
     @staticmethod
     def _determine_target_unit_id(env, action_int: int, pre_action_units: List[Dict], post_action_units: List[Dict]) -> Optional[int]:
@@ -833,7 +908,7 @@ class GameReplayIntegration:
         
         # Method 3: For charge actions, find unit that is now adjacent to the acting unit
         if action_type == 5:  # charge_closest - NEVER causes damage, only moves adjacent
-            acting_unit_id = GameReplayIntegration._determine_acting_unit_id(env, action_int, post_action_units)
+            acting_unit_id = GameReplayIntegration._determine_acting_unit_id(env, action_int, post_action_units, pre_action_units)
             if not acting_unit_id:
                 raise RuntimeError(f"CRITICAL ERROR: Cannot determine acting unit for charge action {action_int}")
             
@@ -886,7 +961,7 @@ class GameReplayIntegration:
                 return target_enemy.get('id')
         
         # Method 4: Use gym environment's target selection logic based on action type
-        acting_unit_id = GameReplayIntegration._determine_acting_unit_id(env, action_int, post_action_units)
+        acting_unit_id = GameReplayIntegration._determine_acting_unit_id(env, action_int, post_action_units, pre_action_units)
         if acting_unit_id:
             acting_unit = next((u for u in post_action_units if u.get('id') == acting_unit_id), None)
             if acting_unit:

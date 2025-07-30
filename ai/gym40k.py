@@ -16,6 +16,7 @@ import copy
 from datetime import datetime
 import sys
 from pathlib import Path
+from collections import defaultdict  
 
 script_dir = Path(__file__).parent
 project_root = script_dir.parent
@@ -166,6 +167,9 @@ class W40KEnv(gym.Env):
             raise FileNotFoundError(f"Specified scenario file not found: {scenario_file}")
         
         self.scenario_path = scenario_file
+        
+        # Calculate max_units dynamically from scenario for action space
+        self._calculate_max_units_from_scenario()
         # Reduced verbosity - scenario path logged only if needed
         if os.path.exists(self.scenario_path):
             try:
@@ -243,11 +247,11 @@ class W40KEnv(gym.Env):
         self.action_space = spaces.Discrete(self.max_units * 8)
         
         # Fixed observation space: Always use consistent size regardless of actual unit count
-        # AI units (2 max): 2 * 7 = 14
-        # Enemy units (2 max): 2 * 4 = 8  
+        # AI units (max_units): max_units * 7
+        # Enemy units (max_units): max_units * 4  
         # Phase encoding: 4
-        # Total: 14 + 8 + 4 = 26
-        obs_size = 26
+        # Total: (max_units * 7) + (max_units * 4) + 4 = max_units * 11 + 4
+        obs_size = self.max_units * 11 + 4
         self.observation_space = spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         
         # Replay tracking - COMPLETELY DISABLED, using GameReplayIntegration only
@@ -265,6 +269,40 @@ class W40KEnv(gym.Env):
                     self.scenario_metadata = scenario_data["metadata"]
             except Exception:
                 pass  # Don't fail if metadata is missing
+
+    def _calculate_max_units_from_scenario(self):
+        """Calculate max_units dynamically from scenario file for action space."""
+        try:
+            with open(self.scenario_path, 'r') as f:
+                scenario_data = json.load(f)
+                
+            # Handle different JSON structures
+            if isinstance(scenario_data, list):
+                scenario_units = scenario_data
+            elif isinstance(scenario_data, dict):
+                if "units" in scenario_data:
+                    scenario_units = scenario_data["units"]
+                else:
+                    scenario_units = list(scenario_data.values())
+            else:
+                raise ValueError(f"Scenario data must be list or dict, got {type(scenario_data)}")
+            
+            # Count maximum units per player for action space calculation
+            player_unit_counts = defaultdict(int)
+            for unit_data in scenario_units:
+                player = unit_data.get("player", 0)
+                player_unit_counts[player] += 1
+            
+            # Use maximum units per player as the action space basis
+            if not player_unit_counts:
+                raise ValueError("No units found in scenario file")
+            
+            self.max_units = max(player_unit_counts.values())
+            print(f"🎯 Dynamic action space: {self.max_units} max units per player (total action space: {self.max_units * 8})")
+            
+        except Exception as e:
+            raise RuntimeError(f"CRITICAL ERROR: Cannot calculate max_units from scenario file '{self.scenario_path}': {e}. "
+                             f"AI_INSTRUCTIONS.md: No fallbacks allowed - scenario file must be valid and readable.")
 
     def _load_unit_definitions(self):
         """Load unit definitions from TypeScript files exactly like the original."""
@@ -454,13 +492,14 @@ class W40KEnv(gym.Env):
         return self._get_obs(), self._get_info()
 
     def _get_obs(self):
-        """Get current observation with fixed size (26 elements)."""
-        obs = np.zeros(26, dtype=np.float32)
+        """Get current observation with dynamic size based on max_units."""
+        obs_size = self.max_units * 11 + 4
+        obs = np.zeros(obs_size, dtype=np.float32)
         
-        # AI units (first 14 elements: 2 units × 7 values each)
+        # AI units (first max_units * 7 elements: max_units units × 7 values each)
         ai_units_alive = [u for u in self.ai_units if u["alive"]]
         
-        for i in range(2):  # Always 2 slots for AI units
+        for i in range(self.max_units):  # Dynamic slots for AI units
             if i < len(ai_units_alive):
                 unit = ai_units_alive[i]
                 base_idx = i * 7
@@ -472,19 +511,19 @@ class W40KEnv(gym.Env):
                 obs[base_idx + 5] = 1.0 if unit["has_charged"] else 0.0
                 obs[base_idx + 6] = 1.0 if unit["has_attacked"] else 0.0
         
-        # Enemy units (next 8 elements: 2 units × 4 values each)
+        # Enemy units (next max_units * 4 elements: max_units units × 4 values each)
         enemy_units_alive = [u for u in self.enemy_units if u["alive"]]
-        for i in range(2):  # Always 2 slots for enemy units
+        for i in range(self.max_units):  # Dynamic slots for enemy units
             if i < len(enemy_units_alive):
                 unit = enemy_units_alive[i]
-                base_idx = 14 + i * 4
+                base_idx = self.max_units * 7 + i * 4
                 obs[base_idx] = unit["col"] / self.board_size[0]
                 obs[base_idx + 1] = unit["row"] / self.board_size[1]
                 obs[base_idx + 2] = unit["cur_hp"] / unit["hp_max"]
                 obs[base_idx + 3] = 1.0  # alive
         
         # Phase encoding (last 4 elements)
-        phase_idx = 22
+        phase_idx = self.max_units * 11  # Dynamic position based on max_units
         if self.current_phase == "move":
             obs[phase_idx] = 1.0
         elif self.current_phase == "shoot":
