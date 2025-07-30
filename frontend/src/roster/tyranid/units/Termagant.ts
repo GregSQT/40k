@@ -1,6 +1,6 @@
-// frontend/src/roster/tyranid/Termagant.ts
+// frontend/src/roster/tyranid/units/Termagant.ts
 //
-import { TyranidInfantrySwarmRangedSwarm } from "./TyranidInfantrySwarmRangedSwarm";
+import { TyranidInfantrySwarmRangedSwarm } from "../classes/TyranidInfantrySwarmRangedSwarm";
 
 export class Termagant extends TyranidInfantrySwarmRangedSwarm {
   static NAME = "Termagant";

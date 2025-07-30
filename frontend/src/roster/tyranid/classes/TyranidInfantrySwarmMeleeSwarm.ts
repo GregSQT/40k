@@ -1,13 +1,13 @@
-// frontend/src/roster/spaceMarine/SpaceMarineInfantryTroopMeleeTroop.ts
+// frontend/src/roster/tyranid/classes/TyranidInfantrySwarmMeleeSwarm.ts
 
-export class SpaceMarineInfantryTroopMeleeTroop {
-  static FACTION = "Space Marines";
+export class TyranidInfantrySwarmMeleeSwarm {
+  static FACTION = "Tyranid";
   static TEAM_COLOR = 0x0078ff;     // Example: blue
 
   // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Troop";      // Troop: 2 wounds, 3+ save
-  static MOVE_TYPE = "Infantry";       // Standard infantry movement
-  static TARGET_TYPE = "Troop";        // MeleeTroop specialist - backbone melee
+  static TANKING_LEVEL = "Swarm";      // Swarm: 1 wound, fragile
+  static MOVE_TYPE = "Infantry";       // Fast infantry movement
+  static TARGET_TYPE = "Swarm";        // MeleeSwarm specialist - mob assault
 
   name: string;
   hp: number;

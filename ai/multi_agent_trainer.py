@@ -174,12 +174,7 @@ class MultiAgentTrainer:
         Supports 3-phase training plan: solo -> cross_faction -> full_composition
         Returns training orchestration summary.
         """
-        print(f"🚀 Starting balanced multi-agent training")
-        print(f"📊 Total episodes: {total_episodes}")
-        print(f"⚙️ Training config: {training_config_name}")
-        print(f"🎯 Rewards config: {rewards_config_name}")
-        if training_phase:
-            print(f"🎯 Training phase: {training_phase}")
+        print(f"🚀 Starting multi-agent training | Episodes: {total_episodes} | Config: {training_config_name} | Phase: {training_phase or 'balanced'}")
         
         # Clean up previous session scenarios
         self._cleanup_previous_session_scenarios()
@@ -209,16 +204,13 @@ class MultiAgentTrainer:
             "start_time": time.time()
         }
         
-        print(f"🔄 Executing {len(training_rotation)} training matchups...")
-        
-        # Update instance config to use the requested training config
+        # Load training config
         self.training_config = self.config.load_training_config(training_config_name)
-        
-        # Load training config to show timesteps info
         training_config = self.config.load_training_config(training_config_name)
-        timesteps_per_session = training_config["total_timesteps"]  # No fallback - must be configured
+        timesteps_per_session = training_config["total_timesteps"]
         total_timesteps = len(training_rotation) * timesteps_per_session
         
+        print(f"🔄 Executing {len(training_rotation)} training matchups...")
         print(f"📊 Episodes per matchup: {episodes_per_pair}")
         print(f"⏱️ Timesteps per session: {timesteps_per_session:,}")
         print(f"🔄 Total timesteps: {total_timesteps:,}")
@@ -313,7 +305,6 @@ class MultiAgentTrainer:
                           f"WR:{result.get('final_win_rate', 0):.0%} R:{result.get('final_avg_reward', 0):.1f}")
                     
                 except Exception as e:
-                    print(f"❌ Session {session_id} failed: {e}")
                     orchestration_results["session_results"].append({
                         "session_id": session_id,
                         "status": "failed",
@@ -324,7 +315,7 @@ class MultiAgentTrainer:
                         if session_id in self.session_progress:
                             del self.session_progress[session_id]
                         self._update_slowest_progress()
-                    print(f"❌ Session {self.completed_sessions}/{self.total_sessions}: FAILED - {session_id}")
+                    print(f"❌ Session {self.completed_sessions}/{self.total_sessions}: {session_id} failed: {e}")
                 finally:
                     # Cleanup
                     if session_id in self.active_sessions:
@@ -518,7 +509,6 @@ class MultiAgentTrainer:
         session_files = glob.glob(pattern)
         
         if not session_files:
-            print("📁 No previous session scenarios found - starting clean")
             return
         
         # Delete all found session scenario files

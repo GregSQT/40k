@@ -1,13 +1,13 @@
-// frontend/src/roster/spaceMarine/SpaceMarineInfantryTroopRangedSwarm.ts
+// frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryLeaderEliteMeleeElite.ts
 
-export class SpaceMarineInfantryTroopRangedSwarm {
+export class SpaceMarineInfantryLeaderEliteMeleeElite {
   static FACTION = "Space Marines";
   static TEAM_COLOR = 0x0078ff;     // Example: blue
 
   // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Troop";      // Troop: 2 wounds, 3+ save
-  static MOVE_TYPE = "Infantry";       // Standard infantry movement
-  static TARGET_TYPE = "Swarm";        // RangedSwarm specialist - bolt rifles vs hordes
+  static TANKING_LEVEL = "LeaderElite"; // LeaderElite: 6+ wounds, 3+ save + invul
+  static MOVE_TYPE = "Infantry";        // Standard infantry movement
+  static TARGET_TYPE = "Elite";         // MeleeElite specialist - hunt elite targets
 
   name: string;
   hp: number;

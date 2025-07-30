@@ -1,13 +1,13 @@
-// frontend/src/roster/tyranid/TyranidInfantrySwarmMeleeSwarm.ts
+// frontend/src/roster/tyranid/classes/TyranidInfantryEliteMeleeElite.ts
 
-export class TyranidInfantrySwarmMeleeSwarm {
+export class TyranidInfantryEliteMeleeElite {
   static FACTION = "Tyranid";
   static TEAM_COLOR = 0x0078ff;     // Example: blue
 
   // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Swarm";      // Swarm: 1 wound, fragile
-  static MOVE_TYPE = "Infantry";       // Fast infantry movement
-  static TARGET_TYPE = "Swarm";        // MeleeSwarm specialist - mob assault
+  static TANKING_LEVEL = "Elite";      // Elite: 8 wounds, 2+ save - heavy armor
+  static MOVE_TYPE = "Infantry";       // Monster movement (treated as infantry)
+  static TARGET_TYPE = "Elite";        // MeleeElite specialist - monster vs elite
 
   name: string;
   hp: number;

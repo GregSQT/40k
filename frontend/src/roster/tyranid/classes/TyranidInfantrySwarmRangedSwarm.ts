@@ -1,4 +1,4 @@
-// frontend/src/roster/tyranid/TyranidInfantrySwarmRangedSwarm.ts
+// frontend/src/roster/tyranid/classes/TyranidInfantrySwarmRangedSwarm.ts
 
 export class TyranidInfantrySwarmRangedSwarm {
   static FACTION = "Tyranid";

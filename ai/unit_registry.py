@@ -52,19 +52,23 @@ class UnitRegistry:
                 faction_name = faction_dir.name
                 print(f"  📁 Scanning faction: {faction_name}")
                 
-                # Scan all TypeScript files in faction directory
-                for ts_file in faction_dir.glob("*.ts"):
-                    if ts_file.name.startswith('index') or 'Unit.ts' in ts_file.name:
-                        continue  # Skip base classes and index files
-                    
-                    unit_data = self._parse_unit_file(ts_file, faction_name)
-                    if unit_data:
-                        self.units[unit_data['unit_type']] = unit_data
-                        self.factions.add(unit_data['faction'])
-                        self.roles.add(unit_data['role'])
-                        self.faction_role_combinations.add((unit_data['faction'], unit_data['role']))
-                        unit_count += 1
-                        print(f"    ✅ {unit_data['unit_type']} ({unit_data['faction']} {unit_data['role']})")
+                # Scan TypeScript files in the units subfolder only
+                units_dir = faction_dir / "units"
+                if units_dir.exists():
+                    for ts_file in units_dir.glob("*.ts"):
+                        if ts_file.name.startswith('index'):
+                            continue  # Skip index files
+                        
+                        unit_data = self._parse_unit_file(ts_file, faction_name)
+                        if unit_data:
+                            self.units[unit_data['unit_type']] = unit_data
+                            self.factions.add(unit_data['faction'])
+                            self.roles.add(unit_data['role'])
+                            self.faction_role_combinations.add((unit_data['faction'], unit_data['role']))
+                            unit_count += 1
+                            print(f"    ✅ {unit_data['unit_type']} ({unit_data['faction']} {unit_data['role']})")
+                else:
+                    print(f"    ⚠️ No units folder found in {faction_dir}")
         
         print(f"📊 Discovery complete: {unit_count} units, {len(self.factions)} factions, {len(self.roles)} roles")
         print(f"🎯 Faction-Role combinations: {sorted(self.faction_role_combinations)}")

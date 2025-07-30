@@ -77,11 +77,6 @@ else:
         "frontend/public/config/action_definitions.json",  # Action Definitions
         "frontend/public/config/board_config.json",  # Board Layout & Visualization
         "frontend/public/config/config.json",  # Frontend Configuration
-        "frontend/public/config/game_config.json",  # Game Rules & Mechanics
-        "frontend/public/config/rewards_config.json",  # Reward System Definitions
-        "frontend/public/config/scenario.json",  # Game Scenarios
-        "frontend/public/config/training_config.json",  # AI Training Parameters
-        "frontend/public/config/unit_definitions.json",  # Unit Stats & Abilities
 
         # Frontend/src
         "frontend/src/App.tsx",
@@ -138,20 +133,20 @@ else:
         "frontend/src/types/replay.ts",
 
         # Frontend/src/roster/spaceMarine
-        "frontend/src/roster/spaceMarine/SpaceMarineInfantryLeaderEliteMeleeElite.ts",
-        "frontend/src/roster/spaceMarine/SpaceMarineInfantryTroopMeleeTroop.ts",
-        "frontend/src/roster/spaceMarine/SpaceMarineInfantryTroopRangedSwarm.ts",
-        "frontend/src/roster/spaceMarine/Intercessor.ts",
-        "frontend/src/roster/spaceMarine/AssaultIntercessor.ts",
-        "frontend/src/roster/spaceMarine/CaptainGravis.ts",
+        "frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryLeaderEliteMeleeElite.ts",
+        "frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryTroopMeleeTroop.ts",
+        "frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryTroopRangedSwarm.ts",
+        "frontend/src/roster/spaceMarine/units/Intercessor.ts",
+        "frontend/src/roster/spaceMarine/units/AssaultIntercessor.ts",
+        "frontend/src/roster/spaceMarine/units/CaptainGravis.ts",
 
         # Frontend/src/roster/tyranid
-        "frontend/src/roster/tyranid/TyranidInfantryEliteMeleeElite.ts",
-        "frontend/src/roster/tyranid/TyranidInfantrySwarmMeleeSwarm.ts",
-        "frontend/src/roster/tyranid/TyranidInfantrySwarmRangedSwarm.ts",
-        "frontend/src/roster/tyranid/Termagant.ts",
-        "frontend/src/roster/tyranid/Hormagaunt.ts",
-        "frontend/src/roster/tyranid/Carnifex.ts",
+        "frontend/src/roster/tyranid/classes/TyranidInfantryEliteMeleeElite.ts",
+        "frontend/src/roster/tyranid/classes/TyranidInfantrySwarmMeleeSwarm.ts",
+        "frontend/src/roster/tyranid/classes/TyranidInfantrySwarmRangedSwarm.ts",
+        "frontend/src/roster/tyranid/units/Termagant.ts",
+        "frontend/src/roster/tyranid/units/Hormagaunt.ts",
+        "frontend/src/roster/tyranid/units/Carnifex.ts",
 
         # frontend/src/utils
         "frontend/src/utils/boardClickHandler.ts",
@@ -184,9 +179,9 @@ with open(logfile, "a", encoding="utf-8") as log:
         filename = os.path.basename(file_rel)
         
         # Handle duplicate filenames by prefixing with folder name
-        if filename in ["config.json", "scenario.json", "game_config.json"]:
-            folder_prefix = os.path.dirname(file_rel).replace("/", "_").replace("\\", "_")
-            filename = f"{folder_prefix}_{filename}"
+        #if filename in ["config.json", "scenario.json", "game_config.json"]:
+        #    folder_prefix = os.path.dirname(file_rel).replace("/", "_").replace("\\", "_")
+        #    filename = f"{folder_prefix}_{filename}"
         
         dest = os.path.join(DEST_ROOT, filename)
         if not os.path.exists(src):

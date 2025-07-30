@@ -36,7 +36,10 @@
       "win": 0.8,
       "lose": -0.8,
       "friendly_fire_penalty": -0.5,
-      "attack_wasted": -0.3
+      "attack_wasted": -0.3,
+      "target_in_cover_penalty": -0.05,
+      "target_exposed_bonus": 0.03,
+      "no_targets_penalty": -1.0
     },
     "tactical_bonuses": {
       "formation_cohesion": 0.1,
@@ -83,7 +86,8 @@
       "friendly_fire_penalty": -0.5,
       "attack_wasted": -0.3,
       "target_in_cover_penalty": -0.1,
-      "target_exposed_bonus": 0.05
+      "target_exposed_bonus": 0.05,
+      "no_targets_penalty": -1.0
     },
     "tactical_bonuses": {
       "formation_cohesion": 0.1,
@@ -130,7 +134,8 @@
       "friendly_fire_penalty": -0.5,
       "attack_wasted": -0.3,
       "target_in_cover_penalty": -0.1,
-      "target_exposed_bonus": 0.05
+      "target_exposed_bonus": 0.05,
+      "no_targets_penalty": -1.0
     },
     "tactical_bonuses": {
       "formation_cohesion": 0.1,
@@ -178,7 +183,8 @@
       "friendly_fire_penalty": -0.3,
       "attack_wasted": -0.2,
       "target_in_cover_penalty": -0.05,
-      "target_exposed_bonus": 0.03
+      "target_exposed_bonus": 0.03,
+      "no_targets_penalty": -1.0
     },
     "tactical_bonuses": {
       "swarm_coordination": 0.2,
@@ -225,7 +231,8 @@
       "friendly_fire_penalty": -0.3,
       "attack_wasted": -0.2,
       "target_in_cover_penalty": -0.05,
-      "target_exposed_bonus": 0.03
+      "target_exposed_bonus": 0.03,
+      "no_targets_penalty": -1.0
     },
     "tactical_bonuses": {
       "swarm_coordination": 0.2,
@@ -272,7 +279,8 @@
       "friendly_fire_penalty": -0.4,
       "attack_wasted": -0.3,
       "target_in_cover_penalty": -0.1,
-      "target_exposed_bonus": 0.05
+      "target_exposed_bonus": 0.05,
+      "no_targets_penalty": -1.0
     },
     "tactical_bonuses": {
       "pack_hunting": 0.2,

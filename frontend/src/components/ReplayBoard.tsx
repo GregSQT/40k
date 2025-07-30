@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Board from './Board_save';
 import { Unit } from '../types/game';
 import { Intercessor } from '../roster/spaceMarine/Intercessor';
-import { AssaultIntercessor } from '../roster/spaceMarine/AssaultIntercessor';
+import { AssaultIntercessor } from '../roster/spaceMarine/units/AssaultIntercessor';
 import { useGameConfig } from '../hooks/useGameConfig';
 
 // Error Boundary Component for ReplayBoard

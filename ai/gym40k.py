@@ -76,8 +76,45 @@ class W40KEnv(gym.Env):
         # Load rewards configuration (unit-type-based)
         self.rewards_config = self.config.load_rewards_config()
         
-        # Load unit definitions from TypeScript files
-        self.unit_definitions = self._load_unit_definitions()
+        # Load unit definitions from the unit registry instead of parsing files separately
+        if unit_registry is not None:
+            # Convert unit registry data to the format expected by gym40k
+            self.unit_definitions = {}
+            for unit_type, unit_data in unit_registry.units.items():
+                # Validate all required unit data exists
+                required_fields = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG', 'RNG_NB', 'RNG_ATK', 'RNG_STR', 'RNG_AP', 'CC_NB', 'CC_ATK', 'CC_STR', 'CC_AP', 'CC_RNG', 'T', 'ARMOR_SAVE', 'INVUL_SAVE']
+                for field in required_fields:
+                    if field not in unit_data:
+                        raise KeyError(f"Unit '{unit_type}' missing required field '{field}' in unit registry")
+                
+                converted_unit = {
+                    'unit_type': unit_type,
+                    'hp_max': unit_data['HP_MAX'],
+                    'move': unit_data['MOVE'],
+                    'rng_rng': unit_data['RNG_RNG'],
+                    'rng_dmg': unit_data['RNG_DMG'],
+                    'cc_dmg': unit_data['CC_DMG'],
+                    'rng_nb': unit_data['RNG_NB'],
+                    'rng_atk': unit_data['RNG_ATK'],
+                    'rng_str': unit_data['RNG_STR'],
+                    'rng_ap': unit_data['RNG_AP'],
+                    'cc_nb': unit_data['CC_NB'],
+                    'cc_atk': unit_data['CC_ATK'],
+                    'cc_str': unit_data['CC_STR'],
+                    'cc_ap': unit_data['CC_AP'],
+                    'cc_rng': unit_data['CC_RNG'],
+                    't': unit_data['T'],
+                    'armor_save': unit_data['ARMOR_SAVE'],
+                    'invul_save': unit_data['INVUL_SAVE'],
+                    'is_ranged': unit_data['role'] == 'Ranged',
+                    'is_melee': unit_data['role'] == 'Melee',
+                    'ICON': unit_data.get('ICON', f"icons/{unit_type}.webp"),  # Keep this default as it's UI-related
+                    'size_radius': unit_data.get('SIZE_RADIUS', 1)  # Keep this default as it's UI-related
+                }
+                self.unit_definitions[unit_type] = converted_unit
+        else:
+            # Fallback to loading from TypeScript files
+            self.unit_definitions = self._load_unit_definitions()
 
         # Load training configuration to get max_steps_per_episode
         self.training_config_name = training_config_name
@@ -165,7 +202,9 @@ class W40KEnv(gym.Env):
                     if unit_data["player"] == 0:  # Bot player
                         icon_name = f"icons/{unit_type}_red.webp"
                     else:  # AI player uses original icons
-                        icon_name = unit.get("ICON", f"icons/{unit_type}.webp")
+                        if "ICON" not in unit:
+                            raise KeyError(f"Unit '{unit_type}' missing required 'ICON' field")
+                        icon_name = unit["ICON"]
                     
                     unit.update({
                         "id": unit_data["id"],
@@ -179,7 +218,7 @@ class W40KEnv(gym.Env):
                         "has_charged": False,
                         "has_attacked": False,
                         "ICON": icon_name,
-                        "size_radius": unit.get("size_radius", 1)  # Pass size_radius to frontend
+                        "size_radius": unit["size_radius"] if "size_radius" in unit else 1  # Pass size_radius to frontend
                     })
                     self.units.append(unit)
                     
@@ -239,11 +278,14 @@ class W40KEnv(gym.Env):
         for faction_dir in os.listdir(roster_dir):
             faction_path = os.path.join(roster_dir, faction_dir)
             if os.path.isdir(faction_path) and not faction_dir.startswith('.'):
-                for filename in os.listdir(faction_path):
-                    if filename.endswith('.ts') and not filename.startswith('index') and 'Unit.ts' not in filename:
-                        file_path = os.path.join(faction_path, filename)
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
+                # Only scan the units subfolder, skip classes folder
+                units_path = os.path.join(faction_path, "units")
+                if os.path.exists(units_path):
+                    for filename in os.listdir(units_path):
+                        if filename.endswith('.ts') and not filename.startswith('index'):
+                            file_path = os.path.join(units_path, filename)
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
                         
                         # Parse TypeScript class with static properties
                         class_match = re.search(r'export class (\w+)', content)
@@ -257,7 +299,7 @@ class W40KEnv(gym.Env):
                             static_props = {
                                 'HP_MAX': 'hp_max', 'MOVE': 'move', 'RNG_RNG': 'rng_rng', 'RNG_DMG': 'rng_dmg', 'CC_DMG': 'cc_dmg',
                                 'RNG_NB': 'rng_nb', 'RNG_ATK': 'rng_atk', 'RNG_STR': 'rng_str', 'RNG_AP': 'rng_ap',
-                                'CC_NB': 'cc_nb', 'CC_ATK': 'cc_atk', 'CC_STR': 'cc_str', 'CC_AP': 'cc_ap',
+                                'CC_NB': 'cc_nb', 'CC_ATK': 'cc_atk', 'CC_STR': 'cc_str', 'CC_AP': 'cc_ap', 'CC_RNG': 'cc_rng',
                                 'T': 't', 'ARMOR_SAVE': 'armor_save', 'INVUL_SAVE': 'invul_save',
                                 'SIZE_RADIUS': 'size_radius'  # New: Extract size_radius if defined in TS
                             }
@@ -297,7 +339,7 @@ class W40KEnv(gym.Env):
                                 unit_data['size_radius'] = 1
                             
                             # Validate we got essential data
-                            if all(prop in unit_data for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg', 'rng_nb', 'rng_atk', 'rng_str', 'rng_ap', 't', 'armor_save', 'invul_save']):
+                            if all(prop in unit_data for prop in ['hp_max', 'move', 'rng_rng', 'rng_dmg', 'cc_dmg', 'cc_rng', 'rng_nb', 'rng_atk', 'rng_str', 'rng_ap', 't', 'armor_save', 'invul_save']):
                                 definitions[unit_name] = unit_data
                             # Remove incomplete data warnings to reduce log clutter
         
@@ -309,36 +351,29 @@ class W40KEnv(gym.Env):
         raise FileNotFoundError("Rewards configuration not found. AI_INSTRUCTIONS.md requires all rewards come from config files.")
 
     def _get_unit_reward_config(self, unit):
-        """Get reward configuration for specific unit type."""
-        unit_type = unit.get("unit_type", "")
+        """Get reward configuration for specific unit type using dynamic registry."""
+        if "unit_type" not in unit:
+            raise KeyError("Unit missing required 'unit_type' field")
+        unit_type = unit["unit_type"]
         
-        # Get the agent key from unit registry
+        # Primary method: Get agent key dynamically from unit registry
         if hasattr(self, 'unit_registry'):
-            agent_key = self.unit_registry.get_model_key(unit_type)
-            if agent_key and agent_key in self.rewards_config:
-                return self.rewards_config.get(agent_key, {})
+            try:
+                agent_key = self.unit_registry.get_model_key(unit_type)
+                if agent_key in self.rewards_config:
+                    return self.rewards_config[agent_key]
+                else:
+                    available_agent_keys = list(self.rewards_config.keys())
+                    raise KeyError(f"Agent key '{agent_key}' for unit '{unit_type}' not found in rewards config. Available agent keys: {available_agent_keys}")
+            except ValueError as e:
+                raise ValueError(f"Failed to get model key for unit '{unit_type}': {e}")
         
-        # Try direct unit type lookup first
+        # Fallback: Try direct unit type lookup
         if unit_type in self.rewards_config:
-            return self.rewards_config.get(unit_type, {})
+            return self.rewards_config[unit_type]
         
-        # Map unit types to agent keys (correct mapping)
-        if unit_type == "CaptainGravis":
-            return self.rewards_config.get("SpaceMarine_Infantry_LeaderElite_MeleeElite", {})
-        elif unit_type == "AssaultIntercessor":
-            return self.rewards_config.get("SpaceMarine_Infantry_Troop_MeleeTroop", {})
-        elif unit_type == "Intercessor":
-            return self.rewards_config.get("SpaceMarine_Infantry_Troop_RangedSwarm", {})
-        elif unit_type == "Carnifex":
-            return self.rewards_config.get("Tyranid_Infantry_Elite_MeleeElite", {})
-        elif unit_type == "Hormagaunt":
-            return self.rewards_config.get("Tyranid_Infantry_Swarm_MeleeSwarm", {})
-        elif unit_type == "Termagant":
-            return self.rewards_config.get("Tyranid_Infantry_Swarm_RangedSwarm", {})
-        
-        # No match found - raise error with available types
-        available_types = list(self.rewards_config.keys())
-        raise KeyError(f"Unit type '{unit_type}' not found in rewards config. Available unit types: {available_types}")
+        # No registry available and no direct match
+        raise RuntimeError(f"Unit registry not available and unit type '{unit_type}' not found in rewards config. Available types: {list(self.rewards_config.keys())}")
 
     def reset(self, seed=None, options=None):
         """Reset environment to initial state."""
@@ -379,7 +414,9 @@ class W40KEnv(gym.Env):
             if unit_data["player"] == 0:  # Bot player
                 icon_name = f"icons/{unit_type}_red.webp"
             else:  # AI player uses original icons
-                icon_name = unit.get("ICON", f"icons/{unit_type}.webp")
+                if "ICON" not in unit:
+                    raise KeyError(f"Unit '{unit_type}' missing required 'ICON' field")
+                icon_name = unit["ICON"]
             
             unit.update({
                 "id": unit_data["id"],
@@ -474,7 +511,9 @@ class W40KEnv(gym.Env):
             elif self.current_phase == "shoot":
                 # AI_GAME.md: Only units with enemies in RNG_RNG range and haven't shot yet
                 # Cannot shoot if adjacent to enemy (engaged in combat)
-                if (unit.get("is_ranged", False) and unit_id not in self.shot_units and 
+                if "is_ranged" not in unit:
+                    raise KeyError(f"Unit missing required 'is_ranged' field")
+                if (unit["is_ranged"] and unit_id not in self.shot_units and 
                     not self._has_adjacent_enemies(unit) and
                     self._has_enemies_in_shooting_range(unit)):
                     eligible.append(unit)
@@ -497,7 +536,9 @@ class W40KEnv(gym.Env):
         """Check if unit has enemies within shooting range."""
         for enemy in self.enemy_units:
             if enemy["alive"]:
-                if is_unit_in_range(unit, enemy, unit.get("rng_rng", 0)):
+                if "rng_rng" not in unit:
+                    raise KeyError(f"Unit missing required 'rng_rng' field")
+                if is_unit_in_range(unit, enemy, unit["rng_rng"]):
                     return True
         return False
 
@@ -506,7 +547,9 @@ class W40KEnv(gym.Env):
         for enemy in self.enemy_units:
             if enemy["alive"]:
                 dist = get_hex_distance(unit, enemy)
-                if dist <= unit.get("move", 0) and dist > 1:  # Can reach but not adjacent
+                if "move" not in unit:
+                    raise KeyError(f"Unit missing required 'move' field")
+                if dist <= unit["move"] and dist > 1:  # Can reach but not adjacent
                     return True
         return False
 
@@ -522,7 +565,9 @@ class W40KEnv(gym.Env):
         """Check if unit has enemies within RNG_RNG shooting range per AI_GAME.md."""
         for enemy in self.enemy_units:
             if enemy["alive"]:
-                if is_unit_in_range(unit, enemy, unit.get("rng_rng", 0)):
+                if "rng_rng" not in unit:
+                    raise KeyError(f"Unit missing required 'rng_rng' field")
+                if is_unit_in_range(unit, enemy, unit["rng_rng"]):
                     return True
         return False
     
@@ -530,7 +575,9 @@ class W40KEnv(gym.Env):
         """Check if unit has enemies within MOVE range per AI_GAME.md."""
         for enemy in self.enemy_units:
             if enemy["alive"]:
-                if is_unit_in_range(unit, enemy, unit.get("move", 0)):
+                if "move" not in unit:
+                    raise KeyError(f"Unit missing required 'move' field")
+                if is_unit_in_range(unit, enemy, unit["move"]):
                     return True
         return False
     
@@ -553,7 +600,9 @@ class W40KEnv(gym.Env):
 
     def _has_enemies_in_combat_range(self, unit):
         """Check if unit has enemies within CC_RNG combat range per AI_GAME.md."""
-        combat_range = unit.get("cc_rng", 1)  # Combat range 1 is W40K standard
+        if "cc_rng" not in unit:
+            raise KeyError(f"Unit missing required 'cc_rng' field")
+        combat_range = unit["cc_rng"]
         for enemy in self.enemy_units:
             if enemy["alive"]:
                 if is_unit_in_range(unit, enemy, combat_range):
@@ -588,7 +637,9 @@ class W40KEnv(gym.Env):
             reward = self._execute_move_action(unit, action_type)
             # ✅ FIXED: Move action handles has_moved internally based on success
             # Only add to moved_units if unit was actually marked as moved
-            if unit.get("has_moved", False):
+            if "has_moved" not in unit:
+                raise KeyError(f"Unit missing required 'has_moved' field")
+            if unit["has_moved"]:
                 self.moved_units.add(unit["id"])  # AI_GAME.md tracking
         elif self.current_phase == "shoot":
             reward = self._execute_shoot_action(unit, action_type)
@@ -713,10 +764,17 @@ class W40KEnv(gym.Env):
                 
                 # Check if melee unit trying to shoot before all ranged units
                 if not is_ranged and self._ranged_units_available():
-                    violation_msg = f"AI_GAME.md violation: Melee unit {acting_unit.get('unit_type', 'unknown')} shooting before ranged units complete"
+                    if "unit_type" not in acting_unit:
+                        raise KeyError("Acting unit missing required 'unit_type' field")
+                    violation_msg = f"AI_GAME.md violation: Melee unit {acting_unit['unit_type']} shooting before ranged units complete"
                     self.phase_behavioral_violations.append(violation_msg)
                     unit_rewards = self._get_unit_reward_config(acting_unit)
-                    reward += unit_rewards.get("ai_game_violation", unit_rewards.get("wait"))  # Scale wait penalty
+                    if "situational_modifiers" not in unit_rewards or "ai_game_violation" not in unit_rewards["situational_modifiers"]:
+                        if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                            raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {acting_unit['unit_type']}")
+                        reward += unit_rewards["base_actions"]["wait"]
+                    else:
+                        reward += unit_rewards["situational_modifiers"]["ai_game_violation"]
 
         # Capture state for replay system
         self._capture_game_state(action, reward)
@@ -725,7 +783,9 @@ class W40KEnv(gym.Env):
             self.game_over = True
             self.winner = None
             unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
-            return self._get_obs(), unit_rewards.get("wait"), False, True, self._get_info()  # truncated=True
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type")
+            return self._get_obs(), unit_rewards["base_actions"]["wait"], False, True, self._get_info()  # truncated=True
         if self.game_over:
             return self._get_obs(), 0.0, True, False, self._get_info()
         
@@ -746,12 +806,16 @@ class W40KEnv(gym.Env):
             self.game_over = True
             self.winner = None
             unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
-            return self._get_obs(), unit_rewards.get("wait", -0.1), True, False, self._get_info()
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type")
+            return self._get_obs(), unit_rewards["base_actions"]["wait"], True, False, self._get_info()
         
         if not eligible_units and not self.game_over:
             # Still no eligible units, return small negative reward
             unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
-            return self._get_obs(), unit_rewards.get("wait"), False, False, self._get_info()
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type")
+            return self._get_obs(), unit_rewards["base_actions"]["wait"], False, False, self._get_info()
         
         # Apply AI_GAME.md action masking before processing
         action = self._mask_invalid_actions(action, None)
@@ -763,25 +827,33 @@ class W40KEnv(gym.Env):
         if unit_idx >= len(eligible_units):
             # Invalid unit, small penalty
             unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
-            return self._get_obs(), unit_rewards.get("wait"), False, False, self._get_info()
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type")
+            return self._get_obs(), unit_rewards["base_actions"]["wait"], False, False, self._get_info()
         
         unit = eligible_units[unit_idx]
         reward = self._execute_action_with_phase(unit, action_type)
         
-        # Game outcome rewards
+        # Game outcome rewards  
         unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
         
         if not any(u["alive"] for u in self.ai_units):
             self.game_over = True
             self.winner = 0
-            reward += unit_rewards.get("lose")
+            if "situational_modifiers" not in unit_rewards or "lose" not in unit_rewards["situational_modifiers"]:
+                raise KeyError(f"Missing 'situational_modifiers.lose' in rewards config for unit type")
+            reward += unit_rewards["situational_modifiers"]["lose"]
         elif not any(u["alive"] for u in self.enemy_units):
             self.game_over = True
             self.winner = 1
-            reward += unit_rewards.get("win")
+            if "situational_modifiers" not in unit_rewards or "win" not in unit_rewards["situational_modifiers"]:
+                raise KeyError(f"Missing 'situational_modifiers.win' in rewards config for unit type")
+            reward += unit_rewards["situational_modifiers"]["win"]
         elif self.current_turn >= self.max_turns:
             self.game_over = True
             self.winner = None
+            if not hasattr(self, 'turn_limit_penalty') or self.turn_limit_penalty is None:
+                self.turn_limit_penalty = self.config.get_turn_limit_penalty()
             reward += self.turn_limit_penalty
         
         # Save replay data
@@ -831,19 +903,25 @@ class W40KEnv(gym.Env):
             new_col = max(0, unit["col"] - unit["move"])
             unit["col"] = new_col
         elif action_type == 7:  # Wait (universal - second click behavior)
-            reward = unit_rewards.get("wait")
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            reward = unit_rewards["base_actions"]["wait"]
             unit["has_moved"] = True
             return reward
         else:
             # Invalid action type in move phase
-            return unit_rewards.get("wait")  # Penalty for invalid action
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["base_actions"]["wait"]  # Penalty for invalid action
         
         # ✅ CRITICAL FIX: Check if movement actually occurred
         movement_occurred = (old_col != unit["col"]) or (old_row != unit["row"])
         
         if not movement_occurred:
             # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
-            reward = unit_rewards.get("wait")  # Negative penalty for invalid move
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            reward = unit_rewards["base_actions"]["wait"]
             # ✅ CRITICAL FIX: Mark unit as moved to prevent infinite loops
             unit["has_moved"] = True
             self.moved_units.add(unit["id"])  # Also add to phase tracking
@@ -861,20 +939,32 @@ class W40KEnv(gym.Env):
                 # Ranged units want to be at optimal range
                 optimal_range = unit["rng_rng"] - 1
                 if new_dist == optimal_range:
-                    reward = unit_rewards.get("move_to_rng")
+                    if "base_actions" not in unit_rewards or "move_to_los" not in unit_rewards["base_actions"]:
+                        raise KeyError(f"Missing 'base_actions.move_to_los' in rewards config for unit type {unit.get('unit_type')}")
+                    reward = unit_rewards["base_actions"]["move_to_los"]
                 elif new_dist < optimal_range:
-                    reward = unit_rewards.get("move_close")
+                    if "base_actions" not in unit_rewards or "move_close" not in unit_rewards["base_actions"]:
+                        raise KeyError(f"Missing 'base_actions.move_close' in rewards config for unit type {unit['unit_type']}")
+                    reward = unit_rewards["base_actions"]["move_close"]
                 else:
-                    reward = unit_rewards.get("move_away")
+                    if "base_actions" not in unit_rewards or "move_away" not in unit_rewards["base_actions"]:
+                        raise KeyError(f"Missing 'base_actions.move_away' in rewards config for unit type {unit.get('unit_type')}")
+                    reward = unit_rewards["base_actions"]["move_away"]
             else:
                 # Melee units want to get closer for charging
                 if new_dist <= unit["move"]:
-                    reward = unit_rewards.get("move_to_charge")
+                    if "base_actions" not in unit_rewards or "move_to_charge" not in unit_rewards["base_actions"]:
+                        raise KeyError(f"Missing 'base_actions.move_to_charge' in rewards config for unit type {unit.get('unit_type')}")
+                    reward = unit_rewards["base_actions"]["move_to_charge"]
                 else:
-                    reward = unit_rewards.get("move_close")
+                    if "base_actions" not in unit_rewards or "move_close" not in unit_rewards["base_actions"]:
+                        raise KeyError(f"Missing 'base_actions.move_close' in rewards config for unit type {unit['unit_type']}")
+                    reward = unit_rewards["base_actions"]["move_close"]
         else:
-            # No enemies found, small positive reward for any movement
-            reward = unit_rewards.get("move_close", 0.1)
+            # No enemies found, movement reward
+            if "base_actions" not in unit_rewards or "move_close" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.move_close' in rewards config for unit type {unit['unit_type']}")
+            reward = unit_rewards["base_actions"]["move_close"]
         
         return reward
 
@@ -884,7 +974,9 @@ class W40KEnv(gym.Env):
         # For AI training, action_type 7 serves this purpose
         unit_rewards = self._get_unit_reward_config(unit)
         unit["has_moved"] = True
-        return unit_rewards.get("wait")
+        if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+            raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+        return unit_rewards["base_actions"]["wait"]
 
     def _execute_shoot_action(self, unit, action_type):
         """Execute shooting using dice-based system: only action_type==4 shoots following AI_GAME.md."""
@@ -907,18 +999,29 @@ class W40KEnv(gym.Env):
                     self._record_detailed_shooting_action(unit, target, result, old_hp)
 
                 # Base ranged attack reward (scaled by damage dealt)
-                reward = unit_rewards.get("ranged_attack") * total_damage if total_damage > 0 else unit_rewards.get("ranged_attack", 0) * 0.1
+                if "base_actions" not in unit_rewards or "ranged_attack" not in unit_rewards["base_actions"]:
+                    raise KeyError(f"Missing 'base_actions.ranged_attack' in rewards config for unit type {unit['unit_type']}")
+                base_attack_reward = unit_rewards["base_actions"]["ranged_attack"]
+                reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
 
                 # Kill bonuses
                 if target["cur_hp"] <= 0:
                     target["alive"] = False
-                    reward += unit_rewards.get("enemy_killed_r")
+                    if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
+                        raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
+                    reward += unit_rewards["result_bonuses"]["kill_target"]
                     if old_hp == total_damage:
-                        reward += unit_rewards.get("enemy_killed_no_overkill_r") - unit_rewards.get("enemy_killed_r")
+                        if "result_bonuses" not in unit_rewards or "no_overkill" not in unit_rewards["result_bonuses"]:
+                            raise KeyError(f"Missing 'result_bonuses.no_overkill' in rewards config for unit type {unit['unit_type']}")
+                        reward += unit_rewards["result_bonuses"]["no_overkill"]
                     if self._was_lowest_hp_target(target, targets):
-                        reward += unit_rewards.get("enemy_killed_lowests_hp_r") - unit_rewards.get("enemy_killed_r")
+                        if "result_bonuses" not in unit_rewards or "target_lowest_hp" not in unit_rewards["result_bonuses"]:
+                            raise KeyError(f"Missing 'result_bonuses.target_lowest_hp' in rewards config for unit type {unit['unit_type']}")
+                        reward += unit_rewards["result_bonuses"]["target_lowest_hp"]
             else:
-                reward = unit_rewards.get("wait")
+                if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                    raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+                reward = unit_rewards["base_actions"]["wait"]
 
             unit["has_shot"] = True
             self.shot_units.add(unit["id"])
@@ -926,11 +1029,15 @@ class W40KEnv(gym.Env):
 
         elif action_type == 7:
             unit["has_shot"] = True
-            return unit_rewards.get("wait")
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["base_actions"]["wait"]
 
         else:
             unit["has_shot"] = True
-            return unit_rewards.get("wait")
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["base_actions"]["wait"]
 
     def _execute_charge_action(self, unit, action_type):
         """Execute charge: only action_type==5 charges following AI_GAME.md."""
@@ -943,9 +1050,13 @@ class W40KEnv(gym.Env):
                 target = targets[0]
                 unit["col"], unit["row"] = target["col"], target["row"]
 
-                reward = unit_rewards.get("charge_success")
+                if "base_actions" not in unit_rewards or "charge_success" not in unit_rewards["base_actions"]:
+                    raise KeyError(f"Missing 'base_actions.charge_success' in rewards config for unit type {unit['unit_type']}")
+                reward = unit_rewards["base_actions"]["charge_success"]
             else:
-                reward = unit_rewards.get("wait")
+                if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                    raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+                reward = unit_rewards["base_actions"]["wait"]
 
             unit["has_charged"] = True
             self.charged_units.add(unit["id"])
@@ -953,11 +1064,15 @@ class W40KEnv(gym.Env):
 
         elif action_type == 7:
             unit["has_charged"] = True
-            return unit_rewards.get("wait")
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["base_actions"]["wait"]
 
         else:
             unit["has_charged"] = True
-            return unit_rewards.get("wait")
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["base_actions"]["wait"]
 
     def _execute_combat_action(self, unit, action_type):
         """Execute melee attack using dice-based system: only action_type==6 attacks following AI_GAME.md."""
@@ -981,18 +1096,29 @@ class W40KEnv(gym.Env):
                     self._record_detailed_combat_action(unit, target, result, old_hp)
 
                 # Base combat attack reward (scaled by damage dealt)
-                reward = unit_rewards.get("attack") * total_damage if total_damage > 0 else unit_rewards.get("attack", 0) * 0.1
+                if "base_actions" not in unit_rewards or "melee_attack" not in unit_rewards["base_actions"]:
+                    raise KeyError(f"Missing 'base_actions.melee_attack' in rewards config for unit type {unit['unit_type']}")
+                base_attack_reward = unit_rewards["base_actions"]["melee_attack"]
+                reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
 
                 # Kill bonuses
                 if target["cur_hp"] <= 0:
                     target["alive"] = False
-                    reward += unit_rewards.get("enemy_killed_m")
+                    if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
+                        raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
+                    reward += unit_rewards["result_bonuses"]["kill_target"]
                     if old_hp == total_damage:
-                        reward += unit_rewards.get("enemy_killed_no_overkill_m") - unit_rewards.get("enemy_killed_m")
+                        if "result_bonuses" not in unit_rewards or "no_overkill" not in unit_rewards["result_bonuses"]:
+                            raise KeyError(f"Missing 'result_bonuses.no_overkill' in rewards config for unit type {unit['unit_type']}")
+                        reward += unit_rewards["result_bonuses"]["no_overkill"]
                     if self._was_lowest_hp_target(target, targets):
-                        reward += unit_rewards.get("enemy_killed_lowests_hp_m") - unit_rewards.get("enemy_killed_m")
+                        if "result_bonuses" not in unit_rewards or "target_lowest_hp" not in unit_rewards["result_bonuses"]:
+                            raise KeyError(f"Missing 'result_bonuses.target_lowest_hp' in rewards config for unit type {unit['unit_type']}")
+                        reward += unit_rewards["result_bonuses"]["target_lowest_hp"]
             else:
-                reward = unit_rewards.get("wait")
+                if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                    raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+                reward = unit_rewards["base_actions"]["wait"]
 
             unit["has_attacked"] = True
             self.attacked_units.add(unit["id"])
@@ -1000,11 +1126,15 @@ class W40KEnv(gym.Env):
 
         elif action_type == 7:
             unit["has_attacked"] = True
-            return unit_rewards.get("wait")
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["base_actions"]["wait"]
 
         else:
             unit["has_attacked"] = True
-            return unit_rewards.get("wait")
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["base_actions"]["wait"]
 
     def _get_shooting_targets(self, unit):
         """Get shooting targets in AI_GAME_OVERVIEW.md priority order."""
@@ -1023,9 +1153,17 @@ class W40KEnv(gym.Env):
         
         # Priority 1: Enemy with highest threat that melee can charge but won't kill in 1 phase
         for enemy in in_range_enemies:
-            threat_score = max(enemy.get("rng_dmg", 0), enemy.get("cc_dmg", 0))
+            if "rng_dmg" not in enemy or "cc_dmg" not in enemy:
+                raise KeyError(f"Enemy missing required 'rng_dmg' or 'cc_dmg' field")
+            threat_score = max(enemy["rng_dmg"], enemy["cc_dmg"])
             can_be_charged = self._can_melee_units_charge(enemy)
-            wont_be_killed_melee = enemy["cur_hp"] > max([u.get("cc_dmg", 0) for u in self.ai_units if u["alive"] and not u["is_ranged"]], default=0)
+            melee_damages = []
+            for u in self.ai_units:
+                if u["alive"] and not u["is_ranged"]:
+                    if "cc_dmg" not in u:
+                        raise KeyError(f"Unit missing required 'cc_dmg' field")
+                    melee_damages.append(u["cc_dmg"])
+            wont_be_killed_melee = enemy["cur_hp"] > max(melee_damages, default=0)
             
             if can_be_charged and wont_be_killed_melee:
                 targets.append(enemy)
@@ -1037,7 +1175,11 @@ class W40KEnv(gym.Env):
         
         # Priority 3: Enemy with highest threat and lowest HP that can be killed in 1 phase
         remaining = [e for e in in_range_enemies if e not in targets and e["cur_hp"] <= unit["rng_dmg"]]
-        remaining.sort(key=lambda e: (max(e.get("rng_dmg", 0), e.get("cc_dmg", 0)), -e["cur_hp"]), reverse=True)
+        def sort_key(e):
+            if "rng_dmg" not in e or "cc_dmg" not in e:
+                raise KeyError(f"Enemy missing required 'rng_dmg' or 'cc_dmg' field")
+            return (max(e["rng_dmg"], e["cc_dmg"]), -e["cur_hp"])
+        remaining.sort(key=sort_key, reverse=True)
         targets.extend(remaining)
         
         return targets[:3]  # Return top 3 priorities
@@ -1061,7 +1203,9 @@ class W40KEnv(gym.Env):
             # Melee unit charge priorities
             # Priority 1: Can kill in 1 melee phase
             for enemy in chargeable_enemies:
-                threat_score = max(enemy.get("rng_dmg", 0), enemy.get("cc_dmg", 0))
+                if "rng_dmg" not in enemy or "cc_dmg" not in enemy:
+                    raise KeyError(f"Enemy missing required 'rng_dmg' or 'cc_dmg' field")
+                threat_score = max(enemy["rng_dmg"], enemy["cc_dmg"])
                 if enemy["cur_hp"] <= unit["cc_dmg"]:
                     targets.append(enemy)
             
@@ -1072,7 +1216,11 @@ class W40KEnv(gym.Env):
             
             # Priority 3: Highest threat, lowest HP
             remaining = [e for e in chargeable_enemies if e not in targets]
-            remaining.sort(key=lambda e: (max(e.get("rng_dmg", 0), e.get("cc_dmg", 0)), -e["cur_hp"]), reverse=True)
+            def sort_key(e):
+                if "rng_dmg" not in e or "cc_dmg" not in e:
+                    raise KeyError(f"Enemy missing required 'rng_dmg' or 'cc_dmg' field")
+                return (max(e["rng_dmg"], e["cc_dmg"]), -e["cur_hp"])
+            remaining.sort(key=sort_key, reverse=True)
             targets.extend(remaining)
         else:
             # Ranged unit charge priorities (different from melee)
@@ -1089,7 +1237,9 @@ class W40KEnv(gym.Env):
         combat_enemies = []
         
         # Find enemies within combat range (CC_RNG)
-        combat_range = unit.get("cc_rng", 1)  # Default to 1 if not specified
+        if "cc_rng" not in unit:
+            raise KeyError(f"Unit missing required 'cc_rng' field")
+        combat_range = unit["cc_rng"]
         for enemy in self.enemy_units:
             if enemy["alive"]:
                 if is_unit_in_range(unit, enemy, combat_range):
@@ -1105,7 +1255,11 @@ class W40KEnv(gym.Env):
         
         # Priority 2: Highest threat, lowest HP
         remaining = [e for e in combat_enemies if e not in targets]
-        remaining.sort(key=lambda e: (max(e.get("rng_dmg", 0), e.get("cc_dmg", 0)), -e["cur_hp"]), reverse=True)
+        def sort_key(e):
+            if "rng_dmg" not in e or "cc_dmg" not in e:
+                raise KeyError(f"Enemy missing required 'rng_dmg' or 'cc_dmg' field")
+            return (max(e["rng_dmg"], e["cc_dmg"]), -e["cur_hp"])
+        remaining.sort(key=sort_key, reverse=True)
         targets.extend(remaining)
         
         return targets[:2]
@@ -1136,7 +1290,9 @@ class W40KEnv(gym.Env):
     def _is_target_adjacent_to_friendly_unit(self, target):
         """Check if target enemy is adjacent to any friendly unit (Rule 2)."""
         for friendly_unit in self.ai_units:
-            if friendly_unit.get("alive", True):
+            if "alive" not in friendly_unit:
+                raise KeyError(f"Friendly unit missing required 'alive' field")
+            if friendly_unit["alive"]:
                 if are_units_adjacent(target, friendly_unit):
                     return True
         return False
@@ -1174,17 +1330,23 @@ class W40KEnv(gym.Env):
         """Shoot at target and return reward."""
         if not target["alive"]:
             unit_rewards = self._get_unit_reward_config(unit)
-            return unit_rewards.get("wait", -0.1)
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["base_actions"]["wait"]
         
         # PREVENT FRIENDLY FIRE: Cannot shoot friendly units
         if self._is_friendly_unit(unit, target):
             unit_rewards = self._get_unit_reward_config(unit)
-            return unit_rewards.get("wait", -1.0)  # Large penalty for friendly fire
+            if "situational_modifiers" not in unit_rewards or "friendly_fire_penalty" not in unit_rewards["situational_modifiers"]:
+                raise KeyError(f"Missing 'situational_modifiers.friendly_fire_penalty' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["situational_modifiers"]["friendly_fire_penalty"]
         
         # RULE 2: Cannot shoot enemy units adjacent to friendly units
         if self._is_target_adjacent_to_friendly_unit(target):
             unit_rewards = self._get_unit_reward_config(unit)
-            return unit_rewards.get("wait", -0.5)  # Penalty for invalid targeting
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["base_actions"]["wait"]
         
         result = execute_shooting_sequence(unit, target)
         total_damage = result["totalDamage"]
@@ -1194,15 +1356,23 @@ class W40KEnv(gym.Env):
         unit_rewards = self._get_unit_reward_config(unit)
         
         # Base ranged attack reward (scaled by damage dealt)
-        reward = unit_rewards.get("ranged_attack", 0.2) * total_damage if total_damage > 0 else unit_rewards.get("ranged_attack", 0.2) * 0.1
+        if "base_actions" not in unit_rewards or "ranged_attack" not in unit_rewards["base_actions"]:
+            raise KeyError(f"Missing 'base_actions.ranged_attack' in rewards config for unit type {unit['unit_type']}")
+        
+        base_attack_reward = unit_rewards["base_actions"]["ranged_attack"]
+        reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
         
         if target["cur_hp"] <= 0:
             target["alive"] = False
-            reward += unit_rewards.get("enemy_killed_r", 0.4)
+            if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
+                raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
+            reward += unit_rewards["result_bonuses"]["kill_target"]
             
             # Bonus for no overkill
             if old_hp == total_damage:
-                reward += unit_rewards.get("enemy_killed_no_overkill_r", 0.8) - unit_rewards.get("enemy_killed_r", 0.4)
+                if "result_bonuses" not in unit_rewards or "no_overkill" not in unit_rewards["result_bonuses"]:
+                    raise KeyError(f"Missing 'result_bonuses.no_overkill' in rewards config for unit type {unit['unit_type']}")
+                reward += unit_rewards["result_bonuses"]["no_overkill"]
         
         return reward
 
@@ -1211,7 +1381,9 @@ class W40KEnv(gym.Env):
         unit_rewards = self._get_unit_reward_config(unit)
         
         if not target["alive"]:
-            return unit_rewards.get("wait", -0.1)
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["base_actions"]["wait"]
         
         # Move unit adjacent to target
         dx = target["col"] - unit["col"]
@@ -1232,20 +1404,34 @@ class W40KEnv(gym.Env):
         unit["col"] = new_col
         unit["row"] = new_row
         
-        return unit_rewards.get("charge_success", 0.2)  # Charge reward
+        if "base_actions" not in unit_rewards or "charge_success" not in unit_rewards["base_actions"]:
+            raise KeyError(f"Missing 'base_actions.charge_success' in rewards config for unit type {unit['unit_type']}")
+        return unit_rewards["base_actions"]["charge_success"]  # Charge reward
 
     def _is_ranged_unit(self, unit):
         """Check if unit is ranged based on unit definitions."""
-        unit_type = unit.get("unit_type", "")
-        unit_def = self.unit_definitions.get(unit_type, {})
+        if "unit_type" not in unit:
+            raise KeyError("Unit missing required 'unit_type' field")
+        unit_type = unit["unit_type"]
+        if unit_type not in self.unit_definitions:
+            raise KeyError(f"Unit type '{unit_type}' not found in unit definitions. Available types: {list(self.unit_definitions.keys())}")
+        unit_def = self.unit_definitions[unit_type]
+        if "rng_rng" not in unit_def:
+            # Show what fields are actually available for debugging
+            available_fields = list(unit_def.keys())
+            raise KeyError(f"Unit definition for '{unit_type}' missing required 'rng_rng' field. Available fields: {available_fields}")
         # Ranged units have shooting range > 1
-        return unit_def.get("RNG_RNG", 0) > 1
+        return unit_def["rng_rng"] > 1
 
     def _ranged_units_available(self):
         """Check if any ranged units can still shoot this phase."""
         for unit in self.ai_units:
-            if (unit.get("alive", True) and 
-                not unit.get("has_shot", False) and 
+            if "alive" not in unit:
+                raise KeyError("Unit missing required 'alive' field")
+            if "has_shot" not in unit:
+                raise KeyError("Unit missing required 'has_shot' field")
+            if (unit["alive"] and 
+                not unit["has_shot"] and 
                 self._is_ranged_unit(unit) and
                 self._has_shooting_targets(unit)):
                 return True
@@ -1253,10 +1439,19 @@ class W40KEnv(gym.Env):
 
     def _has_shooting_targets(self, unit):
         """Check if unit has valid shooting targets."""
-        unit_type = unit.get("unit_type", "")
-        unit_range = self.unit_definitions.get(unit_type, {}).get("RNG_RNG", 0)
+        if "unit_type" not in unit:
+            raise KeyError("Unit missing required 'unit_type' field")
+        unit_type = unit["unit_type"]
+        if unit_type not in self.unit_definitions:
+            raise KeyError(f"Unit type '{unit_type}' not found in unit definitions")
+        unit_def = self.unit_definitions[unit_type]
+        if "rng_rng" not in unit_def:
+            raise KeyError(f"Unit definition for '{unit_type}' missing required 'RNG_RNG' field")
+        unit_range = unit_def["RNG_RNG"]
         for enemy in self.enemy_units:
-            if enemy.get("alive", True):
+            if "alive" not in enemy:
+                raise KeyError("Enemy missing required 'alive' field")
+            if enemy["alive"]:
                 distance = self._calculate_distance(unit, enemy)
                 if distance <= unit_range:
                     # Rule 2: Cannot shoot enemy units adjacent to friendly units
@@ -1273,30 +1468,42 @@ class W40KEnv(gym.Env):
         unit_rewards = self._get_unit_reward_config(unit)
         
         if not target["alive"]:
-            return unit_rewards.get("wait", -0.1)
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["base_actions"]["wait"]
         
         # PREVENT FRIENDLY FIRE: Cannot attack friendly units
         if self._is_friendly_unit(unit, target):
-            return unit_rewards.get("wait", -1.0)  # Large penalty for friendly fire
+            if "situational_modifiers" not in unit_rewards or "friendly_fire_penalty" not in unit_rewards["situational_modifiers"]:
+                raise KeyError(f"Missing 'situational_modifiers.friendly_fire_penalty' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["situational_modifiers"]["friendly_fire_penalty"]  # Large penalty for friendly fire
         
         # Check if actually adjacent
         dist = abs(unit["col"] - target["col"]) + abs(unit["row"] - target["row"])
         if dist > 1:
-            return unit_rewards.get("atk_wasted_m", -0.3)  # Not adjacent penalty
+            if "situational_modifiers" not in unit_rewards or "attack_wasted" not in unit_rewards["situational_modifiers"]:
+                raise KeyError(f"Missing 'situational_modifiers.attack_wasted' in rewards config for unit type {unit['unit_type']}")
+            return unit_rewards["situational_modifiers"]["attack_wasted"]  # Not adjacent penalty
         
         damage = unit["cc_dmg"]
         old_hp = target["cur_hp"]
         target["cur_hp"] = max(0, target["cur_hp"] - damage)
         
-        reward = unit_rewards.get("attack", 0.2)  # Base attack reward
+        if "base_actions" not in unit_rewards or "melee_attack" not in unit_rewards["base_actions"]:
+            raise KeyError(f"Missing 'base_actions.melee_attack' in rewards config for unit type {unit['unit_type']}")
+        reward = unit_rewards["base_actions"]["melee_attack"]  # Base attack reward
         
         if target["cur_hp"] <= 0:
             target["alive"] = False
-            reward += unit_rewards.get("enemy_killed_m", 0.4)  # Kill bonus
+            if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
+                raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
+            reward += unit_rewards["result_bonuses"]["kill_target"]  # Kill bonus
             
             # Bonus for no overkill
             if old_hp == damage:
-                reward += unit_rewards.get("enemy_killed_no_overkill_m", 0.8) - unit_rewards.get("enemy_killed_m", 0.4)
+                if "result_bonuses" not in unit_rewards or "no_overkill" not in unit_rewards["result_bonuses"]:
+                    raise KeyError(f"Missing 'result_bonuses.no_overkill' in rewards config for unit type {unit['unit_type']}")
+                reward += unit_rewards["result_bonuses"]["no_overkill"]
         
         return reward
 
@@ -1321,8 +1528,12 @@ class W40KEnv(gym.Env):
         """
         violations = []
         current_phase = self.current_phase
-        unit_type = unit.get('unit_type', '')
-        is_ranged = unit.get('is_ranged', False)
+        if "unit_type" not in unit:
+            raise KeyError("Unit missing required 'unit_type' field")
+        if "is_ranged" not in unit:
+            raise KeyError("Unit missing required 'is_ranged' field")
+        unit_type = unit['unit_type']
+        is_ranged = unit['is_ranged']
         
         if current_phase == 'move':
             # AI_GAME.md: "Ranged units avoid being charged, keep 1 enemy within RNG_RNG range"
@@ -1392,34 +1603,54 @@ class W40KEnv(gym.Env):
         4. High damage enemy, can't be killed by shooting
         """
         enemies_in_range = [e for e in self.enemy_units if e['alive'] and 
-                           not self._is_friendly_unit(shooter, e) and
-                           abs(shooter['col'] - e['col']) + abs(shooter['row'] - e['row']) <= shooter.get('rng_rng', 0)]
+                            not self._is_friendly_unit(shooter, e)]
+        if "rng_rng" not in shooter:
+            raise KeyError("Shooter missing required 'rng_rng' field")
+        enemies_in_range = [e for e in self.enemy_units if e['alive'] and 
+            not self._is_friendly_unit(shooter, e) and
+            abs(shooter['col'] - e['col']) + abs(shooter['row'] - e['row']) <= shooter['rng_rng']]
         if not enemies_in_range:
             return True
         
         # Get damage scores - AI_GAME.md: "highest RNG_DMG or CC_DMG (pick the best)"
-        target_damage_score = max(target.get('rng_dmg', 0), target.get('cc_dmg', 0))
-        highest_damage_enemies = [e for e in enemies_in_range 
-                                 if max(e.get('rng_dmg', 0), e.get('cc_dmg', 0)) >= target_damage_score]
+        if "rng_dmg" not in target or "cc_dmg" not in target:
+            raise KeyError("Target missing required 'rng_dmg' or 'cc_dmg' field")
+        target_damage_score = max(target['rng_dmg'], target['cc_dmg'])
+        highest_damage_enemies = []
+        for e in enemies_in_range:
+            if "rng_dmg" not in e or "cc_dmg" not in e:
+                raise KeyError("Enemy missing required 'rng_dmg' or 'cc_dmg' field")
+            if max(e['rng_dmg'], e['cc_dmg']) >= target_damage_score:
+                highest_damage_enemies.append(e)
         
         # Basic priority validation - target should be among highest damage enemies
         return target in highest_damage_enemies
 
     def _validate_charge_priority(self, charger, target):
         """AI_GAME.md: Validate charge target selection against priority system."""
+        if "move" not in charger:
+            raise KeyError("Charger missing required 'move' field")
         enemies_in_range = [e for e in self.enemy_units if e['alive'] and 
-                           abs(charger['col'] - e['col']) + abs(charger['row'] - e['row']) <= charger.get('move', 0)]
+                           abs(charger['col'] - e['col']) + abs(charger['row'] - e['row']) <= charger['move']]
         if not enemies_in_range:
             return True
         
-        is_ranged_charger = charger.get('is_ranged', False)
-        target_damage_score = max(target.get('rng_dmg', 0), target.get('cc_dmg', 0))
-        can_kill_target = target.get('cur_hp', 0) <= charger.get('cc_dmg', 0)
+        if "is_ranged" not in charger:
+            raise KeyError("Charger missing required 'is_ranged' field")
+        if "rng_dmg" not in target or "cc_dmg" not in target:
+            raise KeyError("Target missing required 'rng_dmg' or 'cc_dmg' field")
+        if "cur_hp" not in target:
+            raise KeyError("Target missing required 'cur_hp' field")
+        if "cc_dmg" not in charger:
+            raise KeyError("Charger missing required 'cc_dmg' field")
+        is_ranged_charger = charger['is_ranged']
+        target_damage_score = max(target['rng_dmg'], target['cc_dmg'])
+        can_kill_target = target['cur_hp'] <= charger['cc_dmg']
         
         # AI_GAME.md priority validation
         if is_ranged_charger:
             # Ranged units charge high HP enemies they can kill
-            return can_kill_target and target.get('cur_hp', 0) > 0
+            return can_kill_target and target['cur_hp'] > 0
         else:
             # Melee units prioritize high damage targets they can kill
             return target_damage_score > 0 or can_kill_target
@@ -1432,16 +1663,26 @@ class W40KEnv(gym.Env):
         if not adjacent_enemies:
             return True
         
-        target_damage_score = max(target.get('rng_dmg', 0), target.get('cc_dmg', 0))
-        can_kill_target = target.get('cur_hp', 0) <= attacker.get('cc_dmg', 0)
+        if "rng_dmg" not in target or "cc_dmg" not in target:
+            raise KeyError("Target missing required 'rng_dmg' or 'cc_dmg' field")
+        if "cur_hp" not in target:
+            raise KeyError("Target missing required 'cur_hp' field")
+        if "cc_dmg" not in attacker:
+            raise KeyError("Attacker missing required 'cc_dmg' field")
+        target_damage_score = max(target['rng_dmg'], target['cc_dmg'])
+        can_kill_target = target['cur_hp'] <= attacker['cc_dmg']
         
         # AI_GAME.md Priority 1: Can kill high damage enemy
         if can_kill_target and target_damage_score > 0:
             return True
         
         # AI_GAME.md Priority 2: Highest damage enemy with lowest HP
-        highest_damage_enemies = [e for e in adjacent_enemies 
-                                 if max(e.get('rng_dmg', 0), e.get('cc_dmg', 0)) >= target_damage_score]
+        highest_damage_enemies = []
+        for e in adjacent_enemies:
+            if "rng_dmg" not in e or "cc_dmg" not in e:
+                raise KeyError("Enemy missing required 'rng_dmg' or 'cc_dmg' field")
+            if max(e['rng_dmg'], e['cc_dmg']) >= target_damage_score:
+                highest_damage_enemies.append(e)
         
         return target in highest_damage_enemies
 
@@ -1449,7 +1690,11 @@ class W40KEnv(gym.Env):
         """Check if ranged units are still available to shoot."""
         eligible_units = self._get_eligible_units()
         for unit in eligible_units:
-            if unit.get('is_ranged', False) and unit.get('id') not in self.shot_units:
+            if "is_ranged" not in unit:
+                raise KeyError("Unit missing required 'is_ranged' field")
+            if "id" not in unit:
+                raise KeyError("Unit missing required 'id' field")
+            if unit['is_ranged'] and unit['id'] not in self.shot_units:
                 return True
         return False
 
@@ -1465,7 +1710,9 @@ class W40KEnv(gym.Env):
 
     def _count_enemies_in_shooting_range(self, unit):
         """Count enemies within shooting range of unit."""
-        shooting_range = unit.get('rng_rng', 0)
+        if "rng_rng" not in unit:
+            raise KeyError("Unit missing required 'rng_rng' field")
+        shooting_range = unit['rng_rng']
         count = 0
         for enemy in self.enemy_units:
             if enemy['alive']:
@@ -1476,7 +1723,9 @@ class W40KEnv(gym.Env):
 
     def _count_charge_opportunities_after_move(self, unit):
         """Count potential charge opportunities after moving."""
-        move_range = unit.get('move', 0)
+        if "move" not in unit:
+            raise KeyError("Unit missing required 'move' field")
+        move_range = unit['move']
         return move_range  # Simplified - would need full move calculation
 
     def _advance_phase(self):
@@ -1523,12 +1772,16 @@ class W40KEnv(gym.Env):
         if self.current_phase == "shoot":
             # Penalty for ranged units that couldn't shoot
             for unit in ai_units_alive:
-                if (unit.get("is_ranged", False) and 
+                if "is_ranged" not in unit:
+                    raise KeyError("Unit missing required 'is_ranged' field")
+                if (unit["is_ranged"] and 
                     unit["id"] not in self.shot_units and
                     not self._has_enemies_in_shooting_range(unit)):
                     
                     unit_rewards = self._get_unit_reward_config(unit)
-                    penalty = unit_rewards.get("ranged_no_targets_penalty", -1.0)
+                    if "situational_modifiers" not in unit_rewards or "no_targets_penalty" not in unit_rewards["situational_modifiers"]:
+                        raise KeyError(f"Missing 'situational_modifiers.no_targets_penalty' in rewards config for unit type {unit['unit_type']}")
+                    penalty = unit_rewards["situational_modifiers"]["no_targets_penalty"]
                     
                     # Record penalty action for replay
                     if self.save_replay:
@@ -1537,12 +1790,16 @@ class W40KEnv(gym.Env):
         elif self.current_phase == "combat":
             # Penalty for melee units that couldn't fight
             for unit in ai_units_alive:
-                if (not unit.get("is_ranged", False) and 
+                if "is_ranged" not in unit:
+                    raise KeyError("Unit missing required 'is_ranged' field")
+                if (not unit["is_ranged"] and 
                     unit["id"] not in self.attacked_units and
                     not self._has_adjacent_enemies(unit)):
                     
                     unit_rewards = self._get_unit_reward_config(unit)
-                    penalty = unit_rewards.get("melee_no_targets_penalty", -1.5)
+                    if "situational_modifiers" not in unit_rewards or "no_targets_penalty" not in unit_rewards["situational_modifiers"]:
+                        raise KeyError(f"Missing 'situational_modifiers.no_targets_penalty' in rewards config for unit type {unit['unit_type']}")
+                    penalty = unit_rewards["situational_modifiers"]["no_targets_penalty"]
                     
                     # Record penalty action for replay
                     if self.save_replay:
@@ -1571,7 +1828,13 @@ class W40KEnv(gym.Env):
             action_taken = False
             
             # Priority 1: Shoot if in range (instead of moving closer)
-            if is_unit_in_range(enemy, nearest_ai, enemy.get("rng_rng", 4)) and enemy.get("rng_dmg", 0) > 0:
+            enemy_rng_rng = 4  # Default for enemy units
+            if "rng_rng" in enemy:
+                enemy_rng_rng = enemy["rng_rng"]
+            enemy_rng_dmg = 0  # Default for enemy units
+            if "rng_dmg" in enemy:
+                enemy_rng_dmg = enemy["rng_dmg"]
+            if is_unit_in_range(enemy, nearest_ai, enemy_rng_rng) and enemy_rng_dmg > 0:
                 # Execute dice-based shooting for enemy
                 result = execute_shooting_sequence(enemy, nearest_ai)
                 total_damage = result["totalDamage"]
@@ -1585,9 +1848,13 @@ class W40KEnv(gym.Env):
                     self._record_action(enemy, 4, 0.0)  # action_type 4 = shoot, reward 0 for bot
 
             # Priority 2: Melee attack if adjacent (no change needed - it's already using damage directly)
-            elif are_units_adjacent(enemy, nearest_ai) and enemy.get("cc_dmg", 0) > 0:
-                damage = min(enemy["cc_dmg"], nearest_ai["cur_hp"])  # Prevent overkill
-                nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
+            elif are_units_adjacent(enemy, nearest_ai):
+                enemy_cc_dmg = 0  # Default for enemy units
+                if "cc_dmg" in enemy:
+                    enemy_cc_dmg = enemy["cc_dmg"]
+                if enemy_cc_dmg > 0:
+                    damage = min(enemy_cc_dmg, nearest_ai["cur_hp"])  # Prevent overkill
+                    nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
                 if nearest_ai["cur_hp"] <= 0:
                     nearest_ai["alive"] = False
                 action_taken = True
@@ -1599,7 +1866,10 @@ class W40KEnv(gym.Env):
             # Priority 3: Move closer (only if can't attack)
             elif dist > 1:
                 # Limited movement: only 1-2 hexes max
-                move_distance = min(2, enemy.get("move", 1))
+                enemy_move = 1  # Default for enemy units
+                if "move" in enemy:
+                    enemy_move = enemy["move"]
+                move_distance = min(2, enemy_move)
                 dx = nearest_ai["col"] - enemy["col"]
                 dy = nearest_ai["row"] - enemy["row"]
                 
@@ -1684,8 +1954,8 @@ class W40KEnv(gym.Env):
             "current_turn": self.current_turn,
             "game_over": self.game_over,
             "winner": self.winner,  # ADD THIS LINE
-            "ai_units_alive": len([u for u in self.ai_units if u.get("alive", True)]),
-            "enemy_units_alive": len([u for u in self.enemy_units if u.get("alive", True)])
+            "ai_units_alive": len([u for u in self.ai_units if u.get("alive", True)]),  # Keep this one for compatibility
+            "enemy_units_alive": len([u for u in self.enemy_units if u.get("alive", True)])  # Keep this one for compatibility
         }
 
 
@@ -1792,11 +2062,11 @@ class W40KEnv(gym.Env):
                     if unit:
                         unit_state = {
                             "id": i,
-                            "player": unit.get('player', 0),
-                            "col": unit.get('col', 0),
-                            "row": unit.get('row', 0),
-                            "cur_hp": unit.get('cur_hp', unit.get('HP', 100)),
-                            "alive": unit.get('alive', True)
+                            "player": unit.get('player', 0),  # Keep for replay compatibility
+                            "col": unit.get('col', 0),  # Keep for replay compatibility
+                            "row": unit.get('row', 0),  # Keep for replay compatibility
+                            "cur_hp": unit.get('cur_hp', unit.get('HP', 100)),  # Keep for replay compatibility
+                            "alive": unit.get('alive', True)  # Keep for replay compatibility
                         }
                         state["units"].append(unit_state)
             

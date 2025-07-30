@@ -1,13 +1,13 @@
-// frontend/src/roster/tyranid/TyranidInfantryEliteMeleeElite.ts
+// frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryTroopMeleeTroop.ts
 
-export class TyranidInfantryEliteMeleeElite {
-  static FACTION = "Tyranid";
+export class SpaceMarineInfantryTroopMeleeTroop {
+  static FACTION = "Space Marines";
   static TEAM_COLOR = 0x0078ff;     // Example: blue
 
   // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Elite";      // Elite: 8 wounds, 2+ save - heavy armor
-  static MOVE_TYPE = "Infantry";       // Monster movement (treated as infantry)
-  static TARGET_TYPE = "Elite";        // MeleeElite specialist - monster vs elite
+  static TANKING_LEVEL = "Troop";      // Troop: 2 wounds, 3+ save
+  static MOVE_TYPE = "Infantry";       // Standard infantry movement
+  static TARGET_TYPE = "Troop";        // MeleeTroop specialist - backbone melee
 
   name: string;
   hp: number;
