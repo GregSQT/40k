@@ -28,6 +28,7 @@ sys.path.insert(0, project_root)
 
 from ai.unit_registry import UnitRegistry
 from ai.scenario_manager import ScenarioManager, TrainingMatchup
+from ai.game_replay_logger import GameReplayIntegration
 from config_loader import get_config_loader
 
 # Import training components
@@ -36,41 +37,7 @@ from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback,
 from stable_baselines3.common.monitor import Monitor
 import gymnasium as gym
 
-class ReplaySavingWrapper(gym.Wrapper):
-    """Wrapper to handle replay saving for Monitor-wrapped environments."""
-    
-    def __init__(self, monitor_env):
-        # Initialize as proper Gymnasium wrapper
-        super().__init__(monitor_env)
-        self.monitor_env = monitor_env
-        # Access the base environment through Monitor.unwrapped
-        self.base_env = monitor_env.unwrapped
-    
-    def save_web_compatible_replay(self, filename=None):
-        """Save replay using the base environment's method."""
-        if hasattr(self.base_env, 'save_web_compatible_replay'):
-            return self.base_env.save_web_compatible_replay(filename)
-        else:
-            print("⚠️ Base environment doesn't support replay saving")
-            return None
-    
-    def get_replay_data(self):
-        """Get replay data from base environment."""
-        if hasattr(self.base_env, 'replay_data'):
-            return self.base_env.replay_data
-        return []
-    
-    def reset(self, **kwargs):
-        """Reset environment."""
-        return self.env.reset(**kwargs)
-    
-    def step(self, action):
-        """Step environment."""
-        return self.env.step(action)
-    
-    def close(self):
-        """Close the environment."""
-        return self.env.close()
+# Removed - using GameReplayIntegration instead
 
 @dataclass
 class TrainingSession:
@@ -413,20 +380,18 @@ class MultiAgentTrainer:
             final_model_path = session.model_path.replace('.zip', f'_session_{session.session_id}.zip')
             model.save(final_model_path)
 
-            # Save descriptive replay file with proper error handling
+            # Save descriptive replay file using GameReplayIntegration
             replay_file_saved = None
             try:
                 timestamp = time.strftime("%Y%m%d_%H%M%S") 
-                #descriptive_filename = f"ai/event_log/training_{session.agent_key}_vs_{session.opponent_agent}_{timestamp}.json"
                 descriptive_filename = f"ai/event_log/training_{session.agent_key}_vs_{session.opponent_agent}.json"
                 
-                # Access base environment through Monitor for replay saving
-                if hasattr(env, 'base_env') and hasattr(env.base_env, 'save_web_compatible_replay'):
-                    replay_file_saved = env.base_env.save_web_compatible_replay(descriptive_filename)
-                elif hasattr(env.unwrapped, 'save_web_compatible_replay'):
-                    replay_file_saved = env.unwrapped.save_web_compatible_replay(descriptive_filename)
+                # Use GameReplayIntegration's save method
+                if hasattr(env.unwrapped, 'replay_logger'):
+                    final_reward = test_results.get("avg_reward", 0)
+                    replay_file_saved = env.unwrapped.replay_logger.save_replay(descriptive_filename, final_reward)
                 else:
-                    print(f"⚠️ No replay saving method available for session {session.session_id}")
+                    print(f"⚠️ GameReplayIntegration not properly initialized for session {session.session_id}")
                 
                 if not replay_file_saved:
                     print(f"⚠️ No replay data to save for session {session.session_id}")
@@ -468,19 +433,16 @@ class MultiAgentTrainer:
             print(f"❌ Session {session.session_id} failed: {e}")
             session.status = 'failed'
             
-            # Try to save replay even on failure
+            # Try to save replay even on failure using GameReplayIntegration
             replay_file_saved = None
             try:
                 if 'env' in locals() and env:
                     timestamp = time.strftime("%Y%m%d_%H%M%S")
-                    #failed_replay_filename = f"ai/event_log/failed_training_{session.agent_key}_vs_{session.opponent_agent}_{timestamp}.json"
                     failed_replay_filename = f"ai/event_log/failed_training_{session.agent_key}_vs_{session.opponent_agent}.json"
                     
-                    # Access base environment through Monitor for replay saving
-                    if hasattr(env, 'base_env') and hasattr(env.base_env, 'save_web_compatible_replay'):
-                        replay_file_saved = env.base_env.save_web_compatible_replay(failed_replay_filename)
-                    elif hasattr(env.unwrapped, 'save_web_compatible_replay'):
-                        replay_file_saved = env.unwrapped.save_web_compatible_replay(failed_replay_filename)
+                    # Use GameReplayIntegration's save method
+                    if hasattr(env.unwrapped, 'replay_logger'):
+                        replay_file_saved = env.unwrapped.replay_logger.save_replay(failed_replay_filename, 0.0)
                     
                     if replay_file_saved:
                         print(f"💾 Failed session replay saved: {replay_file_saved}")
@@ -546,10 +508,10 @@ class MultiAgentTrainer:
             scenario_file=scenario_path,
             unit_registry=self.unit_registry  # Pass shared registry
         )
-        monitor_env = Monitor(base_env, allow_early_resets=True)
         
-        # Wrap for replay saving access - now properly inherits from gym.Wrapper
-        env = ReplaySavingWrapper(monitor_env)
+        # Enhance environment with our shared GameReplayIntegration
+        enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
+        env = Monitor(enhanced_env, allow_early_resets=True)
         
         # Agent-specific model path
         model_path = self._get_agent_model_path(agent_key)

@@ -477,6 +477,8 @@ class GameReplayLogger:
                     "is_melee": unit.get("unit_type") in ["AssaultIntercessor"]
                 })
         
+        # Actions generation removed - using combat_log only for unified format
+        
         replay_data = {
             "game_info": {
                 "scenario": self.game_metadata.get("scenario", "training_episode"),
@@ -499,7 +501,7 @@ class GameReplayLogger:
                 "units": initial_units,
                 "board_size": self.game_metadata.get("board_size", [24, 18])
             },
-            "combat_log": self.combat_log_entries,  # Use direct reference instead of getattr
+            "combat_log": self.combat_log_entries,  # ✅ Use ONLY our shared format
             "game_states": self.game_states,
             "training_summary": self._generate_training_summary()
         }
@@ -510,11 +512,25 @@ class GameReplayLogger:
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(replay_data, f, indent=2)
         
-        print(f"💾 Saved game replay: {filename}")
+        print(f"💾 Saved unified combat_log replay: {filename}")
         print(f"   📊 {len(self.game_states)} game states captured")
         print(f"   🎮 {self.current_turn} turns played")
         print(f"   💯 Final reward: {episode_reward:.2f}")
-        print(f"   📝 {len(getattr(self, 'combat_log_entries', []))} combat log entries")
+        print(f"   ⚔️ {len(getattr(self, 'combat_log_entries', []))} combat log entries (shared format)")
+
+    # _generate_frontend_actions method removed - using combat_log only
+
+    def _map_event_type_to_action(self, event_type: str) -> int:
+        """Map combat_log event type back to action_type for compatibility."""
+        type_map = {
+            "move": 0,
+            "shoot": 4,
+            "charge": 5,
+            "combat": 6,
+            "wait": 7,
+            "penalty": -1
+        }
+        return type_map.get(event_type, 0)
 
     def _get_event_type_from_action(self, action_int: int, pre_action_units: List[Dict], post_action_units: List[Dict]) -> str:
         """Determine event type based on action and unit changes."""

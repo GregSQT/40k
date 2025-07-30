@@ -31,31 +31,6 @@ from config_loader import get_config_loader
 from ai.game_replay_logger import GameReplayIntegration
 import torch
 
-class ReplaySavingWrapper:
-    """Wrapper to handle replay saving for Monitor-wrapped environments."""
-    
-    def __init__(self, monitor_env):
-        self.monitor_env = monitor_env
-        self.base_env = getattr(monitor_env.unwrapped, 'base_env', monitor_env.unwrapped)
-    
-    def save_web_compatible_replay(self, filename=None):
-        """Save replay using the base environment's method."""
-        if hasattr(self.base_env, 'save_web_compatible_replay'):
-            return self.base_env.save_web_compatible_replay(filename)
-        else:
-            print("⚠️ Base environment doesn't support replay saving")
-            return None
-    
-    def get_replay_data(self):
-        """Get replay data from base environment."""
-        if hasattr(self.base_env, 'replay_data'):
-            return self.base_env.replay_data
-        return []
-    
-    def __getattr__(self, name):
-        """Delegate all other attributes to the monitor environment."""
-        return getattr(self.monitor_env, name)
-
 def check_gpu_availability():
     """Check and display GPU availability for training."""
     print("\n🔍 GPU AVAILABILITY CHECK")
@@ -125,8 +100,8 @@ def create_model(config, training_config_name="default", rewards_config_name="de
     enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
     env = Monitor(enhanced_env)
     
-    # Store reference to base environment for replay access
-    env.unwrapped.base_env = enhanced_env
+    # Store reference to replay logger for access
+    env.replay_logger = enhanced_env.replay_logger
     
     model_path = config.get_model_path()
     
@@ -192,8 +167,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
     env = Monitor(enhanced_env)
     
-    # Store reference to base environment for replay access
-    env.unwrapped.base_env = enhanced_env
+    # Store reference to replay logger for access
+    env.replay_logger = enhanced_env.replay_logger
     
     # Agent-specific model path
     model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
@@ -237,7 +212,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     # Enhance evaluation environment with our advanced replay logger
     enhanced_eval_env = GameReplayIntegration.enhance_training_env(base_eval_env)
     eval_env = Monitor(enhanced_eval_env)
-    eval_env.unwrapped.base_env = enhanced_eval_env
+    eval_env.replay_logger = enhanced_eval_env.replay_logger
     eval_freq=training_config['eval_freq']
     total_timesteps = training_config['total_timesteps']
     

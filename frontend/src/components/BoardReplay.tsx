@@ -110,6 +110,133 @@ const calculateMovePath = (fromCol: number, fromRow: number, toCol: number, toRo
   return []; // No path found
 };
 
+// Line of sight utilities for shooting preview (adapted from BoardPvp.tsx)
+const getHexLine = (x0: number, y0: number, x1: number, y1: number) => {
+  const hexes: { col: number; row: number }[] = [];
+  const dx = Math.abs(x1 - x0);
+  const dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  let x = x0;
+  let y = y0;
+
+  while (true) {
+    hexes.push({ col: x, row: y });
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      x += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+  return hexes;
+};
+
+const hasLineOfSight = (
+  from: { col: number; row: number },
+  to: { col: number; row: number },
+  wallHexes: [number, number][]
+): { canSee: boolean; inCover: boolean } => {
+  if (from.col === to.col && from.row === to.row) {
+    return { canSee: true, inCover: false };
+  }
+
+  const lineHexes = getHexLine(from.col, from.row, to.col, to.row);
+  const wallHexSet = new Set<string>(wallHexes.map(([c, r]) => `${c},${r}`));
+  
+  let hasWallInPath = false;
+  let hasCover = false;
+
+  // Check each hex in the line (excluding start and end)
+  for (let i = 1; i < lineHexes.length - 1; i++) {
+    const hex = lineHexes[i];
+    const hexKey = `${hex.col},${hex.row}`;
+    
+    if (wallHexSet.has(hexKey)) {
+      hasWallInPath = true;
+      break;
+    }
+    
+    // Check for units that could provide cover (would need unit positions)
+    // For now, just check walls for cover detection
+  }
+
+  if (hasWallInPath) {
+    return { canSee: false, inCover: false };
+  }
+
+  // Simple cover detection - if there are walls near the line but not blocking
+  const pathLength = lineHexes.length;
+  if (pathLength > 2) {
+    // Check if there are walls adjacent to the path
+    for (let i = 1; i < lineHexes.length - 1; i++) {
+      const hex = lineHexes[i];
+      // Check adjacent hexes for walls
+      const adjacentOffsets = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1]];
+      for (const [dx, dy] of adjacentOffsets) {
+        const adjKey = `${hex.col + dx},${hex.row + dy}`;
+        if (wallHexSet.has(adjKey)) {
+          hasCover = true;
+          break;
+        }
+      }
+      if (hasCover) break;
+    }
+  }
+
+  return { canSee: true, inCover: hasCover };
+};
+
+const calculateShootingTargets = (
+  shooterCol: number,
+  shooterRow: number,
+  range: number,
+  boardConfig: any,
+  units: ReplayUnit[]
+): {
+  clearTargets: { col: number; row: number }[];
+  coverTargets: { col: number; row: number }[];
+  blockedTargets: Set<string>;
+} => {
+  const clearTargets: { col: number; row: number }[] = [];
+  const coverTargets: { col: number; row: number }[] = [];
+  const blockedTargets = new Set<string>();
+  
+  if (!boardConfig) return { clearTargets, coverTargets, blockedTargets };
+  
+  const shooterCube = offsetToCube(shooterCol, shooterRow);
+  const wallHexes = boardConfig.wall_hexes || [];
+  
+  // Check all enemy units within range
+  units.filter(unit => unit.alive).forEach(target => {
+    const targetCube = offsetToCube(target.col, target.row);
+    const distance = cubeDistance(shooterCube, targetCube);
+    
+    if (distance > 0 && distance <= range) {
+      const lineOfSight = hasLineOfSight(
+        { col: shooterCol, row: shooterRow },
+        { col: target.col, row: target.row },
+        wallHexes
+      );
+      
+      if (!lineOfSight.canSee) {
+        blockedTargets.add(`${target.col},${target.row}`);
+      } else if (lineOfSight.inCover) {
+        coverTargets.push({ col: target.col, row: target.row });
+      } else {
+        clearTargets.push({ col: target.col, row: target.row });
+      }
+    }
+  });
+  
+  return { clearTargets, coverTargets, blockedTargets };
+};
+
 // AI_GAME.md: Strict type definitions following game mechanisms
 interface ReplayEvent {
   turn: number;
@@ -174,8 +301,8 @@ interface ReplayData {
     units: ReplayUnit[];
     board_size: [number, number];
   };
-  actions: ReplayEvent[];
-  combat_log?: any[]; // Training replay combat log entries
+  actions?: ReplayEvent[]; // Optional - legacy format
+  combat_log: any[]; // Required - our shared format
 }
 
 // Removed ScenarioConfig interface - using BoardConfig directly
@@ -220,6 +347,17 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
     toRow: number;
     path: { col: number; row: number }[];
     unitId: number;
+  } | null>(null);
+  
+  // Shooting preview state for line of sight visualization
+  const [shootingPreview, setShootingPreview] = useState<{
+    shooterCol: number;
+    shooterRow: number;
+    clearTargets: { col: number; row: number }[];
+    coverTargets: { col: number; row: number }[];
+    blockedTargets: Set<string>;
+    unitId: number;
+    range: number;
   } | null>(null);
   
   // PIXI.js refs - AI_INSTRUCTIONS.md: Use PIXI.js Canvas
@@ -692,6 +830,59 @@ const validateUnitRegistry = () => {
     app.stage.addChild(previewContainer);
   }, [movePreview, boardConfig, getHexCenter, getHexPolygonPoints]);
 
+  // Draw shooting preview hexes (red clear sight + orange cover)
+  const drawShootingPreview = useCallback((app: PIXI.Application) => {
+    if (!shootingPreview || !boardConfig) return;
+    
+    const HEX_RADIUS = boardConfig.hex_radius;
+    
+    // Remove existing shooting preview graphics
+    const existingPreview = app.stage.children.find(child => child.name === 'shootingPreview');
+    if (existingPreview) {
+      app.stage.removeChild(existingPreview);
+      existingPreview.destroy();
+    }
+    
+    const previewContainer = new PIXI.Container();
+    previewContainer.name = 'shootingPreview';
+    previewContainer.zIndex = 1; // Below units but above board
+    
+    // Draw red hexes for clear line of sight targets
+    const clearColor = parseInt(boardConfig.colors.attack?.replace('0x', '') || 'FF0000', 16);
+    shootingPreview.clearTargets.forEach(target => {
+      const center = getHexCenter(target.col, target.row);
+      const targetHex = new PIXI.Graphics();
+      const points = getHexPolygonPoints(center.x, center.y, HEX_RADIUS * 0.8);
+      targetHex.beginFill(clearColor, 0.6); // Red with transparency
+      targetHex.drawPolygon(points);
+      targetHex.endFill();
+      previewContainer.addChild(targetHex);
+    });
+    
+    // Draw orange hexes for targets in cover
+    const coverColor = parseInt((boardConfig.colors.charge || '0xFFA500').replace('0x', ''), 16);
+    shootingPreview.coverTargets.forEach(target => {
+      const center = getHexCenter(target.col, target.row);
+      const targetHex = new PIXI.Graphics();
+      const points = getHexPolygonPoints(center.x, center.y, HEX_RADIUS * 0.8);
+      targetHex.beginFill(coverColor, 0.6); // Orange with transparency
+      targetHex.drawPolygon(points);
+      targetHex.endFill();
+      previewContainer.addChild(targetHex);
+    });
+    
+    // Draw range indicator circle around shooter
+    const shooterCenter = getHexCenter(shootingPreview.shooterCol, shootingPreview.shooterRow);
+    const rangeCircle = new PIXI.Graphics();
+    const hexSize = HEX_RADIUS * 1.5; // Approximate hex spacing
+    const rangeRadius = shootingPreview.range * hexSize;
+    rangeCircle.lineStyle(2, 0xFFFFFF, 0.3); // White circle with transparency
+    rangeCircle.drawCircle(shooterCenter.x, shooterCenter.y, rangeRadius);
+    previewContainer.addChild(rangeCircle);
+    
+    app.stage.addChild(previewContainer);
+  }, [shootingPreview, boardConfig, getHexCenter, getHexPolygonPoints]);
+
   // Draw units using UnitRenderer - same as Board.tsx
   const drawUnits = useCallback((app: PIXI.Application, units: ReplayUnit[], highlightUnitId: number | null = null) => {
     if (!scenario || !app.stage || !boardConfig?.display) return;
@@ -829,6 +1020,7 @@ const validateUnitRegistry = () => {
       // Draw initial board and units using shared BoardRenderer
       drawBoard(app, boardConfig! as any);
       drawMovePreview(app);
+      drawShootingPreview(app);
       drawUnits(app, currentUnits, actingUnitId);
       
       // Cleanup function
@@ -844,7 +1036,7 @@ const validateUnitRegistry = () => {
       console.error('❌ Error initializing PIXI application:', error);
       setError('Failed to initialize board display');
     }
-  }, [scenario, replayData, drawUnits, drawMovePreview, currentUnits, actingUnitId, movePreview]);
+  }, [scenario, replayData, drawUnits, drawMovePreview, drawShootingPreview, currentUnits, actingUnitId, movePreview, shootingPreview]);
 
   // Update game state based on current step
   useEffect(() => {
@@ -926,13 +1118,45 @@ const validateUnitRegistry = () => {
         } else {
           setMovePreview(null);
         }
+        setShootingPreview(null); // Clear shooting preview during moves
+      } 
+      // Detect shooting actions and set up shooting preview
+      else if (currentLogEntry && (currentLogEntry as any).type === 'shoot') {
+        const logEntry = currentLogEntry as any;
+        const shootingUnit = newUnits.find(u => u.id === logEntry.unitId);
+        
+        if (shootingUnit) {
+          // Calculate shooting targets and line of sight
+          const shootingTargets = calculateShootingTargets(
+            shootingUnit.col,
+            shootingUnit.row,
+            shootingUnit.RNG_RNG,
+            boardConfig,
+            newUnits.filter(u => u.player !== shootingUnit.player) // Only enemy units
+          );
+          
+          setShootingPreview({
+            shooterCol: shootingUnit.col,
+            shooterRow: shootingUnit.row,
+            clearTargets: shootingTargets.clearTargets,
+            coverTargets: shootingTargets.coverTargets,
+            blockedTargets: shootingTargets.blockedTargets,
+            unitId: logEntry.unitId,
+            range: shootingUnit.RNG_RNG
+          });
+        } else {
+          setShootingPreview(null);
+        }
+        setMovePreview(null); // Clear move preview during shooting
       } else {
         setMovePreview(null);
+        setShootingPreview(null);
       }
       
       // Update PIXI display
       if (pixiAppRef.current) {
         drawMovePreview(pixiAppRef.current);
+        drawShootingPreview(pixiAppRef.current);
         drawUnits(pixiAppRef.current, newUnits, currentActingUnitId);
       }
       
@@ -994,10 +1218,10 @@ const validateUnitRegistry = () => {
   };
 
   const goToTurn = (targetTurn: number) => {
-    if (!replayData?.actions) return;
+    if (!battleLog || battleLog.length === 0) return;
     
-    // Find the first action of the target turn
-    const actionIndex = replayData.actions.findIndex(action => action.turn === targetTurn);
+    // Find the first action of the target turn using battleLog (combat_log)
+    const actionIndex = battleLog.findIndex(action => action.turn === targetTurn);
     if (actionIndex !== -1) {
       setCurrentStep(actionIndex);
       setIsPlaying(false);
@@ -1196,7 +1420,7 @@ const validateUnitRegistry = () => {
           <button 
             className="btn btn--secondary" 
             onClick={nextStep} 
-            disabled={!replayData || currentStep >= replayData.actions.length - 1}
+            disabled={!replayData || currentStep >= battleLog.length - 1}
             title="Next step"
           >
             ⏭
@@ -1204,7 +1428,7 @@ const validateUnitRegistry = () => {
           <button 
             className="btn btn--secondary" 
             onClick={goToEnd} 
-            disabled={!replayData || currentStep >= replayData.actions.length - 1}
+            disabled={!replayData || currentStep >= battleLog.length - 1}
             title="Last step"
           >
             ⏭⏭

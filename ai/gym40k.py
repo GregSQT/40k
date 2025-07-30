@@ -248,9 +248,10 @@ class W40KEnv(gym.Env):
         obs_size = 26
         self.observation_space = spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         
-        # Replay tracking
+        # Replay tracking - COMPLETELY DISABLED, using GameReplayIntegration only
         self.replay_data = []
-        self.save_replay = True
+        self.save_replay = False
+        print("🔧 gym40k replay system disabled - using GameReplayIntegration only")
         
         # Store scenario metadata for replay
         self.scenario_metadata = None
@@ -856,9 +857,8 @@ class W40KEnv(gym.Env):
                 self.turn_limit_penalty = self.config.get_turn_limit_penalty()
             reward += self.turn_limit_penalty
         
-        # Save replay data
-        if self.save_replay:
-            self._record_action(unit, action_type, reward)
+        # Replay recording handled by GameReplayIntegration wrapper
+        pass
         
         return self._get_obs(), reward, self.game_over, False, self._get_info()
 
@@ -1911,40 +1911,12 @@ class W40KEnv(gym.Env):
         return nearest
 
     def _record_action(self, unit, action_type, reward):
-        """Record action for replay system."""
-        action_data = {
-            "turn": self.current_turn,
-            "phase": self.current_phase,
-            "player": unit["player"],
-            "unit_id": unit["id"],
-            "unit_type": unit["unit_type"],
-            "action_type": action_type,
-            "position": [unit["col"], unit["row"]],
-            "hp": unit["cur_hp"],
-            "reward": reward,
-            "timestamp": datetime.now().isoformat()
-        }
-        self.replay_data.append(action_data)
+        """DISABLED - Using GameReplayIntegration only."""
+        pass  # All replay recording handled by GameReplayIntegration
 
     def _record_penalty_action(self, unit, penalty_type, penalty_amount):
-        """Record penalty action for replay and analysis system."""
-        if self.save_replay:
-            penalty_data = {
-                "turn": self.current_turn,
-                "phase": self.current_phase,
-                "player": unit["player"],
-                "unit_id": unit["id"],
-                "unit_type": unit["unit_type"],
-                "penalty_type": penalty_type,
-                "penalty_amount": penalty_amount,
-                "position": [unit["col"], unit["row"]],
-                "hp": unit["cur_hp"],
-                "timestamp": datetime.now().isoformat()
-            }
-            # Add to main replay data with special marker
-            penalty_data["action_type"] = -1  # Use -1 for penalty actions to match ACTION_TYPE_MAPPING
-            penalty_data["reward"] = penalty_amount  # Also store as reward for consistent display
-            self.replay_data.append(penalty_data)
+        """DISABLED - Using GameReplayIntegration only."""
+        pass  # All replay recording handled by GameReplayIntegration
 
     def _get_info(self):
         """Get info dictionary for step return."""
@@ -1960,65 +1932,9 @@ class W40KEnv(gym.Env):
 
 
     def save_web_compatible_replay(self, filename=None):
-        if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # Get current controlled agent from environment
-            if hasattr(self, 'controlled_agent') and self.controlled_agent:
-                agent_name = self.controlled_agent
-            else:
-                agent_name = "unknown"
-                
-            # Create descriptive filename
-            #filename = f"ai/event_log/replay_{agent_name}_vs_bot_{timestamp}.json"
-            filename = f"ai/event_log/replay_{agent_name}_vs_bot.json"
-        
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        
-        # Include scenario template info if available
-        scenario_name = "phase_based_training"  # Default fallback
-        if self.scenario_metadata and "template" in self.scenario_metadata:
-            scenario_name = self.scenario_metadata["template"]
-        
-        replay_structure = {
-            "game_info": {
-                "scenario": scenario_name,
-                "ai_behavior": "phase_based_following_AI_GAME_OVERVIEW",
-                "total_turns": self.current_turn,
-                "winner": self.winner,
-                "ai_units_final": len([u for u in self.ai_units if u["alive"]]),
-                "enemy_units_final": len([u for u in self.enemy_units if u["alive"]])
-            },
-            "metadata": self.scenario_metadata if self.scenario_metadata else {},   
-            "initial_state": {
-                "units": [
-                    {
-                        "id": u["id"],
-                        "unit_type": u["unit_type"],
-                        "player": u["player"],
-                        "col": u["col"],
-                        "row": u["row"],
-                        "hp_max": u["hp_max"],
-                        "move": u["move"],
-                        "rng_rng": u["rng_rng"],
-                        "rng_dmg": u["rng_dmg"],
-                        "cc_dmg": u["cc_dmg"],
-                        "is_ranged": u["is_ranged"],
-                        "is_melee": u["is_melee"]
-                    }
-                    for u in self.units
-                ],
-                "board_size": list(self.board_size)
-            },
-            "actions": self.replay_data
-        }
-        
-        with open(filename, 'w') as f:
-            json.dump(replay_structure, f, indent=2, default=int)
-        
-        # Reduced verbosity to prevent progress bar interference
-        return filename
+        """COMPLETELY DISABLED - Using GameReplayIntegration only."""
+        print("⚠️ gym40k.save_web_compatible_replay() disabled - using GameReplayIntegration")
+        return None
 
     def render(self, mode='human'):
         """Render current state for debugging."""
@@ -2076,8 +1992,49 @@ class W40KEnv(gym.Env):
 
     def close(self):
         """Clean up environment."""
-        if self.save_replay and self.replay_data:
-            self.save_web_compatible_replay()
+        # Replay saving now handled by GameReplayIntegration
+        pass
+
+    # _generate_combat_log_from_actions removed - using GameReplayIntegration only
+
+    def _map_action_to_event_type(self, action_type):
+        """Map action_type to combat_log event_type."""
+        action_map = {
+            0: "move", 1: "move", 2: "move", 3: "move",  # Movement
+            4: "shoot",  # Shooting
+            5: "charge", # Charge
+            6: "combat", # Combat
+            7: "wait",   # Wait
+            -1: "penalty" # Penalty actions
+        }
+        return action_map.get(action_type, "unknown")
+
+    def _format_action_message(self, action_type, unit_type, unit_id):
+        """Format action message for combat log."""
+        if action_type in [0, 1, 2, 3]:
+            directions = ["north", "south", "east", "west"]
+            direction = directions[action_type] if action_type < 4 else "unknown"
+            return f"Unit {unit_type} {unit_id} moved {direction}"
+        elif action_type == 4:
+            return f"Unit {unit_type} {unit_id} fired ranged weapons"
+        elif action_type == 5:
+            return f"Unit {unit_type} {unit_id} charged into combat"
+        elif action_type == 6:
+            return f"Unit {unit_type} {unit_id} attacked in melee combat"
+        elif action_type == 7:
+            return f"Unit {unit_type} {unit_id} waited"
+        elif action_type == -1:
+            return f"Unit {unit_type} {unit_id} received penalty"
+        else:
+            return f"Unit {unit_type} {unit_id} performed unknown action"
+
+    def _get_action_name(self, action_type):
+        """Get human-readable action name."""
+        action_names = {
+            0: "move_north", 1: "move_south", 2: "move_east", 3: "move_west",
+            4: "shoot", 5: "charge", 6: "attack", 7: "wait", -1: "penalty"
+        }
+        return action_names.get(action_type, f"action_{action_type}")
 
 # Register environment with gymnasium
 def register_environment():
