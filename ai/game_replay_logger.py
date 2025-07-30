@@ -10,32 +10,50 @@ import numpy as np
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
+# Import shared message formatting functions (keeping all existing structure)
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from shared.gameLogUtils import (
+    format_shooting_message,
+    format_move_message, 
+    format_no_move_message,
+    format_combat_message,
+    format_death_message,
+    format_turn_start_message,
+    format_phase_change_message
+)
+
 def format_game_log_message(event_type: str, acting_unit: Optional[Dict], target_unit: Optional[Dict], 
                            start_hex: Optional[str] = None, end_hex: Optional[str] = None) -> str:
-    """Format game log messages exactly like useGameLog.ts frontend."""
+    """Format game log messages using shared functions to match PvP exactly."""
     
     if event_type == "death" and target_unit:
-        return f"Unit {target_unit.get('id', '?')} ({target_unit.get('unit_type', 'unknown')}) DIED !"
+        unit_type = target_unit.get('unit_type', 'unknown')
+        return format_death_message(target_unit.get('id', 0), unit_type)
     
     if event_type == "shoot" and acting_unit and target_unit:
-        return f"Unit {acting_unit.get('id', '?')} SHOT at unit {target_unit.get('id', '?')}"
+        return format_shooting_message(acting_unit.get('id', 0), target_unit.get('id', 0))
     
     if event_type == "combat" and acting_unit and target_unit:
-        return f"Unit {acting_unit.get('id', '?')} FOUGHT unit {target_unit.get('id', '?')}"
-    
-    if event_type == "charge" and acting_unit and target_unit:
-        if start_hex and end_hex:
-            return f"Unit {acting_unit.get('id', '?')} CHARGED unit {target_unit.get('id', '?')} from {start_hex} to {end_hex}"
-        else:
-            return f"Unit {acting_unit.get('id', '?')} CHARGED unit {target_unit.get('id', '?')}"
+        return format_combat_message(acting_unit.get('id', 0), target_unit.get('id', 0))
     
     if event_type == "move" and acting_unit:
         if start_hex and end_hex:
-            return f"Unit {acting_unit.get('id', '?')} MOVED from {start_hex} to {end_hex}"
+            # Extract coordinates from hex string format "(x, y)"
+            try:
+                start_coords = start_hex.strip('()').split(', ')
+                end_coords = end_hex.strip('()').split(', ')
+                start_col, start_row = int(start_coords[0]), int(start_coords[1])
+                end_col, end_row = int(end_coords[0]), int(end_coords[1])
+                return format_move_message(acting_unit.get('id', 0), start_col, start_row, end_col, end_row)
+            except:
+                # Fallback if coordinate parsing fails
+                return f"Unit {acting_unit.get('id', '?')} MOVED from {start_hex} to {end_hex}"
         else:
-            return f"Unit {acting_unit.get('id', '?')} NO MOVE"
+            return format_no_move_message(acting_unit.get('id', 0))
     
-    # Fallback for unknown event types
+    # Fallback for unknown event types (keep existing logic)
     return "Unknown action"
 
 class GameReplayLogger:
@@ -279,13 +297,71 @@ class GameReplayLogger:
         return max(abs(unit1["col"] - unit2["col"]), abs(unit1["row"] - unit2["row"]))
     
     def _update_turn_phase(self):
-        """Update turn and phase tracking."""
+        """Update turn and phase tracking with proper log entries."""
+        # Get current player before phase change
+        current_player = getattr(self.env, 'current_player', 0)
+        
         # Simple phase progression - you can make this more sophisticated
+        old_phase = self.current_phase
         self.phase_index = (self.phase_index + 1) % len(self.phases)
         self.current_phase = self.phases[self.phase_index]
         
-        if self.phase_index == 0:  # Back to move phase
+        # Generate phase change log entry
+        if not hasattr(self, 'combat_log_entries'):
+            self.combat_log_entries = []
+            
+        player_name = "Player 1" if current_player == 0 else "Player 2"
+        phase_message = format_phase_change_message(player_name, self.current_phase)
+        
+        phase_entry = {
+            "id": len(self.combat_log_entries) + 1,
+            "type": "phase_change",
+            "message": phase_message,
+            "reward": 0.0,
+            "turnNumber": self.current_turn,
+            "phase": self.current_phase,
+            "player": current_player,
+            "unitType": None,
+            "unitId": None,
+            "targetUnitType": None,
+            "targetUnitId": None,
+            "startHex": None,
+            "endHex": None,
+            "actionName": "phase_change",
+            "shootDetails": None
+        }
+        
+        self.combat_log_entries.append(phase_entry)
+        
+        # If back to move phase, increment turn and add turn start message
+        if self.phase_index == 0:  
             self.current_turn += 1
+            
+            turn_message = format_turn_start_message(self.current_turn)
+            turn_entry = {
+                "id": len(self.combat_log_entries) + 1,
+                "type": "turn_change", 
+                "message": turn_message,
+                "reward": 0.0,
+                "turnNumber": self.current_turn,
+                "phase": self.current_phase,
+                "player": None,
+                "unitType": None,
+                "unitId": None,
+                "targetUnitType": None,
+                "targetUnitId": None,
+                "startHex": None,
+                "endHex": None,
+                "actionName": "turn_change",
+                "shootDetails": None
+            }
+            
+            self.combat_log_entries.append(turn_entry)
+            
+        # Print turn/phase changes for visibility during training
+        print(f"🔄 {phase_message}")
+        if self.phase_index == 0:
+            print(f"🔄 {turn_message}")
 
     def set_training_context(self, timestep: int, episode_num: int, model_info: Dict[str, Any]):
         """Set current training context for this episode."""

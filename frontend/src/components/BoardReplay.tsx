@@ -75,6 +75,7 @@ interface ReplayData {
     board_size: [number, number];
   };
   actions: ReplayEvent[];
+  combat_log?: any[]; // Training replay combat log entries
 }
 
 // Removed ScenarioConfig interface - using BoardConfig directly
@@ -409,6 +410,27 @@ const validateUnitRegistry = () => {
         
         setReplayData(replay);
         
+        // ENFORCE: All replays must have combat_log (new format)
+        if (!replay.combat_log || !Array.isArray(replay.combat_log)) {
+          throw new Error('Invalid replay format: Missing combat_log. Please use training replays generated with the new combat log system.');
+        }
+        
+        console.log('🎯 Using combat_log format with', replay.combat_log.length, 'entries');
+        // Set the battle log directly from the training logger's combat_log
+        setBattleLog(replay.combat_log.map((entry: any) => ({
+          turn: entry.turnNumber || 1,
+          phase: entry.phase || 'move',
+          player: entry.player || 0,
+          action: {
+            type: entry.type,
+            unit_id: entry.unitId,
+            target_id: entry.targetUnitId
+          },
+          description: entry.message,
+          // Include all the training-specific data
+          ...entry
+        })));
+        
         // Process initial units with proper mapping
         if (replay.initial_state?.units) {
           const processedUnits: ReplayUnit[] = replay.initial_state.units.map((unit: any) => {
@@ -709,78 +731,17 @@ const validateUnitRegistry = () => {
         };
       });
       
-      let newBattleLog: ReplayEvent[] = [];
-      
-      // Apply actions up to current step
-      for (let i = 0; i <= currentStep && i < (replayData.actions?.length || 0); i++) {
-        const event = replayData.actions[i];
-        
-        // Apply action effects based on the actual replay format
-        if ((event as any).action_type !== undefined && (event as any).position) {
-          const actionInfo = ACTION_TYPE_MAPPING[(event as any).action_type];
-          
-        // Handle movement actions (0, 1, 2, 3)
-        if ([0, 1, 2, 3].includes((event as any).action_type)) {
-          const unit = newUnits.find(u => u.id === (event as any).unit_id);
-          if (unit && (event as any).position) {
-            
-            // Check if target position is occupied
-            const targetCol = (event as any).position[0];
-            const targetRow = (event as any).position[1];
-            const occupiedBy = newUnits.find(u => u.id !== unit.id && u.col === targetCol && u.row === targetRow && u.alive);
-            
-            if (occupiedBy) {
-              console.error(`❌ COLLISION: Unit ${unit.id} trying to move to (${targetCol},${targetRow}) occupied by unit ${occupiedBy.id}`);
-              // Don't move if position is occupied
-              return;
-            }
-            
-            unit.col = targetCol;
-            unit.row = targetRow;
-          }
-        }
-          
-          // Handle HP changes from the replay data
-          if ((event as any).hp !== undefined) {
-            const unit = newUnits.find(u => u.id === (event as any).unit_id);
-            if (unit && (event as any).hp !== unit.CUR_HP) {
-              const damage = unit.CUR_HP - (event as any).hp;
-              if (damage > 0) {
-                console.log(`💥 Unit ${unit.id} takes ${damage} damage: ${unit.CUR_HP} -> ${(event as any).hp}`);
-              }
-              unit.CUR_HP = (event as any).hp;
-              unit.cur_hp = (event as any).hp;
-              unit.hp_current = (event as any).hp;
-              if ((event as any).hp <= 0) {
-                unit.alive = false;
-                console.log(`💀 Unit ${unit.id} is killed`);
-              }
-            }
-          }
-        }
-        
-        newBattleLog.push({
-          ...event,
-          description: `${(event as any).player === 1 ? 'AI' : 'Bot'}: ${ACTION_TYPE_MAPPING[(event as any).action_type]?.name || `Action ${(event as any).action_type}`}`,
-          action: {
-            type: ACTION_TYPE_MAPPING[(event as any).action_type]?.type || 'unknown',
-            unit_id: (event as any).unit_id,
-            to_pos: (event as any).position
-          }
-        });
-      }
+      // Note: Unit state updates are handled by the training environment
+      // The combat_log contains all the display information we need
       setCurrentUnits(newUnits);
-      setBattleLog(newBattleLog);
-      setCurrentEvent(replayData.actions?.[currentStep] || null);
       
-      // Set acting unit ID for highlighting
-      const currentAction = replayData.actions?.[currentStep];
-      setActingUnitId(currentAction ? (currentAction as any).unit_id : null);
+      // Set acting unit ID from combat_log for highlighting
+      const currentLogEntry = battleLog[currentStep];
+      const currentActingUnitId = currentLogEntry ? (currentLogEntry as any).unitId : null;
+      setActingUnitId(currentActingUnitId);
       
       // Update PIXI display
       if (pixiAppRef.current) {
-        const currentAction = replayData.actions?.[currentStep];
-        const currentActingUnitId = currentAction ? (currentAction as any).unit_id : null;
         drawUnits(pixiAppRef.current, newUnits, currentActingUnitId);
       }
       
@@ -795,7 +756,7 @@ const validateUnitRegistry = () => {
     if (isPlaying && replayData) {
       intervalRef.current = setInterval(() => {
         setCurrentStep(prev => {
-          if (prev >= replayData.actions.length - 1) {
+          if (prev >= battleLog.length - 1) {
             setIsPlaying(false);
             return prev;
           }
@@ -818,14 +779,15 @@ const validateUnitRegistry = () => {
 
   // Navigation functions
   const goToStep = (step: number) => {
-    if (replayData && step >= 0 && step < replayData.actions.length) {
+    if (step >= 0 && step < battleLog.length) {
       setCurrentStep(step);
       setIsPlaying(false);
     }
   };
 
+
   const nextStep = () => {
-    if (replayData && currentStep < replayData.actions.length - 1) {
+    if (currentStep < battleLog.length - 1) {
       setCurrentStep(prev => prev + 1);
     }
   };
@@ -857,8 +819,8 @@ const validateUnitRegistry = () => {
   };
 
   const goToEnd = () => {
-    if (replayData && replayData.actions.length > 0) {
-      setCurrentStep(replayData.actions.length - 1);
+    if (battleLog.length > 0) {
+      setCurrentStep(battleLog.length - 1);
       setIsPlaying(false);
     }
   };
@@ -1060,7 +1022,7 @@ const validateUnitRegistry = () => {
         
         {/* Progress Info */}
         <div className="replay-controls__info">
-          Step {currentStep + 1} of {replayData?.actions.length || 0}
+          Step {currentStep + 1} of {battleLog.length}
         </div>
         
         {/* Progress Bar */}
@@ -1068,7 +1030,7 @@ const validateUnitRegistry = () => {
           <div
             className="replay-controls__progress-fill"
             style={{
-              width: replayData ? `${((currentStep + 1) / replayData.actions.length) * 100}%` : '0%'
+              width: battleLog.length > 0 ? `${((currentStep + 1) / battleLog.length) * 100}%` : '0%'
             }}
           />
         </div>
@@ -1172,54 +1134,55 @@ const validateUnitRegistry = () => {
             <div className="game-log__empty">No actions yet...</div>
           ) : (
             <div className="game-log__events">
-              {battleLog.slice(0, currentStep + 1).reverse().map((event, reverseIndex) => {
-                const originalIndex = currentStep - reverseIndex;
+              {battleLog.slice().reverse().map((event, reverseIndex) => {
+                const originalIndex = battleLog.length - 1 - reverseIndex;
                 const rawEvent = event as any;
                 
+                // Only new format (combat_log) is supported
+                const eventType = rawEvent.type;
+                
                 // Determine event type for proper icon and styling
-                const getEventIcon = (actionType: number): string => {
-                  const iconMap: Record<number, string> = {
-                    0: '👟', // Move North
-                    1: '👟', // Move South  
-                    2: '👟', // Move East
-                    3: '👟', // Move West
-                    4: '🎯', // Ranged Attack
-                    5: '⚡', // Charge Enemy
-                    6: '⚔️', // Melee Attack
-                    7: '⏸️', // Wait/End turn
+                const getEventIcon = (eventType: string): string => {
+                  const iconMap: Record<string, string> = {
+                    'move': '👟',
+                    'shoot': '🎯', 
+                    'charge': '⚡',
+                    'combat': '⚔️',
+                    'death': '💀',
+                    'turn_change': '🔄',
+                    'phase_change': '📋'
                   };
-                  return iconMap[actionType] || '📝';
+                  return iconMap[eventType] || '📝';
                 };
                 
-                const getEventTypeClass = (actionType: number): string => {
-                  const classMap: Record<number, string> = {
-                    0: 'game-log-entry--move',
-                    1: 'game-log-entry--move',
-                    2: 'game-log-entry--move',
-                    3: 'game-log-entry--move',
-                    4: 'game-log-entry--shoot',
-                    5: 'game-log-entry--charge',
-                    6: 'game-log-entry--combat',
-                    7: 'game-log-entry--phase',
+                const getEventTypeClass = (eventType: string): string => {
+                  const classMap: Record<string, string> = {
+                    'move': 'game-log-entry--move',
+                    'shoot': 'game-log-entry--shoot',
+                    'charge': 'game-log-entry--charge', 
+                    'combat': 'game-log-entry--combat',
+                    'death': 'game-log-entry--death',
+                    'turn_change': 'game-log-entry--turn',
+                    'phase_change': 'game-log-entry--phase'
                   };
-                  return classMap[actionType] || 'game-log-entry--default';
+                  return classMap[eventType] || 'game-log-entry--default';
                 };
                 
                 return (
                   <div 
                     key={originalIndex}
-                    className={`game-log-entry ${getEventTypeClass(rawEvent.action_type)} ${originalIndex === currentStep ? 'game-log-entry--active' : ''}`}
+                    className={`game-log-entry ${getEventTypeClass(eventType)} ${originalIndex === currentStep ? 'game-log-entry--active' : ''}`}
                     onClick={() => setCurrentStep(originalIndex)}
                     style={{ cursor: 'pointer' }}
                   >
                     <div className="game-log-entry__single-line">
-                      <span className="game-log-entry__icon">{getEventIcon(rawEvent.action_type)}</span>
-                      <span className="game-log-entry__turn">T{event.turn}</span>
-                      <span className={`game-log-entry__player ${event.player === 0 ? 'game-log-entry__player--blue' : 'game-log-entry__player--red'}`}>
-                        P{event.player}
+                      <span className="game-log-entry__icon">{getEventIcon(eventType)}</span>
+                      <span className="game-log-entry__turn">T{rawEvent.turnNumber || event.turn}</span>
+                      <span className={`game-log-entry__player ${(rawEvent.player || event.player) === 0 ? 'game-log-entry__player--blue' : 'game-log-entry__player--red'}`}>
+                        P{rawEvent.player || event.player}
                       </span>
                       <span className="game-log-entry__message">
-                        {event.description || `${ACTION_TYPE_MAPPING[rawEvent.action_type]?.name || `Action ${rawEvent.action_type}`} by unit ${rawEvent.unit_id}`}
+                        {rawEvent.message}
                       </span>
                       <span className="game-log-entry__reward">
                         {(rawEvent.reward !== undefined) ? (
@@ -1233,7 +1196,7 @@ const validateUnitRegistry = () => {
                         )}
                       </span>
                       <span style={{ fontSize: '11px', color: '#888', marginLeft: '8px' }}>
-                        {ACTION_TYPE_MAPPING[rawEvent.action_type]?.name || `action_${rawEvent.action_type}`}
+                        {rawEvent.actionName || eventType}
                       </span>
                     </div>
                   </div>
