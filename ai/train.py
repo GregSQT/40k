@@ -536,10 +536,26 @@ def main():
             print("\n" + "=" * 70)
             test_trained_model(model, args.test_episodes)
             
+            # Save training replay with our unified system
+            if hasattr(env, 'replay_logger'):
+                from ai.game_replay_logger import GameReplayIntegration
+                final_reward = 0.0  # Average reward from testing
+                replay_file = GameReplayIntegration.save_episode_replay(
+                    env, 
+                    episode_reward=final_reward, 
+                    output_dir="ai/event_log", 
+                    is_best=False
+                )
+                if replay_file:
+                    print(f"💾 Training replay saved: {replay_file}")
+                else:
+                    print("⚠️ No replay data to save")
+            
             print("\n🎯 Training Complete!")
             print(f"Model saved to: {model_path}")
             print(f"Monitor tensorboard: tensorboard --logdir ./tensorboard/")
             print(f"Test model: python ai/train.py --test-only")
+            print(f"View replay: Load replay file in frontend")
             
             return 0
         else:
