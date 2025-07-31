@@ -127,14 +127,16 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
                     {(event.type === 'shoot' || event.type === 'combat') && event.shootDetails && (
                       <span className="game-log-entry__shoot-inline">
                         {event.shootDetails.map((shot, index) => {
-                          let shotText = ` - Shot ${shot.shotNumber}: Hit (${shot.hitTarget || 3}+) ${shot.attackRoll}: ${shot.hitResult === 'HIT' ? 'Success!' : 'Failed!'}`;
+                          let shotText = ` - Shot ${shot.shotNumber}: Hit (${shot.hitTarget}+) ${shot.attackRoll}: ${shot.hitResult === 'HIT' ? 'Success!' : 'Failed!'}`;
                           
-                          if (shot.hitResult === 'HIT' && shot.strengthRoll) {
-                            shotText += ` - Wound (${shot.woundTarget || 4}+) ${shot.strengthRoll}: ${shot.strengthResult === 'SUCCESS' ? 'Success!' : 'Failed!'}`;
+                          // Show wound roll if we have wound target data
+                          if (shot.woundTarget && shot.woundTarget > 0) {
+                            shotText += ` - Wound (${shot.woundTarget}+) ${shot.strengthRoll}: ${shot.strengthResult === 'SUCCESS' ? 'Success!' : 'Failed!'}`;
                           }
                           
-                          if (shot.hitResult === 'HIT' && shot.strengthResult === 'SUCCESS' && shot.saveRoll) {
-                            shotText += ` - Armor (${shot.saveTarget || 4}+) ${shot.saveRoll}: ${shot.saveSuccess ? 'Success!' : 'Failed!'} : -${shot.damageDealt || 0} HP`;
+                          // Show save roll if we have save target data  
+                          if (shot.saveTarget && shot.saveTarget > 0) {
+                            shotText += ` - Armor (${shot.saveTarget}+) ${shot.saveRoll}: ${shot.saveSuccess ? 'Success!' : 'Failed!'} : -${shot.damageDealt} HP`;
                           }
                           
                           return (

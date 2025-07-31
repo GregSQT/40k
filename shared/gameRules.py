@@ -71,7 +71,7 @@ def calculate_save_target(armor_save: int, invul_save: int, armor_penetration: i
 # === SHOOTING SYSTEM (EXACT from frontend implementation) ===
 
 def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], target_in_cover: bool = False) -> Dict[str, Any]:
-    """Execute complete shooting sequence (EXACT from frontend logic)."""
+    """Execute complete shooting sequence with individual shot tracking."""
     
     # Validate required shooter stats
     if "rng_nb" not in shooter:
@@ -98,6 +98,7 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
     hits = 0
     wounds = 0
     failed_saves = 0
+    shot_details = []
     
     # Process each shot
     for shot in range(1, number_of_shots + 1):
@@ -106,7 +107,22 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
         hit_target = shooter["rng_atk"]
         did_hit = hit_roll >= hit_target
         
+        # Initialize shot record
+        shot_record = {
+            "hit_roll": hit_roll,
+            "hit_target": hit_target,
+            "hit": did_hit,
+            "wound_roll": 0,
+            "wound_target": 0,
+            "wound": False,
+            "save_roll": 0,
+            "save_target": 0,
+            "save_success": False,
+            "damage": 0
+        }
+        
         if not did_hit:
+            shot_details.append(shot_record)
             continue  # Miss - next shot
         hits += 1
         
@@ -115,7 +131,14 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
         wound_target = calculate_wound_target(shooter["rng_str"], target["t"])
         did_wound = wound_roll >= wound_target
         
+        shot_record.update({
+            "wound_roll": wound_roll,
+            "wound_target": wound_target,
+            "wound": did_wound
+        })
+        
         if not did_wound:
+            shot_details.append(shot_record)
             continue  # Failed to wound - next shot
         wounds += 1
         
@@ -124,12 +147,23 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
         save_target = calculate_save_target(target["armor_save"], target["invul_save"], shooter["rng_ap"])
         saved_wound = save_roll >= save_target
         
+        shot_record.update({
+            "save_roll": save_roll,
+            "save_target": save_target,
+            "save_success": saved_wound
+        })
+        
         if saved_wound:
+            shot_details.append(shot_record)
             continue  # Save successful - next shot
         failed_saves += 1
         
         # Inflict damage
-        total_damage += shooter["rng_dmg"]
+        damage_dealt = shooter["rng_dmg"]
+        total_damage += damage_dealt
+        shot_record["damage"] = damage_dealt
+        
+        shot_details.append(shot_record)
     
     return {
         "totalDamage": total_damage,
@@ -138,7 +172,8 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
             "hits": hits,
             "wounds": wounds,
             "failedSaves": failed_saves
-        }
+        },
+        "shots": shot_details  # Individual shot details for logging
     }
     # Step 1: Number of shots
     if "rng_nb" not in shooter:

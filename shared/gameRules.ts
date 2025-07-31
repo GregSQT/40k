@@ -118,6 +118,30 @@ export interface ShootingResult {
   };
 }
 
+export interface ShotDetail {
+  hit_roll: number;
+  hit_target: number;
+  hit: boolean;
+  wound_roll: number;
+  wound_target: number;
+  wound: boolean;
+  save_roll: number;
+  save_target: number;
+  save_success: boolean;
+  damage: number;
+}
+
+export interface ShootingResult {
+  totalDamage: number;
+  summary: {
+    totalShots: number;
+    hits: number;
+    wounds: number;
+    failedSaves: number;
+  };
+  shots?: ShotDetail[]; // Individual shot details for logging
+}
+
 export function executeShootingSequence(shooter: any, target: any, targetInCover: boolean = false): ShootingResult {
   // Step 1: Number of shots
   if (shooter.RNG_NB === undefined) {
@@ -129,11 +153,10 @@ export function executeShootingSequence(shooter: any, target: any, targetInCover
   let hits = 0;
   let wounds = 0;
   let failedSaves = 0;
+  const shotDetails: ShotDetail[] = [];
 
   // Process each shot
   for (let shot = 1; shot <= numberOfShots; shot++) {
-    // Step 2: Range check (already validated before calling)
-    
     // Step 3: Hit roll
     const hitRoll = rollD6();
     if (shooter.RNG_ATK === undefined) {
@@ -142,7 +165,24 @@ export function executeShootingSequence(shooter: any, target: any, targetInCover
     const hitTarget = shooter.RNG_ATK;
     const didHit = hitRoll >= hitTarget;
     
-    if (!didHit) continue; // Miss - next shot
+    // Initialize shot record
+    const shotRecord: ShotDetail = {
+      hit_roll: hitRoll,
+      hit_target: hitTarget,
+      hit: didHit,
+      wound_roll: 0,
+      wound_target: 0,
+      wound: false,
+      save_roll: 0,
+      save_target: 0,
+      save_success: false,
+      damage: 0
+    };
+    
+    if (!didHit) {
+      shotDetails.push(shotRecord);
+      continue; // Miss - next shot
+    }
     hits++;
     
     // Step 4: Wound roll  
@@ -156,7 +196,14 @@ export function executeShootingSequence(shooter: any, target: any, targetInCover
     const woundTarget = calculateWoundTarget(shooter.RNG_STR, target.T);
     const didWound = woundRoll >= woundTarget;
     
-    if (!didWound) continue; // Failed to wound - next shot
+    shotRecord.wound_roll = woundRoll;
+    shotRecord.wound_target = woundTarget;
+    shotRecord.wound = didWound;
+    
+    if (!didWound) {
+      shotDetails.push(shotRecord);
+      continue; // Failed to wound - next shot
+    }
     wounds++;
     
     // Step 5: Armor save (with cover bonus)
@@ -178,14 +225,25 @@ export function executeShootingSequence(shooter: any, target: any, targetInCover
     );
     const savedWound = saveRoll >= saveTarget;
     
-    if (savedWound) continue; // Save successful - next shot
+    shotRecord.save_roll = saveRoll;
+    shotRecord.save_target = saveTarget;
+    shotRecord.save_success = savedWound;
+    
+    if (savedWound) {
+      shotDetails.push(shotRecord);
+      continue; // Save successful - next shot
+    }
     failedSaves++;
     
     // Step 6: Inflict damage
     if (shooter.RNG_DMG === undefined) {
       throw new Error('shooter.RNG_DMG is required');
     }
-    totalDamage += shooter.RNG_DMG;
+    const damage = shooter.RNG_DMG;
+    totalDamage += damage;
+    shotRecord.damage = damage;
+    
+    shotDetails.push(shotRecord);
   }
 
   return {
@@ -195,7 +253,8 @@ export function executeShootingSequence(shooter: any, target: any, targetInCover
       hits,
       wounds,
       failedSaves
-    }
+    },
+    shots: shotDetails
   };
 }
 

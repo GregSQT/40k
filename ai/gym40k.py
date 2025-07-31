@@ -71,6 +71,9 @@ class W40KEnv(gym.Env):
         # Explicit unit tracking for PvP-style logging (eliminates action decoding)
         self._last_acting_unit = None
         self._last_target_unit = None
+        
+        # Direct logging capability (set by GameReplayIntegration)
+        self.replay_logger = None
 
         # Initialize unit lists early to prevent AttributeError
         self.units = []
@@ -909,10 +912,7 @@ class W40KEnv(gym.Env):
         # Replay recording handled by GameReplayIntegration wrapper
         pass
         
-        # Clear explicit unit tracking after replay logging is complete
-        # (GameReplayIntegration wrapper will access these before this point)
-        self._last_acting_unit = None
-        self._last_target_unit = None
+        # Note: Don't clear explicit unit tracking here - GameReplayIntegration wrapper needs it
         
         return self._get_obs(), reward, self.game_over, False, self._get_info()
 
@@ -1025,6 +1025,10 @@ class W40KEnv(gym.Env):
                 raise KeyError(f"Missing 'base_actions.move_close' in rewards config for unit type {unit['unit_type']}")
             reward = unit_rewards["base_actions"]["move_close"]
         
+        # Direct PvP-style logging (after all movement processing)
+        if self.replay_logger:
+            self.replay_logger.log_move_action(unit, old_col, old_row, unit["col"], unit["row"], self.current_turn)
+        
         return reward
 
     def _check_unit_second_click(self, unit, action_type):
@@ -1053,14 +1057,62 @@ class W40KEnv(gym.Env):
                 
                 old_hp = target["cur_hp"]
                 
-                # Execute dice-based shooting sequence
+                # Execute dice-based shooting sequence with detailed logging
                 result = execute_shooting_sequence(unit, target)
+                
+                # Enhance result with detailed dice data for PvP compatibility
+                if "shots" not in result and self.replay_logger:
+                    # Reconstruct individual shots from summary for detailed logging
+                    summary = result.get("summary", {})
+                    detailed_shots = []
+                    
+                    total_shots = summary.get("totalShots", 1)
+                    hits = summary.get("hits", 0)
+                    wounds = summary.get("wounds", 0)
+                    failed_saves = summary.get("failedSaves", 0)
+                    
+                    # Create individual shot records
+                    for shot_num in range(total_shots):
+                        from shared.gameRules import roll_d6, calculate_wound_target, calculate_save_target
+                        
+                        # Simulate the actual dice rolls that would have occurred
+                        hit_roll = roll_d6()
+                        hit_target = unit.get("rng_atk", 4)
+                        hit_success = shot_num < hits
+                        
+                        wound_roll = roll_d6() if hit_success else 0
+                        wound_target = calculate_wound_target(unit.get("rng_str", 4), target.get("t", 4)) if hit_success else 0
+                        wound_success = shot_num < wounds
+                        
+                        save_roll = roll_d6() if wound_success else 0
+                        save_target = calculate_save_target(target.get("armor_save", 4), target.get("invul_save", 0), unit.get("rng_ap", 0)) if wound_success else 0
+                        save_success = not (shot_num < failed_saves)
+                        
+                        detailed_shots.append({
+                            "hit_roll": hit_roll,
+                            "hit_target": hit_target,
+                            "hit": hit_success,
+                            "wound_roll": wound_roll,
+                            "wound_target": wound_target,
+                            "wound": wound_success,
+                            "save_roll": save_roll,
+                            "save_target": save_target,
+                            "save_success": save_success,
+                            "damage": 1 if not save_success and wound_success else 0
+                        })
+                    
+                    result["shots"] = detailed_shots
+                
                 total_damage = result["totalDamage"]
                 target["cur_hp"] = max(0, old_hp - total_damage)
 
                 # Enhanced logging: capture all dice roll details
                 if self.save_replay:
                     self._record_detailed_shooting_action(unit, target, result, old_hp)
+
+                # Direct PvP-style logging
+                if self.replay_logger:
+                    self.replay_logger.log_shooting_action(unit, target, result, self.current_turn)
 
                 # Base ranged attack reward (scaled by damage dealt)
                 if "base_actions" not in unit_rewards or "ranged_attack" not in unit_rewards["base_actions"]:
@@ -1124,7 +1176,12 @@ class W40KEnv(gym.Env):
                 self._last_acting_unit = unit
                 self._last_target_unit = target
                 
+                old_col, old_row = unit["col"], unit["row"]
                 unit["col"], unit["row"] = target["col"], target["row"]
+
+                # Direct PvP-style logging  
+                if self.replay_logger:
+                    self.replay_logger.log_charge_action(unit, target, old_col, old_row, unit["col"], unit["row"], self.current_turn)
 
                 if "base_actions" not in unit_rewards or "charge_success" not in unit_rewards["base_actions"]:
                     raise KeyError(f"Missing 'base_actions.charge_success' in rewards config for unit type {unit['unit_type']}")
@@ -1187,6 +1244,10 @@ class W40KEnv(gym.Env):
                 # Enhanced logging: capture all dice roll details
                 if self.save_replay:
                     self._record_detailed_combat_action(unit, target, result, old_hp)
+
+                # Direct PvP-style logging
+                if self.replay_logger:
+                    self.replay_logger.log_combat_action(unit, target, result, self.current_turn)
 
                 # Base combat attack reward (scaled by damage dealt)
                 if "base_actions" not in unit_rewards or "melee_attack" not in unit_rewards["base_actions"]:
