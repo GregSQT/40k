@@ -38,10 +38,12 @@ else:
 ######################################################################################################
 
     ### ai
+        "ai/agent.py",
         "ai/evaluate.py",
         "ai/game_replay_logger.py",
         "ai/gym40k.py",
         "ai/multi_agent_trainer.py",
+        "ai/reward_mapper.py",
         "ai/scenario.json",
         "ai/scenario_manager.py",
         "ai/train.py",

@@ -34,7 +34,9 @@ def decode_action(env, obs, action):
     # Check if unit_idx is valid
     if unit_idx < len(eligible_units):
         unit = eligible_units[unit_idx]
-        is_ranged = unit.get("rng_rng", 0) > 1  # Ranged if shooting range > 1
+        if "rng_rng" not in unit:
+            raise ValueError(f"unit.rng_rng is required for unit {unit.get('name', 'unknown')}")
+        is_ranged = unit["rng_rng"] > 1  # Ranged if shooting range > 1
     else:
         is_ranged = False  # Invalid unit index
 

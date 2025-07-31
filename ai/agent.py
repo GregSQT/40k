@@ -16,15 +16,21 @@ class RLAgent:
         # Example: Flatten a list of unit attributes (pad to N units)
         obs = []
         for u in units:
+            # Validate required unit data before processing - no fallback defaults
+            required_fields = ["player", "col", "row", "CUR_HP", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG"]
+            for field in required_fields:
+                if field not in u:
+                    raise ValueError(f"Unit missing required field {field}: {u.get('name', 'unknown')}")
+
             obs.extend([
-                u.get("player", 0), 
-                u.get("col", 0), 
-                u.get("row", 0), 
-                u.get("CUR_HP", 0),
-                u.get("MOVE", 0),
-                u.get("RNG_RNG", 0), 
-                u.get("RNG_DMG", 0), 
-                u.get("CC_DMG", 0)
+                u["player"], 
+                u["col"], 
+                u["row"], 
+                u["CUR_HP"],
+                u["MOVE"],
+                u["RNG_RNG"], 
+                u["RNG_DMG"], 
+                u["CC_DMG"]
             ])
         while len(obs) < 7 * 10:  # pad for 10 units
             obs.append(0)
@@ -42,7 +48,9 @@ class RLAgent:
 
         # Find all legal positions (including not moving)
         positions = []
-        move_range = unit.get("MOVE", 1)
+        if "MOVE" not in unit:
+            raise ValueError(f"unit.MOVE is required for unit {unit.get('name', 'unknown')}")
+        move_range = unit["MOVE"]
         start = (unit["col"], unit["row"])
         for dx in range(-move_range, move_range + 1):
             for dy in range(-move_range, move_range + 1):
@@ -63,7 +71,9 @@ class RLAgent:
             for u in state["units"]
             if u["player"] != unit["player"]
         ]
-        rng_rng = unit.get("RNG_RNG", 1)
+        if "RNG_RNG" not in unit:
+            raise ValueError(f"unit.RNG_RNG is required for unit {unit.get('name', 'unknown')}")
+        rng_rng = unit["RNG_RNG"]
         best_pos = (unit["col"], unit["row"])
         best_error = float('inf')
 
@@ -90,7 +100,9 @@ class RLAgent:
 
         # Find all legal positions (including not moving)
         positions = []
-        move_range = unit.get("MOVE", 1)
+        if "MOVE" not in unit:
+            raise ValueError(f"unit.MOVE is required for unit {unit.get('name', 'unknown')}")
+        move_range = unit["MOVE"]
         start = (unit["col"], unit["row"])
         for dx in range(-move_range, move_range + 1):
             for dy in range(-move_range, move_range + 1):
@@ -110,7 +122,10 @@ class RLAgent:
         if not enemy_units:
             return (unit["col"], unit["row"])
         # Find enemy with the lowest HP
-        target_enemy = min(enemy_units, key=lambda u: u.get("CUR_HP", 9999))
+        for u in enemy_units:
+            if "CUR_HP" not in u:
+                raise ValueError(f"enemy.CUR_HP is required for unit {u.get('name', 'unknown')}")
+        target_enemy = min(enemy_units, key=lambda u: u["CUR_HP"])
         target_pos = (target_enemy["col"], target_enemy["row"])
 
         # For each possible move, score by distance to lowest HP enemy
@@ -121,7 +136,9 @@ class RLAgent:
             # Check: Is this cell out of ALL enemy charge ranges?
             safe = True
             for e in enemy_units:
-                charge_range = e.get("MOVE", 1)  # Assuming MOVE=charge range for all
+                if "MOVE" not in e:
+                    raise ValueError(f"enemy.MOVE is required for unit {e.get('name', 'unknown')}")
+                charge_range = e["MOVE"]  # Assuming MOVE=charge range for all
                 if chebyshev_dist(pos, (e["col"], e["row"])) <= charge_range:
                     safe = False
                     break
@@ -140,7 +157,10 @@ class RLAgent:
         action_idx, _ = self.model.predict(obs, deterministic=True)
         if action_idx == 43:
             units = state_dict["units"]
-            my_units = [u for u in units if u.get("player", 0) == 1]
+            for u in units:
+                if "player" not in u:
+                    raise ValueError(f"unit.player is required for unit {u.get('name', 'unknown')}")
+            my_units = [u for u in units if u["player"] == 1]
             if my_units:
                 unit = my_units[0]
                 new_col, new_row = self.moveToRngRng(unit, state_dict)

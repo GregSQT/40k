@@ -32,8 +32,14 @@ class RewardMapper:
         base_reward = unit_rewards.get("ranged_attack", 1.0)
         
         # Calculate target threat score (highest RNG_DMG or CC_DMG)
-        target_threat = max(target.get("rng_dmg", 0), target.get("cc_dmg", 0))
-        can_kill_1_phase = target["cur_hp"] <= unit.get("rng_dmg", 0)
+        if "rng_dmg" not in target:
+            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+        if "cc_dmg" not in target:
+            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+        target_threat = max(target["rng_dmg"], target["cc_dmg"])
+        if "rng_dmg" not in unit:
+            raise ValueError(f"unit.rng_dmg is required for unit {unit.get('name', 'unknown')}")
+        can_kill_1_phase = target["cur_hp"] <= unit["rng_dmg"]
         
         # Priority 1: High threat target that melee can charge but won't kill in 1 melee phase
         if can_melee_charge_target:
@@ -67,9 +73,15 @@ class RewardMapper:
         """
         unit_rewards = self._get_unit_rewards(unit)
         base_reward = unit_rewards.get("charge_success", 1.5)
-        
-        target_threat = max(target.get("rng_dmg", 0), target.get("cc_dmg", 0))
-        can_kill_1_phase = target["cur_hp"] <= unit.get("cc_dmg", 0)
+
+        if "rng_dmg" not in target:
+            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+        if "cc_dmg" not in target:
+            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+        target_threat = max(target["rng_dmg"], target["cc_dmg"])
+        if "cc_dmg" not in unit:
+            raise ValueError(f"unit.cc_dmg is required for unit {unit.get('name', 'unknown')}")
+        can_kill_1_phase = target["cur_hp"] <= unit["cc_dmg"]
         
         if unit.get("is_melee", True):  # Melee unit charge priorities
             # Priority 1: Can kill in 1 melee phase
@@ -77,7 +89,7 @@ class RewardMapper:
                 return base_reward + unit_rewards.get("charge_priority_1", 2.0)
             
             # Priority 2: High threat, low HP, HP >= unit's damage
-            if (target["cur_hp"] >= unit.get("cc_dmg", 0) and 
+            if (target["cur_hp"] >= unit["cc_dmg"] and 
                 self._is_highest_threat_in_range(target, all_targets) and
                 self._is_lowest_hp_among_threats(target, all_targets)):
                 return base_reward + unit_rewards.get("charge_priority_2", 1.5)
@@ -104,9 +116,11 @@ class RewardMapper:
         """
         unit_rewards = self._get_unit_rewards(unit)
         base_reward = unit_rewards.get("attack", 1.0)
-        
-        can_kill_1_phase = target["cur_hp"] <= unit.get("cc_dmg", 0)
-        
+
+        if "cc_dmg" not in unit:
+            raise ValueError(f"unit.cc_dmg is required for unit {unit.get('name', 'unknown')}")
+        can_kill_1_phase = target["cur_hp"] <= unit["cc_dmg"]
+
         # Priority 1: Can kill in 1 melee phase with highest threat
         if can_kill_1_phase and self._is_highest_threat_adjacent(target, all_targets):
             return base_reward + unit_rewards.get("attack_priority_1", 2.0)
@@ -182,32 +196,51 @@ class RewardMapper:
     
     def _is_highest_threat_in_range(self, target, all_targets):
         """Check if target has highest threat score among all targets in range."""
-        target_threat = max(target.get("rng_dmg", 0), target.get("cc_dmg", 0))
+        if "rng_dmg" not in target:
+            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+        if "cc_dmg" not in target:
+            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+        target_threat = max(target["rng_dmg"], target["cc_dmg"])
         for other in all_targets:
             if other != target:
-                other_threat = max(other.get("rng_dmg", 0), other.get("cc_dmg", 0))
+                if "rng_dmg" not in other or "cc_dmg" not in other:
+                    raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
+                other_threat = max(other["rng_dmg"], other["cc_dmg"])
                 if other_threat > target_threat:
                     return False
         return True
     
     def _is_highest_threat_adjacent(self, target, adjacent_targets):
         """Check if target has highest threat score among adjacent targets."""
-        target_threat = max(target.get("rng_dmg", 0), target.get("cc_dmg", 0))
+        if "rng_dmg" not in target:
+            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+        if "cc_dmg" not in target:
+            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+        target_threat = max(target["rng_dmg"], target["cc_dmg"])
         for other in adjacent_targets:
             if other != target:
-                other_threat = max(other.get("rng_dmg", 0), other.get("cc_dmg", 0))
+                if "rng_dmg" not in other or "cc_dmg" not in other:
+                    raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
+                other_threat = max(other["rng_dmg"], other["cc_dmg"])
                 if other_threat > target_threat:
                     return False
         return True
     
     def _is_lowest_hp_high_threat(self, target, all_targets):
         """Check if target has lowest HP among high threat targets."""
-        target_threat = max(target.get("rng_dmg", 0), target.get("cc_dmg", 0))
-        max_threat = max(max(t.get("rng_dmg", 0), t.get("cc_dmg", 0)) for t in all_targets)
+        if "rng_dmg" not in target:
+            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+        if "cc_dmg" not in target:
+            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+        target_threat = max(target["rng_dmg"], target["cc_dmg"])
+        max_threat = max(max(t["rng_dmg"], t["cc_dmg"]) for t in all_targets 
+                        if "rng_dmg" in t and "cc_dmg" in t)
         
         if target_threat == max_threat:
             for other in all_targets:
-                other_threat = max(other.get("rng_dmg", 0), other.get("cc_dmg", 0))
+                if "rng_dmg" not in other or "cc_dmg" not in other:
+                    raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
+                other_threat = max(other["rng_dmg"], other["cc_dmg"])
                 if other_threat == max_threat and other["cur_hp"] < target["cur_hp"]:
                     return False
             return True
@@ -215,28 +248,46 @@ class RewardMapper:
     
     def _is_lowest_hp_among_threats(self, target, all_targets):
         """Check if target has lowest HP among targets of same threat level.""" 
-        target_threat = max(target.get("rng_dmg", 0), target.get("cc_dmg", 0))
+        if "rng_dmg" not in target:
+            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+        if "cc_dmg" not in target:
+            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+        target_threat = max(target["rng_dmg"], target["cc_dmg"])
         for other in all_targets:
-            other_threat = max(other.get("rng_dmg", 0), other.get("cc_dmg", 0))
+            if "rng_dmg" not in other or "cc_dmg" not in other:
+                raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
+            other_threat = max(other["rng_dmg"], other["cc_dmg"])
             if other_threat == target_threat and other["cur_hp"] < target["cur_hp"]:
                 return False
         return True
     
     def _is_highest_hp_among_threats(self, target, all_targets):
         """Check if target has highest HP among targets of same threat level."""
-        target_threat = max(target.get("rng_dmg", 0), target.get("cc_dmg", 0))
+        if "rng_dmg" not in target:
+            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+        if "cc_dmg" not in target:
+            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+        target_threat = max(target["rng_dmg"], target["cc_dmg"])
         for other in all_targets:
-            other_threat = max(other.get("rng_dmg", 0), other.get("cc_dmg", 0))
+            if "rng_dmg" not in other or "cc_dmg" not in other:
+                raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
+            other_threat = max(other["rng_dmg"], other["cc_dmg"])
             if other_threat == target_threat and other["cur_hp"] > target["cur_hp"]:
                 return False
         return True
     
     def _is_lowest_hp_among_adjacent_threats(self, target, adjacent_targets):
         """Check if target has lowest HP among adjacent targets of same threat level."""
-        target_threat = max(target.get("rng_dmg", 0), target.get("cc_dmg", 0))
+        if "rng_dmg" not in target:
+            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+        if "cc_dmg" not in target:
+            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+        target_threat = max(target["rng_dmg"], target["cc_dmg"])
         for other in adjacent_targets:
             if other != target:
-                other_threat = max(other.get("rng_dmg", 0), other.get("cc_dmg", 0))
+                if "rng_dmg" not in other or "cc_dmg" not in other:
+                    raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
+                other_threat = max(other["rng_dmg"], other["cc_dmg"])
                 if other_threat == target_threat and other["cur_hp"] < target["cur_hp"]:
                     return False
         return True
@@ -244,8 +295,8 @@ class RewardMapper:
     def _get_max_melee_damage_vs_target(self, target):
         """Get maximum melee damage our units can do to target.""" 
         # This would need access to friendly units list
-        # For now, return a reasonable default
-        return 2  # Typical melee damage
+        # Throw error instead of using default - no fallbacks allowed
+        raise NotImplementedError("_get_max_melee_damage_vs_target requires access to friendly units list - no fallback defaults allowed")
     
     def _get_current_phase(self):
         """Get current game phase."""

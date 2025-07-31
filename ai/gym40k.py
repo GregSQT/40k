@@ -731,11 +731,11 @@ class W40KEnv(gym.Env):
                 "name": shooter.get("name", f"Unit_{shooter['id']}"),
                 "position": {"col": shooter["col"], "row": shooter["row"]},
                 "stats": {
-                    "rng_nb": shooter.get("rng_nb", 1),
-                    "rng_atk": shooter.get("rng_atk", 4),
-                    "rng_str": shooter.get("rng_str", 4),
-                    "rng_ap": shooter.get("rng_ap", 0),
-                    "rng_dmg": shooter.get("rng_dmg", 1)
+                    "rng_nb": shooter["rng_nb"] if "rng_nb" in shooter else None,
+                    "rng_atk": shooter["rng_atk"] if "rng_atk" in shooter else None,
+                    "rng_str": shooter["rng_str"] if "rng_str" in shooter else None,
+                    "rng_ap": shooter["rng_ap"] if "rng_ap" in shooter else None,
+                    "rng_dmg": shooter["rng_dmg"] if "rng_dmg" in shooter else None
                 }
             },
             "target": {
@@ -743,9 +743,9 @@ class W40KEnv(gym.Env):
                 "name": target.get("name", f"Unit_{target['id']}"),
                 "position": {"col": target["col"], "row": target["row"]},
                 "stats": {
-                    "t": target.get("t", 4),
-                    "armor_save": target.get("armor_save", 4),
-                    "invul_save": target.get("invul_save", 0)
+                    "t": target["t"] if "t" in target else None,
+                    "armor_save": target["armor_save"] if "armor_save" in target else None,
+                    "invul_save": target["invul_save"] if "invul_save" in target else None
                 },
                 "hp_before": old_hp,
                 "hp_after": target["cur_hp"]
@@ -770,11 +770,11 @@ class W40KEnv(gym.Env):
                 "name": attacker.get("name", f"Unit_{attacker['id']}"),
                 "position": {"col": attacker["col"], "row": attacker["row"]},
                 "stats": {
-                    "cc_nb": attacker.get("cc_nb", 1),
-                    "cc_atk": attacker.get("cc_atk", 4),
-                    "cc_str": attacker.get("cc_str", 4),
-                    "cc_ap": attacker.get("cc_ap", 0),
-                    "cc_dmg": attacker.get("cc_dmg", 1)
+                    "cc_nb": attacker["cc_nb"] if "cc_nb" in attacker else None,
+                    "cc_atk": attacker["cc_atk"] if "cc_atk" in attacker else None,
+                    "cc_str": attacker["cc_str"] if "cc_str" in attacker else None,
+                    "cc_ap": attacker["cc_ap"] if "cc_ap" in attacker else None,
+                    "cc_dmg": attacker["cc_dmg"] if "cc_dmg" in attacker else None
                 }
             },
             "target": {
@@ -782,9 +782,9 @@ class W40KEnv(gym.Env):
                 "name": target.get("name", f"Unit_{target['id']}"),
                 "position": {"col": target["col"], "row": target["row"]},
                 "stats": {
-                    "t": target.get("t", 4),
-                    "armor_save": target.get("armor_save", 4),
-                    "invul_save": target.get("invul_save", 0)
+                    "t": target["t"] if "t" in target else None,
+                    "armor_save": target["armor_save"] if "armor_save" in target else None,
+                    "invul_save": target["invul_save"] if "invul_save" in target else None
                 },
                 "hp_before": old_hp,
                 "hp_after": target["cur_hp"]
@@ -1063,13 +1063,24 @@ class W40KEnv(gym.Env):
                 # Enhance result with detailed dice data for PvP compatibility
                 if "shots" not in result and self.replay_logger:
                     # Reconstruct individual shots from summary for detailed logging
-                    summary = result.get("summary", {})
+                    if "summary" not in result:
+                        raise ValueError("result.summary is required for detailed shot reconstruction")
+                    summary = result["summary"]
                     detailed_shots = []
                     
-                    total_shots = summary.get("totalShots", 1)
-                    hits = summary.get("hits", 0)
-                    wounds = summary.get("wounds", 0)
-                    failed_saves = summary.get("failedSaves", 0)
+                    if "totalShots" not in summary:
+                        raise ValueError("summary.totalShots is required for shot reconstruction")
+                    if "hits" not in summary:
+                        raise ValueError("summary.hits is required for shot reconstruction")
+                    if "wounds" not in summary:
+                        raise ValueError("summary.wounds is required for shot reconstruction")
+                    if "failedSaves" not in summary:
+                        raise ValueError("summary.failedSaves is required for shot reconstruction")
+                    
+                    total_shots = summary["totalShots"]
+                    hits = summary["hits"]
+                    wounds = summary["wounds"]
+                    failed_saves = summary["failedSaves"]
                     
                     # Create individual shot records
                     for shot_num in range(total_shots):
@@ -1077,15 +1088,33 @@ class W40KEnv(gym.Env):
                         
                         # Simulate the actual dice rolls that would have occurred
                         hit_roll = roll_d6()
-                        hit_target = unit.get("rng_atk", 4)
+                        if "rng_atk" not in unit:
+                            raise ValueError(f"unit.rng_atk is required for shot reconstruction")
+                        hit_target = unit["rng_atk"]
                         hit_success = shot_num < hits
                         
                         wound_roll = roll_d6() if hit_success else 0
-                        wound_target = calculate_wound_target(unit.get("rng_str", 4), target.get("t", 4)) if hit_success else 0
+                        if hit_success:
+                            if "rng_str" not in unit:
+                                raise ValueError(f"unit.rng_str is required for wound calculation")
+                            if "t" not in target:
+                                raise ValueError(f"target.t is required for wound calculation")
+                            wound_target = calculate_wound_target(unit["rng_str"], target["t"])
+                        else:
+                            wound_target = 0
                         wound_success = shot_num < wounds
                         
                         save_roll = roll_d6() if wound_success else 0
-                        save_target = calculate_save_target(target.get("armor_save", 4), target.get("invul_save", 0), unit.get("rng_ap", 0)) if wound_success else 0
+                        if wound_success:
+                            if "armor_save" not in target:
+                                raise ValueError(f"target.armor_save is required for save calculation")
+                            if "invul_save" not in target:
+                                raise ValueError(f"target.invul_save is required for save calculation")
+                            if "rng_ap" not in unit:
+                                raise ValueError(f"unit.rng_ap is required for save calculation")
+                            save_target = calculate_save_target(target["armor_save"], target["invul_save"], unit["rng_ap"])
+                        else:
+                            save_target = 0
                         save_success = not (shot_num < failed_saves)
                         
                         detailed_shots.append({
@@ -1994,12 +2023,12 @@ class W40KEnv(gym.Env):
             action_taken = False
             
             # Priority 1: Shoot if in range (instead of moving closer)
-            enemy_rng_rng = 4  # Default for enemy units
-            if "rng_rng" in enemy:
-                enemy_rng_rng = enemy["rng_rng"]
-            enemy_rng_dmg = 0  # Default for enemy units
-            if "rng_dmg" in enemy:
-                enemy_rng_dmg = enemy["rng_dmg"]
+            if "rng_rng" not in enemy:
+                raise ValueError(f"enemy.rng_rng is required for unit {enemy.get('name', 'unknown')}")
+            if "rng_dmg" not in enemy:
+                raise ValueError(f"enemy.rng_dmg is required for unit {enemy.get('name', 'unknown')}")
+            enemy_rng_rng = enemy["rng_rng"]
+            enemy_rng_dmg = enemy["rng_dmg"]
             if is_unit_in_range(enemy, nearest_ai, enemy_rng_rng) and enemy_rng_dmg > 0:
                 # Execute dice-based shooting for enemy
                 result = execute_shooting_sequence(enemy, nearest_ai)
@@ -2015,9 +2044,9 @@ class W40KEnv(gym.Env):
 
             # Priority 2: Melee attack if adjacent (no change needed - it's already using damage directly)
             elif are_units_adjacent(enemy, nearest_ai):
-                enemy_cc_dmg = 0  # Default for enemy units
-                if "cc_dmg" in enemy:
-                    enemy_cc_dmg = enemy["cc_dmg"]
+                if "cc_dmg" not in enemy:
+                    raise ValueError(f"enemy.cc_dmg is required for unit {enemy.get('name', 'unknown')}")
+                enemy_cc_dmg = enemy["cc_dmg"]
                 if enemy_cc_dmg > 0:
                     damage = min(enemy_cc_dmg, nearest_ai["cur_hp"])  # Prevent overkill
                     nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
@@ -2032,9 +2061,9 @@ class W40KEnv(gym.Env):
             # Priority 3: Move closer (only if can't attack)
             elif dist > 1:
                 # Limited movement: only 1-2 hexes max
-                enemy_move = 1  # Default for enemy units
-                if "move" in enemy:
-                    enemy_move = enemy["move"]
+                if "move" not in enemy:
+                    raise ValueError(f"enemy.move is required for unit {enemy.get('name', 'unknown')}")
+                enemy_move = enemy["move"]
                 move_distance = min(2, enemy_move)
                 dx = nearest_ai["col"] - enemy["col"]
                 dy = nearest_ai["row"] - enemy["row"]
