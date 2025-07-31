@@ -111,10 +111,11 @@ body {
   flex: 1;
   display: flex;
   justify-content: flex-start;
-  align-items: flex-start;
+  align-items: stretch;
   padding: var(--spacing-lg);
   min-height: 0;
   gap: var(--spacing-lg);
+  height: 100%;
 }
 
 .game-board-section {
@@ -122,6 +123,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  height: fit-content;
 }
 
 .game-footer {
@@ -198,13 +200,17 @@ body {
   max-width: 900px;
   margin-left: var(--spacing-lg);
   margin-top: 60px; /* Push tables below navigation buttons */
+  height: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  padding-right: var(--spacing-xs);
 }
 
 .unit-status-table-container {
   background: var(--bg-secondary);
   border: 1px solid #555;
   border-radius: var(--radius-lg);
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm);
   color: var(--text-primary);
 }
 
@@ -237,15 +243,7 @@ body {
   background: var(--bg-secondary);
   border: 1px solid #555;
   border-radius: var(--radius-lg);
-  margin-bottom: var(--spacing-lg);
-}
-
-.turn-phase-tracker-right {
-  width: 100%;
-  background: var(--bg-secondary);
-  border: 1px solid #555;
-  border-radius: var(--radius-lg);
-  margin-bottom: var(--spacing-lg);
+  margin-bottom: var(--spacing-sm);
 }
 
 .turn-phase-tracker-right .flex {
@@ -1021,31 +1019,43 @@ textarea:focus {
   background: var(--bg-secondary);
   border: 1px solid #555;
   border-radius: var(--radius-lg);
-  padding: var(--spacing-lg);
-  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+}
+
+.replay-controls__top-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--spacing-sm);
 }
 
 .replay-controls__buttons {
   display: flex;
   gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-md);
   justify-content: center;
   flex-wrap: wrap;
+  flex: 1;
+  align-items: center;
 }
 
 .replay-controls__buttons .btn {
   min-width: 48px;
-  min-height: 44px;
-  padding: var(--spacing-sm);
-  font-size: 16px;
+  min-height: 32px;
+  padding: var(--spacing-xs);
+  font-size: 14px;
   line-height: 1;
 }
 
 .replay-controls__info {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  margin-bottom: var(--spacing-sm);
   text-align: center;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .replay-controls__progress-bar {
@@ -1055,6 +1065,12 @@ textarea:focus {
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid #555;
+  transition: background-color var(--transition-fast);
+}
+
+.replay-controls__progress-bar:hover {
+  background: #444;
+  border-color: var(--color-accent);
 }
 
 .replay-controls__progress-fill {
@@ -1104,4 +1120,121 @@ textarea:focus {
 .game-log-entry__reward {
   flex-shrink: 0;
   margin-right: var(--spacing-xs);
+}
+
+/* File Browser Controls */
+.file-browser-container {
+  padding: 1px var(--spacing-sm);
+}
+
+.file-browser-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-bottom: 1px;
+}
+
+.file-browser-button {
+  padding: 6px var(--spacing-md);
+  background-color: #1e40af;
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-sm);
+}
+
+.file-browser-button:hover {
+  background-color: #1d4ed8;
+}
+
+.file-browser-filename {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.file-browser-template {
+  color: var(--color-success);
+  margin-left: var(--spacing-sm);
+}
+
+.file-browser-error {
+  font-size: var(--font-size-sm);
+  color: var(--color-danger);
+  margin-top: var(--spacing-xs);
+}
+
+.file-browser-preview {
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-md);
+  background-color: #333;
+  border-radius: var(--spacing-sm);
+}
+
+.file-browser-preview-title {
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.file-browser-preview-description {
+  font-size: var(--font-size-sm);
+  color: #666;
+}
+
+/* Custom scrollbar for right column */
+.unit-status-tables::-webkit-scrollbar {
+  width: 6px;
+}
+
+.unit-status-tables::-webkit-scrollbar-track {
+  background: #333;
+  border-radius: 3px;
+}
+
+.unit-status-tables::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 3px;
+}
+
+.unit-status-tables::-webkit-scrollbar-thumb:hover {
+  background: #666;
+}
+
+/* Navigation buttons */
+.nav-button {
+  padding: var(--spacing-xs) var(--spacing-md);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  margin-right: var(--spacing-sm);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  transition: all var(--transition-fast);
+  min-height: 28px;
+}
+
+.nav-button--active {
+  background-color: #1e40af;
+  font-weight: var(--font-weight-bold);
+}
+
+.nav-button--inactive {
+  background-color: #64748b;
+  font-weight: var(--font-weight-normal);
+}
+
+.nav-button--inactive:hover {
+  background-color: #475569;
+}
+
+.navigation {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
+  padding-top: 0;
+  margin-top: 0;
+  justify-content: flex-end;
 }

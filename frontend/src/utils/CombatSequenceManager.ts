@@ -153,7 +153,10 @@ export class SingleAttackSequenceManager {
     this.state.stepResults.saveRoll = saveRoll;
     this.state.stepResults.saveSuccess = saveSuccess;
 
-    const damageDealt = saveSuccess ? 0 : (attacker.CC_DMG || 1);
+    if (attacker.CC_DMG === undefined) {
+      throw new Error('attacker.CC_DMG is required');
+    }
+    const damageDealt = saveSuccess ? 0 : attacker.CC_DMG;
     
     this.state.currentStep = 'damage_application';
     this.state.stepResults.damageDealt = damageDealt;

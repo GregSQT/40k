@@ -12,22 +12,14 @@ interface SharedLayoutProps {
 const Navigation: React.FC = () => {
   const location = useLocation();
   
-  const getButtonStyle = (path: string) => ({
-    padding: '10px 18px',
-    backgroundColor: location.pathname === path ? '#1e40af' : '#64748b',
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    marginRight: '8px',
-    cursor: 'pointer',
-    fontWeight: location.pathname === path ? 'bold' : 'normal'
-  });
+  const getButtonClass = (path: string) => 
+    `nav-button ${location.pathname === path ? 'nav-button--active' : 'nav-button--inactive'}`;
 
   return (
-    <nav style={{ display: 'flex', gap: '8px', marginBottom: '4px', paddingTop: '0px', marginTop: '0px', justifyContent: 'flex-end' }}>
-      <button onClick={() => window.location.href = '/game'} style={getButtonStyle('/game')}>PvP</button>
-      <button onClick={() => window.location.href = '/pve'} style={getButtonStyle('/pve')}>PvE</button>
-      <button onClick={() => window.location.href = '/replay'} style={getButtonStyle('/replay')}>Replay</button>
+    <nav className="navigation">
+      <button onClick={() => window.location.href = '/game'} className={getButtonClass('/game')}>PvP</button>
+      <button onClick={() => window.location.href = '/pve'} className={getButtonClass('/pve')}>PvE</button>
+      <button onClick={() => window.location.href = '/replay'} className={getButtonClass('/replay')}>Replay</button>
     </nav>
   );
 };

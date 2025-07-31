@@ -1290,10 +1290,10 @@ const validateUnitRegistry = () => {
               📁 Replay Files
             </button>
             {selectedFileName && (
-              <span style={{ fontSize: '12px', color: '#888' }}>
+              <span className="file-browser-filename">
                 {selectedFileName}
                 {replayData?.metadata?.template && (
-                  <span style={{ color: '#4ade80', marginLeft: '8px' }}>
+                  <span className="file-browser-template">
                     [{replayData.metadata.template}]
                   </span>
                 )}
@@ -1301,13 +1301,13 @@ const validateUnitRegistry = () => {
             )}
           </div>
           {fileError && (
-            <div style={{ fontSize: '12px', color: '#ff4444', marginTop: '4px' }}>
+            <div className="file-browser-error">
               {fileError}
             </div>
           )}
-          <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#333', borderRadius: '8px' }}>
-            <div style={{ fontSize: '14px', color: '#888', marginBottom: '8px' }}>Board Preview</div>
-            <div style={{ fontSize: '12px', color: '#666' }}>
+          <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#333', borderRadius: '6px' }}>
+            <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>Board Preview</div>
+            <div style={{ fontSize: '11px', color: '#666' }}>
               Select a replay file to see AI training in action on this board
             </div>
           </div>
@@ -1364,28 +1364,20 @@ const validateUnitRegistry = () => {
   const rightColumnContent = (
     <>
       {/* File Browser Controls */}
-      <div className="unit-status-table-container" style={{ marginBottom: '16px' }}>
-        <div style={{ padding: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+      <div className="unit-status-table-container" style={{ marginBottom: '8px' }}>
+        <div className="file-browser-container">
+          <div className="file-browser-controls">
             <button
               onClick={openFileBrowser}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: '#1e40af',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
+              className="file-browser-button"
             >
               📁 Replay Files
             </button>
             {selectedFileName && (
-              <span style={{ fontSize: '12px', color: '#888' }}>
+              <span className="file-browser-filename">
                 {selectedFileName}
                 {replayData?.metadata?.template && (
-                  <span style={{ color: '#4ade80', marginLeft: '8px' }}>
+                  <span className="file-browser-template">
                     [{replayData.metadata.template}]
                   </span>
                 )}
@@ -1393,7 +1385,7 @@ const validateUnitRegistry = () => {
             )}
           </div>
           {fileError && (
-            <div style={{ fontSize: '12px', color: '#ff4444', marginTop: '4px' }}>
+            <div className="file-browser-error">
               {fileError}
             </div>
           )}
@@ -1409,56 +1401,72 @@ const validateUnitRegistry = () => {
 
       {/* Combined Replay Controls with Turn/Phase Navigation */}
       <div className="replay-controls">
-        {/* Playback Controls */}
-        <div className="replay-controls__buttons">
-          <button 
-            className="btn btn--secondary" 
-            onClick={goToStart} 
-            disabled={currentStep === 0}
-            title="Back to the start"
-          >
-            ⏮⏮
-          </button>
-          <button 
-            className="btn btn--secondary" 
-            onClick={prevStep} 
-            disabled={currentStep === 0}
-            title="Previous step"
-          >
-            ⏮
-          </button>
-          <button 
-            className="btn btn--primary" 
-            onClick={togglePlay}
-            title={isPlaying ? 'Pause' : 'Play'}
-          >
-            {isPlaying ? '⏸' : '▶'}
-          </button>
-          <button 
-            className="btn btn--secondary" 
-            onClick={nextStep} 
-            disabled={!replayData || currentStep >= battleLog.length - 1}
-            title="Next step"
-          >
-            ⏭
-          </button>
-          <button 
-            className="btn btn--secondary" 
-            onClick={goToEnd} 
-            disabled={!replayData || currentStep >= battleLog.length - 1}
-            title="Last step"
-          >
-            ⏭⏭
-          </button>
-        </div>
-        
-        {/* Progress Info */}
-        <div className="replay-controls__info">
-          Step {currentStep + 1} of {battleLog.length}
+        {/* Top row with buttons and step info */}
+        <div className="replay-controls__top-row">
+          <div className="replay-controls__buttons">
+            <button 
+              className="btn btn--secondary" 
+              onClick={goToStart} 
+              disabled={currentStep === 0}
+              title="Back to the start"
+            >
+              ⏮⏮
+            </button>
+            <button 
+              className="btn btn--secondary" 
+              onClick={prevStep} 
+              disabled={currentStep === 0}
+              title="Previous step"
+            >
+              ⏮
+            </button>
+            <button 
+              className="btn btn--primary" 
+              onClick={togglePlay}
+              title={isPlaying ? 'Pause' : 'Play'}
+            >
+              {isPlaying ? '⏸' : '▶'}
+            </button>
+            <button 
+              className="btn btn--secondary" 
+              onClick={nextStep} 
+              disabled={!replayData || currentStep >= battleLog.length - 1}
+              title="Next step"
+            >
+              ⏭
+            </button>
+            <button 
+              className="btn btn--secondary" 
+              onClick={goToEnd} 
+              disabled={!replayData || currentStep >= battleLog.length - 1}
+              title="Last step"
+            >
+              ⏭⏭
+            </button>
+          </div>
+          
+          {/* Progress Info */}
+          <div className="replay-controls__info">
+            Step {currentStep + 1} of {battleLog.length}
+          </div>
         </div>
         
         {/* Progress Bar */}
-        <div className="replay-controls__progress-bar">
+        <div 
+          className="replay-controls__progress-bar"
+          onClick={(e) => {
+            if (battleLog.length > 0) {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const clickX = e.clientX - rect.left;
+              const progressPercent = clickX / rect.width;
+              const targetStep = Math.floor(progressPercent * battleLog.length);
+              const clampedStep = Math.max(0, Math.min(targetStep, battleLog.length - 1));
+              goToStep(clampedStep);
+            }
+          }}
+          style={{ cursor: 'pointer' }}
+          title="Click to jump to step"
+        >
           <div
             className="replay-controls__progress-fill"
             style={{
@@ -1615,6 +1623,36 @@ const validateUnitRegistry = () => {
                       </span>
                       <span className="game-log-entry__message">
                         {rawEvent.message}
+                        {/* Add dice details for shooting and combat actions */}
+                        {(eventType === 'shoot' || eventType === 'combat') && rawEvent.shootDetails && Array.isArray(rawEvent.shootDetails) && (
+                          <span className="game-log-entry__dice-details">
+                            {rawEvent.shootDetails.map((shot: any, shotIndex: number) => (
+                              <span key={shotIndex} className="game-log-entry__shot-detail">
+                                {rawEvent.shootDetails.length > 1 && ` - Shot ${shot.shotNumber || shotIndex + 1}:`}
+                                {shot.hitTarget > 0 && (
+                                  <span className={`game-log-entry__dice-roll ${shot.hitResult === 'HIT' ? 'game-log-entry__dice-roll--success' : 'game-log-entry__dice-roll--failure'}`}>
+                                    {` Hit (${shot.hitTarget}+) ${shot.attackRoll}: ${shot.hitResult === 'HIT' ? 'Success!' : 'Failed!'}`}
+                                  </span>
+                                )}
+                                {shot.hitResult === 'HIT' && shot.woundTarget > 0 && (
+                                  <span className={`game-log-entry__dice-roll ${shot.strengthResult === 'SUCCESS' ? 'game-log-entry__dice-roll--success' : 'game-log-entry__dice-roll--failure'}`}>
+                                    {` - Wound (${shot.woundTarget}+) ${shot.strengthRoll}: ${shot.strengthResult === 'SUCCESS' ? 'Success!' : 'Failed!'}`}
+                                  </span>
+                                )}
+                                {shot.strengthResult === 'SUCCESS' && shot.saveTarget > 0 && (
+                                  <span className={`game-log-entry__dice-roll ${shot.saveSuccess ? 'game-log-entry__dice-roll--failure' : 'game-log-entry__dice-roll--success'}`}>
+                                    {` - Armor (${shot.saveTarget}+) ${shot.saveRoll}: ${shot.saveSuccess ? 'Saved!' : 'Failed!'}`}
+                                  </span>
+                                )}
+                                {shot.damageDealt > 0 && (
+                                  <span className="game-log-entry__damage">
+                                    {` : -${shot.damageDealt} HP`}
+                                  </span>
+                                )}
+                              </span>
+                            ))}
+                          </span>
+                        )}
                       </span>
                       <span className="game-log-entry__reward">
                         {(rawEvent.reward !== undefined) ? (
