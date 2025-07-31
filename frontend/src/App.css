@@ -206,6 +206,14 @@ body {
   padding-right: var(--spacing-xs);
 }
 
+@media (max-width: 900px) {
+  .unit-status-tables {
+    margin-left: 0;
+    max-width: 100%;
+    margin-top: 20px; /* Reduce top margin on smaller screens */
+  }
+}
+
 .unit-status-table-container {
   background: var(--bg-secondary);
   border: 1px solid #555;
@@ -577,6 +585,7 @@ body {
   .unit-status-tables {
     margin-left: 0;
     max-width: 100%;
+    margin-top: 20px; /* Reduce top margin on smaller screens */
   }
   
   .unit-status-table-wrapper {

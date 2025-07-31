@@ -1027,7 +1027,7 @@ class W40KEnv(gym.Env):
         
         # Direct PvP-style logging (after all movement processing)
         if self.replay_logger:
-            self.replay_logger.log_move_action(unit, old_col, old_row, unit["col"], unit["row"], self.current_turn)
+            self.replay_logger.log_move_action(unit, old_col, old_row, unit["col"], unit["row"], self.current_turn, reward=reward, action_int=action_type)
         
         return reward
 
@@ -1139,15 +1139,15 @@ class W40KEnv(gym.Env):
                 if self.save_replay:
                     self._record_detailed_shooting_action(unit, target, result, old_hp)
 
-                # Direct PvP-style logging
-                if self.replay_logger:
-                    self.replay_logger.log_shooting_action(unit, target, result, self.current_turn)
-
                 # Base ranged attack reward (scaled by damage dealt)
                 if "base_actions" not in unit_rewards or "ranged_attack" not in unit_rewards["base_actions"]:
                     raise KeyError(f"Missing 'base_actions.ranged_attack' in rewards config for unit type {unit['unit_type']}")
                 base_attack_reward = unit_rewards["base_actions"]["ranged_attack"]
                 reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
+
+                # Direct PvP-style logging
+                if self.replay_logger:
+                    self.replay_logger.log_shooting_action(unit, target, result, self.current_turn, reward=reward, action_int=4)
 
                 # Kill bonuses
                 if target["cur_hp"] <= 0:
@@ -1208,13 +1208,13 @@ class W40KEnv(gym.Env):
                 old_col, old_row = unit["col"], unit["row"]
                 unit["col"], unit["row"] = target["col"], target["row"]
 
-                # Direct PvP-style logging  
-                if self.replay_logger:
-                    self.replay_logger.log_charge_action(unit, target, old_col, old_row, unit["col"], unit["row"], self.current_turn)
-
                 if "base_actions" not in unit_rewards or "charge_success" not in unit_rewards["base_actions"]:
                     raise KeyError(f"Missing 'base_actions.charge_success' in rewards config for unit type {unit['unit_type']}")
                 reward = unit_rewards["base_actions"]["charge_success"]
+
+                # Direct PvP-style logging  
+                if self.replay_logger:
+                    self.replay_logger.log_charge_action(unit, target, old_col, old_row, unit["col"], unit["row"], self.current_turn, reward=reward, action_int=5)
             else:
                 # Set explicit tracking - PvP style (no targets available)
                 self._last_acting_unit = unit
@@ -1274,15 +1274,15 @@ class W40KEnv(gym.Env):
                 if self.save_replay:
                     self._record_detailed_combat_action(unit, target, result, old_hp)
 
-                # Direct PvP-style logging
-                if self.replay_logger:
-                    self.replay_logger.log_combat_action(unit, target, result, self.current_turn)
-
                 # Base combat attack reward (scaled by damage dealt)
                 if "base_actions" not in unit_rewards or "melee_attack" not in unit_rewards["base_actions"]:
                     raise KeyError(f"Missing 'base_actions.melee_attack' in rewards config for unit type {unit['unit_type']}")
                 base_attack_reward = unit_rewards["base_actions"]["melee_attack"]
                 reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
+
+                # Direct PvP-style logging
+                if self.replay_logger:
+                    self.replay_logger.log_combat_action(unit, target, result, self.current_turn, reward=reward, action_int=6)
 
                 # Kill bonuses
                 if target["cur_hp"] <= 0:

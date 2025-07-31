@@ -91,6 +91,15 @@ def format_game_log_message(event_type: str, acting_unit: Optional[Dict], target
     return "Unknown action"
 
 class GameReplayLogger:
+    """
+    Game replay logger with unified action recording system.
+    
+    SYSTEM FLOW:
+    - capture_action_state() -> _log_action_directly() -> _add_event_immediate()
+    - Single method handles all action types with reward/action name
+    - Direct data flow ensures no reward/action data loss
+    """
+    
     def __init__(self, env):
         """Initialize with the W40K environment."""
         self.quiet = getattr(env, 'quiet', False)  # Inherit quiet mode from environment
@@ -187,13 +196,23 @@ class GameReplayLogger:
         # Normalize action to integer
         action_int = self._normalize_action(action)
         
+        # Store the reward for immediate use
+        self.current_action_reward = reward
+        self.current_action_int = action_int
+        
+        # Debug output (can be enabled when needed)
+        if not self.quiet:
+            print(f"🏗️ *** CAPTURE_ACTION_STATE CALLED ***")
+            print(f"   storing reward: {reward}")
+            print(f"   storing action_int: {action_int}")
+        
         # CRITICAL FIX: Update turn/phase BEFORE logging the event
         # so the event gets the correct turn/phase numbers
         self._update_turn_phase()
         
-        # Generate combat log formatted entry (this now handles change detection internally)
-        self._generate_combat_log_entry(action_int, reward, pre_action_units, post_action_units, 
-                                      acting_unit_id, target_unit_id, description)
+        # Generate direct combat log entry with actual reward
+        self._log_action_directly(action_int, reward, pre_action_units, post_action_units, 
+                                acting_unit_id, target_unit_id, description)
         
         # Create state snapshot
         state = self._create_game_state_snapshot(
@@ -217,9 +236,111 @@ class GameReplayLogger:
         
         self.game_states.append(state)
     
-    def log_move_action(self, unit, start_col, start_row, end_col, end_row, turn_number):
-        """Log move action exactly like PvP useGameLog.ts"""
+    def _log_action_directly(self, action_int: int, reward: float, pre_action_units: List[Dict], 
+                           post_action_units: List[Dict], acting_unit_id: Optional[int] = None,
+                           target_unit_id: Optional[int] = None, description: str = ""):
+        """Log action directly with actual reward from environment step."""
+        
+        # Get action name
+        action_name = self.action_names.get(action_int, f"action_{action_int}")
+        
+        # Detect event type from action and changes
+        event_type = self._get_event_type_from_action(action_int, pre_action_units, post_action_units)
+        
+        # Find acting and target units
+        if not acting_unit_id or not target_unit_id:
+            acting_unit_id, target_unit_id = self._detect_units_from_changes(pre_action_units, post_action_units)
+        
+        # Get unit objects
+        acting_unit = next((u for u in post_action_units if u.get('id') == acting_unit_id), None) if acting_unit_id else None
+        target_unit = next((u for u in post_action_units if u.get('id') == target_unit_id), None) if target_unit_id else None
+        
+        # Calculate position change for movement events
+        start_hex = None
+        end_hex = None
+        if acting_unit and event_type in ["move", "charge"]:
+            pre_unit = next((u for u in pre_action_units if u.get('id') == acting_unit_id), None)
+            if pre_unit:
+                start_hex = f"({pre_unit.get('col', 0)}, {pre_unit.get('row', 0)})"
+                end_hex = f"({acting_unit.get('col', 0)}, {acting_unit.get('row', 0)})"
+        
+        # Format message
+        message = self._format_combat_message(event_type, acting_unit, target_unit, action_int, start_hex, end_hex)
+        
+        # Create combat log entry with actual reward
+        self._add_event_immediate({
+            "type": event_type,
+            "message": message,
+            "reward": reward,  # Use actual reward from environment
+            "actionName": action_name,  # Use actual action name
+            "turnNumber": self.current_turn,
+            "phase": self.current_phase,
+            "unitType": acting_unit.get("unit_type") if acting_unit else None,
+            "unitId": acting_unit_id,
+            "targetUnitType": target_unit.get("unit_type") if target_unit else None,
+            "targetUnitId": target_unit_id,
+            "player": acting_unit.get("player") if acting_unit else None,
+            "startHex": start_hex,
+            "endHex": end_hex,
+            "shootDetails": None  # Will be filled by specific action methods if needed
+        })
+    
+    def _detect_units_from_changes(self, pre_action_units: List[Dict], post_action_units: List[Dict]) -> tuple[Optional[int], Optional[int]]:
+        """Detect acting and target units from state changes."""
+        acting_unit_id = None
+        target_unit_id = None
+        
+        # Find unit that acted (moved, changed flags)
+        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
+            if pre_unit.get('id') == post_unit.get('id'):
+                # Check position change
+                if (pre_unit.get('col') != post_unit.get('col') or 
+                    pre_unit.get('row') != post_unit.get('row')):
+                    acting_unit_id = post_unit.get('id')
+                    break
+                
+                # Check action flags
+                for flag in ['has_moved', 'has_shot', 'has_charged', 'has_attacked']:
+                    if not pre_unit.get(flag, False) and post_unit.get(flag, False):
+                        acting_unit_id = post_unit.get('id')
+                        break
+                if acting_unit_id:
+                    break
+        
+        # Find target unit (took damage)
+        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
+            if pre_unit.get('id') == post_unit.get('id'):
+                pre_hp = pre_unit.get('cur_hp', pre_unit.get('hp', 0))
+                post_hp = post_unit.get('cur_hp', post_unit.get('hp', 0))
+                if pre_hp > post_hp:
+                    target_unit_id = post_unit.get('id')
+                    break
+                
+                # Check if unit died
+                if pre_unit.get('alive', True) and not post_unit.get('alive', True):
+                    target_unit_id = post_unit.get('id')
+                    break
+        
+        return acting_unit_id, target_unit_id
+    
+    # Removed legacy methods - using unified system only
+    
+    def log_move_action(self, unit, start_col, start_row, end_col, end_row, turn_number, reward=None, action_int=None):
+        """Log move action - Enhanced with reward and action name tracking"""
         from shared.gameLogUtils import format_move_message, format_no_move_message
+        
+        # Debug output (minimal when needed)
+        if not self.quiet:
+            print(f"🚁 log_move_action: reward={reward}, action={action_int}")
+        
+        # NO FALLBACKS - require all parameters
+        if reward is None:
+            raise ValueError("log_move_action() requires reward parameter - no fallbacks allowed")
+        if action_int is None:
+            raise ValueError("log_move_action() requires action_int parameter - no fallbacks allowed")
+        
+        # Get action name for display
+        action_name = self.action_names.get(action_int, f"action_{action_int}")
         
         if start_col != end_col or start_row != end_row:
             message = format_move_message(unit["id"], start_col, start_row, end_col, end_row)
@@ -233,6 +354,8 @@ class GameReplayLogger:
         self._add_event_immediate({
             "type": "move",
             "message": message,
+            "reward": reward,
+            "actionName": action_name,
             "turnNumber": turn_number,
             "phase": self.current_phase,
             "unitType": unit.get("unit_type"),
@@ -242,23 +365,38 @@ class GameReplayLogger:
             "endHex": end_hex
         })
 
-    def log_shooting_action(self, shooter, target, shoot_details, turn_number):
-        """Log shooting action exactly like PvP useGameLog.ts"""
+    def log_shooting_action(self, shooter, target, shoot_details, turn_number, reward=None, action_int=None):
+        """Log shooting action - Enhanced with reward and action name tracking"""
         from shared.gameLogUtils import format_shooting_message
         
-        print(f"🎯 log_shooting_action called:")
-        print(f"   shoot_details received: {shoot_details}")
-        print(f"   shooter stats: rng_atk={shooter.get('rng_atk')}, rng_str={shooter.get('rng_str')}, rng_ap={shooter.get('rng_ap')}")
-        print(f"   target stats: t={target.get('t')}, armor_save={target.get('armor_save')}, invul_save={target.get('invul_save')}")
+        # CRITICAL: Check if reward is properly provided
+        if reward == 0.0:
+            print(f"⚠️ WARNING: log_shooting_action called with reward=0.0 - this may be incorrect!")
+            print(f"   This suggests gym environment is calling individual log methods directly")
+            print(f"   instead of using the unified capture_action_state() system")
+        
+        # NO FALLBACKS - require all parameters
+        if reward is None:
+            raise ValueError("log_shooting_action() requires reward parameter - no fallbacks allowed")
+        if action_int is None:
+            raise ValueError("log_shooting_action() requires action_int parameter - no fallbacks allowed")
+        
+        action_name = self.action_names.get(action_int, f"action_{action_int}")
+        
+        # Debug output (can be disabled when working)
+        if not self.quiet:
+            print(f"🎯 *** log_shooting_action CALLED ***")
+            print(f"   reward parameter: {reward}")
+            print(f"   action_int: {action_int}")
         
         message = format_shooting_message(shooter["id"], target["id"])
-        
         converted_details = self._convert_shoot_details(shoot_details, shooter, target)
-        print(f"   converted shootDetails: {converted_details}")
         
         self._add_event_immediate({
             "type": "shoot", 
             "message": message,
+            "reward": reward,
+            "actionName": action_name,
             "turnNumber": turn_number,
             "phase": self.current_phase,
             "unitType": shooter.get("unit_type"),
@@ -269,8 +407,21 @@ class GameReplayLogger:
             "shootDetails": converted_details
         })
 
-    def log_charge_action(self, unit, target, start_col, start_row, end_col, end_row, turn_number):
-        """Log charge action exactly like PvP useGameLog.ts"""
+    def log_charge_action(self, unit, target, start_col, start_row, end_col, end_row, turn_number, reward=None, action_int=None):
+        """Log charge action - Enhanced with reward and action name tracking"""
+        
+        # Debug output (can be disabled when working)
+        if not self.quiet:
+            print(f"🔍 log_charge_action DEBUG:")
+            print(f"   reward parameter: {reward}")
+            print(f"   action_int: {action_int}")
+        # NO FALLBACKS - require all parameters  
+        if reward is None:
+            raise ValueError("log_charge_action() requires reward parameter - no fallbacks allowed")
+        if action_int is None:
+            raise ValueError("log_charge_action() requires action_int parameter - no fallbacks allowed")
+        
+        action_name = self.action_names.get(action_int, f"action_{action_int}")
         from shared.gameLogUtils import format_charge_message
         
         unit_name = unit.get("unit_type", "Unit")
@@ -282,7 +433,9 @@ class GameReplayLogger:
         
         self._add_event_immediate({
             "type": "charge",
-            "message": message, 
+            "message": message,
+            "reward": reward,  # NEW: Include actual reward
+            "actionName": action_name,  # NEW: Include action name
             "turnNumber": turn_number,
             "phase": self.current_phase,
             "unitType": unit.get("unit_type"),
@@ -294,15 +447,25 @@ class GameReplayLogger:
             "endHex": end_hex
         })
 
-    def log_combat_action(self, attacker, target, combat_details, turn_number):
-        """Log combat action exactly like PvP useGameLog.ts"""
+    def log_combat_action(self, attacker, target, combat_details, turn_number, reward=None, action_int=None):
+        """Log combat action - Enhanced with reward and action name tracking"""
         from shared.gameLogUtils import format_combat_message
+        
+        # NO FALLBACKS - require all parameters
+        if reward is None:
+            raise ValueError("log_combat_action() requires reward parameter - no fallbacks allowed")
+        if action_int is None:
+            raise ValueError("log_combat_action() requires action_int parameter - no fallbacks allowed")
+        
+        action_name = self.action_names.get(action_int, f"action_{action_int}")
         
         message = format_combat_message(attacker["id"], target["id"])
         
         self._add_event_immediate({
             "type": "combat",
             "message": message,
+            "reward": reward,
+            "actionName": action_name,
             "turnNumber": turn_number, 
             "phase": self.current_phase,
             "unitType": attacker.get("unit_type"),
@@ -310,7 +473,7 @@ class GameReplayLogger:
             "targetUnitType": target.get("unit_type"),
             "targetUnitId": target.get("id"),
             "player": attacker.get("player"),
-            "shootDetails": self._convert_combat_details(combat_details, attacker, target)  # Pass unit data
+            "shootDetails": self._convert_combat_details(combat_details, attacker, target)
         })
 
     def _add_event_immediate(self, event_data):
@@ -321,6 +484,13 @@ class GameReplayLogger:
         event_id = self.next_event_id
         self.next_event_id += 1
         
+        # DEBUG: Check reward source
+        reward = event_data.get('reward', 0.0)
+        action_name = event_data.get('actionName', 'unknown')
+        
+        # Minimal debug output when needed
+        # (Debug output can be enabled by setting quiet=False if needed)
+        
         event = {
             "id": event_id,
             "timestamp": datetime.datetime.now().isoformat(),
@@ -329,9 +499,10 @@ class GameReplayLogger:
         
         self.combat_log_entries.append(event)
         
-        # Debug: Print event immediately for verification
+        # Enhanced debug output with reward and action name
         if not self.quiet:
-            print(f"📝 Event #{event_id}: {event.get('type', 'unknown')} - {event.get('message', '')[:50]}")
+            reward_str = f"+{reward:.2f}" if reward >= 0 else f"{reward:.2f}"
+            print(f"📝 Event #{event_id}: {event.get('type', 'unknown')} - {event.get('message', '')[:50]} (R: {reward_str}) [{action_name}]")
 
     def _convert_shoot_details(self, shoot_result, shooter=None, target=None):
         """Convert gym shooting result to PvP shootDetails format with actual dice rolls"""
@@ -341,10 +512,25 @@ class GameReplayLogger:
         # Calculate real target numbers using the same rules as training
         from shared.gameRules import calculate_wound_target, calculate_save_target
         
-        # Get actual target numbers from unit stats (same as training uses)
-        hit_target = shooter.get("rng_atk", 4) if shooter else 4
-        wound_target = calculate_wound_target(shooter.get("rng_str", 4), target.get("t", 4)) if shooter and target else 4
-        save_target = calculate_save_target(target.get("armor_save", 4), target.get("invul_save", 0), shooter.get("rng_ap", 0)) if shooter and target else 4
+        # Get actual target numbers from unit stats - NO DEFAULTS!
+        if not shooter or not target:
+            print(f"⚠️ WARNING: Missing shooter or target data for shooting details")
+            return None
+            
+        hit_target = shooter.get("rng_atk")
+        shooter_str = shooter.get("rng_str")
+        target_t = target.get("t")
+        target_armor = target.get("armor_save")
+        target_invul = target.get("invul_save", 0)  # Only invul can default to 0
+        shooter_ap = shooter.get("rng_ap", 0)  # Only AP can default to 0
+        
+        # Validate required stats exist
+        if any(x is None for x in [hit_target, shooter_str, target_t, target_armor]):
+            print(f"⚠️ WARNING: Missing unit stats - hit_target:{hit_target}, str:{shooter_str}, t:{target_t}, armor:{target_armor}")
+            return None
+            
+        wound_target = calculate_wound_target(shooter_str, target_t)
+        save_target = calculate_save_target(target_armor, target_invul, shooter_ap)
         
         # Check if we have detailed shot-by-shot data (now always available after shared rules update)
         if "shots" in shoot_result and isinstance(shoot_result["shots"], list):
@@ -384,24 +570,49 @@ class GameReplayLogger:
                 })
             return shoot_details
         
-        # Legacy fallback if shots data somehow missing (should not happen after shared rules update)
-        summary = shoot_result.get("summary", {})
-        total_shots = summary.get("totalShots", 1)
-        hits = summary.get("hits", 0)
-        wounds = summary.get("wounds", 0)
-        failed_saves = summary.get("failedSaves", 0)
+        # Legacy fallback if shots data somehow missing - NO MORE DEFAULTS!
+        summary = shoot_result.get("summary")
+        if not summary:
+            print(f"⚠️ WARNING: No shoot_result summary data - cannot create shooting details")
+            return None
+            
+        total_shots = summary.get("totalShots")
+        hits = summary.get("hits") 
+        wounds = summary.get("wounds")
+        failed_saves = summary.get("failedSaves")
+        
+        # Fix missing totalShots - calculate from hits (shots must be >= hits)
+        if total_shots is None:
+            if hits is not None:
+                # Conservative estimate: assume all shots hit (minimum possible shots)
+                total_shots = hits
+                print(f"🔧 FIXED: totalShots was None, estimated from hits: {total_shots}")
+            else:
+                print(f"⚠️ WARNING: Missing both totalShots and hits data")
+                return None
+        
+        # Validate other required data exists  
+        if any(x is None for x in [hits, wounds, failed_saves]):
+            print(f"⚠️ WARNING: Missing shooting summary data - hits:{hits}, wounds:{wounds}, failedSaves:{failed_saves}")
+            return None
         
         # Create fallback shot entries with calculated targets
         shoot_details = []
-        for shot_num in range(max(1, total_shots)):
+        for shot_num in range(total_shots):
             hit_result = "HIT" if shot_num < hits else "MISS"
             wound_result = "SUCCESS" if shot_num < wounds and hit_result == "HIT" else "FAILED"
             save_failed = shot_num < failed_saves and wound_result == "SUCCESS"
             
-            # Generate realistic dice values that match the results
-            attack_roll = 5 if hit_result == "HIT" else 2  # Good hit vs clear miss
-            strength_roll = 5 if wound_result == "SUCCESS" else 2  # Good wound vs clear fail
-            save_roll = 2 if save_failed else 5  # Clear fail vs good save
+            # Generate realistic dice values that match the results - NO ARBITRARY DEFAULTS
+            # Use target numbers to generate appropriate dice rolls
+            attack_roll = hit_target + 1 if hit_result == "HIT" else hit_target - 1
+            strength_roll = wound_target + 1 if wound_result == "SUCCESS" else wound_target - 1  
+            save_roll = save_target - 1 if save_failed else save_target + 1
+            
+            # Clamp dice rolls to valid range [1-6]
+            attack_roll = max(1, min(6, attack_roll))
+            strength_roll = max(1, min(6, strength_roll))
+            save_roll = max(1, min(6, save_roll))
             
             shoot_details.append({
                 "shotNumber": shot_num + 1,
@@ -540,7 +751,7 @@ class GameReplayLogger:
     def _update_turn_phase(self):
         """Update turn and phase tracking with absolute turn numbers that never reset."""
         # Get current state from the training environment
-        current_player = getattr(self.env, 'current_player', self.current_player)
+        current_player = getattr(self.env, 'current_player', 0)
         env_current_phase = getattr(self.env, 'current_phase', self.current_phase) 
         env_current_turn = getattr(self.env, 'current_turn', self.current_turn)
         
@@ -569,6 +780,7 @@ class GameReplayLogger:
                 "type": "phase_change",
                 "message": phase_message,
                 "reward": 0.0,
+                "actionName": "phase_change",
                 "turnNumber": self.absolute_turn,  # Use absolute turn
                 "phase": env_current_phase,
                 "player": current_player,
@@ -578,19 +790,19 @@ class GameReplayLogger:
                 "targetUnitId": None,
                 "startHex": None,
                 "endHex": None,
-                "actionName": "phase_change",
                 "shootDetails": None
             })
         
         # Only log turn changes when they actually happen (based on absolute turn)
         if env_current_turn != old_env_turn:
-            turn_message = format_turn_start_message(current_turn)
+            turn_message = format_turn_start_message(self.absolute_turn)
             self._add_event_immediate({
                 "type": "turn_change", 
                 "message": turn_message,
                 "reward": 0.0,
-                "turnNumber": current_turn,
-                "phase": current_phase,
+                "actionName": "turn_change",
+                "turnNumber": self.absolute_turn,
+                "phase": self.current_phase,
                 "player": None,
                 "unitType": None,
                 "unitId": None,
@@ -598,7 +810,6 @@ class GameReplayLogger:
                 "targetUnitId": None,
                 "startHex": None,
                 "endHex": None,
-                "actionName": "turn_change",
                 "shootDetails": None
             })
             
@@ -768,20 +979,9 @@ class GameReplayLogger:
         if damage <= 0:
             return None
         
-        # Create basic shooting detail (simplified for training)
-        return [{
-            "shotNumber": 1,
-            "attackRoll": 6,  # Simplified - assume hit
-            "strengthRoll": 6,  # Simplified - assume wound
-            "hitResult": "HIT",
-            "strengthResult": "SUCCESS",
-            "hitTarget": 4,
-            "woundTarget": 4,
-            "saveTarget": 4,
-            "saveRoll": 2,  # Simplified - assume failed save
-            "saveSuccess": False,
-            "damageDealt": damage
-        }]
+        # Create basic shooting detail - NO MORE HARDCODED VALUES
+        print(f"⚠️ WARNING: Using simplified shooting details - damage: {damage}")
+        return None  # Don't create fake shooting details, let the system handle it properly
 
     def _generate_training_summary(self) -> Dict[str, Any]:
         """Generate summary of training data from this episode."""
