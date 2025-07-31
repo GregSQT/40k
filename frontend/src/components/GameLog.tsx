@@ -37,8 +37,8 @@ interface GameLogProps {
 }
 
 export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElapsedTime }) => {
-  // Display all events (newest first) - maxEvents now controls visual height via CSS
-  const displayedEvents = [...events];
+  // Display all events (newest first) - sort by timestamp descending
+  const displayedEvents = [...events].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
   const getEventIcon = (type: GameLogEvent['type']): string => {
     switch (type) {

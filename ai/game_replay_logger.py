@@ -102,6 +102,8 @@ class GameReplayLogger:
             self.combat_log_entries = []
         self.current_turn = 1
         self.current_phase = "move"
+        # Absolute turn counter that never resets across episodes
+        self.absolute_turn = 1
         self.game_metadata = {
             "board_size": env.board_size,
             "max_turns": env.max_turns,
@@ -112,6 +114,9 @@ class GameReplayLogger:
         # Phase tracking
         self.phases = ["move", "shoot", "charge", "combat"]
         self.phase_index = 0
+        
+        # Sequential ID counter for proper chronological ordering
+        self.next_event_id = 1
         
         # Action name mapping
         self.action_names = {
@@ -140,10 +145,9 @@ class GameReplayLogger:
         if not hasattr(self, 'combat_log_entries'):
             self.combat_log_entries = []
             
-        # Add game start message
+        # Add game start message using immediate event addition
         start_message = format_turn_start_message(1)
-        start_entry = {
-            "id": 1,
+        self._add_event_immediate({
             "type": "turn_change",
             "message": start_message,
             "reward": 0.0,
@@ -158,8 +162,7 @@ class GameReplayLogger:
             "endHex": None,
             "actionName": "game_start",
             "shootDetails": None
-        }
-        self.combat_log_entries.append(start_entry)
+        })
         
         initial_state = self._create_game_state_snapshot(
             action_taken=None,
@@ -183,6 +186,10 @@ class GameReplayLogger:
         """Capture game state after an action with combat log format."""
         # Normalize action to integer
         action_int = self._normalize_action(action)
+        
+        # CRITICAL FIX: Update turn/phase BEFORE logging the event
+        # so the event gets the correct turn/phase numbers
+        self._update_turn_phase()
         
         # Generate combat log formatted entry (this now handles change detection internally)
         self._generate_combat_log_entry(action_int, reward, pre_action_units, post_action_units, 
@@ -209,7 +216,6 @@ class GameReplayLogger:
         state["event_flags"]["description"] = description
         
         self.game_states.append(state)
-        self._update_turn_phase()
     
     def log_move_action(self, unit, start_col, start_row, end_col, end_row, turn_number):
         """Log move action exactly like PvP useGameLog.ts"""
@@ -224,7 +230,7 @@ class GameReplayLogger:
             start_hex = None
             end_hex = None
         
-        self._add_event({
+        self._add_event_immediate({
             "type": "move",
             "message": message,
             "turnNumber": turn_number,
@@ -250,7 +256,7 @@ class GameReplayLogger:
         converted_details = self._convert_shoot_details(shoot_details, shooter, target)
         print(f"   converted shootDetails: {converted_details}")
         
-        self._add_event({
+        self._add_event_immediate({
             "type": "shoot", 
             "message": message,
             "turnNumber": turn_number,
@@ -274,7 +280,7 @@ class GameReplayLogger:
         start_hex = f"({start_col}, {start_row})"
         end_hex = f"({end_col}, {end_row})"
         
-        self._add_event({
+        self._add_event_immediate({
             "type": "charge",
             "message": message, 
             "turnNumber": turn_number,
@@ -294,7 +300,7 @@ class GameReplayLogger:
         
         message = format_combat_message(attacker["id"], target["id"])
         
-        self._add_event({
+        self._add_event_immediate({
             "type": "combat",
             "message": message,
             "turnNumber": turn_number, 
@@ -307,11 +313,13 @@ class GameReplayLogger:
             "shootDetails": self._convert_combat_details(combat_details, attacker, target)  # Pass unit data
         })
 
-    def _add_event(self, event_data):
-        """Add event exactly like PvP addEvent function"""
+    def _add_event_immediate(self, event_data):
+        """Add event immediately with sequential ID - called at exact moment event occurs"""
         import datetime
         
-        event_id = f"event_{len(self.combat_log_entries) + 1}_{int(datetime.datetime.now().timestamp() * 1000)}"
+        # Assign ID immediately when event occurs
+        event_id = self.next_event_id
+        self.next_event_id += 1
         
         event = {
             "id": event_id,
@@ -320,6 +328,10 @@ class GameReplayLogger:
         }
         
         self.combat_log_entries.append(event)
+        
+        # Debug: Print event immediately for verification
+        if not self.quiet:
+            print(f"📝 Event #{event_id}: {event.get('type', 'unknown')} - {event.get('message', '')[:50]}")
 
     def _convert_shoot_details(self, shoot_result, shooter=None, target=None):
         """Convert gym shooting result to PvP shootDetails format with actual dice rolls"""
@@ -526,54 +538,59 @@ class GameReplayLogger:
         return max(abs(unit1["col"] - unit2["col"]), abs(unit1["row"] - unit2["row"]))
     
     def _update_turn_phase(self):
-        """Update turn and phase tracking with proper log entries."""
-        # Get current player before phase change
-        current_player = getattr(self.env, 'current_player', 0)
+        """Update turn and phase tracking with absolute turn numbers that never reset."""
+        # Get current state from the training environment
+        current_player = getattr(self.env, 'current_player', self.current_player)
+        env_current_phase = getattr(self.env, 'current_phase', self.current_phase) 
+        env_current_turn = getattr(self.env, 'current_turn', self.current_turn)
         
-        # Simple phase progression - you can make this more sophisticated
+        # Track changes in environment's turn (which resets per episode)
+        old_env_turn = getattr(self, '_last_env_turn', env_current_turn)
         old_phase = self.current_phase
-        self.phase_index = (self.phase_index + 1) % len(self.phases)
-        self.current_phase = self.phases[self.phase_index]
         
-        # Generate phase change log entry
-        if not hasattr(self, 'combat_log_entries'):
-            self.combat_log_entries = []
+        # Update phase tracking from environment
+        self.current_phase = env_current_phase
+        
+        # Increment absolute turn when environment's turn changes or resets
+        if env_current_turn != old_env_turn:
+            # If env turn went backwards (new episode), or increased normally
+            if env_current_turn < old_env_turn or env_current_turn > old_env_turn:
+                self.absolute_turn += 1
+        
+        # Store environment's turn for next comparison
+        self._last_env_turn = env_current_turn
+        
+        # Only log phase changes when they actually happen
+        if old_phase != env_current_phase:
+            player_name = "Player 1" if current_player == 0 else "Player 2"
+            phase_message = format_phase_change_message(player_name, env_current_phase)
             
-        player_name = "Player 1" if current_player == 0 else "Player 2"
-        phase_message = format_phase_change_message(player_name, self.current_phase)
+            self._add_event_immediate({
+                "type": "phase_change",
+                "message": phase_message,
+                "reward": 0.0,
+                "turnNumber": self.absolute_turn,  # Use absolute turn
+                "phase": env_current_phase,
+                "player": current_player,
+                "unitType": None,
+                "unitId": None,
+                "targetUnitType": None,
+                "targetUnitId": None,
+                "startHex": None,
+                "endHex": None,
+                "actionName": "phase_change",
+                "shootDetails": None
+            })
         
-        phase_entry = {
-            "id": len(self.combat_log_entries) + 1,
-            "type": "phase_change",
-            "message": phase_message,
-            "reward": 0.0,
-            "turnNumber": self.current_turn,
-            "phase": self.current_phase,
-            "player": current_player,
-            "unitType": None,
-            "unitId": None,
-            "targetUnitType": None,
-            "targetUnitId": None,
-            "startHex": None,
-            "endHex": None,
-            "actionName": "phase_change",
-            "shootDetails": None
-        }
-        
-        self.combat_log_entries.append(phase_entry)
-        
-        # If back to move phase, increment turn and add turn start message
-        if self.phase_index == 0:  
-            self.current_turn += 1
-            
-            turn_message = format_turn_start_message(self.current_turn)
-            turn_entry = {
-                "id": len(self.combat_log_entries) + 1,
+        # Only log turn changes when they actually happen (based on absolute turn)
+        if env_current_turn != old_env_turn:
+            turn_message = format_turn_start_message(current_turn)
+            self._add_event_immediate({
                 "type": "turn_change", 
                 "message": turn_message,
                 "reward": 0.0,
-                "turnNumber": self.current_turn,
-                "phase": self.current_phase,
+                "turnNumber": current_turn,
+                "phase": current_phase,
                 "player": None,
                 "unitType": None,
                 "unitId": None,
@@ -583,9 +600,7 @@ class GameReplayLogger:
                 "endHex": None,
                 "actionName": "turn_change",
                 "shootDetails": None
-            }
-            
-            self.combat_log_entries.append(turn_entry)
+            })
             
         # Print turn/phase changes for visibility during training
         # DISABLED for less verbose training

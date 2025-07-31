@@ -163,7 +163,6 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
               <button
                 key={turn}
                 style={style}
-                className="text-xs"
                 disabled
               >
                 Turn {turn}
@@ -180,7 +179,6 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
               <button
                 key={phase}
                 style={style}
-                className="text-xs"
                 disabled
               >
                 {formatPhaseName(phase)}

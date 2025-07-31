@@ -1574,8 +1574,20 @@ const validateUnitRegistry = () => {
             <div className="game-log__empty">No actions yet...</div>
           ) : (
             <div className="game-log__events">
-              {battleLog.slice(0, currentStep + 1).reverse().map((event, reverseIndex) => {
-                const originalIndex = currentStep - reverseIndex;
+              {(() => {
+                // First sort the entire battleLog by ID, then slice
+                const sortedBattleLog = [...battleLog].sort((a: any, b: any) => {
+                  const aId = parseInt(a.id) || 0;
+                  const bId = parseInt(b.id) || 0;
+                  return aId - bId; // Ascending order (chronological)
+                });
+                
+                // Then slice to get events up to current step, and reverse for display (newest first)
+                const eventsToDisplay = sortedBattleLog.slice(0, currentStep + 1).reverse();
+                
+                return eventsToDisplay;
+              })().map((event: any, index: number) => {
+                const originalIndex = battleLog.indexOf(event);
                 const rawEvent = event as any;
                 
                 // Only new format (combat_log) is supported
@@ -1617,6 +1629,7 @@ const validateUnitRegistry = () => {
                   >
                     <div className="game-log-entry__single-line">
                       <span className="game-log-entry__icon">{getEventIcon(eventType)}</span>
+                      <span className="game-log-entry__id" style={{ fontSize: '10px', color: '#666', marginRight: '4px' }}>#{rawEvent.id}</span>
                       <span className="game-log-entry__turn">T{rawEvent.turnNumber || event.turn}</span>
                       <span className={`game-log-entry__player ${(rawEvent.player || event.player) === 0 ? 'game-log-entry__player--blue' : 'game-log-entry__player--red'}`}>
                         P{rawEvent.player || event.player}
