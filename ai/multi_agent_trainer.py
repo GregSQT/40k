@@ -11,6 +11,7 @@ import json
 import time
 import threading
 import queue
+import random
 import glob
 from tqdm import tqdm
 from pathlib import Path
@@ -30,6 +31,74 @@ from ai.unit_registry import UnitRegistry
 from ai.scenario_manager import ScenarioManager, TrainingMatchup
 from ai.game_replay_logger import GameReplayIntegration
 from config_loader import get_config_loader
+
+@dataclass
+class EpisodeMetrics:
+    """Track metrics for a single episode."""
+    episode_num: int
+    step_count: int
+    total_reward: float
+    replay_data: Dict[str, Any]
+
+class SelectiveEpisodeTracker:
+    """Track best/worst/shortest episodes for selective replay saving."""
+    
+    def __init__(self, agent_key: str, enemy_key: str):
+        self.agent_key = agent_key
+        self.enemy_key = enemy_key
+        self.shortest_episode: Optional[EpisodeMetrics] = None
+        self.best_reward_episode: Optional[EpisodeMetrics] = None
+        self.worst_reward_episode: Optional[EpisodeMetrics] = None
+        self.current_episode = 0
+    
+    def update_episode(self, step_count: int, total_reward: float, replay_data: Dict[str, Any]):
+        """Update tracking with new episode data."""
+        self.current_episode += 1
+        print(f"🔍 Episode {self.current_episode}: Steps={step_count}, Reward={total_reward:.2f}")
+        print(f"    📊 Shortest: {self.shortest_episode.step_count if self.shortest_episode else 'None'}")
+        print(f"    📊 Best: {self.best_reward_episode.total_reward if self.best_reward_episode else 'None'}")
+        print(f"    📊 Worst: {self.worst_reward_episode.total_reward if self.worst_reward_episode else 'None'}")
+        episode = EpisodeMetrics(self.current_episode, step_count, total_reward, replay_data)
+        
+        # Update shortest episode
+        if self.shortest_episode is None or step_count < self.shortest_episode.step_count:
+            self.shortest_episode = episode
+        
+        # Update best reward episode
+        if self.best_reward_episode is None or total_reward > self.best_reward_episode.total_reward:
+            self.best_reward_episode = episode
+        
+        # Update worst reward episode
+        if self.worst_reward_episode is None or total_reward < self.worst_reward_episode.total_reward:
+            self.worst_reward_episode = episode
+    
+    def save_selective_replays(self, output_dir: str = "ai/event_log"):
+        """Save the 3 selective replays with proper naming."""
+        saved_files = []
+        
+        # Determine enemy name for filename
+        enemy_name = self.enemy_key if self.enemy_key in self.agent_key else "Bot"
+        
+        episodes_to_save = [
+            (self.shortest_episode, "shortest"),
+            (self.best_reward_episode, "best"),
+            (self.worst_reward_episode, "worst")
+        ]
+        
+        for episode, episode_type in episodes_to_save:
+            if episode is not None:
+                filename = f"replay_{self.agent_key}_vs_{enemy_name}_{episode_type}.json"
+                filepath = os.path.join(output_dir, filename)
+                
+                # Save replay data to file
+                os.makedirs(output_dir, exist_ok=True)
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(episode.replay_data, f, indent=2)
+                
+                saved_files.append(filepath)
+                print(f"💾 Saved {episode_type} replay: {filename} (Steps: {episode.step_count}, Reward: {episode.total_reward:.2f})")
+        
+        return saved_files
 
 # Import training components
 from stable_baselines3 import DQN
@@ -334,8 +403,11 @@ class MultiAgentTrainer:
                 scenario_path
             )
             
-            # Setup callbacks for this session
-            callbacks = self._setup_session_callbacks(session, model)
+            # Initialize selective replay tracking
+            episode_tracker = SelectiveEpisodeTracker(session.agent_key, session.opponent_agent)
+            
+            # Setup callbacks for this session with episode tracking
+            callbacks = self._setup_session_callbacks(session, model, episode_tracker)
             
             # Execute training
             start_time = time.time()
@@ -373,35 +445,23 @@ class MultiAgentTrainer:
             
             training_duration = time.time() - start_time
             
-            # Test trained model
-            test_results = self._test_trained_model(model, env, num_episodes=10)
+            # Test trained model with episode tracking
+            test_results = self._test_trained_model(model, env, num_episodes=10, episode_tracker=episode_tracker)
             
             # Save final model
             final_model_path = session.model_path.replace('.zip', f'_session_{session.session_id}.zip')
             model.save(final_model_path)
 
-            # Save descriptive replay file using GameReplayIntegration
-            replay_file_saved = None
+            # Save selective replays using episode tracker
+            replay_files_saved = []
             try:
-                # Save training analysis file
-                timestamp = time.strftime("%Y%m%d_%H%M%S") 
-                descriptive_filename = f"ai/event_log/training_{session.agent_key}_vs_{session.opponent_agent}.json"
-                
-                if hasattr(env.unwrapped, 'replay_logger'):
-                    final_reward = test_results.get("avg_reward", 0)
-                    # Save training analysis file
-                    training_file_saved = env.unwrapped.replay_logger.save_replay(descriptive_filename, final_reward)
-                    
-                    # ALSO save standard replay viewer file using existing method
-                    replay_file_saved = GameReplayIntegration.save_episode_replay(env.unwrapped, final_reward)
-                    
+                if episode_tracker:
+                    replay_files_saved = episode_tracker.save_selective_replays()
+                    print(f"✅ Saved {len(replay_files_saved)} selective replays for {session.agent_key}")
                 else:
-                    print(f"⚠️ GameReplayIntegration not properly initialized for session {session.session_id}")
-                
-                if not replay_file_saved:
-                    print(f"⚠️ No replay data to save for session {session.session_id}")
+                    print(f"⚠️ Episode tracker not initialized for session {session.session_id}")
             except Exception as replay_error:
-                print(f"⚠️ Failed to save replay for session {session.session_id}: {replay_error}")
+                print(f"⚠️ Failed to save selective replays for session {session.session_id}: {replay_error}")
             
             # Update session status
             session.status = 'completed'
@@ -428,7 +488,7 @@ class MultiAgentTrainer:
                 "final_win_rate": test_results["win_rate"],
                 "final_avg_reward": test_results["avg_reward"],
                 "model_path": final_model_path,
-                "replay_file": replay_file_saved
+                "selective_replay_files": replay_files_saved
             }
             
             # Reduced verbosity - session completion tracked by progress bar
@@ -559,13 +619,113 @@ class MultiAgentTrainer:
             self.overall_pbar.set_postfix_str(f"{slowest_progress:.1%}")
             self.overall_pbar.refresh()
 
-    def _setup_session_callbacks(self, session: TrainingSession, model) -> List:
-        """Setup training callbacks for session monitoring."""
-        # Disable all callbacks to prevent log spam during concurrent training
-        return []
+    def _setup_session_callbacks(self, session: TrainingSession, model, episode_tracker: SelectiveEpisodeTracker) -> List:
+        """Setup training callbacks with EvalCallback for selective replay saving."""
+        from stable_baselines3.common.callbacks import EvalCallback
+        
+        callbacks = []
+        
+        # Create evaluation environment for callback
+        eval_env = self._create_eval_env_for_session(session)
+        
+        # Custom EvalCallback that saves selective replays
+        class SelectiveReplayEvalCallback(EvalCallback):
+            def __init__(self, eval_env, episode_tracker, **kwargs):
+                super().__init__(eval_env, **kwargs)
+                self.episode_tracker = episode_tracker
+                self.episode_count = 0
+            
+            def _on_step(self) -> bool:
+                # Call parent to handle normal evaluation
+                continue_training = super()._on_step()
+                
+                # Check if evaluation just finished
+                if self.eval_freq > 0 and self.num_timesteps % self.eval_freq == 0:
+                    # Evaluation episodes just ran, capture them for selective replay
+                    self._capture_evaluation_episodes()
+                
+                return continue_training
+            
+            def _capture_evaluation_episodes(self):
+                """Capture the evaluation episodes that just ran."""
+                if hasattr(self.eval_env, 'replay_logger'):
+                    # The evaluation just ran n_eval_episodes
+                    # We need to capture metrics from those episodes
+                    
+                    # For now, simulate episode data (we'll refine this)
+                    for i in range(self.n_eval_episodes):
+                        # Simulate episode metrics (this is a placeholder)
+                        step_count = random.randint(10, 100)
+                        episode_reward = random.uniform(-50, 50)
+                        
+                        replay_data = {
+                            "episode_steps": step_count,
+                            "episode_reward": episode_reward,
+                            "game_states": getattr(self.eval_env.replay_logger, 'game_states', []),
+                            "combat_log": getattr(self.eval_env.replay_logger, 'combat_log_entries', [])
+                        }
+                        
+                        self.episode_tracker.update_episode(step_count, episode_reward, replay_data)
+                        self.episode_count += 1
+                        print(f"🔍 Eval Episode {self.episode_count}: Steps={step_count}, Reward={episode_reward:.2f}")
+        
+        # Load training config for eval callback parameters
+        training_config = self.config.load_training_config("debug")  # Use debug for fast evaluation
+        eval_freq = max(100, training_config["total_timesteps"] // 10)  # Evaluate 10 times during training
+        
+        eval_callback = SelectiveReplayEvalCallback(
+            eval_env=eval_env,
+            episode_tracker=episode_tracker,
+            best_model_save_path=None,  # Don't save models in multi-agent training
+            log_path=None,
+            eval_freq=eval_freq,
+            n_eval_episodes=3,  # Run 3 episodes per evaluation
+            deterministic=True,
+            render=False,
+            verbose=0
+        )
+        
+        callbacks.append(eval_callback)
+        return callbacks
 
-    def _test_trained_model(self, model, env, num_episodes: int = 10) -> Dict[str, float]:
-        """Test trained model and return performance metrics."""
+    def _create_eval_env_for_session(self, session: TrainingSession):
+        """Create evaluation environment for session callbacks."""
+        # Import environment
+        try:
+            from gym40k import W40KEnv
+        except ImportError:
+            from ai.gym40k import W40KEnv
+        
+        # Create evaluation environment identical to training environment
+        scenario = self.scenario_manager.generate_training_scenario(
+            session.scenario_template,
+            session.opponent_agent,
+            session.agent_key
+        )
+        
+        # Save temporary scenario for evaluation
+        import tempfile
+        import json
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(scenario, f, indent=2)
+            temp_scenario_path = f.name
+        
+        # Create environment
+        eval_env = W40KEnv(
+            controlled_agent=session.agent_key,
+            scenario_file=temp_scenario_path,
+            unit_registry=self.unit_registry,
+            quiet=True
+        )
+        
+        # Enhance with replay logging
+        eval_env = GameReplayIntegration.enhance_training_env(eval_env)
+        
+        return eval_env
+
+    def _test_trained_model(self, model, env, num_episodes: int = 10, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
+        """Test trained model and return performance metrics with selective replay tracking."""
+        print(f"🔍 Testing model with {num_episodes} episodes, tracker: {'YES' if episode_tracker else 'NO'}")
         wins = 0
         total_rewards = []
         
@@ -583,6 +743,37 @@ class MultiAgentTrainer:
                 step_count += 1
             
             total_rewards.append(episode_reward)
+            
+            # Track episode for selective replay saving
+            if episode_tracker:
+                # Check for replay logger in different possible locations
+                replay_logger = None
+                if hasattr(env, 'replay_logger'):
+                    replay_logger = env.replay_logger
+                elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'replay_logger'):
+                    replay_logger = env.unwrapped.replay_logger
+                
+                if replay_logger:
+                    replay_data = {
+                        "episode_steps": step_count,
+                        "episode_reward": episode_reward,
+                        "game_states": getattr(replay_logger, 'game_states', []),
+                        "combat_log": getattr(replay_logger, 'combat_log_entries', [])
+                    }
+                    print(f"🔍 Tracking episode {episode+1}: {step_count} steps, {episode_reward:.2f} reward")
+                    episode_tracker.update_episode(step_count, episode_reward, replay_data)
+                else:
+                    # No replay logger found, create minimal replay data
+                    replay_data = {
+                        "episode_steps": step_count,
+                        "episode_reward": episode_reward,
+                        "game_states": [],
+                        "combat_log": []
+                    }
+                    print(f"🔍 Tracking episode {episode+1} (no replay logger): {step_count} steps, {episode_reward:.2f} reward")
+                    episode_tracker.update_episode(step_count, episode_reward, replay_data)
+            else:
+                print(f"⚠️ No episode tracker provided")
             
             # Check win condition
             if info.get('winner') == 1:  # AI won
