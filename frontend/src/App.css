@@ -900,24 +900,29 @@ textarea:focus {
   background: rgba(0, 204, 102, 0.1);
 }
 
-.game-log-entry--shoot {
-  border-left-color: #ff6600;
-  background: rgba(255, 102, 0, 0.1);
-}
-
 .game-log-entry--charge {
   border-left-color: #ffcc00;
   background: rgba(255, 204, 0, 0.1);
 }
 
-.game-log-entry--shoot {
-  border-left-color: #ff6600;
-  background: rgba(255, 102, 0, 0.1);
+.game-log-entry--shoot-saved {
+  border-left-color: #ea580c;
+  background: rgba(234, 88, 12, 0.20); /* Orange - hits with no damage */
+}
+
+.game-log-entry--shoot-no-damage {
+  border-left-color: #ea580c;
+  background: rgba(234, 88, 12, 0.20); /* Orange - hits with no damage */
+}
+
+.game-log-entry--shoot-damage {
+  border-left-color: #dc2626;
+  background: rgba(220, 38, 38, 0.30); /* Red - damage dealt */
 }
 
 .game-log-entry--shoot-failed {
-  border-left-color: #ff9900;
-  background: rgba(255, 153, 0, 0.1);
+  border-left-color: #eab308;
+  background: rgba(234, 179, 8, 0.20); /* Yellow - misses/fails */
 }
 
 .game-log-entry--combat {

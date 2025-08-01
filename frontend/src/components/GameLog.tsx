@@ -60,19 +60,35 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
       case 'turn_change': return 'game-log-entry--turn';
       case 'phase_change': return 'game-log-entry--phase';
       case 'move': return 'game-log-entry--move';
-      case 'shoot': 
-        // Orange for failed shots, red for successful damage
-        if (event.shootDetails && event.shootDetails[0]?.damageDealt === 0) {
-          return 'game-log-entry--shoot-failed';
+      case 'shoot':
+        const message = event.message;
+        console.log('SHOOT DEBUG:', message);
+        // Check message text for damage dealt (look for "-X HP" pattern)
+        if (message.includes('HP') && message.includes('-')) {
+          console.log('Returning: shoot-damage');
+          return 'game-log-entry--shoot-damage'; // Red background for damage dealt
         }
-        return 'game-log-entry--shoot';
+        // Check message text for successful save (look for "Saved!" or "Success!")
+        if (message.includes('Saved!') || (message.includes('Success!') && !message.includes('Failed!'))) {
+          console.log('Returning: shoot-saved');
+          return 'game-log-entry--shoot-saved'; // Orange background for hits with no damage
+        }
+        // Everything else is a miss or failure
+        console.log('Returning: shoot-failed');
+        return 'game-log-entry--shoot-failed'; // Yellow background for misses/fails
       case 'charge': return 'game-log-entry--charge';
       case 'combat':
-        // Orange for failed combat, red for successful damage
-        if (event.shootDetails && event.shootDetails[0]?.damageDealt === 0) {
-          return 'game-log-entry--combat-failed';
+        // Check if any attack dealt damage
+        const combatDealtDamage = event.shootDetails?.some(shot => shot.damageDealt && shot.damageDealt > 0);
+        if (combatDealtDamage) {
+          return 'game-log-entry--combat'; // Red background for damage dealt
         }
-        return 'game-log-entry--combat';
+        // Check if any attack hit but didn't deal damage
+        const combatHit = event.shootDetails?.some(shot => shot.hitResult === 'HIT');
+        if (combatHit) {
+          return 'game-log-entry--combat-no-damage'; // Gray background for hits without damage
+        }
+        return 'game-log-entry--combat-failed'; // Orange background for complete misses
       case 'death': return 'game-log-entry--death';
       case 'move_cancel': 
       case 'charge_cancel': return 'game-log-entry--cancel';

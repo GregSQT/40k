@@ -521,13 +521,14 @@ class GameReplayLogger:
         shooter_str = shooter.get("rng_str")
         target_t = target.get("t")
         target_armor = target.get("armor_save")
-        target_invul = target.get("invul_save", 0)  # Only invul can default to 0
-        shooter_ap = shooter.get("rng_ap", 0)  # Only AP can default to 0
+        target_invul = target.get("invul_save")
+        shooter_ap = shooter.get("rng_ap")
         
-        # Validate required stats exist
-        if any(x is None for x in [hit_target, shooter_str, target_t, target_armor]):
-            print(f"⚠️ WARNING: Missing unit stats - hit_target:{hit_target}, str:{shooter_str}, t:{target_t}, armor:{target_armor}")
-            return None
+        # Validate all required stats exist - no defaults allowed
+        if any(x is None for x in [hit_target, shooter_str, target_t, target_armor, target_invul, shooter_ap]):
+            raise ValueError(f"Missing unit stats - hit_target:{hit_target}, str:{shooter_str}, t:{target_t}, armor:{target_armor}, invul:{target_invul}, ap:{shooter_ap}")
+        
+        # This validation is now handled above with all stats including invul and ap
             
         wound_target = calculate_wound_target(shooter_str, target_t)
         save_target = calculate_save_target(target_armor, target_invul, shooter_ap)
@@ -581,15 +582,9 @@ class GameReplayLogger:
         wounds = summary.get("wounds")
         failed_saves = summary.get("failedSaves")
         
-        # Fix missing totalShots - calculate from hits (shots must be >= hits)
+        # Remove fallback code - raise error instead per AI_INSTRUCTIONS.md
         if total_shots is None:
-            if hits is not None:
-                # Conservative estimate: assume all shots hit (minimum possible shots)
-                total_shots = hits
-                print(f"🔧 FIXED: totalShots was None, estimated from hits: {total_shots}")
-            else:
-                print(f"⚠️ WARNING: Missing both totalShots and hits data")
-                return None
+            raise ValueError(f"execute_shooting_sequence() returned None for totalShots - this violates AI_INSTRUCTIONS.md no fallbacks policy. Unit: {shooter.get('unit_type', 'unknown') if shooter else 'None'} vs Target: {target.get('unit_type', 'unknown') if target else 'None'}")
         
         # Validate other required data exists  
         if any(x is None for x in [hits, wounds, failed_saves]):
@@ -632,7 +627,82 @@ class GameReplayLogger:
 
     def _convert_combat_details(self, combat_result, attacker=None, target=None):
         """Convert gym combat result to PvP shootDetails format (reused structure)"""
-        return self._convert_shoot_details(combat_result, attacker, target)  # Same format with unit data
+        if not combat_result:
+            return None
+        
+        # Combat results have 'totalAttacks' not 'totalShots' - convert the format
+        if "summary" in combat_result and "totalAttacks" in combat_result["summary"]:
+            # Create a shooting-compatible format
+            modified_result = {
+                "totalDamage": combat_result["totalDamage"],
+                "summary": {
+                    "totalShots": combat_result["summary"]["totalAttacks"],  # Convert totalAttacks to totalShots
+                    "hits": combat_result["summary"]["hits"],
+                    "wounds": combat_result["summary"]["wounds"], 
+                    "failedSaves": combat_result["summary"]["failedSaves"]
+                }
+            }
+            # Add shots data if available (convert from attackDetails)
+            if "attackDetails" in combat_result:
+                modified_result["shots"] = []
+                # Convert combat attackDetails to shooting shots format - calculate real targets
+                for i, attack in enumerate(combat_result["attackDetails"]):
+                    if not attacker or not target:
+                        raise ValueError("Combat details conversion requires attacker and target unit data")
+                    
+                    # Calculate real target numbers using same rules as combat
+                    from shared.gameRules import calculate_wound_target, calculate_save_target
+                    
+                    if "cc_atk" not in attacker:
+                        raise ValueError("attacker.cc_atk is required for combat details conversion")
+                    if "cc_str" not in attacker:
+                        raise ValueError("attacker.cc_str is required for combat details conversion")
+                    if "cc_ap" not in attacker:
+                        raise ValueError("attacker.cc_ap is required for combat details conversion")
+                    if "t" not in target:
+                        raise ValueError("target.t is required for combat details conversion")
+                    if "armor_save" not in target:
+                        raise ValueError("target.armor_save is required for combat details conversion")
+                    if "invul_save" not in target:
+                        raise ValueError("target.invul_save is required for combat details conversion")
+                    
+                    hit_target = attacker["cc_atk"]
+                    wound_target = calculate_wound_target(attacker["cc_str"], target["t"])
+                    save_target = calculate_save_target(target["armor_save"], target["invul_save"], attacker["cc_ap"])
+                    
+                    # Validate all required combat attack data exists - no defaults allowed
+                    if "hit_roll" not in attack:
+                        raise ValueError("Combat attack missing required hit_roll")
+                    if "hit_success" not in attack:
+                        raise ValueError("Combat attack missing required hit_success")
+                    if "wound_roll" not in attack:
+                        raise ValueError("Combat attack missing required wound_roll")
+                    if "wound_success" not in attack:
+                        raise ValueError("Combat attack missing required wound_success")
+                    if "save_roll" not in attack:
+                        raise ValueError("Combat attack missing required save_roll")
+                    if "save_success" not in attack:
+                        raise ValueError("Combat attack missing required save_success")
+                    if "damage_dealt" not in attack:
+                        raise ValueError("Combat attack missing required damage_dealt")
+                    
+                    shot = {
+                        "hit_roll": attack["hit_roll"],
+                        "hit_target": hit_target,
+                        "hit": attack["hit_success"],
+                        "wound_roll": attack["wound_roll"],
+                        "wound_target": wound_target,
+                        "wound": attack["wound_success"],
+                        "save_roll": attack["save_roll"],
+                        "save_target": save_target,
+                        "save_success": attack["save_success"],
+                        "damage": attack["damage_dealt"]
+                    }
+                    modified_result["shots"].append(shot)
+            
+            return self._convert_shoot_details(modified_result, attacker, target)
+        else:
+            return self._convert_shoot_details(combat_result, attacker, target)
         
         # Print combat log entry for immediate visibility during training with action name
         # DISABLED for less verbose training

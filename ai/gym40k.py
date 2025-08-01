@@ -118,8 +118,8 @@ class W40KEnv(gym.Env):
                     'invul_save': unit_data['INVUL_SAVE'],
                     'is_ranged': unit_data['role'] == 'Ranged',
                     'is_melee': unit_data['role'] == 'Melee',
-                    'ICON': unit_data.get('ICON', f"icons/{unit_type}.webp"),  # Keep this default as it's UI-related
-                    'size_radius': unit_data.get('SIZE_RADIUS', 1)  # Keep this default as it's UI-related
+                    'ICON': unit_data['ICON'],  # No fallback - must be defined
+                    'size_radius': unit_data.get('SIZE_RADIUS', 1)  # UI-related default is acceptable
                 }
                 self.unit_definitions[unit_type] = converted_unit
         else:
@@ -362,7 +362,7 @@ class W40KEnv(gym.Env):
                             if icon_match:
                                 unit_data['ICON'] = icon_match.group(1)
                             else:
-                                unit_data['ICON'] = f"icons/{unit_name}.webp"  # Default fallback
+                                raise ValueError(f"Unit {unit_name} missing required ICON property in TypeScript file")
                             
                             # Determine unit type from class hierarchy - check 4-part classes first, then fallback to 2-part
                             if ('SpaceMarineInfantryTroopRangedSwarm' in content or 'SpaceMarineInfantryTroopRangedElite' in content or 
@@ -564,9 +564,10 @@ class W40KEnv(gym.Env):
             elif self.current_phase == "shoot":
                 # AI_GAME.md: Only units with enemies in RNG_RNG range and haven't shot yet
                 # Cannot shoot if adjacent to enemy (engaged in combat)
-                if "is_ranged" not in unit:
-                    raise KeyError(f"Unit missing required 'is_ranged' field")
-                if (unit["is_ranged"] and unit_id not in self.shot_units and 
+                # CRITICAL: Only check rng_nb > 0, ignore is_ranged classification
+                if "rng_nb" not in unit:
+                    raise KeyError(f"Unit missing required 'rng_nb' field")
+                if (unit["rng_nb"] > 0 and unit_id not in self.shot_units and 
                     not self._has_adjacent_enemies(unit) and
                     self._has_enemies_in_shooting_range(unit)):
                     eligible.append(unit)
@@ -673,7 +674,8 @@ class W40KEnv(gym.Env):
             action_type = 0
         elif self.current_phase == "shoot" and action_type != 4:
             # AI_GAME.md: "The only available action in this phase is shooting"
-            # Force action to be shooting
+            # Only units with rng_nb > 0 should be in shoot phase (eligible units check)
+            # If they're here, they can shoot, so force to shooting action
             action_type = 4
         elif self.current_phase == "charge" and action_type != 5:
             # AI_GAME.md: Charge phase restriction
@@ -1047,6 +1049,12 @@ class W40KEnv(gym.Env):
 
         # Only action 4 shoots in shoot phase; action 7 waits
         if action_type == 4:
+            # Validate unit can shoot - prevent melee-only units from shooting
+            if "rng_nb" not in unit:
+                raise ValueError(f"Unit {unit.get('unit_type', 'unknown')} missing rng_nb field")
+            if unit["rng_nb"] == 0:
+                raise ValueError(f"Unit {unit.get('unit_type', 'unknown')} has rng_nb=0 (melee-only) but attempting to shoot - this violates AI_INSTRUCTIONS.md no fallbacks policy")
+            
             targets = self._get_shooting_targets(unit)
             if targets:
                 target = targets[0]
@@ -1059,6 +1067,12 @@ class W40KEnv(gym.Env):
                 
                 # Execute dice-based shooting sequence with detailed logging
                 result = execute_shooting_sequence(unit, target)
+                
+                # Validate result structure - no fallbacks allowed
+                if not result or "summary" not in result:
+                    raise ValueError(f"execute_shooting_sequence() returned invalid result structure for unit {unit.get('unit_type', 'unknown')}")
+                if "totalShots" not in result["summary"]:
+                    raise ValueError(f"execute_shooting_sequence() missing totalShots in summary for unit {unit.get('unit_type', 'unknown')} - check shared/gameRules.py implementation")
                 
                 # Enhance result with detailed dice data for PvP compatibility
                 if "shots" not in result and self.replay_logger:

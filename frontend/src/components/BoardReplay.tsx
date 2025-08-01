@@ -1607,12 +1607,41 @@ const validateUnitRegistry = () => {
                   return iconMap[eventType] || '📝';
                 };
                 
-                const getEventTypeClass = (eventType: string): string => {
+                const getEventTypeClass = (eventType: string, rawEvent: any): string => {
+                  if (eventType === 'shoot') {
+                    // Check shootDetails for actual damage dealt
+                    if (rawEvent.shootDetails && Array.isArray(rawEvent.shootDetails)) {
+                      const hasWounds = rawEvent.shootDetails.some((shot: any) => shot.damageDealt && shot.damageDealt > 0);
+                      const hasSaves = rawEvent.shootDetails.some((shot: any) => shot.saveSuccess === true);
+                      
+                      if (hasWounds) {
+                        return 'game-log-entry--shoot-damage'; // Red - damage dealt
+                      } else if (hasSaves) {
+                        return 'game-log-entry--shoot-saved'; // Orange - armor saved
+                      }
+                    }
+                    return 'game-log-entry--shoot-failed'; // Yellow - missed
+                  }
+                  
+                  if (eventType === 'combat') {
+                    // Check shootDetails for actual combat damage dealt (same structure as shooting)
+                    if (rawEvent.shootDetails && Array.isArray(rawEvent.shootDetails)) {
+                      const hasWounds = rawEvent.shootDetails.some((shot: any) => shot.damageDealt && shot.damageDealt > 0);
+                      const hasSaves = rawEvent.shootDetails.some((shot: any) => shot.saveSuccess === true);
+                      const hasHits = rawEvent.shootDetails.some((shot: any) => shot.hitResult === 'HIT');
+                      
+                      if (hasWounds) {
+                        return 'game-log-entry--combat'; // Red - damage dealt
+                      } else if (hasSaves || hasHits) {
+                        return 'game-log-entry--combat-no-damage'; // Gray - hit but no damage
+                      }
+                    }
+                    return 'game-log-entry--combat-failed'; // Orange - complete miss
+                  }
+                  
                   const classMap: Record<string, string> = {
                     'move': 'game-log-entry--move',
-                    'shoot': 'game-log-entry--shoot',
                     'charge': 'game-log-entry--charge', 
-                    'combat': 'game-log-entry--combat',
                     'death': 'game-log-entry--death',
                     'turn_change': 'game-log-entry--turn',
                     'phase_change': 'game-log-entry--phase'
@@ -1623,7 +1652,7 @@ const validateUnitRegistry = () => {
                 return (
                   <div 
                     key={originalIndex}
-                    className={`game-log-entry ${getEventTypeClass(eventType)} ${originalIndex === currentStep ? 'game-log-entry--active' : ''}`}
+                    className={`game-log-entry ${getEventTypeClass(eventType, rawEvent)} ${originalIndex === currentStep ? 'game-log-entry--active' : ''}`}
                     onClick={() => setCurrentStep(originalIndex)}
                     style={{ cursor: 'pointer' }}
                   >

@@ -175,74 +175,7 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
         },
         "shots": shot_details  # Individual shot details for logging
     }
-    # Step 1: Number of shots
-    if "rng_nb" not in shooter:
-        raise ValueError("shooter.rng_nb is required")
-    number_of_shots = shooter["rng_nb"]
-
-    total_damage = 0
-    hits = 0
-    wounds = 0
-    failed_saves = 0
-
-    # Process each shot
-    for shot in range(1, number_of_shots + 1):
-        # Step 3: Hit roll
-        hit_roll = roll_d6()
-        if "rng_atk" not in shooter:
-            raise ValueError("shooter.rng_atk is required")
-        hit_target = shooter["rng_atk"]
-        did_hit = hit_roll >= hit_target
-        
-        if not did_hit:
-            continue  # Miss - next shot
-        hits += 1
-        
-        # Step 4: Wound roll  
-        wound_roll = roll_d6()
-        if "rng_str" not in shooter:
-            raise ValueError("shooter.rng_str is required")
-        if "t" not in target:
-            raise ValueError("target.t is required")
-        wound_target = calculate_wound_target(shooter["rng_str"], target["t"])
-        did_wound = wound_roll >= wound_target
-        
-        if not did_wound:
-            continue  # Failed to wound - next shot
-        wounds += 1
-        
-        # Step 5: Armor save (with cover bonus)
-        save_roll = roll_d6()
-        base_armor_save = target["armor_save"]
-        invul_save = target.get("invul_save", 0)
-        armor_penetration = shooter["rng_ap"]
-        
-        # Apply cover bonus - +1 to armor save (better save)
-        if target_in_cover:
-            base_armor_save = max(2, base_armor_save - 1)  # Improve armor save by 1, minimum 2+
-            # Note: Invulnerable saves are not affected by cover
-        
-        save_target = calculate_save_target(base_armor_save, invul_save, armor_penetration)
-        saved_wound = save_roll >= save_target
-        
-        if saved_wound:
-            continue  # Save successful - next shot
-        failed_saves += 1
-        
-        # Step 6: Inflict damage
-        if "rng_dmg" not in shooter:
-            raise ValueError("shooter.rng_dmg is required")
-        total_damage += shooter["rng_dmg"]
-
-    return {
-        "totalDamage": total_damage,
-        "summary": {
-            "totalShots": number_of_shots,
-            "hits": hits,
-            "wounds": wounds,
-            "failedSaves": failed_saves
-        }
-    }
+    # REMOVED - This was duplicate code that overwrote the correct function above
 
 # === COMBAT SYSTEM (EXACT from frontend implementation) ===
 
