@@ -9,18 +9,9 @@ import { UnitStatusTable } from './UnitStatusTable';
 import { ErrorBoundary } from './ErrorBoundary';
 import { renderUnit } from './UnitRenderer';
 import { drawBoard } from './BoardDisplay';
+import { hasLineOfSight, offsetToCube, cubeDistance, getHexLine } from '../utils/gameHelpers';
 
-// Pathfinding utilities for move preview (adapted from BoardPvp.tsx)
-const offsetToCube = (col: number, row: number) => {
-  const x = col;
-  const z = row - ((col - (col & 1)) >> 1);
-  const y = -x - z;
-  return { x, y, z };
-};
-
-const cubeDistance = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) => {
-  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.z - b.z));
-};
+// Pathfinding utilities now imported from gameHelpers (same as BoardPvp.tsx)
 
 const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: number, boardConfig: any, units: ReplayUnit[]): { col: number; row: number }[] => {
   if (!boardConfig) return [];
@@ -141,87 +132,9 @@ const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: 
   return availableCells;
 };
 
-// Line of sight utilities for shooting preview (adapted from BoardPvp.tsx)
-const getHexLine = (x0: number, y0: number, x1: number, y1: number) => {
-  const hexes: { col: number; row: number }[] = [];
-  const dx = Math.abs(x1 - x0);
-  const dy = Math.abs(y1 - y0);
-  const sx = x0 < x1 ? 1 : -1;
-  const sy = y0 < y1 ? 1 : -1;
-  let err = dx - dy;
-  let x = x0;
-  let y = y0;
+// Import line of sight utilities from gameHelpers (same as BoardPvp.tsx)
 
-  while (true) {
-    hexes.push({ col: x, row: y });
-    if (x === x1 && y === y1) break;
-    const e2 = 2 * err;
-    if (e2 > -dy) {
-      err -= dy;
-      x += sx;
-    }
-    if (e2 < dx) {
-      err += dx;
-      y += sy;
-    }
-  }
-  return hexes;
-};
-
-const hasLineOfSight = (
-  from: { col: number; row: number },
-  to: { col: number; row: number },
-  wallHexes: [number, number][]
-): { canSee: boolean; inCover: boolean } => {
-  if (from.col === to.col && from.row === to.row) {
-    return { canSee: true, inCover: false };
-  }
-
-  const lineHexes = getHexLine(from.col, from.row, to.col, to.row);
-  const wallHexSet = new Set<string>(wallHexes.map(([c, r]) => `${c},${r}`));
-  
-  let hasWallInPath = false;
-  let hasCover = false;
-
-  // Check each hex in the line (excluding start and end)
-  for (let i = 1; i < lineHexes.length - 1; i++) {
-    const hex = lineHexes[i];
-    const hexKey = `${hex.col},${hex.row}`;
-    
-    if (wallHexSet.has(hexKey)) {
-      hasWallInPath = true;
-      break;
-    }
-    
-    // Check for units that could provide cover (would need unit positions)
-    // For now, just check walls for cover detection
-  }
-
-  if (hasWallInPath) {
-    return { canSee: false, inCover: false };
-  }
-
-  // Simple cover detection - if there are walls near the line but not blocking
-  const pathLength = lineHexes.length;
-  if (pathLength > 2) {
-    // Check if there are walls adjacent to the path
-    for (let i = 1; i < lineHexes.length - 1; i++) {
-      const hex = lineHexes[i];
-      // Check adjacent hexes for walls
-      const adjacentOffsets = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1]];
-      for (const [dx, dy] of adjacentOffsets) {
-        const adjKey = `${hex.col + dx},${hex.row + dy}`;
-        if (wallHexSet.has(adjKey)) {
-          hasCover = true;
-          break;
-        }
-      }
-      if (hasCover) break;
-    }
-  }
-
-  return { canSee: true, inCover: hasCover };
-};
+// hasLineOfSight now imported from gameHelpers (same as BoardPvp.tsx)
 
 const calculateShootingTargets = (
   shooterCol: number,
@@ -1095,8 +1008,16 @@ const validateUnitRegistry = () => {
         console.log('🟢 availableCells generated:', availableCells);
       }
       
-      // Draw initial board and units using shared BoardRenderer with move preview
-      drawBoard(app, boardConfig! as any, { availableCells });
+      // Draw initial board and units using shared BoardRenderer with previews
+      drawBoard(app, boardConfig as any, {
+        availableCells,
+        attackCells: shootingPreview?.clearTargets || [],
+        coverCells: shootingPreview?.coverTargets || [],
+        chargeCells: [],
+        blockedTargets: shootingPreview?.blockedTargets || new Set(),
+        coverTargets: new Set(),
+        phase: shootingPreview ? 'shoot' : 'move'
+      });
       drawUnits(app, currentUnits, actingUnitId);
       
       // Draw darkened origin unit for move preview
@@ -1152,7 +1073,15 @@ const validateUnitRegistry = () => {
       }
       
       // Redraw board with preview hexes
-      drawBoard(pixiAppRef.current, boardConfig as any, { availableCells });
+      drawBoard(pixiAppRef.current, boardConfig as any, {
+        availableCells,
+        attackCells: shootingPreview?.clearTargets || [],
+        coverCells: shootingPreview?.coverTargets || [],
+        chargeCells: [],
+        blockedTargets: shootingPreview?.blockedTargets || new Set(),
+        coverTargets: new Set(),
+        phase: shootingPreview ? 'shoot' : 'move'
+      });
       drawUnits(pixiAppRef.current, currentUnits, actingUnitId);
       
       // Also add darkened origin unit in update effect
@@ -1336,27 +1265,100 @@ const validateUnitRegistry = () => {
         }
         setShootingPreview(null); // Clear shooting preview during moves
       } 
-      // Detect shooting actions and set up shooting preview
+      // Detect shooting actions and set up shooting preview (following BoardPvp.tsx pattern)
       else if (currentLogEntry && (currentLogEntry as any).type === 'shoot') {
         const logEntry = currentLogEntry as any;
         const shootingUnit = newUnits.find(u => u.id === logEntry.unitId);
         
-        if (shootingUnit) {
-          // Calculate shooting targets and line of sight
-          const shootingTargets = calculateShootingTargets(
-            shootingUnit.col,
-            shootingUnit.row,
-            shootingUnit.RNG_RNG,
-            boardConfig,
-            newUnits.filter(u => u.player !== shootingUnit.player) // Only enemy units
-          );
+        if (shootingUnit && shootingUnit.RNG_RNG) {
+          const shooterCube = offsetToCube(shootingUnit.col, shootingUnit.row);
+          const wallHexes = boardConfig?.wall_hexes || [];
+          const range = shootingUnit.RNG_RNG;
+          
+          const clearTargets: { col: number; row: number }[] = [];
+          const coverTargets: { col: number; row: number }[] = [];
+          const blockedTargets = new Set<string>();
+          const coverTargetsSet = new Set<string>();
+          
+          // First, find all enemies in range and mark cover paths (exact PvP logic)
+          const coverPathHexes = new Set<string>();
+          const enemyUnits = newUnits.filter(u => u.player !== shootingUnit.player && u.alive);
+          
+          // Process actual enemy units first
+          for (const enemy of enemyUnits) {
+            const distance = cubeDistance(shooterCube, offsetToCube(enemy.col, enemy.row));
+            if (distance > 0 && distance <= range) {
+              const lineOfSight = hasLineOfSight(
+                { col: shootingUnit.col, row: shootingUnit.row },
+                { col: enemy.col, row: enemy.row },
+                wallHexes
+              );
+              
+              if (lineOfSight.canSee && lineOfSight.inCover) {
+                // Mark this enemy as in cover
+                coverTargets.push({ col: enemy.col, row: enemy.row });
+                coverTargetsSet.add(`${enemy.col},${enemy.row}`);
+                
+                // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
+                const pathHexes = getHexLine(shootingUnit.col, shootingUnit.row, enemy.col, enemy.row);
+                const wallHexSet = new Set<string>(wallHexes.map(([c, r]) => `${c},${r}`));
+                pathHexes.forEach(hex => {
+                  const hexKey = `${hex.col},${hex.row}`;
+                  if (!wallHexSet.has(hexKey)) {
+                    coverPathHexes.add(hexKey);
+                  }
+                });
+              } else if (lineOfSight.canSee) {
+                // Clear line of sight enemy
+                clearTargets.push({ col: enemy.col, row: enemy.row });
+              } else {
+                // Blocked enemy
+                blockedTargets.add(`${enemy.col},${enemy.row}`);
+              }
+            }
+          }
+          
+          // Now show all hexes in range with appropriate colors (exact PvP logic)
+          for (let col = 0; col < (boardConfig?.cols || 0); col++) {
+            for (let row = 0; row < (boardConfig?.rows || 0); row++) {
+              const targetCube = offsetToCube(col, row);
+              const dist = cubeDistance(shooterCube, targetCube);
+              if (dist > 0 && dist <= range) {
+                const hexKey = `${col},${row}`;
+                const hasEnemy = newUnits.some(u => 
+                  u.player !== shootingUnit.player && 
+                  u.col === col && 
+                  u.row === row
+                );
+                
+                if (!hasEnemy) {
+                  // For empty hexes, show orange if part of cover path, red if clear
+                  if (coverPathHexes.has(hexKey)) {
+                    coverTargets.push({ col, row });
+                  } else {
+                    const lineOfSight = hasLineOfSight(
+                      { col: shootingUnit.col, row: shootingUnit.row },
+                      { col, row },
+                      wallHexes
+                    );
+                    
+                    if (lineOfSight.canSee && !lineOfSight.inCover) {
+                      clearTargets.push({ col, row });
+                    } else if (lineOfSight.canSee && lineOfSight.inCover) {
+                      coverTargets.push({ col, row });
+                    }
+                  }
+                }
+              }
+            }
+          }
           
           setShootingPreview({
             shooterCol: shootingUnit.col,
             shooterRow: shootingUnit.row,
-            clearTargets: shootingTargets.clearTargets,
-            coverTargets: shootingTargets.coverTargets,
-            blockedTargets: shootingTargets.blockedTargets,
+            clearTargets,
+            coverTargets,
+            blockedTargets,
             unitId: logEntry.unitId,
             range: shootingUnit.RNG_RNG
           });
