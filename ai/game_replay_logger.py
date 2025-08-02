@@ -290,35 +290,45 @@ class GameReplayLogger:
         acting_unit_id = None
         target_unit_id = None
         
+        # Create ID-based dictionaries for proper matching
+        pre_units_by_id = {unit.get('id'): unit for unit in pre_action_units}
+        post_units_by_id = {unit.get('id'): unit for unit in post_action_units}
+        
         # Find unit that acted (moved, changed flags)
-        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
-            if pre_unit.get('id') == post_unit.get('id'):
+        for unit_id in post_units_by_id.keys():
+            if unit_id in pre_units_by_id:
+                pre_unit = pre_units_by_id[unit_id]
+                post_unit = post_units_by_id[unit_id]
+                
                 # Check position change
                 if (pre_unit.get('col') != post_unit.get('col') or 
                     pre_unit.get('row') != post_unit.get('row')):
-                    acting_unit_id = post_unit.get('id')
+                    acting_unit_id = unit_id
                     break
                 
                 # Check action flags
                 for flag in ['has_moved', 'has_shot', 'has_charged', 'has_attacked']:
                     if not pre_unit.get(flag, False) and post_unit.get(flag, False):
-                        acting_unit_id = post_unit.get('id')
+                        acting_unit_id = unit_id
                         break
                 if acting_unit_id:
                     break
         
         # Find target unit (took damage)
-        for pre_unit, post_unit in zip(pre_action_units, post_action_units):
-            if pre_unit.get('id') == post_unit.get('id'):
+        for unit_id in post_units_by_id.keys():
+            if unit_id in pre_units_by_id:
+                pre_unit = pre_units_by_id[unit_id]
+                post_unit = post_units_by_id[unit_id]
+                
                 pre_hp = pre_unit.get('cur_hp', pre_unit.get('hp', 0))
                 post_hp = post_unit.get('cur_hp', post_unit.get('hp', 0))
                 if pre_hp > post_hp:
-                    target_unit_id = post_unit.get('id')
+                    target_unit_id = unit_id
                     break
                 
                 # Check if unit died
                 if pre_unit.get('alive', True) and not post_unit.get('alive', True):
-                    target_unit_id = post_unit.get('id')
+                    target_unit_id = unit_id
                     break
         
         return acting_unit_id, target_unit_id
@@ -755,8 +765,8 @@ class GameReplayLogger:
         units_data = []
         for i, unit in enumerate(self.env.units):
             unit_data = {
-                "id": i,
-                "name": unit.get("name", f"{unit.get('unit_type', 'Unit')} {i+1}"),
+                "id": unit.get('id', i),
+                "name": unit.get("name", f"{unit.get('unit_type', 'Unit')} {unit.get('id', i)+1}"),
                 "unit_type": unit.get("unit_type", "Unknown"),
                 "player": unit.get("player", 0),
                 "row": unit.get("row", 0),

@@ -2186,7 +2186,7 @@ class W40KEnv(gym.Env):
                 for i, unit in enumerate(self.units):
                     if unit:
                         unit_state = {
-                            "id": i,
+                            "id": unit.get('id', i),
                             "player": unit.get('player', 0),  # Keep for replay compatibility
                             "col": unit.get('col', 0),  # Keep for replay compatibility
                             "row": unit.get('row', 0),  # Keep for replay compatibility

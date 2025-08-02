@@ -705,7 +705,7 @@ class MultiAgentTrainer:
             
             def _capture_evaluation_episodes(self):
                 """Capture the evaluation episodes that just ran."""
-                print(f"🔍 Capturing {self.n_eval_episodes} evaluation episodes for selective replay")
+                # print(f"🔍 Capturing {self.n_eval_episodes} evaluation episodes for selective replay")
                 
                 # Get the actual evaluation results from the parent callback
                 if hasattr(self, 'last_mean_reward'):
@@ -769,7 +769,7 @@ class MultiAgentTrainer:
                         "episode_reward": episode_reward
                     })
                     
-                    print(f"✅ Using GameReplayLogger: {len(replay_data.get('combat_log', []))} combat log entries captured")
+                    # print(f"✅ Using GameReplayLogger: {len(replay_data.get('combat_log', []))} combat log entries captured")
                     return replay_data
                 else:
                     print(f"❌ No GameReplayLogger found in evaluation environment")
@@ -866,7 +866,7 @@ class MultiAgentTrainer:
 
     def _test_trained_model(self, model, env, num_episodes: int = 10, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
         """Test trained model and return performance metrics with selective replay tracking."""
-        print(f"🔍 Testing model with {num_episodes} episodes, tracker: {'YES' if episode_tracker else 'NO'}")
+        # print(f"🔍 Testing model with {num_episodes} episodes, tracker: {'YES' if episode_tracker else 'NO'}")
         wins = 0
         total_rewards = []
         
@@ -913,8 +913,8 @@ class MultiAgentTrainer:
                     }
                     print(f"🔍 Tracking episode {episode+1} (no replay logger): {step_count} steps, {episode_reward:.2f} reward")
                     episode_tracker.update_episode(step_count, episode_reward, replay_data)
-            else:
-                print(f"⚠️ No episode tracker provided")
+            # else:
+                # print(f"⚠️ No episode tracker provided")
             
             # Check win condition
             if info.get('winner') == 1:  # AI won

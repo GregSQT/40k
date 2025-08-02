@@ -1076,6 +1076,14 @@ const validateUnitRegistry = () => {
     }
   }, [scenario, replayData, drawUnits, drawMovePreview, drawShootingPreview, currentUnits, actingUnitId, movePreview, shootingPreview]);
 
+  // Update previews when they change
+  useEffect(() => {
+    if (pixiAppRef.current) {
+      drawMovePreview(pixiAppRef.current);
+      drawShootingPreview(pixiAppRef.current);
+    }
+  }, [movePreview, shootingPreview, drawMovePreview, drawShootingPreview]);
+
   // Update game state based on current step
   useEffect(() => {
     if (!replayData || currentStep < 0 || !battleLog || battleLog.length === 0) return;
@@ -1177,22 +1185,32 @@ const validateUnitRegistry = () => {
         const logEntry = currentLogEntry as any;
         const movingUnit = newUnits.find(u => u.id === logEntry.unitId);
         
-        if (movingUnit && logEntry.fromPosition && logEntry.toPosition) {
-          const [fromCol, fromRow] = logEntry.fromPosition;
-          const [toCol, toRow] = logEntry.toPosition;
+        if (movingUnit && logEntry.startHex && logEntry.endHex) {
+          // Parse hex coordinates from "(col, row)" format
+          const startMatch = logEntry.startHex.match(/\((\d+),\s*(\d+)\)/);
+          const endMatch = logEntry.endHex.match(/\((\d+),\s*(\d+)\)/);
           
-          // Calculate path using pathfinding
-          const path = calculateMovePath(fromCol, fromRow, toCol, toRow, movingUnit.MOVE, boardConfig, newUnits);
-          
-          if (path.length > 0) {
-            setMovePreview({
-              fromCol,
-              fromRow,
-              toCol,
-              toRow,
-              path,
-              unitId: logEntry.unitId
-            });
+          if (startMatch && endMatch) {
+            const fromCol = parseInt(startMatch[1]);
+            const fromRow = parseInt(startMatch[2]);
+            const toCol = parseInt(endMatch[1]);
+            const toRow = parseInt(endMatch[2]);
+            
+            // Calculate path using pathfinding
+            const path = calculateMovePath(fromCol, fromRow, toCol, toRow, movingUnit.MOVE, boardConfig, newUnits);
+            
+            if (path.length > 0) {
+              setMovePreview({
+                fromCol,
+                fromRow,
+                toCol,
+                toRow,
+                path,
+                unitId: logEntry.unitId
+              });
+            } else {
+              setMovePreview(null);
+            }
           } else {
             setMovePreview(null);
           }
