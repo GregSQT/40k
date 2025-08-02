@@ -264,7 +264,7 @@ class W40KEnv(gym.Env):
         # Replay tracking - COMPLETELY DISABLED, using GameReplayIntegration only
         self.replay_data = []
         self.save_replay = False
-        print("🔧 gym40k replay system disabled - using GameReplayIntegration only")
+        # print("🔧 gym40k replay system disabled - using GameReplayIntegration only")
         
         # Store scenario metadata for replay
         self.scenario_metadata = None

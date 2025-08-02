@@ -1055,10 +1055,17 @@ const validateUnitRegistry = () => {
       // Store app reference
       pixiAppRef.current = app;
       
-      // Draw initial board and units using shared BoardRenderer
-      drawBoard(app, boardConfig! as any);
-      drawMovePreview(app);
-      drawShootingPreview(app);
+      console.log('🟢 movePreview state in main useEffect:', movePreview);
+      
+      // Generate move preview cells like BoardPvp.tsx
+      let availableCells: { col: number; row: number }[] = [];
+      if (movePreview && movePreview.path) {
+        availableCells = movePreview.path;
+        console.log('🟢 availableCells generated:', availableCells);
+      }
+      
+      // Draw initial board and units using shared BoardRenderer with move preview
+      drawBoard(app, boardConfig! as any, { availableCells });
       drawUnits(app, currentUnits, actingUnitId);
       
       // Cleanup function
@@ -1078,11 +1085,18 @@ const validateUnitRegistry = () => {
 
   // Update previews when they change
   useEffect(() => {
-    if (pixiAppRef.current) {
-      drawMovePreview(pixiAppRef.current);
-      drawShootingPreview(pixiAppRef.current);
+    if (pixiAppRef.current && boardConfig) {
+      // Generate move preview cells like BoardPvp.tsx
+      let availableCells: { col: number; row: number }[] = [];
+      if (movePreview && movePreview.path) {
+        availableCells = movePreview.path;
+      }
+      
+      // Redraw board with preview hexes
+      drawBoard(pixiAppRef.current, boardConfig as any, { availableCells });
+      drawUnits(pixiAppRef.current, currentUnits, actingUnitId);
     }
-  }, [movePreview, shootingPreview, drawMovePreview, drawShootingPreview]);
+  }, [movePreview, shootingPreview, currentUnits, actingUnitId, boardConfig, drawUnits]);
 
   // Update game state based on current step
   useEffect(() => {
@@ -1181,25 +1195,37 @@ const validateUnitRegistry = () => {
       setCurrentEvent(currentLogEntry);
       
       // Detect move actions and set up move preview
+      console.log('🔍 currentLogEntry:', currentLogEntry);
       if (currentLogEntry && (currentLogEntry as any).type === 'move') {
         const logEntry = currentLogEntry as any;
+        console.log('🔍 Move detected! logEntry:', logEntry);
         const movingUnit = newUnits.find(u => u.id === logEntry.unitId);
+        console.log('🔍 movingUnit found:', movingUnit);
+        console.log('🔍 logEntry.startHex:', logEntry.startHex);
+        console.log('🔍 logEntry.endHex:', logEntry.endHex);
         
         if (movingUnit && logEntry.startHex && logEntry.endHex) {
           // Parse hex coordinates from "(col, row)" format
           const startMatch = logEntry.startHex.match(/\((\d+),\s*(\d+)\)/);
           const endMatch = logEntry.endHex.match(/\((\d+),\s*(\d+)\)/);
+          console.log('🔍 startMatch:', startMatch);
+          console.log('🔍 endMatch:', endMatch);
           
           if (startMatch && endMatch) {
             const fromCol = parseInt(startMatch[1]);
             const fromRow = parseInt(startMatch[2]);
             const toCol = parseInt(endMatch[1]);
             const toRow = parseInt(endMatch[2]);
+            console.log('🔍 Move coordinates:', { fromCol, fromRow, toCol, toRow });
             
             // Calculate path using pathfinding
+            console.log('🔍 Unit MOVE value:', movingUnit.MOVE);
+            console.log('🔍 Current units for pathfinding:', newUnits.map(u => ({ id: u.id, col: u.col, row: u.row, alive: u.alive })));
             const path = calculateMovePath(fromCol, fromRow, toCol, toRow, movingUnit.MOVE, boardConfig, newUnits);
+            console.log('🔍 Calculated path:', path);
             
             if (path.length > 0) {
+              console.log('🟢 Setting movePreview with path!');
               setMovePreview({
                 fromCol,
                 fromRow,
@@ -1209,12 +1235,15 @@ const validateUnitRegistry = () => {
                 unitId: logEntry.unitId
               });
             } else {
+              console.log('❌ Path is empty, setting movePreview to null');
               setMovePreview(null);
             }
           } else {
+            console.log('❌ Failed to parse hex coordinates, setting movePreview to null');
             setMovePreview(null);
           }
         } else {
+          console.log('❌ Missing movingUnit or hex data, setting movePreview to null');
           setMovePreview(null);
         }
         setShootingPreview(null); // Clear shooting preview during moves
