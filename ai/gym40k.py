@@ -13,6 +13,7 @@ import os
 import re
 import random
 import copy
+import json
 from datetime import datetime
 import sys
 from pathlib import Path
@@ -23,6 +24,7 @@ project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
 from ai.unit_registry import UnitRegistry
+from ai.unit_manager import UnitManager
 from shared.gameRules import roll_d6, calculate_wound_target, calculate_save_target, execute_shooting_sequence, remove_unit_from_lists
 
 try:
@@ -87,11 +89,8 @@ class W40KEnv(gym.Env):
         # Ensure we load from the root config directory, not frontend/public/config
         self.rewards_config = self.config.load_rewards_config()
         if not self.rewards_config:
-            # Fallback to direct file loading if config_loader fails
-            import json
-            rewards_path = project_root / "config" / "rewards_config.json"
-            with open(rewards_path, 'r') as f:
-                self.rewards_config = json.load(f)
+            # AI_INSTRUCTIONS.md: No fallbacks allowed - raise error instead
+            raise RuntimeError("Failed to load rewards configuration from config_loader - check config/rewards_config.json")
         
         # Load unit definitions from the unit registry instead of parsing files separately
         if unit_registry is not None:
@@ -426,24 +425,26 @@ class W40KEnv(gym.Env):
             raise KeyError("Unit missing required 'unit_type' field")
         unit_type = unit["unit_type"]
         
-        # Primary method: Get agent key dynamically from unit registry
-        if hasattr(self, 'unit_registry'):
-            try:
-                agent_key = self.unit_registry.get_model_key(unit_type)
-                if agent_key in self.rewards_config:
-                    return self.rewards_config[agent_key]
-                else:
-                    available_agent_keys = list(self.rewards_config.keys())
-                    raise KeyError(f"Agent key '{agent_key}' for unit '{unit_type}' not found in rewards config. Available agent keys: {available_agent_keys}")
-            except ValueError as e:
-                raise ValueError(f"Failed to get model key for unit '{unit_type}': {e}")
+        # AI_INSTRUCTIONS.md: No fallbacks - unit registry is required
+        if not hasattr(self, 'unit_registry'):
+            raise RuntimeError("AI_INSTRUCTIONS.md violation: Unit registry is required - no fallbacks allowed")
         
-        # Fallback: Try direct unit type lookup
-        if unit_type in self.rewards_config:
-            return self.rewards_config[unit_type]
-        
-        # No registry available and no direct match
-        raise RuntimeError(f"Unit registry not available and unit type '{unit_type}' not found in rewards config. Available types: {list(self.rewards_config.keys())}")
+        try:
+            agent_key = self.unit_registry.get_model_key(unit_type)
+            if agent_key not in self.rewards_config:
+                available_agent_keys = list(self.rewards_config.keys())
+                raise KeyError(f"Agent key '{agent_key}' for unit '{unit_type}' not found in rewards config. Available agent keys: {available_agent_keys}")
+            
+            # Validate the structure exists before returning
+            unit_reward_config = self.rewards_config[agent_key]
+            if "base_actions" not in unit_reward_config:
+                raise KeyError(f"Missing 'base_actions' section in rewards config for agent key '{agent_key}' (unit type '{unit_type}')")
+            if "wait" not in unit_reward_config["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for agent key '{agent_key}' (unit type '{unit_type}')")
+            
+            return unit_reward_config
+        except ValueError as e:
+            raise ValueError(f"Failed to get model key for unit '{unit_type}': {e}")
 
     def reset(self, seed=None, options=None):
         """Reset environment to initial state."""
@@ -861,7 +862,8 @@ class W40KEnv(gym.Env):
             self.winner = None
             unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type")
+                unit_type = self.ai_units[0]["unit_type"] if self.ai_units else "unknown"
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type '{unit_type}'")
             return self._get_obs(), unit_rewards["base_actions"]["wait"], False, True, self._get_info()  # truncated=True
         if self.game_over:
             return self._get_obs(), 0.0, True, False, self._get_info()
@@ -879,19 +881,23 @@ class W40KEnv(gym.Env):
             phase_advances += 1
         
         if phase_advances >= max_phase_advances:
-            # Emergency end game to prevent infinite loops
+            # Emergency end game to prevent infinite loops - check if game should have ended
+            if not self.ai_units or not self.enemy_units:
+                # Units were eliminated but game didn't end properly, force proper termination
+                self.game_over = True
+                self.winner = 0 if not self.ai_units else 1
+                return self._get_obs(), 0.0, True, False, self._get_info()
+            # Still have units but too many phase advances - end with draw
             self.game_over = True
             self.winner = None
-            unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
-            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type")
-            return self._get_obs(), unit_rewards["base_actions"]["wait"], True, False, self._get_info()
+            return self._get_obs(), -1.0, True, False, self._get_info()
         
         if not eligible_units and not self.game_over:
             # Still no eligible units, return small negative reward
             unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type")
+                unit_type = self.ai_units[0]["unit_type"] if self.ai_units else "unknown"
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type '{unit_type}'")
             return self._get_obs(), unit_rewards["base_actions"]["wait"], False, False, self._get_info()
         
         # Apply AI_GAME.md action masking before processing
@@ -905,27 +911,34 @@ class W40KEnv(gym.Env):
             # Invalid unit, small penalty
             unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type")
+                unit_type = self.ai_units[0]["unit_type"] if self.ai_units else "unknown"
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type '{unit_type}'")
             return self._get_obs(), unit_rewards["base_actions"]["wait"], False, False, self._get_info()
         
         unit = eligible_units[unit_idx]
         reward = self._execute_action_with_phase(unit, action_type)
         
-        # Game outcome rewards  
-        unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
-        
-        if not any(u["alive"] for u in self.ai_units):
+        # Game outcome rewards - check termination conditions BEFORE accessing unit rewards
+        if not self.ai_units:  # Empty list means all AI units were removed
             self.game_over = True
             self.winner = 0
-            if "situational_modifiers" not in unit_rewards or "lose" not in unit_rewards["situational_modifiers"]:
-                raise KeyError(f"Missing 'situational_modifiers.lose' in rewards config for unit type")
-            reward += unit_rewards["situational_modifiers"]["lose"]
-        elif not any(u["alive"] for u in self.enemy_units):
+            # Use first available unit from original scenario for reward config
+            if self.units:
+                ai_unit_for_rewards = next((u for u in self.units if u["player"] == 1), None)
+                if ai_unit_for_rewards:
+                    unit_rewards = self._get_unit_reward_config(ai_unit_for_rewards)
+                    reward += unit_rewards["situational_modifiers"]["lose"]
+            return self._get_obs(), reward, True, False, self._get_info()
+        elif not self.enemy_units:  # Empty list means all enemy units were removed
             self.game_over = True
             self.winner = 1
-            if "situational_modifiers" not in unit_rewards or "win" not in unit_rewards["situational_modifiers"]:
-                raise KeyError(f"Missing 'situational_modifiers.win' in rewards config for unit type")
-            reward += unit_rewards["situational_modifiers"]["win"]
+            # Get unit rewards for win condition
+            if self.units:
+                ai_unit_for_rewards = next((u for u in self.units if u["player"] == 1), None)
+                if ai_unit_for_rewards:
+                    unit_rewards = self._get_unit_reward_config(ai_unit_for_rewards)
+                    reward += unit_rewards["situational_modifiers"]["win"]
+            return self._get_obs(), reward, True, False, self._get_info()
         elif self.current_turn >= self.max_turns:
             self.game_over = True
             self.winner = None
@@ -1201,11 +1214,13 @@ class W40KEnv(gym.Env):
                 base_attack_reward = unit_rewards["base_actions"]["ranged_attack"]
                 reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
 
-                # Kill bonuses - MOVE BEFORE LOGGING
+                # Kill bonuses - EXACT PvP mode behavior: completely remove dead units
                 if target["cur_hp"] <= 0:
-                    self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
-                        target, self.units, self.ai_units, self.enemy_units
-                    )
+                    # Apply EXACT PvP mode fix: remove unit completely from all lists
+                    target_id = target["id"]
+                    self.units = [u for u in self.units if u["id"] != target_id]
+                    self.ai_units = [u for u in self.ai_units if u["id"] != target_id]
+                    self.enemy_units = [u for u in self.enemy_units if u["id"] != target_id]
                     if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                         raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
                     reward += unit_rewards["result_bonuses"]["kill_target"]
@@ -1338,11 +1353,13 @@ class W40KEnv(gym.Env):
                 base_attack_reward = unit_rewards["base_actions"]["melee_attack"]
                 reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
 
-                # Kill bonuses - MOVE BEFORE LOGGING
+                # Kill bonuses - EXACT PvP mode behavior: completely remove dead units
                 if target["cur_hp"] <= 0:
-                    self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
-                        target, self.units, self.ai_units, self.enemy_units
-                    )
+                    # Apply EXACT PvP mode fix: remove unit completely from all lists
+                    target_id = target["id"]
+                    self.units = [u for u in self.units if u["id"] != target_id]
+                    self.ai_units = [u for u in self.ai_units if u["id"] != target_id]
+                    self.enemy_units = [u for u in self.enemy_units if u["id"] != target_id]
                     if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                         raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
                     reward += unit_rewards["result_bonuses"]["kill_target"]
@@ -1654,10 +1671,13 @@ class W40KEnv(gym.Env):
         base_attack_reward = unit_rewards["base_actions"]["ranged_attack"]
         reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
         
+        # Kill bonuses - EXACT PvP mode behavior: completely remove dead units
         if target["cur_hp"] <= 0:
-            self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
-                target, self.units, self.ai_units, self.enemy_units
-            )
+            # Apply EXACT PvP mode fix: remove unit completely from all lists
+            target_id = target["id"]
+            self.units = [u for u in self.units if u["id"] != target_id]
+            self.ai_units = [u for u in self.ai_units if u["id"] != target_id]
+            self.enemy_units = [u for u in self.enemy_units if u["id"] != target_id]
             if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                 raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
             reward += unit_rewards["result_bonuses"]["kill_target"]
@@ -1882,13 +1902,16 @@ class W40KEnv(gym.Env):
             raise KeyError(f"Missing 'base_actions.melee_attack' in rewards config for unit type {unit['unit_type']}")
         reward = unit_rewards["base_actions"]["melee_attack"]  # Base attack reward
         
+        # Kill bonuses - EXACT PvP mode behavior: completely remove dead units
         if target["cur_hp"] <= 0:
-            self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
-                target, self.units, self.ai_units, self.enemy_units
-            )
+            # Apply EXACT PvP mode fix: remove unit completely from all lists
+            target_id = target["id"]
+            self.units = [u for u in self.units if u["id"] != target_id]
+            self.ai_units = [u for u in self.ai_units if u["id"] != target_id]
+            self.enemy_units = [u for u in self.enemy_units if u["id"] != target_id]
             if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                 raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
-            reward += unit_rewards["result_bonuses"]["kill_target"]  # Kill bonus
+            reward += unit_rewards["result_bonuses"]["kill_target"]
             
             # Bonus for no overkill
             if old_hp == damage:
@@ -2199,15 +2222,21 @@ class W40KEnv(gym.Env):
     def _execute_enemy_turn(self):
         """Execute enemy turn using scripted behavior as mentioned in AI_GAME_OVERVIEW.md."""
         # BALANCED scripted enemy behavior for training - LIMITED ACTIONS
+        # Use self.enemy_units directly since remove_unit_from_lists keeps it updated
         enemy_units_alive = [u for u in self.enemy_units if u["alive"] and u["cur_hp"] > 0]
         
         # Limit total enemy actions per turn to prevent overwhelming AI
         max_enemy_actions = min(2, len(enemy_units_alive))  # Max 2 actions total
         enemy_actions_taken = 0
         
-        for enemy in enemy_units_alive:
+        # Process each enemy action, but only if enemy is still alive  
+        for enemy in enemy_units_alive[:]:  # Use slice copy to avoid modification during iteration
             if enemy_actions_taken >= max_enemy_actions:
                 break  # Limit enemy actions to give AI a chance
+                
+            # Check if enemy is still alive and in the current enemy_units list
+            if enemy not in self.enemy_units or not enemy.get("alive", False) or enemy.get("cur_hp", 0) <= 0:
+                continue
                 
             nearest_ai = self._get_nearest_ai_unit(enemy)
             if not nearest_ai:
@@ -2231,9 +2260,12 @@ class W40KEnv(gym.Env):
                 total_damage = result["totalDamage"]
                 nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - total_damage)
                 if nearest_ai["cur_hp"] <= 0:
+                    # Apply EXACT PvP mode fix - completely remove dead units
                     self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
                         nearest_ai, self.units, self.ai_units, self.enemy_units
                     )
+                    # Immediately break to avoid targeting removed unit
+                    break
                 action_taken = True
                 
                 # Record bot shooting action
@@ -2249,9 +2281,12 @@ class W40KEnv(gym.Env):
                     damage = min(enemy_cc_dmg, nearest_ai["cur_hp"])  # Prevent overkill
                     nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
                 if nearest_ai["cur_hp"] <= 0:
+                    # Apply EXACT PvP mode fix - completely remove dead units
                     self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
                         nearest_ai, self.units, self.ai_units, self.enemy_units
                     )
+                    # Immediately break to avoid targeting removed unit
+                    break
                 action_taken = True
                 
                 # Record bot melee attack action
@@ -2292,16 +2327,17 @@ class W40KEnv(gym.Env):
         self.ai_units = [u for u in self.units if u["player"] == 1 and u["alive"]]
 
     def _get_nearest_ai_unit(self, enemy):
-        """Get nearest alive AI unit for enemy targeting."""
+        """Get nearest alive AI unit for enemy targeting - EXACT PvP mode behavior."""
         nearest = None
         min_dist = float('inf')
         
+        # In PvP mode, dead units are completely removed from the list
+        # So self.ai_units should only contain alive units after remove_unit_from_lists
         for unit in self.ai_units:
-            if unit["alive"] and unit["cur_hp"] > 0:
-                dist = get_hex_distance(enemy, unit)
-                if dist < min_dist:
-                    min_dist = dist
-                    nearest = unit
+            dist = get_hex_distance(enemy, unit)
+            if dist < min_dist:
+                min_dist = dist
+                nearest = unit
         
         return nearest
 

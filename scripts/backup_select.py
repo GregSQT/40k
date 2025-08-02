@@ -47,6 +47,7 @@ else:
         "ai/scenario.json",
         "ai/scenario_manager.py",
         "ai/train.py",
+        "ai/unit_manager.py",
         "ai/unit_registry.py",
 
 ######################################################################################################
