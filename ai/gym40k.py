@@ -1101,15 +1101,6 @@ class W40KEnv(gym.Env):
             if targets:
                 target = targets[0]
                 
-                # Validate target is alive and has positive HP before shooting
-                if not target.get("alive", False) or target.get("cur_hp", 0) <= 0:
-                    # Skip shooting at dead target
-                    unit["has_shot"] = True
-                    self.shot_units.add(unit["id"])
-                    if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                        raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
-                    return unit_rewards["base_actions"]["wait"]
-                
                 # Set explicit tracking - PvP style
                 self._last_acting_unit = unit
                 self._last_target_unit = target
