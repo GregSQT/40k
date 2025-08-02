@@ -398,3 +398,32 @@ def get_player_units(units: List[Dict[str, Any]], player_id: int) -> List[Dict[s
 def get_enemy_units(units: List[Dict[str, Any]], player_id: int) -> List[Dict[str, Any]]:
     """Get enemy units for specific player (EXACT from frontend)."""
     return [unit for unit in units if unit["player"] != player_id]
+
+def remove_unit_from_lists(unit_to_remove: Dict[str, Any], 
+                          units: List[Dict[str, Any]], 
+                          ai_units: List[Dict[str, Any]], 
+                          enemy_units: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Centralized unit removal function (following frontend removeUnit pattern).
+    
+    Args:
+        unit_to_remove: Unit to remove from all lists
+        units: Main units list
+        ai_units: AI player units list
+        enemy_units: Enemy player units list
+    
+    Returns:
+        Tuple of (updated_units, updated_ai_units, updated_enemy_units)
+    """
+    unit_id = unit_to_remove["id"]
+    
+    # Remove from all lists by ID
+    updated_units = [u for u in units if u["id"] != unit_id]
+    updated_ai_units = [u for u in ai_units if u["id"] != unit_id]
+    updated_enemy_units = [u for u in enemy_units if u["id"] != unit_id]
+    
+    # Mark unit as dead for any remaining references
+    unit_to_remove["alive"] = False
+    unit_to_remove["cur_hp"] = 0
+    
+    return updated_units, updated_ai_units, updated_enemy_units

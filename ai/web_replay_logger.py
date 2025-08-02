@@ -79,6 +79,9 @@ class WebReplayLogger:
     
     def _convert_unit_to_web_format(self, unit_dict: Dict, unit_index: int) -> Dict[str, Any]:
         """Convert gym environment unit to web format."""
+        cur_hp = unit_dict.get("cur_hp", unit_dict.get("hp_max", 3))
+        is_alive = unit_dict.get("alive", True) and cur_hp > 0
+        
         return {
             "id": unit_index,
             "name": unit_dict.get("name", f"{unit_dict.get('unit_type', 'Unit')} {unit_index + 1}"),
@@ -89,12 +92,12 @@ class WebReplayLogger:
             "color": self._get_unit_color(unit_dict),
             "MOVE": unit_dict.get("move", 6),
             "HP_MAX": unit_dict.get("hp_max", unit_dict.get("cur_hp", 3)),
-            "CUR_HP": unit_dict.get("cur_hp", unit_dict.get("hp_max", 3)),
+            "CUR_HP": cur_hp,
             "RNG_RNG": unit_dict.get("rng_rng", 8),
             "RNG_DMG": unit_dict.get("rng_dmg", 2),
             "CC_DMG": unit_dict.get("cc_dmg", 1),
             "ICON": self._get_unit_icon(unit_dict),
-            "alive": unit_dict.get("alive", True)
+            "alive": is_alive
         }
     
     def _get_unit_color(self, unit_dict: Dict) -> int:

@@ -23,7 +23,7 @@ project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
 from ai.unit_registry import UnitRegistry
-from shared.gameRules import roll_d6, calculate_wound_target, calculate_save_target, execute_shooting_sequence
+from shared.gameRules import roll_d6, calculate_wound_target, calculate_save_target, execute_shooting_sequence, remove_unit_from_lists
 
 try:
     from config_loader import get_config_loader
@@ -1190,16 +1190,18 @@ class W40KEnv(gym.Env):
                 base_attack_reward = unit_rewards["base_actions"]["ranged_attack"]
                 reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
 
-                # Direct PvP-style logging
-                if self.replay_logger:
-                    self.replay_logger.log_shooting_action(unit, target, result, self.current_turn, reward=reward, action_int=4)
-
-                # Kill bonuses
+                # Kill bonuses - MOVE BEFORE LOGGING
                 if target["cur_hp"] <= 0:
-                    target["alive"] = False
+                    self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
+                        target, self.units, self.ai_units, self.enemy_units
+                    )
                     if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                         raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
                     reward += unit_rewards["result_bonuses"]["kill_target"]
+
+                # Direct PvP-style logging - MOVE AFTER UNIT REMOVAL
+                if self.replay_logger:
+                    self.replay_logger.log_shooting_action(unit, target, result, self.current_turn, reward=reward, action_int=4)
                     if old_hp == total_damage:
                         if "result_bonuses" not in unit_rewards or "no_overkill" not in unit_rewards["result_bonuses"]:
                             raise KeyError(f"Missing 'result_bonuses.no_overkill' in rewards config for unit type {unit['unit_type']}")
@@ -1325,16 +1327,18 @@ class W40KEnv(gym.Env):
                 base_attack_reward = unit_rewards["base_actions"]["melee_attack"]
                 reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
 
-                # Direct PvP-style logging
-                if self.replay_logger:
-                    self.replay_logger.log_combat_action(unit, target, result, self.current_turn, reward=reward, action_int=6)
-
-                # Kill bonuses
+                # Kill bonuses - MOVE BEFORE LOGGING
                 if target["cur_hp"] <= 0:
-                    target["alive"] = False
+                    self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
+                        target, self.units, self.ai_units, self.enemy_units
+                    )
                     if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                         raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
                     reward += unit_rewards["result_bonuses"]["kill_target"]
+
+                # Direct PvP-style logging - MOVE AFTER UNIT REMOVAL
+                if self.replay_logger:
+                    self.replay_logger.log_combat_action(unit, target, result, self.current_turn, reward=reward, action_int=6)
                     if old_hp == total_damage:
                         if "result_bonuses" not in unit_rewards or "no_overkill" not in unit_rewards["result_bonuses"]:
                             raise KeyError(f"Missing 'result_bonuses.no_overkill' in rewards config for unit type {unit['unit_type']}")
@@ -1377,16 +1381,19 @@ class W40KEnv(gym.Env):
             return unit_rewards["base_actions"]["wait"]
 
     def _get_shooting_targets(self, unit):
-        """Get shooting targets in AI_GAME_OVERVIEW.md priority order."""
+        """Get shooting targets in AI_GAME_OVERVIEW.md priority order with line of sight validation."""
         targets = []
         in_range_enemies = []
         
-        # Find enemies in range
+        # Find enemies in range with line of sight validation
         for enemy in self.enemy_units:
-            if enemy["alive"]:
+            # CRITICAL FIX: Ensure enemy is truly alive and has HP > 0
+            if enemy["alive"] and enemy["cur_hp"] > 0:
                 dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
                 if dist <= unit["rng_rng"]:
-                    in_range_enemies.append(enemy)
+                    # CRITICAL FIX: Add line of sight validation using wall_hexes
+                    if self._has_line_of_sight(unit, enemy):
+                        in_range_enemies.append(enemy)
         
         if not in_range_enemies:
             return targets
@@ -1399,7 +1406,7 @@ class W40KEnv(gym.Env):
             can_be_charged = self._can_melee_units_charge(enemy)
             melee_damages = []
             for u in self.ai_units:
-                if u["alive"] and not u["is_ranged"]:
+                if u["alive"] and u["cur_hp"] > 0 and not u["is_ranged"]:
                     if "cc_dmg" not in u:
                         raise KeyError(f"Unit missing required 'cc_dmg' field")
                     melee_damages.append(u["cc_dmg"])
@@ -1424,6 +1431,40 @@ class W40KEnv(gym.Env):
         
         return targets[:3]  # Return top 3 priorities
 
+    def _has_line_of_sight(self, shooter, target):
+        """Check if shooter has line of sight to target (no walls blocking)."""
+        # AI_INSTRUCTIONS.md: Must use board_config.wall_hexes for validation
+        if not hasattr(self, 'board_config') or 'wall_hexes' not in self.board_config:
+            raise RuntimeError("AI_INSTRUCTIONS.md violation: Board configuration with wall_hexes required for line of sight validation")
+        
+        # Get wall positions as a set for fast lookup
+        wall_positions = set()
+        for wall_hex in self.board_config['wall_hexes']:
+            if not isinstance(wall_hex, (list, tuple)) or len(wall_hex) != 2:
+                raise ValueError(f"Invalid wall hex format: {wall_hex}. Expected [col, row] format.")
+            wall_positions.add(f"{wall_hex[0]},{wall_hex[1]}")
+        
+        # Simple line of sight: check direct line between units for wall hexes
+        start_col, start_row = shooter["col"], shooter["row"]
+        end_col, end_row = target["col"], target["row"]
+        
+        # If adjacent, always have line of sight
+        if abs(start_col - end_col) <= 1 and abs(start_row - end_row) <= 1:
+            return True
+        
+        # Check intermediate hexes along the line for walls
+        steps = max(abs(end_col - start_col), abs(end_row - start_row))
+        for step in range(1, steps):  # Skip start and end positions
+            t = step / steps
+            check_col = int(start_col + t * (end_col - start_col) + 0.5)
+            check_row = int(start_row + t * (end_row - start_row) + 0.5)
+            
+            # Check if this position is a wall
+            if f"{check_col},{check_row}" in wall_positions:
+                return False  # Wall blocks line of sight
+        
+        return True  # No walls blocking
+
     def _get_charge_targets(self, unit):
         """Get charge targets in AI_GAME_OVERVIEW.md priority order."""
         targets = []
@@ -1431,7 +1472,7 @@ class W40KEnv(gym.Env):
         
         # Find enemies within charge range (move distance) but not adjacent
         for enemy in self.enemy_units:
-            if enemy["alive"]:
+            if enemy["alive"] and enemy["cur_hp"] > 0:
                 dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
                 if 1 < dist <= unit["move"]:  # Can charge (not adjacent, within move)
                     chargeable_enemies.append(enemy)
@@ -1481,7 +1522,7 @@ class W40KEnv(gym.Env):
             raise KeyError(f"Unit missing required 'cc_rng' field")
         combat_range = unit["cc_rng"]
         for enemy in self.enemy_units:
-            if enemy["alive"]:
+            if enemy["alive"] and enemy["cur_hp"] > 0:
                 if is_unit_in_range(unit, enemy, combat_range):
                     combat_enemies.append(enemy)
         
@@ -1603,7 +1644,9 @@ class W40KEnv(gym.Env):
         reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
         
         if target["cur_hp"] <= 0:
-            target["alive"] = False
+            self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
+                target, self.units, self.ai_units, self.enemy_units
+            )
             if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                 raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
             reward += unit_rewards["result_bonuses"]["kill_target"]
@@ -1829,7 +1872,9 @@ class W40KEnv(gym.Env):
         reward = unit_rewards["base_actions"]["melee_attack"]  # Base attack reward
         
         if target["cur_hp"] <= 0:
-            target["alive"] = False
+            self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
+                target, self.units, self.ai_units, self.enemy_units
+            )
             if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                 raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
             reward += unit_rewards["result_bonuses"]["kill_target"]  # Kill bonus
@@ -2143,7 +2188,7 @@ class W40KEnv(gym.Env):
     def _execute_enemy_turn(self):
         """Execute enemy turn using scripted behavior as mentioned in AI_GAME_OVERVIEW.md."""
         # BALANCED scripted enemy behavior for training - LIMITED ACTIONS
-        enemy_units_alive = [u for u in self.enemy_units if u["alive"]]
+        enemy_units_alive = [u for u in self.enemy_units if u["alive"] and u["cur_hp"] > 0]
         
         # Limit total enemy actions per turn to prevent overwhelming AI
         max_enemy_actions = min(2, len(enemy_units_alive))  # Max 2 actions total
@@ -2175,7 +2220,9 @@ class W40KEnv(gym.Env):
                 total_damage = result["totalDamage"]
                 nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - total_damage)
                 if nearest_ai["cur_hp"] <= 0:
-                    nearest_ai["alive"] = False
+                    self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
+                        nearest_ai, self.units, self.ai_units, self.enemy_units
+                    )
                 action_taken = True
                 
                 # Record bot shooting action
@@ -2191,7 +2238,9 @@ class W40KEnv(gym.Env):
                     damage = min(enemy_cc_dmg, nearest_ai["cur_hp"])  # Prevent overkill
                     nearest_ai["cur_hp"] = max(0, nearest_ai["cur_hp"] - damage)
                 if nearest_ai["cur_hp"] <= 0:
-                    nearest_ai["alive"] = False
+                    self.units, self.ai_units, self.enemy_units = remove_unit_from_lists(
+                        nearest_ai, self.units, self.ai_units, self.enemy_units
+                    )
                 action_taken = True
                 
                 # Record bot melee attack action
@@ -2229,7 +2278,7 @@ class W40KEnv(gym.Env):
                 enemy_actions_taken += 1
         
         # Update AI units list
-        self.ai_units = [u for u in self.units if u["player"] == 1]
+        self.ai_units = [u for u in self.units if u["player"] == 1 and u["alive"]]
 
     def _get_nearest_ai_unit(self, enemy):
         """Get nearest alive AI unit for enemy targeting."""
@@ -2237,7 +2286,7 @@ class W40KEnv(gym.Env):
         min_dist = float('inf')
         
         for unit in self.ai_units:
-            if unit["alive"]:
+            if unit["alive"] and unit["cur_hp"] > 0:
                 dist = get_hex_distance(enemy, unit)
                 if dist < min_dist:
                     min_dist = dist
