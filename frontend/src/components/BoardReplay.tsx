@@ -297,10 +297,14 @@ interface ReplayData {
     player_1_agent?: string;
     [key: string]: any;
   };
-  initial_state: {
+  initial_state?: {
     units: ReplayUnit[];
     board_size: [number, number];
   };
+  game_states?: {
+    units: any[];
+    [key: string]: any;
+  }[];
   actions?: ReplayEvent[]; // Optional - legacy format
   combat_log: any[]; // Required - our shared format
 }
@@ -522,11 +526,15 @@ const initializeUnitRegistry = async () => {
     // Dynamically import each unit class
     for (const [unitType, unitPath] of Object.entries(unitConfig.units)) {
       try {
+        console.log(`🔄 Importing unit: ${unitType} from path: ../roster/${unitPath}`);
         const module = await import(/* @vite-ignore */ `../roster/${unitPath}`);
+        console.log(`✅ Module loaded for ${unitType}:`, Object.keys(module));
+        
         const UnitClass = module[unitType] || module.default;
+        console.log(`🔍 UnitClass for ${unitType}:`, UnitClass ? 'Found' : 'Not found');
         
         if (!UnitClass) {
-          throw new Error(`Unit class ${unitType} not found in ${unitPath}`);
+          throw new Error(`Unit class ${unitType} not found in ${unitPath}. Available exports: ${Object.keys(module).join(', ')}`);
         }
         
         // Validate required properties
@@ -538,9 +546,10 @@ const initializeUnitRegistry = async () => {
         });
         
         UNIT_REGISTRY[unitType] = UnitClass;
+        console.log(`✅ Successfully registered unit: ${unitType}`);
         
       } catch (importError) {
-        console.error(`❌ Failed to import unit ${unitType}:`, importError);
+        console.error(`❌ Failed to import unit ${unitType} from ${unitPath}:`, importError);
         throw importError;
       }
     }
@@ -577,6 +586,9 @@ const validateUnitRegistry = () => {
   const getUnitStats = useCallback((unitType: string) => {
     const UnitClass = UNIT_REGISTRY[unitType];
     if (!UnitClass) {
+      console.error(`❌ Unknown unit type: ${unitType}. Available units:`, Object.keys(UNIT_REGISTRY));
+      console.error(`❌ This indicates the unit registry failed to load Tyranid units properly.`);
+      console.error(`❌ Check /config/unit_registry.json file and ensure it includes paths to Tyranid units.`);
       throw new Error(`Unknown unit type: ${unitType}. Available types: ${Object.keys(UNIT_REGISTRY).join(', ')}`);
     }
     
@@ -613,6 +625,7 @@ const validateUnitRegistry = () => {
       // Wait for unit registry to be initialized before loading replay
       if (!registryInitialized) {
         console.log('⏳ Waiting for unit registry to initialize...');
+        setLoading(false); // Important: set loading to false when waiting
         return;
       }
       
@@ -691,9 +704,21 @@ const validateUnitRegistry = () => {
           console.log('🔍 battleLog state after 100ms:', battleLog.length);
         }, 100);
         
-        // Process initial units with proper mapping
+        // Process initial units with proper mapping - handle both formats
+        let initialUnits: any[] = [];
         if (replay.initial_state?.units) {
-          const processedUnits: ReplayUnit[] = replay.initial_state.units.map((unit: any) => {
+          initialUnits = replay.initial_state.units;
+          console.log('🔍 Using initial_state.units format');
+        } else if (replay.game_states?.[0]?.units) {
+          initialUnits = replay.game_states[0].units;
+          console.log('🔍 Using game_states[0].units format');
+        } else {
+          console.error('❌ No initial units found in replay data. Available keys:', Object.keys(replay));
+          return;
+        }
+
+        if (initialUnits.length > 0) {
+          const processedUnits: ReplayUnit[] = initialUnits.map((unit: any) => {
             const stats = getUnitStats(unit.unit_type);
             return {
               id: unit.id,
@@ -740,9 +765,10 @@ const validateUnitRegistry = () => {
             }
           });
           
+          console.log(`✅ Processed ${processedUnits.length} initial units`);
           setCurrentUnits(processedUnits);
         } else {
-          console.error('❌ No initial_state.units found in replay data');
+          console.error('❌ No initial units found in replay data');
         }
         
         // Don't reset battleLog here - it's set by combat_log processing
@@ -1052,16 +1078,22 @@ const validateUnitRegistry = () => {
 
   // Update game state based on current step
   useEffect(() => {
-    if (!replayData || currentStep < 0) return;
+    if (!replayData || currentStep < 0 || !battleLog || battleLog.length === 0) return;
     
     try {
-      // Reset to initial state
-      if (!replayData.initial_state?.units) {
+      // Get initial units from either format
+      let initialUnits: any[] = [];
+      if (replayData.initial_state?.units) {
+        initialUnits = replayData.initial_state.units;
+      } else if (replayData.game_states?.[0]?.units) {
+        initialUnits = replayData.game_states[0].units;
+      } else {
         console.error('❌ No initial state units available');
         return;
       }
       
-      let newUnits: ReplayUnit[] = replayData.initial_state.units.map((unit: any) => {
+      // Start with initial state
+      let newUnits: ReplayUnit[] = initialUnits.map((unit: any) => {
         const stats = getUnitStats(unit.unit_type);
         return {
           id: unit.id,
@@ -1094,14 +1126,51 @@ const validateUnitRegistry = () => {
         };
       });
       
-      // Note: Unit state updates are handled by the training environment
-      // The combat_log contains all the display information we need
+      // Process combat log events up to current step to update unit state
+      console.log(`🔄 Processing ${currentStep + 1} combat log events to update unit state`);
+      for (let i = 0; i <= currentStep && i < battleLog.length; i++) {
+        const event = battleLog[i] as any;
+        
+        // Process move events
+        if (event.type === 'move' && event.unitId !== undefined) {
+          const unit = newUnits.find(u => u.id === event.unitId);
+          if (unit && event.endHex) {
+            const [newCol, newRow] = event.endHex.match(/\d+/g)?.map(Number) || [unit.col, unit.row];
+            unit.col = newCol;
+            unit.row = newRow;
+            console.log(`📍 Unit ${unit.id} moved to (${newCol}, ${newRow})`);
+          }
+        }
+        
+        // Process damage events (shoot/combat)
+        if ((event.type === 'shoot' || event.type === 'combat') && event.targetUnitId !== undefined) {
+          const targetUnit = newUnits.find(u => u.id === event.targetUnitId);
+          if (targetUnit && event.shootDetails && Array.isArray(event.shootDetails)) {
+            const totalDamage = event.shootDetails.reduce((sum: number, shot: any) => sum + (shot.damageDealt || 0), 0);
+            if (totalDamage > 0) {
+              targetUnit.hp_current = Math.max(0, targetUnit.hp_current - totalDamage);
+              targetUnit.cur_hp = targetUnit.hp_current;
+              targetUnit.CUR_HP = targetUnit.hp_current;
+              console.log(`💥 Unit ${targetUnit.id} took ${totalDamage} damage, HP: ${targetUnit.hp_current}/${targetUnit.hp_max}`);
+              
+              if (targetUnit.hp_current <= 0) {
+                targetUnit.alive = false;
+                console.log(`💀 Unit ${targetUnit.id} died`);
+              }
+            }
+          }
+        }
+      }
+      
       setCurrentUnits(newUnits);
       
       // Set acting unit ID from combat_log for highlighting
       const currentLogEntry = battleLog[currentStep];
       const currentActingUnitId = currentLogEntry ? (currentLogEntry as any).unitId : null;
       setActingUnitId(currentActingUnitId);
+      
+      // Set current event
+      setCurrentEvent(currentLogEntry);
       
       // Detect move actions and set up move preview
       if (currentLogEntry && (currentLogEntry as any).type === 'move') {
@@ -1176,7 +1245,7 @@ const validateUnitRegistry = () => {
       console.error('❌ Error updating game state:', error);
       setError('Failed to update game state');
     }
-  }, [currentStep, replayData, drawUnits, scenario, getUnitStats]);
+  }, [currentStep, replayData, drawUnits, scenario, getUnitStats, battleLog, boardConfig]);
 
   // Debug: Track battleLog changes
   useEffect(() => {

@@ -60,6 +60,8 @@ else:
         "config/scenario_templates.json",
         "config/training_config.json", # AI Training Parameters
         "config/unit_definitions.json", # Unit Stats & Abilities
+        "config/unit_registry.json", # 
+
 
 ######################################################################################################
 ##### Documentation files

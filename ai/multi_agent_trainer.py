@@ -751,8 +751,17 @@ class MultiAgentTrainer:
                 if actual_env and hasattr(actual_env, 'replay_logger') and actual_env.replay_logger:
                     replay_logger = actual_env.replay_logger
                     
-                    # Get the complete replay data with detailed combat logs
-                    replay_data = replay_logger.get_complete_replay_data()
+                    # Get the replay data directly from GameReplayLogger attributes
+                    replay_data = {
+                        "game_states": getattr(replay_logger, 'game_states', []).copy(),
+                        "combat_log": getattr(replay_logger, 'combat_log_entries', []).copy(),
+                        "initial_state": getattr(replay_logger, 'initial_game_state', {}),
+                        "game_info": {
+                            "scenario": "training_episode",
+                            "total_turns": getattr(replay_logger, 'current_turn', 0),
+                            "winner": None
+                        }
+                    }
                     
                     # Add our episode metrics
                     replay_data.update({
@@ -760,7 +769,7 @@ class MultiAgentTrainer:
                         "episode_reward": episode_reward
                     })
                     
-                    print(f"✅ Using GameReplayLogger: {len(replay_data.get('actions', []))} detailed actions captured")
+                    print(f"✅ Using GameReplayLogger: {len(replay_data.get('combat_log', []))} combat log entries captured")
                     return replay_data
                 else:
                     print(f"❌ No GameReplayLogger found in evaluation environment")
@@ -840,7 +849,7 @@ class MultiAgentTrainer:
         from ai.game_replay_logger import GameReplayLogger
         base_eval_env.replay_logger = GameReplayLogger(base_eval_env)
         base_eval_env.replay_logger.capture_initial_state()
-        enhanced_eval_env = eval_env
+        enhanced_eval_env = base_eval_env
         
         # Wrap with Monitor for proper evaluation callback integration
         from stable_baselines3.common.monitor import Monitor
