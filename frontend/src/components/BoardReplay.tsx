@@ -22,15 +22,14 @@ const cubeDistance = (a: { x: number; y: number; z: number }, b: { x: number; y:
   return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.z - b.z));
 };
 
-const calculateMovePath = (fromCol: number, fromRow: number, toCol: number, toRow: number, maxMove: number, boardConfig: any, units: ReplayUnit[]): { col: number; row: number }[] => {
+const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: number, boardConfig: any, units: ReplayUnit[]): { col: number; row: number }[] => {
   if (!boardConfig) return [];
   
   const BOARD_COLS = boardConfig.cols;
   const BOARD_ROWS = boardConfig.rows;
   
   const visited = new Map<string, number>();
-  const parent = new Map<string, string | null>();
-  const queue: [number, number, number][] = [[fromCol, fromRow, 0]];
+  const queue: [number, number, number][] = [[unitCol, unitRow, 0]];
   
   // Use cube coordinate system for proper hex neighbors
   const cubeDirections = [
@@ -38,48 +37,73 @@ const calculateMovePath = (fromCol: number, fromRow: number, toCol: number, toRo
     [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
   ];
   
-  // Collect forbidden hexes (walls + units)
+  // Collect all forbidden hexes (adjacent to any enemy + wall hexes) using cube coordinates  
   const forbiddenSet = new Set<string>();
   
-  // Add wall hexes
-  if (boardConfig.wall_hexes) {
-    boardConfig.wall_hexes.forEach(([col, row]: [number, number]) => {
-      forbiddenSet.add(`${col},${row}`);
-    });
-  }
+  // Add all wall hexes as forbidden
+  const wallHexSet = new Set<string>(
+    (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+  );
+  wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
   
-  // Add unit positions (except the moving unit)
-  units.forEach(unit => {
-    if (unit.alive && !(unit.col === fromCol && unit.row === fromRow)) {
-      forbiddenSet.add(`${unit.col},${unit.row}`);
+  for (const enemy of units) {
+    if (enemy.player === 1) continue; // Skip friendly units (player 1)
+
+    // Add enemy position itself
+    forbiddenSet.add(`${enemy.col},${enemy.row}`);
+
+    // Use cube coordinates for proper hex adjacency
+    const enemyCube = offsetToCube(enemy.col, enemy.row);
+    for (const [dx, dy, dz] of cubeDirections) {
+      const adjCube = {
+        x: enemyCube.x + dx,
+        y: enemyCube.y + dy,
+        z: enemyCube.z + dz
+      };
+      
+      // Convert back to offset coordinates
+      const adjCol = adjCube.x;
+      const adjRow = adjCube.z + ((adjCube.x - (adjCube.x & 1)) >> 1);
+      
+      if (
+        adjCol >= 0 && adjCol < BOARD_COLS &&
+        adjRow >= 0 && adjRow < BOARD_ROWS
+      ) {
+        forbiddenSet.add(`${adjCol},${adjRow}`);
+      }
     }
-  });
-  
-  visited.set(`${fromCol},${fromRow}`, 0);
-  parent.set(`${fromCol},${fromRow}`, null);
-  
+  }
+
+  const availableCells: { col: number; row: number }[] = [];
+
   while (queue.length > 0) {
-    const [col, row, steps] = queue.shift()!;
+    const next = queue.shift();
+    if (!next) continue;
+    const [col, row, steps] = next;
     const key = `${col},${row}`;
     
-    // Found destination
-    if (col === toCol && row === toRow) {
-      // Reconstruct path
-      const path: { col: number; row: number }[] = [];
-      let current: string | null = key;
-      
-      while (current !== null) {
-        const [c, r] = current.split(',').map(Number);
-        path.unshift({ col: c, row: r });
-        current = parent.get(current) || null;
-      }
-      
-      return path;
+    if (visited.has(key) && steps >= visited.get(key)!) {
+      continue;
     }
-    
-    if (steps >= maxMove) continue;
-    
-    // Explore neighbors
+
+    visited.set(key, steps);
+
+    // ⛔ Skip forbidden positions completely - don't expand from them
+    if (forbiddenSet.has(key) && steps > 0) {
+      continue;
+    }
+
+    const blocked = units.some(u => u.col === col && u.row === row && !(u.col === unitCol && u.row === unitRow));
+
+    if (steps > 0 && steps <= maxMove && !blocked && !forbiddenSet.has(key)) {
+      availableCells.push({ col, row });
+    }
+
+    if (steps >= maxMove) {
+      continue;
+    }
+
+    // Use cube coordinates for proper hex neighbors
     const currentCube = offsetToCube(col, row);
     for (const [dx, dy, dz] of cubeDirections) {
       const neighborCube = {
@@ -88,26 +112,33 @@ const calculateMovePath = (fromCol: number, fromRow: number, toCol: number, toRo
         z: currentCube.z + dz
       };
       
+      // Convert back to offset coordinates
       const ncol = neighborCube.x;
-      const nrow = neighborCube.z + Math.floor((neighborCube.x + (neighborCube.x & 1)) / 2);
+      const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+      
       const nkey = `${ncol},${nrow}`;
       const nextSteps = steps + 1;
-      
+
       if (
         ncol >= 0 && ncol < BOARD_COLS &&
         nrow >= 0 && nrow < BOARD_ROWS &&
         nextSteps <= maxMove &&
-        !forbiddenSet.has(nkey) &&
-        (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
+        !forbiddenSet.has(nkey)
       ) {
-        visited.set(nkey, nextSteps);
-        parent.set(nkey, key);
-        queue.push([ncol, nrow, nextSteps]);
+        const nblocked = units.some(u => u.col === ncol && u.row === nrow && !(u.col === unitCol && u.row === unitRow));
+        // Wall hexes are already handled by forbiddenSet above
+        
+        if (
+          !nblocked &&
+          (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
+        ) {
+          queue.push([ncol, nrow, nextSteps]);
+        }
       }
     }
   }
   
-  return []; // No path found
+  return availableCells;
 };
 
 // Line of sight utilities for shooting preview (adapted from BoardPvp.tsx)
@@ -1068,6 +1099,34 @@ const validateUnitRegistry = () => {
       drawBoard(app, boardConfig! as any, { availableCells });
       drawUnits(app, currentUnits, actingUnitId);
       
+      // Draw darkened origin unit for move preview
+      if (movePreview) {
+        const movingUnit = currentUnits.find(u => u.id === movePreview.unitId);
+        if (movingUnit && movingUnit.ICON) {
+          const HEX_RADIUS = boardConfig!.hex_radius;
+          const MARGIN = boardConfig!.margin;
+          const HEX_WIDTH = 1.5 * HEX_RADIUS;
+          const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+          const HEX_HORIZ_SPACING = HEX_WIDTH;
+          const HEX_VERT_SPACING = HEX_HEIGHT;
+          
+          const originCenterX = movePreview.fromCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const originCenterY = movePreview.fromRow * HEX_VERT_SPACING + ((movePreview.fromCol % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          
+          const iconPath = movingUnit.player === 1 ? movingUnit.ICON.replace('.webp', '_red.webp') : movingUnit.ICON;
+          const texture = PIXI.Texture.from(iconPath);
+          const originSprite = new PIXI.Sprite(texture);
+          originSprite.anchor.set(0.5);
+          originSprite.position.set(originCenterX, originCenterY);
+          const unitIconScale = movingUnit.ICON_SCALE || (displayConfig?.icon_scale || 1.2);
+          originSprite.width = HEX_RADIUS * unitIconScale;
+          originSprite.height = HEX_RADIUS * unitIconScale;
+          originSprite.alpha = 0.6; // More visible darkened origin
+          originSprite.zIndex = 200; // Higher than normal units to ensure visibility
+          app.stage.addChild(originSprite);
+        }
+      }
+      
       // Cleanup function
       return () => {
         if (pixiAppRef.current) {
@@ -1095,6 +1154,35 @@ const validateUnitRegistry = () => {
       // Redraw board with preview hexes
       drawBoard(pixiAppRef.current, boardConfig as any, { availableCells });
       drawUnits(pixiAppRef.current, currentUnits, actingUnitId);
+      
+      // Also add darkened origin unit in update effect
+      if (movePreview) {
+        const movingUnit = currentUnits.find(u => u.id === movePreview.unitId);
+        if (movingUnit && movingUnit.ICON) {
+          const displayConfig = boardConfig?.display;
+          const HEX_RADIUS = boardConfig!.hex_radius;
+          const MARGIN = boardConfig!.margin;
+          const HEX_WIDTH = 1.5 * HEX_RADIUS;
+          const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+          const HEX_HORIZ_SPACING = HEX_WIDTH;
+          const HEX_VERT_SPACING = HEX_HEIGHT;
+          
+          const originCenterX = movePreview.fromCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const originCenterY = movePreview.fromRow * HEX_VERT_SPACING + ((movePreview.fromCol % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          
+          const iconPath = movingUnit.player === 1 ? movingUnit.ICON.replace('.webp', '_red.webp') : movingUnit.ICON;
+          const texture = PIXI.Texture.from(iconPath);
+          const originSprite = new PIXI.Sprite(texture);
+          originSprite.anchor.set(0.5);
+          originSprite.position.set(originCenterX, originCenterY);
+          const unitIconScale = movingUnit.ICON_SCALE || (displayConfig?.icon_scale || 1.2);
+          originSprite.width = HEX_RADIUS * unitIconScale;
+          originSprite.height = HEX_RADIUS * unitIconScale;
+          originSprite.alpha = 0.6;
+          originSprite.zIndex = 400; // Even higher z-index
+          pixiAppRef.current.stage.addChild(originSprite);
+        }
+      }
     }
   }, [movePreview, shootingPreview, currentUnits, actingUnitId, boardConfig, drawUnits]);
 
@@ -1221,21 +1309,21 @@ const validateUnitRegistry = () => {
             // Calculate path using pathfinding
             console.log('🔍 Unit MOVE value:', movingUnit.MOVE);
             console.log('🔍 Current units for pathfinding:', newUnits.map(u => ({ id: u.id, col: u.col, row: u.row, alive: u.alive })));
-            const path = calculateMovePath(fromCol, fromRow, toCol, toRow, movingUnit.MOVE, boardConfig, newUnits);
-            console.log('🔍 Calculated path:', path);
+            const availableCells = calculateAvailableMoveCells(fromCol, fromRow, movingUnit.MOVE, boardConfig, newUnits);
+            console.log('🔍 Available move cells:', availableCells);
             
-            if (path.length > 0) {
-              console.log('🟢 Setting movePreview with path!');
+            if (availableCells.length > 0) {
+              console.log('🟢 Setting movePreview with available cells!');
               setMovePreview({
                 fromCol,
                 fromRow,
                 toCol,
                 toRow,
-                path,
+                path: availableCells,
                 unitId: logEntry.unitId
               });
             } else {
-              console.log('❌ Path is empty, setting movePreview to null');
+              console.log('❌ No available cells, setting movePreview to null');
               setMovePreview(null);
             }
           } else {
