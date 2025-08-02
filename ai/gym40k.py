@@ -176,15 +176,7 @@ class W40KEnv(gym.Env):
         self.shot_units = set()      # Units that shot this turn  
         self.charged_units = set()   # Units that charged this turn
         self.attacked_units = set()  # Units that attacked this turn
-        print(f"🔍 DEBUG: About to set board_size, current attributes: {[attr for attr in dir(self) if not attr.startswith('_') and hasattr(self, attr)]}")
-        try:
-            self.board_size = self.config.get_board_size()
-            print(f"✅ DEBUG: board_size successfully set to {self.board_size}")
-        except Exception as e:
-            print(f"❌ DEBUG: Error setting board_size: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+        self.board_size = self.config.get_board_size()
         
         # Phase tracking - units that have acted in current phase
         self.phase_acted_units = set()
