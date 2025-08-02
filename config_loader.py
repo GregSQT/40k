@@ -51,12 +51,12 @@ class ConfigLoader:
             raise FileNotFoundError(f"Configuration file not found: {config_file}")
         
         try:
-            with open(config_file, 'r', encoding='utf-8') as f:
+            with open(config_file, 'r', encoding='utf-8-sig') as f:
                 config = json.load(f)
                 self._cache[config_name] = config
                 return config
         except json.JSONDecodeError as e:
-            raise json.JSONDecodeError(f"Invalid JSON in {config_file}: {e}")
+            raise RuntimeError(f"Invalid JSON in {config_file}: {e}")
     
     def get_game_config(self) -> Dict[str, Any]:
         """Get game configuration."""
@@ -72,10 +72,11 @@ class ConfigLoader:
         return game_config["game_rules"]["max_turns"]
     
     def get_board_size(self) -> tuple[int, int]:
-        """Get board size as (cols, rows)."""
-        game_config = self.get_game_config()
-        board_size = game_config["game_rules"]["board_size"]
-        return tuple(board_size)
+        """Get board size as (cols, rows) from board_config as single source of truth."""
+        board_config = self.get_board_config()
+        cols = board_config["default"]["cols"]
+        rows = board_config["default"]["rows"]
+        return (cols, rows)
     
     def get_turn_limit_penalty(self) -> float:
         """Get penalty applied when reaching turn limit."""

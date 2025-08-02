@@ -69,9 +69,7 @@ class ScenarioManager:
         self.matchup_statistics = defaultdict(dict)  # (agent1, agent2) -> stats
         self.current_training_cycle = 0
         
-        print(f"✅ Scenario Manager initialized with {len(self.available_agents)} agents")
-        print(f"📋 Available agents: {self.available_agents}")
-        print(f"🎯 Loaded {len(self.scenario_templates)} scenario templates")
+        # Scenario Manager initialized
 
     def _load_scenario_templates(self) -> Dict[str, ScenarioTemplate]:
         """Load scenario templates from config file."""
@@ -97,7 +95,7 @@ class ScenarioManager:
                         training_focus=data.get("training_focus", "balanced")
                     )
                     
-                print(f"✅ Loaded scenario templates from {template_file}")
+                # Templates loaded
                 
             except Exception as e:
                 print(f"⚠️ Failed to load scenario templates: {e}")
@@ -206,7 +204,7 @@ class ScenarioManager:
             for name, template in templates.items():
                 template_data[name] = {
                     "description": template.description,
-                    "board_size": list(template.board_size),
+                    # board_size removed - using board_config as single source of truth
                     "agent_compositions": template.agent_compositions,
                     "unit_counts": template.unit_counts,
                     "deployment_zones": {str(k): v for k, v in template.deployment_zones.items()},
@@ -241,7 +239,7 @@ class ScenarioManager:
         # Generate units for player 0 - Use template composition if specified
         if player_0_agent in template.agent_compositions:
             agent_0_units = template.agent_compositions[player_0_agent]
-            print(f"🎯 Using template composition for {player_0_agent}: {agent_0_units}")
+            # Using template composition
         else:
             agent_0_units = self.unit_registry.get_units_for_model(player_0_agent)
             print(f"⚠️ No template composition found for {player_0_agent}, using registry: {agent_0_units}")
@@ -349,7 +347,7 @@ class ScenarioManager:
             "units": scenario_units
         }
         
-        print(f"✅ Scenario '{template_name}' generated successfully: {len(scenario_units)} units, no conflicts")
+        # Scenario generated successfully
         return scenario
 
     def get_balanced_training_rotation(self, total_episodes: int) -> List[TrainingMatchup]:
@@ -437,7 +435,7 @@ class ScenarioManager:
                         priority=1.0
                     ))
         
-        print(f"🎯 Generated {len(matchups)} phase-specific matchups for phase: {phase}")
+        # Phase matchups generated
         return matchups
         
         # Episodes per agent pair

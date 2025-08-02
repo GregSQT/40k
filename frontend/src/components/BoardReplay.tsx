@@ -89,7 +89,7 @@ const calculateMovePath = (fromCol: number, fromRow: number, toCol: number, toRo
       };
       
       const ncol = neighborCube.x;
-      const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+      const nrow = neighborCube.z + Math.floor((neighborCube.x + (neighborCube.x & 1)) / 2);
       const nkey = `${ncol},${nrow}`;
       const nextSteps = steps + 1;
       

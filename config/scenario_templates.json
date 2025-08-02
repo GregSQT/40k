@@ -1,7 +1,6 @@
 {
   "solo_spacemarine_infantry_troop_rangedswarm": {
     "description": "Solo training for SpaceMarine_Infantry_Troop_RangedSwarm agents (Intercessor focus)",
-    "board_size": [24, 18],
     "agent_compositions": {
       "SpaceMarine_Infantry_Troop_RangedSwarm": ["Intercessor"]
     },
@@ -17,7 +16,6 @@
   },
   "solo_spacemarine_infantry_troop_meleetroop": {
     "description": "Solo training for SpaceMarine_Infantry_Troop_MeleeTroop agents (AssaultIntercessor focus)",
-    "board_size": [24, 18],
     "agent_compositions": {
       "SpaceMarine_Infantry_Troop_MeleeTroop": ["AssaultIntercessor"]
     },
@@ -33,7 +31,6 @@
   },
   "solo_tyranid_infantry_swarm_rangedswarm": {
     "description": "Solo training for Tyranid_Infantry_Swarm_RangedSwarm agents (Termagant focus)",
-    "board_size": [24, 18],
     "agent_compositions": {
       "Tyranid_Infantry_Swarm_RangedSwarm": ["Termagant"]
     },
@@ -49,7 +46,6 @@
   },
   "solo_tyranid_infantry_swarm_meleeswarm": {
     "description": "Solo training for Tyranid_Infantry_Swarm_MeleeSwarm agents (Hormagaunt focus)",
-    "board_size": [24, 18],
     "agent_compositions": {
       "Tyranid_Infantry_Swarm_MeleeSwarm": ["Hormagaunt"]
     },
@@ -65,7 +61,6 @@
   },
   "cross_spacemarine_vs_tyranid_balanced": {
     "description": "Balanced cross-faction training: Space Marines vs Tyranids",
-    "board_size": [24, 18],
     "agent_compositions": {
       "SpaceMarine_Infantry_Troop_RangedSwarm": ["Intercessor"],
       "Tyranid_Infantry_Swarm_RangedSwarm": ["Termagant"]
@@ -83,7 +78,6 @@
   },
   "cross_melee_ranged_training": {
     "description": "Cross-role training: Melee units vs Ranged units",
-    "board_size": [24, 18],
     "agent_compositions": {
       "SpaceMarine_Infantry_Troop_MeleeTroop": ["AssaultIntercessor"],
       "SpaceMarine_Infantry_Troop_RangedSwarm": ["Intercessor"]
@@ -101,7 +95,6 @@
   },
   "elite_units_training": {
     "description": "Elite unit training with CaptainGravis and Carnifex",
-    "board_size": [24, 18],
     "agent_compositions": {
       "SpaceMarine_Infantry_LeaderElite_MeleeElite": ["CaptainGravis"],
       "Tyranid_Infantry_Elite_MeleeElite": ["Carnifex"]
@@ -119,7 +112,6 @@
   },
   "mixed_composition_small": {
     "description": "Small mixed composition: Combined arms training",
-    "board_size": [24, 18],
     "agent_compositions": {
       "SpaceMarine_Infantry_Troop_RangedSwarm": ["Intercessor"],
       "SpaceMarine_Infantry_Troop_MeleeTroop": ["AssaultIntercessor"],
@@ -141,7 +133,6 @@
   },
   "marines_vs_tyranids_new_composition": {
     "description": "New team composition: Marines (2 Intercessors, 2 Assault Intercessors, 1 Captain Gravis) vs Tyranids (4 Termagants, 4 Hormagaunts, 1 Carnifex)",
-    "board_size": [24, 18],
     "agent_compositions": {
       "SpaceMarine_Infantry_Troop_RangedSwarm": ["Intercessor"],
       "SpaceMarine_Infantry_Troop_MeleeTroop": ["AssaultIntercessor"],
@@ -167,7 +158,6 @@
   },
   "tyranids_vs_marines_focused": {
     "description": "Tyranid AI training focused scenario vs Marines",
-    "board_size": [24, 18],
     "agent_compositions": {
       "Tyranid_Infantry_Swarm_RangedSwarm": ["Termagant"],
       "Tyranid_Infantry_Swarm_MeleeSwarm": ["Hormagaunt"],
@@ -193,7 +183,6 @@
   },
   "solo_spacemarine_infantry_leaderelite_meleeelite": {
     "description": "Solo training for SpaceMarine_Infantry_LeaderElite_MeleeElite agents (CaptainGravis focus)",
-    "board_size": [24, 18],
     "agent_compositions": {
       "SpaceMarine_Infantry_LeaderElite_MeleeElite": ["CaptainGravis"]
     },
@@ -209,7 +198,6 @@
   },
   "Tyranid_Infantry_Elite_MeleeElite": {
     "description": "Solo training for Tyranid_Infantry_Elite_MeleeElite agents (Carnifex focus)",
-    "board_size": [24, 18],
     "agent_compositions": {
       "Tyranid_Infantry_Elite_MeleeElite": ["Carnifex"]
     },

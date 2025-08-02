@@ -129,6 +129,19 @@ class W40KEnv(gym.Env):
         # Load training configuration to get max_steps_per_episode
         self.training_config_name = training_config_name
         training_config = self.config.load_training_config(training_config_name)
+        # Load board configuration for pathfinding validation - BEFORE board_size initialization
+        try:
+            board_configs = self.config.get_board_config()
+            if "default" not in board_configs:
+                raise KeyError("Missing 'default' board configuration")
+            self.board_config = board_configs["default"]
+            if "wall_hexes" not in self.board_config:
+                raise KeyError("Board configuration missing required 'wall_hexes' field")
+            # Board config loaded successfully
+        except Exception as e:
+            if "UTF-8 BOM" in str(e):
+                raise RuntimeError(f"AI_INSTRUCTIONS.md violation: Board config file has UTF-8 BOM encoding issue: {e}")
+            raise RuntimeError(f"AI_INSTRUCTIONS.md violation: Failed to load required board configuration: {e}")
         self.max_steps_per_episode = self.config.get_max_steps_per_episode(training_config_name)
         
         # Episode step counter to prevent infinite episodes
@@ -137,6 +150,8 @@ class W40KEnv(gym.Env):
         # Game state following AI_GAME.md exactly
         # Load phase order from config following AI_GAME.md - raise error if missing
         self.phase_order = self.config.get_phase_order()
+
+        # Board config and pathfinding configured
         
         # Game state following AI_GAME.md exactly
         self.current_phase = "move"  # Always start with move phase
@@ -161,7 +176,15 @@ class W40KEnv(gym.Env):
         self.shot_units = set()      # Units that shot this turn  
         self.charged_units = set()   # Units that charged this turn
         self.attacked_units = set()  # Units that attacked this turn
-        self.board_size = self.config.get_board_size()
+        print(f"🔍 DEBUG: About to set board_size, current attributes: {[attr for attr in dir(self) if not attr.startswith('_') and hasattr(self, attr)]}")
+        try:
+            self.board_size = self.config.get_board_size()
+            print(f"✅ DEBUG: board_size successfully set to {self.board_size}")
+        except Exception as e:
+            print(f"❌ DEBUG: Error setting board_size: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
         
         # Phase tracking - units that have acted in current phase
         self.phase_acted_units = set()
@@ -941,7 +964,7 @@ class W40KEnv(gym.Env):
         return True
 
     def _execute_move_action(self, unit, action_type):
-        """Execute movement following AI_GAME.md: only movement actions allowed."""
+        """Execute movement with pathfinding validation following AI_GAME.md."""
         
         # Set explicit tracking - PvP style (no target for movement)
         self._last_acting_unit = unit
@@ -951,18 +974,17 @@ class W40KEnv(gym.Env):
         
         old_col, old_row = unit["col"], unit["row"]
         
+        # Calculate target position based on action type
+        target_col, target_row = old_col, old_row
+        
         if action_type == 0:  # Move North
-            new_row = max(0, unit["row"] - unit["move"])
-            unit["row"] = new_row
+            target_row = max(0, unit["row"] - unit["move"])
         elif action_type == 1:  # Move South
-            new_row = min(self.board_size[1] - 1, unit["row"] + unit["move"])
-            unit["row"] = new_row
+            target_row = min(self.board_size[1] - 1, unit["row"] + unit["move"])
         elif action_type == 2:  # Move East
-            new_col = min(self.board_size[0] - 1, unit["col"] + unit["move"])
-            unit["col"] = new_col
+            target_col = min(self.board_size[0] - 1, unit["col"] + unit["move"])
         elif action_type == 3:  # Move West
-            new_col = max(0, unit["col"] - unit["move"])
-            unit["col"] = new_col
+            target_col = max(0, unit["col"] - unit["move"])
         elif action_type == 7:  # Wait (universal - second click behavior)
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
@@ -975,11 +997,28 @@ class W40KEnv(gym.Env):
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
             return unit_rewards["base_actions"]["wait"]  # Penalty for invalid action
         
-        # ✅ CRITICAL FIX: Check if movement actually occurred
+        # Validate movement using pathfinding (same algorithm as frontend)
+        valid_path = self._calculate_move_path(old_col, old_row, target_col, target_row, unit["move"])
+        
+        if not valid_path or len(valid_path) == 0:
+            # Movement blocked by walls or obstacles - return penalty
+            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+            reward = unit_rewards["base_actions"]["wait"]
+            unit["has_moved"] = True
+            self.moved_units.add(unit["id"])
+            return reward
+        
+        # Apply the last valid position from pathfinding
+        final_position = valid_path[-1]
+        unit["col"] = final_position["col"]
+        unit["row"] = final_position["row"]
+        
+        # ✅ PATHFINDING VALIDATION: Check if movement actually occurred
         movement_occurred = (old_col != unit["col"]) or (old_row != unit["row"])
         
         if not movement_occurred:
-            # ❌ FAILED MOVE: Unit hit wall/boundary, return negative penalty
+            # ❌ FAILED MOVE: Path blocked by walls/obstacles, return penalty
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
             reward = unit_rewards["base_actions"]["wait"]
@@ -1671,6 +1710,101 @@ class W40KEnv(gym.Env):
     def _calculate_distance(self, unit1, unit2):
         """Calculate hex grid distance between two units."""
         return get_hex_distance(unit1, unit2)
+    
+    def _calculate_move_path(self, from_col, from_row, to_col, to_row, max_move):
+        """Calculate valid movement path using pathfinding (exact copy of frontend algorithm)."""
+        # AI_INSTRUCTIONS.md: No fallbacks allowed - must have proper config
+        if not hasattr(self, 'board_config') or 'wall_hexes' not in self.board_config:
+            raise RuntimeError("AI_INSTRUCTIONS.md violation: Board configuration with wall_hexes is required for pathfinding. Cannot proceed without proper wall definitions.")
+        
+        # Validate board configuration exists and is properly loaded
+        if not self.board_config.get('wall_hexes'):
+            raise ValueError("Board configuration missing required 'wall_hexes' field. Pathfinding requires wall definitions.")
+        
+        board_cols = self.board_size[0]
+        board_rows = self.board_size[1]
+        
+        visited = {}
+        parent = {}
+        queue = [(from_col, from_row, 0)]
+        
+        # Cube coordinate directions for proper hex neighbors (exact copy from frontend)
+        cube_directions = [
+            [1, -1, 0], [1, 0, -1], [0, 1, -1], 
+            [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+        ]
+        
+        # Collect forbidden hexes (walls + units) - exact copy from frontend
+        forbidden_set = set()
+        
+        # Add wall hexes - exact copy from frontend
+        for wall_hex in self.board_config['wall_hexes']:
+            if not isinstance(wall_hex, (list, tuple)) or len(wall_hex) != 2:
+                raise ValueError(f"Invalid wall hex format: {wall_hex}. Expected [col, row] format.")
+            forbidden_set.add(f"{wall_hex[0]},{wall_hex[1]}")
+        
+        # Add unit positions (except the moving unit) - exact copy from frontend
+        for other_unit in self.units:
+            if (other_unit["alive"] and 
+                not (other_unit["col"] == from_col and other_unit["row"] == from_row)):
+                forbidden_set.add(f"{other_unit['col']},{other_unit['row']}")
+        
+        visited[f"{from_col},{from_row}"] = 0
+        parent[f"{from_col},{from_row}"] = None
+        
+        while queue:
+            col, row, steps = queue.pop(0)
+            key = f"{col},{row}"
+            
+            # Found destination - exact copy from frontend
+            if col == to_col and row == to_row:
+                # Reconstruct path - exact copy from frontend
+                path = []
+                current = key
+                
+                while current is not None:
+                    c, r = current.split(',')
+                    path.insert(0, {"col": int(c), "row": int(r)})
+                    current = parent.get(current)
+                
+                return path
+            
+            if steps >= max_move:
+                continue
+            
+            # Explore neighbors - exact copy from frontend
+            current_cube = self._offset_to_cube(col, row)
+            for dx, dy, dz in cube_directions:
+                neighbor_cube = {
+                    "x": current_cube["x"] + dx,
+                    "y": current_cube["y"] + dy,
+                    "z": current_cube["z"] + dz
+                }
+                
+                # Convert back to offset coordinates - exact copy from frontend
+                ncol = neighbor_cube["x"]
+                nrow = neighbor_cube["z"] + ((neighbor_cube["x"] - (neighbor_cube["x"] & 1)) >> 1)
+                nkey = f"{ncol},{nrow}"
+                next_steps = steps + 1
+                
+                if (ncol >= 0 and ncol < board_cols and
+                    nrow >= 0 and nrow < board_rows and
+                    next_steps <= max_move and
+                    nkey not in forbidden_set and
+                    (nkey not in visited or visited.get(nkey, float('inf')) > next_steps)):
+                    
+                    visited[nkey] = next_steps
+                    parent[nkey] = key
+                    queue.append((ncol, nrow, next_steps))
+        
+        return []  # No path found
+
+    def _offset_to_cube(self, col, row):
+        """Convert offset coordinates to cube coordinates (same as frontend)."""
+        x = col
+        z = row - ((col - (col & 1)) >> 1)
+        y = -x - z
+        return {"x": x, "y": y, "z": z}
 
     def _attack_target(self, unit, target):
         """Attack adjacent target in melee combat."""
