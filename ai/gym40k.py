@@ -84,7 +84,14 @@ class W40KEnv(gym.Env):
         self.config = get_config_loader()
         
         # Load rewards configuration (unit-type-based)
+        # Ensure we load from the root config directory, not frontend/public/config
         self.rewards_config = self.config.load_rewards_config()
+        if not self.rewards_config:
+            # Fallback to direct file loading if config_loader fails
+            import json
+            rewards_path = project_root / "config" / "rewards_config.json"
+            with open(rewards_path, 'r') as f:
+                self.rewards_config = json.load(f)
         
         # Load unit definitions from the unit registry instead of parsing files separately
         if unit_registry is not None:
@@ -1076,6 +1083,10 @@ class W40KEnv(gym.Env):
 
     def _execute_shoot_action(self, unit, action_type):
         """Execute shooting using dice-based system: only action_type==4 shoots following AI_GAME.md."""
+        # Validate unit first before getting rewards
+        if "unit_type" not in unit:
+            raise KeyError("Unit missing required 'unit_type' field")
+        
         unit_rewards = self._get_unit_reward_config(unit)
 
         # Only action 4 shoots in shoot phase; action 7 waits
@@ -1089,6 +1100,15 @@ class W40KEnv(gym.Env):
             targets = self._get_shooting_targets(unit)
             if targets:
                 target = targets[0]
+                
+                # Validate target is alive and has positive HP before shooting
+                if not target.get("alive", False) or target.get("cur_hp", 0) <= 0:
+                    # Skip shooting at dead target
+                    unit["has_shot"] = True
+                    self.shot_units.add(unit["id"])
+                    if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                        raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+                    return unit_rewards["base_actions"]["wait"]
                 
                 # Set explicit tracking - PvP style
                 self._last_acting_unit = unit
