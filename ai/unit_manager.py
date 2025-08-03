@@ -57,11 +57,11 @@ class UnitManager:
     
     def get_alive_ai_units(self) -> List[Dict[str, Any]]:
         """Get alive AI units only."""
-        return [u for u in self.ai_units if u.get("cur_hp", 0) > 0]
+        return [u for u in self.ai_units if u.get("cur_hp", 0) > 0 and u.get("alive", False)]
     
     def get_alive_enemy_units(self) -> List[Dict[str, Any]]:
         """Get alive enemy units only."""
-        return [u for u in self.enemy_units if u.get("cur_hp", 0) > 0]
+        return [u for u in self.enemy_units if u.get("cur_hp", 0) > 0 and u.get("alive", False)]
     
     def handle_unit_death(self, unit: Dict[str, Any]) -> bool:
         """
@@ -83,6 +83,9 @@ class UnitManager:
         Apply damage and handle death atomically like PvP mode.
         Returns True if unit died and was removed.
         """
+        # Validate unit is still alive before applying damage
+        if not self.is_target_valid(unit):
+            return False  # Unit already dead, no damage applied
         old_hp = unit.get("cur_hp", 0)
         new_hp = max(0, old_hp - damage)
         unit["cur_hp"] = new_hp
@@ -100,6 +103,9 @@ class UnitManager:
         Apply shooting damage atomically like PvP mode.
         Returns True if target died and was removed.
         """
+        # Validate target is still alive before applying damage
+        if not self.is_target_valid(target):
+            return False  # Target already dead, no damage applied
         total_damage = shooting_result["totalDamage"]
         return self.apply_damage_and_check_death(target, total_damage)
     
@@ -108,6 +114,9 @@ class UnitManager:
         Apply combat damage atomically like PvP mode.
         Returns True if target died and was removed.
         """
+        # Validate target is still alive before applying damage
+        if not self.is_target_valid(target):
+            return False  # Target already dead, no damage applied
         total_damage = combat_result["totalDamage"]
         return self.apply_damage_and_check_death(target, total_damage)
     
@@ -116,5 +125,38 @@ class UnitManager:
         Apply direct damage (like cc_dmg) atomically like PvP mode.
         Returns True if target died and was removed.
         """
+        # Validate target is still alive before applying damage
+        if not self.is_target_valid(target):
+            return False  # Target already dead, no damage applied
         damage = attacker["cc_dmg"]
         return self.apply_damage_and_check_death(target, damage)
+    
+    def is_target_valid(self, target: Dict[str, Any]) -> bool:
+        """
+        Validate that target is still alive and in the game.
+        Use this before any combat action to ensure target is valid.
+        """
+        if not target:
+            return False
+        if target.get("cur_hp", 0) <= 0:
+            return False
+        if not target.get("alive", False):
+            return False
+        # Verify target still exists in our managed lists
+        target_id = target.get("id")
+        return self.find_unit(target_id) is not None
+    
+    def is_target_valid(self, target: Dict[str, Any]) -> bool:
+        """
+        Validate that target is still alive and in the game.
+        Use this before any combat action to ensure target is valid.
+        """
+        if not target:
+            return False
+        if target.get("cur_hp", 0) <= 0:
+            return False
+        if not target.get("alive", False):
+            return False
+        # Verify target still exists in our managed lists
+        target_id = target.get("id")
+        return self.find_unit(target_id) is not None

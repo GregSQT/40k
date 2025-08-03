@@ -77,11 +77,6 @@ class W40KEnv(gym.Env):
         # Direct logging capability (set by GameReplayIntegration)
         self.replay_logger = None
 
-        # Initialize unit lists early to prevent AttributeError
-        self.units = []
-        self.ai_units = []
-        self.enemy_units = []
-        
         # Initialize UnitManager for centralized unit death management
         self.unit_manager = None
         
@@ -218,8 +213,8 @@ class W40KEnv(gym.Env):
                 else:
                     raise ValueError(f"Scenario data must be list or dict, got {type(scenario_data)}")
                     
-                # Initialize units from scenario
-                self.units = []
+                # Initialize units from scenario - build list for UnitManager
+                units_for_manager = []
                 for unit_data in scenario_units:
                     # Get unit stats from definitions
                     unit_type = unit_data["unit_type"]
@@ -257,23 +252,22 @@ class W40KEnv(gym.Env):
                         "ICON": icon_name,
                         "size_radius": unit["size_radius"] if "size_radius" in unit else 1  # Pass size_radius to frontend
                     })
-                    self.units.append(unit)
+                    units_for_manager.append(unit)
                     
             except Exception as e:
                 raise RuntimeError(f"Failed to load scenario: {e}")
         else:
             raise FileNotFoundError(f"Scenario file not found: {self.scenario_path}")
+            
+        # Initialize UnitManager for centralized unit management - no local copies
+        self.unit_manager = UnitManager(units_for_manager)
         
-        # Initialize AI and enemy unit lists first
-        self.ai_units = [u for u in self.units if u["player"] == 1]
-        self.enemy_units = [u for u in self.units if u["player"] == 0]
-        
-        # Initialize UnitManager for centralized unit death management
-        self.unit_manager = UnitManager(self.units)
+        # TEMPORARY: Compatibility property for any remaining self.units references
+        self.units = self.unit_manager.units
         
         # Action space: one action per unit per phase
         # Actions: unit_id, action_type, target (optional)
-        self.max_units = len(self.ai_units)
+        self.max_units = len([u for u in units_for_manager if u["player"] == 1])
         # Action encoding:
         # 0-7: Unit actions for first unit
         # 8-15: Unit actions for second unit, etc.
@@ -487,7 +481,7 @@ class W40KEnv(gym.Env):
         elif isinstance(scenario_data, dict):
             scenario_units = scenario_data.get("units", list(scenario_data.values()))
         
-        self.units = []
+        units_for_reset = []
         for unit_data in scenario_units:
             unit_type = unit_data["unit_type"]
             unit = copy.deepcopy(self.unit_definitions[unit_type])
@@ -520,14 +514,10 @@ class W40KEnv(gym.Env):
                 "armor_save": unit["armor_save"],
                 "invul_save": unit["invul_save"]
             })
-            self.units.append(unit)
+            units_for_reset.append(unit)
         
-        # Reinitialize UnitManager with reset units
-        self.unit_manager = UnitManager(self.units)
-        
-        # Update unit lists - use UnitManager for consistency
-        self.ai_units = self.unit_manager.ai_units
-        self.enemy_units = self.unit_manager.enemy_units
+        # Reinitialize UnitManager with reset units - no local copies
+        self.unit_manager = UnitManager(units_for_reset)
         
         # Reset replay
         self.replay_data = []
@@ -664,7 +654,7 @@ class W40KEnv(gym.Env):
     
     def get_agent_units(self, agent_key: str) -> List:
         """Get all units controlled by a specific agent."""
-        return [u for u in self.ai_units if u["alive"] and 
+        return [u for u in self.unit_manager.get_alive_ai_units() if 
                 self.unit_registry.get_model_key(u["unit_type"]) == agent_key]
     
     def set_controlled_agent(self, agent_key: str):
@@ -863,9 +853,10 @@ class W40KEnv(gym.Env):
             # Episode too long, truncate it
             self.game_over = True
             self.winner = None
-            unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
+            ai_units_alive = self.unit_manager.get_alive_ai_units()
+            unit_rewards = self._get_unit_reward_config(ai_units_alive[0]) if ai_units_alive else {}
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                unit_type = self.ai_units[0]["unit_type"] if self.ai_units else "unknown"
+                unit_type = ai_units_alive[0]["unit_type"] if ai_units_alive else "unknown"
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type '{unit_type}'")
             return self._get_obs(), unit_rewards["base_actions"]["wait"], False, True, self._get_info()  # truncated=True
         if self.game_over:
@@ -885,10 +876,10 @@ class W40KEnv(gym.Env):
         
         if phase_advances >= max_phase_advances:
             # Emergency end game to prevent infinite loops - check if game should have ended
-            if not self.ai_units or not self.enemy_units:
+            if not self.unit_manager.get_alive_ai_units() or not self.unit_manager.get_alive_enemy_units():
                 # Units were eliminated but game didn't end properly, force proper termination
                 self.game_over = True
-                self.winner = 0 if not self.ai_units else 1
+                self.winner = 0 if not self.unit_manager.get_alive_ai_units() else 1
                 return self._get_obs(), 0.0, True, False, self._get_info()
             # Still have units but too many phase advances - end with draw
             self.game_over = True
@@ -897,9 +888,10 @@ class W40KEnv(gym.Env):
         
         if not eligible_units and not self.game_over:
             # Still no eligible units, return small negative reward
-            unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
+            ai_units_alive = self.unit_manager.get_alive_ai_units()
+            unit_rewards = self._get_unit_reward_config(ai_units_alive[0]) if ai_units_alive else {}
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                unit_type = self.ai_units[0]["unit_type"] if self.ai_units else "unknown"
+                unit_type = ai_units_alive[0]["unit_type"] if ai_units_alive else "unknown"
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type '{unit_type}'")
             return self._get_obs(), unit_rewards["base_actions"]["wait"], False, False, self._get_info()
         
@@ -912,32 +904,33 @@ class W40KEnv(gym.Env):
         
         if unit_idx >= len(eligible_units):
             # Invalid unit, small penalty
-            unit_rewards = self._get_unit_reward_config(self.ai_units[0]) if self.ai_units else {}
+            ai_units_alive = self.unit_manager.get_alive_ai_units()
+            unit_rewards = self._get_unit_reward_config(ai_units_alive[0]) if ai_units_alive else {}
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                unit_type = self.ai_units[0]["unit_type"] if self.ai_units else "unknown"
+                unit_type = ai_units_alive[0]["unit_type"] if ai_units_alive else "unknown"
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type '{unit_type}'")
             return self._get_obs(), unit_rewards["base_actions"]["wait"], False, False, self._get_info()
         
         unit = eligible_units[unit_idx]
         reward = self._execute_action_with_phase(unit, action_type)
         
-        # Game outcome rewards - check termination conditions BEFORE accessing unit rewards
-        if not self.ai_units:  # Empty list means all AI units were removed
+        # Game outcome rewards - check termination conditions using UnitManager
+        if not self.unit_manager.get_alive_ai_units():  # No alive AI units
             self.game_over = True
             self.winner = 0
-            # Use first available unit from original scenario for reward config
-            if self.units:
-                ai_unit_for_rewards = next((u for u in self.units if u["player"] == 1), None)
+            # Use first available unit from UnitManager for reward config
+            if self.unit_manager.units:
+                ai_unit_for_rewards = next((u for u in self.unit_manager.units if u["player"] == 1), None)
                 if ai_unit_for_rewards:
                     unit_rewards = self._get_unit_reward_config(ai_unit_for_rewards)
                     reward += unit_rewards["situational_modifiers"]["lose"]
             return self._get_obs(), reward, True, False, self._get_info()
-        elif not self.enemy_units:  # Empty list means all enemy units were removed
+        elif not self.unit_manager.get_alive_enemy_units():  # No alive enemy units
             self.game_over = True
             self.winner = 1
             # Get unit rewards for win condition
-            if self.units:
-                ai_unit_for_rewards = next((u for u in self.units if u["player"] == 1), None)
+            if self.unit_manager.units:
+                ai_unit_for_rewards = next((u for u in self.unit_manager.units if u["player"] == 1), None)
                 if ai_unit_for_rewards:
                     unit_rewards = self._get_unit_reward_config(ai_unit_for_rewards)
                     reward += unit_rewards["situational_modifiers"]["win"]
@@ -1114,8 +1107,20 @@ class W40KEnv(gym.Env):
                 raise ValueError(f"Unit {unit.get('unit_type', 'unknown')} has rng_nb=0 (melee-only) but attempting to shoot - this violates AI_INSTRUCTIONS.md no fallbacks policy")
             
             targets = self._get_shooting_targets(unit)
-            if targets:
-                target = targets[0]
+            print(f"DEBUG: Shooting targets found: {[t.get('id', 'unknown') for t in targets]}")
+            # Re-validate targets at moment of use - they might have died since selection
+            alive_targets = [t for t in targets if self.unit_manager.is_target_valid(t)]
+            print(f"DEBUG: Alive targets after validation: {[t.get('id', 'unknown') for t in alive_targets]}")
+            if alive_targets:
+                target = alive_targets[0]
+                print(f"DEBUG: Selected target {target.get('id', 'unknown')} with HP {target.get('cur_hp', 0)}")
+                # CRITICAL: Validate target is still alive using UnitManager
+                if not self.unit_manager.is_target_valid(target):
+                    unit["has_shot"] = True
+                    self.shot_units.add(unit["id"])
+                    if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                        raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+                    return unit_rewards["base_actions"]["wait"]
                 
                 # Set explicit tracking - PvP style
                 self._last_acting_unit = unit
@@ -1217,10 +1222,7 @@ class W40KEnv(gym.Env):
 
                 # EXACT PvP mode behavior: centralized damage+death handling
                 if self.unit_manager.apply_shooting_damage(unit, target, result):
-                    # Unit died and was removed by UnitManager, sync local lists
-                    self.units = self.unit_manager.units
-                    self.ai_units = self.unit_manager.ai_units
-                    self.enemy_units = self.unit_manager.enemy_units
+                    # Unit died and was removed by UnitManager - no manual sync needed
                     if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                         raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
                     reward += unit_rewards["result_bonuses"]["kill_target"]
@@ -1353,11 +1355,8 @@ class W40KEnv(gym.Env):
                 reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
 
                 # EXACT PvP mode behavior: atomic damage application and death handling
-                if self.unit_manager.apply_damage_and_check_death(target, total_damage):
-                    # Unit died and was removed by UnitManager, sync local lists
-                    self.units = self.unit_manager.units
-                    self.ai_units = self.unit_manager.ai_units
-                    self.enemy_units = self.unit_manager.enemy_units
+                if self.unit_manager.apply_combat_damage(unit, target, result):
+                    # Unit died and was removed by UnitManager - no manual sync needed
                     if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                         raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
                     reward += unit_rewards["result_bonuses"]["kill_target"]
@@ -1411,12 +1410,10 @@ class W40KEnv(gym.Env):
         targets = []
         in_range_enemies = []
         
-        # Find enemies in range with line of sight validation
-        for enemy in self.enemy_units:
-            # CRITICAL FIX: Ensure enemy is truly alive and has HP > 0
-            if enemy["alive"] and enemy["cur_hp"] > 0:
-                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                if dist <= unit["rng_rng"]:
+        # Find enemies in range with line of sight validation - use UnitManager's cleaned list
+        for enemy in self.unit_manager.get_alive_enemy_units():
+            dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+            if dist <= unit["rng_rng"]:
                     # CRITICAL FIX: Add line of sight validation using wall_hexes
                     if self._has_line_of_sight(unit, enemy):
                         in_range_enemies.append(enemy)
@@ -1431,8 +1428,8 @@ class W40KEnv(gym.Env):
             threat_score = max(enemy["rng_dmg"], enemy["cc_dmg"])
             can_be_charged = self._can_melee_units_charge(enemy)
             melee_damages = []
-            for u in self.ai_units:
-                if u["alive"] and u["cur_hp"] > 0 and not u["is_ranged"]:
+            for u in self.unit_manager.get_alive_ai_units():
+                if not u["is_ranged"]:
                     if "cc_dmg" not in u:
                         raise KeyError(f"Unit missing required 'cc_dmg' field")
                     melee_damages.append(u["cc_dmg"])
@@ -1496,11 +1493,10 @@ class W40KEnv(gym.Env):
         targets = []
         chargeable_enemies = []
         
-        # Find enemies within charge range (move distance) but not adjacent
-        for enemy in self.enemy_units:
-            if enemy["alive"] and enemy["cur_hp"] > 0:
-                dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
-                if 1 < dist <= unit["move"]:  # Can charge (not adjacent, within move)
+        # Find enemies within charge range (move distance) but not adjacent - use UnitManager's cleaned list
+        for enemy in self.unit_manager.get_alive_enemy_units():
+            dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
+            if 1 < dist <= unit["move"]:  # Can charge (not adjacent, within move)
                     chargeable_enemies.append(enemy)
         
         if not chargeable_enemies:
@@ -1543,14 +1539,13 @@ class W40KEnv(gym.Env):
         targets = []
         combat_enemies = []
         
-        # Find enemies within combat range (CC_RNG)
+        # Find enemies within combat range (CC_RNG) - use UnitManager's cleaned list
         if "cc_rng" not in unit:
             raise KeyError(f"Unit missing required 'cc_rng' field")
         combat_range = unit["cc_rng"]
-        for enemy in self.enemy_units:
-            if enemy["alive"] and enemy["cur_hp"] > 0:
-                if is_unit_in_range(unit, enemy, combat_range):
-                    combat_enemies.append(enemy)
+        for enemy in self.unit_manager.get_alive_enemy_units():
+            if is_unit_in_range(unit, enemy, combat_range):
+                combat_enemies.append(enemy)
         
         if not combat_enemies:
             return targets
@@ -1573,8 +1568,9 @@ class W40KEnv(gym.Env):
 
     def _can_melee_units_charge(self, enemy):
         """Check if any of our melee units can charge this enemy."""
-        for unit in self.ai_units:
-            if unit["alive"] and not unit["is_ranged"] and not unit["has_charged"]:
+        # Use UnitManager's cleaned list instead of manual alive checks
+        for unit in self.unit_manager.get_alive_ai_units():
+            if not unit["is_ranged"] and not unit["has_charged"]:
                 dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
                 if 1 < dist <= unit["move"]:
                     return True
@@ -1595,12 +1591,10 @@ class W40KEnv(gym.Env):
     
     def _is_target_adjacent_to_friendly_unit(self, target):
         """Check if target enemy is adjacent to any friendly unit (Rule 2)."""
-        for friendly_unit in self.ai_units:
-            if "alive" not in friendly_unit:
-                raise KeyError(f"Friendly unit missing required 'alive' field")
-            if friendly_unit["alive"]:
-                if are_units_adjacent(target, friendly_unit):
-                    return True
+        # Use UnitManager's cleaned list instead of manual alive checks
+        for friendly_unit in self.unit_manager.get_alive_ai_units():
+            if are_units_adjacent(target, friendly_unit):
+                return True
         return False
 
     def _get_valid_actions_for_phase(self, unit, current_phase):
@@ -1634,11 +1628,6 @@ class W40KEnv(gym.Env):
 
     def _shoot_at_target(self, unit, target):
         """Shoot at target and return reward."""
-        if not target["alive"]:
-            unit_rewards = self._get_unit_reward_config(unit)
-            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
-            return unit_rewards["base_actions"]["wait"]
         
         # PREVENT FRIENDLY FIRE: Cannot shoot friendly units
         if self._is_friendly_unit(unit, target):
@@ -1657,7 +1646,8 @@ class W40KEnv(gym.Env):
         result = execute_shooting_sequence(unit, target)
         total_damage = result["totalDamage"]
         old_hp = target["cur_hp"]
-        target["cur_hp"] = max(0, target["cur_hp"] - total_damage)
+        # Use UnitManager instead of direct manipulation - capture return value
+        target_died = self.unit_manager.apply_shooting_damage(unit, target, result)
         
         unit_rewards = self._get_unit_reward_config(unit)
         
@@ -1668,12 +1658,9 @@ class W40KEnv(gym.Env):
         base_attack_reward = unit_rewards["base_actions"]["ranged_attack"]
         reward = base_attack_reward * total_damage if total_damage > 0 else base_attack_reward * 0.1
         
-        # Kill bonuses - EXACT PvP mode behavior: completely remove dead units
-        if self.unit_manager.handle_unit_death(target):
-            # Unit died and was removed by UnitManager, sync local lists
-            self.units = self.unit_manager.units
-            self.ai_units = self.unit_manager.ai_units
-            self.enemy_units = self.unit_manager.enemy_units
+        # Kill bonuses - UnitManager already handled death, use its return value
+        if target_died:
+            # Unit died and was removed by UnitManager
             if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                 raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
             reward += unit_rewards["result_bonuses"]["kill_target"]
@@ -1689,11 +1676,6 @@ class W40KEnv(gym.Env):
     def _charge_at_target(self, unit, target):
         """Charge at target (move adjacent)."""
         unit_rewards = self._get_unit_reward_config(unit)
-        
-        if not target["alive"]:
-            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
-            return unit_rewards["base_actions"]["wait"]
         
         # Move unit adjacent to target
         dx = target["col"] - unit["col"]
@@ -1735,13 +1717,10 @@ class W40KEnv(gym.Env):
 
     def _ranged_units_available(self):
         """Check if any ranged units can still shoot this phase."""
-        for unit in self.ai_units:
-            if "alive" not in unit:
-                raise KeyError("Unit missing required 'alive' field")
+        for unit in self.unit_manager.get_alive_ai_units():
             if "has_shot" not in unit:
                 raise KeyError("Unit missing required 'has_shot' field")
-            if (unit["alive"] and 
-                not unit["has_shot"] and 
+            if (not unit["has_shot"] and 
                 self._is_ranged_unit(unit) and
                 self._has_shooting_targets(unit)):
                 return True
@@ -1758,15 +1737,12 @@ class W40KEnv(gym.Env):
         if "rng_rng" not in unit_def:
             raise KeyError(f"Unit definition for '{unit_type}' missing required 'RNG_RNG' field")
         unit_range = unit_def["RNG_RNG"]
-        for enemy in self.enemy_units:
-            if "alive" not in enemy:
-                raise KeyError("Enemy missing required 'alive' field")
-            if enemy["alive"]:
-                distance = self._calculate_distance(unit, enemy)
-                if distance <= unit_range:
-                    # Rule 2: Cannot shoot enemy units adjacent to friendly units
-                    if not self._is_target_adjacent_to_friendly_unit(enemy):
-                        return True
+        for enemy in self.unit_manager.get_alive_enemy_units():
+            distance = self._calculate_distance(unit, enemy)
+            if distance <= unit_range:
+                # Rule 2: Cannot shoot enemy units adjacent to friendly units
+                if not self._is_target_adjacent_to_friendly_unit(enemy):
+                    return True
         return False
     
     def _calculate_distance(self, unit1, unit2):
@@ -1806,7 +1782,7 @@ class W40KEnv(gym.Env):
             forbidden_set.add(f"{wall_hex[0]},{wall_hex[1]}")
         
         # Add unit positions (except the moving unit) - exact copy from frontend
-        for other_unit in self.units:
+        for other_unit in self.unit_manager.units:
             if (other_unit["alive"] and 
                 not (other_unit["col"] == from_col and other_unit["row"] == from_row)):
                 forbidden_set.add(f"{other_unit['col']},{other_unit['row']}")
@@ -1872,11 +1848,6 @@ class W40KEnv(gym.Env):
         """Attack adjacent target in melee combat."""
         unit_rewards = self._get_unit_reward_config(unit)
         
-        if not target["alive"]:
-            if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
-            return unit_rewards["base_actions"]["wait"]
-        
         # PREVENT FRIENDLY FIRE: Cannot attack friendly units
         if self._is_friendly_unit(unit, target):
             if "situational_modifiers" not in unit_rewards or "friendly_fire_penalty" not in unit_rewards["situational_modifiers"]:
@@ -1898,11 +1869,8 @@ class W40KEnv(gym.Env):
         reward = unit_rewards["base_actions"]["melee_attack"]  # Base attack reward
         
         # EXACT PvP mode behavior: atomic damage application and death handling
-        if self.unit_manager.apply_damage_and_check_death(target, damage):
-            # Unit died and was removed by UnitManager, sync local lists
-            self.units = self.unit_manager.units
-            self.ai_units = self.unit_manager.ai_units
-            self.enemy_units = self.unit_manager.enemy_units
+        if self.unit_manager.apply_direct_damage(unit, target):
+            # Unit died and was removed by UnitManager - no manual sync needed
             if "result_bonuses" not in unit_rewards or "kill_target" not in unit_rewards["result_bonuses"]:
                 raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
             reward += unit_rewards["result_bonuses"]["kill_target"]
@@ -1916,16 +1884,16 @@ class W40KEnv(gym.Env):
         return reward
 
     def _get_nearest_ai_unit(self, enemy):
-        """Get nearest alive AI unit for enemy targeting."""
+        """Get nearest alive AI unit for enemy targeting - EXACT PvP mode behavior."""
         nearest = None
         min_dist = float('inf')
         
-        for unit in self.ai_units:
-            if unit["alive"]:
-                dist = get_hex_distance(enemy, unit)
-                if dist < min_dist:
-                    min_dist = dist
-                    nearest = unit
+        # Use UnitManager's cleaned list instead of manual alive checks
+        for unit in self.unit_manager.get_alive_ai_units():
+            dist = get_hex_distance(enemy, unit)
+            if dist < min_dist:
+                min_dist = dist
+                nearest = unit
         
         return nearest
 
@@ -2010,11 +1978,11 @@ class W40KEnv(gym.Env):
         3. High damage enemy, can be killed by shooting
         4. High damage enemy, can't be killed by shooting
         """
-        enemies_in_range = [e for e in self.enemy_units if e['alive'] and 
+        enemies_in_range = [e for e in self.unit_manager.get_alive_enemy_units() if 
                             not self._is_friendly_unit(shooter, e)]
         if "rng_rng" not in shooter:
             raise KeyError("Shooter missing required 'rng_rng' field")
-        enemies_in_range = [e for e in self.enemy_units if e['alive'] and 
+        enemies_in_range = [e for e in self.unit_manager.get_alive_enemy_units() if 
             not self._is_friendly_unit(shooter, e) and
             abs(shooter['col'] - e['col']) + abs(shooter['row'] - e['row']) <= shooter['rng_rng']]
         if not enemies_in_range:
@@ -2038,7 +2006,7 @@ class W40KEnv(gym.Env):
         """AI_GAME.md: Validate charge target selection against priority system."""
         if "move" not in charger:
             raise KeyError("Charger missing required 'move' field")
-        enemies_in_range = [e for e in self.enemy_units if e['alive'] and 
+        enemies_in_range = [e for e in self.unit_manager.get_alive_enemy_units() if 
                            abs(charger['col'] - e['col']) + abs(charger['row'] - e['row']) <= charger['move']]
         if not enemies_in_range:
             return True
@@ -2065,7 +2033,7 @@ class W40KEnv(gym.Env):
 
     def _validate_combat_priority(self, attacker, target):
         """AI_GAME.md: Validate combat target selection against priority system."""
-        adjacent_enemies = [e for e in self.enemy_units if e['alive'] and 
+        adjacent_enemies = [e for e in self.unit_manager.get_alive_enemy_units() if 
                            not self._is_friendly_unit(attacker, e) and
                            abs(attacker['col'] - e['col']) + abs(attacker['row'] - e['row']) == 1]
         if not adjacent_enemies:
@@ -2109,11 +2077,10 @@ class W40KEnv(gym.Env):
     def _count_enemies_in_charge_range(self, unit):
         """Count enemies within charge range (1 hex) of unit."""
         count = 0
-        for enemy in self.enemy_units:
-            if enemy['alive']:
-                distance = abs(unit['col'] - enemy['col']) + abs(unit['row'] - enemy['row'])
-                if distance == 1:
-                    count += 1
+        for enemy in self.unit_manager.get_alive_enemy_units():
+            distance = abs(unit['col'] - enemy['col']) + abs(unit['row'] - enemy['row'])
+            if distance == 1:
+                count += 1
         return count
 
     def _count_enemies_in_shooting_range(self, unit):
@@ -2122,11 +2089,10 @@ class W40KEnv(gym.Env):
             raise KeyError("Unit missing required 'rng_rng' field")
         shooting_range = unit['rng_rng']
         count = 0
-        for enemy in self.enemy_units:
-            if enemy['alive']:
-                distance = abs(unit['col'] - enemy['col']) + abs(unit['row'] - enemy['row'])
-                if distance <= shooting_range:
-                    count += 1
+        for enemy in self.unit_manager.get_alive_enemy_units():
+            distance = abs(unit['col'] - enemy['col']) + abs(unit['row'] - enemy['row'])
+            if distance <= shooting_range:
+                count += 1
         return count
 
     def _count_charge_opportunities_after_move(self, unit):
@@ -2160,8 +2126,8 @@ class W40KEnv(gym.Env):
                 self.charged_units.clear()
                 self.attacked_units.clear()
                 
-                # Reset unit flags for compatibility
-                for unit in self.ai_units:
+                # Reset unit flags for compatibility - use UnitManager to ensure consistency
+                for unit in self.unit_manager.ai_units:  # Use UnitManager's maintained list
                     unit["has_moved"] = False
                     unit["has_shot"] = False
                     unit["has_charged"] = False
@@ -2216,7 +2182,7 @@ class W40KEnv(gym.Env):
     def _execute_enemy_turn(self):
         """Execute enemy turn using scripted behavior as mentioned in AI_GAME_OVERVIEW.md."""
         # BALANCED scripted enemy behavior for training - LIMITED ACTIONS
-        # Use self.enemy_units directly since remove_unit_from_lists keeps it updated
+        # Use UnitManager.get_alive_enemy_units() for centralized dead unit management
         enemy_units_alive = self.unit_manager.get_alive_enemy_units()
         
         # Limit total enemy actions per turn to prevent overwhelming AI
@@ -2228,9 +2194,8 @@ class W40KEnv(gym.Env):
             if enemy_actions_taken >= max_enemy_actions:
                 break  # Limit enemy actions to give AI a chance
                 
-            # Check if enemy is still alive and in the current enemy_units list
-            if enemy not in self.enemy_units or not enemy.get("alive", False) or enemy.get("cur_hp", 0) <= 0:
-                continue
+            # UnitManager's get_alive_enemy_units() already ensures only alive units
+            # No manual check needed since we're iterating over alive units only
                 
             nearest_ai = self._get_nearest_ai_unit(enemy)
             if not nearest_ai:
@@ -2251,12 +2216,8 @@ class W40KEnv(gym.Env):
             if is_unit_in_range(enemy, nearest_ai, enemy_rng_rng) and enemy_rng_dmg > 0:
                 # Execute dice-based shooting for enemy
                 result = execute_shooting_sequence(enemy, nearest_ai)
-                total_damage = result["totalDamage"]
-                if self.unit_manager.apply_damage_and_check_death(nearest_ai, total_damage):
-                    # Unit died and was removed by UnitManager, sync local lists
-                    self.units = self.unit_manager.units
-                    self.ai_units = self.unit_manager.ai_units
-                    self.enemy_units = self.unit_manager.enemy_units
+                if self.unit_manager.apply_shooting_damage(enemy, nearest_ai, result):
+                    # Unit died and was removed by UnitManager - no manual sync needed
                     # Immediately break to avoid targeting removed unit
                     break
                 action_taken = True
@@ -2271,14 +2232,10 @@ class W40KEnv(gym.Env):
                     raise ValueError(f"enemy.cc_dmg is required for unit {enemy.get('name', 'unknown')}")
                 enemy_cc_dmg = enemy["cc_dmg"]
                 if enemy_cc_dmg > 0:
-                    damage = min(enemy_cc_dmg, nearest_ai["cur_hp"])  # Prevent overkill
-                    if self.unit_manager.apply_damage_and_check_death(nearest_ai, damage):
-                        # Unit died and was removed by UnitManager, sync local lists
-                        self.units = self.unit_manager.units
-                        self.ai_units = self.unit_manager.ai_units
-                        self.enemy_units = self.unit_manager.enemy_units
-                    # Immediately break to avoid targeting removed unit
-                    break
+                    if self.unit_manager.apply_direct_damage(enemy, nearest_ai):
+                        # Unit died and was removed by UnitManager - no manual sync needed
+                        # Immediately break to avoid targeting removed unit
+                        break
                 action_taken = True
                 
                 # Record bot melee attack action
@@ -2314,18 +2271,14 @@ class W40KEnv(gym.Env):
             
             if action_taken:
                 enemy_actions_taken += 1
-        
-        # Update AI units list
-        self.ai_units = self.unit_manager.get_alive_ai_units()
 
     def _get_nearest_ai_unit(self, enemy):
         """Get nearest alive AI unit for enemy targeting - EXACT PvP mode behavior."""
         nearest = None
         min_dist = float('inf')
         
-        # In PvP mode, dead units are completely removed from the list
-        # So self.ai_units should only contain alive units after remove_unit_from_lists
-        for unit in self.ai_units:
+        # Use UnitManager's cleaned list to ensure only alive units
+        for unit in self.unit_manager.get_alive_ai_units():
             dist = get_hex_distance(enemy, unit)
             if dist < min_dist:
                 min_dist = dist
@@ -2348,9 +2301,9 @@ class W40KEnv(gym.Env):
             "current_player": self.current_player,
             "current_turn": self.current_turn,
             "game_over": self.game_over,
-            "winner": self.winner,  # ADD THIS LINE
-            "ai_units_alive": len([u for u in self.ai_units if u.get("alive", True)]),  # Keep this one for compatibility
-            "enemy_units_alive": len([u for u in self.enemy_units if u.get("alive", True)])  # Keep this one for compatibility
+            "winner": self.winner,
+            "ai_units_alive": len(self.unit_manager.get_alive_ai_units()),
+            "enemy_units_alive": len(self.unit_manager.get_alive_enemy_units())
         }
 
 
@@ -2367,17 +2320,16 @@ class W40KEnv(gym.Env):
             # Show board state
             board = [['.' for _ in range(self.board_size[0])] for _ in range(self.board_size[1])]
             
-            for unit in self.units:
-                if unit["alive"]:
-                    symbol = 'A' if unit["player"] == 1 else 'E'
-                    if unit["col"] < len(board[0]) and unit["row"] < len(board):
-                        board[unit["row"]][unit["col"]] = symbol
+            for unit in self.unit_manager.get_alive_units():
+                symbol = 'A' if unit["player"] == 1 else 'E'
+                if unit["col"] < len(board[0]) and unit["row"] < len(board):
+                    board[unit["row"]][unit["col"]] = symbol
             
             for row in board:
                 print(' '.join(row))
             
-            print(f"\nAI Units: {len([u for u in self.ai_units if u['alive']])}")
-            print(f"Enemy Units: {len([u for u in self.enemy_units if u['alive']])}")
+            print(f"\nAI Units: {len(self.unit_manager.get_alive_ai_units())}")
+            print(f"Enemy Units: {len(self.unit_manager.get_alive_enemy_units())}")
             print(f"Eligible Units: {len(self._get_eligible_units())}")
 
     def _capture_game_state(self, action, reward):
@@ -2395,9 +2347,9 @@ class W40KEnv(gym.Env):
                 "units": []
             }
             
-            # Capture unit states
-            if hasattr(self, 'units') and self.units:
-                for i, unit in enumerate(self.units):
+            # Capture unit states from UnitManager
+            if hasattr(self, 'unit_manager') and self.unit_manager.units:
+                for i, unit in enumerate(self.unit_manager.units):
                     if unit:
                         unit_state = {
                             "id": unit.get('id', i),
