@@ -664,7 +664,7 @@ class MultiAgentTrainer:
         )
         
         # Enhance environment with clean game logger
-        from ai.game_logger import CleanGameReplayIntegration
+        from game_replay_logger import CleanGameReplayIntegration
         enhanced_env = CleanGameReplayIntegration.enhance_training_env(base_env)
         env = Monitor(enhanced_env, allow_early_resets=True)
         
@@ -878,7 +878,7 @@ class MultiAgentTrainer:
         )
 
         # Create enhanced evaluation environment with clean game logger
-        from ai.game_logger import CleanGameReplayIntegration
+        from game_replay_logger import CleanGameReplayIntegration
         enhanced_eval_env = CleanGameReplayIntegration.enhance_training_env(base_eval_env)
         
         # Wrap with Monitor for proper evaluation callback integration

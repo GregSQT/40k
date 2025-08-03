@@ -97,7 +97,7 @@ def create_model(config, training_config_name="default", rewards_config_name="de
     base_env = W40KEnv(rewards_config=rewards_config_name, training_config_name=training_config_name)
     
     # Enhance environment with clean game logger BEFORE Monitor wrapping
-    from ai.game_logger import CleanGameReplayIntegration
+    from game_replay_logger import CleanGameReplayIntegration
     enhanced_env = CleanGameReplayIntegration.enhance_training_env(base_env)
     env = Monitor(enhanced_env)
     
@@ -165,7 +165,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                       controlled_agent=agent_key)
     
     # Enhance environment with clean game logger BEFORE Monitor wrapping
-    from ai.game_logger import CleanGameReplayIntegration
+    from game_replay_logger import CleanGameReplayIntegration
     enhanced_env = CleanGameReplayIntegration.enhance_training_env(base_env)
     env = Monitor(enhanced_env)
     
