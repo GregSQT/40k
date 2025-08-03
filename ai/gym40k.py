@@ -1107,13 +1107,10 @@ class W40KEnv(gym.Env):
                 raise ValueError(f"Unit {unit.get('unit_type', 'unknown')} has rng_nb=0 (melee-only) but attempting to shoot - this violates AI_INSTRUCTIONS.md no fallbacks policy")
             
             targets = self._get_shooting_targets(unit)
-            print(f"DEBUG: Shooting targets found: {[t.get('id', 'unknown') for t in targets]}")
             # Re-validate targets at moment of use - they might have died since selection
             alive_targets = [t for t in targets if self.unit_manager.is_target_valid(t)]
-            print(f"DEBUG: Alive targets after validation: {[t.get('id', 'unknown') for t in alive_targets]}")
             if alive_targets:
                 target = alive_targets[0]
-                print(f"DEBUG: Selected target {target.get('id', 'unknown')} with HP {target.get('cur_hp', 0)}")
                 # CRITICAL: Validate target is still alive using UnitManager
                 if not self.unit_manager.is_target_valid(target):
                     unit["has_shot"] = True
@@ -1273,8 +1270,10 @@ class W40KEnv(gym.Env):
 
         if action_type == 5:
             targets = self._get_charge_targets(unit)
-            if targets:
-                target = targets[0]
+            # Re-validate targets are still alive
+            alive_targets = [t for t in targets if self.unit_manager.is_target_valid(t)]
+            if alive_targets:
+                target = alive_targets[0]
                 
                 # Set explicit tracking - PvP style
                 self._last_acting_unit = unit
@@ -1330,8 +1329,10 @@ class W40KEnv(gym.Env):
         # Only action 6 attacks in combat phase; action 7 waits
         if action_type == 6:
             targets = self._get_combat_targets(unit)
-            if targets:
-                target = targets[0]
+            # Re-validate targets are still alive
+            alive_targets = [t for t in targets if self.unit_manager.is_target_valid(t)]
+            if alive_targets:
+                target = alive_targets[0]
                 
                 # Set explicit tracking - PvP style
                 self._last_acting_unit = unit
@@ -1410,8 +1411,10 @@ class W40KEnv(gym.Env):
         targets = []
         in_range_enemies = []
         
-        # Find enemies in range with line of sight validation - use UnitManager's cleaned list
+        # Find enemies in range with line of sight validation - use UnitManager's cleaned list with target validation
         for enemy in self.unit_manager.get_alive_enemy_units():
+            if not self.unit_manager.is_target_valid(enemy):
+                continue
             dist = abs(unit["col"] - enemy["col"]) + abs(unit["row"] - enemy["row"])
             if dist <= unit["rng_rng"]:
                     # CRITICAL FIX: Add line of sight validation using wall_hexes
@@ -2198,7 +2201,7 @@ class W40KEnv(gym.Env):
             # No manual check needed since we're iterating over alive units only
                 
             nearest_ai = self._get_nearest_ai_unit(enemy)
-            if not nearest_ai:
+            if not nearest_ai or not self.unit_manager.is_target_valid(nearest_ai):
                 continue
             
             dist = abs(enemy["col"] - nearest_ai["col"]) + abs(enemy["row"] - nearest_ai["row"])

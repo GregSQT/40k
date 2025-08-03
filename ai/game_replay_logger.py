@@ -940,19 +940,25 @@ class GameReplayLogger:
         if self.game_states and len(self.game_states) > 0:
             first_state = self.game_states[0]
             for unit in first_state.get("units", []):
+                # Get real unit stats from training environment
+                unit_stats = self.env.unit_definitions.get(unit.get("unit_type"))
+                if not unit_stats:
+                    raise ValueError(f"Unit type '{unit.get('unit_type')}' not found in training environment unit definitions")
+                
                 initial_units.append({
                     "id": unit.get("id", 0),
                     "unit_type": unit.get("unit_type", "Unknown"),
                     "player": unit.get("player", 0),
                     "col": unit.get("col", 0),
                     "row": unit.get("row", 0), 
-                    "hp_max": unit.get("max_hp", 1),
-                    "move": unit.get("movement", 6),
-                    "rng_rng": 18,  # Default values for training
-                    "rng_dmg": 1,
-                    "cc_dmg": 1,
-                    "is_ranged": unit.get("unit_type") in ["Intercessor", "Termagant"],
-                    "is_melee": unit.get("unit_type") in ["AssaultIntercessor"]
+                    "HP_MAX": unit_stats["hp_max"],
+                    "hp_max": unit_stats["hp_max"],
+                    "move": unit_stats["move"],
+                    "rng_rng": unit_stats["rng_rng"],
+                    "rng_dmg": unit_stats["rng_dmg"],
+                    "cc_dmg": unit_stats["cc_dmg"],
+                    "is_ranged": unit_stats["is_ranged"],
+                    "is_melee": unit_stats["is_melee"]
                 })
         
         # Actions generation removed - using combat_log only for unified format

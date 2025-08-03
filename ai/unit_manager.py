@@ -138,25 +138,20 @@ class UnitManager:
         """
         if not target:
             return False
-        if target.get("cur_hp", 0) <= 0:
+        
+        cur_hp = target.get("cur_hp", 0)
+        alive = target.get("alive", False)
+        target_id = target.get("id")
+        
+        if cur_hp <= 0:
+            print(f"DEBUG: Target {target_id} invalid - HP: {cur_hp}")
             return False
-        if not target.get("alive", False):
+        if not alive:
+            print(f"DEBUG: Target {target_id} invalid - alive: {alive}")
             return False
         # Verify target still exists in our managed lists
-        target_id = target.get("id")
-        return self.find_unit(target_id) is not None
-    
-    def is_target_valid(self, target: Dict[str, Any]) -> bool:
-        """
-        Validate that target is still alive and in the game.
-        Use this before any combat action to ensure target is valid.
-        """
-        if not target:
+        exists = self.find_unit(target_id) is not None
+        if not exists:
+            print(f"DEBUG: Target {target_id} invalid - not in unit lists")
             return False
-        if target.get("cur_hp", 0) <= 0:
-            return False
-        if not target.get("alive", False):
-            return False
-        # Verify target still exists in our managed lists
-        target_id = target.get("id")
-        return self.find_unit(target_id) is not None
+        return True

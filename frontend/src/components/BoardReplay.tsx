@@ -621,9 +621,6 @@ const validateUnitRegistry = () => {
           throw new Error('Invalid replay format: Missing combat_log. Please use training replays generated with the new combat log system.');
         }
         
-        console.log('🎯 Using combat_log format with', replay.combat_log.length, 'entries');
-        console.log('🔍 First 3 combat_log entries:', replay.combat_log.slice(0, 3));
-        
         // Set the battle log directly from the training logger's combat_log
         const mappedBattleLog = replay.combat_log.map((entry: any) => ({
           turn: entry.turnNumber || 1,
@@ -639,23 +636,14 @@ const validateUnitRegistry = () => {
           ...entry
         }));
         
-        console.log('🔍 Mapped battleLog length:', mappedBattleLog.length);
-        console.log('🔍 First mapped entry:', mappedBattleLog[0]);
         setBattleLog(mappedBattleLog);
-        
-        // Debug: Check if battleLog state is being reset
-        setTimeout(() => {
-          console.log('🔍 battleLog state after 100ms:', battleLog.length);
-        }, 100);
         
         // Process initial units with proper mapping - handle both formats
         let initialUnits: any[] = [];
         if (replay.initial_state?.units) {
           initialUnits = replay.initial_state.units;
-          console.log('🔍 Using initial_state.units format');
         } else if (replay.game_states?.[0]?.units) {
           initialUnits = replay.game_states[0].units;
-          console.log('🔍 Using game_states[0].units format');
         } else {
           console.error('❌ No initial units found in replay data. Available keys:', Object.keys(replay));
           return;
@@ -1156,7 +1144,7 @@ const validateUnitRegistry = () => {
           cur_hp: unit.hp_max,
           COLOR: unit.player === 0 ? parseInt(boardConfig!.colors.player_0.replace('0x', ''), 16) : parseInt(boardConfig!.colors.player_1.replace('0x', ''), 16),
           MOVE: stats.MOVE,
-          HP_MAX: stats.HP_MAX,
+          HP_MAX: stats.HP_MAX ?? unit.hp_max,
           RNG_RNG: stats.RNG_RNG,
           RNG_DMG: stats.RNG_DMG,
           CC_DMG: stats.CC_DMG,
