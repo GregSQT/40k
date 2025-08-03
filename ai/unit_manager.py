@@ -71,6 +71,50 @@ class UnitManager:
         Returns True if unit died and was removed.
         """
         if unit.get("cur_hp", 0) <= 0:
+            # Mark as dead immediately
+            unit["alive"] = False
+            unit["cur_hp"] = 0
             self.remove_unit(unit["id"])
             return True
         return False
+    
+    def apply_damage_and_check_death(self, unit: Dict[str, Any], damage: int) -> bool:
+        """
+        Apply damage and handle death atomically like PvP mode.
+        Returns True if unit died and was removed.
+        """
+        old_hp = unit.get("cur_hp", 0)
+        new_hp = max(0, old_hp - damage)
+        unit["cur_hp"] = new_hp
+        
+        if new_hp <= 0:
+            # Mark as dead immediately
+            unit["alive"] = False
+            unit["cur_hp"] = 0
+            self.remove_unit(unit["id"])
+            return True
+        return False
+    
+    def apply_shooting_damage(self, shooter: Dict[str, Any], target: Dict[str, Any], shooting_result: Dict[str, Any]) -> bool:
+        """
+        Apply shooting damage atomically like PvP mode.
+        Returns True if target died and was removed.
+        """
+        total_damage = shooting_result["totalDamage"]
+        return self.apply_damage_and_check_death(target, total_damage)
+    
+    def apply_combat_damage(self, attacker: Dict[str, Any], target: Dict[str, Any], combat_result: Dict[str, Any]) -> bool:
+        """
+        Apply combat damage atomically like PvP mode.
+        Returns True if target died and was removed.
+        """
+        total_damage = combat_result["totalDamage"]
+        return self.apply_damage_and_check_death(target, total_damage)
+    
+    def apply_direct_damage(self, attacker: Dict[str, Any], target: Dict[str, Any]) -> bool:
+        """
+        Apply direct damage (like cc_dmg) atomically like PvP mode.
+        Returns True if target died and was removed.
+        """
+        damage = attacker["cc_dmg"]
+        return self.apply_damage_and_check_death(target, damage)
