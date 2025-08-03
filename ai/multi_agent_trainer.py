@@ -464,6 +464,10 @@ class MultiAgentTrainer:
             # Setup callbacks for this session with episode tracking
             callbacks = self._setup_session_callbacks(session, model, episode_tracker)
             
+            # CRITICAL FIX: Capture replays from TRAINING episodes, not testing
+            # Note: Using existing SelectiveEpisodeTracker for replay capture
+            # training_replay_tracker = SelectiveEpisodeTracker(session.agent_key, session.opponent_agent)
+            
             # Execute training
             start_time = time.time()
             training_config = self.config.load_training_config(training_config_name)
@@ -500,8 +504,37 @@ class MultiAgentTrainer:
             
             training_duration = time.time() - start_time
             
-            # Test trained model (episodes collected during training)
-            test_results = self._test_trained_model(model, env, num_episodes=10, episode_tracker=None)
+            # CRITICAL FIX: Save replays from TRAINING phase, not testing phase
+            try:
+                if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'replay_logger'):
+                    replay_logger = env.unwrapped.replay_logger
+                    if replay_logger and hasattr(replay_logger, 'game_states'):
+                        # Create final training replay data
+                        final_replay_data = {
+                            "game_states": getattr(replay_logger, 'game_states', []).copy(),
+                            "combat_log": getattr(replay_logger, 'combat_log_entries', []).copy(),
+                            "initial_state": getattr(replay_logger, 'initial_game_state', {}),
+                            "game_info": {
+                                "scenario": "training_episode",
+                                "total_turns": getattr(replay_logger, 'current_turn', 0),
+                                "winner": getattr(env.unwrapped, 'winner', None)
+                            },
+                            "episode_steps": getattr(env.unwrapped, 'step_count', 0),
+                            "episode_reward": getattr(env.unwrapped, '_episode_reward', 0)
+                        }
+                        
+                        # Update episode tracker with final training episode
+                        episode_tracker.update_episode(
+                            final_replay_data["episode_steps"],
+                            final_replay_data["episode_reward"], 
+                            final_replay_data
+                        )
+                        print(f"✅ Captured final training episode: Turn {final_replay_data['game_info']['total_turns']}, Steps {final_replay_data['episode_steps']}")
+            except Exception as e:
+                print(f"⚠️ Failed to capture training replay data: {e}")
+            
+            # Test the trained model (but don't use for replay capture)
+            test_results = self._test_trained_model(model, env, 20, None)  # No episode tracker for testing
             
             # Save final model
             final_model_path = session.model_path.replace('.zip', f'_session_{session.session_id}.zip')
@@ -630,11 +663,10 @@ class MultiAgentTrainer:
             quiet=True  # Enable quiet mode for training
         )
         
-        # Enhance environment with proper GameReplayLogger
-        from ai.game_replay_logger import GameReplayLogger
-        base_env.replay_logger = GameReplayLogger(base_env)
-        base_env.replay_logger.capture_initial_state()
-        env = Monitor(base_env, allow_early_resets=True)
+        # Enhance environment with clean game logger
+        from ai.game_logger import CleanGameReplayIntegration
+        enhanced_env = CleanGameReplayIntegration.enhance_training_env(base_env)
+        env = Monitor(enhanced_env, allow_early_resets=True)
         
         # Agent-specific model path
         model_path = self._get_agent_model_path(agent_key)
@@ -845,11 +877,9 @@ class MultiAgentTrainer:
             quiet=True
         )
 
-        # Create enhanced evaluation environment with proper GameReplayLogger
-        from ai.game_replay_logger import GameReplayLogger
-        base_eval_env.replay_logger = GameReplayLogger(base_eval_env)
-        base_eval_env.replay_logger.capture_initial_state()
-        enhanced_eval_env = base_eval_env
+        # Create enhanced evaluation environment with clean game logger
+        from ai.game_logger import CleanGameReplayIntegration
+        enhanced_eval_env = CleanGameReplayIntegration.enhance_training_env(base_eval_env)
         
         # Wrap with Monitor for proper evaluation callback integration
         from stable_baselines3.common.monitor import Monitor
@@ -865,7 +895,7 @@ class MultiAgentTrainer:
         return eval_env
 
     def _test_trained_model(self, model, env, num_episodes: int = 10, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
-        """Test trained model and return performance metrics with selective replay tracking."""
+        """Test trained model - episode_tracker should be None to prevent test episode capture"""
         # print(f"🔍 Testing model with {num_episodes} episodes, tracker: {'YES' if episode_tracker else 'NO'}")
         wins = 0
         total_rewards = []

@@ -38,6 +38,7 @@ else:
 ######################################################################################################
 
     ### ai
+        "ai/ai_phase_transition.py",
         "ai/agent.py",
         "ai/evaluate.py",
         "ai/game_replay_logger.py",

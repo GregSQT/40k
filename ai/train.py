@@ -96,12 +96,13 @@ def create_model(config, training_config_name="default", rewards_config_name="de
         raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
     base_env = W40KEnv(rewards_config=rewards_config_name, training_config_name=training_config_name)
     
-    # Enhance environment with our advanced replay logger BEFORE Monitor wrapping
-    enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
+    # Enhance environment with clean game logger BEFORE Monitor wrapping
+    from ai.game_logger import CleanGameReplayIntegration
+    enhanced_env = CleanGameReplayIntegration.enhance_training_env(base_env)
     env = Monitor(enhanced_env)
     
-    # Store reference to replay logger for access
-    env.replay_logger = enhanced_env.replay_logger
+    # Store reference to clean logger for access
+    env.game_logger = enhanced_env.game_logger
     
     model_path = config.get_model_path()
     
@@ -163,12 +164,13 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                       training_config_name=training_config_name,
                       controlled_agent=agent_key)
     
-    # Enhance environment with our advanced replay logger BEFORE Monitor wrapping
-    enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
+    # Enhance environment with clean game logger BEFORE Monitor wrapping
+    from ai.game_logger import CleanGameReplayIntegration
+    enhanced_env = CleanGameReplayIntegration.enhance_training_env(base_env)
     env = Monitor(enhanced_env)
     
-    # Store reference to replay logger for access
-    env.replay_logger = enhanced_env.replay_logger
+    # Store reference to clean logger for access
+    env.game_logger = enhanced_env.game_logger
     
     # Agent-specific model path
     model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')

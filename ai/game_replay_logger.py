@@ -192,7 +192,7 @@ class GameReplayLogger:
     def capture_action_state(self, action, reward: float, pre_action_units: List[Dict], 
                            post_action_units: List[Dict], acting_unit_id: Optional[int] = None,
                            target_unit_id: Optional[int] = None, description: str = ""):
-        """Capture game state after an action with combat log format."""
+        """SYSTEM 2 REMOVED - Only capture game states, not combat log entries. System 1 handles all combat logging."""
         # Normalize action to integer
         action_int = self._normalize_action(action)
         
@@ -200,21 +200,12 @@ class GameReplayLogger:
         self.current_action_reward = reward
         self.current_action_int = action_int
         
-        # Debug output (can be enabled when needed)
-        if not self.quiet:
-            print(f"🏗️ *** CAPTURE_ACTION_STATE CALLED ***")
-            print(f"   storing reward: {reward}")
-            print(f"   storing action_int: {action_int}")
-        
-        # CRITICAL FIX: Update turn/phase BEFORE logging the event
-        # so the event gets the correct turn/phase numbers
+        # Update turn/phase tracking
         self._update_turn_phase()
         
-        # Generate direct combat log entry with actual reward
-        self._log_action_directly(action_int, reward, pre_action_units, post_action_units, 
-                                acting_unit_id, target_unit_id, description)
+        # REMOVED: _log_action_directly() call - System 1 (direct action logging) handles this
         
-        # Create state snapshot
+        # Create state snapshot ONLY (no combat log entry)
         state = self._create_game_state_snapshot(
             action_taken=action_int,
             acting_unit_id=acting_unit_id,
@@ -223,9 +214,6 @@ class GameReplayLogger:
             turn=self.current_turn,
             reward=reward
         )
-        
-        # Combat log entry now handles all change detection centrally
-        # No longer need separate change flags in state
         
         # Enhanced description
         if not description:
@@ -240,7 +228,6 @@ class GameReplayLogger:
                            post_action_units: List[Dict], acting_unit_id: Optional[int] = None,
                            target_unit_id: Optional[int] = None, description: str = ""):
         """Log action directly with actual reward from environment step."""
-        
         # Get action name
         action_name = self.action_names.get(action_int, f"action_{action_int}")
         
