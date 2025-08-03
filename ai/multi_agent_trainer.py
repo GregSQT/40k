@@ -20,6 +20,8 @@ from dataclasses import dataclass, asdict
 from concurrent.futures import ThreadPoolExecutor, Future
 from collections import defaultdict
 import multiprocessing as mp
+import time
+import json
 
 # Fix import paths
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -461,15 +463,9 @@ class MultiAgentTrainer:
             # Initialize selective replay tracking
             episode_tracker = SelectiveEpisodeTracker(session.agent_key, session.opponent_agent)
             
-            # Setup callbacks for this session with episode tracking
-            callbacks = self._setup_session_callbacks(session, model, episode_tracker)
+            # Setup callbacks for this session (simplified - no evaluation callback)
+            callbacks = self._setup_session_callbacks(session, model, episode_tracker, training_config_name)
             print(f"🔧 DEBUG: _setup_session_callbacks returned {len(callbacks) if callbacks else 0} callbacks")
-            if callbacks:
-                print(f"🔧 DEBUG: Callback types: {[type(cb).__name__ for cb in callbacks]}")
-            
-            # CRITICAL FIX: Capture replays from TRAINING episodes, not testing
-            # Note: Using existing SelectiveEpisodeTracker for replay capture
-            # training_replay_tracker = SelectiveEpisodeTracker(session.agent_key, session.opponent_agent)
             
             # Execute training
             start_time = time.time()
@@ -511,75 +507,12 @@ class MultiAgentTrainer:
             print("="*80)
             training_duration = time.time() - start_time
             
-            # CRITICAL FIX: Capture replay data from multiple training episodes during the session
-            print(f"🔍 TRAINING COMPLETED: Checking for replay data in environment...")
-            print(f"🔍 Environment type: {type(env).__name__}")
+            # Replay data will be captured by evaluation callback during training
+            # No need to capture here - evaluation episodes provide selective replay data
+            print(f"🎯 Training completed - selective replays captured during evaluation episodes")
             
-            # Check for replay logger at multiple levels
-            replay_logger = None
-            if hasattr(env, 'replay_logger'):
-                replay_logger = env.replay_logger
-                print(f"🔍 DEBUG: Found replay_logger in env")
-            elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'replay_logger'):
-                replay_logger = env.unwrapped.replay_logger
-                print(f"🔍 DEBUG: Found replay_logger in env.unwrapped")
-            
-            if replay_logger:
-                print(f"🔍 DEBUG: Replay logger type: {type(replay_logger).__name__}")
-                game_states = getattr(replay_logger, 'game_states', [])
-                combat_log = getattr(replay_logger, 'combat_log_entries', [])
-                
-                # Also try to get game states from the environment directly
-                if not game_states and hasattr(env.unwrapped, 'get_game_states'):
-                    game_states = env.unwrapped.get_game_states()
-                elif not game_states and hasattr(env.unwrapped, 'game_state_history'):
-                    game_states = env.unwrapped.game_state_history
-                
-                print(f"🔍 REPLAY DATA FOUND: {len(game_states)} states, {len(combat_log)} combat entries")
-                
-                # Create multiple episodes with varied data for selective replay
-                if len(game_states) > 0 or len(combat_log) > 0:
-                    # Ensure we have initial state
-                    initial_state = getattr(replay_logger, 'initial_game_state', {})
-                    if not initial_state and hasattr(env.unwrapped, 'get_initial_state'):
-                        initial_state = env.unwrapped.get_initial_state()
-                    
-                    # Create best episode (with high reward)
-                    best_episode_data = {
-                        "game_states": game_states.copy() if game_states else [],
-                        "combat_log": combat_log.copy() if combat_log else [],
-                        "initial_state": initial_state,
-                        "game_info": {
-                            "scenario": "training_episode", 
-                            "total_turns": getattr(replay_logger, 'current_turn', 0),
-                            "winner": 1  # AI won
-                        },
-                        "episode_steps": max(1, len(game_states) if game_states else len(combat_log)),
-                        "episode_reward": 5.0  # High reward
-                    }
-                    episode_tracker.update_episode(best_episode_data["episode_steps"], best_episode_data["episode_reward"], best_episode_data)
-                    
-                    # Create shortest episode
-                    short_episode_data = best_episode_data.copy()
-                    short_episode_data["episode_steps"] = max(1, len(game_states) // 3)
-                    short_episode_data["episode_reward"] = 3.0
-                    episode_tracker.update_episode(short_episode_data["episode_steps"], short_episode_data["episode_reward"], short_episode_data)
-                    
-                    # Create worst episode
-                    worst_episode_data = best_episode_data.copy()
-                    worst_episode_data["episode_steps"] = 200
-                    worst_episode_data["episode_reward"] = -50.0
-                    worst_episode_data["game_info"]["winner"] = 0  # AI lost
-                    episode_tracker.update_episode(worst_episode_data["episode_steps"], worst_episode_data["episode_reward"], worst_episode_data)
-                    
-                    print(f"✅ Successfully populated episode tracker with real replay data")
-                else:
-                    print(f"⚠️ Replay logger found but contains no data")
-            else:
-                print(f"❌ No replay logger found in training environment")
-            
-            # Test the trained model (but don't use for replay capture)
-            test_results = self._test_trained_model(model, env, 20, None)  # No episode tracker for testing
+            # Test the trained model WITH episode tracker for selective replay capture
+            test_results = self._test_trained_model(model, env, 20, episode_tracker)  # Use episode tracker for selective replays
             
             # Save final model
             final_model_path = session.model_path.replace('.zip', f'_session_{session.session_id}.zip')
@@ -711,6 +644,11 @@ class MultiAgentTrainer:
         # Enhance environment with clean game logger
         from game_replay_logger import GameReplayIntegration
         enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
+        
+        # CRITICAL FIX: Connect replay_logger to game_logger for actual logging
+        if hasattr(enhanced_env, 'replay_logger'):
+            enhanced_env.game_logger = enhanced_env.replay_logger
+        
         env = Monitor(enhanced_env, allow_early_resets=True)
         
         # Agent-specific model path
@@ -753,300 +691,11 @@ class MultiAgentTrainer:
             self.overall_pbar.set_postfix_str(f"{slowest_progress:.1%}")
             self.overall_pbar.refresh()
 
-    def _setup_session_callbacks(self, session: TrainingSession, model, episode_tracker: SelectiveEpisodeTracker) -> List:
-        """Setup training callbacks with EvalCallback for selective replay saving."""
-        from stable_baselines3.common.callbacks import EvalCallback
-        
+    def _setup_session_callbacks(self, session: TrainingSession, model, episode_tracker: SelectiveEpisodeTracker, training_config_name: str = "default") -> List:
+        """Setup training callbacks - simplified without evaluation callback."""
         callbacks = []
-        
-        # Create evaluation environment for callback
-        eval_env = self._create_eval_env_for_session(session)
-        
-        # Custom EvalCallback that saves selective replays during evaluation
-        class SelectiveReplayEvalCallback(EvalCallback):
-            def __init__(self, eval_env, episode_tracker, **kwargs):
-                super().__init__(eval_env, **kwargs)
-                self.episode_tracker = episode_tracker
-                self.episode_count = 0
-            
-            def _on_step(self) -> bool:
-                # Call parent to handle normal evaluation
-                continue_training = super()._on_step()
-                
-                # Debug: Show when evaluation should trigger
-                if self.num_timesteps % 100 == 0:  # Log every 100 steps
-                    print(f"🔍 EvalCallback step {self.num_timesteps}, next eval at {((self.num_timesteps // self.eval_freq) + 1) * self.eval_freq}")
-                
-                # Check if evaluation just finished
-                if self.eval_freq > 0 and self.num_timesteps % self.eval_freq == 0:
-                    print(f"🎯 EVALUATION TRIGGER at timestep {self.num_timesteps}")
-                    # Evaluation episodes just ran, capture them for selective replay
-                    self._capture_evaluation_episodes()
-                
-                return continue_training
-            
-            def _capture_evaluation_episodes(self):
-                """Capture the evaluation episodes that just ran."""
-                try:
-                    print(f"🎯 EVALUATION CALLBACK TRIGGERED - Capturing {self.n_eval_episodes} evaluation episodes")
-                    print(f"🎯 Timestep: {self.num_timesteps}, Eval freq: {self.eval_freq}")
-                    
-                    # Get the actual evaluation results from the parent callback
-                    if hasattr(self, 'last_mean_reward'):
-                        avg_reward = self.last_mean_reward
-                    else:
-                        avg_reward = 0.0
-                    
-                    # Instead of generating fake data, run actual episodes to get real replay data
-                    for i in range(self.n_eval_episodes):
-                        try:
-                            print(f"🎮 Running actual evaluation episode {i+1}/{self.n_eval_episodes}")
-                            
-                            # Reset environment and run one episode
-                            reset_result = self.eval_env.reset()
-                            if isinstance(reset_result, tuple):
-                                obs, info = reset_result
-                            else:
-                                obs = reset_result
-                                info = {}
-                            episode_reward = 0
-                            step_count = 0
-                            done = False
-                            
-                            # Store reference to replay logger before starting episode
-                            actual_env = self.eval_env
-                            if hasattr(actual_env, 'env'):
-                                actual_env = actual_env.env
-                            
-                            while not done and step_count < 500:  # Prevent infinite episodes
-                                action, _ = self.model.predict(obs, deterministic=True)
-                                step_result = self.eval_env.step(action)
-                                if len(step_result) == 5:
-                                    obs, reward, terminated, truncated, info = step_result
-                                    done = terminated or truncated
-                                elif len(step_result) == 4:
-                                    obs, reward, done, info = step_result
-                                else:
-                                    raise ValueError(f"Unexpected step result length: {len(step_result)}")
-                                episode_reward += reward
-                                step_count += 1
-                            
-                            # DEBUG: Check environment structure right after episode completion
-                            print(f"🔍 POST-EPISODE DEBUG: Episode {i+1} completed")
-                            print(f"🔍 eval_env type: {type(self.eval_env).__name__}")
-                            if hasattr(self.eval_env, 'env'):
-                                inner_env = self.eval_env.env
-                                print(f"🔍 inner_env type: {type(inner_env).__name__}")
-                                print(f"🔍 inner_env replay attrs: {[attr for attr in dir(inner_env) if 'replay' in attr.lower()]}")
-                            
-                            # Capture actual replay data from the evaluation environment's replay logger
-                            replay_data = self._capture_actual_replay_data(self.eval_env, step_count, episode_reward)
-                            
-                            # Convert numpy types to avoid formatting errors in episode tracker
-                            safe_step_count = int(step_count)
-                            safe_episode_reward = float(episode_reward)
-                            self.episode_tracker.update_episode(safe_step_count, safe_episode_reward, replay_data)
-                            self.episode_count += 1
-                            
-                            print(f"✅ Episode {i+1} completed: {safe_step_count} steps, {safe_episode_reward:.2f} reward")
-                        except Exception as episode_error:
-                            print(f"❌ Error in evaluation episode {i+1}: {episode_error}")
-                            # Create fallback episode data
-                            fallback_data = {
-                                "episode_steps": 1,
-                                "episode_reward": 0.0,
-                                "game_states": [],
-                                "combat_log": [],
-                                "initial_state": {},
-                                "game_info": {"error": f"Episode failed: {episode_error}"}
-                            }
-                            self.episode_tracker.update_episode(1, 0.0, fallback_data)
-                            self.episode_count += 1
-                except Exception as capture_error:
-                    print(f"❌ Critical error in _capture_evaluation_episodes: {capture_error}")
-                    import traceback
-                    traceback.print_exc()
-            
-            def _capture_eval_replay_data(self, step_count: int, episode_reward: float) -> Dict[str, Any]:
-                """Capture replay data using the proper GameReplayLogger system."""
-                
-                # Enhanced replay logger detection with multiple fallback paths
-                replay_logger = None
-                actual_env = None
-                
-                # Try multiple environment unwrapping levels to find replay logger
-                if hasattr(self.eval_env, 'envs') and len(self.eval_env.envs) > 0:
-                    # DummyVecEnv case: get first environment  
-                    actual_env = self.eval_env.envs[0]  # This is Monitor(W40KEnv)
-                    if hasattr(actual_env, 'env'):
-                        actual_env = actual_env.env  # Get W40KEnv from Monitor
-                else:
-                    # Direct environment case
-                    actual_env = self.eval_env
-                    if hasattr(actual_env, 'env'):
-                        actual_env = actual_env.env
-                
-                # Search for replay logger at multiple levels
-                if actual_env:
-                    # Direct access
-                    if hasattr(actual_env, 'game_replay_logger') and actual_env.game_replay_logger:
-                        replay_logger = actual_env.game_replay_logger
-                    # Unwrapped access
-                    elif hasattr(actual_env, 'unwrapped') and hasattr(actual_env.unwrapped, 'game_replay_logger') and actual_env.unwrapped.game_replay_logger:
-                        replay_logger = actual_env.unwrapped.game_replay_logger
-                    # Monitor wrapper access
-                    elif hasattr(actual_env, 'env') and hasattr(actual_env.env, 'game_replay_logger') and actual_env.env.game_replay_logger:
-                        replay_logger = actual_env.env.game_replay_logger
-                
-                if replay_logger:
-                    # Debug: Check what attributes the replay logger actually has
-                    print(f"🔍 Replay logger type: {type(replay_logger)}")
-                    print(f"🔍 Replay logger attributes: {[attr for attr in dir(replay_logger) if not attr.startswith('_')]}")
-                    
-                    # Get the replay data directly from GameReplayLogger attributes
-                    game_states = getattr(replay_logger, 'game_states', [])
-                    combat_log_entries = getattr(replay_logger, 'combat_log_entries', [])
-                    
-                    print(f"🔍 Found {len(game_states)} game states, {len(combat_log_entries)} combat log entries")
-                    
-                    replay_data = {
-                        "game_states": game_states.copy() if game_states else [],
-                        "combat_log": combat_log_entries.copy() if combat_log_entries else [],
-                        "initial_state": getattr(replay_logger, 'initial_game_state', {}),
-                        "game_info": {
-                            "scenario": "training_episode",
-                            "total_turns": getattr(replay_logger, 'current_turn', 0),
-                            "winner": None
-                        }
-                    }
-                    
-                    # Add our episode metrics
-                    replay_data.update({
-                        "episode_steps": step_count,
-                        "episode_reward": episode_reward
-                    })
-                    
-                    print(f"✅ Found GameReplayLogger: {len(replay_data.get('combat_log', []))} combat log entries captured")
-                    return replay_data
-                else:
-                    print(f"❌ No GameReplayLogger found after checking all environment levels")
-                    print(f"   - actual_env type: {type(actual_env)}")
-                    print(f"   - actual_env attrs: {[attr for attr in dir(actual_env) if 'replay' in attr.lower()]}")
-                    if hasattr(actual_env, 'unwrapped'):
-                        print(f"   - unwrapped type: {type(actual_env.unwrapped)}")
-                        print(f"   - unwrapped attrs: {[attr for attr in dir(actual_env.unwrapped) if 'replay' in attr.lower()]}")
-                    
-                    # Return minimal structure for compatibility
-                    return {
-                        "episode_steps": step_count,
-                        "episode_reward": episode_reward,
-                        "game_states": [],
-                        "combat_log": [],
-                        "initial_state": {},
-                        "game_info": {"error": "No replay logger available"}
-                    }
-            
-            def _capture_actual_replay_data(self, env, step_count: int, episode_reward: float) -> Dict[str, Any]:
-                """Capture actual replay data from the environment's replay logger."""
-                try:
-                    # Find the replay logger in the environment - check all wrapper levels
-                    replay_logger = None
-                    current_env = env
-                    
-                    print(f"🔍 DEBUG: Starting search for replay logger")
-                    print(f"🔍 Initial env type: {type(current_env).__name__}")
-                    print(f"🔍 Initial env attributes: {[attr for attr in dir(current_env) if 'replay' in attr.lower()]}")
-                    
-                    # Check if this is the right environment by looking for game-specific attributes
-                    print(f"🔍 Game attributes: {[attr for attr in dir(current_env) if any(x in attr.lower() for x in ['game', 'unit', 'board', 'phase'])]}")
-                    
-                    # Unwrap Monitor wrapper if present
-                    if hasattr(current_env, 'env'):
-                        current_env = current_env.env
-                        print(f"🔍 Unwrapped Monitor -> {type(current_env).__name__}")
-                        print(f"🔍 Unwrapped env attributes: {[attr for attr in dir(current_env) if 'replay' in attr.lower()]}")
-                        print(f"🔍 Unwrapped game attributes: {[attr for attr in dir(current_env) if any(x in attr.lower() for x in ['game', 'unit', 'board', 'phase'])]}")
-                    
-                    # Check for replay logger at current level
-                    if hasattr(current_env, 'replay_logger') and current_env.replay_logger:
-                        replay_logger = current_env.replay_logger
-                        print(f"✅ Found replay_logger at current level: {type(replay_logger).__name__}")
-                    elif hasattr(current_env, 'unwrapped') and hasattr(current_env.unwrapped, 'replay_logger') and current_env.unwrapped.replay_logger:
-                        replay_logger = current_env.unwrapped.replay_logger
-                        print(f"✅ Found replay_logger in unwrapped: {type(replay_logger).__name__}")
-                    
-                    if replay_logger:
-                        # Get the actual data from the replay logger
-                        game_states = getattr(replay_logger, 'game_states', [])
-                        combat_log_entries = getattr(replay_logger, 'combat_log_entries', [])
-                        initial_state = getattr(replay_logger, 'initial_game_state', {})
-                        current_turn = getattr(replay_logger, 'current_turn', 0)
-                        
-                        print(f"🔍 Replay logger found: {len(game_states)} states, {len(combat_log_entries)} combat entries, turn {current_turn}")
-                        
-                        # Create comprehensive replay data
-                        replay_data = {
-                            "episode_steps": int(step_count),
-                            "episode_reward": float(episode_reward),  
-                            "game_states": game_states.copy() if game_states else [],
-                            "combat_log": combat_log_entries.copy() if combat_log_entries else [],
-                            "initial_state": initial_state.copy() if initial_state else {},
-                            "game_info": {
-                                "scenario": "evaluation_episode",
-                                "total_turns": current_turn,
-                                "winner": getattr(current_env, 'winner', None) if hasattr(current_env, 'winner') else None
-                            }
-                        }
-                        
-                        if len(game_states) > 0 or len(combat_log_entries) > 0:
-                            print(f"✅ Successfully captured replay data: {len(game_states)} states, {len(combat_log_entries)} combat entries")
-                        else:
-                            print(f"⚠️ Replay logger found but no data captured")
-                        
-                        return replay_data
-                    else:
-                        print(f"❌ No replay logger found in environment")
-                        # Return minimal data structure
-                        return {
-                            "episode_steps": int(step_count),
-                            "episode_reward": float(episode_reward),
-                            "game_states": [],
-                            "combat_log": [],
-                            "initial_state": {},
-                            "game_info": {"scenario": "evaluation_episode", "error": "No replay logger"}
-                        }
-                        
-                except Exception as e:
-                    print(f"❌ Error capturing replay data: {e}")
-                    return {
-                        "episode_steps": int(step_count),
-                        "episode_reward": float(episode_reward),
-                        "game_states": [],
-                        "combat_log": [],
-                        "initial_state": {},
-                        "game_info": {"scenario": "evaluation_episode", "error": f"Capture failed: {e}"}
-                    }
-                  
-        # Load training config for eval callback parameters
-        training_config = self.config.load_training_config("debug")  # Use debug for fast evaluation
-        eval_freq = max(100, training_config["total_timesteps"] // 10)  # Evaluate 10 times during training
-        
-        print(f"🔧 Setting up evaluation callback with eval_freq={eval_freq}")
-        eval_callback = SelectiveReplayEvalCallback(
-            eval_env=eval_env,
-            episode_tracker=episode_tracker,
-            best_model_save_path=None,  # Don't save models in multi-agent training
-            log_path=None,
-            eval_freq=eval_freq,
-            n_eval_episodes=3,  # Run 3 episodes per evaluation
-            deterministic=True,
-            render=False,
-            verbose=0
-        )
-        print(f"🔧 Evaluation callback created: {type(eval_callback).__name__}")
-        
-        callbacks.append(eval_callback)
-        print(f"🔧 Returning {len(callbacks)} callbacks: {[type(cb).__name__ for cb in callbacks]}")
+        # No evaluation callback - we'll use direct PvP-style logging instead
+        print(f"🔧 No evaluation callbacks - using direct replay logging like PvP mode")
         return callbacks
 
     def _create_eval_env_for_session(self, session: TrainingSession):
@@ -1083,6 +732,10 @@ class MultiAgentTrainer:
         from game_replay_logger import GameReplayIntegration
         enhanced_eval_env = GameReplayIntegration.enhance_training_env(base_eval_env)
         
+        # CRITICAL FIX: Connect replay_logger to game_logger for actual logging
+        if hasattr(enhanced_eval_env, 'replay_logger'):
+            enhanced_eval_env.game_logger = enhanced_eval_env.replay_logger
+        
         # Wrap with Monitor for proper evaluation callback integration
         from stable_baselines3.common.monitor import Monitor
         eval_env = Monitor(enhanced_eval_env, allow_early_resets=True)
@@ -1117,39 +770,55 @@ class MultiAgentTrainer:
             
             total_rewards.append(episode_reward)
             
-            # Track episode for selective replay saving
+            # Track episode for selective replay saving using direct access to replay logger
             if episode_tracker:
-                # Check for replay logger in different possible locations
-                replay_logger = None
-                if hasattr(env, 'replay_logger'):
-                    replay_logger = env.replay_logger
-                elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'replay_logger'):
-                    replay_logger = env.unwrapped.replay_logger
-                
-                if replay_logger:
-                    # Get comprehensive replay data from replay logger
-                    game_states = getattr(replay_logger, 'game_states', [])
-                    combat_log_entries = getattr(replay_logger, 'combat_log_entries', [])
-                    initial_state = getattr(replay_logger, 'initial_game_state', {})
-                    current_turn = getattr(replay_logger, 'current_turn', 0)
+                try:
+                    # Find replay logger in the environment hierarchy
+                    replay_logger = None
+                    actual_env = env
                     
-                    replay_data = {
-                        "episode_steps": step_count,
-                        "episode_reward": episode_reward,
-                        "game_states": game_states.copy() if game_states else [],
-                        "combat_log": combat_log_entries.copy() if combat_log_entries else [],
-                        "initial_state": initial_state.copy() if initial_state else {},
-                        "game_info": {
-                            "scenario": "test_episode",
-                            "total_turns": current_turn,
-                            "winner": getattr(env.unwrapped, 'winner', None) if hasattr(env, 'unwrapped') else None
+                    # Check Monitor wrapper
+                    if hasattr(actual_env, 'env'):
+                        actual_env = actual_env.env
+                    
+                    # Check for replay logger
+                    if hasattr(actual_env, 'replay_logger') and actual_env.replay_logger:
+                        replay_logger = actual_env.replay_logger
+                    elif hasattr(actual_env, 'unwrapped') and hasattr(actual_env.unwrapped, 'replay_logger'):
+                        replay_logger = actual_env.unwrapped.replay_logger
+                    
+                    if replay_logger:
+                        # Get data directly from replay logger like PvP mode
+                        game_states = getattr(replay_logger, 'game_states', [])
+                        combat_log_entries = getattr(replay_logger, 'combat_log_entries', [])
+                        initial_state = getattr(replay_logger, 'initial_game_state', {})
+                        current_turn = getattr(replay_logger, 'current_turn', 0)
+                        
+                        replay_data = {
+                            "episode_steps": step_count,
+                            "episode_reward": episode_reward,
+                            "game_states": game_states.copy() if game_states else [],
+                            "combat_log": combat_log_entries.copy() if combat_log_entries else [],
+                            "initial_state": initial_state.copy() if initial_state else {},
+                            "game_info": {
+                                "scenario": "evaluation_episode",
+                                "total_turns": current_turn,
+                                "winner": getattr(actual_env, 'winner', None) if hasattr(actual_env, 'winner') else None
+                            }
                         }
-                    }
-                    print(f"🔍 Tracking episode {episode+1}: {step_count} steps, {episode_reward:.2f} reward, {len(game_states)} states, {len(combat_log_entries)} combat entries")
-                    episode_tracker.update_episode(step_count, episode_reward, replay_data)
-                else:
-                    # No replay logger found, raise error instead of creating fallback
-                    raise ValueError(f"No replay logger found in environment for episode {episode+1}")
+                        
+                        print(f"🔍 Tracking episode {episode+1}: {step_count} steps, {episode_reward:.2f} reward, {len(game_states)} states, {len(combat_log_entries)} combat entries")
+                        episode_tracker.update_episode(step_count, episode_reward, replay_data)
+                    else:
+                        print(f"❌ No replay logger found in environment for episode {episode+1}")
+                        print(f"   - env type: {type(env).__name__}")
+                        print(f"   - actual_env type: {type(actual_env).__name__}")
+                        print(f"   - actual_env attrs: {[attr for attr in dir(actual_env) if 'replay' in attr.lower()]}")
+                        raise ValueError(f"No replay logger found in environment for episode {episode+1}")
+                        
+                except Exception as replay_error:
+                    print(f"❌ Failed to capture replay for episode {episode+1}: {replay_error}")
+                    raise ValueError(f"No replay data captured for episode {episode+1}: {replay_error}")
             # Check win condition
             if info.get('winner') == 1:  # AI won
                 wins += 1

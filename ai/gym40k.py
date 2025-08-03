@@ -80,8 +80,9 @@ class W40KEnv(gym.Env):
         self._last_acting_unit = None
         self._last_target_unit = None
         
-        # Clean logging capability
+        # Clean logging capability  
         self.game_logger = None
+        self.replay_logger = None  # Will be set by GameReplayIntegration
 
         # Initialize UnitManager for centralized unit death management
         self.unit_manager = None
@@ -515,6 +516,32 @@ class W40KEnv(gym.Env):
             # CRITICAL: Recapture initial state after reset to populate replay data
             if hasattr(self.replay_logger, 'capture_initial_state'):
                 self.replay_logger.capture_initial_state()
+                
+                # CRITICAL: Also populate initial_game_state for replay file
+                if hasattr(self.replay_logger, 'initial_game_state') and hasattr(self, 'unit_manager'):
+                    initial_units = []
+                    for unit in self.unit_manager.units:
+                        initial_unit = {
+                            "id": unit.get("id"),
+                            "unit_type": unit.get("unit_type"),
+                            "player": unit.get("player"),
+                            "col": unit.get("col"),
+                            "row": unit.get("row"),
+                            "HP_MAX": unit.get("hp_max"),
+                            "hp_max": unit.get("hp_max"),
+                            "move": unit.get("move"),
+                            "rng_rng": unit.get("rng_rng"),
+                            "rng_dmg": unit.get("rng_dmg"),
+                            "cc_dmg": unit.get("cc_dmg"),
+                            "is_ranged": unit.get("is_ranged"),
+                            "is_melee": unit.get("is_melee")
+                        }
+                        initial_units.append(initial_unit)
+                    
+                    self.replay_logger.initial_game_state = {
+                        "units": initial_units,
+                        "board_size": self.board_size
+                    }
         
         # Mark episode as started
         self._episode_started = True
@@ -1010,18 +1037,33 @@ class W40KEnv(gym.Env):
         
         unit = eligible_units[unit_idx]
         
-        # CRITICAL: Force action logging for every step
+        # CRITICAL: Capture pre-action state for replay logger
+        pre_action_units = []
         if hasattr(self, 'replay_logger') and self.replay_logger:
-            # Pre-log the action attempt
+            pre_action_units = copy.deepcopy(self.unit_manager.units) if hasattr(self, 'unit_manager') else []
             action_name = self._get_action_name(action_type)
             print(f"🎯 Logging action: Unit {unit.get('id', 'unknown')} - {action_name} (Turn {self.current_turn})")
         
         reward = self._execute_action_with_phase(unit, action_type)
         
-        # CRITICAL: Post-execution logging verification
+        # CRITICAL: Capture post-action state and call capture_action_state
         if hasattr(self, 'replay_logger') and self.replay_logger:
+            post_action_units = copy.deepcopy(self.unit_manager.units) if hasattr(self, 'unit_manager') else []
+            
+            # Call capture_action_state to populate game_states array
+            self.replay_logger.capture_action_state(
+                action=action,
+                reward=reward,
+                pre_action_units=pre_action_units,
+                post_action_units=post_action_units,
+                acting_unit_id=unit.get('id'),
+                target_unit_id=getattr(self, '_last_target_unit', {}).get('id') if hasattr(self, '_last_target_unit') and self._last_target_unit else None,
+                description=f"AI unit {unit.get('id')} performs {self._get_action_name(action_type)}"
+            )
+            
             combat_log_count = len(getattr(self.replay_logger, 'combat_log_entries', []))
-            print(f"🎯 Replay logger state: {combat_log_count} entries, Turn {getattr(self.replay_logger, 'current_turn', 'unknown')}")
+            game_states_count = len(getattr(self.replay_logger, 'game_states', []))
+            print(f"🎯 Replay logger state: {combat_log_count} combat entries, {game_states_count} game states, Turn {getattr(self.replay_logger, 'current_turn', 'unknown')}")
         
         # CRITICAL: Check game over conditions IMMEDIATELY after any action
         ai_units_alive = self.unit_manager.get_alive_ai_units()
