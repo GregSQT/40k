@@ -554,28 +554,3 @@ class GameReplayIntegration:
             
             return env.replay_logger.save_replay(filename, episode_reward)
         return None
-
-
-# Simple integration helper (legacy compatibility)  
-class CleanGameReplayIntegration:
-    """Clean integration helper for adding logging to training environment."""
-    
-    @staticmethod
-    def enhance_training_env(env):
-        """Add clean logging to training environment."""
-        env.game_logger = GameReplayLogger(env)
-        env.game_logger.log_game_start()
-        
-        if not env.game_logger.quiet:
-            print("✅ Clean GameLogger attached to environment")
-        
-        return env
-    
-    @staticmethod
-    def save_episode_replay(env, episode_reward, output_dir="ai/event_log"):
-        """Save episode replay using clean logger."""
-        if hasattr(env, 'game_logger') and env.game_logger:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join(output_dir, f"clean_game_replay_{timestamp}.json")
-            return env.game_logger.save_replay(filename, episode_reward)
-        return None
