@@ -457,6 +457,24 @@ class GameReplayLogger:
             "endHex": end_hex
         })
 
+    def log_unit_death(self, unit):
+        """Log unit death event immediately when unit dies"""
+        from shared.gameLogUtils import format_death_message
+        
+        message = format_death_message(unit.get("id", 0), unit.get("unit_type", "unknown"))
+        
+        self._add_event_immediate({
+            "type": "death",
+            "message": message,
+            "turnNumber": self.current_turn,
+            "phase": self.current_phase,
+            "unitType": unit.get("unit_type"),
+            "unitId": unit.get("id"),
+            "player": unit.get("player")
+        })
+        
+        print(f"💀 DEATH EVENT LOGGED: {message}")
+
     def log_combat_action(self, attacker, target, combat_details, turn_number, reward=None, action_int=None):
         """Log combat action - Enhanced with reward and action name tracking"""
         from shared.gameLogUtils import format_combat_message

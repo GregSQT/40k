@@ -262,6 +262,9 @@ class W40KEnv(gym.Env):
         # Initialize UnitManager for centralized unit management - no local copies
         self.unit_manager = UnitManager(units_for_manager)
         
+        # Connect UnitManager to replay logger for death event logging (will be connected when replay_logger is set)
+        pass  # Connection handled by property setter below
+        
         # TEMPORARY: Compatibility property for any remaining self.units references
         self.units = self.unit_manager.units
         
@@ -449,6 +452,10 @@ class W40KEnv(gym.Env):
     def reset(self, seed=None, options=None):
         """Reset environment to initial state."""
         super().reset(seed=seed)
+
+        # Connect UnitManager to replay logger if available
+        if hasattr(self, 'replay_logger') and self.replay_logger and hasattr(self, 'unit_manager') and self.unit_manager:
+            self.unit_manager.replay_logger = self.replay_logger
 
         # Reset game state
         self.current_phase = "move"  # Always start with move per AI_GAME.md
@@ -1111,19 +1118,21 @@ class W40KEnv(gym.Env):
             alive_targets = [t for t in targets if self.unit_manager.is_target_valid(t)]
             if alive_targets:
                 target = alive_targets[0]
-                # CRITICAL: Validate target is still alive using UnitManager
-                if not self.unit_manager.is_target_valid(target):
-                    unit["has_shot"] = True
-                    self.shot_units.add(unit["id"])
-                    if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
-                        raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
-                    return unit_rewards["base_actions"]["wait"]
                 
                 # Set explicit tracking - PvP style
                 self._last_acting_unit = unit
                 self._last_target_unit = target
                 
                 old_hp = target["cur_hp"]
+                
+                # CRITICAL: Final validation immediately before shooting execution
+                # Prevents attacking dead units that died between target selection and execution
+                if not self.unit_manager.is_target_valid(target):
+                    unit["has_shot"] = True
+                    self.shot_units.add(unit["id"])
+                    if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                        raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+                    return unit_rewards["base_actions"]["wait"]
                 
                 # Execute dice-based shooting sequence with detailed logging
                 result = execute_shooting_sequence(unit, target)
@@ -1279,6 +1288,15 @@ class W40KEnv(gym.Env):
                 self._last_acting_unit = unit
                 self._last_target_unit = target
                 
+                # CRITICAL: Final validation immediately before charge execution
+                # Prevents charging dead units that died between target selection and execution
+                if not self.unit_manager.is_target_valid(target):
+                    unit["has_charged"] = True
+                    self.charged_units.add(unit["id"])
+                    if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                        raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+                    return unit_rewards["base_actions"]["wait"]
+                
                 old_col, old_row = unit["col"], unit["row"]
                 unit["col"], unit["row"] = target["col"], target["row"]
 
@@ -1339,6 +1357,15 @@ class W40KEnv(gym.Env):
                 self._last_target_unit = target
                 
                 old_hp = target["cur_hp"]
+                
+                # CRITICAL: Final validation immediately before combat execution
+                # Prevents attacking dead units that died between target selection and execution
+                if not self.unit_manager.is_target_valid(target):
+                    unit["has_attacked"] = True
+                    self.attacked_units.add(unit["id"])
+                    if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                        raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+                    return unit_rewards["base_actions"]["wait"]
                 
                 # Execute dice-based combat sequence
                 from shared.gameRules import execute_combat_sequence

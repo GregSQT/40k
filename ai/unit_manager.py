@@ -17,6 +17,7 @@ class UnitManager:
         self.units = initial_units.copy()
         self.ai_units = [u for u in self.units if u["player"] == 1]
         self.enemy_units = [u for u in self.units if u["player"] == 0]
+        self.replay_logger = None  # Will be set by environment
     
     def remove_unit(self, unit_id: int) -> None:
         """
@@ -94,6 +95,11 @@ class UnitManager:
             # Mark as dead immediately
             unit["alive"] = False
             unit["cur_hp"] = 0
+            
+            # CRITICAL: Log death event to replay logger before removing unit
+            if hasattr(self, 'replay_logger') and self.replay_logger:
+                self.replay_logger.log_unit_death(unit)
+            
             self.remove_unit(unit["id"])
             return True
         return False
