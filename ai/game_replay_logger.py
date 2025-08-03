@@ -847,27 +847,23 @@ class GameReplayLogger:
         return max(abs(unit1["col"] - unit2["col"]), abs(unit1["row"] - unit2["row"]))
     
     def _update_turn_phase(self):
-        """Update turn and phase tracking with absolute turn numbers that never reset."""
-        # Get current state from the training environment
+        """Update turn and phase tracking - use environment's actual turn/phase state."""
+        # Get current state from the training environment - trust the environment
         current_player = getattr(self.env, 'current_player', 0)
-        env_current_phase = getattr(self.env, 'current_phase', self.current_phase) 
-        env_current_turn = getattr(self.env, 'current_turn', self.current_turn)
+        env_current_phase = getattr(self.env, 'current_phase', self.current_phase)
+        env_current_turn = getattr(self.env, 'current_turn', 1)
         
-        # Track changes in environment's turn (which resets per episode)
-        old_env_turn = getattr(self, '_last_env_turn', env_current_turn)
+        # Track changes for logging purposes only
+        old_player = getattr(self, '_last_player', current_player)
         old_phase = self.current_phase
+        old_turn = self.current_turn
         
-        # Update phase tracking from environment
+        # Use environment's turn and phase directly - don't override
         self.current_phase = env_current_phase
+        self.current_turn = env_current_turn
         
-        # Increment absolute turn when environment's turn changes or resets
-        if env_current_turn != old_env_turn:
-            # If env turn went backwards (new episode), or increased normally
-            if env_current_turn < old_env_turn or env_current_turn > old_env_turn:
-                self.absolute_turn += 1
-        
-        # Store environment's turn for next comparison
-        self._last_env_turn = env_current_turn
+        # Store for next comparison
+        self._last_player = current_player
         
         # Only log phase changes when they actually happen
         if old_phase != env_current_phase:
@@ -879,7 +875,7 @@ class GameReplayLogger:
                 "message": phase_message,
                 "reward": 0.0,
                 "actionName": "phase_change",
-                "turnNumber": self.absolute_turn,  # Use absolute turn
+                "turnNumber": self.current_turn,
                 "phase": env_current_phase,
                 "player": current_player,
                 "unitType": None,
@@ -891,9 +887,9 @@ class GameReplayLogger:
                 "shootDetails": None
             })
         
-        # Only log turn changes when they actually happen (based on absolute turn)
-        if env_current_turn != old_env_turn:
-            turn_message = format_turn_start_message(self.absolute_turn)
+        # Log turn changes when turn actually increments in environment
+        if old_turn != env_current_turn:
+            turn_message = format_turn_start_message(self.current_turn)
             self._add_event_immediate({
                 "type": "turn_change", 
                 "message": turn_message,
