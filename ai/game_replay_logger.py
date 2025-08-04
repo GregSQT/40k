@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
-game_logger.py - Clean, unified game logger with complete dice roll tracking
-Replaces game_replay_logger.py with single logging method and preserved dice functionality
+game_replay_logger.py - Capture full game state for visual replay
 """
 
 import json
 import os
+import copy
 import numpy as np
+from typing import List, Dict, Any, Optional
 from datetime import datetime
-from typing import List, Dict, Optional, Any
+
+# Import shared structure
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from shared.gameLogStructure import create_training_log_entry, TrainingLogEntry
 
 # Import shared message formatting functions
 import sys
@@ -55,132 +61,107 @@ class GameReplayLogger:
         if not self.quiet:
             print("✅ GameLogger initialized with dice roll tracking")
     
-    def add_entry(self, entry_type: str, message: str, **kwargs):
-        """Add a single entry to combat log - the core method."""
-        entry = {
-            "id": self.next_event_id,
-            "timestamp": datetime.now().isoformat(),
-            "type": entry_type,
-            "message": message,
-            "turnNumber": self.current_turn,
-            "phase": self.current_phase,
-            **kwargs  # Add any additional fields
-        }
+    def add_entry(self, entry_type: str, acting_unit: Dict = None, target_unit: Dict = None,
+                  reward: float = 0.0, action_name: str = "", turn_number: int = None,
+                  phase: str = None, start_hex: str = None, end_hex: str = None, 
+                  shoot_details: List = None):
+        """Add entry to combat log using shared structure."""
+        # Use shared structure for creating log entry
+        log_entry = create_training_log_entry(
+            entry_type=entry_type,
+            acting_unit=acting_unit,
+            target_unit=target_unit,
+            reward=reward,
+            action_name=action_name,
+            turn_number=turn_number or self.current_turn,
+            phase=phase or self.current_phase,
+            start_hex=start_hex,
+            end_hex=end_hex,
+            shoot_details=shoot_details
+        )
         
-        self.combat_log_entries.append(entry)
+        # Convert to dict and add to combat log
+        entry_dict = log_entry.to_dict()
+        entry_dict["id"] = self.next_event_id  # Add sequential ID
+        self.combat_log_entries.append(entry_dict)
         self.next_event_id += 1
         
         if not self.quiet:
-            print(f"📝 Logged: {entry_type} - {message} (ID: {entry['id']})")
+            print(f"📝 Logged: {entry_type} - {log_entry.message} (ID: {entry_dict['id']})")
         
-        return entry
+        return entry_dict
     
     def log_game_start(self):
         """Log game start."""
         self.add_entry(
             entry_type="turn_change",
-            message="Start of Turn 1",
             reward=0.0,
-            actionName="game_start",
-            player=None,
-            unitType=None,
-            unitId=None,
-            targetUnitType=None,
-            targetUnitId=None,
-            startHex=None,
-            endHex=None,
-            shootDetails=None
+            action_name="game_start"
         )
     
     def log_move(self, unit: Dict, start_col: int, start_row: int, 
                  end_col: int, end_row: int, turn_number: int, 
                  reward: float, action_int: int):
         """Log movement action."""
+        start_hex = None
+        end_hex = None
         if start_col != end_col or start_row != end_row:
-            message = f"Unit {unit['id']} moved from ({start_col},{start_row}) to ({end_col},{end_row})"
             start_hex = f"({start_col},{start_row})"
             end_hex = f"({end_col},{end_row})"
-        else:
-            message = f"Unit {unit['id']} stayed at ({start_col},{start_row})"
-            start_hex = None
-            end_hex = None
         
         self.add_entry(
             entry_type="move",
-            message=message,
+            acting_unit=unit,
             reward=reward,
-            actionName=self.action_names.get(action_int, f"action_{action_int}"),
-            player=unit.get("player"),
-            unitType=unit.get("unit_type"),
-            unitId=unit.get("id"),
-            targetUnitType=None,
-            targetUnitId=None,
-            startHex=start_hex,
-            endHex=end_hex,
-            shootDetails=None
+            action_name=self.action_names.get(action_int, f"action_{action_int}"),
+            turn_number=turn_number,
+            start_hex=start_hex,
+            end_hex=end_hex
         )
     
     def log_shoot(self, shooter: Dict, target: Dict, shoot_details: Dict, 
                   turn_number: int, reward: float, action_int: int):
         """Log shooting action with complete dice roll details."""
-        message = format_shooting_message(shooter.get("id", 0), target.get("id", 0))
         converted_details = self._convert_shoot_details(shoot_details, shooter, target)
         
         self.add_entry(
             entry_type="shoot",
-            message=message,
+            acting_unit=shooter,
+            target_unit=target,
             reward=reward,
-            actionName=self.action_names.get(action_int, f"action_{action_int}"),
-            player=shooter.get("player"),
-            unitType=shooter.get("unit_type"),
-            unitId=shooter.get("id"),
-            targetUnitType=target.get("unit_type"),
-            targetUnitId=target.get("id"),
-            startHex=None,
-            endHex=None,
-            shootDetails=converted_details  # Enhanced with dice roll details
+            action_name=self.action_names.get(action_int, f"action_{action_int}"),
+            turn_number=turn_number,
+            shoot_details=converted_details
         )
     
     def log_charge(self, charger: Dict, target: Dict, start_col: int, start_row: int,
                    end_col: int, end_row: int, turn_number: int, 
                    reward: float, action_int: int):
         """Log charge action."""
-        message = f"Unit {charger['id']} charged Unit {target['id']} from ({start_col},{start_row}) to ({end_col},{end_row})"
-        
         self.add_entry(
             entry_type="charge",
-            message=message,
+            acting_unit=charger,
+            target_unit=target,
             reward=reward,
-            actionName=self.action_names.get(action_int, f"action_{action_int}"),
-            player=charger.get("player"),
-            unitType=charger.get("unit_type"),
-            unitId=charger.get("id"),
-            targetUnitType=target.get("unit_type"),
-            targetUnitId=target.get("id"),
-            startHex=f"({start_col},{start_row})",
-            endHex=f"({end_col},{end_row})",
-            shootDetails=None
+            action_name=self.action_names.get(action_int, f"action_{action_int}"),
+            turn_number=turn_number,
+            start_hex=f"({start_col},{start_row})",
+            end_hex=f"({end_col},{end_row})"
         )
     
     def log_combat(self, attacker: Dict, target: Dict, combat_details: Dict,
                    turn_number: int, reward: float, action_int: int):
         """Log combat action with complete dice roll details."""
-        message = format_combat_message(attacker.get("id", 0), target.get("id", 0))
         converted_details = self._convert_combat_details(combat_details, attacker, target)
         
         self.add_entry(
             entry_type="combat",
-            message=message,
+            acting_unit=attacker,
+            target_unit=target,
             reward=reward,
-            actionName=self.action_names.get(action_int, f"action_{action_int}"),
-            player=attacker.get("player"),
-            unitType=attacker.get("unit_type"),
-            unitId=attacker.get("id"),
-            targetUnitType=target.get("unit_type"),
-            targetUnitId=target.get("id"),
-            startHex=None,
-            endHex=None,
-            shootDetails=converted_details  # Enhanced with dice roll details
+            action_name=self.action_names.get(action_int, f"action_{action_int}"),
+            turn_number=turn_number,
+            shoot_details=converted_details
         )
     
     def _convert_shoot_details(self, shoot_result, shooter=None, target=None):
@@ -411,17 +392,8 @@ class GameReplayLogger:
         """Capture final game state - compatibility method."""
         self.add_entry(
             entry_type="game_end",
-            message=f"Battle concludes - {winner} victorious",
             reward=final_reward,
-            actionName="game_end",
-            player=None,
-            unitType=None,
-            unitId=None,
-            targetUnitType=None,
-            targetUnitId=None,
-            startHex=None,
-            endHex=None,
-            shootDetails=None
+            action_name="game_end"
         )
         
         if not self.quiet:

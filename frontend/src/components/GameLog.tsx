@@ -1,35 +1,13 @@
 // frontend/src/components/GameLog.tsx
+// frontend/src/components/GameLog.tsx
 import React from 'react';
+import { BaseLogEntry, getEventIcon, getEventTypeClass } from '../../../shared/gameLogStructure';
 
-export interface GameLogEvent {
+// Use shared interface as base, add frontend-specific fields
+export interface GameLogEvent extends BaseLogEntry {
   id: string;
   timestamp: Date;
-  type: 'turn_change' | 'phase_change' | 'move' | 'shoot' | 'charge' | 'combat' | 'death' | 'move_cancel' | 'charge_cancel';
-  message: string;
-  turnNumber?: number;
-  phase?: string;
-  player?: number;
-  unitType?: string;
-  unitId?: number;
-  startHex?: string;
-  endHex?: string;
-  targetUnitType?: string;
-  targetUnitId?: number;
-  shootDetails?: {
-    shotNumber: number;
-    attackRoll: number;
-    strengthRoll: number;
-    hitResult: 'HIT' | 'MISS';
-    strengthResult: 'SUCCESS' | 'FAILED';
-    hitTarget?: number;
-    woundTarget?: number;
-    saveTarget?: number;
-    saveRoll?: number;
-    saveSuccess?: boolean;
-    damageDealt?: number;
-  }[];
 }
-
 interface GameLogProps {
   events: GameLogEvent[];
   maxEvents?: number;
@@ -56,62 +34,6 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
   const displayedEvents = [...events]
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
     .slice(0, visibleRowCount);
-
-  const getEventIcon = (type: GameLogEvent['type']): string => {
-    switch (type) {
-      case 'turn_change': return '🔄';
-      case 'phase_change': return '⏭️';
-      case 'move': return '👟';
-      case 'shoot': return '🎯';
-      case 'charge': return '⚡';
-      case 'combat': return '⚔️';
-      case 'death': return '💀';
-      case 'move_cancel': return '❌';
-      case 'charge_cancel': return '❌';
-      default: return '📝';
-    }
-  };
-
-  const getEventTypeClass = (event: GameLogEvent): string => {
-    switch (event.type) {
-      case 'turn_change': return 'game-log-entry--turn';
-      case 'phase_change': return 'game-log-entry--phase';
-      case 'move': return 'game-log-entry--move';
-      case 'shoot':
-        const message = event.message;
-        console.log('SHOOT DEBUG:', message);
-        // Check message text for damage dealt (look for "-X HP" pattern)
-        if (message.includes('HP') && message.includes('-')) {
-          console.log('Returning: shoot-damage');
-          return 'game-log-entry--shoot-damage'; // Red background for damage dealt
-        }
-        // Check message text for successful save (look for "Saved!" or "Success!")
-        if (message.includes('Saved!') || (message.includes('Success!') && !message.includes('Failed!'))) {
-          console.log('Returning: shoot-saved');
-          return 'game-log-entry--shoot-saved'; // Orange background for hits with no damage
-        }
-        // Everything else is a miss or failure
-        console.log('Returning: shoot-failed');
-        return 'game-log-entry--shoot-failed'; // Yellow background for misses/fails
-      case 'charge': return 'game-log-entry--charge';
-      case 'combat':
-        // Check if any attack dealt damage
-        const combatDealtDamage = event.shootDetails?.some(shot => shot.damageDealt && shot.damageDealt > 0);
-        if (combatDealtDamage) {
-          return 'game-log-entry--combat'; // Red background for damage dealt
-        }
-        // Check if any attack hit but didn't deal damage
-        const combatHit = event.shootDetails?.some(shot => shot.hitResult === 'HIT');
-        if (combatHit) {
-          return 'game-log-entry--combat-no-damage'; // Gray background for hits without damage
-        }
-        return 'game-log-entry--combat-failed'; // Orange background for complete misses
-      case 'death': return 'game-log-entry--death';
-      case 'move_cancel': 
-      case 'charge_cancel': return 'game-log-entry--cancel';
-      default: return 'game-log-entry--default';
-    }
-  };
 
   const formatTime = (timestamp: Date): string => {
     return getElapsedTime(timestamp);

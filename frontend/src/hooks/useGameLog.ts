@@ -2,6 +2,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { GameLogEvent } from '../components/GameLog';
 import { Unit } from '../types/game';
+import { createLogEntry, LogEntryParams } from '../../../shared/gameLogStructure';
 
 export const useGameLog = () => {
   const [events, setEvents] = useState<GameLogEvent[]>([]);
@@ -13,7 +14,7 @@ export const useGameLog = () => {
     return `event_${eventIdCounter.current}_${Date.now()}`;
   };
 
-  const addEvent = useCallback((event: Omit<GameLogEvent, 'id' | 'timestamp'>) => {
+  const addEvent = useCallback((baseEntry: any) => {
     const currentTime = new Date();
     
     // Set game start time on first event
@@ -22,7 +23,7 @@ export const useGameLog = () => {
     }
     
     const newEvent: GameLogEvent = {
-      ...event,
+      ...baseEntry,
       id: generateEventId(),
       timestamp: currentTime,
     };
@@ -32,23 +33,30 @@ export const useGameLog = () => {
 
   // Turn change event
   const logTurnStart = useCallback((turnNumber: number) => {
-    addEvent({
+    const logParams: LogEntryParams = {
       type: 'turn_change',
-      message: `Start of Turn ${turnNumber}`,
-      turnNumber,
-    });
+      turnNumber
+    };
+
+    const baseEntry = createLogEntry(logParams);
+    addEvent(baseEntry);
   }, [addEvent]);
 
   // Phase change event
   const logPhaseChange = useCallback((phase: string, player: number, turnNumber: number) => {
-    const playerName = player === 0 ? 'Player 1' : 'Player 2';
-    addEvent({
+    const logParams: LogEntryParams = {
       type: 'phase_change',
-      message: `Start ${playerName}'s ${phase.toUpperCase()} phase`,
+      actingUnit: {
+        id: 0,
+        unitType: '',
+        player: player
+      },
       turnNumber,
-      phase,
-      player,
-    });
+      phase
+    };
+
+    const baseEntry = createLogEntry(logParams);
+    addEvent(baseEntry);
   }, [addEvent]);
 
   // Move action
@@ -60,43 +68,61 @@ export const useGameLog = () => {
     endRow: number,
     turnNumber: number
   ) => {
-    const startHex = `(${startCol}, ${startRow})`;
-    const endHex = `(${endCol}, ${endRow})`;
-    
-    addEvent({
+    const logParams: LogEntryParams = {
       type: 'move',
-      message: `Unit ${unit.id} MOVED from ${startHex} to ${endHex}`,
+      actingUnit: {
+        id: unit.id,
+        unitType: unit.type,
+        player: unit.player,
+        col: endCol,
+        row: endRow
+      },
       turnNumber,
-      unitType: unit.type,
-      unitId: unit.id,
-      startHex,
-      endHex,
-      player: unit.player,
-    });
+      phase: 'movement',
+      startHex: `(${startCol}, ${startRow})`,
+      endHex: `(${endCol}, ${endRow})`
+    };
+
+    const baseEntry = createLogEntry(logParams);
+    addEvent(baseEntry);
   }, [addEvent]);
 
   // Move cancel
   const logMoveCancellation = useCallback((unit: Unit, turnNumber: number) => {
-    addEvent({
+    const logParams: LogEntryParams = {
       type: 'move_cancel',
-      message: `Unit ${unit.name} ${unit.id} cancelled its move action`,
+      actingUnit: {
+        id: unit.id,
+        unitType: unit.name,
+        player: unit.player,
+        col: unit.col,
+        row: unit.row
+      },
       turnNumber,
-      unitType: unit.name,
-      unitId: unit.id,
-      player: unit.player,
-    });
+      phase: 'movement'
+    };
+
+    const baseEntry = createLogEntry(logParams);
+    addEvent(baseEntry);
   }, [addEvent]);
 
   // No move action
   const logNoMoveAction = useCallback((unit: Unit, turnNumber: number) => {
-    addEvent({
+    const logParams: LogEntryParams = {
       type: 'move',
-      message: `Unit ${unit.id} NO MOVE`,
+      actingUnit: {
+        id: unit.id,
+        unitType: unit.type,
+        player: unit.player,
+        col: unit.col,
+        row: unit.row
+      },
       turnNumber,
-      unitType: unit.type,
-      unitId: unit.id,
-      player: unit.player,
-    });
+      phase: 'movement'
+    };
+
+    const baseEntry = createLogEntry(logParams);
+    addEvent(baseEntry);
   }, [addEvent]);
 
   // Shooting action
@@ -106,17 +132,29 @@ export const useGameLog = () => {
     shootDetails: GameLogEvent['shootDetails'],
     turnNumber: number
   ) => {
-    addEvent({
+    const logParams: LogEntryParams = {
       type: 'shoot',
-      message: `Unit ${shooter.id} SHOT at unit ${target.id}`,
+      actingUnit: {
+        id: shooter.id,
+        unitType: shooter.type,
+        player: shooter.player,
+        col: shooter.col,
+        row: shooter.row
+      },
+      targetUnit: {
+        id: target.id,
+        unitType: target.type,
+        player: target.player,
+        col: target.col,
+        row: target.row
+      },
       turnNumber,
-      unitType: shooter.type,
-      unitId: shooter.id,
-      targetUnitType: target.type,
-      targetUnitId: target.id,
-      player: shooter.player,
-      shootDetails,
-    });
+      phase: 'shooting',
+      shootDetails
+    };
+
+    const baseEntry = createLogEntry(logParams);
+    addEvent(baseEntry);
   }, [addEvent]);
 
   // Charge action
@@ -129,33 +167,49 @@ export const useGameLog = () => {
     endRow: number,
     turnNumber: number
   ) => {
-    const startHex = `(${startCol}, ${startRow})`;
-    const endHex = `(${endCol}, ${endRow})`;
-    
-    addEvent({
+    const logParams: LogEntryParams = {
       type: 'charge',
-      message: `Unit ${unit.name} ${unit.id} CHARGED unit ${target.name} ${target.id} from ${startHex} to ${endHex}`,
+      actingUnit: {
+        id: unit.id,
+        unitType: unit.name,
+        player: unit.player,
+        col: endCol,
+        row: endRow
+      },
+      targetUnit: {
+        id: target.id,
+        unitType: target.name,
+        player: target.player,
+        col: target.col,
+        row: target.row
+      },
       turnNumber,
-      unitType: unit.name,
-      unitId: unit.id,
-      targetUnitType: target.name,
-      targetUnitId: target.id,
-      startHex,
-      endHex,
-      player: unit.player,
-    });
+      phase: 'charge',
+      startHex: `(${startCol}, ${startRow})`,
+      endHex: `(${endCol}, ${endRow})`
+    };
+
+    const baseEntry = createLogEntry(logParams);
+    addEvent(baseEntry);
   }, [addEvent]);
 
   // Charge cancel
   const logChargeCancellation = useCallback((unit: Unit, turnNumber: number) => {
-    addEvent({
+    const logParams: LogEntryParams = {
       type: 'charge_cancel',
-      message: `Unit ${unit.name} ${unit.id} cancelled its charge action`,
+      actingUnit: {
+        id: unit.id,
+        unitType: unit.name,
+        player: unit.player,
+        col: unit.col,
+        row: unit.row
+      },
       turnNumber,
-      unitType: unit.name,
-      unitId: unit.id,
-      player: unit.player,
-    });
+      phase: 'charge'
+    };
+
+    const baseEntry = createLogEntry(logParams);
+    addEvent(baseEntry);
   }, [addEvent]);
 
   // Combat action (similar to shooting but for melee)
@@ -165,29 +219,48 @@ export const useGameLog = () => {
     combatDetails: GameLogEvent['shootDetails'], // Using same structure for combat rolls
     turnNumber: number
   ) => {
-    addEvent({
+    const logParams: LogEntryParams = {
       type: 'combat',
-      message: `Unit ${attacker.id} FOUGHT unit ${target.id}`,
+      actingUnit: {
+        id: attacker.id,
+        unitType: attacker.type,
+        player: attacker.player,
+        col: attacker.col,
+        row: attacker.row
+      },
+      targetUnit: {
+        id: target.id,
+        unitType: target.type,
+        player: target.player,
+        col: target.col,
+        row: target.row
+      },
       turnNumber,
-      unitType: attacker.type,
-      unitId: attacker.id,
-      targetUnitType: target.type,
-      targetUnitId: target.id,
-      player: attacker.player,
-      shootDetails: combatDetails, // Reusing structure for combat rolls
-    });
+      phase: 'combat',
+      shootDetails: combatDetails
+    };
+
+    const baseEntry = createLogEntry(logParams);
+    addEvent(baseEntry);
   }, [addEvent]);
 
   // Unit death
-  const logUnitDeath = useCallback((unit: Unit, turnNumber: number) => {
-    addEvent({
+  const logUnitDeath = useCallback((unit: Unit, turnNumber: number, phase: string = 'unknown') => {
+    const logParams: LogEntryParams = {
       type: 'death',
-      message: `Unit ${unit.id} (${unit.type}) DIED !`,
+      targetUnit: {
+        id: unit.id,
+        unitType: unit.type,
+        player: unit.player,
+        col: unit.col,
+        row: unit.row
+      },
       turnNumber,
-      unitType: unit.type,
-      unitId: unit.id,
-      player: unit.player,
-    });
+      phase
+    };
+
+    const baseEntry = createLogEntry(logParams);
+    addEvent(baseEntry);
   }, [addEvent]);
 
   // Clear all events (useful for game reset)
