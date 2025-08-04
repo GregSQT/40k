@@ -395,8 +395,8 @@ body {
   border-right: 2px solid #666;
 }
 
-.unit-status-header-cell:nth-child(11),
-.unit-status-cell:nth-child(11) {
+.unit-status-header-cell:nth-child(12),
+.unit-status-cell:nth-child(12) {
   border-right: 2px solid #666;
 }
 

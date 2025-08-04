@@ -1,5 +1,5 @@
 // frontend/src/components/UnitStatusTable.tsx
-import React, { memo, useMemo } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import { Unit, UnitId } from '../types/game';
 
 interface UnitStatusTableProps {
@@ -8,6 +8,7 @@ interface UnitStatusTableProps {
   selectedUnitId: UnitId | null;
   clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
+  gameMode?: 'pvp' | 'pve' | 'training';
 }
 
 interface UnitRowProps {
@@ -136,8 +137,12 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
   player,
   selectedUnitId,
   clickedUnitId,
-  onSelectUnit
+  onSelectUnit,
+  gameMode = 'pvp'
 }) => {
+  // Collapse/expand state
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  
   // Filter units for this player and exclude dead units
   const playerUnits = useMemo(() => {
     return units.filter(unit => 
@@ -146,11 +151,21 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
     );
   }, [units, player]);
 
+  const getPlayerTypeLabel = (playerNumber: 0 | 1): string => {
+    if (gameMode === 'training') {
+      return playerNumber === 0 ? 'Player 1 - Bot' : 'Player 2 - AI';
+    } else if (gameMode === 'pve') {
+      return playerNumber === 0 ? 'Player 1 - Human' : 'Player 2 - AI';
+    } else { // pvp
+      return playerNumber === 0 ? 'Player 1 - Human' : 'Player 2 - Human';
+    }
+  };
+
   if (playerUnits.length === 0) {
     return (
       <div className="unit-status-table-container">
         <div className="unit-status-table-empty">
-          {player === 0 ? "Player 1" : "Player 2"}: No units remaining
+          {getPlayerTypeLabel(player)}: No units remaining
         </div>
       </div>
     );
@@ -163,36 +178,69 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
           <thead>
             <tr className="unit-status-player-row">
               <th className={`unit-status-player-header ${player === 1 ? 'unit-status-player-header--red' : ''}`} colSpan={17}>
-                {player === 0 ? "Player 1" : "Player 2"}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    onClick={() => setIsCollapsed(!isCollapsed)}
+                    style={{
+                      background: 'rgba(0, 0, 0, 0.3)',
+                      border: '1px solid rgba(0, 0, 0, 0.4)',
+                      color: 'inherit',
+                      fontSize: '16px',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minWidth: '20px',
+                      minHeight: '20px',
+                      borderRadius: '4px',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(0, 0, 0, 0.5)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
+                    }}
+                    aria-label={isCollapsed ? 'Expand table' : 'Collapse table'}
+                  >
+                    {isCollapsed ? '+' : '−'}
+                  </button>
+                  <span>{getPlayerTypeLabel(player)}</span>
+                </div>
               </th>
             </tr>
-            <tr className="unit-status-header-group">
-              <th className="unit-status-header-group-cell" colSpan={6}></th>
-              <th className="unit-status-header-group-cell" colSpan={6}>RANGE WEAPON</th>
-              <th className="unit-status-header-group-cell" colSpan={5}>MELEE WEAPON</th>
-            </tr>
-            <tr className="unit-status-header">
-              <th className="unit-status-header-cell">ID</th>
-              <th className="unit-status-header-cell">Type</th>
-              <th className="unit-status-header-cell">HP</th>
-              <th className="unit-status-header-cell" title="Movement">M</th>
-              <th className="unit-status-header-cell" title="Toughness">T</th>
-              <th className="unit-status-header-cell" title="Armor Save">SV</th>
-              <th className="unit-status-header-cell" title="Range">RNG</th>
-              <th className="unit-status-header-cell" title="Number of Ranged Attacks">A</th>
-              <th className="unit-status-header-cell" title="Ranged Attack">BS</th>
-              <th className="unit-status-header-cell" title="Strength">S</th>
-              <th className="unit-status-header-cell" title="Armor Penetration">AP</th>
-              <th className="unit-status-header-cell" title="Damage">D</th>
-              <th className="unit-status-header-cell" title="Number of Close Combat Attacks">A</th>
-              <th className="unit-status-header-cell" title="Close Combat Attack">CC</th>
-              <th className="unit-status-header-cell" title="Strength">S</th>
-              <th className="unit-status-header-cell" title="Armor Penetration">AP</th>
-              <th className="unit-status-header-cell" title="Damage">D</th>
-            </tr>
+            {!isCollapsed && (
+              <>
+                <tr className="unit-status-header-group">
+                  <th className="unit-status-header-group-cell" colSpan={6}></th>
+                  <th className="unit-status-header-group-cell" colSpan={6}>RANGE WEAPON</th>
+                  <th className="unit-status-header-group-cell" colSpan={5}>MELEE WEAPON</th>
+                </tr>
+                <tr className="unit-status-header">
+                  <th className="unit-status-header-cell">ID</th>
+                  <th className="unit-status-header-cell">Type</th>
+                  <th className="unit-status-header-cell">HP</th>
+                  <th className="unit-status-header-cell" title="Movement">M</th>
+                  <th className="unit-status-header-cell" title="Toughness">T</th>
+                  <th className="unit-status-header-cell" title="Armor Save">SV</th>
+                  <th className="unit-status-header-cell" title="Range">RNG</th>
+                  <th className="unit-status-header-cell" title="Number of Ranged Attacks">A</th>
+                  <th className="unit-status-header-cell" title="Ranged Attack">BS</th>
+                  <th className="unit-status-header-cell" title="Strength">S</th>
+                  <th className="unit-status-header-cell" title="Armor Penetration">AP</th>
+                  <th className="unit-status-header-cell" title="Damage">D</th>
+                  <th className="unit-status-header-cell" title="Number of Close Combat Attacks">A</th>
+                  <th className="unit-status-header-cell" title="Close Combat Attack">CC</th>
+                  <th className="unit-status-header-cell" title="Strength">S</th>
+                  <th className="unit-status-header-cell" title="Armor Penetration">AP</th>
+                  <th className="unit-status-header-cell" title="Damage">D</th>
+                </tr>
+              </>
+            )}
           </thead>
           <tbody>
-            {playerUnits.map(unit => (
+            {!isCollapsed && playerUnits.map(unit => (
               <UnitRow
                 key={unit.id}
                 unit={unit}

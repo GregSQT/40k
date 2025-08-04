@@ -1729,6 +1729,7 @@ const validateUnitRegistry = () => {
               selectedUnitId={actingUnitId}
               clickedUnitId={actingUnitId}
               onSelectUnit={() => {}} // No manual selection in replay mode
+              gameMode="training"
             />
           </ErrorBoundary>
 
@@ -1765,6 +1766,7 @@ const validateUnitRegistry = () => {
               selectedUnitId={actingUnitId}
               clickedUnitId={actingUnitId}
               onSelectUnit={() => {}} // No manual selection in replay mode
+              gameMode="training"
             />
           </ErrorBoundary>
         </>

@@ -30,6 +30,11 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Generate default units if none provided
   const [gameUnits, setGameUnits] = useState<Unit[]>(initialUnits || []);
   
+  // Detect game mode from URL
+  const location = useLocation();
+  const gameMode = location.pathname.includes('/pve') ? 'pve' : 
+                   location.pathname.includes('/replay') ? 'training' : 'pvp';
+  
   useEffect(() => {
     if (!initialUnits || initialUnits.length === 0) {
       // Generate units dynamically using available types
@@ -233,6 +238,7 @@ export const GameController: React.FC<GameControllerProps> = ({
             gameActions.selectUnit(unitId);
             setClickedUnitId(null);
           }}
+          gameMode={gameMode}
         />
       </ErrorBoundary>
 
@@ -246,6 +252,7 @@ export const GameController: React.FC<GameControllerProps> = ({
             gameActions.selectUnit(unitId);
             setClickedUnitId(null);
           }}
+          gameMode={gameMode}
         />
       </ErrorBoundary>
 
