@@ -488,12 +488,13 @@ class W40KEnv(gym.Env):
         # Track if this is a legitimate episode reset vs mid-episode reset
         is_legitimate_reset = not hasattr(self, '_episode_started') or self.game_over or self.winner is not None
         
-        if hasattr(self, 'replay_logger') and self.replay_logger and is_legitimate_reset:
+        # CRITICAL: Never reset replay logger during episode - only clear at true episode end
+        if hasattr(self, 'replay_logger') and self.replay_logger and is_legitimate_reset and self.game_over:
             # DEBUG: Show replay logger state before reset
             combat_entries_before = len(getattr(self.replay_logger, 'combat_log_entries', []))
             print(f"🔍 RESET: Replay logger has {combat_entries_before} entries before reset")
             
-            # Only reset replay logger for legitimate episode boundaries
+            # Only reset replay logger for legitimate episode boundaries when game is actually over
             if hasattr(self.replay_logger, 'game_states'):
                 self.replay_logger.game_states = []
             if hasattr(self.replay_logger, 'combat_log_entries'):
@@ -690,11 +691,15 @@ class W40KEnv(gym.Env):
                 print(f"🔍 Unit {unit_id}: in_moved_units={in_moved_units}, has_adjacent={has_adjacent}")
                 
                 # AI_GAME.md: units that haven't moved are selectable (green outline)
-                if unit_id not in self.moved_units and not self._has_adjacent_enemies(unit):
+                # CRITICAL: Prevent movement adjacent to enemies outside charge phase
+                has_adjacent = self._has_adjacent_enemies(unit)
+                already_moved = unit_id in self.moved_units
+                
+                if not already_moved and not has_adjacent:
                     eligible.append(unit)
                     print(f"✅ Unit {unit_id} is ELIGIBLE for move")
                 else:
-                    print(f"❌ Unit {unit_id} is NOT ELIGIBLE for move")
+                    print(f"❌ Unit {unit_id} is NOT ELIGIBLE for move (moved: {already_moved}, adjacent: {has_adjacent})")
                     
             elif self.current_phase == "shoot":
                 # AI_GAME.md: Only units with enemies in RNG_RNG range and haven't shot yet
@@ -1041,29 +1046,69 @@ class W40KEnv(gym.Env):
         pre_action_units = []
         if hasattr(self, 'replay_logger') and self.replay_logger:
             pre_action_units = copy.deepcopy(self.unit_manager.units) if hasattr(self, 'unit_manager') else []
-            action_name = self._get_action_name(action_type)
-            print(f"🎯 Logging action: Unit {unit.get('id', 'unknown')} - {action_name} (Turn {self.current_turn})")
         
         reward = self._execute_action_with_phase(unit, action_type)
         
-        # CRITICAL: Capture post-action state and call capture_action_state
+        # CRITICAL: Manually create game state snapshot AFTER action execution completes
         if hasattr(self, 'replay_logger') and self.replay_logger:
             post_action_units = copy.deepcopy(self.unit_manager.units) if hasattr(self, 'unit_manager') else []
             
-            # Call capture_action_state to populate game_states array
-            self.replay_logger.capture_action_state(
-                action=action,
-                reward=reward,
-                pre_action_units=pre_action_units,
-                post_action_units=post_action_units,
-                acting_unit_id=unit.get('id'),
-                target_unit_id=getattr(self, '_last_target_unit', {}).get('id') if hasattr(self, '_last_target_unit') and self._last_target_unit else None,
-                description=f"AI unit {unit.get('id')} performs {self._get_action_name(action_type)}"
-            )
+            # CRITICAL: Manual game state creation - replace missing capture_action_state method
+            try:
+                # Ensure game_states list exists
+                if not hasattr(self.replay_logger, 'game_states'):
+                    self.replay_logger.game_states = []
+                
+                # Create game state snapshot manually using CURRENT unit positions
+                units_data = []
+                for i, unit_snapshot in enumerate(self.unit_manager.units):
+                    # CRITICAL: Ensure we capture the ACTUAL current position after action
+                    unit_data = {
+                        "id": unit_snapshot.get('id', i),
+                        "name": unit_snapshot.get("name", f"{unit_snapshot.get('unit_type', 'Unit')} {unit_snapshot.get('id', i)+1}"),
+                        "unit_type": unit_snapshot.get("unit_type", "Unknown"),
+                        "player": unit_snapshot.get("player", 0),
+                        "row": unit_snapshot.get("row", 0),
+                        "col": unit_snapshot.get("col", 0),
+                        "cur_hp": unit_snapshot.get("cur_hp", unit_snapshot.get("hp_max")),
+                        "hp_max": unit_snapshot.get("hp_max"),
+                        "alive": unit_snapshot.get("alive", True)
+                    }
+                    units_data.append(unit_data)
+                
+                # Create state snapshot with CURRENT game state
+                state = {
+                    "turn": self.current_turn,
+                    "phase": self.current_phase,
+                    "active_player": self.current_player,
+                    "units": units_data,
+                    "board_state": {
+                        "width": self.board_size[0],
+                        "height": self.board_size[1]
+                    },
+                    "event_flags": {
+                        "action_id": action,
+                        "acting_unit_id": unit.get('id'),
+                        "target_unit_id": getattr(self, '_last_target_unit', {}).get('id') if hasattr(self, '_last_target_unit') and self._last_target_unit else None,
+                        "reward": reward,
+                        "description": f"AI unit {unit.get('id')} performs {self._get_action_name(action_type)}",
+                        "step_number": len(self.replay_logger.game_states) + 1  # Add sequential step numbering
+                    }
+                }
+                
+                # Append to game_states
+                self.replay_logger.game_states.append(state)
+
+                pass
+                
+            except Exception as e:
+                print(f"❌ CRITICAL: Manual game state creation failed: {e}")
+                import traceback
+                traceback.print_exc()
             
-            combat_log_count = len(getattr(self.replay_logger, 'combat_log_entries', []))
-            game_states_count = len(getattr(self.replay_logger, 'game_states', []))
-            print(f"🎯 Replay logger state: {combat_log_count} combat entries, {game_states_count} game states, Turn {getattr(self.replay_logger, 'current_turn', 'unknown')}")
+            # CRITICAL FIX: Update replay_logger.env.units to point to current UnitManager units
+            if hasattr(self.replay_logger, 'env') and hasattr(self, 'unit_manager'):
+                self.replay_logger.env.units = self.unit_manager.units
         
         # CRITICAL: Check game over conditions IMMEDIATELY after any action
         ai_units_alive = self.unit_manager.get_alive_ai_units()
