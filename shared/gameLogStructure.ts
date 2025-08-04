@@ -6,6 +6,8 @@
  * Base log entry interface - used by both PvP and Replay
  * This matches the replay log format exactly
  */
+import { formatMoveMessage, formatShootingMessage, formatCombatMessage, formatChargeMessage, formatDeathMessage, formatMoveCancelMessage, formatChargeCancelMessage, formatTurnStartMessage, formatPhaseChangeMessage } from './gameLogUtils';
+
 export interface BaseLogEntry {
   type: 'move' | 'shoot' | 'combat' | 'charge' | 'death' | 'turn_change' | 'phase_change' | 'move_cancel' | 'charge_cancel';
   message: string;
@@ -94,18 +96,49 @@ export function createLogEntry(params: LogEntryParams): BaseLogEntry {
     shootDetails
   } = params;
 
-  // Import existing message formatting functions
+  // Use shared message formatting functions for consistency
   const messageFormatters = {
-    shoot: (actorId: number, targetId: number) => `Unit ${actorId} SHOT at unit ${targetId}`,
-    move: (unitId: number, startHex: string, endHex: string) => `Unit ${unitId} MOVED from ${startHex} to ${endHex}`,
-    combat: (attackerId: number, targetId: number) => `Unit ${attackerId} FOUGHT unit ${targetId}`,
-    charge: (unitName: string, unitId: number, targetName: string, targetId: number, startHex: string, endHex: string) => 
-      `Unit ${unitName} ${unitId} CHARGED unit ${targetName} ${targetId} from ${startHex} to ${endHex}`,
-    death: (unitId: number, unitType: string) => `Unit ${unitId} (${unitType}) DIED !`,
-    move_cancel: (unitName: string, unitId: number) => `Unit ${unitName} ${unitId} cancelled its move action`,
-    charge_cancel: (unitName: string, unitId: number) => `Unit ${unitName} ${unitId} cancelled its charge action`,
-    turn_change: (turnNumber: number) => `Start of Turn ${turnNumber}`,
-    phase_change: (playerName: string, phase: string) => `Start ${playerName}'s ${phase.toUpperCase()} phase`
+    shoot: formatShootingMessage,
+    move: (unitId: number, startHex: string, endHex: string) => {
+      // Parse coordinates from hex strings like "(25, 12)"
+      try {
+        const startMatch = startHex.match(/\((\d+),\s*(\d+)\)/);
+        const endMatch = endHex.match(/\((\d+),\s*(\d+)\)/);
+        if (startMatch && endMatch) {
+          const startCol = parseInt(startMatch[1]);
+          const startRow = parseInt(startMatch[2]);
+          const endCol = parseInt(endMatch[1]);
+          const endRow = parseInt(endMatch[2]);
+          return formatMoveMessage(unitId, startCol, startRow, endCol, endRow);
+        }
+      } catch (error) {
+        // Fallback to original format if parsing fails
+      }
+      return `Unit ${unitId} MOVED from ${startHex} to ${endHex}`;
+    },
+    combat: formatCombatMessage,
+    charge: (unitName: string, unitId: number, targetName: string, targetId: number, startHex: string, endHex: string) => {
+      // Parse coordinates for charge messages too
+      try {
+        const startMatch = startHex.match(/\((\d+),\s*(\d+)\)/);
+        const endMatch = endHex.match(/\((\d+),\s*(\d+)\)/);
+        if (startMatch && endMatch) {
+          const startCol = parseInt(startMatch[1]);
+          const startRow = parseInt(startMatch[2]);
+          const endCol = parseInt(endMatch[1]);
+          const endRow = parseInt(endMatch[2]);
+          return formatChargeMessage(unitName, unitId, targetName, targetId, startCol, startRow, endCol, endRow);
+        }
+      } catch (error) {
+        // Fallback to original format if parsing fails
+      }
+      return `Unit ${unitName} ${unitId} CHARGED unit ${targetName} ${targetId} from ${startHex} to ${endHex}`;
+    },
+    death: formatDeathMessage,
+    move_cancel: formatMoveCancelMessage,
+    charge_cancel: formatChargeCancelMessage,
+    turn_change: formatTurnStartMessage,
+    phase_change: formatPhaseChangeMessage
   };
 
   // Generate message based on type
@@ -244,16 +277,32 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
     case 'phase_change': return 'game-log-entry--phase';
     case 'move': return 'game-log-entry--move';
     case 'shoot':
-      const message = event.message;
-      if (message.includes('HP') && message.includes('-')) {
-        return 'game-log-entry--shoot-damage';
+      // Check shootDetails for actual shooting results (same logic as BoardReplay.tsx)
+      if (event.shootDetails && Array.isArray(event.shootDetails)) {
+        const hasWounds = event.shootDetails.some((shot: any) => shot.damageDealt && shot.damageDealt > 0);
+        const hasSaves = event.shootDetails.some((shot: any) => shot.saveSuccess === true);
+        
+        if (hasWounds) {
+          return 'game-log-entry--shoot-damage'; // Red - target loses HP
+        } else if (hasSaves) {
+          return 'game-log-entry--shoot-saved'; // Orange - target succeeded save roll
+        }
       }
-      if (message.includes('Saved!') || (message.includes('Success!') && !message.includes('Failed!'))) {
-        return 'game-log-entry--shoot-saved';
-      }
-      return 'game-log-entry--shoot';
+      return 'game-log-entry--shoot-failed'; // Yellow - failed during hit or wound rolls
     case 'charge': return 'game-log-entry--charge';
-    case 'combat': return 'game-log-entry--combat';
+    case 'combat':
+      // Check shootDetails for actual combat results (same logic as shooting)
+      if (event.shootDetails && Array.isArray(event.shootDetails)) {
+        const hasWounds = event.shootDetails.some((shot: any) => shot.damageDealt && shot.damageDealt > 0);
+        const hasSaves = event.shootDetails.some((shot: any) => shot.saveSuccess === true);
+        
+        if (hasWounds) {
+          return 'game-log-entry--combat-damage'; // Red - target loses HP
+        } else if (hasSaves) {
+          return 'game-log-entry--combat-saved'; // Orange - target succeeded save roll
+        }
+      }
+      return 'game-log-entry--combat-failed'; // Yellow - failed during hit or wound rolls
     case 'death': return 'game-log-entry--death';
     case 'move_cancel': return 'game-log-entry--cancel';
     case 'charge_cancel': return 'game-log-entry--cancel';

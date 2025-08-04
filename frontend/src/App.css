@@ -918,48 +918,65 @@ textarea:focus {
   background: rgba(255, 204, 0, 0.1);
 }
 
-.game-log-entry--shoot-saved {
-  border-left-color: #ea580c;
-  background: rgba(234, 88, 12, 0.20); /* Orange - hits with no damage */
-}
-
-.game-log-entry--shoot-no-damage {
-  border-left-color: #ea580c;
-  background: rgba(234, 88, 12, 0.20); /* Orange - hits with no damage */
-}
-
-.game-log-entry--shoot-damage {
-  border-left-color: #dc2626;
-  background: rgba(220, 38, 38, 0.30); /* Red - damage dealt */
+/* Shooting Action Color Coding */
+.game-log-entry--shoot {
+  border-left-color: #eab308; /* Default yellow for shooting */
+  background: rgba(234, 179, 8, 0.15);
 }
 
 .game-log-entry--shoot-failed {
-  border-left-color: #eab308;
-  background: rgba(234, 179, 8, 0.20); /* Yellow - misses/fails */
+  border-left-color: #eab308; /* Yellow - failed during hit or wound rolls */
+  background: rgba(234, 179, 8, 0.20);
 }
 
+.game-log-entry--shoot-saved {
+  border-left-color: #ea580c; /* Orange - target succeeded save roll */
+  background: rgba(234, 88, 12, 0.20);
+}
+
+.game-log-entry--shoot-damage {
+  border-left-color: #dc2626; /* Red - target loses HP */
+  background: rgba(220, 38, 38, 0.25);
+}
+
+.game-log-entry--shoot-no-damage {
+  border-left-color: #ea580c; /* Orange - hits but no damage (same as saved) */
+  background: rgba(234, 88, 12, 0.20);
+}
+
+/* Combat Action Color Coding (same as shooting) */
 .game-log-entry--combat {
-  border-left-color: #cc0000;
-  background: rgba(204, 0, 0, 0.1);
+  border-left-color: #eab308; /* Default yellow for combat */
+  background: rgba(234, 179, 8, 0.15);
 }
 
 .game-log-entry--combat-failed {
-  border-left-color: #ff9900;
-  background: rgba(255, 153, 0, 0.1);
+  border-left-color: #eab308; /* Yellow - failed during hit or wound rolls */
+  background: rgba(234, 179, 8, 0.20);
+}
+
+.game-log-entry--combat-saved {
+  border-left-color: #ea580c; /* Orange - target succeeded save roll */
+  background: rgba(234, 88, 12, 0.20);
+}
+
+.game-log-entry--combat-damage {
+  border-left-color: #dc2626; /* Red - target loses HP */
+  background: rgba(220, 38, 38, 0.25);
 }
 
 .game-log-entry--combat-no-damage {
-  border-left-color: #666;
-  background: rgba(102, 102, 102, 0.1);
+  border-left-color: #ea580c; /* Orange - hits but no damage (same as saved) */
+  background: rgba(234, 88, 12, 0.20);
 }
 
 .game-log-entry--death {
-  border-left-color: #666;
-  background: rgba(102, 102, 102, 0.1);
+  border-left-color: #000000; /* Black border for death */
+  background: rgba(0, 0, 0, 0.2); /* Dark background */
 }
 
 .game-log-entry--death .game-log-entry__message {
-  color: #ff6666;
+  color: #cccccc; /* Light gray text on dark background */
   font-weight: var(--font-weight-bold);
 }
 
