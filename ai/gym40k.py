@@ -27,7 +27,6 @@ from ai.unit_registry import UnitRegistry
 from ai.unit_manager import UnitManager
 try:
     from ai.ai_phase_transition import PhaseTransitionManager
-    print("✅ PhaseTransitionManager imported successfully")
 except ImportError as e:
     print(f"❌ CRITICAL: Failed to import PhaseTransitionManager: {e}")
     raise
@@ -203,7 +202,7 @@ class W40KEnv(gym.Env):
         
         # Calculate max_units dynamically from scenario for action space
         self._calculate_max_units_from_scenario()
-        # Reduced verbosity - scenario path logged only if needed
+        # Load scenario for initialization
         if os.path.exists(self.scenario_path):
             try:
                 with open(self.scenario_path, 'r') as f:
@@ -278,7 +277,6 @@ class W40KEnv(gym.Env):
         # Initialize phase transition manager (mirrors frontend usePhaseTransition.ts)
         try:
             self.phase_manager = PhaseTransitionManager(self)
-            print(f"✅ PhaseTransitionManager initialized for {self.controlled_agent or 'default'}")
         except Exception as e:
             print(f"❌ CRITICAL: Failed to initialize PhaseTransitionManager: {e}")
             raise
@@ -468,20 +466,6 @@ class W40KEnv(gym.Env):
         """Reset environment to initial state."""
         import traceback
         
-        # CRITICAL DEBUG: Track what's triggering resets
-        reset_reason = "unknown"
-        if hasattr(self, 'game_over') and self.game_over:
-            reset_reason = f"game_over_winner_{self.winner}"
-        elif hasattr(self, 'step_count') and self.step_count >= self.max_steps_per_episode:
-            reset_reason = f"max_steps_{self.step_count}"
-        elif hasattr(self, 'current_turn') and self.current_turn >= self.max_turns:
-            reset_reason = f"max_turns_{self.current_turn}"
-        else:
-            reset_reason = "external_call"
-        
-        print(f"🔄 ENVIRONMENT RESET TRIGGERED: {reset_reason} (Turn: {getattr(self, 'current_turn', 'unknown')})")
-        print(f"   Call stack: {traceback.format_stack()[-3:-1]}")
-        
         super().reset(seed=seed)
 
         # CRITICAL FIX: Only reset replay logger for TRUE episode boundaries
@@ -491,8 +475,6 @@ class W40KEnv(gym.Env):
         # CRITICAL: Never reset replay logger during episode - only clear at true episode end
         if hasattr(self, 'replay_logger') and self.replay_logger and is_legitimate_reset and self.game_over:
             # DEBUG: Show replay logger state before reset
-            combat_entries_before = len(getattr(self.replay_logger, 'combat_log_entries', []))
-            print(f"🔍 RESET: Replay logger has {combat_entries_before} entries before reset")
             
             # Only reset replay logger for legitimate episode boundaries when game is actually over
             if hasattr(self.replay_logger, 'game_states'):
@@ -502,7 +484,6 @@ class W40KEnv(gym.Env):
             
             # DEBUG: Verify reset worked
             combat_entries_after = len(getattr(self.replay_logger, 'combat_log_entries', []))
-            print(f"🔍 RESET: Replay logger has {combat_entries_after} entries after reset")
             if hasattr(self.replay_logger, 'current_turn'):
                 self.replay_logger.current_turn = 1
             if hasattr(self.replay_logger, 'initial_game_state'):
@@ -678,17 +659,12 @@ class W40KEnv(gym.Env):
             ai_units_alive = [u for u in ai_units_alive 
             if self.unit_registry.get_model_key(u["unit_type"]) == self.controlled_agent]
         
-        # DEBUG: Show eligibility checking details
-        print(f"🔍 Eligibility check - Phase: {self.current_phase}, AI units alive: {len(ai_units_alive)}")
-        print(f"🔍 moved_units set: {self.moved_units}")
-        
         for unit in ai_units_alive:
             unit_id = unit["id"]
             
             if self.current_phase == "move":
                 in_moved_units = unit_id in self.moved_units
                 has_adjacent = self._has_adjacent_enemies(unit)
-                print(f"🔍 Unit {unit_id}: in_moved_units={in_moved_units}, has_adjacent={has_adjacent}")
                 
                 # AI_GAME.md: units that haven't moved are selectable (green outline)
                 # CRITICAL: Prevent movement adjacent to enemies outside charge phase
@@ -697,9 +673,6 @@ class W40KEnv(gym.Env):
                 
                 if not already_moved and not has_adjacent:
                     eligible.append(unit)
-                    print(f"✅ Unit {unit_id} is ELIGIBLE for move")
-                else:
-                    print(f"❌ Unit {unit_id} is NOT ELIGIBLE for move (moved: {already_moved}, adjacent: {has_adjacent})")
                     
             elif self.current_phase == "shoot":
                 # AI_GAME.md: Only units with enemies in RNG_RNG range and haven't shot yet
@@ -969,7 +942,6 @@ class W40KEnv(gym.Env):
         self._capture_game_state(action, reward)
         if self.step_count >= self.max_steps_per_episode:
             # Episode too long, truncate it
-            print(f"🏁 EPISODE TRUNCATED: Step limit reached ({self.step_count}/{self.max_steps_per_episode}) at Turn {self.current_turn}")
             self.game_over = True
             self.winner = None
             ai_units_alive = self.unit_manager.get_alive_ai_units()
@@ -979,10 +951,6 @@ class W40KEnv(gym.Env):
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type '{unit_type}'")
             return self._get_obs(), unit_rewards["base_actions"]["wait"], False, True, self._get_info()  # truncated=True
         
-        # CRITICAL: Check for game over BEFORE any phase logic
-        if not self.unit_manager.get_alive_ai_units() or not self.unit_manager.get_alive_enemy_units():
-            print(f"🏁 Early game over detected - proceeding to game over checks")
-        
         # Get eligible units for current phase
         eligible_units = self._get_eligible_units()
         
@@ -991,11 +959,9 @@ class W40KEnv(gym.Env):
         max_phase_advances = 32  # Allow more phase advances for longer games
         
         while not eligible_units and not self.game_over and phase_advances < max_phase_advances:
-            print(f"🔄 Calling phase_manager.advance_phase() - Phase: {self.current_phase}, Player: {self.current_player}, Turn: {self.current_turn}")
             self.phase_manager.advance_phase()
             eligible_units = self._get_eligible_units()
             phase_advances += 1
-            print(f"🔄 After advance_phase() - Phase: {self.current_phase}, Player: {self.current_player}, Turn: {self.current_turn}, Eligible: {len(eligible_units)}")
         
         if phase_advances >= max_phase_advances:
             # Emergency end game to prevent infinite loops - check if game should have ended
@@ -1114,11 +1080,8 @@ class W40KEnv(gym.Env):
         ai_units_alive = self.unit_manager.get_alive_ai_units()
         enemy_units_alive = self.unit_manager.get_alive_enemy_units()
         
-        print(f"🔍 Game state check: AI={len(ai_units_alive)}, Enemy={len(enemy_units_alive)}")
-        
         # Game outcome rewards - check termination conditions using UnitManager
         if not ai_units_alive:  # No alive AI units
-            print(f"🏁 GAME OVER: AI defeated at Turn {self.current_turn}, Step {self.step_count}")
             self.game_over = True
             self.winner = 0
             
@@ -1139,7 +1102,6 @@ class W40KEnv(gym.Env):
                     reward += unit_rewards["situational_modifiers"]["lose"]
             return self._get_obs(), reward, True, False, self._get_info()
         elif not enemy_units_alive:  # No alive enemy units
-            print(f"🏁 GAME OVER: AI victory at Turn {self.current_turn}, Step {self.step_count}")
             self.game_over = True
             self.winner = 1
             
@@ -1228,34 +1190,30 @@ class W40KEnv(gym.Env):
         
         old_col, old_row = unit["col"], unit["row"]
         
-        # Calculate target position based on action type
-        target_col, target_row = old_col, old_row
-        
-        if action_type == 0:  # Move North
-            target_row = max(0, unit["row"] - unit["move"])
-        elif action_type == 1:  # Move South
-            target_row = min(self.board_size[1] - 1, unit["row"] + unit["move"])
-        elif action_type == 2:  # Move East
-            target_col = min(self.board_size[0] - 1, unit["col"] + unit["move"])
-        elif action_type == 3:  # Move West
-            target_col = max(0, unit["col"] - unit["move"])
-        elif action_type == 7:  # Wait (universal - second click behavior)
+        # Handle wait action
+        if action_type == 7:  # Wait (universal - second click behavior)
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
             reward = unit_rewards["base_actions"]["wait"]
             unit["has_moved"] = True
             return reward
-        else:
-            # Invalid action type in move phase
+        
+        # Calculate target position from action
+        target_col, target_row = self._calculate_target_position_from_action(unit, action_type)
+        
+        # Check for invalid action (no change in position)
+        if target_col == old_col and target_row == old_row:
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
-            return unit_rewards["base_actions"]["wait"]  # Penalty for invalid action
+            reward = unit_rewards["base_actions"]["wait"]
+            unit["has_moved"] = True
+            return reward
         
-        # Validate movement using pathfinding (same algorithm as frontend)
-        valid_path = self._calculate_move_path(old_col, old_row, target_col, target_row, unit["move"])
+        # Use shared movement validation
+        movement_succeeded = self._execute_validated_movement(unit, target_col, target_row)
         
-        if not valid_path or len(valid_path) == 0:
-            # Movement blocked by walls or obstacles - return penalty
+        if not movement_succeeded:
+            # Movement blocked by walls/obstacles - return penalty
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
             reward = unit_rewards["base_actions"]["wait"]
@@ -1263,28 +1221,22 @@ class W40KEnv(gym.Env):
             self.moved_units.add(unit["id"])
             return reward
         
-        # Apply the last valid position from pathfinding
-        final_position = valid_path[-1]
-        unit["col"] = final_position["col"]
-        unit["row"] = final_position["row"]
-        
-        # ✅ PATHFINDING VALIDATION: Check if movement actually occurred
+        # Check if movement actually occurred (unit might have been blocked partway)
         movement_occurred = (old_col != unit["col"]) or (old_row != unit["row"])
         
         if not movement_occurred:
-            # ❌ FAILED MOVE: Path blocked by walls/obstacles, return penalty
+            # No actual movement - return penalty but mark as moved
             if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                 raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
             reward = unit_rewards["base_actions"]["wait"]
-            # ✅ CRITICAL FIX: Mark unit as moved to prevent infinite loops
             unit["has_moved"] = True
-            self.moved_units.add(unit["id"])  # Also add to phase tracking
+            self.moved_units.add(unit["id"])
             return reward
         
-        # ✅ SUCCESSFUL MOVE: Mark unit as moved and calculate rewards
+        # Successful movement - mark unit as moved and calculate rewards
         unit["has_moved"] = True
         
-        # Movement rewards based on tactical positioning (only for successful moves)
+        # Calculate movement rewards based on tactical positioning (only for successful moves)
         nearest_enemy = self._get_nearest_enemy(unit)
         if nearest_enemy:
             new_dist = get_hex_distance(unit, nearest_enemy)
@@ -1325,10 +1277,8 @@ class W40KEnv(gym.Env):
             try:
                 self.game_logger.log_move(unit, old_col, old_row, unit["col"], unit["row"], 
                                         self.current_turn, reward, action_type)
-                print(f"✅ Movement logged: Unit {unit.get('id')} from ({old_col},{old_row}) to ({unit['col']},{unit['row']}) Turn {self.current_turn}")
-                print(f"🎯 Clean logger state: {self.game_logger.get_combat_log_count()} entries, Turn {self.current_turn}")
             except Exception as e:
-                print(f"❌ Movement logging failed: {e}")
+                pass  # Silent failure to avoid breaking training
         else:
             print(f"⚠️ No game logger available for movement logging")
         
@@ -1484,10 +1434,8 @@ class W40KEnv(gym.Env):
                 if self.game_logger:
                     try:
                         self.game_logger.log_shoot(unit, target, result, self.current_turn, reward, 4)
-                        print(f"✅ Shooting logged: Unit {unit.get('id')} -> Unit {target.get('id')} Turn {self.current_turn}")
-                        print(f"🎯 Clean logger state: {self.game_logger.get_combat_log_count()} entries, Turn {self.current_turn}")
                     except Exception as e:
-                        print(f"❌ Shooting logging failed: {e}")
+                        pass  # Silent failure to avoid breaking training
                 else:
                     print(f"⚠️ No game logger available for shooting logging")
                     if old_hp == total_damage:
@@ -1563,10 +1511,8 @@ class W40KEnv(gym.Env):
                     try:
                         self.game_logger.log_charge(unit, target, old_col, old_row, unit["col"], unit["row"], 
                                                   self.current_turn, reward, 5)
-                        print(f"✅ Charge logged: Unit {unit.get('id')} -> Unit {target.get('id')} Turn {self.current_turn}")
-                        print(f"🎯 Clean logger state: {self.game_logger.get_combat_log_count()} entries, Turn {self.current_turn}")
                     except Exception as e:
-                        print(f"❌ Charge logging failed: {e}")
+                        pass  # Silent failure to avoid breaking training
             else:
                 # Set explicit tracking - PvP style (no targets available)
                 self._last_acting_unit = unit
@@ -1653,10 +1599,8 @@ class W40KEnv(gym.Env):
                 if self.game_logger:
                     try:
                         self.game_logger.log_combat(unit, target, result, self.current_turn, reward, 6)
-                        print(f"✅ Combat logged: Unit {unit.get('id')} -> Unit {target.get('id')} Turn {self.current_turn}")
-                        print(f"🎯 Clean logger state: {self.game_logger.get_combat_log_count()} entries, Turn {self.current_turn}")
                     except Exception as e:
-                        print(f"❌ Combat logging failed: {e}")
+                        pass  # Silent failure to avoid breaking training
                     if old_hp == total_damage:
                         if "result_bonuses" not in unit_rewards or "no_overkill" not in unit_rewards["result_bonuses"]:
                             raise KeyError(f"Missing 'result_bonuses.no_overkill' in rewards config for unit type {unit['unit_type']}")
@@ -2132,12 +2076,73 @@ class W40KEnv(gym.Env):
         
         return []  # No path found
 
+    def _execute_validated_movement(self, unit, target_col, target_row):
+        """Shared movement validation for both AI agents and bots."""
+        old_col, old_row = unit["col"], unit["row"]
+        move_range = unit.get("move", 6)
+        
+        # Use same pathfinding validation for everyone
+        valid_path = self._calculate_move_path(old_col, old_row, target_col, target_row, move_range)
+        
+        if not valid_path or len(valid_path) == 0:
+            return False  # Movement blocked by walls/obstacles
+        
+        # Apply validated movement to final reachable position
+        final_position = valid_path[-1]
+        unit["col"] = final_position["col"]
+        unit["row"] = final_position["row"]
+        
+        return True  # Movement succeeded
+
     def _offset_to_cube(self, col, row):
         """Convert offset coordinates to cube coordinates (same as frontend)."""
         x = col
         z = row - ((col - (col & 1)) >> 1)
         y = -x - z
         return {"x": x, "y": y, "z": z}
+
+    def _calculate_target_position_from_action(self, unit, action_type):
+        """Convert action type to target coordinates."""
+        old_col, old_row = unit["col"], unit["row"]
+        move_range = unit.get("move", 6)
+        
+        if action_type == 0:  # Move North
+            target_row = max(0, old_row - move_range)
+            target_col = old_col
+        elif action_type == 1:  # Move South
+            target_row = min(self.board_size[1] - 1, old_row + move_range)
+            target_col = old_col
+        elif action_type == 2:  # Move East
+            target_col = min(self.board_size[0] - 1, old_col + move_range)
+            target_row = old_row
+        elif action_type == 3:  # Move West
+            target_col = max(0, old_col - move_range)
+            target_row = old_row
+        else:
+            # Invalid action - return current position (no movement)
+            return old_col, old_row
+        
+        return target_col, target_row
+
+    def _calculate_bot_target_position(self, bot_unit, target_unit):
+        """Calculate where bot wants to move toward target."""
+        dx = target_unit["col"] - bot_unit["col"]
+        dy = target_unit["row"] - bot_unit["row"]
+        move_distance = bot_unit.get("move", 6)
+        
+        # Move toward target, respecting move distance
+        if abs(dx) > abs(dy):
+            # Move horizontally
+            step = min(move_distance, abs(dx)) * (1 if dx > 0 else -1)
+            target_col = max(0, min(self.board_size[0] - 1, bot_unit["col"] + step))
+            target_row = bot_unit["row"]
+        else:
+            # Move vertically  
+            step = min(move_distance, abs(dy)) * (1 if dy > 0 else -1)
+            target_col = bot_unit["col"]
+            target_row = max(0, min(self.board_size[1] - 1, bot_unit["row"] + step))
+        
+        return target_col, target_row
 
     def _attack_target(self, unit, target):
         """Attack adjacent target in melee combat."""
@@ -2398,97 +2403,172 @@ class W40KEnv(gym.Env):
         return move_range  # Simplified - would need full move calculation
 
     def _execute_enemy_turn(self):
-        """Execute enemy turn using scripted behavior as mentioned in AI_GAME_OVERVIEW.md."""
-        # BALANCED scripted enemy behavior for training - LIMITED ACTIONS
-        # Use UnitManager.get_alive_enemy_units() for centralized dead unit management
+        """Execute enemy turn using improved scripted behavior following proper phase mechanics."""
         enemy_units_alive = self.unit_manager.get_alive_enemy_units()
         
-        # Limit total enemy actions per turn to prevent overwhelming AI
-        max_enemy_actions = min(2, len(enemy_units_alive))  # Max 2 actions total
-        enemy_actions_taken = 0
+        if not enemy_units_alive:
+            return  # No enemies to act
         
-        # Process each enemy action, but only if enemy is still alive  
+        # Execute actions based on current phase
+        actions_taken = 0
+        max_actions = len(enemy_units_alive)  # Allow all enemies to act once per phase
+        
         for enemy in enemy_units_alive[:]:  # Use slice copy to avoid modification during iteration
-            if enemy_actions_taken >= max_enemy_actions:
-                break  # Limit enemy actions to give AI a chance
-                
-            # UnitManager's get_alive_enemy_units() already ensures only alive units
-            # No manual check needed since we're iterating over alive units only
-                
-            nearest_ai = self._get_nearest_ai_unit(enemy)
-            if not nearest_ai or not self.unit_manager.is_target_valid(nearest_ai):
+            if actions_taken >= max_actions:
+                break
+            
+            # Find best target (not just nearest)
+            target = self._get_best_enemy_target(enemy)
+            if not target or not self.unit_manager.is_target_valid(target):
                 continue
             
-            dist = abs(enemy["col"] - nearest_ai["col"]) + abs(enemy["row"] - nearest_ai["row"])
-            
-            # BALANCED: Only ONE action per enemy per turn
             action_taken = False
             
-            # Priority 1: Shoot if in range (instead of moving closer)
-            if "rng_rng" not in enemy:
-                raise ValueError(f"enemy.rng_rng is required for unit {enemy.get('name', 'unknown')}")
-            if "rng_dmg" not in enemy:
-                raise ValueError(f"enemy.rng_dmg is required for unit {enemy.get('name', 'unknown')}")
-            enemy_rng_rng = enemy["rng_rng"]
-            enemy_rng_dmg = enemy["rng_dmg"]
-            if is_unit_in_range(enemy, nearest_ai, enemy_rng_rng) and enemy_rng_dmg > 0:
-                # Execute dice-based shooting for enemy
-                result = execute_shooting_sequence(enemy, nearest_ai)
-                if self.unit_manager.apply_shooting_damage(enemy, nearest_ai, result):
-                    # Unit died and was removed by UnitManager - no manual sync needed
-                    # Immediately break to avoid targeting removed unit
-                    break
-                action_taken = True
-                
-                # Record bot shooting action
-                if self.save_replay:
-                    self._record_action(enemy, 4, 0.0)  # action_type 4 = shoot, reward 0 for bot
-
-            # Priority 2: Melee attack if adjacent (no change needed - it's already using damage directly)
-            elif are_units_adjacent(enemy, nearest_ai):
-                if "cc_dmg" not in enemy:
-                    raise ValueError(f"enemy.cc_dmg is required for unit {enemy.get('name', 'unknown')}")
-                enemy_cc_dmg = enemy["cc_dmg"]
-                if enemy_cc_dmg > 0:
-                    if self.unit_manager.apply_direct_damage(enemy, nearest_ai):
-                        # Unit died and was removed by UnitManager - no manual sync needed
-                        # Immediately break to avoid targeting removed unit
-                        break
-                action_taken = True
-                
-                # Record bot melee attack action
-                if self.save_replay:
-                    self._record_action(enemy, 6, 0.0)  # action_type 6 = attack, reward 0 for bot
-                
-            # Priority 3: Move closer (only if can't attack)
-            elif dist > 1:
-                # Limited movement: only 1-2 hexes max
-                if "move" not in enemy:
-                    raise ValueError(f"enemy.move is required for unit {enemy.get('name', 'unknown')}")
-                enemy_move = enemy["move"]
-                move_distance = min(2, enemy_move)
-                dx = nearest_ai["col"] - enemy["col"]
-                dy = nearest_ai["row"] - enemy["row"]
-                
-                if abs(dx) > abs(dy):
-                    step = min(move_distance, abs(dx)) * (1 if dx > 0 else -1)
-                    enemy["col"] = max(0, min(self.board_size[0] - 1, enemy["col"] + step))
-                else:
-                    step = min(move_distance, abs(dy)) * (1 if dy > 0 else -1)
-                    enemy["row"] = max(0, min(self.board_size[1] - 1, enemy["row"] + step))
-                action_taken = True
-                
-                # Record bot movement action
-                if self.save_replay:
-                    # Determine movement direction for proper action_type
-                    if abs(dx) > abs(dy):
-                        action_type = 2 if dx > 0 else 3  # East or West
-                    else:
-                        action_type = 1 if dy > 0 else 0  # South or North
-                    self._record_action(enemy, action_type, 0.0)  # Movement with reward 0 for bot
+            # Phase-based enemy behavior
+            if self.current_phase == "move":
+                action_taken = self._enemy_move_phase(enemy, target)
+            elif self.current_phase == "shoot":
+                action_taken = self._enemy_shoot_phase(enemy, target)
+            elif self.current_phase == "charge":
+                action_taken = self._enemy_charge_phase(enemy, target)
+            elif self.current_phase == "combat":
+                action_taken = self._enemy_combat_phase(enemy, target)
             
             if action_taken:
-                enemy_actions_taken += 1
+                actions_taken += 1
+    
+    def _get_best_enemy_target(self, enemy):
+        """Get best target for enemy unit (not just nearest)."""
+        ai_units = self.unit_manager.get_alive_ai_units()
+        if not ai_units:
+            return None
+        
+        # Priority 1: Lowest HP unit (finish off wounded)
+        wounded_units = [u for u in ai_units if u.get("cur_hp") < u.get("hp_max")]
+        if wounded_units:
+            return min(wounded_units, key=lambda u: u.get("cur_hp"))
+        
+        # Priority 2: Nearest unit
+        return min(ai_units, key=lambda u: get_hex_distance(enemy, u))
+    
+    def _enemy_move_phase(self, enemy, target):
+        """Enemy movement behavior with proper pathfinding validation."""
+        distance = get_hex_distance(enemy, target)
+        
+        # Don't move if already adjacent or in shooting range
+        if distance <= 1:
+            return False
+        
+        enemy_range = enemy.get("rng_rng")
+        if distance <= enemy_range and enemy.get("rng_dmg", 0) > 0:
+            return False  # In shooting range, save movement
+        
+        # Calculate desired target position using shared logic
+        target_col, target_row = self._calculate_bot_target_position(enemy, target)
+        
+        # Store original position for logging
+        old_col, old_row = enemy["col"], enemy["row"]
+        
+        # Use shared movement validation (same as AI player)
+        movement_succeeded = self._execute_validated_movement(enemy, target_col, target_row)
+        
+        if not movement_succeeded:
+            # Path blocked by walls - don't move
+            return False
+        
+        # Log movement
+        if self.game_logger:
+            self.game_logger.log_move(enemy, old_col, old_row, enemy["col"], enemy["row"], 
+                                        self.current_turn, 0.0, 0)
+        
+        return True
+    
+    def _enemy_shoot_phase(self, enemy, target):
+        """Enemy shooting behavior."""
+        enemy_range = enemy.get("rng_rng")
+        enemy_damage = enemy.get("rng_dmg")
+        
+        if not enemy_damage or enemy_damage <= 0:
+            return False  # No ranged weapons
+        
+        distance = get_hex_distance(enemy, target)
+        if distance > enemy_range:
+            return False  # Out of range
+        
+        if are_units_adjacent(enemy, target):
+            return False  # Too close for shooting
+        
+        # Execute shooting
+        result = execute_shooting_sequence(enemy, target)
+        target_died = self.unit_manager.apply_shooting_damage(enemy, target, result)
+        
+        # Log shooting
+        if self.game_logger:
+            self.game_logger.log_shoot(enemy, target, result, self.current_turn, 0.0, 4)
+        
+        return True
+    
+    def _enemy_charge_phase(self, enemy, target):
+        """Enemy charge behavior."""
+        distance = get_hex_distance(enemy, target)
+        move_range = enemy.get("move")
+        
+        # Can charge if target is within move range but not adjacent
+        if distance <= 1 or distance > move_range:
+            return False
+        
+        # Find adjacent position to target using pathfinding validation
+        old_col, old_row = enemy["col"], enemy["row"]
+        
+        # Find adjacent position to target
+        possible_positions = [
+            (target["col"] + 1, target["row"]),
+            (target["col"] - 1, target["row"]),
+            (target["col"], target["row"] + 1),
+            (target["col"], target["row"] - 1)
+        ]
+        
+        # Choose closest valid position that can be reached via pathfinding
+        valid_positions = [(c, r) for c, r in possible_positions 
+                          if 0 <= c < self.board_size[0] and 0 <= r < self.board_size[1]]
+        
+        if valid_positions:
+            # Try each position, starting with the closest
+            sorted_positions = sorted(valid_positions, key=lambda pos: abs(pos[0] - old_col) + abs(pos[1] - old_row))
+            
+            for target_col, target_row in sorted_positions:
+                # Use shared movement validation to ensure path is clear
+                if self._execute_validated_movement(enemy, target_col, target_row):
+                    # Charge succeeded via valid path
+                    if self.game_logger:
+                        self.game_logger.log_charge(enemy, target, old_col, old_row, 
+                                                  enemy["col"], enemy["row"], self.current_turn, 0.0, 5)
+                    return True
+        
+        return False
+    
+    def _enemy_combat_phase(self, enemy, target):
+        """Enemy combat behavior."""
+        combat_range = enemy.get("cc_rng")
+        combat_damage = enemy.get("cc_dmg")
+        
+        if not combat_damage or combat_damage <= 0:
+            return False  # No melee weapons
+        
+        distance = get_hex_distance(enemy, target)
+        if distance > combat_range:
+            return False  # Out of combat range
+        
+        # Execute combat
+        from shared.gameRules import execute_combat_sequence
+        result = execute_combat_sequence(enemy, target)
+        target_died = self.unit_manager.apply_combat_damage(enemy, target, result)
+        
+        # Log combat
+        if self.game_logger:
+            self.game_logger.log_combat(enemy, target, result, self.current_turn, 0.0, 6)
+        
+        return True
 
     def _get_nearest_ai_unit(self, enemy):
         """Get nearest alive AI unit for enemy targeting - EXACT PvP mode behavior."""

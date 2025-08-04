@@ -66,13 +66,10 @@ def setup_imports():
         from gym40k import W40KEnv, register_environment
         return W40KEnv, register_environment
     except ImportError as e:
-        print(f"Import error: {e}")
-        print("AI_INSTRUCTIONS.md: Please ensure gym40k.py exists in ai/ directory and is properly configured")
-        sys.exit(1)
+        raise ImportError(f"AI_INSTRUCTIONS.md: gym40k.py import failed: {e}")
 
 def create_model(config, training_config_name="default", rewards_config_name="default", new_model=False, append_training=False):
     """Create or load DQN model with configuration following AI_INSTRUCTIONS.md."""
-    print(f"🤖 Creating/loading model with training config: {training_config_name}, rewards config: {rewards_config_name}")
     
     # Check GPU availability
     gpu_available = check_gpu_availability()
@@ -139,7 +136,6 @@ def create_model(config, training_config_name="default", rewards_config_name="de
 def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default", 
                             agent_key=None, new_model=False, append_training=False):
     """Create or load DQN model for specific agent with configuration following AI_INSTRUCTIONS.md."""
-    print(f"🤖 Creating/loading model for agent: {agent_key}")
     
     # Check GPU availability
     gpu_available = check_gpu_availability()
@@ -252,9 +248,6 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
 
 def train_model(model, training_config, callbacks, model_path):
     """Execute the training process."""
-    print("🚀 Starting default training following AI_GAME_OVERVIEW.md...")
-    print(f"   Total timesteps: {training_config['total_timesteps']:,}")
-    print(f"   Model will be saved to: {model_path}")
     
     try:
         # Start training
@@ -268,8 +261,6 @@ def train_model(model, training_config, callbacks, model_path):
         # Save final model
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         model.save(model_path)
-        print(f"✅ Training completed! Model saved to: {model_path}")
-        
         return True
         
     except KeyboardInterrupt:
@@ -288,7 +279,6 @@ def train_model(model, training_config, callbacks, model_path):
 
 def test_trained_model(model, num_episodes=5):
     """Test the trained model."""
-    print(f"🧪 Testing trained model for {num_episodes} episodes...")
     
     W40KEnv, _ = setup_imports()
     env = W40KEnv(scenario_file=None)  # Explicit use of default scenario
@@ -312,13 +302,6 @@ def test_trained_model(model, num_episodes=5):
         
         if info['winner'] == 1:  # AI won
             wins += 1
-            result = "WIN"
-        elif info['winner'] == 0:  # AI lost
-            result = "LOSS"
-        else:
-            result = "DRAW"
-        
-        print(f"   Episode {episode + 1}: {result} - Reward: {episode_reward:.2f}, Steps: {step_count}")
     
     win_rate = wins / num_episodes
     avg_reward = sum(total_rewards) / len(total_rewards)
@@ -373,7 +356,6 @@ def start_multi_agent_orchestration(config, total_episodes: int, training_config
                                    rewards_config_name: str = "default", max_concurrent: int = None,
                                    training_phase: str = None):
     """Start multi-agent orchestration training with optional phase specification."""
-    print("🎮 Starting Multi-Agent Orchestration Training")
     
     try:
         trainer = MultiAgentTrainer(config, max_concurrent_sessions=max_concurrent)
@@ -393,32 +375,9 @@ def start_multi_agent_orchestration(config, total_episodes: int, training_config
 
 def ensure_scenario():
     """Ensure scenario.json exists."""
-    # write into <project_root>/config/scenario.json
     scenario_path = os.path.join(project_root, "config", "scenario.json")
     if not os.path.exists(scenario_path):
-        print("⚠️ scenario.json not found - creating default from AI_GAME_OVERVIEW.md specs...")
-        # Create scenario following the frontend structure
-        default_scenario = [
-            {
-                "id": 1, "unit_type": "Intercessor", "player": 0,
-                "col": 23, "row": 12
-            },
-            {
-                "id": 2, "unit_type": "AssaultIntercessor", "player": 0,
-                "col": 1, "row": 12
-            },
-            {
-                "id": 3, "unit_type": "Intercessor", "player": 1,
-                "col": 0, "row": 5
-            },
-            {
-                "id": 4, "unit_type": "AssaultIntercessor", "player": 1,
-                "col": 22, "row": 3
-            }
-        ]
-        with open(scenario_path, "w") as f:
-            json.dump(default_scenario, f, indent=2)
-        print("✅ Created default scenario.json")
+        raise FileNotFoundError(f"Missing required scenario.json file: {scenario_path}. AI_INSTRUCTIONS.md: No fallbacks allowed - scenario file must exist.")
 
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
@@ -465,14 +424,11 @@ def main():
     
     try:
         # Sync configs to frontend automatically
-        print("🔧 Syncing configs to frontend...")
         try:
             subprocess.run(['node', 'scripts/copy-configs.js'], 
                          cwd=project_root, check=True, capture_output=True, text=True)
-            print("✅ Configs synced to frontend")
         except subprocess.CalledProcessError as e:
-            print(f"⚠️ Config sync failed: {e.stderr}")
-            print("   Continuing with training...")
+            pass  # Continue with training if sync fails
         
         # Setup environment and configuration
         config = get_config_loader()
@@ -535,7 +491,6 @@ def main():
         
         if success:
             # Test the trained model
-            print("\n" + "=" * 70)
             test_trained_model(model, args.test_episodes)
             
             # Save training replay with our unified system
@@ -548,16 +503,6 @@ def main():
                     output_dir="ai/event_log", 
                     is_best=False
                 )
-                if replay_file:
-                    print(f"💾 Training replay saved: {replay_file}")
-                else:
-                    print("⚠️ No replay data to save")
-            
-            print("\n🎯 Training Complete!")
-            print(f"Model saved to: {model_path}")
-            print(f"Monitor tensorboard: tensorboard --logdir ./tensorboard/")
-            print(f"Test model: python ai/train.py --test-only")
-            print(f"View replay: Load replay file in frontend")
             
             return 0
         else:

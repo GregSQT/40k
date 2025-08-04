@@ -28,7 +28,7 @@ const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: 
     [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
   ];
   
-  // Collect all forbidden hexes (adjacent to any enemy + wall hexes) using cube coordinates  
+  // Collect all forbidden hexes (adjacent to any enemy + wall hexes + dead units) using cube coordinates  
   const forbiddenSet = new Set<string>();
   
   // Add all wall hexes as forbidden
@@ -37,8 +37,13 @@ const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: 
   );
   wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
   
+  // Add dead unit positions as forbidden
+  units.filter(unit => !unit.alive).forEach(deadUnit => {
+    forbiddenSet.add(`${deadUnit.col},${deadUnit.row}`);
+  });
+  
   for (const enemy of units) {
-    if (enemy.player === 1) continue; // Skip friendly units (player 1)
+    if (enemy.player === 1 || !enemy.alive) continue; // Skip friendly units (player 1) and dead units
 
     // Add enemy position itself
     forbiddenSet.add(`${enemy.col},${enemy.row}`);
@@ -996,11 +1001,16 @@ const validateUnitRegistry = () => {
         console.log('🟢 availableCells generated:', availableCells);
       }
       
+      // Calculate dead unit positions to exclude from previews
+      const deadUnitPositions = new Set(
+        currentUnits.filter(unit => !unit.alive).map(unit => `${unit.col},${unit.row}`)
+      );
+
       // Draw initial board and units using shared BoardRenderer with previews
       drawBoard(app, boardConfig as any, {
-        availableCells,
-        attackCells: shootingPreview?.clearTargets || [],
-        coverCells: shootingPreview?.coverTargets || [],
+        availableCells: availableCells.filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
+        attackCells: (shootingPreview?.clearTargets || []).filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
+        coverCells: (shootingPreview?.coverTargets || []).filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
         chargeCells: [],
         blockedTargets: shootingPreview?.blockedTargets || new Set(),
         coverTargets: new Set(),
@@ -1060,11 +1070,16 @@ const validateUnitRegistry = () => {
         availableCells = movePreview.path;
       }
       
+      // Calculate dead unit positions to exclude from previews
+      const deadUnitPositions = new Set(
+        currentUnits.filter(unit => !unit.alive).map(unit => `${unit.col},${unit.row}`)
+      );
+
       // Redraw board with preview hexes
       drawBoard(pixiAppRef.current, boardConfig as any, {
-        availableCells,
-        attackCells: shootingPreview?.clearTargets || [],
-        coverCells: shootingPreview?.coverTargets || [],
+        availableCells: availableCells.filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
+        attackCells: (shootingPreview?.clearTargets || []).filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
+        coverCells: (shootingPreview?.coverTargets || []).filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
         chargeCells: [],
         blockedTargets: shootingPreview?.blockedTargets || new Set(),
         coverTargets: new Set(),

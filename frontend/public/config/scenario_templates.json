@@ -1,4 +1,19 @@
 {
+  "solo_spacemarine_infantry_leaderelite_meleeelite": {
+    "description": "Solo training for SpaceMarine_Infantry_LeaderElite_MeleeElite agents (CaptainGravis focus)",
+    "agent_compositions": {
+      "SpaceMarine_Infantry_LeaderElite_MeleeElite": ["CaptainGravis"]
+    },
+    "unit_counts": {
+      "CaptainGravis": 2
+    },
+    "deployment_zones": {
+      "0": [[15,14], [18,21]],
+      "1": [[8,2], [11,8]]
+    },
+    "difficulty": "easy",
+    "training_focus": "solo"
+  },
   "solo_spacemarine_infantry_troop_rangedswarm": {
     "description": "Solo training for SpaceMarine_Infantry_Troop_RangedSwarm agents (Intercessor focus)",
     "agent_compositions": {
@@ -8,8 +23,8 @@
       "Intercessor": 2
     },
     "deployment_zones": {
-      "0": [[10,12], [11,6]],
-      "1": [[16,11], [15,5]]
+      "0": [[15,14], [18,21]],
+      "1": [[8,2], [11,8]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -23,8 +38,8 @@
       "AssaultIntercessor": 2
     },
     "deployment_zones": {
-      "0": [[1, 8], [1, 10]],
-      "1": [[22, 8], [22, 10]]
+      "0": [[15,14], [18,21]],
+      "1": [[8,2], [11,8]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -35,11 +50,11 @@
       "Tyranid_Infantry_Swarm_RangedSwarm": ["Termagant"]
     },
     "unit_counts": {
-      "Termagant": 3
+      "Termagant": 2
     },
     "deployment_zones": {
-      "0": [[9,11], [9,13], [10,6]],
-      "1": [[17,9], [17,11], [18,15]]
+      "0": [[15,14], [18,21]],
+      "1": [[8,2], [11,8]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -50,11 +65,26 @@
       "Tyranid_Infantry_Swarm_MeleeSwarm": ["Hormagaunt"]
     },
     "unit_counts": {
-      "Hormagaunt": 4
+      "Hormagaunt": 2
     },
     "deployment_zones": {
-      "0": [[1, 6], [1, 8], [1, 10], [1, 12]],
-      "1": [[22, 6], [22, 8], [22, 10], [22, 12]]
+      "0": [[15,14], [18,21]],
+      "1": [[8,2], [11,8]]
+    },
+    "difficulty": "easy",
+    "training_focus": "solo"
+  },
+  "solo_tyranid_infantry_elite_meleeelite": {
+    "description": "Solo training for Tyranid_Infantry_Elite_MeleeElite agents (Carnifex focus)",
+    "agent_compositions": {
+      "Tyranid_Infantry_Elite_MeleeElite": ["Carnifex"]
+    },
+    "unit_counts": {
+      "Carnifex": 2
+    },
+    "deployment_zones": {
+      "0": [[15,14], [18,21]],
+      "1": [[8,2], [11,8]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -180,21 +210,6 @@
     },
     "difficulty": "hard",
     "training_focus": "tyranid_specialization"
-  },
-  "solo_spacemarine_infantry_leaderelite_meleeelite": {
-    "description": "Solo training for SpaceMarine_Infantry_LeaderElite_MeleeElite agents (CaptainGravis focus)",
-    "agent_compositions": {
-      "SpaceMarine_Infantry_LeaderElite_MeleeElite": ["CaptainGravis"]
-    },
-    "unit_counts": {
-      "CaptainGravis": 2
-    },
-    "deployment_zones": {
-      "0": [[1, 8], [1, 10]],
-      "1": [[22, 8], [22, 10]]
-    },
-    "difficulty": "easy",
-    "training_focus": "solo"
   },
   "Tyranid_Infantry_Elite_MeleeElite": {
     "description": "Solo training for Tyranid_Infantry_Elite_MeleeElite agents (Carnifex focus)",

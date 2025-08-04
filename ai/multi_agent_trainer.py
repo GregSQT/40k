@@ -85,9 +85,7 @@ class SelectiveEpisodeTracker:
         # Memory management - keep only promising candidates
         if len(self.episode_candidates) > self.max_candidates:
             self._prune_candidates()
-        
-        if self.current_episode % 50 == 0:  # Log progress every 50 episodes
-            print(f"🔍 Episode {self.current_episode}: Current Best - Steps:{self.shortest_episode.step_count}, Reward:{float(self.best_reward_episode.total_reward):.2f}, Worst:{float(self.worst_reward_episode.total_reward):.2f}")
+        pass
     
     def _prune_candidates(self):
         """Keep only the most promising episodes to manage memory."""
@@ -132,9 +130,8 @@ class SelectiveEpisodeTracker:
                         json.dump(serializable_data, f, indent=2)
                     
                     saved_files.append(filepath)
-                    print(f"💾 Saved {episode_type} replay: {filename} (Steps: {episode.step_count}, Reward: {float(episode.total_reward):.2f})")
                 except Exception as e:
-                    print(f"⚠️ Failed to save {episode_type} replay {filename}: {e}")
+                    pass  # Silent failure for replay saving
         
         return saved_files
     
@@ -465,7 +462,6 @@ class MultiAgentTrainer:
             
             # Setup callbacks for this session (simplified - no evaluation callback)
             callbacks = self._setup_session_callbacks(session, model, episode_tracker, training_config_name)
-            print(f"🔧 DEBUG: _setup_session_callbacks returned {len(callbacks) if callbacks else 0} callbacks")
             
             # Execute training
             start_time = time.time()
@@ -492,7 +488,6 @@ class MultiAgentTrainer:
             
             progress_tracker = ProgressTracker(self, session.session_id)
             all_callbacks = callbacks + [progress_tracker] if callbacks else [progress_tracker]
-            print(f"🔧 DEBUG: Final callback list has {len(all_callbacks)} callbacks: {[type(cb).__name__ for cb in all_callbacks]}")
             
             # Execute training with individual progress tracking
             model.learn(
@@ -502,14 +497,7 @@ class MultiAgentTrainer:
                 progress_bar=False  # Disable built-in progress bar
             )
             
-            print("="*80)
-            print("🎯 TRAINING SESSION COMPLETED - CHECKING FOR REPLAY DATA")
-            print("="*80)
             training_duration = time.time() - start_time
-            
-            # Replay data will be captured by evaluation callback during training
-            # No need to capture here - evaluation episodes provide selective replay data
-            print(f"🎯 Training completed - selective replays captured during evaluation episodes")
             
             # Test the trained model WITH episode tracker for selective replay capture
             test_results = self._test_trained_model(model, env, 20, episode_tracker)  # Use episode tracker for selective replays
@@ -523,11 +511,8 @@ class MultiAgentTrainer:
             try:
                 if episode_tracker:
                     replay_files_saved = episode_tracker.save_selective_replays()
-                    print(f"✅ Saved {len(replay_files_saved)} selective replays for {session.agent_key}")
-                else:
-                    print(f"⚠️ Episode tracker not initialized for session {session.session_id}")
             except Exception as replay_error:
-                print(f"⚠️ Failed to save selective replays for session {session.session_id}: {replay_error}")
+                pass  # Silent failure for replay saving
             
             # Update session status
             session.status = 'completed'
@@ -574,11 +559,8 @@ class MultiAgentTrainer:
                     # Use GameReplayLogger's save method
                     if hasattr(env.unwrapped, 'replay_logger'):
                         replay_file_saved = env.unwrapped.replay_logger.save_replay(failed_replay_filename)
-                    
-                    if replay_file_saved:
-                        print(f"💾 Failed session replay saved: {replay_file_saved}")
             except Exception as replay_error:
-                print(f"⚠️ Failed to save replay for failed session {session.session_id}: {replay_error}")
+                pass  # Silent failure for failed session replay saving
             
             return {
                 "session_id": session.session_id,
@@ -595,7 +577,6 @@ class MultiAgentTrainer:
         session_scenarios_dir = os.path.join(os.path.dirname(self.config.config_dir), "ai", "session_scenarios")
         
         if not os.path.exists(session_scenarios_dir):
-            print("📁 No session scenarios directory found - nothing to clean")
             return
         
         # Find all scenario_*.json files
@@ -612,9 +593,7 @@ class MultiAgentTrainer:
                 os.remove(file_path)
                 deleted_count += 1
             except Exception as e:
-                print(f"⚠️ Failed to delete {file_path}: {e}")
-        
-        print(f"🗑️ Cleaned up {deleted_count} previous session scenario files")
+                pass
 
     def _create_agent_model(self, agent_key: str, training_config_name: str,
                            rewards_config_name: str, scenario_path: str) -> Tuple[DQN, Any]:
@@ -694,8 +673,6 @@ class MultiAgentTrainer:
     def _setup_session_callbacks(self, session: TrainingSession, model, episode_tracker: SelectiveEpisodeTracker, training_config_name: str = "default") -> List:
         """Setup training callbacks - simplified without evaluation callback."""
         callbacks = []
-        # No evaluation callback - we'll use direct PvP-style logging instead
-        print(f"🔧 No evaluation callbacks - using direct replay logging like PvP mode")
         return callbacks
 
     def _create_eval_env_for_session(self, session: TrainingSession):
@@ -739,13 +716,7 @@ class MultiAgentTrainer:
         # Wrap with Monitor for proper evaluation callback integration
         from stable_baselines3.common.monitor import Monitor
         eval_env = Monitor(enhanced_eval_env, allow_early_resets=True)
-        
-        # Debug: Check if replay logger is present
-        print(f"🔍 Eval env created: {type(eval_env).__name__} -> {type(enhanced_eval_env).__name__} -> {type(base_eval_env).__name__}")
-        if hasattr(enhanced_eval_env, 'replay_logger'):
-            print(f"✅ Replay logger found in enhanced_eval_env")
-        else:
-            print(f"❌ No replay logger in enhanced_eval_env")
+        pass
         
         return eval_env
 
@@ -807,17 +778,11 @@ class MultiAgentTrainer:
                             }
                         }
                         
-                        print(f"🔍 Tracking episode {episode+1}: {step_count} steps, {episode_reward:.2f} reward, {len(game_states)} states, {len(combat_log_entries)} combat entries")
                         episode_tracker.update_episode(step_count, episode_reward, replay_data)
                     else:
-                        print(f"❌ No replay logger found in environment for episode {episode+1}")
-                        print(f"   - env type: {type(env).__name__}")
-                        print(f"   - actual_env type: {type(actual_env).__name__}")
-                        print(f"   - actual_env attrs: {[attr for attr in dir(actual_env) if 'replay' in attr.lower()]}")
                         raise ValueError(f"No replay logger found in environment for episode {episode+1}")
                         
                 except Exception as replay_error:
-                    print(f"❌ Failed to capture replay for episode {episode+1}: {replay_error}")
                     raise ValueError(f"No replay data captured for episode {episode+1}: {replay_error}")
             # Check win condition
             if info.get('winner') == 1:  # AI won
