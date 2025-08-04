@@ -9,6 +9,7 @@ interface UnitStatusTableProps {
   clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
   gameMode?: 'pvp' | 'pve' | 'training';
+  onCollapseChange?: (collapsed: boolean) => void;
 }
 
 interface UnitRowProps {
@@ -138,7 +139,8 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
   selectedUnitId,
   clickedUnitId,
   onSelectUnit,
-  gameMode = 'pvp'
+  gameMode = 'pvp',
+  onCollapseChange
 }) => {
   // Collapse/expand state
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -180,7 +182,12 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
               <th className={`unit-status-player-header ${player === 1 ? 'unit-status-player-header--red' : ''}`} colSpan={17}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button
-                    onClick={() => setIsCollapsed(!isCollapsed)}
+                    onClick={() => {
+                      const newCollapsed = !isCollapsed;
+                      console.log(`UnitStatusTable Player ${player}: ${newCollapsed ? 'COLLAPSED' : 'EXPANDED'}`);
+                      setIsCollapsed(newCollapsed);
+                      onCollapseChange?.(newCollapsed);
+                    }}
                     style={{
                       background: 'rgba(0, 0, 0, 0.3)',
                       border: '1px solid rgba(0, 0, 0, 0.4)',

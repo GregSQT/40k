@@ -34,11 +34,28 @@ interface GameLogProps {
   events: GameLogEvent[];
   maxEvents?: number;
   getElapsedTime: (timestamp: Date) => string;
+  availableHeight?: number;
 }
 
-export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElapsedTime }) => {
-  // Display all events (newest first) - sort by timestamp descending
-  const displayedEvents = [...events].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElapsedTime, availableHeight = 220 }) => {
+  const [visibleRowCount, setVisibleRowCount] = React.useState(4);
+  const eventsContainerRef = React.useRef<HTMLDivElement>(null);
+  
+  // Calculate how many complete rows can fit dynamically
+  React.useEffect(() => {
+    const ROW_HEIGHT = 52; // Fixed height per log entry
+    const maxRows = Math.floor(availableHeight / ROW_HEIGHT);
+    const finalRowCount = Math.max(1, maxRows); // Show at least 1 row
+    
+    console.log(`GameLog DEBUG: availableHeight=${availableHeight}px, maxRows=${maxRows}, finalRowCount=${finalRowCount}`);
+    console.log(`GameLog: Setting container height to ${finalRowCount * 52}px`);
+    setVisibleRowCount(finalRowCount);
+  }, [availableHeight]);
+
+  // Display limited events (newest first) - sort by timestamp descending and limit to calculated rows
+  const displayedEvents = [...events]
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+    .slice(0, visibleRowCount);
 
   const getEventIcon = (type: GameLogEvent['type']): string => {
     switch (type) {
@@ -115,7 +132,14 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
             No events yet. Start playing to see the action log!
           </div>
         ) : (
-          <div className="game-log__events">
+          <div 
+            ref={eventsContainerRef}
+            className="game-log__events"
+            style={{
+              height: `${visibleRowCount * 52}px`, // Exact height for complete rows
+              overflow: 'hidden'
+            }}
+          >
             {displayedEvents.map((event) => (
               <div 
                 key={event.id} 

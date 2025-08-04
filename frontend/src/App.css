@@ -251,7 +251,7 @@ body {
   background: var(--bg-secondary);
   border: 1px solid #555;
   border-radius: var(--radius-lg);
-  margin-bottom: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm); /* Space A = 8px (original) */
 }
 
 .turn-phase-tracker-right .flex {
@@ -753,8 +753,8 @@ textarea:focus {
   border-radius: var(--radius-lg);
   padding: var(--spacing-md);
   color: var(--text-primary);
-  margin-top: var(--spacing-lg);
-  max-height: 320px;
+  margin-top: var(--spacing-sm); /* Space B = 8px (same as Space A) */
+  max-height: none; /* Remove height constraint */
   display: flex;
   flex-direction: column;
 }
@@ -801,6 +801,16 @@ textarea:focus {
   padding-right: 4px;
 }
 
+/* Ensure consistent log entry heights */
+.game-log-entry {
+  min-height: 52px; /* Fixed height per log entry */
+  max-height: 52px; /* Prevent entries from growing */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
 /* Custom Scrollbar */
 .game-log__events::-webkit-scrollbar {
   width: 6px;
@@ -822,12 +832,13 @@ textarea:focus {
 
 /* Game Log Entry */
 .game-log-entry {
-  margin-bottom: var(--spacing-sm);
-  padding: var(--spacing-sm);
+  margin-bottom: 2px; /* Reduce margin between log entries */
+  padding: 2px var(--spacing-sm); /* No vertical padding: 0px top/bottom, 8px left/right */
   border-radius: var(--radius-md);
   border-left: 3px solid #555;
   background: rgba(255, 255, 255, 0.02);
   transition: background-color var(--transition-fast);
+  min-height: auto; /* Remove any minimum height constraint */
 }
 
 .game-log-entry:hover {
@@ -838,6 +849,8 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
+  min-height: 0; /* Remove any minimum height constraints */
+  line-height: 1.1; /* Match the message line-height */
 }
 
 .game-log-entry__icon {
@@ -1100,27 +1113,21 @@ textarea:focus {
 }
 
 .game-log-entry__reward-value--positive {
+  font-size: var(--font-size-sm); /* Same as turn indicator */
   color: var(--color-success);
   font-weight: var(--font-weight-bold);
   background: rgba(54, 227, 107, 0.2);
-  padding: 2px 4px;
+  padding: 1px 4px; /* Same as turn indicator */
   border-radius: var(--radius-sm);
-  font-family: 'Courier New', monospace;
-  min-width: 32px;
-  display: inline-block;
-  text-align: center;
 }
 
 .game-log-entry__reward-value--negative {
+  font-size: var(--font-size-sm); /* Same as turn indicator */
   color: var(--color-danger);
   font-weight: var(--font-weight-bold);
   background: rgba(255, 68, 68, 0.2);
-  padding: 2px 4px;
+  padding: 1px 4px; /* Same as turn indicator */
   border-radius: var(--radius-sm);
-  font-family: 'Courier New', monospace;
-  min-width: 32px;
-  display: inline-block;
-  text-align: center;
 }
 
 .game-log-entry__reward-value--none {

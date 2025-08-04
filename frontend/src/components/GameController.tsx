@@ -34,6 +34,10 @@ export const GameController: React.FC<GameControllerProps> = ({
   const location = useLocation();
   const gameMode = location.pathname.includes('/pve') ? 'pve' : 
                    location.pathname.includes('/replay') ? 'training' : 'pvp';
+                   
+  // Track UnitStatusTable collapse states
+  const [player0Collapsed, setPlayer0Collapsed] = useState(false);
+  const [player1Collapsed, setPlayer1Collapsed] = useState(false);
   
   useEffect(() => {
     if (!initialUnits || initialUnits.length === 0) {
@@ -109,6 +113,37 @@ export const GameController: React.FC<GameControllerProps> = ({
 
   // Use original game actions without modification
   const gameActions = originalGameActions;
+
+  // Calculate available height for GameLog dynamically
+  const [logAvailableHeight, setLogAvailableHeight] = useState(220);
+  
+  React.useEffect(() => {
+    // Calculate space taken by UnitStatusTables
+    const HEADER_HEIGHT = 60; // TurnPhaseTracker height
+    const TABLE_HEADER_HEIGHT = 45; // Each table header
+    const ROW_HEIGHT = 35; // Each unit row height
+    const COLLAPSED_HEIGHT = 45; // Just header when collapsed
+    
+    // Count units per player
+    const player0Units = gameState.units.filter(u => u.player === 0 && (u.CUR_HP ?? u.HP_MAX) > 0).length;
+    const player1Units = gameState.units.filter(u => u.player === 1 && (u.CUR_HP ?? u.HP_MAX) > 0).length;
+    
+    // Calculate actual table heights
+    const player0Height = player0Collapsed ? COLLAPSED_HEIGHT : (TABLE_HEADER_HEIGHT + (player0Units * ROW_HEIGHT));
+    const player1Height = player1Collapsed ? COLLAPSED_HEIGHT : (TABLE_HEADER_HEIGHT + (player1Units * ROW_HEIGHT));
+    
+    // Assume total available space is ~800px, subtract used space
+    const TOTAL_SPACE = 800;
+    const usedSpace = HEADER_HEIGHT + player0Height + player1Height + 60; // 60px for margins/padding
+    const availableForLog = Math.max(100, TOTAL_SPACE - usedSpace); // Minimum 100px
+    
+    console.log(`Height calculation DEBUG:`);
+    console.log(`- Player0: collapsed=${player0Collapsed}, units=${player0Units}, height=${player0Height}px`);
+    console.log(`- Player1: collapsed=${player1Collapsed}, units=${player1Units}, height=${player1Height}px`);
+    console.log(`- Total space=${TOTAL_SPACE}px, used=${usedSpace}px, available=${availableForLog}px`);
+    console.log(`- Calculated rows: ${Math.floor(availableForLog / 52)}`);
+    setLogAvailableHeight(availableForLog);
+  }, [player0Collapsed, player1Collapsed, gameState.units]);
 
   // Calculate eligible units by calling the useGameActions.isUnitEligible function (no duplicate logic)
   const eligibleUnitIds = React.useMemo(() => {
@@ -239,6 +274,7 @@ export const GameController: React.FC<GameControllerProps> = ({
             setClickedUnitId(null);
           }}
           gameMode={gameMode}
+          onCollapseChange={setPlayer0Collapsed}
         />
       </ErrorBoundary>
 
@@ -253,6 +289,7 @@ export const GameController: React.FC<GameControllerProps> = ({
             setClickedUnitId(null);
           }}
           gameMode={gameMode}
+          onCollapseChange={setPlayer1Collapsed}
         />
       </ErrorBoundary>
 
@@ -261,6 +298,7 @@ export const GameController: React.FC<GameControllerProps> = ({
         <GameLog 
           events={gameLog.events}
           getElapsedTime={gameLog.getElapsedTime}
+          availableHeight={logAvailableHeight}
         />
       </ErrorBoundary>
     </>

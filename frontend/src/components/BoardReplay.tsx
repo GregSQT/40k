@@ -292,6 +292,37 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
   // Acting unit ID for automatic highlighting
   const [actingUnitId, setActingUnitId] = useState<number | null>(null);
   
+  // Track UnitStatusTable collapse states for Training Log height adjustment
+  const [player0Collapsed, setPlayer0Collapsed] = useState(false);
+  const [player1Collapsed, setPlayer1Collapsed] = useState(false);
+  
+  // Calculate available height for Training Log dynamically
+  const [logAvailableHeight, setLogAvailableHeight] = useState(220);
+  
+  React.useEffect(() => {
+    // Calculate space taken by UnitStatusTables
+    const CONTROLS_HEIGHT = 120; // Replay controls + file browser
+    const TABLE_HEADER_HEIGHT = 45; // Each table header
+    const ROW_HEIGHT = 35; // Each unit row height
+    const COLLAPSED_HEIGHT = 45; // Just header when collapsed
+    
+    // Count units per player
+    const player0Units = currentUnits.filter(u => u.player === 0 && u.alive).length;
+    const player1Units = currentUnits.filter(u => u.player === 1 && u.alive).length;
+    
+    // Calculate actual table heights
+    const player0Height = player0Collapsed ? COLLAPSED_HEIGHT : (TABLE_HEADER_HEIGHT + (player0Units * ROW_HEIGHT));
+    const player1Height = player1Collapsed ? COLLAPSED_HEIGHT : (TABLE_HEADER_HEIGHT + (player1Units * ROW_HEIGHT));
+    
+    // Assume total available space is ~650px (more realistic), subtract used space
+    const TOTAL_SPACE = 650;
+    const usedSpace = CONTROLS_HEIGHT + player0Height + player1Height + 80; // 80px for margins/padding
+    const availableForLog = Math.max(150, TOTAL_SPACE - usedSpace); // Minimum 150px (3 rows)
+    
+    console.log(`BoardReplay height calculation: P0=${player0Height}, P1=${player1Height}, available=${availableForLog}`);
+    setLogAvailableHeight(availableForLog);
+  }, [player0Collapsed, player1Collapsed, currentUnits]);
+  
   // Move preview state for pathfinding visualization
   const [movePreview, setMovePreview] = useState<{
     fromCol: number;
@@ -1730,6 +1761,7 @@ const validateUnitRegistry = () => {
               clickedUnitId={actingUnitId}
               onSelectUnit={() => {}} // No manual selection in replay mode
               gameMode="training"
+              onCollapseChange={setPlayer0Collapsed}
             />
           </ErrorBoundary>
 
@@ -1767,6 +1799,7 @@ const validateUnitRegistry = () => {
               clickedUnitId={actingUnitId}
               onSelectUnit={() => {}} // No manual selection in replay mode
               gameMode="training"
+              onCollapseChange={setPlayer1Collapsed}
             />
           </ErrorBoundary>
         </>
@@ -1784,8 +1817,32 @@ const validateUnitRegistry = () => {
           {battleLog.length === 0 ? (
             <div className="game-log__empty">No actions yet...</div>
           ) : (
-            <div className="game-log__events">
+            <div 
+              className="game-log__events"
+              style={{
+                maxHeight: `${Math.floor(logAvailableHeight / 52) * 52}px`, // Exact height for complete rows
+                height: `${Math.floor(logAvailableHeight / 52) * 52}px`, // Also set height
+                overflow: 'hidden'
+              }}
+            >
               {(() => {
+                // Calculate how many events to show based on available height
+                const ROW_HEIGHT = 60; // Increased to account for margins between entries
+                const maxEvents = Math.max(1, Math.floor(logAvailableHeight / ROW_HEIGHT));
+                const calculatedHeight = Math.floor(logAvailableHeight / 52) * 52;
+                console.log(`Training Log CSS: Setting height to ${calculatedHeight}px (${Math.floor(logAvailableHeight / 52)} rows)`);
+                
+                // Debug actual DOM measurements
+                setTimeout(() => {
+                  const container = document.querySelector('.game-log__events');
+                  const entries = document.querySelectorAll('.game-log-entry');
+                  if (container && entries.length > 0) {
+                    console.log(`DOM DEBUG: Container height=${container.scrollHeight}px, computed height=${window.getComputedStyle(container).height}`);
+                    console.log(`DOM DEBUG: ${entries.length} entries, first entry height=${entries[0].getBoundingClientRect().height}px`);
+                    console.log(`DOM DEBUG: Container style.height="${(container as HTMLElement).style.height}", style.maxHeight="${(container as HTMLElement).style.maxHeight}"`);
+                  }
+                }, 100);
+                
                 // First sort the entire battleLog by ID, then slice
                 const sortedBattleLog = [...battleLog].sort((a: any, b: any) => {
                   const aId = parseInt(a.id) || 0;
@@ -1793,8 +1850,13 @@ const validateUnitRegistry = () => {
                   return aId - bId; // Ascending order (chronological)
                 });
                 
-                // Then slice to get events up to current step, and reverse for display (newest first)
-                const eventsToDisplay = sortedBattleLog.slice(0, currentStep + 1).reverse();
+                // Then slice to get events up to current step, reverse for display, and limit by maxEvents
+                const eventsToDisplay = sortedBattleLog
+                  .slice(0, currentStep + 1)
+                  .reverse()
+                  .slice(0, maxEvents);
+                
+                console.log(`Training Log DEBUG: logAvailableHeight=${logAvailableHeight}, maxEvents=${maxEvents}, showing ${eventsToDisplay.length} events`);
                 
                 return eventsToDisplay;
               })().map((event: any, index: number) => {
