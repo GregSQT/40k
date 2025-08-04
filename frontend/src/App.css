@@ -1119,6 +1119,7 @@ textarea:focus {
   background: rgba(54, 227, 107, 0.2);
   padding: 1px 4px; /* Same as turn indicator */
   border-radius: var(--radius-sm);
+  align-self: center;
 }
 
 .game-log-entry__reward-value--negative {
@@ -1128,6 +1129,7 @@ textarea:focus {
   background: rgba(255, 68, 68, 0.2);
   padding: 1px 4px; /* Same as turn indicator */
   border-radius: var(--radius-sm);
+  align-self: center;
 }
 
 .game-log-entry__reward-value--none {
@@ -1141,6 +1143,10 @@ textarea:focus {
 .game-log-entry__reward {
   flex-shrink: 0;
   margin-right: var(--spacing-xs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
 }
 
 /* File Browser Controls */
