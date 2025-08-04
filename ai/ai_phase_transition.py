@@ -102,7 +102,14 @@ class PhaseTransitionManager:
     def _execute_enemy_turn(self):
         """Execute enemy AI turn - delegate to environment's enemy AI."""
         if hasattr(self.env, '_execute_enemy_turn'):
-            self.env._execute_enemy_turn()
+            if not self.quiet:
+                print(f"🤖 PhaseTransitionManager executing enemy turn for turn {self.env.current_turn}")
+            actions_taken = self.env._execute_enemy_turn()
+            if not self.quiet:
+                print(f"🤖 PhaseTransitionManager: Enemy turn completed with {actions_taken} actions")
+        else:
+            if not self.quiet:
+                print(f"❌ PhaseTransitionManager: No _execute_enemy_turn method found")
     
     def _apply_phase_penalties(self):
         """Apply penalties for units that couldn't act in their optimal phase."""
@@ -145,17 +152,22 @@ class PhaseTransitionManager:
                         self.env._record_penalty_action(unit, "no_combat_targets", penalty)
     
     def _log_turn_start(self):
-        """Log turn start for debugging."""
+        """Log turn start for debugging and replay consistency."""
         if not self.quiet:
             print(f"🔄 Turn {self.env.current_turn} begins - AI player starts")
         
-        # Update replay logger if available AND ensure it stays in sync
+        # CRITICAL: Force replay logger synchronization to prevent turn jumps
         if hasattr(self.env, 'replay_logger') and self.env.replay_logger:
+            # Ensure replay logger matches environment turn
             if hasattr(self.env.replay_logger, 'current_turn'):
+                old_replay_turn = getattr(self.env.replay_logger, 'current_turn', 0)
                 self.env.replay_logger.current_turn = self.env.current_turn
-            # Force replay logger to capture turn progression
-            if hasattr(self.env.replay_logger, '_update_turn_phase'):
-                self.env.replay_logger._update_turn_phase()
+                if not self.quiet and old_replay_turn != self.env.current_turn:
+                    print(f"🔄 Replay logger turn sync: {old_replay_turn} -> {self.env.current_turn}")
+            
+            # Force absolute turn tracking to prevent jumps
+            if hasattr(self.env.replay_logger, 'absolute_turn'):
+                self.env.replay_logger.absolute_turn = self.env.current_turn
     
     def _log_phase_change(self):
         """Log phase changes for debugging."""

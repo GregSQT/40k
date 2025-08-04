@@ -3,7 +3,7 @@
     "description": "Optimized parameters for complex reward learning",
     "_training_duration_comments": {
       "total_timesteps": "Total number of environment steps to train for (1M steps = substantial learning)",
-      "max_steps_per_episode": "Maximum steps before episode is truncated (prevents infinite games)",
+      "max_steps_per_episode": "Maximum steps before episode is truncated (800 steps for longer tactical episodes)",
       "eval_freq": "How often to evaluate model performance (every 10k steps = 100 evaluations total)"
     },
     "_callback_comments": {
@@ -31,7 +31,7 @@
   "default": {
   "description": "Balanced training for active AI learning",
   "total_timesteps": 100000,
-    "max_steps_per_episode": 200,
+    "max_steps_per_episode": 800,
     "eval_freq": 5000,
     "callback_params": {
       "eval_deterministic": true,
@@ -67,7 +67,7 @@
   "conservative": {
     "description": "Conservative increase from original",
     "total_timesteps": 100000,
-    "max_steps_per_episode": 200,
+    "max_steps_per_episode": 800,
     "eval_freq": 9999,
     "callback_params": {
       "eval_deterministic": true,
@@ -103,7 +103,7 @@
   "aggressive": {
     "description": "Aggressive parameters for faster learning",
     "total_timesteps": 2000000,
-    "max_steps_per_episode": 200,
+    "max_steps_per_episode": 800,
     "eval_freq": 9999,
     "callback_params": {
       "eval_deterministic": true,
@@ -139,7 +139,7 @@
   "debug": {
     "description": "Ultra minimal to force working",
     "total_timesteps": 1000,
-    "max_steps_per_episode": 200,
+    "max_steps_per_episode": 800,
     "eval_freq": 500,
     "callback_params": {
       "eval_deterministic": true,
@@ -175,7 +175,7 @@
   "emergency": {
     "description": "Emergency config for broken training recovery",
     "total_timesteps": 100000,
-    "max_steps_per_episode": 200,
+    "max_steps_per_episode": 800,
     "eval_freq": 500,
     "callback_params": {
       "eval_deterministic": true,

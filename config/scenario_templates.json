@@ -9,7 +9,7 @@
     },
     "deployment_zones": {
       "0": [[15,14], [18,21]],
-      "1": [[8,2], [11,8]]
+      "1": [[10,8], [12,10]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -24,7 +24,7 @@
     },
     "deployment_zones": {
       "0": [[15,14], [18,21]],
-      "1": [[8,2], [11,8]]
+      "1": [[10,8], [12,10]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -39,7 +39,7 @@
     },
     "deployment_zones": {
       "0": [[15,14], [18,21]],
-      "1": [[8,2], [11,8]]
+      "1": [[10,8], [12,10]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -54,7 +54,7 @@
     },
     "deployment_zones": {
       "0": [[15,14], [18,21]],
-      "1": [[8,2], [11,8]]
+      "1": [[10,8], [12,10]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -69,7 +69,7 @@
     },
     "deployment_zones": {
       "0": [[15,14], [18,21]],
-      "1": [[8,2], [11,8]]
+      "1": [[10,8], [12,10]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -84,7 +84,7 @@
     },
     "deployment_zones": {
       "0": [[15,14], [18,21]],
-      "1": [[8,2], [11,8]]
+      "1": [[10,8], [12,10]]
     },
     "difficulty": "easy",
     "training_focus": "solo"

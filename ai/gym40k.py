@@ -25,6 +25,7 @@ sys.path.insert(0, str(project_root))
 
 from ai.unit_registry import UnitRegistry
 from ai.unit_manager import UnitManager
+from ai.bot_manager import BotManager
 try:
     from ai.ai_phase_transition import PhaseTransitionManager
 except ImportError as e:
@@ -277,6 +278,8 @@ class W40KEnv(gym.Env):
         # Initialize phase transition manager (mirrors frontend usePhaseTransition.ts)
         try:
             self.phase_manager = PhaseTransitionManager(self)
+            # Initialize bot manager for enemy AI with proper logging
+            self.bot_manager = BotManager(self)
         except Exception as e:
             print(f"❌ CRITICAL: Failed to initialize PhaseTransitionManager: {e}")
             raise
@@ -956,7 +959,7 @@ class W40KEnv(gym.Env):
         
         # Keep advancing phases until we find eligible units or game ends
         phase_advances = 0
-        max_phase_advances = 32  # Allow more phase advances for longer games
+        max_phase_advances = 120  # Allow sufficient phase advances for 800-step episodes
         
         while not eligible_units and not self.game_over and phase_advances < max_phase_advances:
             self.phase_manager.advance_phase()
@@ -1148,9 +1151,6 @@ class W40KEnv(gym.Env):
             if not hasattr(self, 'turn_limit_penalty') or self.turn_limit_penalty is None:
                 self.turn_limit_penalty = self.config.get_turn_limit_penalty()
             reward += self.turn_limit_penalty
-            print(f"🏁 Episode ended: Turn limit reached ({self.current_turn}/{self.max_turns})")
-        
-        # Replay recording handled by GameReplayIntegration wrapper
         pass
         
         # Note: Don't clear explicit unit tracking here - GameReplayIntegration wrapper needs it
@@ -1311,8 +1311,15 @@ class W40KEnv(gym.Env):
                 raise ValueError(f"Unit {unit.get('unit_type', 'unknown')} has rng_nb=0 (melee-only) but attempting to shoot - this violates AI_INSTRUCTIONS.md no fallbacks policy")
             
             targets = self._get_shooting_targets(unit)
-            # Re-validate targets at moment of use - they might have died since selection
-            alive_targets = [t for t in targets if self.unit_manager.is_target_valid(t)]
+            # CRITICAL: Final validation to prevent shooting dead units
+            alive_targets = []
+            for t in targets:
+                if self.unit_manager.is_target_valid(t):
+                    alive_targets.append(t)
+                else:
+                    if not self.quiet:
+                        print(f"⚠️ Removing dead target {t.get('id')} from shooting list")
+            
             if alive_targets:
                 target = alive_targets[0]
                 
@@ -1827,6 +1834,10 @@ class W40KEnv(gym.Env):
                     nearest = enemy
         
         return nearest
+    
+    def _is_friendly_unit(self, unit1, unit2):
+        """Check if two units are on the same team."""
+        return unit1.get("player", -1) == unit2.get("player", -2)
     
     def _is_target_adjacent_to_friendly_unit(self, target):
         """Check if target enemy is adjacent to any friendly unit (Rule 2)."""
@@ -2403,186 +2414,18 @@ class W40KEnv(gym.Env):
         return move_range  # Simplified - would need full move calculation
 
     def _execute_enemy_turn(self):
-        """Execute enemy turn using improved scripted behavior following proper phase mechanics."""
-        enemy_units_alive = self.unit_manager.get_alive_enemy_units()
+        """Execute enemy turn using centralized BotManager with proper logging."""
+        if not hasattr(self, 'bot_manager'):
+            print(f"❌ No bot_manager available for enemy turn")
+            return
         
-        if not enemy_units_alive:
-            return  # No enemies to act
-        
-        # Execute actions based on current phase
-        actions_taken = 0
-        max_actions = len(enemy_units_alive)  # Allow all enemies to act once per phase
-        
-        for enemy in enemy_units_alive[:]:  # Use slice copy to avoid modification during iteration
-            if actions_taken >= max_actions:
-                break
-            
-            # Find best target (not just nearest)
-            target = self._get_best_enemy_target(enemy)
-            if not target or not self.unit_manager.is_target_valid(target):
-                continue
-            
-            action_taken = False
-            
-            # Phase-based enemy behavior
-            if self.current_phase == "move":
-                action_taken = self._enemy_move_phase(enemy, target)
-            elif self.current_phase == "shoot":
-                action_taken = self._enemy_shoot_phase(enemy, target)
-            elif self.current_phase == "charge":
-                action_taken = self._enemy_charge_phase(enemy, target)
-            elif self.current_phase == "combat":
-                action_taken = self._enemy_combat_phase(enemy, target)
-            
-            if action_taken:
-                actions_taken += 1
-    
-    def _get_best_enemy_target(self, enemy):
-        """Get best target for enemy unit (not just nearest)."""
-        ai_units = self.unit_manager.get_alive_ai_units()
-        if not ai_units:
-            return None
-        
-        # Priority 1: Lowest HP unit (finish off wounded)
-        wounded_units = [u for u in ai_units if u.get("cur_hp") < u.get("hp_max")]
-        if wounded_units:
-            return min(wounded_units, key=lambda u: u.get("cur_hp"))
-        
-        # Priority 2: Nearest unit
-        return min(ai_units, key=lambda u: get_hex_distance(enemy, u))
-    
-    def _enemy_move_phase(self, enemy, target):
-        """Enemy movement behavior with proper pathfinding validation."""
-        distance = get_hex_distance(enemy, target)
-        
-        # Don't move if already adjacent or in shooting range
-        if distance <= 1:
-            return False
-        
-        enemy_range = enemy.get("rng_rng")
-        if distance <= enemy_range and enemy.get("rng_dmg", 0) > 0:
-            return False  # In shooting range, save movement
-        
-        # Calculate desired target position using shared logic
-        target_col, target_row = self._calculate_bot_target_position(enemy, target)
-        
-        # Store original position for logging
-        old_col, old_row = enemy["col"], enemy["row"]
-        
-        # Use shared movement validation (same as AI player)
-        movement_succeeded = self._execute_validated_movement(enemy, target_col, target_row)
-        
-        if not movement_succeeded:
-            # Path blocked by walls - don't move
-            return False
-        
-        # Log movement
-        if self.game_logger:
-            self.game_logger.log_move(enemy, old_col, old_row, enemy["col"], enemy["row"], 
-                                        self.current_turn, 0.0, 0)
-        
-        return True
-    
-    def _enemy_shoot_phase(self, enemy, target):
-        """Enemy shooting behavior."""
-        enemy_range = enemy.get("rng_rng")
-        enemy_damage = enemy.get("rng_dmg")
-        
-        if not enemy_damage or enemy_damage <= 0:
-            return False  # No ranged weapons
-        
-        distance = get_hex_distance(enemy, target)
-        if distance > enemy_range:
-            return False  # Out of range
-        
-        if are_units_adjacent(enemy, target):
-            return False  # Too close for shooting
-        
-        # Execute shooting
-        result = execute_shooting_sequence(enemy, target)
-        target_died = self.unit_manager.apply_shooting_damage(enemy, target, result)
-        
-        # Log shooting
-        if self.game_logger:
-            self.game_logger.log_shoot(enemy, target, result, self.current_turn, 0.0, 4)
-        
-        return True
-    
-    def _enemy_charge_phase(self, enemy, target):
-        """Enemy charge behavior."""
-        distance = get_hex_distance(enemy, target)
-        move_range = enemy.get("move")
-        
-        # Can charge if target is within move range but not adjacent
-        if distance <= 1 or distance > move_range:
-            return False
-        
-        # Find adjacent position to target using pathfinding validation
-        old_col, old_row = enemy["col"], enemy["row"]
-        
-        # Find adjacent position to target
-        possible_positions = [
-            (target["col"] + 1, target["row"]),
-            (target["col"] - 1, target["row"]),
-            (target["col"], target["row"] + 1),
-            (target["col"], target["row"] - 1)
-        ]
-        
-        # Choose closest valid position that can be reached via pathfinding
-        valid_positions = [(c, r) for c, r in possible_positions 
-                          if 0 <= c < self.board_size[0] and 0 <= r < self.board_size[1]]
-        
-        if valid_positions:
-            # Try each position, starting with the closest
-            sorted_positions = sorted(valid_positions, key=lambda pos: abs(pos[0] - old_col) + abs(pos[1] - old_row))
-            
-            for target_col, target_row in sorted_positions:
-                # Use shared movement validation to ensure path is clear
-                if self._execute_validated_movement(enemy, target_col, target_row):
-                    # Charge succeeded via valid path
-                    if self.game_logger:
-                        self.game_logger.log_charge(enemy, target, old_col, old_row, 
-                                                  enemy["col"], enemy["row"], self.current_turn, 0.0, 5)
-                    return True
-        
-        return False
-    
-    def _enemy_combat_phase(self, enemy, target):
-        """Enemy combat behavior."""
-        combat_range = enemy.get("cc_rng")
-        combat_damage = enemy.get("cc_dmg")
-        
-        if not combat_damage or combat_damage <= 0:
-            return False  # No melee weapons
-        
-        distance = get_hex_distance(enemy, target)
-        if distance > combat_range:
-            return False  # Out of combat range
-        
-        # Execute combat
-        from shared.gameRules import execute_combat_sequence
-        result = execute_combat_sequence(enemy, target)
-        target_died = self.unit_manager.apply_combat_damage(enemy, target, result)
-        
-        # Log combat
-        if self.game_logger:
-            self.game_logger.log_combat(enemy, target, result, self.current_turn, 0.0, 6)
-        
-        return True
+        enemy_units = self.unit_manager.get_alive_enemy_units()
+        # print(f"🤖 Bot turn: {len(enemy_units)} enemy units, Phase: {self.current_phase}")
+           
+        # Delegate to centralized bot manager with proper logging
+        actions_taken = self.bot_manager.execute_bot_turn()
+        # print(f"🤖 Bot completed turn: {actions_taken} actions taken")
 
-    def _get_nearest_ai_unit(self, enemy):
-        """Get nearest alive AI unit for enemy targeting - EXACT PvP mode behavior."""
-        nearest = None
-        min_dist = float('inf')
-        
-        # Use UnitManager's cleaned list to ensure only alive units
-        for unit in self.unit_manager.get_alive_ai_units():
-            dist = get_hex_distance(enemy, unit)
-            if dist < min_dist:
-                min_dist = dist
-                nearest = unit
-        
-        return nearest
 
     def _record_action(self, unit, action_type, reward):
         """DISABLED - Using GameReplayIntegration only."""
