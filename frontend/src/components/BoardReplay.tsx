@@ -300,9 +300,9 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
   // Calculate available height for Training Log dynamically
   const [logAvailableHeight, setLogAvailableHeight] = useState(0);
   
-  React.useEffect(() => {
-    // Wait for DOM to render, then measure actual heights - NO HARDCODED VALUES!
-    const timer = setTimeout(() => {
+  // Extract log height calculation into reusable function
+  const calculateAndApplyLogHeight = useCallback(() => {
+    try {
       // Dynamically measure actual DOM element heights using more robust selectors
       const replayControls = document.querySelector('.replay-controls');
       const allTables = document.querySelectorAll('.unit-status-table-container');
@@ -314,12 +314,11 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
       const player0Table = allTables[0];
       const player1Table = allTables[1];
       
-      // Throw errors if critical elements not found - NO FALLBACKS!
-      if (!replayControls) throw new Error('Replay controls element not found');
-      if (!gameLogHeader) throw new Error('GameLog header element not found in BoardReplay');
-      if (!rightColumn) throw new Error('Right column container not found');
-      if (!gameLogContainer) throw new Error('Game log container not found');
-      if (allTables.length < 2) throw new Error(`Expected 2 unit tables, found ${allTables.length}`);
+      // Early return if critical elements not found (instead of throwing)
+      if (!replayControls || !gameLogHeader || !rightColumn || !gameLogContainer || allTables.length < 2) {
+        console.warn('Some elements not found for log height calculation, skipping...');
+        return;
+      }
       
       // Get actual heights from DOM measurements
       const controlsHeight = replayControls.getBoundingClientRect().height;
@@ -334,61 +333,77 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
       // Current log start position = bottom of player 1 table + log header
       const logStartY = player1Rect.bottom + gameLogHeaderHeight;
       
-      // Calculate board canvas height to align log with board bottom  
-      if (!boardConfig?.cols) throw new Error('boardConfig.cols not found');
-      if (!boardConfig?.rows) throw new Error('boardConfig.rows not found');
-      if (!boardConfig?.hex_radius) throw new Error('boardConfig.hex_radius not found');
-      if (!boardConfig?.margin) throw new Error('boardConfig.margin not found');
-      
-      const BOARD_COLS = boardConfig.cols;
-      const BOARD_ROWS = boardConfig.rows;
-      const HEX_RADIUS = boardConfig.hex_radius;
-      const MARGIN = boardConfig.margin;
-      const HEX_WIDTH = 1.5 * HEX_RADIUS;
-      const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
-      const HEX_HORIZ_SPACING = HEX_WIDTH;
-      const HEX_VERT_SPACING = HEX_HEIGHT;
       // Use configurable right column bottom position for target bottom  
       if (!boardConfig?.display?.right_column_bottom_offset) {
-        throw new Error('boardConfig.display.right_column_bottom_offset not found in config');
+        console.warn('boardConfig.display.right_column_bottom_offset not found, using fallback');
+        return;
       }
       
       const fixedBottomPosition = boardConfig.display.right_column_bottom_offset;
       
-      // Available space = from current log position to fixed bottom position
-      let availableForLog = Math.max(100, fixedBottomPosition - logStartY);
-      
-      // Use calculated space without arbitrary constraints
-      // availableForLog is already calculated correctly above
+      // ALWAYS expand log to reach the hardcoded bottom position (250px from top)
+      // Calculate how much space we need to reach exactly that position
+      const targetLogBottom = fixedBottomPosition;
+      const availableForLog = Math.max(100, targetLogBottom - logStartY);
       
       // Debug the actual measurements
       console.log(`DEBUG: fixedBottomPosition=${fixedBottomPosition}, logStartY=${logStartY}`);
-      console.log(`DEBUG: calculated availableForLog=${availableForLog}px`);
-      
-      // Ensure minimum space and apply height constraint to prevent horizontal splitting
-      if (availableForLog <= 0) {
-        throw new Error(`Invalid available log space: ${availableForLog}px. Check right column layout.`);
-      }
+      console.log(`DEBUG: targetLogBottom=${targetLogBottom}, calculated availableForLog=${availableForLog}px`);
+      console.log(`DEBUG: Log will expand from ${logStartY} to ${logStartY + availableForLog} (target: ${targetLogBottom})`);
       
       const logContainer = document.querySelector('.game-log__events') as HTMLElement;
+      const gameLogContent = document.querySelector('.game-log__content') as HTMLElement;
+      const gameLogWrapper = document.querySelector('.game-log') as HTMLElement;
       const sampleLogEntry = document.querySelector('.game-log-entry');
-      if (logContainer && sampleLogEntry) {
+      
+      if (logContainer && gameLogContent && gameLogWrapper && sampleLogEntry) {
         const entryHeight = sampleLogEntry.getBoundingClientRect().height;
-        if (entryHeight <= 0) throw new Error('Log entry height measurement failed');
-        
-        // Use full available space without row constraints
-        logContainer.style.height = `${availableForLog}px`;
-        logContainer.style.maxHeight = `${availableForLog}px`;
-        logContainer.style.overflowY = 'auto';
-        console.log(`Applied dynamic height: ${availableForLog}px (full available space)`);
+        if (entryHeight > 0) {
+          // Apply height to all log components to ensure proper expansion
+          gameLogWrapper.style.height = 'auto';
+          gameLogWrapper.style.maxHeight = 'none';
+          gameLogWrapper.style.minHeight = `${availableForLog + 50}px`; // +50 for header
+          gameLogContent.style.height = `${availableForLog}px`;
+          gameLogContent.style.maxHeight = `${availableForLog}px`;
+          gameLogContent.style.flex = 'none';
+          logContainer.style.height = `${availableForLog}px`;
+          logContainer.style.maxHeight = `${availableForLog}px`;
+          logContainer.style.overflowY = 'auto';
+          console.log(`Applied dynamic height: ${availableForLog}px to all log components`);
+        }
       }
       
       console.log(`BoardReplay height calculation: Controls=${controlsHeight}px, P0=${player0Height}px, P1=${player1Height}px, LogHeader=${gameLogHeaderHeight}px, available=${availableForLog}px`);
       setLogAvailableHeight(availableForLog);
-    }, 100); // Reduced delay for faster response to table changes
+    } catch (error) {
+      console.error('Error calculating log height:', error);
+    }
+  }, [boardConfig]);
+
+  // Effect for initial calculation and when layout changes
+  React.useEffect(() => {
+    // Multiple recalculations to handle DOM timing issues
+    const timer1 = setTimeout(calculateAndApplyLogHeight, 50);
+    const timer2 = setTimeout(calculateAndApplyLogHeight, 150);
+    const timer3 = setTimeout(calculateAndApplyLogHeight, 300);
     
-    return () => clearTimeout(timer);
-  }, [player0Collapsed, player1Collapsed, currentUnits, battleLog.length]);
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+    };
+  }, [player0Collapsed, player1Collapsed, currentUnits.length, battleLog.length, calculateAndApplyLogHeight]);
+
+  // Additional effect for immediate recalculation when units die
+  React.useEffect(() => {
+    // Immediate recalculation when alive unit count changes
+    const aliveUnits = currentUnits.filter(unit => unit.alive);
+    if (aliveUnits.length !== currentUnits.length) {
+      // Units have died, recalculate immediately and with delays
+      setTimeout(calculateAndApplyLogHeight, 25);
+      setTimeout(calculateAndApplyLogHeight, 100);
+    }
+  }, [currentUnits, calculateAndApplyLogHeight]);
   
   // Move preview state for pathfinding visualization
   const [movePreview, setMovePreview] = useState<{

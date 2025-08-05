@@ -53,7 +53,7 @@
       "charge_target_border_width": 3,
       "default_border_width": 2,
       "canvas_border": "1px solid #333",
-      "right_column_bottom_offset": 250
+      "right_column_bottom_offset": 650
     }
   }
 }
