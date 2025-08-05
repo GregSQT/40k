@@ -348,7 +348,7 @@ export class UnitRenderer {
     const sliceWidth = finalBarWidth / unit.HP_MAX;
     for (let i = 0; i < unit.HP_MAX; i++) {
       const slice = new PIXI.Graphics();
-      const color = i < displayHP ? parseColor(boardConfig.colors.hp_full) : parseColor(boardConfig.colors.hp_damaged);
+      const color = i < displayHP ? (unit.player === 0 ? 0x4da6ff : 0xff4d4d) : parseColor(boardConfig.colors.hp_damaged);
       slice.beginFill(color, 1);
       slice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
       slice.endFill();

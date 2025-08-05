@@ -1511,7 +1511,51 @@ class W40KEnv(gym.Env):
                     return unit_rewards["base_actions"]["wait"]
                 
                 old_col, old_row = unit["col"], unit["row"]
-                unit["col"], unit["row"] = target["col"], target["row"]
+
+                # Calculate charge distance and validate charge attempt
+                distance = max(abs(unit["col"] - target["col"]), abs(unit["row"] - target["row"]))
+                
+                # Roll 2d6 for charge distance (W40K rules)
+                from shared.gameRules import roll_d6
+                charge_roll = roll_d6() + roll_d6()
+
+                if distance <= 1:
+                    # Already adjacent - cannot charge
+                    charge_succeeded = False
+                elif distance > charge_roll:
+                    # Charge roll too low to reach target
+                    charge_succeeded = False
+                else:
+                    # Find valid adjacent position using hex grid (6 positions)
+                    adjacent_positions = [
+                        (target["col"] + 1, target["row"]),      # East
+                        (target["col"] - 1, target["row"]),      # West  
+                        (target["col"], target["row"] + 1),      # South
+                        (target["col"], target["row"] - 1),      # North
+                        (target["col"] + 1, target["row"] - 1),  # Northeast (odd cols)
+                        (target["col"] - 1, target["row"] + 1)   # Southwest (even cols)
+                    ]
+                    
+                    # Find valid adjacent position using pathfinding
+                    charge_succeeded = False
+                    for target_col, target_row in adjacent_positions:
+                        if (0 <= target_col < self.board_size[0] and 
+                            0 <= target_row < self.board_size[1]):
+                            # Check if this position is within charge roll distance
+                            move_distance = max(abs(unit["col"] - target_col), abs(unit["row"] - target_row))
+                            if move_distance <= charge_roll:
+                                # Use pathfinding validation to respect walls
+                                if self._execute_validated_movement(unit, target_col, target_row):
+                                    charge_succeeded = True
+                                    break
+
+                if not charge_succeeded:
+                    # Charge failed due to walls/obstacles, but still counts as charged
+                    unit["has_charged"] = True
+                    self.charged_units.add(unit["id"])
+                    if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
+                        raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
+                    return unit_rewards["base_actions"]["wait"]
 
                 if "base_actions" not in unit_rewards or "charge_success" not in unit_rewards["base_actions"]:
                     raise KeyError(f"Missing 'base_actions.charge_success' in rewards config for unit type {unit['unit_type']}")
