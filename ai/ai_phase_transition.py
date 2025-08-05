@@ -46,6 +46,11 @@ class PhaseTransitionManager:
         if current_phase_idx < len(self.phase_order) - 1:
             # Move to next phase within same player's turn
             self.env.current_phase = self.phase_order[current_phase_idx + 1]
+            
+            # CRITICAL FIX: Reset unit status flags when entering movement phase
+            if self.env.current_phase == "move":
+                self._reset_unit_action_flags()
+            
             self._log_phase_change()
         else:
             # End of all phases - handle player/turn transition
@@ -60,21 +65,19 @@ class PhaseTransitionManager:
         old_player = self.env.current_player
         self.env.current_player = 1 - self.env.current_player
         
-        # DEBUG: Force logging of player transitions with unit counts
+        # Reduced verbosity: Only log major transitions
         if not self.quiet:
             ai_units = len(self.env.unit_manager.get_alive_ai_units())
             enemy_units = len(self.env.unit_manager.get_alive_enemy_units())
-            print(f"🔄 Player transition: {old_player} -> {self.env.current_player} (AI:{ai_units}, Enemy:{enemy_units})")
+            print(f"🔄 P{old_player}→P{self.env.current_player} (AI:{ai_units}/E:{enemy_units})")
         
-        # CRITICAL FIX: Turn increment when Player 1 starts move phase
+        # CRITICAL FIX: Turn increment when Player 1 starts move phase  
         if self.env.current_player == 1 and self.env.current_phase == "move":
             # Player 1 starting move phase = new turn begins
             old_turn = self.env.current_turn
             self.env.current_turn += 1
             if not self.quiet:
-                print(f"🔄 TURN INCREMENT: {old_turn} -> {self.env.current_turn}")
-                print(f"   AI units: {len(self.env.unit_manager.get_alive_ai_units())}")
-                print(f"   Enemy units: {len(self.env.unit_manager.get_alive_enemy_units())}")
+                print(f"🔄 Turn {old_turn}→{self.env.current_turn}")
             self._reset_turn_state()
             self._log_turn_start()  # Log AFTER turn increment, while current_player is still 1
             
@@ -95,12 +98,20 @@ class PhaseTransitionManager:
         self.env.charged_units.clear()
         self.env.attacked_units.clear()
         
-        # Reset unit flags for all units
+        # Reset unit flags handled by _reset_unit_action_flags()
+        self._reset_unit_action_flags()
+    
+    def _reset_unit_action_flags(self):
+        """Reset unit action flags - called at movement phase start AND turn transition."""
         for unit in self.env.unit_manager.get_alive_units():
             unit["has_moved"] = False
             unit["has_shot"] = False
             unit["has_charged"] = False
             unit["has_attacked"] = False
+        
+        if not self.quiet:
+            alive_count = len(self.env.unit_manager.get_alive_units())
+            print(f"🔄 Unit flags reset for {alive_count} units")
     
     def _execute_enemy_turn(self):
         """Execute enemy AI turn - delegate to environment's enemy AI."""

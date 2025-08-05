@@ -69,7 +69,7 @@ class W40KEnv(gym.Env):
              controlled_agent=None, active_agents=None, scenario_file=None, unit_registry=None, quiet=False):
         super().__init__()
         
-        self.quiet = False  # Add quiet mode flag
+        self.quiet = quiet  # Add quiet mode flag
 
         # Multi-agent support - reuse shared registry if provided
         self.unit_registry = unit_registry if unit_registry is not None else UnitRegistry()
@@ -677,14 +677,13 @@ class W40KEnv(gym.Env):
             unit_id = unit["id"]
             
             if self.current_phase == "move":
+                # CRITICAL FIX: Check BOTH moved_units set AND has_moved flag
                 in_moved_units = unit_id in self.moved_units
+                has_moved_flag = unit.get("has_moved", False)
+                already_moved = in_moved_units or has_moved_flag
                 has_adjacent = self._has_adjacent_enemies(unit)
                 
                 # AI_GAME.md: units that haven't moved are selectable (green outline)
-                # CRITICAL: Prevent movement adjacent to enemies outside charge phase
-                has_adjacent = self._has_adjacent_enemies(unit)
-                already_moved = unit_id in self.moved_units
-                
                 if not already_moved and not has_adjacent:
                     eligible.append(unit)
                     
@@ -1141,67 +1140,6 @@ class W40KEnv(gym.Env):
             if hasattr(self.replay_logger, 'env') and hasattr(self, 'unit_manager'):
                 self.replay_logger.env.units = self.unit_manager.units
         
-        # CRITICAL: Check game over conditions IMMEDIATELY after any action
-        ai_units_alive = self.unit_manager.get_alive_ai_units()
-        enemy_units_alive = self.unit_manager.get_alive_enemy_units()
-        
-        # Game outcome rewards - check termination conditions using UnitManager - with detailed debugging
-        if not ai_units_alive:  # No alive AI units
-            self.game_over = True
-            self.winner = 0
-            
-            if not self.quiet:
-                print(f"🏁 GAME OVER: AI has no living units at Turn {self.current_turn}, Step {self.step_count}")
-                print(f"   Enemy units remaining: {len(enemy_units_alive)}")
-                print(f"   Last AI unit deaths:")
-                for unit in self.unit_manager.units:
-                    if unit["player"] == 1 and not unit["alive"]:
-                        print(f"     Unit {unit.get('id')} ({unit.get('unit_type')}) HP: {unit.get('cur_hp', 0)}")
-            
-            # CRITICAL: Finalize replay data at actual game end
-            if hasattr(self, 'replay_logger') and self.replay_logger:
-                if hasattr(self.replay_logger, 'game_info'):
-                    if not self.replay_logger.game_info:
-                        self.replay_logger.game_info = {}
-                    self.replay_logger.game_info['total_turns'] = self.current_turn
-                    self.replay_logger.game_info['winner'] = self.winner
-                    self.replay_logger.game_info['episode_steps'] = self.step_count
-            
-            # Use first available unit from UnitManager for reward config
-            if self.unit_manager.units:
-                ai_unit_for_rewards = next((u for u in self.unit_manager.units if u["player"] == 1), None)
-                if ai_unit_for_rewards:
-                    unit_rewards = self._get_unit_reward_config(ai_unit_for_rewards)
-                    reward += unit_rewards["situational_modifiers"]["lose"]
-            return self._get_obs(), reward, True, False, self._get_info()
-        elif not enemy_units_alive:  # No alive enemy units
-            self.game_over = True
-            self.winner = 1
-            
-            if not self.quiet:
-                print(f"🏁 GAME OVER: Enemy has no living units at Turn {self.current_turn}, Step {self.step_count}")
-                print(f"   AI units remaining: {len(ai_units_alive)}")
-                print(f"   Last enemy unit deaths:")
-                for unit in self.unit_manager.units:
-                    if unit["player"] == 0 and not unit["alive"]:
-                        print(f"     Unit {unit.get('id')} ({unit.get('unit_type')}) HP: {unit.get('cur_hp', 0)}")
-            
-            # CRITICAL: Finalize replay data at actual game end
-            if hasattr(self, 'replay_logger') and self.replay_logger:
-                if hasattr(self.replay_logger, 'game_info'):
-                    if not self.replay_logger.game_info:
-                        self.replay_logger.game_info = {}
-                    self.replay_logger.game_info['total_turns'] = self.current_turn
-                    self.replay_logger.game_info['winner'] = self.winner
-                    self.replay_logger.game_info['episode_steps'] = self.step_count
-            
-            # Get unit rewards for win condition
-            if self.unit_manager.units:
-                ai_unit_for_rewards = next((u for u in self.unit_manager.units if u["player"] == 1), None)
-                if ai_unit_for_rewards:
-                    unit_rewards = self._get_unit_reward_config(ai_unit_for_rewards)
-                    reward += unit_rewards["situational_modifiers"]["win"]
-            return self._get_obs(), reward, True, False, self._get_info()
         elif not self.unit_manager.get_alive_enemy_units():  # No alive enemy units
             print(f"🏁 GAME OVER: AI victory at Turn {self.current_turn}, Step {self.step_count}")
             self.game_over = True
