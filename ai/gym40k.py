@@ -475,32 +475,31 @@ class W40KEnv(gym.Env):
         # Track if this is a legitimate episode reset vs mid-episode reset
         is_legitimate_reset = not hasattr(self, '_episode_started') or self.game_over or self.winner is not None
         
-        # CRITICAL: Never reset replay logger during episode - only clear at true episode end
-        if hasattr(self, 'replay_logger') and self.replay_logger and is_legitimate_reset and self.game_over:
-            # DEBUG: Show replay logger state before reset
-            
-            # Only reset replay logger for legitimate episode boundaries when game is actually over
+        # CRITICAL: Always reset replay logger for every episode reset  
+        if hasattr(self, 'replay_logger') and self.replay_logger:
+            # Force reset replay logger state for clean episode start
             if hasattr(self.replay_logger, 'game_states'):
                 self.replay_logger.game_states = []
             if hasattr(self.replay_logger, 'combat_log_entries'):
                 self.replay_logger.combat_log_entries = []
             
-            # DEBUG: Verify reset worked
-            combat_entries_after = len(getattr(self.replay_logger, 'combat_log_entries', []))
+            # CRITICAL: Reset event counter to restart step numbers from 1
+            if hasattr(self.replay_logger, 'next_event_id'):
+                self.replay_logger.next_event_id = 1
+            # CRITICAL: Reset turn to 0 to match environment - will increment to 1 when AI acts
             if hasattr(self.replay_logger, 'current_turn'):
-                self.replay_logger.current_turn = 1
+                self.replay_logger.current_turn = 0
             if hasattr(self.replay_logger, 'initial_game_state'):
                 self.replay_logger.initial_game_state = {}
             if hasattr(self.replay_logger, 'absolute_turn'):
-                self.replay_logger.absolute_turn = 1
+                self.replay_logger.absolute_turn = 0
             
             # Connect UnitManager to replay logger after reset
             if hasattr(self, 'unit_manager') and self.unit_manager:
                 self.unit_manager.replay_logger = self.replay_logger
                 
-            # CRITICAL: Recapture initial state after reset to populate replay data
-            if hasattr(self.replay_logger, 'capture_initial_state'):
-                self.replay_logger.capture_initial_state()
+            # CRITICAL: Recapture initial state AFTER environment turn is properly set
+            # This is done later after all state is properly initialized
                 
                 # CRITICAL: Also populate initial_game_state for replay file
                 if hasattr(self.replay_logger, 'initial_game_state') and hasattr(self, 'unit_manager'):
@@ -534,7 +533,9 @@ class W40KEnv(gym.Env):
         # Reset game state
         self.current_phase = "move"  # Always start with move per AI_GAME.md
         self.current_player = 1  # AI starts
-        self.current_turn = 1
+        self.current_turn = 1  # CRITICAL: Start at 1 - AI should start on Turn 1
+        if not self.quiet:
+            print(f"🔄 EPISODE RESET: Turn set to {self.current_turn}, Player {self.current_player}")
         self.game_over = False
         self.winner = None
         self.phase_acted_units = set()
@@ -957,16 +958,33 @@ class W40KEnv(gym.Env):
         # Get eligible units for current phase
         eligible_units = self._get_eligible_units()
         
+        # DEBUG: Log eligible units for debugging
+        if not self.quiet and len(eligible_units) == 0:
+            ai_units = self.unit_manager.get_alive_ai_units()
+            print(f"🔍 No eligible units - Phase: {self.current_phase}, Player: {self.current_player}")
+            print(f"   AI units alive: {len(ai_units)}")
+            for i, unit in enumerate(ai_units[:3]):  # Show first 3 units
+                print(f"   Unit {unit.get('id', i)}: moved={unit.get('has_moved', False)}, shot={unit.get('has_shot', False)}")
+        
         # Keep advancing phases until we find eligible units or game ends
         phase_advances = 0
         max_phase_advances = 120  # Allow sufficient phase advances for 800-step episodes
         
         while not eligible_units and not self.game_over and phase_advances < max_phase_advances:
+            if not self.quiet:
+                print(f"🔄 Phase advance {phase_advances}: {self.current_phase}, Player {self.current_player}")
             self.phase_manager.advance_phase()
             eligible_units = self._get_eligible_units()
             phase_advances += 1
         
         if phase_advances >= max_phase_advances:
+            # CRITICAL: Don't end game - this is a bug, not a legitimate termination
+            if not self.quiet:
+                print(f"❌ CRITICAL: Phase advances exceeded {max_phase_advances} - potential infinite loop")
+                print(f"   AI units alive: {len(self.unit_manager.get_alive_ai_units())}")
+                print(f"   Enemy units alive: {len(self.unit_manager.get_alive_enemy_units())}")
+                print(f"   Current phase: {self.current_phase}, Current player: {self.current_player}")
+                print(f"   Turn: {self.current_turn}, Step: {self.step_count}")
             # Emergency end game to prevent infinite loops - check if game should have ended
             if not self.unit_manager.get_alive_ai_units() or not self.unit_manager.get_alive_enemy_units():
                 # Units were eliminated but game didn't end properly, force proper termination
@@ -1151,7 +1169,7 @@ class W40KEnv(gym.Env):
             if not hasattr(self, 'turn_limit_penalty') or self.turn_limit_penalty is None:
                 self.turn_limit_penalty = self.config.get_turn_limit_penalty()
             reward += self.turn_limit_penalty
-        pass
+            return self._get_obs(), reward, True, False, self._get_info()  # CRITICAL: Return terminated=True for turn limit
         
         # Note: Don't clear explicit unit tracking here - GameReplayIntegration wrapper needs it
         
@@ -1553,10 +1571,15 @@ class W40KEnv(gym.Env):
                     # Charge failed due to walls/obstacles, but still counts as charged
                     unit["has_charged"] = True
                     self.charged_units.add(unit["id"])
+                    if not self.quiet:
+                        print(f"⚔️ CHARGE FAILED: Unit {unit['id']} could not reach target at ({target['col']}, {target['row']})")
                     if "base_actions" not in unit_rewards or "wait" not in unit_rewards["base_actions"]:
                         raise KeyError(f"Missing 'base_actions.wait' in rewards config for unit type {unit['unit_type']}")
                     return unit_rewards["base_actions"]["wait"]
 
+                if not self.quiet:
+                    print(f"⚔️ CHARGE SUCCESS: Unit {unit['id']} moved from ({old_col}, {old_row}) to ({unit['col']}, {unit['row']}) to charge target at ({target['col']}, {target['row']})")
+                
                 if "base_actions" not in unit_rewards or "charge_success" not in unit_rewards["base_actions"]:
                     raise KeyError(f"Missing 'base_actions.charge_success' in rewards config for unit type {unit['unit_type']}")
                 reward = unit_rewards["base_actions"]["charge_success"]
@@ -2089,6 +2112,11 @@ class W40KEnv(gym.Env):
                 not (other_unit["col"] == from_col and other_unit["row"] == from_row)):
                 forbidden_set.add(f"{other_unit['col']},{other_unit['row']}")
         
+        # CRITICAL: Also check destination hex is not occupied
+        destination_key = f"{to_col},{to_row}"
+        if destination_key in forbidden_set:
+            return []  # Destination occupied - no valid path
+        
         visited[f"{from_col},{from_row}"] = 0
         parent[f"{from_col},{from_row}"] = None
         
@@ -2468,15 +2496,25 @@ class W40KEnv(gym.Env):
     def _execute_enemy_turn(self):
         """Execute enemy turn using centralized BotManager with proper logging."""
         if not hasattr(self, 'bot_manager'):
-            print(f"❌ No bot_manager available for enemy turn")
-            return
+            if not self.quiet:
+                print(f"❌ No bot_manager available for enemy turn")
+            return 0
         
         enemy_units = self.unit_manager.get_alive_enemy_units()
-        # print(f"🤖 Bot turn: {len(enemy_units)} enemy units, Phase: {self.current_phase}")
+        if not self.quiet:
+            print(f"🤖 Bot turn: {len(enemy_units)} enemy units, Phase: {self.current_phase}")
            
+        # CRITICAL: Debug bot manager execution
+        if not self.quiet:
+            print(f"🤖 Calling bot_manager.execute_bot_turn() - Phase: {self.current_phase}")
+            print(f"🤖 Enemy units available: {[u.get('id') for u in enemy_units]}")
+        
         # Delegate to centralized bot manager with proper logging
         actions_taken = self.bot_manager.execute_bot_turn()
-        # print(f"🤖 Bot completed turn: {actions_taken} actions taken")
+        if not self.quiet:
+            print(f"🤖 Bot completed turn: {actions_taken} actions taken")
+        
+        return actions_taken
 
 
     def _record_action(self, unit, action_type, reward):

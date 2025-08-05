@@ -142,6 +142,47 @@ const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: 
 
 // hasLineOfSight now imported from gameHelpers (same as BoardPvp.tsx)
 
+const calculateChargeTargets = (
+  chargerCol: number,
+  chargerRow: number,
+  maxMove: number,
+  boardConfig: any,
+  units: ReplayUnit[]
+): {
+  chargeCells: { col: number; row: number }[];
+  adjacentToEnemyCells: { col: number; row: number }[];
+} => {
+  const chargeCells: { col: number; row: number }[] = [];
+  const adjacentToEnemyCells: { col: number; row: number }[] = [];
+  
+  if (!boardConfig) return { chargeCells, adjacentToEnemyCells };
+  
+  // Get all available move cells using same logic as moves
+  const availableCells = calculateAvailableMoveCells(chargerCol, chargerRow, maxMove, boardConfig, units);
+  
+  // Find enemy units for this charging unit
+  const chargingUnit = units.find(u => u.col === chargerCol && u.row === chargerRow);
+  if (!chargingUnit) return { chargeCells, adjacentToEnemyCells };
+  
+  const enemyUnits = units.filter(u => u.player !== chargingUnit.player && u.alive);
+  
+  // Check each available cell to see if it's adjacent to an enemy
+  availableCells.forEach(cell => {
+    const isAdjacentToEnemy = enemyUnits.some(enemy => {
+      const distance = Math.max(Math.abs(cell.col - enemy.col), Math.abs(cell.row - enemy.row));
+      return distance === 1; // Adjacent means distance of 1
+    });
+    
+    if (isAdjacentToEnemy) {
+      adjacentToEnemyCells.push(cell);
+    } else {
+      chargeCells.push(cell);
+    }
+  });
+  
+  return { chargeCells, adjacentToEnemyCells };
+};
+
 const calculateShootingTargets = (
   shooterCol: number,
   shooterRow: number,
@@ -346,11 +387,6 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
       const targetLogBottom = fixedBottomPosition;
       const availableForLog = Math.max(100, targetLogBottom - logStartY);
       
-      // Debug the actual measurements
-      console.log(`DEBUG: fixedBottomPosition=${fixedBottomPosition}, logStartY=${logStartY}`);
-      console.log(`DEBUG: targetLogBottom=${targetLogBottom}, calculated availableForLog=${availableForLog}px`);
-      console.log(`DEBUG: Log will expand from ${logStartY} to ${logStartY + availableForLog} (target: ${targetLogBottom})`);
-      
       const logContainer = document.querySelector('.game-log__events') as HTMLElement;
       const gameLogContent = document.querySelector('.game-log__content') as HTMLElement;
       const gameLogWrapper = document.querySelector('.game-log') as HTMLElement;
@@ -369,11 +405,9 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
           logContainer.style.height = `${availableForLog}px`;
           logContainer.style.maxHeight = `${availableForLog}px`;
           logContainer.style.overflowY = 'auto';
-          console.log(`Applied dynamic height: ${availableForLog}px to all log components`);
         }
       }
       
-      console.log(`BoardReplay height calculation: Controls=${controlsHeight}px, P0=${player0Height}px, P1=${player1Height}px, LogHeader=${gameLogHeaderHeight}px, available=${availableForLog}px`);
       setLogAvailableHeight(availableForLog);
     } catch (error) {
       console.error('Error calculating log height:', error);
@@ -422,6 +456,16 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
     clearTargets: { col: number; row: number }[];
     coverTargets: { col: number; row: number }[];
     blockedTargets: Set<string>;
+    unitId: number;
+    range: number;
+  } | null>(null);
+  
+  // Charge preview state for charge range visualization
+  const [chargePreview, setChargePreview] = useState<{
+    chargerCol: number;
+    chargerRow: number;
+    chargeCells: { col: number; row: number }[];
+    adjacentToEnemyCells: { col: number; row: number }[];
     unitId: number;
     range: number;
   } | null>(null);
@@ -971,6 +1015,50 @@ const validateUnitRegistry = () => {
     app.stage.addChild(previewContainer);
   }, [shootingPreview, boardConfig, getHexCenter, getHexPolygonPoints]);
 
+  // Draw charge preview hexes (light orange for movement + darker orange for adjacent to enemies)
+  const drawChargePreview = useCallback((app: PIXI.Application) => {
+    if (!chargePreview || !boardConfig) return;
+    
+    const HEX_RADIUS = boardConfig.hex_radius;
+    
+    // Remove existing charge preview graphics
+    const existingPreview = app.stage.children.find(child => child.name === 'chargePreview');
+    if (existingPreview) {
+      app.stage.removeChild(existingPreview);
+      existingPreview.destroy();
+    }
+    
+    const previewContainer = new PIXI.Container();
+    previewContainer.name = 'chargePreview';
+    previewContainer.zIndex = 1; // Below units but above board
+    
+    // Draw light orange hexes for charge movement cells
+    const lightOrangeColor = 0xFFB366; // Light orange
+    chargePreview.chargeCells.forEach(cell => {
+      const center = getHexCenter(cell.col, cell.row);
+      const cellHex = new PIXI.Graphics();
+      const points = getHexPolygonPoints(center.x, center.y, HEX_RADIUS * 0.8);
+      cellHex.beginFill(lightOrangeColor, 0.5); // Light orange with transparency
+      cellHex.drawPolygon(points);
+      cellHex.endFill();
+      previewContainer.addChild(cellHex);
+    });
+    
+    // Draw darker orange hexes for cells adjacent to enemies
+    const darkOrangeColor = 0xFF8000; // Darker orange
+    chargePreview.adjacentToEnemyCells.forEach(cell => {
+      const center = getHexCenter(cell.col, cell.row);
+      const cellHex = new PIXI.Graphics();
+      const points = getHexPolygonPoints(center.x, center.y, HEX_RADIUS * 0.8);
+      cellHex.beginFill(darkOrangeColor, 0.7); // Darker orange with more opacity
+      cellHex.drawPolygon(points);
+      cellHex.endFill();
+      previewContainer.addChild(cellHex);
+    });
+    
+    app.stage.addChild(previewContainer);
+  }, [chargePreview, boardConfig, getHexCenter, getHexPolygonPoints]);
+
   // Draw units using UnitRenderer - same as Board.tsx
   const drawUnits = useCallback((app: PIXI.Application, units: ReplayUnit[], highlightUnitId: number | null = null) => {
     if (!scenario || !app.stage || !boardConfig?.display) return;
@@ -1124,11 +1212,13 @@ const validateUnitRegistry = () => {
         availableCells: availableCells.filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
         attackCells: (shootingPreview?.clearTargets || []).filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
         coverCells: (shootingPreview?.coverTargets || []).filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
-        chargeCells: [],
+        chargeCells: (chargePreview?.chargeCells || []).filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
         blockedTargets: shootingPreview?.blockedTargets || new Set(),
         coverTargets: new Set(),
-        phase: shootingPreview ? 'shoot' : 'move'
+        phase: chargePreview ? 'charge' : (shootingPreview ? 'shoot' : 'move')
       });
+      drawUnits(app, currentUnits, actingUnitId);
+      drawChargePreview(app); // Add charge preview drawing
       drawUnits(app, currentUnits, actingUnitId);
       
       // Draw darkened origin unit for move preview
@@ -1172,7 +1262,7 @@ const validateUnitRegistry = () => {
       console.error('❌ Error initializing PIXI application:', error);
       setError('Failed to initialize board display');
     }
-  }, [scenario, replayData, drawUnits, drawMovePreview, drawShootingPreview, currentUnits, actingUnitId, movePreview, shootingPreview]);
+  }, [scenario, replayData, drawUnits, drawMovePreview, drawShootingPreview, drawChargePreview, currentUnits, actingUnitId, movePreview, shootingPreview, chargePreview]);
 
   // Update previews when they change
   useEffect(() => {
@@ -1193,12 +1283,13 @@ const validateUnitRegistry = () => {
         availableCells: availableCells.filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
         attackCells: (shootingPreview?.clearTargets || []).filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
         coverCells: (shootingPreview?.coverTargets || []).filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
-        chargeCells: [],
+        chargeCells: (chargePreview?.chargeCells || []).filter(cell => !deadUnitPositions.has(`${cell.col},${cell.row}`)),
         blockedTargets: shootingPreview?.blockedTargets || new Set(),
         coverTargets: new Set(),
-        phase: shootingPreview ? 'shoot' : 'move'
+        phase: chargePreview ? 'charge' : (shootingPreview ? 'shoot' : 'move')
       });
       drawUnits(pixiAppRef.current, currentUnits, actingUnitId);
+      drawChargePreview(pixiAppRef.current); // Add charge preview drawing
       
       // Also add darkened origin unit in update effect
       if (movePreview) {
@@ -1229,7 +1320,7 @@ const validateUnitRegistry = () => {
         }
       }
     }
-  }, [movePreview, shootingPreview, currentUnits, actingUnitId, boardConfig, drawUnits]);
+  }, [movePreview, shootingPreview, chargePreview, currentUnits, actingUnitId, boardConfig, drawUnits]);
 
   // Update game state based on current step
   useEffect(() => {
@@ -1482,9 +1573,40 @@ const validateUnitRegistry = () => {
           setShootingPreview(null);
         }
         setMovePreview(null); // Clear move preview during shooting
+        setChargePreview(null); // Clear charge preview during shooting
+      }
+      // Detect charge actions and set up charge preview
+      else if (currentLogEntry && (currentLogEntry as any).type === 'charge') {
+        const logEntry = currentLogEntry as any;
+        const chargingUnit = newUnits.find(u => u.id === logEntry.unitId);
+        
+        if (chargingUnit && chargingUnit.MOVE) {
+          // Calculate charge preview using same pathfinding as moves
+          const { chargeCells, adjacentToEnemyCells } = calculateChargeTargets(
+            chargingUnit.col, 
+            chargingUnit.row, 
+            chargingUnit.MOVE, 
+            boardConfig, 
+            newUnits
+          );
+          
+          setChargePreview({
+            chargerCol: chargingUnit.col,
+            chargerRow: chargingUnit.row,
+            chargeCells,
+            adjacentToEnemyCells,
+            unitId: logEntry.unitId,
+            range: chargingUnit.MOVE
+          });
+        } else {
+          setChargePreview(null);
+        }
+        setMovePreview(null); // Clear move preview during charges
+        setShootingPreview(null); // Clear shooting preview during charges
       } else {
         setMovePreview(null);
         setShootingPreview(null);
+        setChargePreview(null);
       }
       
       // Update PIXI display
@@ -1499,11 +1621,6 @@ const validateUnitRegistry = () => {
       setError('Failed to update game state');
     }
   }, [currentStep, replayData, drawUnits, scenario, getUnitStats, battleLog, boardConfig]);
-
-  // Debug: Track battleLog changes
-  useEffect(() => {
-    console.log('🔍 battleLog state changed, new length:', battleLog.length);
-  }, [battleLog]);
 
   // Auto-play functionality
   useEffect(() => {
@@ -1916,7 +2033,6 @@ const validateUnitRegistry = () => {
                 if (!sampleLogEntry) {
                   // First render - show limited entries to establish DOM structure for measurement
                   maxEvents = Math.min(battleLog.length, 5); // Show up to 5 entries initially
-                  console.log(`Training Log DEBUG: Initial render, showing ${maxEvents} entries for measurement`);
                 } else {
                   // Measure actual log entry height and apply dynamic constraints
                   actualRowHeight = sampleLogEntry.getBoundingClientRect().height;
@@ -1929,21 +2045,8 @@ const validateUnitRegistry = () => {
                     container.style.height = `${exactHeight}px`;
                     container.style.maxHeight = `${exactHeight}px`;
                   }
-                  
-                  console.log(`Training Log DEBUG: logAvailableHeight=${logAvailableHeight}px, measured actualRowHeight=${actualRowHeight}px, maxEvents=${maxEvents}`);
                 }
-                
-                // Debug actual DOM measurements
-                setTimeout(() => {
-                  const container = document.querySelector('.game-log__events');
-                  const entries = document.querySelectorAll('.game-log-entry');
-                  if (container && entries.length > 0) {
-                    console.log(`DOM DEBUG: Container height=${container.scrollHeight}px, computed height=${window.getComputedStyle(container).height}`);
-                    console.log(`DOM DEBUG: ${entries.length} entries, first entry height=${entries[0].getBoundingClientRect().height}px`);
-                    console.log(`DOM DEBUG: Container style.height="${(container as HTMLElement).style.height}", style.maxHeight="${(container as HTMLElement).style.maxHeight}"`);
-                  }
-                }, 100);
-                
+                                
                 // First sort the entire battleLog by ID, then slice
                 const sortedBattleLog = [...battleLog].sort((a: any, b: any) => {
                   const aId = parseInt(a.id) || 0;
@@ -1955,9 +2058,7 @@ const validateUnitRegistry = () => {
                 const eventsToDisplay = sortedBattleLog
                   .slice(0, currentStep + 1)
                   .reverse();
-                
-                console.log(`Training Log DEBUG: logAvailableHeight=${logAvailableHeight}, maxEvents=${maxEvents}, showing ${eventsToDisplay.length} events`);
-                
+                  
                 return eventsToDisplay;
               })().map((event: any, index: number) => {
                 const originalIndex = battleLog.indexOf(event);

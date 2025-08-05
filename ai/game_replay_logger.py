@@ -92,7 +92,8 @@ class GameReplayLogger:
         self.add_entry(
             entry_type="turn_change",
             reward=0.0,
-            action_name="game_start"
+            action_name="game_start",
+            turn_number=1  # CRITICAL: Force turn 1 for game start
         )
     
     def log_move(self, unit: Dict, start_col: int, start_row: int, 

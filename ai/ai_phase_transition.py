@@ -64,7 +64,7 @@ class PhaseTransitionManager:
         if not self.quiet:
             print(f"🔄 Player transition: {old_player} -> {self.env.current_player}")
         
-        # SIMPLIFIED: Turn increment when Player 1 starts move phase
+        # CRITICAL FIX: Turn increment when Player 1 starts move phase
         if self.env.current_player == 1 and self.env.current_phase == "move":
             # Player 1 starting move phase = new turn begins
             old_turn = self.env.current_turn
@@ -72,7 +72,7 @@ class PhaseTransitionManager:
             if not self.quiet:
                 print(f"🔄 TURN INCREMENT: {old_turn} -> {self.env.current_turn}")
             self._reset_turn_state()
-            self._log_turn_start()
+            self._log_turn_start()  # Log AFTER turn increment, while current_player is still 1
             
         elif self.env.current_player == 0:
             # Player 0 (enemy) starting their turn - execute enemy AI
@@ -153,6 +153,10 @@ class PhaseTransitionManager:
         """Log turn start for debugging and replay consistency."""
         if not self.quiet:
             print(f"🔄 Turn {self.env.current_turn} begins - AI player starts")
+        
+        # CRITICAL: Don't log turn start here - it causes wrong player attribution
+        # Turn start will be logged by the first AI action in the turn
+        pass
         
         # CRITICAL: Force replay logger synchronization to prevent turn jumps
         if hasattr(self.env, 'replay_logger') and self.env.replay_logger:
