@@ -132,15 +132,16 @@ export const GameController: React.FC<GameControllerProps> = ({
     const player0Height = player0Collapsed ? COLLAPSED_HEIGHT : (TABLE_HEADER_HEIGHT + (player0Units * ROW_HEIGHT));
     const player1Height = player1Collapsed ? COLLAPSED_HEIGHT : (TABLE_HEADER_HEIGHT + (player1Units * ROW_HEIGHT));
     
-    // Assume total available space is ~800px, subtract used space
-    const TOTAL_SPACE = 800;
-    const usedSpace = HEADER_HEIGHT + player0Height + player1Height + 60; // 60px for margins/padding
-    const availableForLog = Math.max(100, TOTAL_SPACE - usedSpace); // Minimum 100px
+    // Get actual viewport height and calculate available space dynamically
+    const viewportHeight = window.innerHeight;
+    const BOARD_AREA_HEIGHT = Math.min(650, viewportHeight * 0.7); // Board takes ~70% of viewport, max 650px
+    const usedSpace = HEADER_HEIGHT + player0Height + player1Height + 80; // 80px for margins/padding
+    const availableForLog = Math.max(104, BOARD_AREA_HEIGHT - usedSpace); // Minimum 104px (2 rows)
     
     console.log(`Height calculation DEBUG:`);
     console.log(`- Player0: collapsed=${player0Collapsed}, units=${player0Units}, height=${player0Height}px`);
     console.log(`- Player1: collapsed=${player1Collapsed}, units=${player1Units}, height=${player1Height}px`);
-    console.log(`- Total space=${TOTAL_SPACE}px, used=${usedSpace}px, available=${availableForLog}px`);
+    console.log(`- Board area=${BOARD_AREA_HEIGHT}px, used=${usedSpace}px, available=${availableForLog}px`);
     console.log(`- Calculated rows: ${Math.floor(availableForLog / 52)}`);
     setLogAvailableHeight(availableForLog);
   }, [player0Collapsed, player1Collapsed, gameState.units]);
