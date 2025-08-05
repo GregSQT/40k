@@ -1902,7 +1902,8 @@ const validateUnitRegistry = () => {
             <div 
               className="game-log__events"
               style={{
-                overflow: 'hidden'
+                overflowY: 'auto',
+                overflowX: 'hidden'
               }}
             >
               {(() => {
@@ -1950,11 +1951,10 @@ const validateUnitRegistry = () => {
                   return aId - bId; // Ascending order (chronological)
                 });
                 
-                // Then slice to get events up to current step, reverse for display, and limit by maxEvents
+                // Show ALL events up to current step, newest first, enable scrolling for older events
                 const eventsToDisplay = sortedBattleLog
                   .slice(0, currentStep + 1)
-                  .reverse()
-                  .slice(0, maxEvents);
+                  .reverse();
                 
                 console.log(`Training Log DEBUG: logAvailableHeight=${logAvailableHeight}, maxEvents=${maxEvents}, showing ${eventsToDisplay.length} events`);
                 
