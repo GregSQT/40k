@@ -31,6 +31,95 @@ from config_loader import get_config_loader
 from ai.game_replay_logger import GameReplayIntegration
 import torch
 
+class SelectiveEvalCallback(EvalCallback):
+    """Custom evaluation callback that saves best/worst/shortest episode replays."""
+    
+    def __init__(self, *args, output_dir="ai/event_log", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.output_dir = output_dir
+        self.episodes_data = []
+        os.makedirs(output_dir, exist_ok=True)
+    
+    def _on_step(self) -> bool:
+        """Override to capture episode data during evaluation."""
+        continue_training = super()._on_step()
+        
+        # Only save replays after all evaluation episodes are complete
+        if self.n_calls % self.eval_freq == 0 and hasattr(self.eval_env, 'replay_logger'):
+            self._save_selective_replays()
+        
+        return continue_training
+    
+    def _save_selective_replays(self):
+        """Save best/worst/shortest replays from evaluation episodes."""
+        if not hasattr(self.eval_env, 'replay_logger') or not self.eval_env.replay_logger:
+            return
+        
+        replay_logger = self.eval_env.replay_logger
+        
+        # Find best/worst/shortest from recent evaluation episodes
+        recent_episodes = []
+        
+        # Simulate episode data from replay logger
+        if hasattr(replay_logger, 'game_states') and replay_logger.game_states:
+            total_reward = sum(state.get('event_flags', {}).get('reward', 0) 
+                             for state in replay_logger.game_states)
+            step_count = len(replay_logger.game_states)
+            
+            episode_data = {
+                'step_count': step_count,
+                'total_reward': total_reward,
+                'replay_data': {
+                    'game_states': replay_logger.game_states,
+                    'combat_log': getattr(replay_logger, 'combat_log_entries', [])
+                }
+            }
+            recent_episodes.append(episode_data)
+        
+        if not recent_episodes:
+            return
+        
+        # Save the 3 types of replays
+        best_episode = max(recent_episodes, key=lambda x: x['total_reward'])
+        worst_episode = min(recent_episodes, key=lambda x: x['total_reward'])
+        shortest_episode = min(recent_episodes, key=lambda x: x['step_count'])
+        
+        replay_types = [
+            (best_episode, "eval_best_replay.json"),
+            (worst_episode, "eval_worst_replay.json"),
+            (shortest_episode, "eval_shortest_replay.json")
+        ]
+        
+        for episode_data, filename in replay_types:
+            filepath = os.path.join(self.output_dir, filename)
+            
+            replay_content = {
+                "game_info": {
+                    "scenario": "evaluation_episode",
+                    "total_turns": episode_data['step_count'],
+                    "episode_reward": episode_data['total_reward'],
+                    "ai_behavior": "evaluation"
+                },
+                "metadata": {
+                    "evaluation_timestep": self.num_timesteps,
+                    "replay_type": filename.replace('.json', '').replace('eval_', ''),
+                    "format_version": "2.0"
+                },
+                "initial_state": {
+                    "units": episode_data['replay_data'].get('game_states', [{}])[0].get('units', []),
+                    "board_size": [24, 18]
+                },
+                "combat_log": episode_data['replay_data'].get('combat_log', []),
+                "game_states": episode_data['replay_data'].get('game_states', [])
+            }
+            
+            try:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(replay_content, f, indent=2)
+                print(f"💾 Saved {filename}")
+            except Exception as e:
+                print(f"⚠️ Failed to save {filename}: {e}")
+
 def check_gpu_availability():
     """Check and display GPU availability for training."""
     print("\n🔍 GPU AVAILABILITY CHECK")
@@ -93,13 +182,9 @@ def create_model(config, training_config_name="default", rewards_config_name="de
         raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
     base_env = W40KEnv(rewards_config=rewards_config_name, training_config_name=training_config_name)
     
-    # Enhance environment with clean game logger BEFORE Monitor wrapping
-    from game_replay_logger import GameReplayIntegration 
-    enhanced_env = GameReplayIntegration .enhance_training_env(base_env)
-    env = Monitor(enhanced_env)
-    
-    # Store reference to clean logger for access
-    env.game_logger = enhanced_env.game_logger
+    # DISABLED: No logging during training for speed
+    # Enhanced logging only during evaluation
+    env = Monitor(base_env)
     
     model_path = config.get_model_path()
     
@@ -160,13 +245,9 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                       training_config_name=training_config_name,
                       controlled_agent=agent_key)
     
-    # Enhance environment with clean game logger BEFORE Monitor wrapping
-    from game_replay_logger import GameReplayIntegration 
-    enhanced_env = GameReplayIntegration .enhance_training_env(base_env)
-    env = Monitor(enhanced_env)
-    
-    # Store reference to clean logger for access
-    env.game_logger = enhanced_env.game_logger
+    # DISABLED: No logging during training for speed
+    # Enhanced logging only during evaluation
+    env = Monitor(base_env)
     
     # Agent-specific model path
     model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
@@ -204,10 +285,10 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     W40KEnv, _ = setup_imports()
     callbacks = []
     
-    # Evaluation callback - test model periodically (use default scenario for consistency)
+    # Evaluation callback - test model periodically with logging enabled
     base_eval_env = W40KEnv(training_config_name=training_config_name, scenario_file=None)
     
-    # Enhance evaluation environment with our advanced replay logger
+    # Enable logging ONLY for evaluation
     enhanced_eval_env = GameReplayIntegration.enhance_training_env(base_eval_env)
     eval_env = Monitor(enhanced_eval_env)
     eval_env.replay_logger = enhanced_eval_env.replay_logger
@@ -223,14 +304,16 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     # Get callback parameters from config with defaults
     callback_params = training_config.get("callback_params", {})
     
-    eval_callback = EvalCallback(
+    # Custom evaluation callback that tracks best/worst/shortest episodes
+    eval_callback = SelectiveEvalCallback(
         eval_env,
         best_model_save_path=os.path.dirname(model_path),
         log_path=os.path.dirname(model_path),
         eval_freq=eval_freq,  # Use config value
         deterministic=callback_params.get("eval_deterministic", True),
         render=callback_params.get("eval_render", False),
-        n_eval_episodes=callback_params.get("n_eval_episodes", 5)
+        n_eval_episodes=callback_params.get("n_eval_episodes", 5),
+        output_dir="ai/event_log"
     )
     callbacks.append(eval_callback)
     

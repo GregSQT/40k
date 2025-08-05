@@ -64,11 +64,9 @@ class PhaseTransitionManager:
         if not self.quiet:
             print(f"🔄 Player transition: {old_player} -> {self.env.current_player}")
         
-        # CRITICAL: Turn increment logic matching frontend
-        # Frontend: increment when player 0 starts
-        # AI training: increment when player 1 (AI) starts after player 0 finishes
-        if self.env.current_player == 1 and old_player == 0:
-            # Player 1 (AI) starting new turn after player 0 completed their turn
+        # SIMPLIFIED: Turn increment when Player 1 starts move phase
+        if self.env.current_player == 1 and self.env.current_phase == "move":
+            # Player 1 starting move phase = new turn begins
             old_turn = self.env.current_turn
             self.env.current_turn += 1
             if not self.quiet:

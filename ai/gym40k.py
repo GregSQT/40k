@@ -81,7 +81,7 @@ class W40KEnv(gym.Env):
         self._last_target_unit = None
         
         # Clean logging capability  
-        self.game_logger = None
+        self.game_logger = None  # Will be set to replay_logger by GameReplayIntegration
         self.replay_logger = None  # Will be set by GameReplayIntegration
 
         # Initialize UnitManager for centralized unit death management
@@ -1273,11 +1273,11 @@ class W40KEnv(gym.Env):
             reward = unit_rewards["base_actions"]["move_close"]
         
         # Clean action logging - map action_type to strategic action for logger
-        if self.game_logger:
+        if self.replay_logger:
             try:
                 # Map basic action_type to strategic action_int for logger
                 strategic_action_int = self._map_to_strategic_action(unit, action_type, "move")
-                self.game_logger.log_move(unit, old_col, old_row, unit["col"], unit["row"], 
+                self.replay_logger.log_move(unit, old_col, old_row, unit["col"], unit["row"], 
                                         self.current_turn, reward, strategic_action_int)
             except Exception as e:
                 pass  # Silent failure to avoid breaking training
@@ -1440,11 +1440,11 @@ class W40KEnv(gym.Env):
                     reward += unit_rewards["result_bonuses"]["kill_target"]
 
                 # Clean action logging - map to strategic action for logger
-                if self.game_logger:
+                if self.replay_logger:
                     try:
                         # Map to strategic shooting action for logger
                         strategic_action_int = self._map_to_strategic_action(unit, action_type, "shoot")
-                        self.game_logger.log_shoot(unit, target, result, self.current_turn, reward, strategic_action_int)
+                        self.replay_logger.log_shoot(unit, target, result, self.current_turn, reward, strategic_action_int)
                     except Exception as e:
                         pass  # Silent failure to avoid breaking training
                 else:
@@ -1562,11 +1562,11 @@ class W40KEnv(gym.Env):
                 reward = unit_rewards["base_actions"]["charge_success"]
 
                 # Clean action logging - map to strategic action for logger  
-                if self.game_logger:
+                if self.replay_logger:
                     try:
                         # Map to strategic charge action for logger
                         strategic_action_int = self._map_to_strategic_action(unit, action_type, "charge")
-                        self.game_logger.log_charge(unit, target, old_col, old_row, unit["col"], unit["row"], 
+                        self.replay_logger.log_charge(unit, target, old_col, old_row, unit["col"], unit["row"], 
                                                   self.current_turn, reward, strategic_action_int)
                     except Exception as e:
                         pass  # Silent failure to avoid breaking training
@@ -1653,11 +1653,11 @@ class W40KEnv(gym.Env):
                     reward += unit_rewards["result_bonuses"]["kill_target"]
 
                 # Clean action logging - MOVE AFTER UNIT REMOVAL
-                if self.game_logger:
+                if self.replay_logger:
                     try:
                         # Map to strategic combat action for logger
                         strategic_action_int = self._map_to_strategic_action(unit, action_type, "combat")
-                        self.game_logger.log_combat(unit, target, result, self.current_turn, reward, strategic_action_int)
+                        self.replay_logger.log_combat(unit, target, result, self.current_turn, reward, strategic_action_int)
                     except Exception as e:
                         pass  # Silent failure to avoid breaking training
                     if old_hp == total_damage:

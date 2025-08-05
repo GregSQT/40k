@@ -301,28 +301,52 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
   const [logAvailableHeight, setLogAvailableHeight] = useState(220);
   
   React.useEffect(() => {
-    // Calculate space taken by UnitStatusTables
-    const CONTROLS_HEIGHT = 120; // Replay controls + file browser
-    const TABLE_HEADER_HEIGHT = 45; // Each table header
-    const ROW_HEIGHT = 35; // Each unit row height
-    const COLLAPSED_HEIGHT = 45; // Just header when collapsed
+    // Wait for DOM to render, then measure actual heights - NO HARDCODED VALUES!
+    const timer = setTimeout(() => {
+      // Dynamically measure actual DOM element heights using more robust selectors
+      const replayControls = document.querySelector('.replay-controls');
+      const allTables = document.querySelectorAll('.unit-status-table-container');
+      const gameLogHeader = document.querySelector('.game-log__header');
+      
+      // Handle tables that may be dynamically shown/hidden
+      const player0Table = allTables[0];
+      const player1Table = allTables[1];
+      
+      // Throw errors if critical elements not found - NO FALLBACKS!
+      if (!replayControls) throw new Error('Replay controls element not found');
+      if (!gameLogHeader) throw new Error('GameLog header element not found in BoardReplay');
+      if (allTables.length < 2) throw new Error(`Expected 2 unit tables, found ${allTables.length}`);
+      
+      // Get actual heights from DOM measurements
+      const controlsHeight = replayControls.getBoundingClientRect().height;
+      const player0Height = player0Table.getBoundingClientRect().height;
+      const player1Height = player1Table.getBoundingClientRect().height;
+      const gameLogHeaderHeight = gameLogHeader.getBoundingClientRect().height;
+      
+      // Calculate available space using viewport but limit to actual usable area
+      const viewportHeight = window.innerHeight;
+      const player1Rect = player1Table.getBoundingClientRect();
+      
+      // Available space = from bottom of last table to bottom of viewport
+      const availableForLog = viewportHeight - player1Rect.bottom - gameLogHeaderHeight;
+      
+      // Immediately apply height constraint to prevent horizontal splitting
+      const logContainer = document.querySelector('.game-log__events') as HTMLElement;
+      const sampleLogEntry = document.querySelector('.game-log-entry');
+      if (logContainer && sampleLogEntry) {
+        const entryHeight = sampleLogEntry.getBoundingClientRect().height;
+        const completeRowsHeight = Math.floor(availableForLog / entryHeight) * entryHeight;
+        logContainer.style.height = `${completeRowsHeight}px`;
+        logContainer.style.maxHeight = `${completeRowsHeight}px`;
+        console.log(`Applied dynamic height: ${completeRowsHeight}px (${Math.floor(availableForLog / entryHeight)} complete rows)`);
+      }
+      
+      console.log(`BoardReplay height calculation: Controls=${controlsHeight}px, P0=${player0Height}px, P1=${player1Height}px, LogHeader=${gameLogHeaderHeight}px, available=${availableForLog}px`);
+      setLogAvailableHeight(availableForLog);
+    }, 300); // Increased delay to ensure tables finish collapsing/expanding
     
-    // Count units per player
-    const player0Units = currentUnits.filter(u => u.player === 0 && u.alive).length;
-    const player1Units = currentUnits.filter(u => u.player === 1 && u.alive).length;
-    
-    // Calculate actual table heights
-    const player0Height = player0Collapsed ? COLLAPSED_HEIGHT : (TABLE_HEADER_HEIGHT + (player0Units * ROW_HEIGHT));
-    const player1Height = player1Collapsed ? COLLAPSED_HEIGHT : (TABLE_HEADER_HEIGHT + (player1Units * ROW_HEIGHT));
-    
-    // Assume total available space is ~650px (more realistic), subtract used space
-    const TOTAL_SPACE = 650;
-    const usedSpace = CONTROLS_HEIGHT + player0Height + player1Height + 80; // 80px for margins/padding
-    const availableForLog = Math.max(150, TOTAL_SPACE - usedSpace); // Minimum 150px (3 rows)
-    
-    console.log(`BoardReplay height calculation: P0=${player0Height}, P1=${player1Height}, available=${availableForLog}`);
-    setLogAvailableHeight(availableForLog);
-  }, [player0Collapsed, player1Collapsed, currentUnits]);
+    return () => clearTimeout(timer);
+  }, [player0Collapsed, player1Collapsed, currentUnits, battleLog.length]);
   
   // Move preview state for pathfinding visualization
   const [movePreview, setMovePreview] = useState<{
@@ -1821,17 +1845,35 @@ const validateUnitRegistry = () => {
             <div 
               className="game-log__events"
               style={{
-                maxHeight: `${Math.floor(logAvailableHeight / 52) * 52}px`, // Exact height for complete rows
-                height: `${Math.floor(logAvailableHeight / 52) * 52}px`, // Also set height
                 overflow: 'hidden'
               }}
             >
               {(() => {
-                // Calculate how many events to show based on available height
-                const ROW_HEIGHT = 60; // Increased to account for margins between entries
-                const maxEvents = Math.max(1, Math.floor(logAvailableHeight / ROW_HEIGHT));
-                const calculatedHeight = Math.floor(logAvailableHeight / 52) * 52;
-                console.log(`Training Log CSS: Setting height to ${calculatedHeight}px (${Math.floor(logAvailableHeight / 52)} rows)`);
+                // First render: show all events without height constraint to allow DOM measurement
+                // Second render: apply dynamic height based on measurements
+                const sampleLogEntry = document.querySelector('.game-log-entry');
+                let actualRowHeight;
+                let maxEvents;
+                
+                if (!sampleLogEntry) {
+                  // First render - show limited entries to establish DOM structure for measurement
+                  maxEvents = Math.min(battleLog.length, 5); // Show up to 5 entries initially
+                  console.log(`Training Log DEBUG: Initial render, showing ${maxEvents} entries for measurement`);
+                } else {
+                  // Measure actual log entry height and apply dynamic constraints
+                  actualRowHeight = sampleLogEntry.getBoundingClientRect().height;
+                  maxEvents = Math.max(1, Math.floor(logAvailableHeight / actualRowHeight));
+                  
+                  // Apply exact height for complete rows by updating the container style
+                  const container = document.querySelector('.game-log__events') as HTMLElement;
+                  if (container) {
+                    const exactHeight = Math.floor(logAvailableHeight / actualRowHeight) * actualRowHeight;
+                    container.style.height = `${exactHeight}px`;
+                    container.style.maxHeight = `${exactHeight}px`;
+                  }
+                  
+                  console.log(`Training Log DEBUG: logAvailableHeight=${logAvailableHeight}px, measured actualRowHeight=${actualRowHeight}px, maxEvents=${maxEvents}`);
+                }
                 
                 // Debug actual DOM measurements
                 setTimeout(() => {

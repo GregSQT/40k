@@ -21,13 +21,20 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
   
   // Calculate how many complete rows can fit dynamically
   React.useEffect(() => {
-    const ROW_HEIGHT = 52; // Fixed height per log entry
-    const maxRows = Math.floor(availableHeight / ROW_HEIGHT);
-    const finalRowCount = Math.max(1, maxRows); // Show at least 1 row
+    // Wait for DOM to render, then measure actual log entry height
+    const timer = setTimeout(() => {
+      const sampleLogEntry = document.querySelector('.game-log-entry');
+      if (!sampleLogEntry) throw new Error('No log entry found to measure height in GameLog');
+      
+      const actualRowHeight = sampleLogEntry.getBoundingClientRect().height;
+      const maxRows = Math.floor(availableHeight / actualRowHeight);
+      const finalRowCount = Math.max(1, maxRows); // Show at least 1 row
+      
+      console.log(`GameLog DEBUG: availableHeight=${availableHeight}px, actualRowHeight=${actualRowHeight}px, maxRows=${maxRows}, finalRowCount=${finalRowCount}`);
+      setVisibleRowCount(finalRowCount);
+    }, 100);
     
-    console.log(`GameLog DEBUG: availableHeight=${availableHeight}px, maxRows=${maxRows}, finalRowCount=${finalRowCount}`);
-    console.log(`GameLog: Setting container height to ${finalRowCount * 52}px`);
-    setVisibleRowCount(finalRowCount);
+    return () => clearTimeout(timer);
   }, [availableHeight]);
 
   // Display limited events (newest first) - sort by timestamp descending and limit to calculated rows
@@ -58,7 +65,7 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
             ref={eventsContainerRef}
             className="game-log__events"
             style={{
-              height: `${visibleRowCount * 52}px`, // Exact height for complete rows
+              maxHeight: `${availableHeight}px`, // Use full available height
               overflow: 'hidden'
             }}
           >
