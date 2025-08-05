@@ -158,9 +158,9 @@ class PhaseTransitionManager:
         # Turn start will be logged by the first AI action in the turn
         pass
         
-        # CRITICAL: Force replay logger synchronization to prevent turn jumps
+        # CRITICAL: Synchronize replay logger IMMEDIATELY to prevent turn jumps
         if hasattr(self.env, 'replay_logger') and self.env.replay_logger:
-            # Ensure replay logger matches environment turn
+            # Ensure replay logger matches environment turn BEFORE any logging
             if hasattr(self.env.replay_logger, 'current_turn'):
                 old_replay_turn = getattr(self.env.replay_logger, 'current_turn', 0)
                 self.env.replay_logger.current_turn = self.env.current_turn
@@ -170,6 +170,10 @@ class PhaseTransitionManager:
             # Force absolute turn tracking to prevent jumps
             if hasattr(self.env.replay_logger, 'absolute_turn'):
                 self.env.replay_logger.absolute_turn = self.env.current_turn
+            
+            # Also synchronize phase to prevent phase desynchronization
+            if hasattr(self.env.replay_logger, 'current_phase'):
+                self.env.replay_logger.current_phase = self.env.current_phase
     
     def _log_phase_change(self):
         """Log phase changes for debugging."""

@@ -89,11 +89,13 @@ class GameReplayLogger:
     
     def log_game_start(self):
         """Log game start."""
+        # Use environment's actual current turn for game start
+        start_turn = getattr(self.env, 'current_turn', 1)
         self.add_entry(
             entry_type="turn_change",
             reward=0.0,
             action_name="game_start",
-            turn_number=1  # CRITICAL: Force turn 1 for game start
+            turn_number=start_turn
         )
     
     def log_move(self, unit: Dict, start_col: int, start_row: int, 
@@ -133,8 +135,23 @@ class GameReplayLogger:
     
     def log_charge(self, charger: Dict, target: Dict, start_col: int, start_row: int,
                    end_col: int, end_row: int, turn_number: int, 
-                   reward: float, action_int: int):
-        """Log charge action."""
+                   reward: float, action_int: int, charge_roll: int = None, 
+                   die1: int = None, die2: int = None, charge_succeeded: bool = None):
+        """Log charge action with dice roll details."""
+        # Create charge details with dice information
+        charge_details = []
+        if charge_roll is not None and die1 is not None and die2 is not None:
+            distance_needed = max(abs(start_col - target["col"]), abs(start_row - target["row"]))
+            charge_details.append({
+                "rollType": "charge",
+                "die1": die1,
+                "die2": die2,
+                "totalRoll": charge_roll,
+                "targetDistance": distance_needed,
+                "chargeSucceeded": charge_succeeded,
+                "rollResult": "SUCCESS" if charge_succeeded else "FAILED"
+            })
+        
         self.add_entry(
             entry_type="charge",
             acting_unit=charger,
@@ -143,7 +160,8 @@ class GameReplayLogger:
             action_name=self.action_names.get(action_int, f"action_{action_int}"),
             turn_number=turn_number,
             start_hex=f"({start_col},{start_row})",
-            end_hex=f"({end_col},{end_row})"
+            end_hex=f"({end_col},{end_row})",
+            shoot_details=charge_details  # Reuse shoot_details field for charge roll info
         )
     
     def log_combat(self, attacker: Dict, target: Dict, combat_details: Dict,

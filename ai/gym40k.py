@@ -483,16 +483,13 @@ class W40KEnv(gym.Env):
             if hasattr(self.replay_logger, 'combat_log_entries'):
                 self.replay_logger.combat_log_entries = []
             
-            # CRITICAL: Reset event counter to restart step numbers from 1
+           # CRITICAL: Reset event counter to restart step numbers from 1
             if hasattr(self.replay_logger, 'next_event_id'):
                 self.replay_logger.next_event_id = 1
-            # CRITICAL: Reset turn to 0 to match environment - will increment to 1 when AI acts
-            if hasattr(self.replay_logger, 'current_turn'):
-                self.replay_logger.current_turn = 0
+            # CRITICAL: Don't set replay logger turn here - will be synchronized later
+            # Reset other replay logger state
             if hasattr(self.replay_logger, 'initial_game_state'):
                 self.replay_logger.initial_game_state = {}
-            if hasattr(self.replay_logger, 'absolute_turn'):
-                self.replay_logger.absolute_turn = 0
             
             # Connect UnitManager to replay logger after reset
             if hasattr(self, 'unit_manager') and self.unit_manager:
@@ -608,6 +605,19 @@ class W40KEnv(gym.Env):
         
         # Reset replay
         self.replay_data = []
+        
+        # CRITICAL: Synchronize replay logger and capture initial state AFTER all environment state is set
+        if hasattr(self, 'replay_logger') and self.replay_logger:
+            # Synchronize replay logger with final environment state
+            if hasattr(self.replay_logger, 'current_turn'):
+                self.replay_logger.current_turn = self.current_turn
+            if hasattr(self.replay_logger, 'current_phase'):
+                self.replay_logger.current_phase = self.current_phase
+            if hasattr(self.replay_logger, 'absolute_turn'):
+                self.replay_logger.absolute_turn = self.current_turn
+            
+            # Now capture initial state with properly synchronized logger
+            self.replay_logger.capture_initial_state()
         
         return self._get_obs(), self._get_info()
 
@@ -1535,7 +1545,9 @@ class W40KEnv(gym.Env):
                 
                 # Roll 2d6 for charge distance (W40K rules)
                 from shared.gameRules import roll_d6
-                charge_roll = roll_d6() + roll_d6()
+                die1 = roll_d6()
+                die2 = roll_d6()
+                charge_roll = die1 + die2
 
                 if distance <= 1:
                     # Already adjacent - cannot charge
@@ -1543,6 +1555,8 @@ class W40KEnv(gym.Env):
                 elif distance > charge_roll:
                     # Charge roll too low to reach target
                     charge_succeeded = False
+                    if not self.quiet:
+                        print(f"⚔️ CHARGE FAILED: Unit {unit['id']} rolled {charge_roll} ({die1}+{die2}) but needed {distance} to reach target")
                 else:
                     # Find valid adjacent position using hex grid (6 positions)
                     adjacent_positions = [
@@ -1590,7 +1604,9 @@ class W40KEnv(gym.Env):
                         # Map to strategic charge action for logger
                         strategic_action_int = self._map_to_strategic_action(unit, action_type, "charge")
                         self.replay_logger.log_charge(unit, target, old_col, old_row, unit["col"], unit["row"], 
-                                                  self.current_turn, reward, strategic_action_int)
+                                                  self.current_turn, reward, strategic_action_int,
+                                                  charge_roll=charge_roll, die1=die1, die2=die2, 
+                                                  charge_succeeded=charge_succeeded)
                     except Exception as e:
                         pass  # Silent failure to avoid breaking training
             else:

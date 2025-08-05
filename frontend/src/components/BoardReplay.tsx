@@ -164,16 +164,21 @@ const calculateChargeTargets = (
   const chargingUnit = units.find(u => u.col === chargerCol && u.row === chargerRow);
   if (!chargingUnit) return { chargeCells, adjacentToEnemyCells };
   
+  // CRITICAL FIX: Only consider enemies within the charger's MOVE range per AI_GAME.md
   const enemyUnits = units.filter(u => u.player !== chargingUnit.player && u.alive);
+  const enemiesInMoveRange = enemyUnits.filter(enemy => {
+    const distanceToEnemy = Math.max(Math.abs(chargerCol - enemy.col), Math.abs(chargerRow - enemy.row));
+    return distanceToEnemy <= maxMove;
+  });
   
-  // Check each available cell to see if it's adjacent to an enemy
+  // Check each available cell to see if it's adjacent to an enemy WITHIN MOVE RANGE
   availableCells.forEach(cell => {
-    const isAdjacentToEnemy = enemyUnits.some(enemy => {
+    const isAdjacentToEnemyInRange = enemiesInMoveRange.some(enemy => {
       const distance = Math.max(Math.abs(cell.col - enemy.col), Math.abs(cell.row - enemy.row));
       return distance === 1; // Adjacent means distance of 1
     });
     
-    if (isAdjacentToEnemy) {
+    if (isAdjacentToEnemyInRange) {
       adjacentToEnemyCells.push(cell);
     } else {
       chargeCells.push(cell);
