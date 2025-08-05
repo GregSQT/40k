@@ -30,7 +30,7 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
   className,
 }) => {
   return (
-    <div className={`game-controller ${className || ''}`} style={{ background: '#222', minHeight: '100vh' }}>
+    <div className={`game-controller ${className || ''}`} style={{ background: '#222', height: '100vh' }}>
       <main className="main-content">
         <div className="game-area" style={{ display: 'flex', gap: '16px' }}>
           <div className="game-board-section">
@@ -39,7 +39,7 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
             </ErrorBoundary>
           </div>
 
-          <div className="unit-status-tables" style={{ paddingTop: '0px', marginTop: '0px', gap: '12px' }}>
+          <div className="unit-status-tables" style={{ paddingTop: '0px', marginTop: '0px', gap: '4px' }}>
             <Navigation />
             {rightColumnContent}
           </div>

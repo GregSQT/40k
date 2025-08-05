@@ -195,14 +195,14 @@ body {
 .unit-status-tables {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xl);
+  gap: var(--spacing-sm); /* Reduce gap from 20px to 8px */
   width: 100%;
   max-width: 900px;
   margin-left: var(--spacing-lg);
   margin-top: 60px; /* Push tables below navigation buttons */
-  height: 100%;
-  max-height: 100%;
-  overflow-y: auto;
+  height: auto; /* Allow natural height for dynamic log calculation */
+  max-height: none; /* Remove height constraint */
+  overflow-y: visible; /* Remove scrolling constraint */
   padding-right: var(--spacing-xs);
 }
 
@@ -796,15 +796,15 @@ textarea:focus {
 }
 
 .game-log__events {
-  max-height: 220px;
+  max-height: none; /* Allow dynamic height calculation from JavaScript */
   overflow-y: auto;
   padding-right: 4px;
 }
 
-/* Ensure consistent log entry heights */
+/* Allow natural log entry heights */
 .game-log-entry {
-  min-height: 52px; /* Fixed height per log entry */
-  max-height: 52px; /* Prevent entries from growing */
+  min-height: auto; /* Allow natural height */
+  max-height: none; /* Remove height constraint */
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -832,8 +832,8 @@ textarea:focus {
 
 /* Game Log Entry */
 .game-log-entry {
-  margin-bottom: 2px; /* Reduce margin between log entries */
-  padding: 2px var(--spacing-sm); /* No vertical padding: 0px top/bottom, 8px left/right */
+  margin-bottom: 1px; /* Minimize margin for tighter spacing */
+  padding: 1px var(--spacing-sm); /* Minimize padding for tighter spacing */
   border-radius: var(--radius-md);
   border-left: 3px solid #555;
   background: rgba(255, 255, 255, 0.02);
@@ -1035,22 +1035,22 @@ textarea:focus {
 /* Responsive Design */
 @media (max-width: 1400px) {
   .game-log {
-    max-height: 270px;
+    max-height: none; /* Allow dynamic height calculation */
   }
   
   .game-log__events {
-    max-height: 190px;
+    max-height: none; /* Allow dynamic height calculation */
   }
 }
 
 @media (max-width: 768px) {
   .game-log {
     margin-top: var(--spacing-md);
-    max-height: 200px;
+    max-height: none; /* Allow dynamic height calculation */
   }
   
   .game-log__events {
-    max-height: 120px;
+    max-height: none; /* Allow dynamic height calculation */
   }
   
   .game-log-entry {
