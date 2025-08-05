@@ -1272,11 +1272,13 @@ class W40KEnv(gym.Env):
                 raise KeyError(f"Missing 'base_actions.move_close' in rewards config for unit type {unit['unit_type']}")
             reward = unit_rewards["base_actions"]["move_close"]
         
-        # Clean action logging
+        # Clean action logging - map action_type to strategic action for logger
         if self.game_logger:
             try:
+                # Map basic action_type to strategic action_int for logger
+                strategic_action_int = self._map_to_strategic_action(unit, action_type, "move")
                 self.game_logger.log_move(unit, old_col, old_row, unit["col"], unit["row"], 
-                                        self.current_turn, reward, action_type)
+                                        self.current_turn, reward, strategic_action_int)
             except Exception as e:
                 pass  # Silent failure to avoid breaking training
         else:
@@ -1437,10 +1439,12 @@ class W40KEnv(gym.Env):
                         raise KeyError(f"Missing 'result_bonuses.kill_target' in rewards config for unit type {unit['unit_type']}")
                     reward += unit_rewards["result_bonuses"]["kill_target"]
 
-                # Clean action logging  
+                # Clean action logging - map to strategic action for logger
                 if self.game_logger:
                     try:
-                        self.game_logger.log_shoot(unit, target, result, self.current_turn, reward, 4)
+                        # Map to strategic shooting action for logger
+                        strategic_action_int = self._map_to_strategic_action(unit, action_type, "shoot")
+                        self.game_logger.log_shoot(unit, target, result, self.current_turn, reward, strategic_action_int)
                     except Exception as e:
                         pass  # Silent failure to avoid breaking training
                 else:
@@ -1513,11 +1517,13 @@ class W40KEnv(gym.Env):
                     raise KeyError(f"Missing 'base_actions.charge_success' in rewards config for unit type {unit['unit_type']}")
                 reward = unit_rewards["base_actions"]["charge_success"]
 
-                # Clean action logging  
+                # Clean action logging - map to strategic action for logger  
                 if self.game_logger:
                     try:
+                        # Map to strategic charge action for logger
+                        strategic_action_int = self._map_to_strategic_action(unit, action_type, "charge")
                         self.game_logger.log_charge(unit, target, old_col, old_row, unit["col"], unit["row"], 
-                                                  self.current_turn, reward, 5)
+                                                  self.current_turn, reward, strategic_action_int)
                     except Exception as e:
                         pass  # Silent failure to avoid breaking training
             else:
@@ -1605,7 +1611,9 @@ class W40KEnv(gym.Env):
                 # Clean action logging - MOVE AFTER UNIT REMOVAL
                 if self.game_logger:
                     try:
-                        self.game_logger.log_combat(unit, target, result, self.current_turn, reward, 6)
+                        # Map to strategic combat action for logger
+                        strategic_action_int = self._map_to_strategic_action(unit, action_type, "combat")
+                        self.game_logger.log_combat(unit, target, result, self.current_turn, reward, strategic_action_int)
                     except Exception as e:
                         pass  # Silent failure to avoid breaking training
                     if old_hp == total_damage:
@@ -2506,10 +2514,26 @@ class W40KEnv(gym.Env):
         except Exception as e:
             pass  # Don't break training if capture fails
 
-    def close(self):
-        """Clean up environment."""
-        # Replay saving now handled by GameReplayIntegration
-        pass
+    def _map_to_strategic_action(self, unit, action_type, phase):
+        """Map basic environment action_type to strategic action_int for logger."""
+        # Map basic environment actions to strategic logger actions
+        if phase == "move":
+            # Basic movement (0-3: north/south/east/west) -> strategic movement
+            # For now, map all movement to move_closer (0) - can be enhanced later
+            return 0  # move_closer
+        elif phase == "shoot":
+            # Basic shooting (4) -> strategic shooting based on target selection
+            # For now, default to shoot_closest (3) - can be enhanced based on target analysis
+            return 3  # shoot_closest
+        elif phase == "charge":
+            # Basic charge (5) -> strategic charge
+            return 5  # charge_closest
+        elif phase == "combat":
+            # Basic combat (6) -> strategic combat
+            return 7  # attack_adjacent
+        else:
+            # Wait/unknown actions
+            return 6  # wait
 
     # _generate_combat_log_from_actions removed - using GameReplayIntegration only
 

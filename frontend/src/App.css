@@ -990,6 +990,17 @@ textarea:focus {
   font-style: italic;
 }
 
+/* Default/Unknown Event Type */
+.game-log-entry--default {
+  border-left-color: #555;
+  background: rgba(85, 85, 85, 0.1);
+}
+
+.game-log-entry--default .game-log-entry__message {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
 /* Shooting/Combat Details */
 .game-log-entry__details {
   margin-top: var(--spacing-xs);
@@ -1125,8 +1136,9 @@ textarea:focus {
 
 /* Enhanced Game Log Styles for Replay Viewer */
 .game-log-entry--active {
-  background: rgba(30, 144, 255, 0.2) !important;
-  border-left-color: var(--color-accent) !important;
+  /* Don't override background or border - let event colors show */
+  box-shadow: 0 0 0 2px var(--color-accent);
+  /* Blue outline to indicate active without overriding colors */
 }
 
 .game-log-entry__reward-value--positive {
