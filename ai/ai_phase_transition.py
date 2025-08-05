@@ -60,9 +60,11 @@ class PhaseTransitionManager:
         old_player = self.env.current_player
         self.env.current_player = 1 - self.env.current_player
         
-        # DEBUG: Force logging of player transitions
+        # DEBUG: Force logging of player transitions with unit counts
         if not self.quiet:
-            print(f"🔄 Player transition: {old_player} -> {self.env.current_player}")
+            ai_units = len(self.env.unit_manager.get_alive_ai_units())
+            enemy_units = len(self.env.unit_manager.get_alive_enemy_units())
+            print(f"🔄 Player transition: {old_player} -> {self.env.current_player} (AI:{ai_units}, Enemy:{enemy_units})")
         
         # CRITICAL FIX: Turn increment when Player 1 starts move phase
         if self.env.current_player == 1 and self.env.current_phase == "move":
@@ -71,6 +73,8 @@ class PhaseTransitionManager:
             self.env.current_turn += 1
             if not self.quiet:
                 print(f"🔄 TURN INCREMENT: {old_turn} -> {self.env.current_turn}")
+                print(f"   AI units: {len(self.env.unit_manager.get_alive_ai_units())}")
+                print(f"   Enemy units: {len(self.env.unit_manager.get_alive_enemy_units())}")
             self._reset_turn_state()
             self._log_turn_start()  # Log AFTER turn increment, while current_player is still 1
             
@@ -78,6 +82,7 @@ class PhaseTransitionManager:
             # Player 0 (enemy) starting their turn - execute enemy AI
             if not self.quiet:
                 print(f"🤖 Enemy turn starting (turn {self.env.current_turn})")
+                print(f"   Enemy units available: {len(self.env.unit_manager.get_alive_enemy_units())}")
             self._execute_enemy_turn()
         
         self._log_phase_change()
@@ -177,6 +182,7 @@ class PhaseTransitionManager:
     
     def _log_phase_change(self):
         """Log phase changes for debugging."""
-        if not self.quiet:
+        # Only log phase changes if specifically requested (reduce verbosity)
+        if not self.quiet and hasattr(self.env, 'verbose_phase_logging') and self.env.verbose_phase_logging:
             player_name = "AI" if self.env.current_player == 1 else "Enemy"
             print(f"📋 {player_name} - {self.env.current_phase.upper()} phase")

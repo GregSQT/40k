@@ -69,7 +69,7 @@ class W40KEnv(gym.Env):
              controlled_agent=None, active_agents=None, scenario_file=None, unit_registry=None, quiet=False):
         super().__init__()
         
-        self.quiet = quiet  # Add quiet mode flag
+        self.quiet = False  # Add quiet mode flag
 
         # Multi-agent support - reuse shared registry if provided
         self.unit_registry = unit_registry if unit_registry is not None else UnitRegistry()
@@ -978,39 +978,73 @@ class W40KEnv(gym.Env):
         
         # Keep advancing phases until we find eligible units or game ends
         phase_advances = 0
-        max_phase_advances = 120  # Allow sufficient phase advances for 800-step episodes
+        max_phase_advances = 500  # Greatly increase to prevent premature termination
         
         while not eligible_units and not self.game_over and phase_advances < max_phase_advances:
-            if not self.quiet:
+            # Only log phase advances every 10 advances to reduce spam
+            if not self.quiet and phase_advances % 10 == 0:
                 print(f"🔄 Phase advance {phase_advances}: {self.current_phase}, Player {self.current_player}")
             self.phase_manager.advance_phase()
             eligible_units = self._get_eligible_units()
             phase_advances += 1
         
         if phase_advances >= max_phase_advances:
-            # CRITICAL: Don't end game - this is a bug, not a legitimate termination
+            # CRITICAL: Only end game if units are actually dead or turn limit reached
+            ai_units_alive = self.unit_manager.get_alive_ai_units()
+            enemy_units_alive = self.unit_manager.get_alive_enemy_units()
+            
             if not self.quiet:
-                print(f"❌ CRITICAL: Phase advances exceeded {max_phase_advances} - potential infinite loop")
-                print(f"   AI units alive: {len(self.unit_manager.get_alive_ai_units())}")
-                print(f"   Enemy units alive: {len(self.unit_manager.get_alive_enemy_units())}")
+                print(f"❌ CRITICAL: Phase advances exceeded {max_phase_advances}")
+                print(f"   AI units alive: {len(ai_units_alive)}")
+                print(f"   Enemy units alive: {len(enemy_units_alive)}")
                 print(f"   Current phase: {self.current_phase}, Current player: {self.current_player}")
                 print(f"   Turn: {self.current_turn}, Step: {self.step_count}")
-            # Emergency end game to prevent infinite loops - check if game should have ended
-            if not self.unit_manager.get_alive_ai_units() or not self.unit_manager.get_alive_enemy_units():
-                # Units were eliminated but game didn't end properly, force proper termination
+            
+            # Only end game if there's a legitimate termination condition
+            if not ai_units_alive:
                 self.game_over = True
-                self.winner = 0 if not self.unit_manager.get_alive_ai_units() else 1
+                self.winner = 0
+                if not self.quiet:
+                    print("🏁 GAME OVER: AI has no living units")
                 return self._get_obs(), 0.0, True, False, self._get_info()
-            # Check turn limit before emergency termination
+            elif not enemy_units_alive:
+                self.game_over = True
+                self.winner = 1
+                if not self.quiet:
+                    print("🏁 GAME OVER: Enemy has no living units")
+                return self._get_obs(), 0.0, True, False, self._get_info()
             elif self.current_turn >= self.max_turns:
                 self.game_over = True
                 self.winner = None
+                if not self.quiet:
+                    print(f"🏁 GAME OVER: Turn limit reached ({self.current_turn}/{self.max_turns})")
                 return self._get_obs(), self.turn_limit_penalty, True, False, self._get_info()
-            # Still have units but too many phase advances - end with draw only as last resort
             else:
-                self.game_over = True
-                self.winner = None
-                return self._get_obs(), -1.0, True, False, self._get_info()
+                # Still have units and haven't reached turn limit - DON'T END THE GAME
+                if not self.quiet:
+                    print("⚠️ WARNING: Too many phase advances but game should continue")
+                    print("🔧 FORCING eligibility for units to break the loop")
+                
+                # Force at least one unit to be eligible to break the infinite loop
+                all_ai_units = self.unit_manager.get_alive_ai_units()
+                if all_ai_units:
+                    # Reset all unit action flags to make them eligible again
+                    for unit in all_ai_units:
+                        unit["has_moved"] = False
+                        unit["has_shot"] = False
+                        unit["has_charged"] = False
+                        unit["has_attacked"] = False
+                    
+                    # Clear tracking sets
+                    self.moved_units.clear()
+                    self.shot_units.clear()
+                    self.charged_units.clear()
+                    self.attacked_units.clear()
+                    
+                    # Get fresh eligible units list
+                    eligible_units = self._get_eligible_units()
+                    if not self.quiet:
+                        print(f"🔧 FORCED reset: {len(eligible_units)} units now eligible")
         
         if not eligible_units and not self.game_over:
             # Still no eligible units, return small negative reward
@@ -1111,10 +1145,18 @@ class W40KEnv(gym.Env):
         ai_units_alive = self.unit_manager.get_alive_ai_units()
         enemy_units_alive = self.unit_manager.get_alive_enemy_units()
         
-        # Game outcome rewards - check termination conditions using UnitManager
+        # Game outcome rewards - check termination conditions using UnitManager - with detailed debugging
         if not ai_units_alive:  # No alive AI units
             self.game_over = True
             self.winner = 0
+            
+            if not self.quiet:
+                print(f"🏁 GAME OVER: AI has no living units at Turn {self.current_turn}, Step {self.step_count}")
+                print(f"   Enemy units remaining: {len(enemy_units_alive)}")
+                print(f"   Last AI unit deaths:")
+                for unit in self.unit_manager.units:
+                    if unit["player"] == 1 and not unit["alive"]:
+                        print(f"     Unit {unit.get('id')} ({unit.get('unit_type')}) HP: {unit.get('cur_hp', 0)}")
             
             # CRITICAL: Finalize replay data at actual game end
             if hasattr(self, 'replay_logger') and self.replay_logger:
@@ -1135,6 +1177,14 @@ class W40KEnv(gym.Env):
         elif not enemy_units_alive:  # No alive enemy units
             self.game_over = True
             self.winner = 1
+            
+            if not self.quiet:
+                print(f"🏁 GAME OVER: Enemy has no living units at Turn {self.current_turn}, Step {self.step_count}")
+                print(f"   AI units remaining: {len(ai_units_alive)}")
+                print(f"   Last enemy unit deaths:")
+                for unit in self.unit_manager.units:
+                    if unit["player"] == 0 and not unit["alive"]:
+                        print(f"     Unit {unit.get('id')} ({unit.get('unit_type')}) HP: {unit.get('cur_hp', 0)}")
             
             # CRITICAL: Finalize replay data at actual game end
             if hasattr(self, 'replay_logger') and self.replay_logger:
@@ -1176,6 +1226,9 @@ class W40KEnv(gym.Env):
         elif self.current_turn >= self.max_turns:
             self.game_over = True
             self.winner = None
+            if not self.quiet:
+                print(f"🏁 GAME OVER: Turn limit reached ({self.current_turn}/{self.max_turns})")
+                print(f"   AI units: {len(ai_units_alive)}, Enemy units: {len(enemy_units_alive)}")
             if not hasattr(self, 'turn_limit_penalty') or self.turn_limit_penalty is None:
                 self.turn_limit_penalty = self.config.get_turn_limit_penalty()
             reward += self.turn_limit_penalty
