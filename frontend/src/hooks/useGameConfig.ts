@@ -18,6 +18,7 @@ interface DisplayConfig {
   charge_target_border_width?: number;
   default_border_width?: number;
   canvas_border?: string;
+  right_column_bottom_offset?: number;
 }
 
 interface ObjectiveZone {

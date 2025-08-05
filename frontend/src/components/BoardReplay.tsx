@@ -327,25 +327,42 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
       const player1Height = player1Table.getBoundingClientRect().height;
       const gameLogHeaderHeight = gameLogHeader.getBoundingClientRect().height;
       
-      // Calculate log space using viewport height minus some reasonable bottom margin
+      // Calculate log space using proven GameController.tsx approach
       const player1Rect = player1Table.getBoundingClientRect();
       const viewportHeight = window.innerHeight;
       
       // Current log start position = bottom of player 1 table + log header
       const logStartY = player1Rect.bottom + gameLogHeaderHeight;
       
-      // Maximum allowed bottom = viewport height minus reasonable margin
-      const bottomMargin = 50; // Leave 50px margin at bottom
-      const maxAllowedBottom = viewportHeight - bottomMargin;
+      // Calculate board canvas height to align log with board bottom  
+      if (!boardConfig?.cols) throw new Error('boardConfig.cols not found');
+      if (!boardConfig?.rows) throw new Error('boardConfig.rows not found');
+      if (!boardConfig?.hex_radius) throw new Error('boardConfig.hex_radius not found');
+      if (!boardConfig?.margin) throw new Error('boardConfig.margin not found');
       
-      // Available space = max allowed bottom minus log start position
-      let availableForLog = Math.max(0, maxAllowedBottom - logStartY);
+      const BOARD_COLS = boardConfig.cols;
+      const BOARD_ROWS = boardConfig.rows;
+      const HEX_RADIUS = boardConfig.hex_radius;
+      const MARGIN = boardConfig.margin;
+      const HEX_WIDTH = 1.5 * HEX_RADIUS;
+      const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+      const HEX_HORIZ_SPACING = HEX_WIDTH;
+      const HEX_VERT_SPACING = HEX_HEIGHT;
+      // Use configurable right column bottom position for target bottom  
+      if (!boardConfig?.display?.right_column_bottom_offset) {
+        throw new Error('boardConfig.display.right_column_bottom_offset not found in config');
+      }
+      
+      const fixedBottomPosition = boardConfig.display.right_column_bottom_offset;
+      
+      // Available space = from current log position to fixed bottom position
+      let availableForLog = Math.max(100, fixedBottomPosition - logStartY);
       
       // Use calculated space without arbitrary constraints
       // availableForLog is already calculated correctly above
       
       // Debug the actual measurements
-      console.log(`DEBUG: viewportHeight=${viewportHeight}, maxAllowedBottom=${maxAllowedBottom}, logStartY=${logStartY}, bottomMargin=${bottomMargin}`);
+      console.log(`DEBUG: fixedBottomPosition=${fixedBottomPosition}, logStartY=${logStartY}`);
       console.log(`DEBUG: calculated availableForLog=${availableForLog}px`);
       
       // Ensure minimum space and apply height constraint to prevent horizontal splitting
@@ -359,11 +376,11 @@ export const BoardReplay: React.FC<ReplayViewerProps> = ({
         const entryHeight = sampleLogEntry.getBoundingClientRect().height;
         if (entryHeight <= 0) throw new Error('Log entry height measurement failed');
         
-        const completeRowsHeight = Math.floor(availableForLog / entryHeight) * entryHeight;
-        logContainer.style.height = `${completeRowsHeight}px`;
-        logContainer.style.maxHeight = `${completeRowsHeight}px`;
-        logContainer.style.overflowY = 'hidden';
-        console.log(`Applied dynamic height: ${completeRowsHeight}px (${Math.floor(availableForLog / entryHeight)} complete rows)`);
+        // Use full available space without row constraints
+        logContainer.style.height = `${availableForLog}px`;
+        logContainer.style.maxHeight = `${availableForLog}px`;
+        logContainer.style.overflowY = 'auto';
+        console.log(`Applied dynamic height: ${availableForLog}px (full available space)`);
       }
       
       console.log(`BoardReplay height calculation: Controls=${controlsHeight}px, P0=${player0Height}px, P1=${player1Height}px, LogHeader=${gameLogHeaderHeight}px, available=${availableForLog}px`);
