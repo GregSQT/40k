@@ -1,0 +1,469 @@
+#!/usr/bin/env python3
+"""
+use_phase_transition.py
+EXACT Python mirror of frontend/src/hooks/usePhaseTransition.ts
+Automatic phase advancement system - ALL features preserved.
+
+This is the complete functional equivalent of the PvP usePhaseTransition hook system.
+"""
+
+from typing import Dict, List, Any, Optional, Callable, Set
+import time
+import copy
+from shared.gameMechanics import (
+    is_unit_eligible,
+    should_transition_from_move,
+    should_transition_from_shoot, 
+    should_transition_from_charge,
+    should_transition_from_charged_units_phase,
+    should_end_alternating_combat,
+    should_end_turn,
+    ensure_charged_this_turn_defaults
+)
+
+class UsePhaseTransition:
+    """
+    EXACT Python mirror of usePhaseTransition TypeScript hook.
+    Automatic phase advancement system with ALL features preserved.
+    """
+    
+    def __init__(self, game_state: Dict[str, Any], 
+                 board_config: Dict[str, Any],
+                 is_unit_eligible_func: Callable,
+                 actions: Dict[str, Callable]):
+        """Initialize with same parameters as TypeScript usePhaseTransition"""
+        self.game_state = game_state
+        self.board_config = board_config
+        self.is_unit_eligible_func = is_unit_eligible_func
+        self.actions = actions
+        
+        # Extract state for convenience (EXACT from TypeScript)
+        self.units = game_state["units"]
+        self.current_player = game_state["current_player"]
+        self.phase = game_state["phase"]
+        self.units_moved = set(game_state.get("units_moved", []))
+        self.units_charged = set(game_state.get("units_charged", []))
+        self.units_attacked = set(game_state.get("units_attacked", []))
+        self.units_fled = set(game_state.get("units_fled", []))
+        self.combat_sub_phase = game_state.get("combat_sub_phase")
+        self.combat_active_player = game_state.get("combat_active_player")
+
+    # === HELPER METHODS (EXACT from TypeScript) ===
+
+    def get_current_player_units(self) -> List[Dict[str, Any]]:
+        """EXACT mirror of getCurrentPlayerUnits from TypeScript"""
+        return [u for u in self.units if u["player"] == self.current_player]
+
+    def get_enemy_units(self) -> List[Dict[str, Any]]:
+        """EXACT mirror of getEnemyUnits from TypeScript"""
+        return [u for u in self.units if u["player"] != self.current_player]
+
+    # === PHASE TRANSITION CHECKS (EXACT from TypeScript) ===
+
+    def should_transition_from_move(self) -> bool:
+        """EXACT mirror of shouldTransitionFromMove from TypeScript"""
+        return should_transition_from_move(self.units, self.current_player, self.units_moved)
+
+    def should_transition_from_shoot(self) -> bool:
+        """EXACT mirror of shouldTransitionFromShoot from TypeScript"""
+        return should_transition_from_shoot(
+            self.units, self.current_player, self.phase, 
+            self.units_moved, self.units_charged, self.units_attacked, self.units_fled
+        )
+
+    def should_transition_from_charge(self) -> bool:
+        """EXACT mirror of shouldTransitionFromCharge from TypeScript"""
+        return should_transition_from_charge(
+            self.units, self.current_player, self.phase,
+            self.units_moved, self.units_charged, self.units_attacked, self.units_fled
+        )
+
+    def should_end_turn(self) -> bool:
+        """EXACT mirror of shouldEndTurn from TypeScript"""
+        return should_end_turn(self.units)
+
+    def should_transition_from_charged_units_phase(self) -> bool:
+        """EXACT mirror of shouldTransitionFromChargedUnitsPhase from TypeScript"""
+        return should_transition_from_charged_units_phase(
+            self.units, self.current_player, self.phase, self.combat_sub_phase,
+            self.units_moved, self.units_charged, self.units_attacked, self.units_fled
+        )
+
+    def should_end_alternating_combat(self) -> bool:
+        """EXACT mirror of shouldEndAlternatingCombat from TypeScript"""
+        return should_end_alternating_combat(
+            self.units, self.phase, self.combat_sub_phase,
+            self.units_moved, self.units_charged, self.units_attacked, self.units_fled
+        )
+
+    # === PHASE TRANSITION ACTIONS (EXACT from TypeScript) ===
+
+    def transition_to_shoot(self) -> None:
+        """
+        EXACT mirror of transitionToShoot from TypeScript.
+        Transition from move to shoot phase with delay.
+        """
+        def delayed_transition():
+            """Mirror setTimeout behavior from TypeScript"""
+            self.actions["set_phase"]("shoot")
+            self.actions["initialize_shooting_phase"]()  # MISSING FEATURE ADDED
+            self.actions["reset_moved_units"]()
+            self.actions["set_selected_unit_id"](None)
+        
+        # Execute with 300ms delay equivalent (can be immediate in training)
+        delayed_transition()
+
+    def transition_to_charge(self) -> None:
+        """
+        EXACT mirror of transitionToCharge from TypeScript.
+        Transition from shoot to charge phase with delay.
+        """
+        def delayed_transition():
+            """Mirror setTimeout behavior from TypeScript"""
+            self.actions["set_phase"]("charge")
+            self.actions["reset_moved_units"]()  # Reset unitsMoved when entering charge phase
+            self.actions["reset_charged_units"]()
+            self.actions["set_selected_unit_id"](None)
+        
+        # Execute with 300ms delay equivalent
+        delayed_transition()
+
+    def transition_to_combat(self) -> None:
+        """
+        EXACT mirror of transitionToCombat from TypeScript.
+        Transition from charge to combat phase with delay.
+        """
+        def delayed_transition():
+            """Mirror setTimeout behavior from TypeScript"""
+            self.actions["set_phase"]("combat")
+            self.actions["initialize_combat_phase"]()
+            self.actions["set_selected_unit_id"](None)
+            self.actions["reset_attacked_units"]()
+            self.actions["set_mode"]("select")
+        
+        # Execute with 300ms delay equivalent
+        delayed_transition()
+
+    def end_turn(self) -> None:
+        """
+        EXACT mirror of endTurn from TypeScript.
+        End current turn and switch to next player or new turn.
+        """
+        def delayed_end_turn():
+            """Delayed execution to mirror setTimeout(300) behavior"""
+            # Switch player (EXACT from TypeScript)
+            new_player = 1 if self.current_player == 0 else 0
+            self.actions["set_current_player"](new_player)
+            
+            # Increment turn when player 0 starts their turn (EXACT from TypeScript)
+            if new_player == 0:
+                self.actions["set_current_turn"](self.game_state["current_turn"] + 1)
+            
+            self.actions["set_phase"]("move")
+            self.actions["reset_moved_units"]()
+            self.actions["reset_charged_units"]()
+            self.actions["reset_attacked_units"]()
+            self.actions["reset_fled_units"]()
+            
+            # Reset hasChargedThisTurn for all units (EXACT from TypeScript)
+            updated_units = []
+            for unit in self.game_state["units"]:
+                updated_unit = copy.deepcopy(unit)
+                updated_unit["has_charged_this_turn"] = False
+                updated_units.append(updated_unit)
+            self.actions["set_units"](updated_units)
+            
+            self.actions["set_selected_unit_id"](None)
+            
+            # Reset combat sub-phase for next turn (EXACT from TypeScript)
+            self.actions["set_combat_sub_phase"](None)
+            self.actions["set_combat_active_player"](None)
+        
+        # Execute with delay to mirror setTimeout (can be immediate in training)
+        delayed_end_turn()
+
+    def ensure_charged_this_turn_defaults(self) -> None:
+        """
+        EXACT mirror of ensureChargedThisTurnDefaults from TypeScript.
+        Ensure all units have hasChargedThisTurn property set.
+        """
+        units_needing_defaults = any(
+            unit.get("has_charged_this_turn") is None for unit in self.units
+        )
+        
+        if units_needing_defaults:
+            updated_units = []
+            for unit in self.units:
+                updated_unit = copy.deepcopy(unit)
+                if updated_unit.get("has_charged_this_turn") is None:
+                    updated_unit["has_charged_this_turn"] = False
+                updated_units.append(updated_unit)
+            self.actions["set_units"](updated_units)
+
+    # === MAIN PHASE TRANSITION LOGIC (EXACT from TypeScript) ===
+
+    def process_phase_transitions(self) -> None:
+        """
+        EXACT mirror of the main useEffect logic from TypeScript.
+        Process all phase transitions based on current game state.
+        """
+        # Update local state references
+        self.units = self.game_state["units"]
+        self.current_player = self.game_state["current_player"]
+        self.phase = self.game_state["phase"]
+        self.units_moved = set(self.game_state.get("units_moved", []))
+        self.units_charged = set(self.game_state.get("units_charged", []))
+        self.units_attacked = set(self.game_state.get("units_attacked", []))
+        self.units_fled = set(self.game_state.get("units_fled", []))
+        self.combat_sub_phase = self.game_state.get("combat_sub_phase")
+        self.combat_active_player = self.game_state.get("combat_active_player")
+
+        # Main phase transition logic (EXACT from TypeScript)
+        if self.phase == "move":
+            if self.should_transition_from_move():
+                self.transition_to_shoot()
+                
+        elif self.phase == "shoot":
+            if self.should_transition_from_shoot():
+                self.transition_to_charge()
+                
+        elif self.phase == "charge":
+            if self.should_transition_from_charge():
+                self.transition_to_combat()
+                
+        elif self.phase == "combat":
+            # Handle combat sub-phase transitions (EXACT from TypeScript)
+            if (self.combat_sub_phase == "charged_units" and 
+                self.should_transition_from_charged_units_phase()):
+                # Transition from charged units phase to alternating combat
+                next_combat_player = 1 if self.current_player == 0 else 0
+                
+                # Batch all state updates together (EXACT from TypeScript)
+                self.actions["set_combat_sub_phase"]("alternating_combat")
+                self.actions["set_combat_active_player"](next_combat_player)
+                self.actions["set_selected_unit_id"](None)
+                
+                # Force immediate state propagation (Python equivalent of setTimeout(100))
+                def force_state_update():
+                    self.actions["set_selected_unit_id"](None)
+                    self.actions["set_mode"]("select")
+                force_state_update()
+                
+            elif (self.combat_sub_phase == "alternating_combat" and 
+                  self.should_end_alternating_combat()):
+                # End combat phase entirely
+                self.end_turn()
+                
+            elif not self.combat_sub_phase:
+                # Initialize combat phase with charged units sub-phase
+                self.ensure_charged_this_turn_defaults()
+                self.actions["set_combat_sub_phase"]("charged_units")
+                self.actions["set_selected_unit_id"](None)
+
+    def process_alternating_combat_player_switch(self) -> None:
+        """
+        EXACT mirror of alternating player switching logic from TypeScript.
+        Handle player switching in alternating combat phase.
+        """
+        if (self.phase == "combat" and 
+            self.combat_sub_phase == "alternating_combat" and 
+            self.combat_active_player is not None):
+            
+            # Only check for player switching when unitsAttacked changes (EXACT from TypeScript)
+            current_combat_player_units = [
+                u for u in self.units if u["player"] == self.combat_active_player
+            ]
+            
+            # Use the authoritative isUnitEligible function (EXACT from TypeScript)
+            has_eligible_units = any(
+                self.is_unit_eligible_func(unit) for unit in current_combat_player_units
+            )
+            
+            if not has_eligible_units:
+                # Switch to other player immediately (EXACT from TypeScript)
+                other_player = 1 if self.combat_active_player == 0 else 0
+                self.actions["set_combat_active_player"](other_player)
+                self.actions["set_selected_unit_id"](None)
+
+    # === TRAINING INTEGRATION METHODS ===
+
+    def auto_advance_phases(self) -> bool:
+        """
+        Automatically advance phases until player input is needed.
+        Returns True if any phase transitions occurred.
+        """
+        initial_phase = self.phase
+        initial_player = self.current_player
+        
+        # Process transitions
+        self.process_phase_transitions()
+        self.process_alternating_combat_player_switch()
+        
+        # Update state after potential changes
+        final_phase = self.game_state.get("phase", self.phase)
+        final_player = self.game_state.get("current_player", self.current_player)
+        
+        # Return True if state changed
+        return initial_phase != final_phase or initial_player != final_player
+
+    def force_phase_advance(self, target_phase: str) -> None:
+        """Force advance to specific phase (for training scenarios)"""
+        phase_order = ["move", "shoot", "charge", "combat"]
+        current_idx = phase_order.index(self.phase)
+        target_idx = phase_order.index(target_phase)
+        
+        while current_idx < target_idx:
+            if self.phase == "move":
+                self.transition_to_shoot()
+            elif self.phase == "shoot":
+                self.transition_to_charge()
+            elif self.phase == "charge":
+                self.transition_to_combat()
+            current_idx += 1
+            self.phase = self.game_state["phase"]
+
+    def get_phase_info(self) -> Dict[str, Any]:
+        """Get complete phase information for training analysis"""
+        return {
+            "phase": self.phase,
+            "current_player": self.current_player,
+            "combat_sub_phase": self.combat_sub_phase,
+            "combat_active_player": self.combat_active_player,
+            "can_transition": {
+                "from_move": self.should_transition_from_move(),
+                "from_shoot": self.should_transition_from_shoot(),
+                "from_charge": self.should_transition_from_charge(),
+                "from_charged_units": self.should_transition_from_charged_units_phase(),
+                "end_alternating_combat": self.should_end_alternating_combat(),
+                "end_turn": self.should_end_turn(),
+            },
+            "units_status": {
+                "moved": list(self.units_moved),
+                "charged": list(self.units_charged),
+                "attacked": list(self.units_attacked),
+                "fled": list(self.units_fled),
+            }
+        }
+
+    # === EXPOSED TRANSITION FUNCTIONS (EXACT from TypeScript return) ===
+
+    def get_transition_functions(self) -> Dict[str, Callable]:
+        """
+        Return all transition functions (mirror of TypeScript usePhaseTransition return).
+        This replaces the TypeScript hook's return statement.
+        """
+        return {
+            # Transition functions for manual control
+            "transition_to_shoot": self.transition_to_shoot,
+            "transition_to_charge": self.transition_to_charge,
+            "transition_to_combat": self.transition_to_combat,
+            "end_turn": self.end_turn,
+            
+            # Check functions for external use
+            "should_transition_from_move": self.should_transition_from_move,
+            "should_transition_from_shoot": self.should_transition_from_shoot,
+            "should_transition_from_charge": self.should_transition_from_charge,
+            "should_end_turn": self.should_end_turn,
+            
+            # Process functions
+            "process_phase_transitions": self.process_phase_transitions,
+            "process_alternating_combat_player_switch": self.process_alternating_combat_player_switch,
+            
+            # Training-specific functions
+            "auto_advance_phases": self.auto_advance_phases,
+            "force_phase_advance": self.force_phase_advance,
+            "get_phase_info": self.get_phase_info,
+        }
+
+
+# === FACTORY FUNCTION (Mirror of TypeScript hook usage) ===
+
+def use_phase_transition(game_state: Dict[str, Any], 
+                        board_config: Dict[str, Any],
+                        is_unit_eligible_func: Callable,
+                        actions: Dict[str, Callable]) -> Dict[str, Callable]:
+    """
+    Factory function that mirrors the TypeScript usePhaseTransition hook.
+    Returns the same transition functions that the TypeScript hook returns.
+    """
+    phase_transition_manager = UsePhaseTransition(
+        game_state, 
+        board_config, 
+        is_unit_eligible_func,
+        actions
+    )
+    
+    return phase_transition_manager.get_transition_functions()
+
+
+# === TRAINING INTEGRATION CLASS ===
+
+class TrainingPhaseTransition(UsePhaseTransition):
+    """
+    Extended version of UsePhaseTransition optimized for AI training.
+    Adds performance optimizations and training-specific methods.
+    """
+    
+    def __init__(self, game_state: Dict[str, Any], 
+                 board_config: Dict[str, Any],
+                 is_unit_eligible_func: Callable,
+                 actions: Dict[str, Callable]):
+        super().__init__(game_state, board_config, is_unit_eligible_func, actions)
+        self.transition_history = []  # Track phase transitions for analysis
+        
+    def log_transition(self, from_phase: str, to_phase: str, details: Dict[str, Any]) -> None:
+        """Log phase transitions for training analysis"""
+        self.transition_history.append({
+            "timestamp": time.time(),
+            "from_phase": from_phase,
+            "to_phase": to_phase,
+            "current_player": self.current_player,
+            "turn": self.game_state.get("current_turn", 1),
+            "details": details
+        })
+    
+    def get_transition_history(self) -> List[Dict[str, Any]]:
+        """Get complete transition history for training analysis"""
+        return copy.deepcopy(self.transition_history)
+    
+    def reset_for_new_episode(self) -> None:
+        """Reset transition tracking for new training episode"""
+        self.transition_history = []
+    
+    def get_training_metrics(self) -> Dict[str, Any]:
+        """Get training-relevant metrics about phase transitions"""
+        if not self.transition_history:
+            return {"total_transitions": 0, "phases_per_turn": 0}
+        
+        total_transitions = len(self.transition_history)
+        total_turns = max(1, self.game_state.get("current_turn", 1))
+        
+        return {
+            "total_transitions": total_transitions,
+            "phases_per_turn": total_transitions / total_turns,
+            "current_phase": self.phase,
+            "current_player": self.current_player,
+            "combat_sub_phase": self.combat_sub_phase,
+        }
+
+    # Override transition methods to add logging
+    def transition_to_shoot(self) -> None:
+        self.log_transition("move", "shoot", {"player": self.current_player})
+        super().transition_to_shoot()
+    
+    def transition_to_charge(self) -> None:
+        self.log_transition("shoot", "charge", {"player": self.current_player})
+        super().transition_to_charge()
+    
+    def transition_to_combat(self) -> None:
+        self.log_transition("charge", "combat", {"player": self.current_player})
+        super().transition_to_combat()
+    
+    def end_turn(self) -> None:
+        new_player = 1 if self.current_player == 0 else 0
+        self.log_transition("combat", "move", {
+            "old_player": self.current_player,
+            "new_player": new_player,
+            "turn_ended": True
+        })
+        super().end_turn()
