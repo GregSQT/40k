@@ -22,6 +22,22 @@ from .gameLogUtils import (
     format_phase_change_message
 )
 
+# Create LogEntryParams as TypedDict for Python mirror compatibility  
+from typing import TypedDict
+
+class LogEntryParams(TypedDict, total=False):
+    """Parameters for creating log entries - Python mirror of TypeScript interface"""
+    type: str
+    actingUnit: Optional[Dict[str, Any]]
+    targetUnit: Optional[Dict[str, Any]]
+    turnNumber: Optional[int]
+    phase: Optional[str]
+    startHex: Optional[str]
+    endHex: Optional[str]
+    shootDetails: Optional[List[Dict]]
+    reward: Optional[float]
+    actionName: Optional[str]
+
 class BaseLogEntry:
     """Base log entry structure - used by both PvP and Replay"""
     

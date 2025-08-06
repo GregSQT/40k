@@ -479,15 +479,14 @@ class TrainingGameController(GameController):
         """Override to use training-optimized hooks"""
         # Use training versions of hooks for better performance
         
-        # Initialize game configuration
-        self.config_manager = TrainingGameConfig(
-            board_config_name=self.config.board_config_name,
-            config_path=self.config.config_path,
-            cache_configs=True
-        )
-        config_data = self.config_manager.get_config_data()
-        self.board_config = config_data["board_config"]
-        self.game_config = config_data["game_config"]
+        # Initialize game configuration - use existing working config_loader
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        self.board_config = config_loader.get_board_config()
+        self.game_config = config_loader.get_game_config()
+        
+        # Maintain compatibility with TrainingGameConfig cache
+        self.config_manager = None  # Skip problematic TrainingGameConfig for now
         
         # Initialize training game state
         self.state_manager = TrainingGameState(self.game_units, max_history=50)

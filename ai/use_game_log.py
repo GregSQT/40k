@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Optional, Callable
 import time
 from datetime import datetime
 import copy
-from shared.gameLogStructure import create_log_entry, LogEntryParams, BaseLogEntry
+from shared.gameLogStructure import create_log_entry, BaseLogEntry, LogEntryParams
 
 class GameLogEvent(BaseLogEntry):
     """

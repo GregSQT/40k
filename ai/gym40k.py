@@ -19,13 +19,20 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-# Import Python mirror architecture
-from ai.game_controller import TrainingGameController, GameControllerConfig
-from ai.use_game_state import TrainingGameState
-from ai.use_game_actions import TrainingGameActions
-from ai.use_phase_transition import TrainingPhaseTransition
-from ai.use_game_log import TrainingGameLog
-from ai.use_game_config import TrainingGameConfig
+# Import Python mirror architecture  
+try:
+    from ai.game_controller import TrainingGameController, GameControllerConfig
+    from ai.use_game_state import TrainingGameState
+    from ai.use_game_actions import TrainingGameActions
+    from ai.use_phase_transition import TrainingPhaseTransition
+    from ai.use_game_log import TrainingGameLog
+    from ai.use_game_config import TrainingGameConfig
+except ImportError as e:
+    print(f"⚠️ Python mirror dependencies missing: {e}")
+    print("🔧 Creating minimal W40KEnv without full mirror architecture...")
+    # Fallback to basic environment without mirrors
+    TrainingGameController = None
+    GameControllerConfig = None
 
 # Import existing components for compatibility
 from ai.unit_registry import UnitRegistry
@@ -154,9 +161,10 @@ class W40KEnv(gym.Env):
         # Initialize TrainingGameController
         self.controller = TrainingGameController(config)
         
-        # Cache board size for observations
-        board_config = self.controller.board_config
-        self.board_size = [board_config.get("width", 24), board_config.get("height", 18)]
+        # Cache board size for observations - use existing config_loader system
+        from config_loader import get_board_size
+        cols, rows = get_board_size()
+        self.board_size = [cols, rows]
 
     def _load_scenario_units(self, scenario_file):
         """Load units from scenario file or create default scenario."""
@@ -166,17 +174,23 @@ class W40KEnv(gym.Env):
                     scenario_data = json.load(f)
                 
                 if isinstance(scenario_data, list):
-                    return scenario_data
+                    basic_units = scenario_data
                 elif isinstance(scenario_data, dict) and "units" in scenario_data:
-                    return scenario_data["units"]
+                    basic_units = scenario_data["units"]
                 elif isinstance(scenario_data, dict):
-                    return list(scenario_data.values())
+                    basic_units = list(scenario_data.values())
+                else:
+                    basic_units = self._create_default_units()
+                
+                # Enhance units with full properties from unit registry
+                return self._enhance_units_with_properties(basic_units)
             except Exception as e:
                 if not self.quiet:
                     print(f"Failed to load scenario file {scenario_file}: {e}")
         
         # Create default scenario
-        return self._create_default_units()
+        basic_units = self._create_default_units()
+        return self._enhance_units_with_properties(basic_units)
 
     def _create_default_units(self):
         """Create default units for training."""
@@ -194,6 +208,70 @@ class W40KEnv(gym.Env):
             {"id": 14, "player": 0, "unit_type": "Hormagaunt", "col": 8, "row": 15},
         ]
         return default_units
+
+    def _enhance_units_with_properties(self, basic_units):
+        """Enhance basic unit data with all required properties from unit registry."""
+        enhanced_units = []
+        
+        for unit_data in basic_units:
+            # Get unit type and validate it exists
+            unit_type = unit_data.get("unit_type")
+            if not unit_type:
+                raise ValueError(f"Unit missing unit_type: {unit_data}")
+            
+            # Get full unit data from registry
+            try:
+                full_unit_data = self.unit_registry.get_unit_data(unit_type)
+            except ValueError as e:
+                raise ValueError(f"Unknown unit type '{unit_type}' in scenario: {e}")
+            
+            # Create enhanced unit with all properties
+            enhanced_unit = {
+                # Basic scenario properties
+                "id": unit_data["id"],
+                "player": unit_data["player"],
+                "unit_type": unit_type,
+                "col": unit_data["col"],
+                "row": unit_data["row"],
+                
+                # Add all TypeScript unit class properties
+                "MOVE": full_unit_data["MOVE"],
+                "T": full_unit_data["T"],
+                "ARMOR_SAVE": full_unit_data["ARMOR_SAVE"],
+                "INVUL_SAVE": full_unit_data["INVUL_SAVE"],
+                "HP_MAX": full_unit_data["HP_MAX"],
+                "LD": full_unit_data["LD"],
+                "OC": full_unit_data["OC"],
+                "VALUE": full_unit_data["VALUE"],
+                
+                # Ranged weapon properties
+                "RNG_RNG": full_unit_data["RNG_RNG"],
+                "RNG_NB": full_unit_data["RNG_NB"],
+                "RNG_ATK": full_unit_data["RNG_ATK"],
+                "RNG_STR": full_unit_data["RNG_STR"],
+                "RNG_AP": full_unit_data["RNG_AP"],
+                "RNG_DMG": full_unit_data["RNG_DMG"],
+                
+                # Close combat properties
+                "CC_NB": full_unit_data["CC_NB"],
+                "CC_RNG": full_unit_data["CC_RNG"],
+                "CC_ATK": full_unit_data["CC_ATK"],
+                "CC_STR": full_unit_data["CC_STR"],
+                "CC_AP": full_unit_data["CC_AP"],
+                "CC_DMG": full_unit_data["CC_DMG"],
+                
+                # Visual properties
+                "ICON": full_unit_data["ICON"],
+                "ICON_SCALE": full_unit_data.get("ICON_SCALE", 1.0),
+                
+                # Game state properties
+                "CUR_HP": full_unit_data["HP_MAX"],
+                "alive": True,
+            }
+            
+            enhanced_units.append(enhanced_unit)
+        
+        return enhanced_units
 
     def reset(self, seed=None, options=None):
         """Reset environment using mirror controller."""

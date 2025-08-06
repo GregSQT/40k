@@ -295,10 +295,14 @@ class UseGameState:
         )
 
     def clear_attack_preview(self) -> None:
-        """Clear attack preview"""
+        """EXACT mirror of clearAttackPreview from TypeScript"""
         self.attack_preview = None
 
-    # === GETTER METHODS (EXACT from TypeScript patterns) ===
+    def set_target_preview(self, target_preview: Optional[Dict[str, Any]]) -> None:
+        """Set target preview for shooting system"""
+        self.game_state["target_preview"] = target_preview
+
+    # === EXPOSED ACTIONS (EXACT from TypeScript return) ===
 
     def get_game_state(self) -> Dict[str, Any]:
         """Get complete game state"""
@@ -468,6 +472,7 @@ class UseGameState:
             "clear_move_preview": self.clear_move_preview,
             "set_attack_preview": self.set_attack_preview,
             "clear_attack_preview": self.clear_attack_preview,
+            "set_target_preview": self.set_target_preview,
         }
 
 

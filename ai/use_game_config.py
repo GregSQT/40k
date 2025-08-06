@@ -159,11 +159,11 @@ class UseGameConfig:
             if not os.path.exists(board_config_path):
                 raise Exception(f"Board config missing: {board_config_path}")
 
-            # Read file contents (mirror response.text())
-            with open(board_config_path, 'r', encoding='utf-8') as f:
+            # Read file contents (mirror response.text()) - Handle UTF-8 BOM
+            with open(board_config_path, 'r', encoding='utf-8-sig') as f:
                 board_response_text = f.read()
             
-            with open(game_config_path, 'r', encoding='utf-8') as f:
+            with open(game_config_path, 'r', encoding='utf-8-sig') as f:
                 game_response_text = f.read()
 
             # Validate files are not empty (EXACT from TypeScript)
@@ -203,8 +203,8 @@ class UseGameConfig:
             self.error = error_message
             print(f"Game config loading error: {err}")
             
-            self.board_config = None
-            self.game_config = None
+            # AI_INSTRUCTIONS.md: Never create default values or fallbacks - raise error instead
+            raise Exception(f"Configuration loading failed: {err}")
 
         finally:
             self.loading = False
