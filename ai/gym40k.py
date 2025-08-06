@@ -222,6 +222,9 @@ class W40KEnv(gym.Env):
         """Enhance basic unit data with all required properties from unit registry."""
         enhanced_units = []
         
+        if not basic_units:
+            raise ValueError("No basic units provided for enhancement")
+        
         for unit_data in basic_units:
             # Get unit type and validate it exists
             unit_type = unit_data.get("unit_type")
@@ -238,6 +241,7 @@ class W40KEnv(gym.Env):
             enhanced_unit = {
                 # Basic scenario properties
                 "id": unit_data["id"],
+                "name": unit_data.get("name", f"{unit_type}_{unit_data['id']}"),
                 "player": unit_data["player"],
                 "unit_type": unit_type,
                 "col": unit_data["col"],
@@ -275,10 +279,16 @@ class W40KEnv(gym.Env):
                 
                 # Game state properties
                 "CUR_HP": full_unit_data["HP_MAX"],
+                "HP_LEFT": full_unit_data["HP_MAX"],
                 "alive": True,
+                "has_charged_this_turn": False,
+                "SHOOT_LEFT": full_unit_data["RNG_NB"],
             }
             
             enhanced_units.append(enhanced_unit)
+        
+        if not enhanced_units:
+            raise ValueError("No enhanced units created - check unit registry and scenario data")
         
         return enhanced_units
 
@@ -307,11 +317,17 @@ class W40KEnv(gym.Env):
         
         # Connect and initialize replay logger
         if hasattr(self, 'replay_logger') and self.replay_logger:
-            # Capture initial state with enhanced unit data
-            self.replay_logger.capture_initial_state()
             # Connect to controller if it supports replay logging
             if hasattr(self.controller, 'connect_replay_logger'):
                 self.controller.connect_replay_logger(self.replay_logger)
+            # Set replay logger env reference to controller for unit access
+            if hasattr(self.replay_logger, 'env'):
+                self.replay_logger.env = self.controller
+            # Override save_replay to use controller's method
+            if hasattr(self.controller, 'save_replay'):
+                self.replay_logger.save_replay = self.controller.save_replay
+            # Capture initial state with enhanced unit data
+            self.replay_logger.capture_initial_state()
         
         return self._get_obs(), self._get_info()
 

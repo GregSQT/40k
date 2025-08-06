@@ -188,8 +188,6 @@ class GameController:
         try:
             from ai.game_replay_logger import GameReplayLogger
             self.replay_logger = GameReplayLogger(self)
-            if not hasattr(self, 'quiet') or not self.quiet:
-                print("✅ GameReplayLogger initialized in GameController")
         except ImportError:
             if not hasattr(self, 'quiet') or not self.quiet:
                 print("⚠️ GameReplayLogger not available for GameController")
@@ -535,8 +533,6 @@ class TrainingGameController(GameController):
         try:
             from ai.game_replay_logger import GameReplayLogger
             self.replay_logger = GameReplayLogger(self)
-            if not hasattr(self, 'quiet') or not self.quiet:
-                print("✅ Training GameReplayLogger initialized")
         except ImportError:
             if not hasattr(self, 'quiet') or not self.quiet:
                 print("⚠️ GameReplayLogger not available for training")
@@ -563,10 +559,91 @@ class TrainingGameController(GameController):
         )
         self.phase_transitions = self.phase_manager.get_transition_functions()
 
+        # Add phase property for training compatibility
+        self._current_phase = self.game_state.get("phase", "move")
+
     def connect_replay_logger(self, replay_logger):
         """Connect replay logger for GameReplayIntegration compatibility."""
         self.replay_logger = replay_logger
         self.game_logger = replay_logger
+
+    @property
+    def units(self) -> List[Dict[str, Any]]:
+        """Units property for replay logger compatibility"""
+        return self.get_units()
+
+    def save_replay(self, filename: str, episode_reward: float = 0.0):
+        """Custom save_replay method for TrainingGameController"""
+        initial_units = []
+        
+        # Get units from controller and format them for replay
+        for unit in self.get_units():
+            replay_unit = {
+                "id": unit.get("id"),
+                "unit_type": unit.get("unit_type"),
+                "player": unit.get("player"),
+                "col": unit.get("col"),
+                "row": unit.get("row"),
+                "HP_MAX": unit.get("HP_MAX"),
+                "hp_max": unit.get("HP_MAX"),
+                "move": unit.get("MOVE"),
+                "rng_rng": unit.get("RNG_RNG"),
+                "rng_dmg": unit.get("RNG_DMG"),
+                "cc_dmg": unit.get("CC_DMG"),
+                "is_ranged": unit.get("RNG_RNG", 0) > 0,
+                "is_melee": unit.get("CC_RNG", 0) > 0,
+                "alive": unit.get("alive", True),
+                "name": unit.get("name", f"{unit.get('unit_type', 'Unit')}_{unit.get('id', 0)}")
+            }
+            initial_units.append(replay_unit)
+        
+        # Create replay data structure
+        replay_data = {
+            "game_info": {
+                "scenario": "training_episode",
+                "ai_behavior": "phase_based",
+                "total_turns": self.get_current_turn(),
+                "winner": self.get_winner(),
+            },
+            "metadata": {
+                "final_turn": self.get_current_turn(),
+                "episode_reward": episode_reward,
+                "format_version": "2.0",
+                "replay_type": "training_enhanced"
+            },
+            "initial_state": {
+                "units": initial_units,
+                "board_size": [24, 18]  # Default board size
+            },
+            "combat_log": getattr(self.replay_logger, 'combat_log_entries', []) if self.replay_logger else [],
+            "game_states": [],
+            "episode_steps": 500,  # Default
+            "episode_reward": episode_reward
+        }
+        
+        # Save to file
+        import os
+        import json
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(replay_data, f, indent=2)
+        
+        return filename
+
+    @property
+    def current_phase(self) -> str:
+        """Get current phase - required for training system compatibility"""
+        return self.get_current_phase()
+
+    @property  
+    def current_player(self) -> int:
+        """Get current player - required for training system compatibility"""
+        return self.get_current_player()
+
+    @property
+    def current_turn(self) -> int:
+        """Get current turn - required for training system compatibility"""
+        return self.get_current_turn()
 
     def can_unit_shoot_target(self, unit_id: int, target_id: int) -> bool:
         """Check if unit can shoot target"""
@@ -577,9 +654,9 @@ class TrainingGameController(GameController):
         
         # Basic range check
         distance = max(abs(unit["col"] - target["col"]), abs(unit["row"] - target["row"]))
-        if "rng_rng" not in unit:
-            raise KeyError(f"Unit missing required 'rng_rng' field: {unit.get('name', 'unknown')}")
-        return distance <= unit["rng_rng"]
+        if "RNG_RNG" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit.get('name', 'unknown')}")
+        return distance <= unit["RNG_RNG"]
 
     def can_unit_charge_target(self, unit_id: int, target_id: int) -> bool:
         """Check if unit can charge target"""
@@ -601,9 +678,9 @@ class TrainingGameController(GameController):
         
         # Basic adjacency check for combat
         distance = max(abs(unit["col"] - target["col"]), abs(unit["row"] - target["row"]))
-        if "cc_rng" not in unit:
-            raise KeyError(f"Unit missing required 'cc_rng' field: {unit.get('name', 'unknown')}")
-        return distance <= unit["cc_rng"]
+        if "CC_RNG" not in unit:
+            raise KeyError(f"Unit missing required 'CC_RNG' field: {unit.get('name', 'unknown')}")
+        return distance <= unit["CC_RNG"]
 
     def find_unit(self, unit_id: int) -> Optional[Dict[str, Any]]:
         """Find unit by ID"""
@@ -696,4 +773,14 @@ class TrainingGameController(GameController):
         result = super().step()
         self.episode_step_count += 1
         self.total_steps += 1
+        
+        # Update phase tracking for training compatibility
+        self._current_phase = self.game_state.get("phase", "move")
+        
         return result
+
+    def _update_state(self) -> None:
+        """Override to include phase tracking"""
+        super()._update_state()
+        # Keep phase property in sync
+        self._current_phase = self.game_state.get("phase", "move")

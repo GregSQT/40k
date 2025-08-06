@@ -53,9 +53,6 @@ class GameReplayLogger:
             3: "shoot_closest", 4: "shoot_weakest", 5: "charge_closest",
             6: "wait", 7: "attack_adjacent"
         }
-        
-        if not self.quiet:
-            print("✅ GameLogger initialized with dice roll tracking")
     
     def add_entry(self, entry_type: str, acting_unit: Dict = None, target_unit: Dict = None,
                   reward: float = 0.0, action_name: str = "", turn_number: int = None,
@@ -81,10 +78,7 @@ class GameReplayLogger:
         entry_dict["id"] = self.next_event_id  # Add sequential ID
         self.combat_log_entries.append(entry_dict)
         self.next_event_id += 1
-        
-        if not self.quiet:
-            print(f"📝 Logged: {entry_type} - {log_entry.message} (ID: {entry_dict['id']})")
-        
+                
         return entry_dict
     
     def log_game_start(self):
@@ -400,8 +394,6 @@ class GameReplayLogger:
     def capture_initial_state(self):
         """Capture initial game state - compatibility method for GameReplayLogger interface."""
         self.log_game_start()
-        if not self.quiet:
-            print(f"📸 Captured initial game state with {len(getattr(self.env, 'units', []))} units")
     
     def capture_game_end(self, winner: str, final_reward: float):
         """Capture final game state - compatibility method."""
