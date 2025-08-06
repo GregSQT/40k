@@ -80,8 +80,8 @@ class W40KEnv(gym.Env):
         obs_size = self.max_units * 11 + 4
         self.observation_space = spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         
-        # Initialize Python mirror game controller
-        self._initialize_mirror_controller(scenario_file)
+        # Mirror controller already initialized in __init__ to ensure training_state is available
+        # (moved to prevent NoneType errors in external components)
         
         # Replay tracking - integrate with existing GameReplayLogger system
         self.replay_data = []
@@ -91,11 +91,13 @@ class W40KEnv(gym.Env):
         self.scenario_metadata = None
         self._load_scenario_metadata(scenario_file)
         
-        # Game state tracking for Gymnasium interface
+        # Game state tracking for Gymnasium interface - use TrainingGameState
+        self.training_state = None  # Will be initialized in _initialize_mirror_controller
         self.game_over = False
         self.winner = None
-        self.current_turn = 1
-        self.current_phase = "move"
+        
+        # CRITICAL: Initialize mirror controller BEFORE other components try to access training_state
+        self._initialize_mirror_controller(scenario_file)
         self.step_count = 0
         self.max_steps_per_episode = 1000
         
@@ -170,6 +172,9 @@ class W40KEnv(gym.Env):
         # Initialize TrainingGameController and start it
         self.controller = TrainingGameController(config)
         self.controller.start_game()  # CRITICAL: Start the controller
+        
+        # Initialize TrainingGameState for proper phase management
+        self.training_state = TrainingGameState(initial_units)
         
         # Cache board size for observations - use existing config_loader system
         from config_loader import get_board_size
@@ -402,11 +407,17 @@ class W40KEnv(gym.Env):
                 traceback.print_exc()
             success = False
         
-        # CRITICAL FIX: If action execution fails, force phase advancement
+        # CRITICAL FIX: If action succeeds, ensure unit is marked as acted for current phase
+        if success:
+            if not self.quiet:
+                print(f"    ✅ Action succeeded - ensuring unit is marked as acted")
+            self._mark_unit_as_acted_for_current_phase(acting_unit)
+        
+        # CRITICAL FIX: If action execution fails, mark unit as acted and continue
         if not success:
             if not self.quiet:
-                print(f"    ⚠️ Action execution FAILED - advancing phase")
-            self._advance_phase_or_turn()
+                print(f"    ⚠️ Action execution FAILED - marking unit as acted for current phase")
+            self._mark_unit_as_acted_for_current_phase(acting_unit)
             reward = self._get_small_penalty_reward()
             return self._get_obs(), reward, False, False, self._get_info()
         
@@ -449,8 +460,6 @@ class W40KEnv(gym.Env):
         
         # Sync state from controller
         self._sync_state_from_controller()
-        if not self.quiet:
-            print(f"    🔄 State synced - Turn: {self.current_turn}, Phase: {self.current_phase}")
         
         # CRITICAL: Check if phase should advance after successful action
         remaining_eligible = self._get_eligible_units()
@@ -470,10 +479,10 @@ class W40KEnv(gym.Env):
         return self._get_obs(), reward, terminated, False, self._get_info()
 
     def _get_eligible_units(self):
-        """Get units eligible for current phase using controller."""
-        all_units = self.controller.get_units()
-        current_player = self.controller.get_current_player()
-        current_phase = self.controller.get_current_phase()
+        """Get units eligible for current phase using TrainingGameState."""
+        all_units = self.training_state.game_state["units"]
+        current_player = self.training_state.game_state["current_player"]
+        current_phase = self.training_state.game_state["phase"]
         
         # Filter units for current player that are eligible for current phase
         eligible_units = []
@@ -481,8 +490,6 @@ class W40KEnv(gym.Env):
             if unit["player"] == current_player and unit.get("alive", True):
                 if self._is_unit_eligible_for_phase(unit, current_phase):
                     eligible_units.append(unit)
-        
-        return eligible_units
         
         return eligible_units
 
@@ -499,61 +506,132 @@ class W40KEnv(gym.Env):
             return not unit.get("has_attacked", False)
         return False
 
+    def _mark_unit_as_acted_for_current_phase(self, unit):
+        """Mark unit as having acted in current phase to prevent infinite loops."""
+        current_phase = self.training_state.game_state["phase"]
+        unit_id = unit["id"]
+        
+        if not self.quiet:
+            print(f"    🔧 Marking unit {unit_id} as acted for phase {current_phase}")
+        
+        if hasattr(self.controller, 'state_actions'):
+            try:
+                if current_phase == "move" and 'add_moved_unit' in self.controller.state_actions:
+                    self.controller.state_actions['add_moved_unit'](unit_id)
+                elif current_phase == "shoot" and 'update_unit' in self.controller.state_actions:
+                    self.controller.state_actions['update_unit'](unit_id, {"SHOOT_LEFT": 0})
+                elif current_phase == "charge" and 'add_charged_unit' in self.controller.state_actions:
+                    self.controller.state_actions['add_charged_unit'](unit_id)
+                elif current_phase == "combat" and 'add_attacked_unit' in self.controller.state_actions:
+                    self.controller.state_actions['add_attacked_unit'](unit_id)
+                
+                if not self.quiet:
+                    print(f"    ✅ Unit {unit_id} marked as acted for {current_phase}")
+            except Exception as e:
+                if not self.quiet:
+                    print(f"    ❌ Failed to mark unit as acted: {e}")
+
     def _advance_phase_or_turn(self):
-        """Advance to next phase or turn using controller's proper phase transition system."""
-        current_phase = self.controller.get_current_phase()
-        current_player = self.controller.get_current_player()
+        """Use TrainingGameState for proper phase advancement."""
+        current_phase = self.training_state.game_state["phase"]
+        current_player = self.training_state.game_state["current_player"]
         
         if not self.quiet:
-            print(f"🔄 _advance_phase_or_turn: Player {current_player}, Phase {current_phase}")
+            print(f"🔄 Phase advance: Player {current_player}, Phase {current_phase}")
         
-        # Use controller's proper phase transition system ONLY
-        if hasattr(self.controller, 'advance_phase'):
-            if not self.quiet:
-                print(f"🔄 Using controller.advance_phase()")
-            self.controller.advance_phase()
-        else:
-            raise AttributeError("TrainingGameController missing advance_phase() method")
-        
-        self._sync_state_from_controller()
+        # Use TrainingGameState's proper phase progression
+        if current_phase == "move":
+            self.training_state.set_phase("shoot")
+            self.training_state.reset_moved_units()
+        elif current_phase == "shoot":
+            self.training_state.set_phase("charge")
+        elif current_phase == "charge":
+            self.training_state.set_phase("combat")
+            self.training_state.initialize_combat_phase()
+        elif current_phase == "combat":
+            # End turn - switch to next player
+            new_player = 1 if current_player == 0 else 0
+            self.training_state.set_current_player(new_player)
+            if new_player == 0:  # Increment turn when player 0 starts
+                current_turn = self.training_state.game_state["current_turn"]
+                self.training_state.set_current_turn(current_turn + 1)
+            self.training_state.set_phase("move")
+            self.training_state.reset_moved_units()
+            self.training_state.reset_charged_units()
+            self.training_state.reset_attacked_units()
         
         if not self.quiet:
-            final_phase = self.controller.get_current_phase()
-            final_player = self.controller.get_current_player()
-            print(f"🔄 Final state: Player {final_player}, Phase {final_phase}")
+            final_phase = self.training_state.game_state["phase"]
+            final_player = self.training_state.game_state["current_player"]
+            print(f"🔄 New state: Player {final_player}, Phase {final_phase}")
 
     def _convert_gym_action_to_mirror(self, unit, action_type):
-        """Convert gym action type to mirror action format."""
-        # Map gym action types to mirror actions
-        if action_type == 0:  # move_north
-            return {"type": "move", "col": unit["col"], "row": unit["row"] - 1}
-        elif action_type == 1:  # move_south
-            return {"type": "move", "col": unit["col"], "row": unit["row"] + 1}
-        elif action_type == 2:  # move_east
-            return {"type": "move", "col": unit["col"] + 1, "row": unit["row"]}
-        elif action_type == 3:  # move_west
-            return {"type": "move", "col": unit["col"] - 1, "row": unit["row"]}
-        elif action_type == 4:  # shoot
-            target = self._find_shoot_target(unit)
-            if target:
-                return {"type": "shoot", "target_id": target["id"]}
-            else:
+        """Convert gym action type to mirror action format with phase validation."""
+        # CRITICAL FIX: Always mark unit as acted for current phase regardless of action success
+        current_phase = self.training_state.game_state["phase"]
+        # Remove this line - unit should only be marked if action fails, not always
+        
+        # PHASE VALIDATION: Only allow actions appropriate for current phase
+        if current_phase == "move":
+            # Move phase: only movement and wait actions allowed
+            if action_type == 0:  # move_north
+                return {"type": "move", "col": unit["col"], "row": unit["row"] - 1}
+            elif action_type == 1:  # move_south
+                return {"type": "move", "col": unit["col"], "row": unit["row"] + 1}
+            elif action_type == 2:  # move_east
+                return {"type": "move", "col": unit["col"] + 1, "row": unit["row"]}
+            elif action_type == 3:  # move_west
+                return {"type": "move", "col": unit["col"] - 1, "row": unit["row"]}
+            elif action_type == 7:  # wait
                 return {"type": "wait"}
-        elif action_type == 5:  # charge
-            target = self._find_charge_target(unit)
-            if target:
-                return {"type": "charge", "target_id": target["id"]}
             else:
+                # Invalid action for move phase - return wait
                 return {"type": "wait"}
-        elif action_type == 6:  # attack
-            target = self._find_combat_target(unit)
-            if target:
-                return {"type": "combat", "target_id": target["id"]}
+        
+        elif current_phase == "shoot":
+            # Shoot phase: only shooting and wait actions allowed
+            if action_type == 4:  # shoot
+                target = self._find_shoot_target(unit)
+                if target:
+                    return {"type": "shoot", "target_id": target["id"]}
+                else:
+                    return {"type": "wait"}
+            elif action_type == 7:  # wait
+                return {"type": "wait"}
             else:
+                # Invalid action for shoot phase - return wait
                 return {"type": "wait"}
-        elif action_type == 7:  # wait
-            return {"type": "wait"}
+        
+        elif current_phase == "charge":
+            # Charge phase: only charge and wait actions allowed
+            if action_type == 5:  # charge
+                target = self._find_charge_target(unit)
+                if target:
+                    return {"type": "charge", "target_id": target["id"]}
+                else:
+                    return {"type": "wait"}
+            elif action_type == 7:  # wait
+                return {"type": "wait"}
+            else:
+                # Invalid action for charge phase - return wait
+                return {"type": "wait"}
+        
+        elif current_phase == "combat":
+            # Combat phase: only combat and wait actions allowed
+            if action_type == 6:  # attack
+                target = self._find_combat_target(unit)
+                if target:
+                    return {"type": "combat", "target_id": target["id"]}
+                else:
+                    return {"type": "wait"}
+            elif action_type == 7:  # wait
+                return {"type": "wait"}
+            else:
+                # Invalid action for combat phase - return wait
+                return {"type": "wait"}
+        
         else:
+            # Unknown phase - default to wait
             return {"type": "wait"}
 
     def _find_shoot_target(self, unit):
@@ -703,9 +781,9 @@ class W40KEnv(gym.Env):
         return unit_rewards["base_actions"]["wait"]
 
     def _sync_state_from_controller(self):
-        """Sync environment state from controller."""
-        self.current_turn = self.controller.get_current_turn()
-        self.current_phase = self.controller.get_current_phase()
+        """Sync environment state from TrainingGameState."""
+        # No sync needed - TrainingGameState is the source of truth
+        pass
         
         # Update game over status
         if self.controller.is_game_over():
@@ -747,7 +825,7 @@ class W40KEnv(gym.Env):
         
         # Phase encoding (last 4 elements)
         phase_idx = self.max_units * 11
-        current_phase = self.controller.get_current_phase()
+        current_phase = self.training_state.game_state["phase"]
         if current_phase == "move":
             obs[phase_idx] = 1.0
         elif current_phase == "shoot":
@@ -777,8 +855,8 @@ class W40KEnv(gym.Env):
             self.game_over = True
         
         return {
-            "current_turn": self.current_turn,
-            "current_phase": self.current_phase,
+            "current_turn": self.training_state.game_state["current_turn"],
+            "current_phase": self.training_state.game_state["phase"],
             "ai_units_alive": len(ai_units_alive),
             "enemy_units_alive": len(enemy_units_alive),
             "step_count": self.step_count,

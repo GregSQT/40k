@@ -135,7 +135,7 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, 
         max_steps = 1000
         
         while not done and game_length < max_steps:
-            current_phase = env.current_phase
+            current_phase = env.training_state.game_state["phase"]
             action, _ = model.predict(obs, deterministic=deterministic)
             
             # Track phase action compliance before step

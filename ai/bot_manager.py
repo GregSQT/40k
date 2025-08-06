@@ -33,7 +33,7 @@ class BotManager:
             return False
             
         if not self.quiet:
-            print(f"🤖 BotManager: {len(enemy_units)} enemy units in {self.env.current_phase} phase")
+            print(f"🤖 BotManager: {len(enemy_units)} enemy units in {self.env.training_state.game_state["phase"]} phase")
             
         actions_executed = 0
         
@@ -57,7 +57,7 @@ class BotManager:
         
     def _execute_bot_phase_action(self, bot_unit: Dict) -> bool:
         """Execute single bot action for current phase with logging."""
-        phase = self.env.current_phase
+        phase = self.env.training_state.game_state["phase"]
         reward = 0.0  # Initialize reward at start
         
         # Store pre-action state for logging
@@ -160,9 +160,9 @@ class BotManager:
                 
             # Create state snapshot
             state = {
-                "turn": self.env.current_turn,
-                "phase": self.env.current_phase,
-                "active_player": self.env.current_player,
+                "turn": self.env.training_state.game_state["current_turn"],
+                "phase": self.env.training_state.game_state["phase"],
+                "active_player": self.env.training_state.game_state["current_player"],
                 "units": units_data,
                 "board_state": {
                     "width": self.env.board_size[0],
@@ -310,7 +310,7 @@ class BotManager:
                 print(f"🤖 Unit {bot_unit.get('id')}: No AI units found")
             return None
         
-        phase = self.env.current_phase
+        phase = self.env.training_state.game_state["phase"]
         
         # Phase-specific target selection
         if phase == "move":

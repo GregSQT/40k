@@ -66,8 +66,8 @@ class GameReplayLogger:
             target_unit=target_unit,
             reward=reward,
             action_name=action_name,
-            turn_number=turn_number or self.env.current_turn,
-            phase=phase or self.env.current_phase,
+            turn_number=turn_number or self.env.training_state.game_state["current_turn"],
+            phase=phase or self.env.training_state.game_state["phase"],
             start_hex=start_hex,
             end_hex=end_hex,
             shoot_details=shoot_details
