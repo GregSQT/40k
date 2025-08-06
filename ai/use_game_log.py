@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-use_game_log.py
+ai/use_game_log.py
 EXACT Python mirror of frontend/src/hooks/useGameLog.ts
 Game logging system - ALL features preserved.
 
@@ -271,6 +271,29 @@ class UseGameLog:
 
     # === EXPOSED FUNCTIONS (EXACT from TypeScript return) ===
 
+    def clear_log(self) -> None:
+        """EXACT mirror of clearLog from TypeScript - clear all events"""
+        self.events = []
+        self.event_id_counter = 0
+
+    def get_events_by_type(self, event_type: str) -> List[Dict[str, Any]]:
+        """Get all events of a specific type"""
+        return [event for event in self.events if event.get("type") == event_type]
+
+    def get_game_duration(self) -> float:
+        """Get game duration in seconds"""
+        if self.game_start_time is None or not self.events:
+            return 0.0
+        
+        # Get timestamp of most recent event
+        latest_event = self.events[0] if self.events else None
+        if latest_event and "timestamp" in latest_event:
+            end_time = latest_event["timestamp"]
+            duration = (end_time - self.game_start_time).total_seconds()
+            return duration
+        
+        return 0.0
+
     def get_log_functions(self) -> Dict[str, Callable]:
         """
         Return all logging functions (EXACT mirror of TypeScript useGameLog return).
@@ -340,7 +363,7 @@ class TrainingGameLog(UseGameLog):
 
     def reset_for_new_episode(self) -> None:
         """Reset logging for new training episode"""
-        self.clear_events()
+        self.clear_log()
         self.training_metrics = {
             "actions_logged": 0,
             "turns_completed": 0,

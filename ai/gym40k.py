@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gym40k.py - Complete replacement for gym40k.py using Python mirror architecture
+ai/gym40k.py - Complete replacement for gym40k.py using Python mirror architecture
 EXACT Python mirror of PvP frontend game logic with Gymnasium interface preservation
 """
 
@@ -125,11 +125,11 @@ class W40KEnv(gym.Env):
                 player_0_count = sum(1 for unit in units if unit.get("player") == 0)
                 player_1_count = sum(1 for unit in units if unit.get("player") == 1)
                 return max(player_0_count, player_1_count, 4)
-            except:
-                pass
+            except Exception as e:
+                raise RuntimeError(f"Failed to load scenario file {scenario_file}: {e}")
         
-        # Default fallback
-        return 6
+        # Raise error instead of fallback
+        raise FileNotFoundError(f"No valid scenario file found at {scenario_file}")
 
     def _load_scenario_metadata(self, scenario_file):
         """Load scenario metadata for replay compatibility."""
@@ -494,7 +494,7 @@ class W40KEnv(gym.Env):
         unit_type = unit.get("unit_type", "unknown")
         
         try:
-            agent_key = self.unit_registry.get_model_key_for_unit(unit_type)
+            agent_key = self.unit_registry.get_model_key(unit_type)
             if agent_key not in self.rewards_config:
                 available_keys = list(self.rewards_config.keys())
                 raise KeyError(f"Agent key '{agent_key}' not found in rewards config. Available keys: {available_keys}")
@@ -505,25 +505,23 @@ class W40KEnv(gym.Env):
             
             return unit_reward_config
         except ValueError as e:
-            # Fallback to default rewards
-            return {
-                "base_actions": {
-                    "move": 0.1,
-                    "ranged_attack": 0.2,
-                    "melee_attack": 0.2,
-                    "charge": 0.3,
-                    "wait": 0.0
-                }
-            }
+            # Raise error instead of using fallback values
+            raise ValueError(f"Failed to get reward config for unit type '{unit_type}': {e}")
 
     def _get_small_penalty_reward(self):
         """Get small penalty reward for invalid actions."""
         # Use first available unit's reward config
         eligible_units = self._get_eligible_units()
-        if eligible_units:
-            unit_rewards = self._get_unit_reward_config(eligible_units[0])
-            return unit_rewards.get("base_actions", {}).get("wait", 0.0)
-        return 0.0
+        if not eligible_units:
+            raise RuntimeError("No eligible units available to determine penalty reward")
+        
+        unit_rewards = self._get_unit_reward_config(eligible_units[0])
+        if "base_actions" not in unit_rewards:
+            raise KeyError(f"Missing 'base_actions' in reward config for unit")
+        if "wait" not in unit_rewards["base_actions"]:
+            raise KeyError(f"Missing 'wait' action in base_actions reward config")
+        
+        return unit_rewards["base_actions"]["wait"]
 
     def _sync_state_from_controller(self):
         """Sync environment state from controller."""

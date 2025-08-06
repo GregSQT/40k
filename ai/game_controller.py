@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-game_controller.py
+ai/game_controller.py
 EXACT Python mirror of frontend/src/components/GameController.tsx
 Master orchestrator component - ALL features preserved.
 
@@ -314,7 +314,7 @@ class GameController:
 
     def move_unit(self, unit_id: int, col: int, row: int) -> bool:
         """Move a unit"""
-        return self.game_actions["confirm_move"](unit_id, col, row)
+        return self.game_actions["direct_move"](unit_id, col, row)
 
     def shoot_unit(self, shooter_id: int, target_id: int) -> bool:
         """Shoot at target"""
@@ -387,8 +387,8 @@ class GameController:
         
         return valid_actions
 
-    def execute_action(self, action: Dict[str, Any]) -> bool:
-        """Execute a game action"""
+    def execute_action(self, unit_id: int, action: Dict[str, Any]) -> bool:
+        """Execute a game action for specified unit"""
         action_type = action.get("type")
         unit_id = action.get("unit_id")
         
@@ -490,7 +490,7 @@ class TrainingGameController(GameController):
         
         # Initialize training game state
         self.state_manager = TrainingGameState(self.game_units, max_history=50)
-        game_state_data = self.state_manager.get_config_data() if hasattr(self.state_manager, 'get_config_data') else {
+        game_state_data = {
             "game_state": self.state_manager.get_game_state(),
             "move_preview": self.state_manager.get_move_preview(),
             "attack_preview": self.state_manager.get_attack_preview(),
@@ -530,6 +530,52 @@ class TrainingGameController(GameController):
             actions=self.state_actions
         )
         self.phase_transitions = self.phase_manager.get_transition_functions()
+
+    def connect_replay_logger(self, replay_logger):
+        """Connect replay logger for GameReplayIntegration compatibility."""
+        self.replay_logger = replay_logger
+        self.game_logger = replay_logger
+
+    def can_unit_shoot_target(self, unit_id: int, target_id: int) -> bool:
+        """Check if unit can shoot target"""
+        unit = self.find_unit(unit_id)
+        target = self.find_unit(target_id)
+        if not unit or not target:
+            return False
+        
+        # Basic range check
+        distance = max(abs(unit["col"] - target["col"]), abs(unit["row"] - target["row"]))
+        return distance <= unit.get("rng_rng", 1)
+
+    def can_unit_charge_target(self, unit_id: int, target_id: int) -> bool:
+        """Check if unit can charge target"""
+        unit = self.find_unit(unit_id)
+        target = self.find_unit(target_id)
+        if not unit or not target:
+            return False
+        
+        # Basic range check (1-12 hex charge range)
+        distance = max(abs(unit["col"] - target["col"]), abs(unit["row"] - target["row"]))
+        return 1 < distance <= 12
+
+    def can_unit_attack_target(self, unit_id: int, target_id: int) -> bool:
+        """Check if unit can attack target in combat"""
+        unit = self.find_unit(unit_id)
+        target = self.find_unit(target_id)
+        if not unit or not target:
+            return False
+        
+        # Basic adjacency check for combat
+        distance = max(abs(unit["col"] - target["col"]), abs(unit["row"] - target["row"]))
+        return distance <= unit.get("cc_rng", 1)
+
+    def find_unit(self, unit_id: int) -> Optional[Dict[str, Any]]:
+        """Find unit by ID"""
+        units = self.get_units()
+        for unit in units:
+            if unit["id"] == unit_id:
+                return unit
+        return None
 
     def start_new_episode(self, scenario_units: Optional[List[Dict[str, Any]]] = None) -> None:
         """Start a new training episode"""

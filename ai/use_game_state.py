@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-use_game_state.py
+ai/use_game_state.py
 EXACT Python mirror of frontend/src/hooks/useGameState.ts
 Central state management system - ALL features preserved.
 

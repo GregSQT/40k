@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-use_game_config.py
+ai/use_game_config.py
 EXACT Python mirror of frontend/src/hooks/useGameConfig.ts
 Configuration loading system - ALL features preserved.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-use_game_actions.py
+ai/use_game_actions.py
 EXACT Python mirror of frontend/src/hooks/useGameActions.ts
 ALL features preserved - NO changes, NO removals, NO simplifications.
 
@@ -1064,6 +1064,7 @@ class TrainingGameActions(UseGameActions):
         return {
             "handle_unit_selection": self.select_unit,
             "confirm_move": self.confirm_move,
+            "direct_move": self.direct_move,
             "handle_shoot": self.handle_shoot,
             "handle_charge": self.handle_charge,
             "handle_combat_attack": self.handle_combat_attack,
