@@ -574,10 +574,15 @@ class TrainingGameController(GameController):
 
     def save_replay(self, filename: str, episode_reward: float = 0.0):
         """Custom save_replay method for TrainingGameController"""
+        print(f"🔧 Controller save_replay called: {filename}")
+        
         initial_units = []
         
         # Get units from controller and format them for replay
-        for unit in self.get_units():
+        units = self.get_units()
+        print(f"🔧 Found {len(units)} units to save")
+        
+        for unit in units:
             replay_unit = {
                 "id": unit.get("id"),
                 "unit_type": unit.get("unit_type"),
@@ -613,13 +618,15 @@ class TrainingGameController(GameController):
             },
             "initial_state": {
                 "units": initial_units,
-                "board_size": [24, 18]  # Default board size
+                "board_size": self._get_board_size_from_config()
             },
             "combat_log": getattr(self.replay_logger, 'combat_log_entries', []) if self.replay_logger else [],
             "game_states": [],
             "episode_steps": 500,  # Default
             "episode_reward": episode_reward
         }
+        
+        print(f"🔧 Saving replay with {len(initial_units)} units in initial_state")
         
         # Save to file
         import os
@@ -628,7 +635,18 @@ class TrainingGameController(GameController):
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(replay_data, f, indent=2)
         
+        print(f"🔧 Replay saved successfully to {filename}")
         return filename
+
+    def _get_board_size_from_config(self) -> List[int]:
+        """Get board size from config - no hardcoded fallback"""
+        try:
+            from config_loader import get_config_loader
+            config = get_config_loader()
+            board_cols, board_rows = config.get_board_size()
+            return [board_cols, board_rows]
+        except Exception as e:
+            raise ValueError(f"Failed to load board size from config: {e}")
 
     @property
     def current_phase(self) -> str:
@@ -714,6 +732,45 @@ class TrainingGameController(GameController):
         # Reset replay logger for new episode
         if self.replay_logger:
             self.replay_logger.capture_initial_state()
+            # Set initial_game_state for SelectiveEpisodeTracker compatibility
+            units = self.get_units()
+            formatted_units = []
+            for unit in units:
+                formatted_units.append({
+                    "id": unit.get("id"),
+                    "unit_type": unit.get("unit_type"),
+                    "player": unit.get("player"),
+                    "col": unit.get("col"),
+                    "row": unit.get("row"),
+                    "hp_max": unit.get("HP_MAX"),
+                    "move": unit.get("MOVE"),
+                    "rng_rng": unit.get("RNG_RNG"),
+                    "rng_dmg": unit.get("RNG_DMG"),
+                    "cc_dmg": unit.get("CC_DMG"),
+                    "is_ranged": unit.get("RNG_RNG", 0) > 0,
+                    "is_melee": unit.get("CC_RNG", 0) > 0,
+                    "alive": unit.get("alive", True)
+                })
+            # Get board size from config instead of hardcoding
+            try:
+                from config_loader import get_config_loader
+                config = get_config_loader()
+                board_cols, board_rows = config.get_board_size()
+                board_size = [board_cols, board_rows]
+            except Exception as e:
+                raise ValueError(f"Failed to load board size from config: {e}")
+            
+            initial_state_data = {
+                "units": formatted_units,
+                "board_size": board_size
+            }
+            
+            # Set both attributes that SelectiveEpisodeTracker might access
+            self.replay_logger.initial_game_state = initial_state_data
+            self.replay_logger.initial_state = initial_state_data
+            
+            print(f"🔧 Set initial_game_state with {len(formatted_units)} units")
+            print(f"🔧 First unit: {formatted_units[0] if formatted_units else 'None'}")
 
     def end_episode(self, final_reward: float = 0.0) -> Dict[str, Any]:
         """End current episode and return metrics"""

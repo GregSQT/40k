@@ -500,6 +500,7 @@ class MultiAgentTrainer:
             training_duration = time.time() - start_time
             
             # Test the trained model WITH episode tracker for selective replay capture
+            print(f"🧪 Evaluating {session.agent_key} vs {session.opponent_agent}...")
             test_results = self._test_trained_model(model, env, 20, episode_tracker)  # Use episode tracker for selective replays
             
             # Save final model
@@ -722,9 +723,13 @@ class MultiAgentTrainer:
 
     def _test_trained_model(self, model, env, num_episodes: int = 10, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
         """Test trained model - episode_tracker should be None to prevent test episode capture"""
-        # print(f"🔍 Testing model with {num_episodes} episodes, tracker: {'YES' if episode_tracker else 'NO'}")
         wins = 0
         total_rewards = []
+        
+        # Add evaluation progress bar
+        eval_pbar = tqdm(total=num_episodes, desc="🧪 Evaluating", 
+                         bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} episodes',
+                         leave=False, ncols=80)
         
         for episode in range(num_episodes):
             obs, info = env.reset()
@@ -787,6 +792,14 @@ class MultiAgentTrainer:
             # Check win condition
             if info.get('winner') == 1:  # AI won
                 wins += 1
+            
+            # Update progress bar with current stats
+            eval_pbar.update(1)
+            current_win_rate = wins / (episode + 1)
+            current_avg_reward = sum(total_rewards) / len(total_rewards)
+            eval_pbar.set_postfix({'WR': f'{current_win_rate:.1%}', 'Reward': f'{current_avg_reward:.1f}'})
+        
+        eval_pbar.close()
         
         win_rate = wins / num_episodes
         avg_reward = sum(total_rewards) / len(total_rewards)
