@@ -8,7 +8,7 @@ DO NOT modify without checking both PvP and training implementations.
 """
 
 from typing import Dict, List, Any, Set, Optional, Tuple
-from shared.gameRules import areUnitsAdjacent, isUnitInRange, offsetToCube, cubeDistance, roll2D6
+from shared.gameRules import are_units_adjacent as areUnitsAdjacent, is_unit_in_range as isUnitInRange, offset_to_cube as offsetToCube, cube_distance as cubeDistance, roll_2d6 as roll2D6
 
 # === CUBE COORDINATE SYSTEM (EXACT from frontend) ===
 

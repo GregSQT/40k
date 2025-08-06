@@ -15,20 +15,19 @@ import threading
 from shared.gameMechanics import (
     is_unit_eligible, 
     calculate_available_move_cells,
-    is_unit_fleeing,
+    detect_flee_on_move as is_unit_fleeing,
     get_cube_neighbors
 )
 from shared.gameRules import (
-    areUnitsAdjacent, 
-    isUnitInRange, 
-    hasLineOfSight,
-    offsetToCube, 
-    cubeDistance, 
-    getHexLine,
-    rollD6, 
-    calculateWoundTarget, 
-    calculateSaveTarget,
-    roll2D6
+    are_units_adjacent as areUnitsAdjacent, 
+    is_unit_in_range as isUnitInRange, 
+    get_hex_distance as getHexDistance,
+    offset_to_cube as offsetToCube, 
+    cube_distance as cubeDistance, 
+    roll_d6 as rollD6, 
+    calculate_wound_target as calculateWoundTarget, 
+    calculate_save_target as calculateSaveTarget,
+    roll_2d6 as roll2D6
 )
 
 # === EXACT TYPESCRIPT INTERFACE MIRROR ===
@@ -1024,3 +1023,49 @@ def use_game_actions(game_state: Dict[str, Any],
     game_actions = UseGameActions(params)
     
     return game_actions.get_available_actions()
+
+# === TRAINING INTEGRATION CLASS ===
+
+class TrainingGameActions(UseGameActions):
+    """
+    Extended version of UseGameActions optimized for AI training.
+    Adds performance optimizations and training-specific methods.
+    """
+    
+    def __init__(self, game_state: Dict[str, Any], 
+                 move_preview: Optional[Dict[str, Any]], 
+                 attack_preview: Optional[Dict[str, Any]], 
+                 shooting_phase_state: Dict[str, Any],
+                 board_config: Dict[str, Any],
+                 actions: Dict[str, Callable],
+                 game_log: Optional[Any] = None):
+        # Initialize with training-specific optimizations
+        super().__init__(UseGameActionsParams(
+            game_state=game_state,
+            move_preview=move_preview,
+            attack_preview=attack_preview,
+            shooting_phase_state=shooting_phase_state,
+            board_config=board_config,
+            actions=actions,
+            game_log=game_log
+        ))
+        
+        # Training-specific metrics
+        self.action_history = []
+        self.performance_metrics = {
+            "actions_executed": 0,
+            "successful_moves": 0,
+            "successful_attacks": 0,
+            "training_efficiency": 0.0
+        }
+
+    def get_action_functions(self) -> Dict[str, Callable]:
+        """Get training-optimized action functions"""
+        return {
+            "handle_unit_selection": self.select_unit,
+            "confirm_move": self.confirm_move,
+            "handle_shoot": self.handle_shoot,
+            "handle_charge": self.handle_charge,
+            "handle_combat_attack": self.handle_combat_attack,
+            "is_unit_eligible": self.is_unit_eligible_local
+        }
