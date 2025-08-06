@@ -96,11 +96,10 @@ class GameReplayLogger:
                  end_col: int, end_row: int, turn_number: int, 
                  reward: float, action_int: int):
         """Log movement action."""
-        start_hex = None
-        end_hex = None
-        if start_col != end_col or start_row != end_row:
-            start_hex = f"({start_col},{start_row})"
-            end_hex = f"({end_col},{end_row})"
+        # Always provide hex coordinates, even for no-move actions
+        # Use space after comma to match frontend expectation: "(col, row)"
+        start_hex = f"({start_col}, {start_row})"
+        end_hex = f"({end_col}, {end_row})"
         
         self.add_entry(
             entry_type="move",
@@ -186,12 +185,13 @@ class GameReplayLogger:
             print(f"⚠️ WARNING: Missing shooter or target data for shooting details")
             return None
             
-        hit_target = shooter.get("rng_atk")
-        shooter_str = shooter.get("rng_str")
-        target_t = target.get("t")
-        target_armor = target.get("armor_save")
-        target_invul = target.get("invul_save")
-        shooter_ap = shooter.get("rng_ap")
+        # Try both lowercase and uppercase field names for compatibility
+        hit_target = shooter.get("rng_atk") or shooter.get("RNG_ATK")
+        shooter_str = shooter.get("rng_str") or shooter.get("RNG_STR")
+        target_t = target.get("t") or target.get("T")
+        target_armor = target.get("armor_save") or target.get("ARMOR_SAVE")
+        target_invul = target.get("invul_save") or target.get("INVUL_SAVE")
+        shooter_ap = shooter.get("rng_ap") or shooter.get("RNG_AP")
         
         # Validate all required stats exist - no defaults allowed
         if any(x is None for x in [hit_target, shooter_str, target_t, target_armor, target_invul, shooter_ap]):
@@ -426,7 +426,6 @@ class GameReplayLogger:
                 
                 # Store for later use in save_replay
                 self.initial_game_state = {"units": formatted_units}
-                print(f"📸 Captured initial state with {len(formatted_units)} units")
     
     def capture_game_end(self, winner: str, final_reward: float):
         """Capture final game state - compatibility method."""
@@ -571,6 +570,31 @@ class GameReplayLogger:
         if not self.quiet:
             print("🔄 GameLogger cleared for new episode")
     
+    def log_turn_change(self, turn_number: int):
+        """Log turn change event."""
+        self.add_entry(
+            entry_type="turn_change",
+            turn_number=turn_number,
+            reward=0.0,
+            action_name="turn_change"
+        )
+    
+    def log_phase_change(self, phase: str, player: int, turn_number: int):
+        """Log phase change event."""
+        acting_unit = {
+            "id": 0,
+            "unitType": "",
+            "player": player
+        }
+        self.add_entry(
+            entry_type="phase_change",
+            acting_unit=acting_unit,
+            turn_number=turn_number,
+            phase=phase,
+            reward=0.0,
+            action_name="phase_change"
+        )
+    
     def log_action(self, action: int, reward: float, pre_action_units: list, post_action_units: list,
                    acting_unit_id: int, target_unit_id: int = None, description: str = ""):
         """Generic action logger that routes to specific log methods based on action type."""
@@ -649,14 +673,7 @@ class GameReplayLogger:
                         self.env.current_turn, reward, action_type
                     )
                     
-        elif action_type == 6:  # Combat
-            if target_unit:
-                # Create minimal combat_details for logging compatibility
-                combat_details = {"summary": {"totalAttacks": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
-                self.log_combat(acting_unit, target_unit, combat_details,
-                               self.env.current_turn, reward, action_type)
-                               
-        elif action_type == 7:  # Wait
+        elif action_type == 6:  # Wait
             # Log as move with no position change
             self.log_move(
                 acting_unit,
@@ -664,6 +681,13 @@ class GameReplayLogger:
                 acting_unit.get('col', 0), acting_unit.get('row', 0),
                 self.env.current_turn, reward, action_type
             )
+                               
+        elif action_type == 7:  # Attack adjacent (Combat)
+            if target_unit:
+                # Create minimal combat_details for logging compatibility
+                combat_details = {"summary": {"totalAttacks": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
+                self.log_combat(acting_unit, target_unit, combat_details,
+                               self.env.current_turn, reward, action_type)
         
         else:
             if not self.quiet:
@@ -777,14 +801,7 @@ class GameReplayIntegration:
                         self.env.current_turn, reward, action_type
                     )
                     
-        elif action_type == 6:  # Combat
-            if target_unit:
-                # Create minimal combat_details for logging compatibility
-                combat_details = {"summary": {"totalAttacks": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
-                self.log_combat(acting_unit, target_unit, combat_details,
-                               self.env.current_turn, reward, action_type)
-                               
-        elif action_type == 7:  # Wait
+        elif action_type == 6:  # Wait
             # Log as move with no position change
             self.log_move(
                 acting_unit,
@@ -792,6 +809,13 @@ class GameReplayIntegration:
                 acting_unit.get('col', 0), acting_unit.get('row', 0),
                 self.env.current_turn, reward, action_type
             )
+                               
+        elif action_type == 7:  # Attack adjacent (Combat)
+            if target_unit:
+                # Create minimal combat_details for logging compatibility
+                combat_details = {"summary": {"totalAttacks": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
+                self.log_combat(acting_unit, target_unit, combat_details,
+                               self.env.current_turn, reward, action_type)
         
         else:
             if not self.quiet:

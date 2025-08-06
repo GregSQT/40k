@@ -449,12 +449,37 @@ class MultiAgentTrainer:
         try:
             # Silent execution to prevent log spam
             
-            # Generate scenario for this matchup
-            scenario = self.scenario_manager.generate_training_scenario(
-                session.scenario_template,
-                session.opponent_agent,  # Player 0 (bot)
-                session.agent_key       # Player 1 (AI)
-            )
+            # Generate scenario for this matchup (Windows-compatible timeout)
+            import threading
+            import time
+            
+            scenario_result = [None]
+            scenario_error = [None]
+            
+            def generate_with_timeout():
+                try:
+                    scenario_result[0] = self.scenario_manager.generate_training_scenario(
+                        session.scenario_template,
+                        session.opponent_agent,  # Player 0 (bot)
+                        session.agent_key       # Player 1 (AI)
+                    )
+                except Exception as e:
+                    scenario_error[0] = e
+            
+            # Start scenario generation in separate thread
+            thread = threading.Thread(target=generate_with_timeout)
+            thread.daemon = True
+            thread.start()
+            thread.join(timeout=10)  # 10 second timeout
+            
+            if thread.is_alive():
+                raise TimeoutError("Scenario generation timeout (10 seconds)")
+            if scenario_error[0]:
+                raise scenario_error[0]
+            if scenario_result[0] is None:
+                raise RuntimeError("Scenario generation failed without error")
+                
+            scenario = scenario_result[0]
             
             # Save scenario to temporary file
             scenario_path = self._save_session_scenario(session.session_id, scenario)
@@ -510,9 +535,15 @@ class MultiAgentTrainer:
             # Record pure training time
             pure_training_time = time.time() - session_start_time
             
+            # Set current session ID for evaluation progress bar identification
+            self._current_session_id = session.session_id
+            
+            # Get number of evaluation episodes from config
+            eval_episodes = training_config.get("eval_episodes")
+            
             # Test the trained model WITH episode tracker for selective replay capture
             evaluation_start = time.time()
-            test_results = self._test_trained_model(model, env, 20, episode_tracker)  # Use episode tracker for selective replays
+            test_results = self._test_trained_model(model, env, eval_episodes, episode_tracker)  # Use configurable evaluation episodes
             evaluation_time = time.time() - evaluation_start
             
             # Calculate total session duration (training + evaluation + model saving)
@@ -746,10 +777,11 @@ class MultiAgentTrainer:
         wins = 0
         total_rewards = []
         
-        # Add evaluation progress bar
-        eval_pbar = tqdm(total=num_episodes, desc="🧪 Evaluating", 
+        # Add single evaluation progress bar per session (fixed to prevent concurrent display issues)
+        session_id = getattr(self, '_current_session_id', 'unknown')
+        eval_pbar = tqdm(total=num_episodes, desc=f"🧪 Eval {session_id[:8]}", 
                          bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} episodes',
-                         leave=False, ncols=80)
+                         leave=False, ncols=80, position=1)
         
         for episode in range(num_episodes):
             obs, info = env.reset()
@@ -812,15 +844,15 @@ class MultiAgentTrainer:
             # Check win condition
             if info.get('winner') == 1:  # AI won
                 wins += 1
-            
+           
             # Update progress bar with current stats
             eval_pbar.update(1)
             current_win_rate = wins / (episode + 1)
             current_avg_reward = sum(total_rewards) / len(total_rewards)
             eval_pbar.set_postfix({'WR': f'{current_win_rate:.1%}', 'Reward': f'{current_avg_reward:.1f}'})
-        
+       
         eval_pbar.close()
-        
+       
         win_rate = wins / num_episodes
         avg_reward = sum(total_rewards) / len(total_rewards)
         

@@ -3,6 +3,7 @@
     "description": "Optimized parameters for complex reward learning",
     "_training_duration_comments": {
       "total_timesteps": "Total number of environment steps to train for (1M steps = substantial learning)",
+      "eval_episodes": "Final evaluation of the trained model before saving ",
       "max_steps_per_episode": "Maximum steps before episode is truncated (800 steps for longer tactical episodes)",
       "eval_freq": "How often to evaluate model performance (every 10k steps = 100 evaluations total)"
     },
@@ -29,8 +30,9 @@
   },
   
   "default": {
-  "description": "Balanced training for active AI learning",
-  "total_timesteps": 100000,
+    "description": "Balanced training for active AI learning",
+    "total_timesteps": 100000,
+    "eval_episodes": 20,
     "max_steps_per_episode": 800,
     "eval_freq": 5000,
     "callback_params": {
@@ -67,6 +69,7 @@
   "conservative": {
     "description": "Conservative increase from original",
     "total_timesteps": 100000,
+    "eval_episodes": 20,
     "max_steps_per_episode": 800,
     "eval_freq": 9999,
     "callback_params": {
@@ -103,6 +106,7 @@
   "aggressive": {
     "description": "Aggressive parameters for faster learning",
     "total_timesteps": 2000000,
+    "eval_episodes": 50,
     "max_steps_per_episode": 800,
     "eval_freq": 9999,
     "callback_params": {
@@ -139,12 +143,13 @@
   "debug": {
     "description": "Ultra minimal to force working",
     "total_timesteps": 1000,
+    "eval_episodes": 5,
     "max_steps_per_episode": 800,
     "eval_freq": 500,
     "callback_params": {
       "eval_deterministic": true,
       "eval_render": false,
-      "n_eval_episodes": 5,
+      "n_eval_episodes": 3,
       "checkpoint_save_freq": 250,
       "checkpoint_name_prefix": "phase_model_checkpoint"
     },
@@ -175,6 +180,7 @@
   "emergency": {
     "description": "Emergency config for broken training recovery",
     "total_timesteps": 100000,
+    "eval_episodes": 20,
     "max_steps_per_episode": 800,
     "eval_freq": 500,
     "callback_params": {

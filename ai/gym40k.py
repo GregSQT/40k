@@ -349,6 +349,11 @@ class W40KEnv(gym.Env):
             self._advance_phase_or_turn()
             return self._get_obs(), 0.0, False, False, self._get_info()
         
+        # Check if it's bot's turn (Player 0) - execute bot actions automatically
+        if self.controller.get_current_player() == 0:
+            self._execute_bot_turn()
+            return self._get_obs(), 0.0, False, False, self._get_info()
+        
         # Decode gym action to mirror action format
         unit_idx = action // 8
         action_type = action % 8
@@ -417,6 +422,8 @@ class W40KEnv(gym.Env):
                     eligible_units.append(unit)
         
         return eligible_units
+        
+        return eligible_units
 
     def _is_unit_eligible_for_phase(self, unit, phase):
         """Check if unit is eligible for specific phase using controller logic."""
@@ -447,10 +454,19 @@ class W40KEnv(gym.Env):
         
         if current_phase == "move":
             self.controller.state_actions["set_phase"]("shoot")
+            # Log phase change
+            if self.replay_logger and hasattr(self.replay_logger, 'log_phase_change'):
+                self.replay_logger.log_phase_change("shoot", current_player, self.controller.get_current_turn())
         elif current_phase == "shoot":
             self.controller.state_actions["set_phase"]("charge")
+            # Log phase change
+            if self.replay_logger and hasattr(self.replay_logger, 'log_phase_change'):
+                self.replay_logger.log_phase_change("charge", current_player, self.controller.get_current_turn())
         elif current_phase == "charge":
             self.controller.state_actions["set_phase"]("combat")
+            # Log phase change
+            if self.replay_logger and hasattr(self.replay_logger, 'log_phase_change'):
+                self.replay_logger.log_phase_change("combat", current_player, self.controller.get_current_turn())
         elif current_phase == "combat":
             # Switch to next player
             next_player = 1 - current_player
@@ -461,6 +477,13 @@ class W40KEnv(gym.Env):
             if next_player == 0:
                 current_turn = self.controller.get_current_turn()
                 self.controller.state_actions["set_current_turn"](current_turn + 1)
+                # Log turn change
+                if self.replay_logger and hasattr(self.replay_logger, 'log_turn_change'):
+                    self.replay_logger.log_turn_change(current_turn + 1)
+            
+            # Log phase change for new player
+            if self.replay_logger and hasattr(self.replay_logger, 'log_phase_change'):
+                self.replay_logger.log_phase_change("move", next_player, self.controller.get_current_turn())
 
     def _convert_gym_action_to_mirror(self, unit, action_type):
         """Convert gym action type to mirror action format."""
@@ -727,6 +750,26 @@ class W40KEnv(gym.Env):
             "eligible_units": len(self._get_eligible_units())
         }
 
+    def _execute_bot_turn(self):
+        """Execute bot turn by advancing through all phases quickly."""
+        # Simply advance through all bot phases without complex actions
+        # This allows the bot to complete its turn and switch to Player 1
+        
+        # Safety counter for this specific bot turn
+        bot_phase_count = 0
+        max_bot_phases = 4  # move, shoot, charge, combat
+        
+        while self.controller.get_current_player() == 0 and bot_phase_count < max_bot_phases:
+            current_phase = self.controller.get_current_phase()
+            
+            # Log phase advancement for debugging
+            if not self.quiet:
+                print(f"Bot advancing from {current_phase} phase")
+            
+            # Just advance to next phase/turn
+            self._advance_phase_or_turn()
+            bot_phase_count += 1
+    
     # === COMPATIBILITY METHODS ===
 
     def save_web_compatible_replay(self, filename):
