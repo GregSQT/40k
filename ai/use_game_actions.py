@@ -576,8 +576,6 @@ class UseGameActions:
             current_target_preview["shooter_id"] == shooter_id):
             
             # Second click - execute shooting (EXACT from TypeScript)
-            print(f"🎯 Executing shooting sequence for {shooter['name']}: {shooter['SHOOT_LEFT']} shots")
-            
             # Clear preview (MISSING from original Python)
             if current_target_preview.get("blink_timer"):
                 # In Python, we'd handle timer cleanup differently
@@ -675,8 +673,6 @@ class UseGameActions:
         
         else:
             # First click - start preview (MISSING from original Python)
-            print(f"🎯 Starting shooting preview for {shooter['name']} → {target['name']}")
-            
             # Clear any existing preview
             if current_target_preview and current_target_preview.get("blink_timer"):
                 # Handle timer cleanup in Python way

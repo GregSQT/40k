@@ -394,6 +394,39 @@ class GameReplayLogger:
     def capture_initial_state(self):
         """Capture initial game state - compatibility method for GameReplayLogger interface."""
         self.log_game_start()
+        
+        # CRITICAL: Save initial units NOW when capture is called
+        if hasattr(self.env, 'controller'):
+            units = self.env.controller.get_units()
+            if units:
+                formatted_units = []
+                for unit in units:
+                    # Validate ALL required fields - NO DEFAULTS
+                    required_fields = ["id", "unit_type", "player", "col", "row",
+                                     "HP_MAX", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
+                    for field in required_fields:
+                        if field not in unit:
+                            raise ValueError(f"Unit missing required field '{field}': {unit}")
+                    
+                    formatted_units.append({
+                        "id": unit["id"],
+                        "unit_type": unit["unit_type"],
+                        "player": unit["player"],
+                        "col": unit["col"],
+                        "row": unit["row"],
+                        "hp_max": unit["HP_MAX"],
+                        "move": unit["MOVE"],
+                        "rng_rng": unit["RNG_RNG"],
+                        "rng_dmg": unit["RNG_DMG"],
+                        "cc_dmg": unit["CC_DMG"],
+                        "is_ranged": unit["RNG_RNG"] > 0,
+                        "is_melee": unit["CC_RNG"] > 0,
+                        "alive": True
+                    })
+                
+                # Store for later use in save_replay
+                self.initial_game_state = {"units": formatted_units}
+                print(f"📸 Captured initial state with {len(formatted_units)} units")
     
     def capture_game_end(self, winner: str, final_reward: float):
         """Capture final game state - compatibility method."""
@@ -414,7 +447,43 @@ class GameReplayLogger:
         """Save replay to file with enhanced structure compatible with frontend."""
         # Extract initial state from environment if available
         initial_units = []
-        if hasattr(self.env, 'units') and self.env.units:
+        
+        # FIRST: Check if we have initial_game_state that was set in start_new_episode
+        if hasattr(self, 'initial_game_state') and self.initial_game_state and 'units' in self.initial_game_state:
+            initial_units = self.initial_game_state['units']
+            print(f"💾 Using stored initial_game_state with {len(initial_units)} units")
+        # SECOND: Try to get from controller if available
+        elif hasattr(self.env, 'controller'):
+            # The controller and env share the SAME replay_logger instance
+            # So check if controller has units directly
+            controller_units = self.env.controller.get_units()
+            if controller_units:
+                for unit in controller_units:
+                    # Validate ALL required fields - NO DEFAULTS
+                    required_fields = ["id", "unit_type", "player", "col", "row", 
+                                     "HP_MAX", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
+                    for field in required_fields:
+                        if field not in unit:
+                            raise ValueError(f"Unit missing required field '{field}': {unit}")
+                    
+                    initial_units.append({
+                        "id": unit["id"],
+                        "unit_type": unit["unit_type"],
+                        "player": unit["player"],
+                        "col": unit["col"],
+                        "row": unit["row"],
+                        "HP_MAX": unit["HP_MAX"],
+                        "hp_max": unit["HP_MAX"],
+                        "move": unit["MOVE"],
+                        "rng_rng": unit["RNG_RNG"],
+                        "rng_dmg": unit["RNG_DMG"],
+                        "cc_dmg": unit["CC_DMG"],
+                        "is_ranged": unit["RNG_RNG"] > 0,
+                        "is_melee": unit["CC_RNG"] > 0
+                    })
+                print(f"💾 Using controller's units with {len(initial_units)} units")
+        # THIRD: Try direct environment units
+        elif hasattr(self.env, 'units') and self.env.units:
             for i, unit in enumerate(self.env.units):
                 if unit and unit.get('alive', True):
                     # Get unit stats from environment unit definitions - NO DEFAULTS

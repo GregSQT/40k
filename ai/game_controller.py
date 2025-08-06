@@ -184,13 +184,9 @@ class GameController:
         self.game_log = log_data
         
         # Initialize replay logger integration for training
+        # DO NOT create a new instance - wait for gym to provide one
         self.replay_logger = None
-        try:
-            from ai.game_replay_logger import GameReplayLogger
-            self.replay_logger = GameReplayLogger(self)
-        except ImportError:
-            if not hasattr(self, 'quiet') or not self.quiet:
-                print("⚠️ GameReplayLogger not available for GameController")
+        # Replay logger will be set by gym environment via connect_replay_logger
         
         # Set up game actions with game log (EXACT from TypeScript)
         actions_data = use_game_actions(
@@ -529,13 +525,9 @@ class TrainingGameController(GameController):
         self.game_log = self.log_manager  # Pass the object, not the functions dict
         
         # Initialize replay logger for training
-        try:
-            from ai.game_replay_logger import GameReplayLogger
-            self.replay_logger = GameReplayLogger(self)
-        except ImportError:
-            if not hasattr(self, 'quiet') or not self.quiet:
-                print("⚠️ GameReplayLogger not available for training")
-            self.replay_logger = None
+        # DO NOT create a new instance - wait for gym to provide one
+        self.replay_logger = None
+        # Replay logger will be set by gym environment via connect_replay_logger
         
         # Initialize training game actions
         self.actions_manager = TrainingGameActions(
@@ -575,6 +567,14 @@ class TrainingGameController(GameController):
         """Custom save_replay method for TrainingGameController"""
         print(f"🔧 Controller save_replay called: {filename}")
         
+        # If we have a replay_logger with captured initial state, use it
+        if self.replay_logger and hasattr(self.replay_logger, 'save_replay'):
+            # Ensure replay_logger has access to current controller state
+            if hasattr(self.replay_logger, 'env'):
+                self.replay_logger.env = self
+            return self.replay_logger.save_replay(filename, episode_reward)
+        
+        # Fallback: manual save
         initial_units = []
         
         # Get units from controller and format them for replay

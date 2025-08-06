@@ -315,17 +315,14 @@ class W40KEnv(gym.Env):
         # Reset replay data and ensure proper initial state capture
         self.replay_data = []
         
-        # Connect and initialize replay logger
+        # Connect and initialize replay logger - SINGLE INSTANCE
         if hasattr(self, 'replay_logger') and self.replay_logger:
-            # Connect to controller if it supports replay logging
+            # Give the SAME replay logger to controller
             if hasattr(self.controller, 'connect_replay_logger'):
                 self.controller.connect_replay_logger(self.replay_logger)
-            # Set replay logger env reference to controller for unit access
+            # Set replay logger env reference for backward compatibility
             if hasattr(self.replay_logger, 'env'):
-                self.replay_logger.env = self.controller
-            # Override save_replay to use controller's method
-            if hasattr(self.controller, 'save_replay'):
-                self.replay_logger.save_replay = self.controller.save_replay
+                self.replay_logger.env = self
             # Capture initial state with enhanced unit data
             self.replay_logger.capture_initial_state()
         
@@ -364,11 +361,30 @@ class W40KEnv(gym.Env):
         # Get the unit to act
         acting_unit = eligible_units[unit_idx]
         
+        # Capture pre-action state for logging
+        pre_action_units = self.controller.get_units()
+       
         # Convert gym action to mirror action format
         mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
-        
+       
         # Execute action through controller
         success = self.controller.execute_action(acting_unit["id"], mirror_action)
+        
+        # Log the action to replay logger
+        if self.replay_logger and hasattr(self.replay_logger, 'log_action'):
+            # Get post-action units for logging
+            post_units = self.controller.get_units()
+            # Find target if action has one
+            target_id = mirror_action.get("target_id") if mirror_action else None
+            self.replay_logger.log_action(
+                action=action,
+                reward=0,  # Will be calculated next
+                pre_action_units=pre_action_units,
+                post_action_units=post_units,
+                acting_unit_id=acting_unit["id"],
+                target_unit_id=target_id,
+                description=f"Action {action_type} by unit {acting_unit['id']}"
+            )
         
         # Calculate reward
         reward = self._calculate_reward(acting_unit, mirror_action, success)
