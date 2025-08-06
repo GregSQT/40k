@@ -53,7 +53,7 @@ class W40KEnv(gym.Env):
                  unit_registry=None, quiet=False):
         super().__init__()
         
-        self.quiet = quiet
+        self.quiet = False
         
         # Multi-agent support - reuse shared registry if provided
         self.unit_registry = unit_registry if unit_registry is not None else UnitRegistry()
@@ -167,8 +167,9 @@ class W40KEnv(gym.Env):
             training_mode=True
         )
         
-        # Initialize TrainingGameController
+        # Initialize TrainingGameController and start it
         self.controller = TrainingGameController(config)
+        self.controller.start_game()  # CRITICAL: Start the controller
         
         # Cache board size for observations - use existing config_loader system
         from config_loader import get_board_size
@@ -350,8 +351,17 @@ class W40KEnv(gym.Env):
             return self._get_obs(), 0.0, False, False, self._get_info()
         
         # Check if it's bot's turn (Player 0) - execute bot actions automatically
-        if self.controller.get_current_player() == 0:
+        current_player = self.controller.get_current_player()
+        if not self.quiet:
+            print(f"🎮 Step: current_player={current_player}, eligible_units={len(eligible_units)}")
+        
+        if current_player == 0:
+            if not self.quiet:
+                print(f"🤖 Executing bot turn for player {current_player}")
             self._execute_bot_turn()
+            # Force phase advancement after bot turn to prevent loops
+            if not self._get_eligible_units():
+                self._advance_phase_or_turn()
             return self._get_obs(), 0.0, False, False, self._get_info()
         
         # Decode gym action to mirror action format
@@ -359,7 +369,8 @@ class W40KEnv(gym.Env):
         action_type = action % 8
         
         if unit_idx >= len(eligible_units):
-            # Invalid unit index, return small penalty
+            # Invalid unit index - advance phase to prevent infinite loops
+            self._advance_phase_or_turn()
             reward = self._get_small_penalty_reward()
             return self._get_obs(), reward, False, False, self._get_info()
         
@@ -372,8 +383,32 @@ class W40KEnv(gym.Env):
         # Convert gym action to mirror action format
         mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
        
-        # Execute action through controller
-        success = self.controller.execute_action(acting_unit["id"], mirror_action)
+        # DETAILED ACTION EXECUTION LOGGING
+        if not self.quiet:
+            print(f"🎮 STEP {self.step_count}: Player {current_player}, Phase {self.controller.get_current_phase()}")
+            print(f"    Acting unit: {acting_unit['id']} at ({acting_unit['col']},{acting_unit['row']})")
+            print(f"    Mirror action: {mirror_action}")
+            print(f"    Pre-action units count: {len(pre_action_units)}")
+        
+        # Execute action through controller with detailed logging
+        try:
+            success = self.controller.execute_action(acting_unit["id"], mirror_action)
+            if not self.quiet:
+                print(f"    ✅ Controller.execute_action returned: {success}")
+        except Exception as e:
+            if not self.quiet:
+                print(f"    ❌ Controller execution error: {e}")
+                import traceback
+                traceback.print_exc()
+            success = False
+        
+        # CRITICAL FIX: If action execution fails, force phase advancement
+        if not success:
+            if not self.quiet:
+                print(f"    ⚠️ Action execution FAILED - advancing phase")
+            self._advance_phase_or_turn()
+            reward = self._get_small_penalty_reward()
+            return self._get_obs(), reward, False, False, self._get_info()
         
         # Log the action to replay logger
         if self.replay_logger and hasattr(self.replay_logger, 'log_action'):
@@ -381,24 +416,50 @@ class W40KEnv(gym.Env):
             post_units = self.controller.get_units()
             # Find target if action has one
             target_id = mirror_action.get("target_id") if mirror_action else None
-            self.replay_logger.log_action(
-                action=action,
-                reward=0,  # Will be calculated next
-                pre_action_units=pre_action_units,
-                post_action_units=post_units,
-                acting_unit_id=acting_unit["id"],
-                target_unit_id=target_id,
-                description=f"Action {action_type} by unit {acting_unit['id']}"
-            )
+            
+            if not self.quiet:
+                print(f"    📝 Logging to replay_logger:")
+                print(f"        Action: {action}, Type: {action_type}")
+                print(f"        Acting unit: {acting_unit['id']}, Target: {target_id}")
+                print(f"        Post-action units count: {len(post_units)}")
+            
+            try:
+                self.replay_logger.log_action(
+                    action=action,
+                    reward=0,  # Will be calculated next
+                    pre_action_units=pre_action_units,
+                    post_action_units=post_units,
+                    acting_unit_id=acting_unit["id"],
+                    target_unit_id=target_id,
+                    description=f"Action {action_type} by unit {acting_unit['id']}"
+                )
+                if not self.quiet:
+                    print(f"        ✅ Replay logging successful")
+            except Exception as e:
+                if not self.quiet:
+                    print(f"        ❌ Replay logging failed: {e}")
         
         # Calculate reward
         reward = self._calculate_reward(acting_unit, mirror_action, success)
+        if not self.quiet:
+            print(f"    💰 Calculated reward: {reward}")
         
         # Update tracking
         self._last_acting_unit = acting_unit
         
         # Sync state from controller
         self._sync_state_from_controller()
+        if not self.quiet:
+            print(f"    🔄 State synced - Turn: {self.current_turn}, Phase: {self.current_phase}")
+        
+        # CRITICAL: Check if phase should advance after successful action
+        remaining_eligible = self._get_eligible_units()
+        if not remaining_eligible:
+            if not self.quiet:
+                print(f"    ⏭️ No eligible units remaining - advancing phase")
+            self._advance_phase_or_turn()
+        elif not self.quiet:
+            print(f"    👥 {len(remaining_eligible)} eligible units remaining")
         
         # Check if game ended
         terminated = self.controller.is_game_over()
@@ -439,51 +500,27 @@ class W40KEnv(gym.Env):
         return False
 
     def _advance_phase_or_turn(self):
-        """Advance to next phase or turn using controller."""
-        if hasattr(self.controller, 'advance_phase'):
-            self.controller.advance_phase()
-        else:
-            # Manual phase advancement if method missing
-            self._manual_phase_advance()
-        self._sync_state_from_controller()
-
-    def _manual_phase_advance(self):
-        """Manual phase advancement logic"""
+        """Advance to next phase or turn using controller's proper phase transition system."""
         current_phase = self.controller.get_current_phase()
         current_player = self.controller.get_current_player()
         
-        if current_phase == "move":
-            self.controller.state_actions["set_phase"]("shoot")
-            # Log phase change
-            if self.replay_logger and hasattr(self.replay_logger, 'log_phase_change'):
-                self.replay_logger.log_phase_change("shoot", current_player, self.controller.get_current_turn())
-        elif current_phase == "shoot":
-            self.controller.state_actions["set_phase"]("charge")
-            # Log phase change
-            if self.replay_logger and hasattr(self.replay_logger, 'log_phase_change'):
-                self.replay_logger.log_phase_change("charge", current_player, self.controller.get_current_turn())
-        elif current_phase == "charge":
-            self.controller.state_actions["set_phase"]("combat")
-            # Log phase change
-            if self.replay_logger and hasattr(self.replay_logger, 'log_phase_change'):
-                self.replay_logger.log_phase_change("combat", current_player, self.controller.get_current_turn())
-        elif current_phase == "combat":
-            # Switch to next player
-            next_player = 1 - current_player
-            self.controller.state_actions["set_current_player"](next_player)
-            self.controller.state_actions["set_phase"]("move")
-            
-            # If back to player 0, increment turn
-            if next_player == 0:
-                current_turn = self.controller.get_current_turn()
-                self.controller.state_actions["set_current_turn"](current_turn + 1)
-                # Log turn change
-                if self.replay_logger and hasattr(self.replay_logger, 'log_turn_change'):
-                    self.replay_logger.log_turn_change(current_turn + 1)
-            
-            # Log phase change for new player
-            if self.replay_logger and hasattr(self.replay_logger, 'log_phase_change'):
-                self.replay_logger.log_phase_change("move", next_player, self.controller.get_current_turn())
+        if not self.quiet:
+            print(f"🔄 _advance_phase_or_turn: Player {current_player}, Phase {current_phase}")
+        
+        # Use controller's proper phase transition system ONLY
+        if hasattr(self.controller, 'advance_phase'):
+            if not self.quiet:
+                print(f"🔄 Using controller.advance_phase()")
+            self.controller.advance_phase()
+        else:
+            raise AttributeError("TrainingGameController missing advance_phase() method")
+        
+        self._sync_state_from_controller()
+        
+        if not self.quiet:
+            final_phase = self.controller.get_current_phase()
+            final_player = self.controller.get_current_player()
+            print(f"🔄 Final state: Player {final_player}, Phase {final_phase}")
 
     def _convert_gym_action_to_mirror(self, unit, action_type):
         """Convert gym action type to mirror action format."""
@@ -751,24 +788,195 @@ class W40KEnv(gym.Env):
         }
 
     def _execute_bot_turn(self):
-        """Execute bot turn by advancing through all phases quickly."""
-        # Simply advance through all bot phases without complex actions
-        # This allows the bot to complete its turn and switch to Player 1
+        """Execute bot turn - quickly mark all units as acted and advance phase."""
+        current_phase = self.controller.get_current_phase()
+        current_player = self.controller.get_current_player()
         
-        # Safety counter for this specific bot turn
-        bot_phase_count = 0
-        max_bot_phases = 4  # move, shoot, charge, combat
+        if not self.quiet:
+            print(f"🤖 Bot turn: Player {current_player}, Phase {current_phase} - auto-advancing")
         
-        while self.controller.get_current_player() == 0 and bot_phase_count < max_bot_phases:
-            current_phase = self.controller.get_current_phase()
+        # Get bot units (Player 0) and mark them all as acted
+        all_units = self.controller.get_units()
+        bot_units = [u for u in all_units if u["player"] == 0 and u.get("alive", True)]
+        
+        # Mark all bot units as having acted in current phase with debugging
+        marked_units = 0
+        if hasattr(self.controller, 'state_actions'):
+            for bot_unit in bot_units:
+                if self._is_unit_eligible_for_phase(bot_unit, current_phase):
+                    if current_phase == "move":
+                        if 'add_moved_unit' in self.controller.state_actions:
+                            try:
+                                self.controller.state_actions['add_moved_unit'](bot_unit["id"])
+                                marked_units += 1
+                                if not self.quiet:
+                                    print(f"    🤖 Called add_moved_unit({bot_unit['id']})")
+                            except Exception as e:
+                                if not self.quiet:
+                                    print(f"    ❌ add_moved_unit failed: {e}")
+                        else:
+                            if not self.quiet:
+                                print(f"    ❌ add_moved_unit not found in state_actions")
+                                print(f"        Available actions: {list(self.controller.state_actions.keys())}")
+                        
+                        # FALLBACK: Direct state manipulation if state_actions fails
+                        if hasattr(self.controller, 'game_state'):
+                            current_moved = self.controller.game_state.get("units_moved", [])
+                            if bot_unit["id"] not in current_moved:
+                                if isinstance(current_moved, list):
+                                    current_moved.append(bot_unit["id"])
+                                    if not self.quiet:
+                                        print(f"    🔧 FALLBACK: Direct append unit {bot_unit['id']} to units_moved")
+                                else:
+                                    self.controller.game_state["units_moved"] = [bot_unit["id"]]
+                                    if not self.quiet:
+                                        print(f"    🔧 FALLBACK: Created units_moved list with unit {bot_unit['id']}")
+                    elif current_phase == "shoot":
+                        # Shooting phase - set SHOOT_LEFT to 0
+                        if 'update_unit' in self.controller.state_actions:
+                            self.controller.state_actions['update_unit'](bot_unit["id"], {"SHOOT_LEFT": 0})
+                            marked_units += 1
+                            if not self.quiet:
+                                print(f"    🤖 Set unit {bot_unit['id']} SHOOT_LEFT to 0")
+                    elif current_phase == "charge" and 'add_charged_unit' in self.controller.state_actions:
+                        self.controller.state_actions['add_charged_unit'](bot_unit["id"])
+                        marked_units += 1
+                        if not self.quiet:
+                            print(f"    🤖 Marked unit {bot_unit['id']} as charged")
+                    elif current_phase == "combat" and 'add_attacked_unit' in self.controller.state_actions:
+                        self.controller.state_actions['add_attacked_unit'](bot_unit["id"])
+                        marked_units += 1
+                        if not self.quiet:
+                            print(f"    🤖 Marked unit {bot_unit['id']} as attacked")
+        
+        # Verify the marking worked
+        if not self.quiet:
+            current_moved = self.controller.game_state.get("units_moved", [])
+            print(f"    🤖 Units moved after marking: {current_moved}")
+        
+        if not self.quiet:
+            print(f"🤖 Bot marked {len(bot_units)} units as acted - advancing phase")
+        
+        # Always advance to next phase after bot turn
+        self._advance_phase_or_turn()
+
+    def _execute_simple_bot_action(self, bot_unit, current_phase):
+        """Execute simple scripted action for bot unit."""
+        try:
+            if current_phase == "move":
+                # Simple move towards nearest enemy
+                return self._bot_simple_move(bot_unit)
+            elif current_phase == "shoot":
+                # Simple shooting at nearest enemy
+                return self._bot_simple_shoot(bot_unit)
+            elif current_phase == "charge":
+                # Simple charge at nearest enemy
+                return self._bot_simple_charge(bot_unit)
+            elif current_phase == "combat":
+                # Simple combat attack
+                return self._bot_simple_combat(bot_unit)
             
-            # Log phase advancement for debugging
+            return False
+        except Exception as e:
             if not self.quiet:
-                print(f"Bot advancing from {current_phase} phase")
-            
-            # Just advance to next phase/turn
-            self._advance_phase_or_turn()
-            bot_phase_count += 1
+                print(f"🤖 Bot action failed for unit {bot_unit['id']}: {e}")
+                import traceback
+                traceback.print_exc()
+            return False
+
+    def _bot_simple_move(self, bot_unit):
+        """Simple bot movement towards nearest enemy."""
+        # Find nearest enemy
+        all_units = self.controller.get_units()
+        enemies = [u for u in all_units if u["player"] != bot_unit["player"] and u.get("alive", True)]
+        
+        if not enemies:
+            # No enemies - just mark as moved to advance phase
+            if hasattr(self.controller, 'state_actions') and 'add_moved_unit' in self.controller.state_actions:
+                self.controller.state_actions['add_moved_unit'](bot_unit["id"])
+            return True
+        
+        # Move towards first enemy (simple AI)
+        target = enemies[0]
+        
+        # Calculate simple direction
+        dx = 1 if target["col"] > bot_unit["col"] else (-1 if target["col"] < bot_unit["col"] else 0)
+        dy = 1 if target["row"] > bot_unit["row"] else (-1 if target["row"] < bot_unit["row"] else 0)
+        
+        new_col = max(0, min(23, bot_unit["col"] + dx))  # Clamp to board bounds
+        new_row = max(0, min(26, bot_unit["row"] + dy))   # Clamp to board bounds
+        
+        # Execute move through controller
+        mirror_action = {"type": "move", "col": new_col, "row": new_row}
+        success = self.controller.execute_action(bot_unit["id"], mirror_action)
+        
+        if success and not self.quiet:
+            print(f"🤖 Unit {bot_unit['id']} moved from ({bot_unit['col']},{bot_unit['row']}) to ({new_col},{new_row})")
+        elif not self.quiet:
+            print(f"🤖 Unit {bot_unit['id']} move failed - marking as moved anyway")
+            # Mark as moved even if action failed to prevent infinite loops
+            if hasattr(self.controller, 'state_actions') and 'add_moved_unit' in self.controller.state_actions:
+                self.controller.state_actions['add_moved_unit'](bot_unit["id"])
+                success = True
+        
+        return success
+
+    def _bot_simple_shoot(self, bot_unit):
+        """Simple bot shooting at nearest enemy in range."""
+        if bot_unit.get("RNG_RNG", 0) <= 0:
+            # No ranged weapon - mark as moved to advance phase
+            if hasattr(self.controller, 'state_actions') and 'add_moved_unit' in self.controller.state_actions:
+                self.controller.state_actions['add_moved_unit'](bot_unit["id"])
+            return True
+        
+        target = self._find_shoot_target(bot_unit)
+        if not target:
+            # No target - mark as moved to advance phase
+            if hasattr(self.controller, 'state_actions') and 'add_moved_unit' in self.controller.state_actions:
+                self.controller.state_actions['add_moved_unit'](bot_unit["id"])
+            return True
+        
+        mirror_action = {"type": "shoot", "target_id": target["id"]}
+        success = self.controller.execute_action(bot_unit["id"], mirror_action)
+        
+        if success and not self.quiet:
+            print(f"🤖 Unit {bot_unit['id']} shot at unit {target['id']}")
+        elif not self.quiet:
+            print(f"🤖 Unit {bot_unit['id']} shoot failed - marking as moved anyway")
+            # Mark as moved even if action failed
+            if hasattr(self.controller, 'state_actions') and 'add_moved_unit' in self.controller.state_actions:
+                self.controller.state_actions['add_moved_unit'](bot_unit["id"])
+                success = True
+        
+        return success
+
+    def _bot_simple_charge(self, bot_unit):
+        """Simple bot charge at nearest enemy."""
+        target = self._find_charge_target(bot_unit)
+        if not target:
+            return False
+        
+        mirror_action = {"type": "charge", "target_id": target["id"]}
+        success = self.controller.execute_action(bot_unit["id"], mirror_action)
+        
+        if success and not self.quiet:
+            print(f"🤖 Unit {bot_unit['id']} charged unit {target['id']}")
+        
+        return success
+
+    def _bot_simple_combat(self, bot_unit):
+        """Simple bot combat attack."""
+        target = self._find_combat_target(bot_unit)
+        if not target:
+            return False
+        
+        mirror_action = {"type": "combat", "target_id": target["id"]}
+        success = self.controller.execute_action(bot_unit["id"], mirror_action)
+        
+        if success and not self.quiet:
+            print(f"🤖 Unit {bot_unit['id']} attacked unit {target['id']}")
+        
+        return success
     
     # === COMPATIBILITY METHODS ===
 

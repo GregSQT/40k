@@ -217,8 +217,9 @@ class GameController:
         self.current_step = 0
         
         # Log game start (EXACT from TypeScript)
-        self.game_log["logTurnStart"](1)
-        self.game_log["logPhaseChange"]("move", 0, 1)
+        if self.game_log and "logTurnStart" in self.game_log:
+            self.game_log["logTurnStart"](1)
+            self.game_log["logPhaseChange"]("move", 0, 1)
         
         # Capture initial state for replay
         if self.replay_logger:
@@ -522,14 +523,14 @@ class TrainingGameController(GameController):
         
         # Initialize training game log
         self.log_manager = TrainingGameLog(max_events=500)
-        self.game_log = self.log_manager  # Pass the object, not the functions dict
+        self.game_log = self.log_manager.get_log_functions()  # Pass the functions dict
         
         # Initialize replay logger for training
         # DO NOT create a new instance - wait for gym to provide one
         self.replay_logger = None
         # Replay logger will be set by gym environment via connect_replay_logger
         
-        # Initialize training game actions
+        # Initialize training game actions with direct method mapping
         self.actions_manager = TrainingGameActions(
             game_state=self.game_state,
             move_preview=self.move_preview,
@@ -539,9 +540,23 @@ class TrainingGameController(GameController):
             actions=self.state_actions,
             game_log=self.game_log
         )
-        self.game_actions = self.actions_manager.get_action_functions()
+        self.game_actions = self.actions_manager.get_available_actions()
         
-        # Initialize training phase transitions
+        # Initialize training phase transitions with working actions
+        print(f"🔧 Initializing phase transitions with state_actions: {list(self.state_actions.keys())}")
+        
+        # Test the critical actions before using them
+        if "set_phase" in self.state_actions:
+            try:
+                test_phase = self.game_state.get("phase", "move")
+                print(f"🔧 Testing set_phase: current phase = {test_phase}")
+                # Don't actually change it, just test the call
+                print(f"🔧 set_phase function: {self.state_actions['set_phase']}")
+            except Exception as e:
+                print(f"🔧 set_phase test failed: {e}")
+        else:
+            print(f"🔧 ERROR: set_phase not found in state_actions!")
+        
         self.phase_manager = TrainingPhaseTransition(
             game_state=self.game_state,
             board_config=self.board_config,
@@ -549,6 +564,9 @@ class TrainingGameController(GameController):
             actions=self.state_actions
         )
         self.phase_transitions = self.phase_manager.get_transition_functions()
+        
+        # Verify phase transition functions are available
+        print(f"🔧 Available phase transitions: {list(self.phase_transitions.keys())}")
 
         # Add phase property for training compatibility
         self._current_phase = self.game_state.get("phase", "move")
@@ -724,8 +742,65 @@ class TrainingGameController(GameController):
         return self.game_actions.get("get_valid_combat_targets", lambda x: [])(unit_id)
 
     def advance_phase(self) -> None:
-        """Advance to next phase or turn"""
-        self.phase_transitions.get("process_phase_transitions", lambda: None)()
+        """Advance to next phase or turn with debugging"""
+        current_phase = self.get_current_phase()
+        current_player = self.get_current_player()
+        
+        print(f"🔧 TrainingGameController.advance_phase(): Player {current_player}, Phase {current_phase}")
+        print(f"    Units moved: {self.game_state.get('units_moved', [])}")
+        print(f"    Units charged: {self.game_state.get('units_charged', [])}")
+        print(f"    Units attacked: {self.game_state.get('units_attacked', [])}")
+        
+        # Check if phase transition conditions are met
+        if hasattr(self, 'phase_transitions'):
+            phase_info = self.phase_transitions.get("get_phase_info", lambda: {})()
+            print(f"    Phase transition conditions: {phase_info.get('can_transition', {})}")
+            
+            # Call the transition processor with detailed debugging
+            print(f"    Calling process_phase_transitions()...")
+            try:
+                self.phase_transitions.get("process_phase_transitions", lambda: None)()
+                print(f"    process_phase_transitions() completed")
+            except Exception as e:
+                print(f"    ERROR in process_phase_transitions(): {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # If process_phase_transitions didn't work, force manual transition
+            new_phase = self.get_current_phase()
+            new_player = self.get_current_player()
+            
+            if new_phase == current_phase and current_phase == "move" and phase_info.get('can_transition', {}).get('from_move', False):
+                print(f"    FORCING transition from move to shoot...")
+                
+                # First test: Call set_phase directly through state_actions
+                try:
+                    print(f"    Testing direct state_actions call...")
+                    old_phase = self.game_state.get("phase", "unknown")
+                    self.state_actions["set_phase"]("shoot")
+                    new_phase = self.game_state.get("phase", "unknown")
+                    print(f"    Direct call result: {old_phase} -> {new_phase}")
+                    
+                    if new_phase == "shoot":
+                        print(f"    SUCCESS: Direct state_actions['set_phase'] works!")
+                    else:
+                        print(f"    FAILED: Direct state_actions['set_phase'] didn't work")
+                        # Reset to original phase
+                        self.state_actions["set_phase"](old_phase)
+                except Exception as e:
+                    print(f"    ERROR in direct state_actions call: {e}")
+                
+                # Second test: Call transition_to_shoot
+                try:
+                    self.phase_transitions.get("transition_to_shoot", lambda: None)()
+                    new_phase = self.get_current_phase()
+                    print(f"    transition_to_shoot result: {new_phase}")
+                except Exception as e:
+                    print(f"    ERROR in forced transition: {e}")
+            
+            print(f"    After transition: Player {new_player}, Phase {new_phase}")
+        else:
+            print(f"    ERROR: No phase_transitions available!")
 
     def start_new_episode(self, scenario_units: Optional[List[Dict[str, Any]]] = None) -> None:
         """Start a new training episode"""
