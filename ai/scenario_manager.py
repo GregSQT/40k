@@ -392,8 +392,6 @@ class ScenarioManager:
                         expected_duration=episodes_per_agent,
                         priority=2.0
                     ))
-                else:
-                    print(f"⚠️ Missing solo scenario for {agent}: {scenario_name}")
         
         elif phase == "cross_faction":
             # Phase 2: Cross-Faction Tactical Learning
