@@ -291,7 +291,9 @@ class MultiAgentTrainer:
             "training_config": training_config_name,
             "rewards_config": rewards_config_name,
             "session_results": [],
-            "start_time": time.time()
+            "start_time": time.time(),
+            "total_training_time": 0.0,
+            "total_evaluation_time": 0.0
         }
         
         # Load training config
@@ -420,12 +422,20 @@ class MultiAgentTrainer:
         orchestration_results["end_time"] = time.time()
         orchestration_results["total_duration"] = orchestration_results["end_time"] - orchestration_results["start_time"]
         
+        # Calculate totals from session results
+        for result in orchestration_results["session_results"]:
+            if result.get("status") == "completed":
+                orchestration_results["total_training_time"] += result.get("pure_training_time", 0.0)
+                orchestration_results["total_evaluation_time"] += result.get("evaluation_time", 0.0)
+        
         # Generate final progress report
         progress_report = self.scenario_manager.get_training_progress_report()
         orchestration_results["progress_report"] = progress_report
         
-        print(f"🎉 Balanced training completed!")
-        print(f"⏱️ Total duration: {orchestration_results['total_duration']:.2f} seconds")
+        print(f"🎉 Balanced training completed!")        
+        print(f"🏋️ Training time: {orchestration_results['total_training_time']:.2f} seconds")
+        print(f"🧪 Evaluation time: {orchestration_results['total_duration']:.2f} seconds")
+        print(f"⏱️ Total duration: {orchestration_results['total_evaluation_time']:.2f} seconds")
         print(f"📊 Successful sessions: {len([r for r in orchestration_results['session_results'] if r.get('status') == 'completed'])}")
         
         # Save orchestration results
@@ -464,7 +474,7 @@ class MultiAgentTrainer:
             callbacks = self._setup_session_callbacks(session, model, episode_tracker, training_config_name)
             
             # Execute training
-            start_time = time.time()
+            session_start_time = time.time()
             training_config = self.config.load_training_config(training_config_name)
             total_timesteps = training_config["total_timesteps"]
             
@@ -497,11 +507,16 @@ class MultiAgentTrainer:
                 progress_bar=False  # Disable built-in progress bar
             )
             
-            training_duration = time.time() - start_time
+            # Record pure training time
+            pure_training_time = time.time() - session_start_time
             
             # Test the trained model WITH episode tracker for selective replay capture
-            print(f"🧪 Evaluating {session.agent_key} vs {session.opponent_agent}...")
+            evaluation_start = time.time()
             test_results = self._test_trained_model(model, env, 20, episode_tracker)  # Use episode tracker for selective replays
+            evaluation_time = time.time() - evaluation_start
+            
+            # Calculate total session duration (training + evaluation + model saving)
+            training_duration = time.time() - session_start_time
             
             # Save final model
             final_model_path = session.model_path.replace('.zip', f'_session_{session.session_id}.zip')
@@ -537,6 +552,8 @@ class MultiAgentTrainer:
                 "status": "completed",
                 "completed_episodes": session.completed_episodes,
                 "training_duration": training_duration,
+                "pure_training_time": pure_training_time,
+                "evaluation_time": evaluation_time,
                 "final_win_rate": test_results["win_rate"],
                 "final_avg_reward": test_results["avg_reward"],
                 "model_path": final_model_path,
@@ -549,6 +566,9 @@ class MultiAgentTrainer:
         except Exception as e:
             print(f"❌ Session {session.session_id} failed: {e}")
             session.status = 'failed'
+            
+            # Calculate duration for failed session
+            session_duration = time.time() - session_start_time if 'session_start_time' in locals() else 0.0
             
             # Try to save replay even on failure using GameReplayLogger
             replay_file_saved = None

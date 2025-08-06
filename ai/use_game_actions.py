@@ -1009,7 +1009,97 @@ class UseGameActions:
             "is_unit_eligible": self.is_unit_eligible_local,  # ❌ WAS MISSING!
             "get_charge_destinations": self.get_charge_destinations,  # ❌ WAS MISSING!
             "direct_move": self.direct_move,  # ❌ WAS MISSING!
+            
+            # MISSING training methods:
+            "get_valid_moves": self.get_valid_moves,
+            "get_valid_shooting_targets": self.get_valid_shooting_targets,
+            "get_valid_charge_targets": self.get_valid_charge_targets,
+            "get_valid_combat_targets": self.get_valid_combat_targets,
         }
+
+    def get_valid_moves(self, unit_id: int) -> List[Dict[str, Any]]:
+        """Get valid move positions for unit"""
+        unit = self.find_unit(unit_id)
+        if not unit or not self.is_unit_eligible_local(unit) or self.phase != "move":
+            return []
+        
+        # Validate required unit fields
+        if "MOVE" not in unit:
+            raise KeyError(f"Unit missing required 'MOVE' field: {unit.get('name', 'unknown')}")
+        if "col" not in unit:
+            raise KeyError(f"Unit missing required 'col' field: {unit.get('name', 'unknown')}")
+        if "row" not in unit:
+            raise KeyError(f"Unit missing required 'row' field: {unit.get('name', 'unknown')}")
+        
+        # Validate required board config fields
+        if "cols" not in self.board_config:
+            raise KeyError("Board config missing required 'cols' field")
+        if "rows" not in self.board_config:
+            raise KeyError("Board config missing required 'rows' field")
+        
+        # Simple implementation: return adjacent hexes within movement range
+        valid_moves = []
+        for col in range(max(0, unit["col"] - unit["MOVE"]), 
+                        min(self.board_config["cols"], unit["col"] + unit["MOVE"] + 1)):
+            for row in range(max(0, unit["row"] - unit["MOVE"]), 
+                            min(self.board_config["rows"], unit["row"] + unit["MOVE"] + 1)):
+                if col != unit["col"] or row != unit["row"]:
+                    # Check if hex is not occupied by friendly unit
+                    occupied = any(u["col"] == col and u["row"] == row and u["player"] == unit["player"] 
+                                 for u in self.units if u["id"] != unit["id"])
+                    if not occupied:
+                        valid_moves.append({"col": col, "row": row})
+        return valid_moves
+
+    def get_valid_shooting_targets(self, unit_id: int) -> List[int]:
+        """Get valid shooting targets for unit"""
+        unit = self.find_unit(unit_id)
+        if not unit or not self.is_unit_eligible_local(unit) or self.phase != "shoot":
+            return []
+        
+        # Validate required unit fields
+        if "RNG_RNG" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit.get('name', 'unknown')}")
+        
+        targets = []
+        enemy_units = [u for u in self.units if u["player"] != unit["player"]]
+        for enemy in enemy_units:
+            distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
+            if distance <= unit["RNG_RNG"]:
+                targets.append(enemy["id"])
+        return targets
+
+    def get_valid_charge_targets(self, unit_id: int) -> List[int]:
+        """Get valid charge targets for unit"""
+        unit = self.find_unit(unit_id)
+        if not unit or not self.is_unit_eligible_local(unit) or self.phase != "charge":
+            return []
+        
+        targets = []
+        enemy_units = [u for u in self.units if u["player"] != unit["player"]]
+        for enemy in enemy_units:
+            distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
+            if 1 < distance <= 12:  # Charge range 1-12 hexes
+                targets.append(enemy["id"])
+        return targets
+
+    def get_valid_combat_targets(self, unit_id: int) -> List[int]:
+        """Get valid combat targets for unit"""
+        unit = self.find_unit(unit_id)
+        if not unit or not self.is_unit_eligible_local(unit) or self.phase != "combat":
+            return []
+        
+        # Validate required unit fields
+        if "CC_RNG" not in unit:
+            raise KeyError(f"Unit missing required 'CC_RNG' field: {unit.get('name', 'unknown')}")
+        
+        targets = []
+        enemy_units = [u for u in self.units if u["player"] != unit["player"]]
+        for enemy in enemy_units:
+            distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
+            if distance <= unit["CC_RNG"]:
+                targets.append(enemy["id"])
+        return targets
 
 
 # === FACTORY FUNCTION (EXACT Mirror of TypeScript hook usage) ===

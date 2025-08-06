@@ -409,7 +409,6 @@ class GameController:
     def execute_action(self, unit_id: int, action: Dict[str, Any]) -> bool:
         """Execute a game action for specified unit"""
         action_type = action.get("type")
-        unit_id = action.get("unit_id")
         
         if action_type == "move":
             return self.move_unit(unit_id, action["col"], action["row"])
@@ -527,7 +526,7 @@ class TrainingGameController(GameController):
         
         # Initialize training game log
         self.log_manager = TrainingGameLog(max_events=500)
-        self.game_log = self.log_manager.get_log_functions()
+        self.game_log = self.log_manager  # Pass the object, not the functions dict
         
         # Initialize replay logger for training
         try:
@@ -707,6 +706,26 @@ class TrainingGameController(GameController):
             if unit["id"] == unit_id:
                 return unit
         return None
+
+    def get_valid_moves(self, unit_id: int) -> List[Dict[str, Any]]:
+        """Get valid move positions for unit"""
+        return self.game_actions.get("get_valid_moves", lambda x: [])(unit_id)
+
+    def get_valid_shooting_targets(self, unit_id: int) -> List[int]:
+        """Get valid shooting targets for unit"""
+        return self.game_actions.get("get_valid_shooting_targets", lambda x: [])(unit_id)
+
+    def get_valid_charge_targets(self, unit_id: int) -> List[int]:
+        """Get valid charge targets for unit"""
+        return self.game_actions.get("get_valid_charge_targets", lambda x: [])(unit_id)
+
+    def get_valid_combat_targets(self, unit_id: int) -> List[int]:
+        """Get valid combat targets for unit"""
+        return self.game_actions.get("get_valid_combat_targets", lambda x: [])(unit_id)
+
+    def advance_phase(self) -> None:
+        """Advance to next phase or turn"""
+        self.phase_transitions.get("process_phase_transitions", lambda: None)()
 
     def start_new_episode(self, scenario_units: Optional[List[Dict[str, Any]]] = None) -> None:
         """Start a new training episode"""

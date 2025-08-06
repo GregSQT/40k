@@ -417,8 +417,34 @@ class W40KEnv(gym.Env):
 
     def _advance_phase_or_turn(self):
         """Advance to next phase or turn using controller."""
-        self.controller.advance_phase()
+        if hasattr(self.controller, 'advance_phase'):
+            self.controller.advance_phase()
+        else:
+            # Manual phase advancement if method missing
+            self._manual_phase_advance()
         self._sync_state_from_controller()
+
+    def _manual_phase_advance(self):
+        """Manual phase advancement logic"""
+        current_phase = self.controller.get_current_phase()
+        current_player = self.controller.get_current_player()
+        
+        if current_phase == "move":
+            self.controller.state_actions["set_phase"]("shoot")
+        elif current_phase == "shoot":
+            self.controller.state_actions["set_phase"]("charge")
+        elif current_phase == "charge":
+            self.controller.state_actions["set_phase"]("combat")
+        elif current_phase == "combat":
+            # Switch to next player
+            next_player = 1 - current_player
+            self.controller.state_actions["set_current_player"](next_player)
+            self.controller.state_actions["set_phase"]("move")
+            
+            # If back to player 0, increment turn
+            if next_player == 0:
+                current_turn = self.controller.get_current_turn()
+                self.controller.state_actions["set_current_turn"](current_turn + 1)
 
     def _convert_gym_action_to_mirror(self, unit, action_type):
         """Convert gym action type to mirror action format."""
@@ -490,33 +516,81 @@ class W40KEnv(gym.Env):
     def _calculate_reward(self, acting_unit, action, success):
         """Calculate reward using existing rewards config."""
         unit_rewards = self._get_unit_reward_config(acting_unit)
+        base_reward = 0.0
+        
+        # Validate required reward structure
+        if "base_actions" not in unit_rewards:
+            raise KeyError(f"Unit rewards missing required 'base_actions' section")
+        
+        base_actions = unit_rewards["base_actions"]
         
         # Base action rewards
         action_type = action["type"]
         if action_type == "move":
             if success:
-                return unit_rewards.get("base_actions", {}).get("move", 0.1)
+                if "move" not in base_actions:
+                    raise KeyError(f"Base actions missing required 'move' reward")
+                base_reward = base_actions["move"]
             else:
-                return unit_rewards.get("base_actions", {}).get("wait", 0.0)
+                if "wait" not in base_actions:
+                    raise KeyError(f"Base actions missing required 'wait' reward")
+                base_reward = base_actions["wait"]
         elif action_type == "shoot":
             if success:
-                return unit_rewards.get("base_actions", {}).get("ranged_attack", 0.2)
+                if "ranged_attack" not in base_actions:
+                    raise KeyError(f"Base actions missing required 'ranged_attack' reward")
+                base_reward = base_actions["ranged_attack"]
             else:
-                return unit_rewards.get("base_actions", {}).get("wait", 0.0)
+                if "wait" not in base_actions:
+                    raise KeyError(f"Base actions missing required 'wait' reward")
+                base_reward = base_actions["wait"]
         elif action_type == "charge":
             if success:
-                return unit_rewards.get("base_actions", {}).get("charge", 0.3)
+                if "charge" not in base_actions:
+                    raise KeyError(f"Base actions missing required 'charge' reward")
+                base_reward = base_actions["charge"]
             else:
-                return unit_rewards.get("base_actions", {}).get("wait", 0.0)
+                if "wait" not in base_actions:
+                    raise KeyError(f"Base actions missing required 'wait' reward")
+                base_reward = base_actions["wait"]
         elif action_type == "combat":
             if success:
-                return unit_rewards.get("base_actions", {}).get("melee_attack", 0.2)
+                if "melee_attack" not in base_actions:
+                    raise KeyError(f"Base actions missing required 'melee_attack' reward")
+                base_reward = base_actions["melee_attack"]
             else:
-                return unit_rewards.get("base_actions", {}).get("wait", 0.0)
+                if "wait" not in base_actions:
+                    raise KeyError(f"Base actions missing required 'wait' reward")
+                base_reward = base_actions["wait"]
         elif action_type == "wait":
-            return unit_rewards.get("base_actions", {}).get("wait", 0.0)
+            if "wait" not in base_actions:
+                raise KeyError(f"Base actions missing required 'wait' reward")
+            base_reward = base_actions["wait"]
         else:
-            return unit_rewards.get("base_actions", {}).get("wait", 0.0)
+            if "wait" not in base_actions:
+                raise KeyError(f"Base actions missing required 'wait' reward")
+            base_reward = base_actions["wait"]
+        
+        # Add win/lose bonuses
+        if self.game_over:
+            if "outcomes" not in unit_rewards:
+                raise KeyError(f"Unit rewards missing required 'outcomes' section")
+            
+            outcomes = unit_rewards["outcomes"]
+            if self.winner == 1:  # AI wins
+                if "win" not in outcomes:
+                    raise KeyError(f"Outcomes missing required 'win' reward")
+                base_reward += outcomes["win"]
+            elif self.winner == 0:  # AI loses
+                if "lose" not in outcomes:
+                    raise KeyError(f"Outcomes missing required 'lose' reward")
+                base_reward += outcomes["lose"]
+            else:  # Draw
+                if "draw" not in outcomes:
+                    raise KeyError(f"Outcomes missing required 'draw' reward")
+                base_reward += outcomes["draw"]
+        
+        return base_reward
 
     def _get_unit_reward_config(self, unit):
         """Get reward configuration for unit type."""
@@ -612,8 +686,19 @@ class W40KEnv(gym.Env):
     def _get_info(self):
         """Get info dictionary for Gymnasium interface."""
         all_units = self.controller.get_units()
-        ai_units_alive = [u for u in all_units if u["player"] == 1 and u.get("alive", True)]
-        enemy_units_alive = [u for u in all_units if u["player"] == 0 and u.get("alive", True)]
+        ai_units_alive = [u for u in all_units if u["player"] == 1 and u.get("alive", True) and u.get("HP_LEFT", u.get("CUR_HP", 1)) > 0]
+        enemy_units_alive = [u for u in all_units if u["player"] == 0 and u.get("alive", True) and u.get("HP_LEFT", u.get("CUR_HP", 1)) > 0]
+        
+        # Check for game end conditions
+        if len(ai_units_alive) == 0 and len(enemy_units_alive) > 0:
+            self.winner = 0  # Enemy wins
+            self.game_over = True
+        elif len(enemy_units_alive) == 0 and len(ai_units_alive) > 0:
+            self.winner = 1  # AI wins
+            self.game_over = True
+        elif len(ai_units_alive) == 0 and len(enemy_units_alive) == 0:
+            self.winner = None  # Draw
+            self.game_over = True
         
         return {
             "current_turn": self.current_turn,

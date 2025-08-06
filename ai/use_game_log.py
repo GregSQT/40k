@@ -13,15 +13,44 @@ from datetime import datetime
 import copy
 from shared.gameLogStructure import create_log_entry, BaseLogEntry, LogEntryParams
 
+# Add dictionary-like methods to BaseLogEntry for compatibility
+class DictLikeBaseLogEntry(BaseLogEntry):
+    """BaseLogEntry with dictionary-like interface for compatibility"""
+    
+    def get(self, key: str, default=None):
+        """Dictionary-like get method"""
+        return getattr(self, key, default)
+    
+    def items(self):
+        """Dictionary-like items method"""
+        return self.to_dict().items()
+    
+    def keys(self):
+        """Dictionary-like keys method"""
+        return self.to_dict().keys()
+    
+    def values(self):
+        """Dictionary-like values method"""
+        return self.to_dict().values()
+
 class GameLogEvent(BaseLogEntry):
     """
     EXACT mirror of GameLogEvent interface from TypeScript.
     Extends BaseLogEntry with frontend-specific properties.
     """
     def __init__(self, base_entry: BaseLogEntry, event_id: str, timestamp: datetime):
-        # Copy all properties from base entry
-        for key, value in base_entry.items():
-            setattr(self, key, value)
+        # Copy all properties from base entry using proper attribute access
+        if hasattr(base_entry, 'to_dict'):
+            # If it's a BaseLogEntry object, convert to dict first
+            entry_dict = base_entry.to_dict()
+            for key, value in entry_dict.items():
+                setattr(self, key, value)
+        else:
+            # Handle direct attribute copying
+            for attr in ['type', 'message', 'turnNumber', 'phase', 'unitType', 'unitId', 
+                        'targetUnitType', 'targetUnitId', 'player', 'startHex', 'endHex', 'shootDetails']:
+                if hasattr(base_entry, attr):
+                    setattr(self, attr, getattr(base_entry, attr))
         
         # Add frontend-specific properties
         self.id = event_id
@@ -55,13 +84,20 @@ class UseGameLog:
         if self.game_start_time is None:
             self.game_start_time = current_time
         
+        # Convert BaseLogEntry to dict if needed
+        if hasattr(base_entry, 'to_dict'):
+            entry_dict = base_entry.to_dict()
+        elif isinstance(base_entry, dict):
+            entry_dict = copy.deepcopy(base_entry)
+        else:
+            raise TypeError(f"Expected BaseLogEntry or dict, got {type(base_entry)}")
+        
         # Create new event with ID and timestamp (EXACT from TypeScript)
-        new_event = copy.deepcopy(base_entry)
-        new_event["id"] = self.generate_event_id()
-        new_event["timestamp"] = current_time
+        entry_dict["id"] = self.generate_event_id()
+        entry_dict["timestamp"] = current_time
         
         # Add to front of events list (EXACT from TypeScript)
-        self.events.insert(0, new_event)
+        self.events.insert(0, entry_dict)
 
     # === LOG EVENT METHODS (EXACT from TypeScript) ===
 
@@ -70,12 +106,10 @@ class UseGameLog:
         EXACT mirror of logTurnStart from TypeScript.
         Log turn change event.
         """
-        log_params: LogEntryParams = {
-            "type": "turn_change",
-            "turnNumber": turn_number
-        }
-        
-        base_entry = create_log_entry(log_params)
+        base_entry = create_log_entry(
+            entry_type="turn_change",
+            turn_number=turn_number
+        )
         self.add_event(base_entry)
 
     def log_phase_change(self, phase: str, player: int, turn_number: int) -> None:
@@ -83,18 +117,18 @@ class UseGameLog:
         EXACT mirror of logPhaseChange from TypeScript.
         Log phase change event.
         """
-        log_params: LogEntryParams = {
-            "type": "phase_change",
-            "actingUnit": {
-                "id": 0,
-                "unitType": "",
-                "player": player
-            },
-            "turnNumber": turn_number,
-            "phase": phase
+        acting_unit_dict = {
+            "id": 0,
+            "unitType": "",
+            "player": player
         }
         
-        base_entry = create_log_entry(log_params)
+        base_entry = create_log_entry(
+            entry_type="phase_change",
+            acting_unit=acting_unit_dict,
+            turn_number=turn_number,
+            phase=phase
+        )
         self.add_event(base_entry)
 
     def log_move_action(self, unit: Dict[str, Any], start_col: int, start_row: int, 
@@ -103,21 +137,21 @@ class UseGameLog:
         EXACT mirror of logMoveAction from TypeScript.
         Log movement action.
         """
-        log_params: LogEntryParams = {
-            "type": "move",
-            "actingUnit": {
-                "id": unit["id"],
-                "unitType": unit["unit_type"],
-                "player": unit["player"],
-                "col": unit["col"],
-                "row": unit["row"]
-            },
-            "turnNumber": turn_number,
-            "startHex": f"({start_col}, {start_row})",
-            "endHex": f"({end_col}, {end_row})"
+        acting_unit_dict = {
+            "id": unit["id"],
+            "unitType": unit["unit_type"],
+            "player": unit["player"],
+            "col": unit["col"],
+            "row": unit["row"]
         }
         
-        base_entry = create_log_entry(log_params)
+        base_entry = create_log_entry(
+            entry_type="move",
+            acting_unit=acting_unit_dict,
+            turn_number=turn_number,
+            start_hex=f"({start_col}, {start_row})",
+            end_hex=f"({end_col}, {end_row})"
+        )
         self.add_event(base_entry)
 
     def log_move_cancellation(self, unit: Dict[str, Any], turn_number: int) -> None:
@@ -125,19 +159,19 @@ class UseGameLog:
         EXACT mirror of logMoveCancellation from TypeScript.
         Log movement cancellation.
         """
-        log_params: LogEntryParams = {
-            "type": "move_cancel",
-            "actingUnit": {
-                "id": unit["id"],
-                "unitType": unit["unit_type"],
-                "player": unit["player"],
-                "col": unit["col"],
-                "row": unit["row"]
-            },
-            "turnNumber": turn_number
+        acting_unit_dict = {
+            "id": unit["id"],
+            "unitType": unit["unit_type"],
+            "player": unit["player"],
+            "col": unit["col"],
+            "row": unit["row"]
         }
         
-        base_entry = create_log_entry(log_params)
+        base_entry = create_log_entry(
+            entry_type="move_cancel",
+            acting_unit=acting_unit_dict,
+            turn_number=turn_number
+        )
         self.add_event(base_entry)
 
     def log_no_move_action(self, unit: Dict[str, Any], turn_number: int) -> None:
@@ -145,19 +179,19 @@ class UseGameLog:
         EXACT mirror of logNoMoveAction from TypeScript.
         Log no move decision.
         """
-        log_params: LogEntryParams = {
-            "type": "move",
-            "actingUnit": {
-                "id": unit["id"],
-                "unitType": unit["unit_type"],
-                "player": unit["player"],
-                "col": unit["col"],
-                "row": unit["row"]
-            },
-            "turnNumber": turn_number
+        acting_unit_dict = {
+            "id": unit["id"],
+            "unitType": unit["unit_type"],
+            "player": unit["player"],
+            "col": unit["col"],
+            "row": unit["row"]
         }
         
-        base_entry = create_log_entry(log_params)
+        base_entry = create_log_entry(
+            entry_type="move",
+            acting_unit=acting_unit_dict,
+            turn_number=turn_number
+        )
         self.add_event(base_entry)
 
     def log_shooting_action(self, shooter: Dict[str, Any], target: Dict[str, Any], 
@@ -166,27 +200,29 @@ class UseGameLog:
         EXACT mirror of logShootingAction from TypeScript.
         Log shooting action with details.
         """
-        log_params: LogEntryParams = {
-            "type": "shoot",
-            "actingUnit": {
-                "id": shooter["id"],
-                "unitType": shooter["unit_type"],
-                "player": shooter["player"],
-                "col": shooter["col"],
-                "row": shooter["row"]
-            },
-            "targetUnit": {
-                "id": target["id"],
-                "unitType": target["unit_type"],
-                "player": target["player"],
-                "col": target["col"],
-                "row": target["row"]
-            },
-            "turnNumber": turn_number,
-            "shootDetails": shoot_details
+        acting_unit_dict = {
+            "id": shooter["id"],
+            "unitType": shooter["unit_type"],
+            "player": shooter["player"],
+            "col": shooter["col"],
+            "row": shooter["row"]
         }
         
-        base_entry = create_log_entry(log_params)
+        target_unit_dict = {
+            "id": target["id"],
+            "unitType": target["unit_type"],
+            "player": target["player"],
+            "col": target["col"],
+            "row": target["row"]
+        }
+        
+        base_entry = create_log_entry(
+            entry_type="shoot",
+            acting_unit=acting_unit_dict,
+            target_unit=target_unit_dict,
+            turn_number=turn_number,
+            shoot_details=shoot_details
+        )
         self.add_event(base_entry)
 
     def log_charge_action(self, charger: Dict[str, Any], target: Dict[str, Any], 
@@ -196,28 +232,30 @@ class UseGameLog:
         EXACT mirror of logChargeAction from TypeScript.
         Log charge action.
         """
-        log_params: LogEntryParams = {
-            "type": "charge",
-            "actingUnit": {
-                "id": charger["id"],
-                "unitType": charger["unit_type"],
-                "player": charger["player"],
-                "col": charger["col"],
-                "row": charger["row"]
-            },
-            "targetUnit": {
-                "id": target["id"],
-                "unitType": target["unit_type"],
-                "player": target["player"],
-                "col": target["col"],
-                "row": target["row"]
-            },
-            "turnNumber": turn_number,
-            "startHex": f"({start_col}, {start_row})",
-            "endHex": f"({end_col}, {end_row})"
+        acting_unit_dict = {
+            "id": charger["id"],
+            "unitType": charger["unit_type"],
+            "player": charger["player"],
+            "col": charger["col"],
+            "row": charger["row"]
         }
         
-        base_entry = create_log_entry(log_params)
+        target_unit_dict = {
+            "id": target["id"],
+            "unitType": target["unit_type"],
+            "player": target["player"],
+            "col": target["col"],
+            "row": target["row"]
+        }
+        
+        base_entry = create_log_entry(
+            entry_type="charge",
+            acting_unit=acting_unit_dict,
+            target_unit=target_unit_dict,
+            turn_number=turn_number,
+            start_hex=f"({start_col}, {start_row})",
+            end_hex=f"({end_col}, {end_row})"
+        )
         self.add_event(base_entry)
 
     def log_charge_cancellation(self, unit: Dict[str, Any], turn_number: int) -> None:
@@ -225,19 +263,19 @@ class UseGameLog:
         EXACT mirror of logChargeCancellation from TypeScript.
         Log charge cancellation.
         """
-        log_params: LogEntryParams = {
-            "type": "charge_cancel",
-            "actingUnit": {
-                "id": unit["id"],
-                "unitType": unit["unit_type"],
-                "player": unit["player"],
-                "col": unit["col"],
-                "row": unit["row"]
-            },
-            "turnNumber": turn_number
+        acting_unit_dict = {
+            "id": unit["id"],
+            "unitType": unit["unit_type"],
+            "player": unit["player"],
+            "col": unit["col"],
+            "row": unit["row"]
         }
         
-        base_entry = create_log_entry(log_params)
+        base_entry = create_log_entry(
+            entry_type="charge_cancel",
+            acting_unit=acting_unit_dict,
+            turn_number=turn_number
+        )
         self.add_event(base_entry)
 
     def log_combat_action(self, attacker: Dict[str, Any], defender: Dict[str, Any], 
@@ -246,27 +284,29 @@ class UseGameLog:
         EXACT mirror of logCombatAction from TypeScript.
         Log combat action with details.
         """
-        log_params: LogEntryParams = {
-            "type": "combat",
-            "actingUnit": {
-                "id": attacker["id"],
-                "unitType": attacker["unit_type"],
-                "player": attacker["player"],
-                "col": attacker["col"],
-                "row": attacker["row"]
-            },
-            "targetUnit": {
-                "id": defender["id"],
-                "unitType": defender["unit_type"],
-                "player": defender["player"],
-                "col": defender["col"],
-                "row": defender["row"]
-            },
-            "turnNumber": turn_number,
-            "shootDetails": combat_details  # Uses same structure as shootDetails
+        acting_unit_dict = {
+            "id": attacker["id"],
+            "unitType": attacker["unit_type"],
+            "player": attacker["player"],
+            "col": attacker["col"],
+            "row": attacker["row"]
         }
         
-        base_entry = create_log_entry(log_params)
+        target_unit_dict = {
+            "id": defender["id"],
+            "unitType": defender["unit_type"],
+            "player": defender["player"],
+            "col": defender["col"],
+            "row": defender["row"]
+        }
+        
+        base_entry = create_log_entry(
+            entry_type="combat",
+            acting_unit=acting_unit_dict,
+            target_unit=target_unit_dict,
+            turn_number=turn_number,
+            shoot_details=combat_details  # Uses same structure as shootDetails
+        )
         self.add_event(base_entry)
 
     # === EXPOSED FUNCTIONS (EXACT from TypeScript return) ===
@@ -347,7 +387,12 @@ class TrainingGameLog(UseGameLog):
         # Update training metrics
         self.training_metrics["actions_logged"] += 1
         
-        event_type = base_entry.get("type", "")
+        # Get event type from dict or BaseLogEntry object
+        if isinstance(base_entry, dict):
+            event_type = base_entry.get("type", "")
+        else:
+            event_type = getattr(base_entry, 'type', "")
+        
         if event_type == "turn_change":
             self.training_metrics["turns_completed"] += 1
         elif event_type == "phase_change":
