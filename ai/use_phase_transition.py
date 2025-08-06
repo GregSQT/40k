@@ -66,10 +66,16 @@ class UsePhaseTransition:
 
     def should_transition_from_shoot(self) -> bool:
         """EXACT mirror of shouldTransitionFromShoot from TypeScript"""
-        return should_transition_from_shoot(
+        result = should_transition_from_shoot(
             self.units, self.current_player, self.phase, 
             self.units_moved, self.units_charged, self.units_attacked, self.units_fled
         )
+        print(f"🔧 should_transition_from_shoot: result={result}, phase={self.phase}, player={self.current_player}")
+        print(f"🔧   units_moved={list(self.units_moved)}, units_charged={list(self.units_charged)}")
+        print(f"🔧   units_attacked={list(self.units_attacked)}, units_fled={list(self.units_fled)}")
+        current_player_units = [u for u in self.units if u["player"] == self.current_player]
+        print(f"🔧   current_player_units: {[(u['id'], u.get('SHOOT_LEFT', 'N/A')) for u in current_player_units]}")
+        return result
 
     def should_transition_from_charge(self) -> bool:
         """EXACT mirror of shouldTransitionFromCharge from TypeScript"""
@@ -105,10 +111,38 @@ class UsePhaseTransition:
         """
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
+            print(f"🔧 BEFORE set_phase: calling set_phase('shoot')")
+            
+            # CRITICAL FIX: Use the SAME game_state object that set_phase modifies
+            set_phase_func = self.actions['set_phase']
+            correct_game_state = set_phase_func.__self__.game_state
+            print(f"🔧 Switching to correct game_state object: {id(correct_game_state)}")
+            
+            # Update self.game_state to point to the correct object
+            self.game_state = correct_game_state
+            print(f"🔧 Updated UsePhaseTransition.game_state to correct object")
+            
             self.actions["set_phase"]("shoot")
+            
+            print(f"🔧 AFTER set_phase call:")
+            print(f"🔧   UsePhaseTransition.game_state['phase']: {self.game_state.get('phase', 'unknown')}")
+            print(f"🔧   set_phase.__self__.game_state['phase']: {set_phase_func.__self__.game_state.get('phase', 'unknown')}")
+            print(f"🔧   Are they the same object? {id(self.game_state) == id(set_phase_func.__self__.game_state)}")
+            
             self.actions["initialize_shooting_phase"]()  # MISSING FEATURE ADDED
             self.actions["reset_moved_units"]()
             self.actions["set_selected_unit_id"](None)
+            
+            # CRITICAL FIX: Add all current player units to units_moved for shoot phase tracking
+            current_player_units = [u for u in self.game_state["units"] if u["player"] == self.game_state["current_player"]]
+            for unit in current_player_units:
+                if unit.get("RNG_RNG", 0) > 0:  # Only ranged units need to be tracked for shooting
+                    self.actions["add_moved_unit"](unit["id"])
+                    print(f"🔧 Added ranged unit {unit['id']} to units_moved for shoot phase")
+            
+            # CRITICAL FIX: Re-sync local state after making changes
+            self.phase = self.game_state["phase"]
+            print(f"🔧 transition_to_shoot: phase updated to {self.phase}")
         
         # Execute with 300ms delay equivalent (can be immediate in training)
         delayed_transition()
@@ -124,6 +158,10 @@ class UsePhaseTransition:
             self.actions["reset_moved_units"]()  # Reset unitsMoved when entering charge phase
             self.actions["reset_charged_units"]()
             self.actions["set_selected_unit_id"](None)
+            
+            # CRITICAL FIX: Re-sync local state after making changes
+            self.phase = self.game_state["phase"]
+            print(f"🔧 transition_to_charge: phase updated to {self.phase}")
         
         # Execute with 300ms delay equivalent
         delayed_transition()
@@ -135,11 +173,20 @@ class UsePhaseTransition:
         """
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
+            # CRITICAL FIX: Use the SAME game_state object that set_phase modifies
+            set_phase_func = self.actions['set_phase']
+            correct_game_state = set_phase_func.__self__.game_state
+            self.game_state = correct_game_state
+            
             self.actions["set_phase"]("combat")
             self.actions["initialize_combat_phase"]()
             self.actions["set_selected_unit_id"](None)
             self.actions["reset_attacked_units"]()
             self.actions["set_mode"]("select")
+            
+            # CRITICAL FIX: Re-sync local state after making changes
+            self.phase = self.game_state["phase"]
+            print(f"🔧 transition_to_combat: phase updated to {self.phase}")
         
         # Execute with 300ms delay equivalent
         delayed_transition()
@@ -151,6 +198,11 @@ class UsePhaseTransition:
         """
         def delayed_end_turn():
             """Delayed execution to mirror setTimeout(300) behavior"""
+            # CRITICAL FIX: Use the SAME game_state object that set_phase modifies
+            set_phase_func = self.actions['set_phase']
+            correct_game_state = set_phase_func.__self__.game_state
+            self.game_state = correct_game_state
+            
             # Switch player (EXACT from TypeScript)
             new_player = 1 if self.current_player == 0 else 0
             self.actions["set_current_player"](new_player)
@@ -178,6 +230,11 @@ class UsePhaseTransition:
             # Reset combat sub-phase for next turn (EXACT from TypeScript)
             self.actions["set_combat_sub_phase"](None)
             self.actions["set_combat_active_player"](None)
+            
+            # CRITICAL FIX: Re-sync local state after making changes
+            self.phase = self.game_state["phase"]
+            self.current_player = self.game_state["current_player"]
+            print(f"🔧 end_turn: phase={self.phase}, player={self.current_player}")
         
         # Execute with delay to mirror setTimeout (can be immediate in training)
         delayed_end_turn()

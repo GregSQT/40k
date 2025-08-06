@@ -259,12 +259,12 @@ class GameController:
         return True
 
     def _update_state(self) -> None:
-        """Update all state references from managers"""
-        self.game_state = self.state_manager.get_game_state()
-        self.move_preview = self.state_manager.get_move_preview()
-        self.attack_preview = self.state_manager.get_attack_preview()
-        self.shooting_phase_state = self.state_manager.get_shooting_phase_state()
-        self.charge_roll_popup = self.state_manager.get_charge_roll_popup()
+        """Update all state references from managers - WITH FIXED DIRECT REFERENCES"""
+        # FIXED: No longer needed since we use direct references to live state objects
+        # self.game_state, self.move_preview, etc. are already direct references
+        # Just ensure any cached values are synced
+        self._current_phase = self.game_state.get("phase", "move")
+        print(f"🔧 _update_state: phase synced to {self._current_phase}")
 
     def _check_game_over(self) -> bool:
         """Check if game is over"""
@@ -296,7 +296,9 @@ class GameController:
 
     def get_current_phase(self) -> str:
         """Get current phase"""
-        return self.game_state["phase"]
+        phase = self.game_state["phase"]
+        print(f"🔧 get_current_phase: game_state id={id(self.game_state)}, phase={phase}")
+        return phase
 
     def get_current_turn(self) -> int:
         """Get current turn"""
@@ -330,19 +332,24 @@ class GameController:
 
     def move_unit(self, unit_id: int, col: int, row: int) -> bool:
         """Move a unit"""
-        return self.game_actions["direct_move"](unit_id, col, row)
+        result = self.game_actions["direct_move"](unit_id, col, row)
+        print(f"🔧 move_unit: unit={unit_id}, pos=({col},{row}), result={result}")
+        return result if result is not None else False
 
     def shoot_unit(self, shooter_id: int, target_id: int) -> bool:
         """Shoot at target"""
-        return self.game_actions["handle_shoot"](shooter_id, target_id)
+        result = self.game_actions["handle_shoot"](shooter_id, target_id)
+        return result if result is not None else False
 
     def charge_unit(self, charger_id: int, target_id: int) -> bool:
         """Charge at target"""
-        return self.game_actions["handle_charge"](charger_id, target_id)
+        result = self.game_actions["handle_charge"](charger_id, target_id)
+        return result if result is not None else False
 
     def combat_attack(self, attacker_id: int, target_id: int) -> bool:
         """Attack in combat"""
-        return self.game_actions["handle_combat_attack"](attacker_id, target_id)
+        result = self.game_actions["handle_combat_attack"](attacker_id, target_id)
+        return result if result is not None else False
 
     # === TRAINING INTEGRATION METHODS ===
 
@@ -505,21 +512,20 @@ class TrainingGameController(GameController):
         
         # Initialize training game state
         self.state_manager = TrainingGameState(self.game_units, max_history=50)
-        game_state_data = {
-            "game_state": self.state_manager.get_game_state(),
-            "move_preview": self.state_manager.get_move_preview(),
-            "attack_preview": self.state_manager.get_attack_preview(),
-            "shooting_phase_state": self.state_manager.get_shooting_phase_state(),
-            "charge_roll_popup": self.state_manager.get_charge_roll_popup(),
-            "actions": self.state_manager.get_actions()
-        }
         
-        self.game_state = game_state_data["game_state"]
-        self.move_preview = game_state_data["move_preview"]
-        self.attack_preview = game_state_data["attack_preview"]
-        self.shooting_phase_state = game_state_data["shooting_phase_state"]
-        self.charge_roll_popup = game_state_data["charge_roll_popup"]
-        self.state_actions = game_state_data["actions"]
+        # CRITICAL FIX: Use direct references to state_manager properties
+        # This ensures all components reference the SAME live state objects
+        self.game_state = self.state_manager.game_state  # Direct reference, not copy
+        self.move_preview = self.state_manager.move_preview  # Direct reference
+        self.attack_preview = self.state_manager.attack_preview  # Direct reference  
+        self.shooting_phase_state = self.state_manager.shooting_phase_state  # Direct reference
+        self.charge_roll_popup = self.state_manager.charge_roll_popup  # Direct reference
+        self.state_actions = self.state_manager.get_actions()  # Action functions
+        
+        # Verify the state_actions has set_phase and it works
+        print(f"🔧 FIXED: state_actions keys: {list(self.state_actions.keys())}")
+        if "set_phase" in self.state_actions:
+            print(f"🔧 FIXED: set_phase function available: {self.state_actions['set_phase']}")
         
         # Initialize training game log
         self.log_manager = TrainingGameLog(max_events=500)
@@ -538,7 +544,7 @@ class TrainingGameController(GameController):
             shooting_phase_state=self.shooting_phase_state,
             board_config=self.board_config,
             actions=self.state_actions,
-            game_log=self.game_log
+            game_log=self.log_manager  # Pass the manager object, not the functions dict
         )
         self.game_actions = self.actions_manager.get_available_actions()
         
@@ -557,8 +563,16 @@ class TrainingGameController(GameController):
         else:
             print(f"🔧 ERROR: set_phase not found in state_actions!")
         
+        # CRITICAL FIX: Ensure ALL components use the EXACT SAME game_state object
+        actual_game_state = self.state_actions['set_phase'].__self__.game_state
+        print(f"🔧 Using actual_game_state object id: {id(actual_game_state)} for phase transitions")
+        
+        # CRITICAL: Update controller's game_state reference to point to the SAME object
+        self.game_state = actual_game_state  # Now controller reads from same object as transitions modify
+        print(f"🔧 Updated controller game_state to same object: {id(self.game_state)}")
+        
         self.phase_manager = TrainingPhaseTransition(
-            game_state=self.game_state,
+            game_state=actual_game_state,  # Use the EXACT object that set_phase modifies
             board_config=self.board_config,
             is_unit_eligible_func=self.game_actions["is_unit_eligible"],
             actions=self.state_actions
@@ -743,6 +757,12 @@ class TrainingGameController(GameController):
 
     def advance_phase(self) -> None:
         """Advance to next phase or turn with debugging"""
+        # CRITICAL FIX: Ensure controller uses same game_state as transitions
+        if hasattr(self, 'state_actions') and 'set_phase' in self.state_actions:
+            actual_game_state = self.state_actions['set_phase'].__self__.game_state
+            print(f"🔧 FIXING controller game_state: {id(self.game_state)} -> {id(actual_game_state)}")
+            self.game_state = actual_game_state
+        
         current_phase = self.get_current_phase()
         current_player = self.get_current_player()
         
@@ -766,29 +786,31 @@ class TrainingGameController(GameController):
                 import traceback
                 traceback.print_exc()
             
-            # If process_phase_transitions didn't work, force manual transition
+            # Check if transition actually occurred after process_phase_transitions
             new_phase = self.get_current_phase()
             new_player = self.get_current_player()
             
             if new_phase == current_phase and current_phase == "move" and phase_info.get('can_transition', {}).get('from_move', False):
                 print(f"    FORCING transition from move to shoot...")
                 
-                # First test: Call set_phase directly through state_actions
+                # Force direct state change - with FIXED state references, this should work now
                 try:
-                    print(f"    Testing direct state_actions call...")
+                    print(f"    Testing FIXED state_actions call...")
                     old_phase = self.game_state.get("phase", "unknown")
                     self.state_actions["set_phase"]("shoot")
-                    new_phase = self.game_state.get("phase", "unknown")
-                    print(f"    Direct call result: {old_phase} -> {new_phase}")
+                    new_phase = self.game_state.get("phase", "unknown")  # Should work now with direct reference
+                    print(f"    FIXED call result: {old_phase} -> {new_phase}")
                     
                     if new_phase == "shoot":
-                        print(f"    SUCCESS: Direct state_actions['set_phase'] works!")
+                        print(f"    SUCCESS: FIXED state_actions['set_phase'] works!")
+                        # Update local cached values
+                        self._current_phase = new_phase
                     else:
-                        print(f"    FAILED: Direct state_actions['set_phase'] didn't work")
-                        # Reset to original phase
-                        self.state_actions["set_phase"](old_phase)
+                        print(f"    STILL FAILED: state_actions['set_phase'] didn't work")
                 except Exception as e:
-                    print(f"    ERROR in direct state_actions call: {e}")
+                    print(f"    ERROR in FIXED state_actions call: {e}")
+                    import traceback
+                    traceback.print_exc()
                 
                 # Second test: Call transition_to_shoot
                 try:
