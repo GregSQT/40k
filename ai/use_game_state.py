@@ -7,17 +7,42 @@ Central state management system - ALL features preserved.
 This is the complete functional equivalent of the PvP useGameState hook system.
 """
 
-from typing import Dict, List, Any, Optional, Callable, Set
+from typing import Dict, List, Any, Optional, Callable, Set, Tuple, Union
 import copy
 import time
 
 class ChargeRollPopup:
-    """Mirror of ChargeRollPopup interface from TypeScript"""
+    """EXACT mirror of ChargeRollPopup interface from TypeScript"""
     def __init__(self, unit_id: int, roll: int, too_low: bool, timestamp: float):
         self.unit_id = unit_id
         self.roll = roll
         self.too_low = too_low
         self.timestamp = timestamp
+
+class MovePreview:
+    """EXACT mirror of MovePreview interface from TypeScript"""
+    def __init__(self, unit_id: int, start_col: int, start_row: int, 
+                 end_col: int, end_row: int, path: List[Dict[str, int]]):
+        self.unit_id = unit_id
+        self.start_col = start_col
+        self.start_row = start_row
+        self.end_col = end_col
+        self.end_row = end_row
+        self.path = path
+
+class AttackPreview:
+    """EXACT mirror of AttackPreview interface from TypeScript"""
+    def __init__(self, attacker_id: int, target_id: int, attack_type: str):
+        self.attacker_id = attacker_id
+        self.target_id = target_id
+        self.attack_type = attack_type  # "shoot" or "combat"
+
+class ShootingPhaseState:
+    """EXACT mirror of ShootingPhaseState interface from TypeScript"""
+    def __init__(self):
+        self.active_shooters: List[int] = []
+        self.current_shooter: Optional[int] = None
+        self.single_shot_state: Optional[Dict[str, Any]] = None
 
 class UseGameState:
     """
@@ -28,7 +53,7 @@ class UseGameState:
     def __init__(self, initial_units: List[Dict[str, Any]]):
         """Initialize with same parameters as TypeScript useGameState"""
         
-        # Initialize game state (EXACT from TypeScript)
+        # Validate and process initial units (EXACT from TypeScript)
         processed_units = []
         for unit in initial_units:
             if unit.get("RNG_NB") is None:
@@ -38,6 +63,7 @@ class UseGameState:
             processed_unit["SHOOT_LEFT"] = unit["RNG_NB"]
             processed_units.append(processed_unit)
         
+        # Initialize game state (EXACT from TypeScript)
         self.game_state = {
             "units": processed_units,
             "current_player": 0,
@@ -56,15 +82,11 @@ class UseGameState:
         }
         
         # Additional state objects (EXACT from TypeScript)
-        self.unit_charge_rolls = {}
-        self.charge_roll_popup = None
-        self.move_preview = None
-        self.attack_preview = None
-        self.shooting_phase_state = {
-            "active_shooters": [],
-            "current_shooter": None,
-            "single_shot_state": None,
-        }
+        self.unit_charge_rolls: Dict[int, int] = {}
+        self.charge_roll_popup: Optional[ChargeRollPopup] = None
+        self.move_preview: Optional[MovePreview] = None
+        self.attack_preview: Optional[AttackPreview] = None
+        self.shooting_phase_state = ShootingPhaseState()
 
     # === CORE STATE SETTERS (EXACT from TypeScript) ===
 
@@ -100,21 +122,7 @@ class UseGameState:
         """EXACT mirror of setCombatActivePlayer from TypeScript"""
         self.game_state["combat_active_player"] = player
 
-    # === PREVIEW SYSTEM MANAGEMENT (EXACT from TypeScript) ===
-
-    def set_move_preview(self, preview: Optional[Dict[str, Any]]) -> None:
-        """EXACT mirror of setMovePreview from TypeScript"""
-        self.move_preview = copy.deepcopy(preview) if preview else None
-
-    def set_attack_preview(self, preview: Optional[Dict[str, Any]]) -> None:
-        """EXACT mirror of setAttackPreview from TypeScript"""
-        self.attack_preview = copy.deepcopy(preview) if preview else None
-
-    def set_target_preview(self, preview: Optional[Dict[str, Any]]) -> None:
-        """EXACT mirror of setTargetPreview from TypeScript"""
-        self.game_state["target_preview"] = copy.deepcopy(preview) if preview else None
-
-    # === UNIT TRACKING SYSTEMS (EXACT from TypeScript) ===
+    # === UNIT TRACKING METHODS (EXACT from TypeScript) ===
 
     def add_moved_unit(self, unit_id: int) -> None:
         """EXACT mirror of addMovedUnit from TypeScript"""
@@ -152,16 +160,12 @@ class UseGameState:
         """EXACT mirror of resetFledUnits from TypeScript"""
         self.game_state["units_fled"] = []
 
-    # === UNIT MANAGEMENT (EXACT from TypeScript) ===
+    # === UNIT UPDATE METHODS (EXACT from TypeScript) ===
 
     def update_unit(self, unit_id: int, updates: Dict[str, Any]) -> None:
-        """
-        EXACT mirror of updateUnit from TypeScript.
-        Update unit properties while preserving all other data.
-        """
+        """EXACT mirror of updateUnit from TypeScript"""
         for i, unit in enumerate(self.game_state["units"]):
             if unit["id"] == unit_id:
-                # Create updated unit with preserved data (EXACT from TypeScript)
                 updated_unit = copy.deepcopy(unit)
                 updated_unit.update(updates)
                 self.game_state["units"][i] = updated_unit
@@ -174,45 +178,57 @@ class UseGameState:
             if unit["id"] != unit_id
         ]
 
-    # === PHASE INITIALIZATION (EXACT from TypeScript) ===
+    def move_unit(self, unit_id: int, new_col: int, new_row: int) -> None:
+        """EXACT mirror of moveUnit from TypeScript"""
+        self.update_unit(unit_id, {"col": new_col, "row": new_row})
+
+    # === PHASE-SPECIFIC INITIALIZATION (EXACT from TypeScript) ===
 
     def initialize_shooting_phase(self) -> None:
         """
         EXACT mirror of initializeShootingPhase from TypeScript.
-        Set SHOOT_LEFT for all units based on their RNG_NB.
+        Reset SHOOT_LEFT for all units to RNG_NB.
         """
-        for i, unit in enumerate(self.game_state["units"]):
+        updated_units = []
+        for unit in self.game_state["units"]:
             if unit.get("RNG_NB") is None:
                 raise ValueError("unit.RNG_NB is required")
             
             updated_unit = copy.deepcopy(unit)
             updated_unit["SHOOT_LEFT"] = unit["RNG_NB"]
-            self.game_state["units"][i] = updated_unit
+            updated_units.append(updated_unit)
+        
+        self.game_state["units"] = updated_units
 
     def initialize_combat_phase(self) -> None:
         """
         EXACT mirror of initializeCombatPhase from TypeScript.
-        Set ATTACK_LEFT for all units based on their CC_NB.
+        Reset ATTACK_LEFT for all units to CC_NB.
         """
-        for i, unit in enumerate(self.game_state["units"]):
+        updated_units = []
+        for unit in self.game_state["units"]:
             if unit.get("CC_NB") is None:
                 raise ValueError("unit.CC_NB is required")
             
             updated_unit = copy.deepcopy(unit)
             updated_unit["ATTACK_LEFT"] = unit["CC_NB"]
-            self.game_state["units"][i] = updated_unit
+            updated_units.append(updated_unit)
+        
+        self.game_state["units"] = updated_units
 
-    # === SHOOTING PHASE MANAGEMENT (EXACT from TypeScript) ===
+    # === SHOOTING PHASE STATE (EXACT from TypeScript) ===
 
     def update_shooting_phase_state(self, updates: Dict[str, Any]) -> None:
         """EXACT mirror of updateShootingPhaseState from TypeScript"""
-        self.shooting_phase_state.update(updates)
+        if "active_shooters" in updates:
+            self.shooting_phase_state.active_shooters = updates["active_shooters"]
+        if "current_shooter" in updates:
+            self.shooting_phase_state.current_shooter = updates["current_shooter"]
+        if "single_shot_state" in updates:
+            self.shooting_phase_state.single_shot_state = updates["single_shot_state"]
 
     def decrement_shots_left(self, unit_id: int) -> None:
-        """
-        EXACT mirror of decrementShotsLeft from TypeScript.
-        Decrease SHOOT_LEFT by 1 for specified unit.
-        """
+        """EXACT mirror of decrementShotsLeft from TypeScript"""
         for i, unit in enumerate(self.game_state["units"]):
             if unit["id"] == unit_id:
                 if unit.get("SHOOT_LEFT") is None:
@@ -223,20 +239,19 @@ class UseGameState:
                 self.game_state["units"][i] = updated_unit
                 break
 
-    # === CHARGE SYSTEM (EXACT from TypeScript) ===
+    # === CHARGE ROLL METHODS (EXACT from TypeScript) ===
 
     def set_unit_charge_roll(self, unit_id: int, roll: int) -> None:
         """EXACT mirror of setUnitChargeRoll from TypeScript"""
-        self.game_state["unit_charge_rolls"][str(unit_id)] = roll
         self.unit_charge_rolls[unit_id] = roll
+        self.game_state["unit_charge_rolls"][unit_id] = roll
 
     def reset_unit_charge_roll(self, unit_id: int) -> None:
         """EXACT mirror of resetUnitChargeRoll from TypeScript"""
-        unit_id_str = str(unit_id)
-        if unit_id_str in self.game_state["unit_charge_rolls"]:
-            del self.game_state["unit_charge_rolls"][unit_id_str]
         if unit_id in self.unit_charge_rolls:
             del self.unit_charge_rolls[unit_id]
+        if unit_id in self.game_state["unit_charge_rolls"]:
+            del self.game_state["unit_charge_rolls"][unit_id]
 
     def show_charge_roll_popup(self, unit_id: int, roll: int, too_low: bool) -> None:
         """EXACT mirror of showChargeRollPopup from TypeScript"""
@@ -244,154 +259,131 @@ class UseGameState:
             unit_id=unit_id,
             roll=roll,
             too_low=too_low,
-            timestamp=time.time() * 1000  # Convert to milliseconds like JS
+            timestamp=time.time()
         )
 
     def reset_charge_rolls(self) -> None:
         """EXACT mirror of resetChargeRolls from TypeScript"""
-        self.game_state["unit_charge_rolls"] = {}
         self.unit_charge_rolls = {}
+        self.game_state["unit_charge_rolls"] = {}
+        self.charge_roll_popup = None
 
-    # === TURN MANAGEMENT (Additional methods for training) ===
+    # === PREVIEW METHODS (EXACT from TypeScript patterns) ===
 
-    def reset_turn_state(self) -> None:
-        """
-        Reset all turn-based tracking for new turn.
-        Combines multiple reset methods for convenience.
-        """
-        self.reset_moved_units()
-        self.reset_charged_units()
-        self.reset_attacked_units()
-        self.reset_fled_units()
-        
-        # Reset unit-specific turn flags (EXACT from TypeScript pattern)
-        for i, unit in enumerate(self.game_state["units"]):
-            updated_unit = copy.deepcopy(unit)
-            updated_unit["has_charged_this_turn"] = False
-            self.game_state["units"][i] = updated_unit
+    def set_move_preview(self, unit_id: int, start_col: int, start_row: int,
+                        end_col: int, end_row: int, path: List[Dict[str, int]]) -> None:
+        """Set movement preview"""
+        self.move_preview = MovePreview(
+            unit_id=unit_id,
+            start_col=start_col,
+            start_row=start_row,
+            end_col=end_col,
+            end_row=end_row,
+            path=path
+        )
 
-    def ensure_unit_properties(self) -> None:
-        """
-        Ensure all units have required properties for current phase.
-        Used by training system to maintain state consistency.
-        """
-        for i, unit in enumerate(self.game_state["units"]):
-            updated_unit = copy.deepcopy(unit)
-            
-            # Ensure shooting properties
-            if updated_unit.get("SHOOT_LEFT") is None and updated_unit.get("RNG_NB") is not None:
-                updated_unit["SHOOT_LEFT"] = updated_unit["RNG_NB"]
-            
-            # Ensure combat properties
-            if updated_unit.get("ATTACK_LEFT") is None and updated_unit.get("CC_NB") is not None:
-                updated_unit["ATTACK_LEFT"] = updated_unit["CC_NB"]
-            
-            # Ensure charge tracking
-            if updated_unit.get("has_charged_this_turn") is None:
-                updated_unit["has_charged_this_turn"] = False
-            
-            self.game_state["units"][i] = updated_unit
+    def clear_move_preview(self) -> None:
+        """Clear movement preview"""
+        self.move_preview = None
 
-    # === STATE ACCESS METHODS ===
+    def set_attack_preview(self, attacker_id: int, target_id: int, attack_type: str) -> None:
+        """Set attack preview"""
+        self.attack_preview = AttackPreview(
+            attacker_id=attacker_id,
+            target_id=target_id,
+            attack_type=attack_type
+        )
+
+    def clear_attack_preview(self) -> None:
+        """Clear attack preview"""
+        self.attack_preview = None
+
+    # === GETTER METHODS (EXACT from TypeScript patterns) ===
 
     def get_game_state(self) -> Dict[str, Any]:
-        """Get complete game state dictionary"""
+        """Get complete game state"""
         return copy.deepcopy(self.game_state)
 
-    def get_move_preview(self) -> Optional[Dict[str, Any]]:
-        """Get current move preview"""
-        return copy.deepcopy(self.move_preview) if self.move_preview else None
+    def get_unit_by_id(self, unit_id: int) -> Optional[Dict[str, Any]]:
+        """Get unit by ID"""
+        for unit in self.game_state["units"]:
+            if unit["id"] == unit_id:
+                return copy.deepcopy(unit)
+        return None
 
-    def get_attack_preview(self) -> Optional[Dict[str, Any]]:
-        """Get current attack preview"""
-        return copy.deepcopy(self.attack_preview) if self.attack_preview else None
-
-    def get_shooting_phase_state(self) -> Dict[str, Any]:
-        """Get current shooting phase state"""
-        return copy.deepcopy(self.shooting_phase_state)
-
-    def get_charge_roll_popup(self) -> Optional[ChargeRollPopup]:
-        """Get current charge roll popup"""
-        return self.charge_roll_popup
-
-    # === ACTION DISPATCHER (EXACT mirror of TypeScript return object) ===
-
-    def get_actions(self) -> Dict[str, Callable]:
-        """
-        Return all action methods (mirror of TypeScript useGameState return).
-        This replaces the TypeScript hook's return statement.
-        """
-        return {
-            # Core state setters
-            "set_units": self.set_units,
-            "set_current_player": self.set_current_player,
-            "set_phase": self.set_phase,
-            "set_mode": self.set_mode,
-            "set_selected_unit_id": self.set_selected_unit_id,
-            "set_current_turn": self.set_current_turn,
-            "set_combat_sub_phase": self.set_combat_sub_phase,
-            "set_combat_active_player": self.set_combat_active_player,
-            
-            # Preview system
-            "set_move_preview": self.set_move_preview,
-            "set_attack_preview": self.set_attack_preview,
-            "set_target_preview": self.set_target_preview,
-            
-            # Unit tracking
-            "add_moved_unit": self.add_moved_unit,
-            "add_charged_unit": self.add_charged_unit,
-            "add_attacked_unit": self.add_attacked_unit,
-            "add_fled_unit": self.add_fled_unit,
-            "reset_moved_units": self.reset_moved_units,
-            "reset_charged_units": self.reset_charged_units,
-            "reset_attacked_units": self.reset_attacked_units,
-            "reset_fled_units": self.reset_fled_units,
-            
-            # Unit management
-            "update_unit": self.update_unit,
-            "remove_unit": self.remove_unit,
-            
-            # Phase initialization
-            "initialize_shooting_phase": self.initialize_shooting_phase,
-            "initialize_combat_phase": self.initialize_combat_phase,
-            
-            # Shooting phase
-            "update_shooting_phase_state": self.update_shooting_phase_state,
-            "decrement_shots_left": self.decrement_shots_left,
-            
-            # Charge system
-            "set_unit_charge_roll": self.set_unit_charge_roll,
-            "reset_unit_charge_roll": self.reset_unit_charge_roll,
-            "show_charge_roll_popup": self.show_charge_roll_popup,
-            "reset_charge_rolls": self.reset_charge_rolls,
-            
-            # Training-specific helpers
-            "reset_turn_state": self.reset_turn_state,
-            "ensure_unit_properties": self.ensure_unit_properties,
-        }
-
-    # === TRAINING INTEGRATION HELPERS ===
+    def get_selected_unit(self) -> Optional[Dict[str, Any]]:
+        """Get currently selected unit"""
+        if self.game_state["selected_unit_id"] is None:
+            return None
+        return self.get_unit_by_id(self.game_state["selected_unit_id"])
 
     def get_current_player_units(self) -> List[Dict[str, Any]]:
-        """Get units for current player"""
+        """Get current player's units"""
         return [
-            unit for unit in self.game_state["units"] 
+            copy.deepcopy(unit) for unit in self.game_state["units"] 
             if unit["player"] == self.game_state["current_player"]
         ]
 
     def get_enemy_units(self) -> List[Dict[str, Any]]:
         """Get enemy units (not current player)"""
         return [
-            unit for unit in self.game_state["units"] 
+            copy.deepcopy(unit) for unit in self.game_state["units"] 
             if unit["player"] != self.game_state["current_player"]
         ]
 
     def get_units_by_player(self, player: int) -> List[Dict[str, Any]]:
         """Get units for specific player"""
         return [
-            unit for unit in self.game_state["units"] 
+            copy.deepcopy(unit) for unit in self.game_state["units"] 
             if unit["player"] == player
         ]
+
+    def get_move_preview(self) -> Optional[Dict[str, Any]]:
+        """Get movement preview data"""
+        if self.move_preview is None:
+            return None
+        
+        return {
+            "unit_id": self.move_preview.unit_id,
+            "start_col": self.move_preview.start_col,
+            "start_row": self.move_preview.start_row,
+            "end_col": self.move_preview.end_col,
+            "end_row": self.move_preview.end_row,
+            "path": copy.deepcopy(self.move_preview.path)
+        }
+
+    def get_attack_preview(self) -> Optional[Dict[str, Any]]:
+        """Get attack preview data"""
+        if self.attack_preview is None:
+            return None
+        
+        return {
+            "attacker_id": self.attack_preview.attacker_id,
+            "target_id": self.attack_preview.target_id,
+            "attack_type": self.attack_preview.attack_type
+        }
+
+    def get_shooting_phase_state(self) -> Dict[str, Any]:
+        """Get shooting phase state"""
+        return {
+            "active_shooters": copy.deepcopy(self.shooting_phase_state.active_shooters),
+            "current_shooter": self.shooting_phase_state.current_shooter,
+            "single_shot_state": copy.deepcopy(self.shooting_phase_state.single_shot_state)
+        }
+
+    def get_charge_roll_popup(self) -> Optional[Dict[str, Any]]:
+        """Get charge roll popup data"""
+        if self.charge_roll_popup is None:
+            return None
+        
+        return {
+            "unit_id": self.charge_roll_popup.unit_id,
+            "roll": self.charge_roll_popup.roll,
+            "too_low": self.charge_roll_popup.too_low,
+            "timestamp": self.charge_roll_popup.timestamp
+        }
+
+    # === GAME STATE QUERIES (EXACT from TypeScript patterns) ===
 
     def is_game_over(self) -> bool:
         """Check if game is over (one player has no units)"""
@@ -407,6 +399,76 @@ class UseGameState:
             return None  # Draw
         
         return self.game_state["units"][0]["player"]
+
+    def is_unit_moved(self, unit_id: int) -> bool:
+        """Check if unit has moved this phase"""
+        return unit_id in self.game_state["units_moved"]
+
+    def is_unit_charged(self, unit_id: int) -> bool:
+        """Check if unit has charged this phase"""
+        return unit_id in self.game_state["units_charged"]
+
+    def is_unit_attacked(self, unit_id: int) -> bool:
+        """Check if unit has attacked this phase"""
+        return unit_id in self.game_state["units_attacked"]
+
+    def is_unit_fled(self, unit_id: int) -> bool:
+        """Check if unit has fled this turn"""
+        return unit_id in self.game_state["units_fled"]
+
+    # === EXPOSED ACTIONS (EXACT from TypeScript return) ===
+
+    def get_actions(self) -> Dict[str, Callable]:
+        """
+        Return all action functions (mirror of TypeScript useGameState return).
+        This replaces the TypeScript hook's return actions object.
+        """
+        return {
+            # Core state setters
+            "set_units": self.set_units,
+            "set_current_player": self.set_current_player,
+            "set_phase": self.set_phase,
+            "set_mode": self.set_mode,
+            "set_selected_unit_id": self.set_selected_unit_id,
+            "set_current_turn": self.set_current_turn,
+            "set_combat_sub_phase": self.set_combat_sub_phase,
+            "set_combat_active_player": self.set_combat_active_player,
+            
+            # Unit tracking
+            "add_moved_unit": self.add_moved_unit,
+            "add_charged_unit": self.add_charged_unit,
+            "add_attacked_unit": self.add_attacked_unit,
+            "add_fled_unit": self.add_fled_unit,
+            "reset_moved_units": self.reset_moved_units,
+            "reset_charged_units": self.reset_charged_units,
+            "reset_attacked_units": self.reset_attacked_units,
+            "reset_fled_units": self.reset_fled_units,
+            
+            # Unit updates
+            "update_unit": self.update_unit,
+            "remove_unit": self.remove_unit,
+            "move_unit": self.move_unit,
+            
+            # Phase initialization
+            "initialize_shooting_phase": self.initialize_shooting_phase,
+            "initialize_combat_phase": self.initialize_combat_phase,
+            
+            # Shooting phase
+            "update_shooting_phase_state": self.update_shooting_phase_state,
+            "decrement_shots_left": self.decrement_shots_left,
+            
+            # Charge rolls
+            "set_unit_charge_roll": self.set_unit_charge_roll,
+            "reset_unit_charge_roll": self.reset_unit_charge_roll,
+            "show_charge_roll_popup": self.show_charge_roll_popup,
+            "reset_charge_rolls": self.reset_charge_rolls,
+            
+            # Previews
+            "set_move_preview": self.set_move_preview,
+            "clear_move_preview": self.clear_move_preview,
+            "set_attack_preview": self.set_attack_preview,
+            "clear_attack_preview": self.clear_attack_preview,
+        }
 
 
 # === FACTORY FUNCTION (Mirror of TypeScript hook usage) ===
@@ -437,57 +499,120 @@ class TrainingGameState(UseGameState):
     Adds performance optimizations and training-specific methods.
     """
     
-    def __init__(self, initial_units: List[Dict[str, Any]]):
+    def __init__(self, initial_units: List[Dict[str, Any]], max_history: int = 100):
         super().__init__(initial_units)
-        self.turn_history = []  # Track state changes for replay generation
-        
-    def log_state_change(self, action: str, details: Dict[str, Any]) -> None:
-        """Log state changes for training replay generation"""
-        self.turn_history.append({
+        self.max_history = max_history
+        self.state_history: List[Dict[str, Any]] = []
+        self.training_metrics = {
+            "actions_taken": 0,
+            "phases_completed": 0,
+            "turns_completed": 0,
+            "units_destroyed": 0
+        }
+
+    def save_state_snapshot(self) -> None:
+        """Save current state for training analysis"""
+        snapshot = {
             "timestamp": time.time(),
-            "action": action,
-            "details": details,
             "turn": self.game_state["current_turn"],
             "phase": self.game_state["phase"],
-            "current_player": self.game_state["current_player"]
-        })
-    
-    def get_turn_history(self) -> List[Dict[str, Any]]:
-        """Get complete turn history for replay generation"""
-        return copy.deepcopy(self.turn_history)
-    
-    def reset_for_new_episode(self, new_units: List[Dict[str, Any]]) -> None:
-        """Reset state for new training episode"""
-        self.__init__(new_units)
-        self.turn_history = []
-    
-    def get_state_vector(self) -> List[float]:
-        """
-        Convert game state to numerical vector for AI training.
-        This can be customized based on AI model requirements.
-        """
-        # This is a basic implementation - can be extended based on AI needs
-        state_vector = []
-        
-        # Add basic game state
-        state_vector.append(float(self.game_state["current_player"]))
-        state_vector.append(float(self.game_state["current_turn"]))
-        
-        # Add phase encoding
-        phase_encoding = {
-            "move": 0.0, "shoot": 1.0, "charge": 2.0, "combat": 3.0
+            "player": self.game_state["current_player"],
+            "units_count": len(self.game_state["units"]),
+            "units_alive": {
+                0: len([u for u in self.game_state["units"] if u["player"] == 0]),
+                1: len([u for u in self.game_state["units"] if u["player"] == 1])
+            }
         }
-        state_vector.append(phase_encoding.get(self.game_state["phase"], 0.0))
         
-        # Add unit states (simplified - can be expanded)
+        self.state_history.append(snapshot)
+        
+        # Limit history size for memory efficiency
+        if len(self.state_history) > self.max_history:
+            self.state_history = self.state_history[-self.max_history:]
+
+    def update_training_metrics(self, action_type: str) -> None:
+        """Update training metrics for analysis"""
+        self.training_metrics["actions_taken"] += 1
+        
+        if action_type == "phase_change":
+            self.training_metrics["phases_completed"] += 1
+        elif action_type == "turn_change":
+            self.training_metrics["turns_completed"] += 1
+        elif action_type == "unit_death":
+            self.training_metrics["units_destroyed"] += 1
+
+    def get_training_metrics(self) -> Dict[str, Any]:
+        """Get training-relevant metrics"""
+        return copy.deepcopy(self.training_metrics)
+
+    def get_state_history(self) -> List[Dict[str, Any]]:
+        """Get state history for training analysis"""
+        return copy.deepcopy(self.state_history)
+
+    def reset_for_new_episode(self, initial_units: List[Dict[str, Any]]) -> None:
+        """Reset state for new training episode"""
+        self.__init__(initial_units, self.max_history)
+
+    def get_compressed_state(self) -> Dict[str, Any]:
+        """Get compressed state for training (remove unnecessary data)"""
+        compressed = {
+            "units": [
+                {
+                    "id": u["id"],
+                    "player": u["player"],
+                    "col": u["col"],
+                    "row": u["row"],
+                    "HP_LEFT": u.get("HP_LEFT", u.get("HP_MAX", 1)),
+                    "unit_type": u.get("unit_type", "unknown")
+                }
+                for u in self.game_state["units"]
+            ],
+            "current_player": self.game_state["current_player"],
+            "phase": self.game_state["phase"],
+            "current_turn": self.game_state["current_turn"],
+            "units_moved": copy.copy(self.game_state["units_moved"]),
+            "units_charged": copy.copy(self.game_state["units_charged"]),
+            "units_attacked": copy.copy(self.game_state["units_attacked"]),
+            "units_fled": copy.copy(self.game_state["units_fled"])
+        }
+        return compressed
+
+    def apply_bulk_updates(self, updates: List[Dict[str, Any]]) -> None:
+        """Apply multiple state updates efficiently"""
+        for update in updates:
+            update_type = update.get("type")
+            
+            if update_type == "unit_update":
+                self.update_unit(update["unit_id"], update["data"])
+            elif update_type == "unit_remove":
+                self.remove_unit(update["unit_id"])
+            elif update_type == "phase_change":
+                self.set_phase(update["phase"])
+            elif update_type == "player_change":
+                self.set_current_player(update["player"])
+            # Add more update types as needed
+
+    def validate_state_consistency(self) -> bool:
+        """Validate state consistency for training debugging"""
+        # Check unit IDs are unique
+        unit_ids = [u["id"] for u in self.game_state["units"]]
+        if len(unit_ids) != len(set(unit_ids)):
+            return False
+        
+        # Check all units have required properties
+        required_props = ["id", "player", "col", "row"]
         for unit in self.game_state["units"]:
-            state_vector.extend([
-                float(unit["player"]),
-                float(unit["col"]),
-                float(unit["row"]),
-                float(unit["wounds"]),
-                float(unit.get("SHOOT_LEFT", 0)),
-                float(unit.get("ATTACK_LEFT", 0)),
-            ])
+            for prop in required_props:
+                if prop not in unit:
+                    return False
         
-        return state_vector
+        # Check player is valid
+        if self.game_state["current_player"] not in [0, 1]:
+            return False
+        
+        # Check phase is valid
+        valid_phases = ["move", "shoot", "charge", "combat"]
+        if self.game_state["phase"] not in valid_phases:
+            return False
+        
+        return True

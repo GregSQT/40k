@@ -51,6 +51,13 @@ else:
         "ai/train.py",
         "ai/unit_manager.py",
         "ai/unit_registry.py",
+        "ai/use_game_actions.py",
+        "use_game_config.py",
+        "use_game_controller.py",
+        "use_game_log.py",
+        "use_game_state.py",
+        "ai/use_game_state.py",
+        "ai/use_phase_transition.py",
 
 ######################################################################################################
 ##### config files
