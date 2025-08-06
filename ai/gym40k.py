@@ -83,9 +83,9 @@ class W40KEnv(gym.Env):
         # Initialize Python mirror game controller
         self._initialize_mirror_controller(scenario_file)
         
-        # Replay tracking - disabled, using GameReplayIntegration only
+        # Replay tracking - integrate with existing GameReplayLogger system
         self.replay_data = []
-        self.save_replay = False
+        self.save_replay = True
         
         # Store scenario metadata for compatibility
         self.scenario_metadata = None
@@ -103,9 +103,18 @@ class W40KEnv(gym.Env):
         self._last_acting_unit = None
         self._last_target_unit = None
         
-        # Initialize replay logger placeholder
-        self.game_logger = None
-        self.replay_logger = None
+        # Initialize replay logger with existing system
+        try:
+            from ai.game_replay_logger import GameReplayIntegration
+            self.replay_logger = GameReplayIntegration.enhance_training_env(self)
+            self.game_logger = self.replay_logger
+            if not self.quiet:
+                print("✅ GameReplayLogger integrated with gym environment")
+        except ImportError as e:
+            if not self.quiet:
+                print(f"⚠️ GameReplayLogger not available: {e}")
+            self.replay_logger = None
+            self.game_logger = None
 
     def _calculate_max_units_from_scenario(self, scenario_file=None):
         """Calculate max_units dynamically from scenario file for action space."""
@@ -293,12 +302,16 @@ class W40KEnv(gym.Env):
         # Sync state from controller
         self._sync_state_from_controller()
         
-        # Reset replay data
+        # Reset replay data and ensure proper initial state capture
         self.replay_data = []
         
-        # Connect replay logger if present
+        # Connect and initialize replay logger
         if hasattr(self, 'replay_logger') and self.replay_logger:
-            self.controller.connect_replay_logger(self.replay_logger)
+            # Capture initial state with enhanced unit data
+            self.replay_logger.capture_initial_state()
+            # Connect to controller if it supports replay logging
+            if hasattr(self.controller, 'connect_replay_logger'):
+                self.controller.connect_replay_logger(self.replay_logger)
         
         return self._get_obs(), self._get_info()
 

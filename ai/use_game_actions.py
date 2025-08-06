@@ -173,9 +173,17 @@ def calculate_combat_wound_probability(attacker: Dict[str, Any], target: Dict[st
 
 def calculate_combat_save_probability(attacker: Dict[str, Any], target: Dict[str, Any]) -> float:
     """EXACT mirror of calculateCombatSaveProbability from TypeScript"""
-    armor_save = target.get("ARMOR_SAVE", 5)
-    invul_save = target.get("INVUL_SAVE", 0)
-    armor_penetration = attacker.get("CC_AP", 0)
+    if "ARMOR_SAVE" not in target:
+        raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target.get('name', 'unknown')}")
+    armor_save = target["ARMOR_SAVE"]
+    
+    if "INVUL_SAVE" not in target:
+        raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target.get('name', 'unknown')}")
+    invul_save = target["INVUL_SAVE"]
+    
+    if "CC_AP" not in attacker:
+        raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker.get('name', 'unknown')}")
+    armor_penetration = attacker["CC_AP"]
     
     modified_armor = armor_save + armor_penetration
     save_target = invul_save if (invul_save > 0 and invul_save < modified_armor) else modified_armor
@@ -303,11 +311,15 @@ class UseGameActions:
             
             # MISSING FEATURE: Combat sub-phase logic from TypeScript
             if self.combat_sub_phase == "charged_units":
-                return unit.get("has_charged_this_turn", False) and any(
+                if "has_charged_this_turn" not in unit:
+                    raise KeyError(f"Unit missing required 'has_charged_this_turn' field: {unit.get('name', 'unknown')}")
+                return unit["has_charged_this_turn"] and any(
                     isUnitInRange(unit, enemy, combat_range) for enemy in enemy_units
                 )
             elif self.combat_sub_phase == "alternating_combat":
-                return (not unit.get("has_charged_this_turn", False) and 
+                if "has_charged_this_turn" not in unit:
+                    raise KeyError(f"Unit missing required 'has_charged_this_turn' field: {unit.get('name', 'unknown')}")
+                return (not unit["has_charged_this_turn"] and 
                        unit["player"] == self.combat_active_player and
                        any(isUnitInRange(unit, enemy, combat_range) for enemy in enemy_units))
             else:
@@ -612,7 +624,9 @@ class UseGameActions:
                     save_success = save_roll >= save_target
                     
                     if not save_success:
-                        damage_dealt = shooter.get("RNG_DMG", 1)
+                        if "RNG_DMG" not in shooter:
+                            raise KeyError(f"Shooter missing required 'RNG_DMG' field: {shooter.get('name', 'unknown')}")
+                        damage_dealt = shooter["RNG_DMG"]
                         new_hp = max(0, target["HP"] - damage_dealt)
                         self.actions["update_unit"](target_id, {"HP": new_hp})
                         
@@ -749,7 +763,9 @@ class UseGameActions:
             
             if hit_success:
                 wound_roll = random.randint(1, 6)
-                wound_target = calculateWoundTarget(attacker.get("CC_STR", 4), target["T"])
+                if "CC_STR" not in attacker:
+                    raise KeyError(f"Attacker missing required 'CC_STR' field: {attacker.get('name', 'unknown')}")
+                wound_target = calculateWoundTarget(attacker["CC_STR"], target["T"])
                 wound_success = wound_roll >= wound_target
                 
                 if wound_success:
@@ -758,7 +774,9 @@ class UseGameActions:
                     save_success = save_roll >= save_target
                     
                     if not save_success:
-                        damage_dealt = attacker.get("CC_DMG", 1)
+                        if "CC_DMG" not in attacker:
+                            raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker.get('name', 'unknown')}")
+                        damage_dealt = attacker["CC_DMG"]
                         new_hp = max(0, target["HP"] - damage_dealt)
                         self.actions["update_unit"](target_id, {"HP": new_hp})
                         

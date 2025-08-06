@@ -16,23 +16,23 @@ import copy
 @dataclass
 class DisplayConfig:
     """EXACT mirror of DisplayConfig interface from TypeScript"""
-    resolution: Union[str, int] = "auto"
-    auto_density: bool = True
-    antialias: bool = True
-    force_canvas: bool = False
-    icon_scale: float = 1.0
-    eligible_outline_width: float = 2.0
-    eligible_outline_alpha: float = 0.8
-    hp_bar_width_ratio: float = 0.8
-    hp_bar_height: float = 4.0
-    hp_bar_y_offset_ratio: float = 0.3
-    unit_circle_radius_ratio: float = 0.85
-    unit_text_size: float = 10.0
-    selected_border_width: float = 3.0
-    charge_target_border_width: float = 2.0
-    default_border_width: float = 1.0
-    canvas_border: str = "1px solid #333"
-    right_column_bottom_offset: float = 20.0
+    resolution: Union[str, int]
+    auto_density: bool
+    antialias: bool
+    force_canvas: bool
+    icon_scale: float
+    eligible_outline_width: float
+    eligible_outline_alpha: float
+    hp_bar_width_ratio: float
+    hp_bar_height: float
+    hp_bar_y_offset_ratio: float
+    unit_circle_radius_ratio: float
+    unit_text_size: float
+    selected_border_width: float
+    charge_target_border_width: float
+    default_border_width: float
+    canvas_border: str
+    right_column_bottom_offset: float
 
 @dataclass
 class ObjectiveZone:
@@ -46,7 +46,7 @@ class Wall:
     id: str
     start: Dict[str, int]
     end: Dict[str, int]
-    thickness: Optional[float] = None
+    thickness: Optional[float]
 
 @dataclass
 class BoardColors:
@@ -61,12 +61,12 @@ class BoardColors:
     hp_damaged: str
     highlight: str
     current_unit: str
-    eligible: Optional[str] = None
-    attack: Optional[str] = None
-    charge: Optional[str] = None
-    objective_zone: Optional[str] = None
-    wall: Optional[str] = None
-    objective: str = ""
+    eligible: Optional[str]
+    attack: Optional[str]
+    charge: Optional[str]
+    objective_zone: Optional[str]
+    wall: Optional[str]
+    objective: str
 
 @dataclass
 class BoardConfig:
@@ -78,9 +78,9 @@ class BoardConfig:
     wall_hexes: List[Tuple[int, int]]
     objective_hexes: List[Tuple[int, int]]
     colors: BoardColors
-    objective_zones: Optional[List[ObjectiveZone]] = field(default_factory=list)
-    walls: Optional[List[Wall]] = field(default_factory=list)
-    display: Optional[DisplayConfig] = field(default_factory=DisplayConfig)
+    objective_zones: Optional[List[ObjectiveZone]]
+    walls: Optional[List[Wall]]
+    display: Optional[DisplayConfig]
 
 @dataclass
 class GameRules:
@@ -211,25 +211,37 @@ class UseGameConfig:
 
     def _build_board_config(self, config_data: Dict[str, Any]) -> BoardConfig:
         """Build BoardConfig object from JSON data"""
-        # Parse colors
-        colors_data = config_data.get("colors", {})
+        # Parse colors - validate required section exists
+        if "colors" not in config_data:
+            raise KeyError("Board config missing required 'colors' section")
+        colors_data = config_data["colors"]
+        
+        # Validate all required color fields
+        required_colors = ["background", "cell_even", "cell_odd", "cell_border", 
+                          "player_0", "player_1", "hp_full", "hp_damaged", 
+                          "highlight", "current_unit", "objective"]
+        
+        for color_key in required_colors:
+            if color_key not in colors_data:
+                raise KeyError(f"Colors config missing required field '{color_key}'")
+        
         colors = BoardColors(
-            background=colors_data.get("background", "0x000000"),
-            cell_even=colors_data.get("cell_even", "0x444444"),
-            cell_odd=colors_data.get("cell_odd", "0x555555"),
-            cell_border=colors_data.get("cell_border", "0x666666"),
-            player_0=colors_data.get("player_0", "0x0000FF"),
-            player_1=colors_data.get("player_1", "0xFF0000"),
-            hp_full=colors_data.get("hp_full", "0x00FF00"),
-            hp_damaged=colors_data.get("hp_damaged", "0xFFFF00"),
-            highlight=colors_data.get("highlight", "0xFFFFFF"),
-            current_unit=colors_data.get("current_unit", "0x00FFFF"),
-            eligible=colors_data.get("eligible"),
+            background=colors_data["background"],
+            cell_even=colors_data["cell_even"],
+            cell_odd=colors_data["cell_odd"],
+            cell_border=colors_data["cell_border"],
+            player_0=colors_data["player_0"],
+            player_1=colors_data["player_1"],
+            hp_full=colors_data["hp_full"],
+            hp_damaged=colors_data["hp_damaged"],
+            highlight=colors_data["highlight"],
+            current_unit=colors_data["current_unit"],
+            eligible=colors_data.get("eligible"),  # Optional fields keep .get()
             attack=colors_data.get("attack"),
             charge=colors_data.get("charge"),
             objective_zone=colors_data.get("objective_zone"),
             wall=colors_data.get("wall"),
-            objective=colors_data.get("objective", "0xFFFF00")
+            objective=colors_data["objective"]
         )
 
         # Parse objective zones
@@ -289,37 +301,70 @@ class UseGameConfig:
 
     def _build_game_config(self, game_data: Dict[str, Any]) -> GameConfig:
         """Build GameConfig object from JSON data"""
-        # Parse game rules
-        rules_data = game_data.get("game_rules", {})
+        # Parse game rules - validate required section
+        if "game_rules" not in game_data:
+            raise KeyError("Game config missing required 'game_rules' section")
+        rules_data = game_data["game_rules"]
+        
+        # Validate required game rules fields
+        required_rules = ["max_turns", "turn_limit_penalty", "max_units_per_player", "board_size"]
+        for rule_key in required_rules:
+            if rule_key not in rules_data:
+                raise KeyError(f"Game rules missing required field '{rule_key}'")
+        
         game_rules = GameRules(
-            max_turns=rules_data.get("max_turns", 100),
-            turn_limit_penalty=rules_data.get("turn_limit_penalty", -1.0),
-            max_units_per_player=rules_data.get("max_units_per_player", 10),
-            board_size=tuple(rules_data.get("board_size", [24, 18]))
+            max_turns=rules_data["max_turns"],
+            turn_limit_penalty=rules_data["turn_limit_penalty"],
+            max_units_per_player=rules_data["max_units_per_player"],
+            board_size=tuple(rules_data["board_size"])
         )
 
-        # Parse gameplay config
-        gameplay_data = game_data.get("gameplay", {})
+        # Parse gameplay config - validate required section
+        if "gameplay" not in game_data:
+            raise KeyError("Game config missing required 'gameplay' section")
+        gameplay_data = game_data["gameplay"]
+        
+        required_gameplay = ["phase_order", "simultaneous_actions", "auto_end_turn"]
+        for gameplay_key in required_gameplay:
+            if gameplay_key not in gameplay_data:
+                raise KeyError(f"Gameplay config missing required field '{gameplay_key}'")
+        
         gameplay = GameplayConfig(
-            phase_order=gameplay_data.get("phase_order", ["move", "shoot", "charge", "combat"]),
-            simultaneous_actions=gameplay_data.get("simultaneous_actions", False),
-            auto_end_turn=gameplay_data.get("auto_end_turn", True)
+            phase_order=gameplay_data["phase_order"],
+            simultaneous_actions=gameplay_data["simultaneous_actions"],
+            auto_end_turn=gameplay_data["auto_end_turn"]
         )
 
-        # Parse AI behavior config
-        ai_data = game_data.get("ai_behavior", {})
+        # Parse AI behavior config - validate required section
+        if "ai_behavior" not in game_data:
+            raise KeyError("Game config missing required 'ai_behavior' section")
+        ai_data = game_data["ai_behavior"]
+        
+        required_ai = ["timeout_ms", "retries", "fallback_action"]
+        for ai_key in required_ai:
+            if ai_key not in ai_data:
+                raise KeyError(f"AI behavior config missing required field '{ai_key}'")
+        
         ai_behavior = AIBehaviorConfig(
-            timeout_ms=ai_data.get("timeout_ms", 5000),
-            retries=ai_data.get("retries", 3),
-            fallback_action=ai_data.get("fallback_action", "end_turn")
+            timeout_ms=ai_data["timeout_ms"],
+            retries=ai_data["retries"],
+            fallback_action=ai_data["fallback_action"]
         )
 
-        # Parse scoring config
-        scoring_data = game_data.get("scoring", {})
+        # Parse scoring config - validate required section
+        if "scoring" not in game_data:
+            raise KeyError("Game config missing required 'scoring' section")
+        scoring_data = game_data["scoring"]
+        
+        required_scoring = ["win_bonus", "lose_penalty", "survival_bonus_per_turn"]
+        for scoring_key in required_scoring:
+            if scoring_key not in scoring_data:
+                raise KeyError(f"Scoring config missing required field '{scoring_key}'")
+        
         scoring = ScoringConfig(
-            win_bonus=scoring_data.get("win_bonus", 100.0),
-            lose_penalty=scoring_data.get("lose_penalty", -50.0),
-            survival_bonus_per_turn=scoring_data.get("survival_bonus_per_turn", 1.0)
+            win_bonus=scoring_data["win_bonus"],
+            lose_penalty=scoring_data["lose_penalty"],
+            survival_bonus_per_turn=scoring_data["survival_bonus_per_turn"]
         )
 
         return GameConfig(
@@ -334,17 +379,23 @@ class UseGameConfig:
     @property
     def max_turns(self) -> int:
         """EXACT mirror of maxTurns getter from TypeScript"""
-        return self.game_config.game_rules.max_turns if self.game_config else 100
+        if not self.game_config:
+            raise RuntimeError("Game config not loaded - cannot access max_turns")
+        return self.game_config.game_rules.max_turns
 
     @property
     def board_size(self) -> Tuple[int, int]:
         """EXACT mirror of boardSize getter from TypeScript"""
-        return self.game_config.game_rules.board_size if self.game_config else (24, 18)
+        if not self.game_config:
+            raise RuntimeError("Game config not loaded - cannot access board_size")
+        return self.game_config.game_rules.board_size
 
     @property
     def turn_penalty(self) -> float:
         """EXACT mirror of turnPenalty getter from TypeScript"""
-        return self.game_config.game_rules.turn_limit_penalty if self.game_config else -1.0
+        if not self.game_config:
+            raise RuntimeError("Game config not loaded - cannot access turn_penalty")
+        return self.game_config.game_rules.turn_limit_penalty
 
     # === UTILITY METHODS ===
 

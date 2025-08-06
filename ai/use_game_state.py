@@ -56,8 +56,10 @@ class UseGameState:
         # Validate and process initial units (EXACT from TypeScript)
         processed_units = []
         for unit in initial_units:
-            if unit.get("RNG_NB") is None:
-                raise ValueError("unit.RNG_NB is required")
+            if "RNG_NB" not in unit:
+                raise ValueError(f"unit.RNG_NB is required for unit: {unit.get('name', 'unknown')}")
+            if unit["RNG_NB"] is None:
+                raise ValueError(f"unit.RNG_NB cannot be None for unit: {unit.get('name', 'unknown')}")
             
             processed_unit = copy.deepcopy(unit)
             processed_unit["SHOOT_LEFT"] = unit["RNG_NB"]
@@ -558,6 +560,21 @@ class TrainingGameState(UseGameState):
         """Reset state for new training episode"""
         self.__init__(initial_units, self.max_history)
 
+    def _get_unit_hp_left(self, unit: Dict[str, Any]) -> int:
+        """Get unit HP_LEFT, validate required fields exist"""
+        if "HP_LEFT" in unit:
+            return unit["HP_LEFT"]
+        elif "HP_MAX" in unit:
+            return unit["HP_MAX"]
+        else:
+            raise KeyError(f"Unit missing both 'HP_LEFT' and 'HP_MAX' fields: {unit.get('name', 'unknown')}")
+
+    def _get_unit_type(self, unit: Dict[str, Any]) -> str:
+        """Get unit type, validate field exists"""
+        if "unit_type" not in unit:
+            raise KeyError(f"Unit missing required 'unit_type' field: {unit.get('name', 'unknown')}")
+        return unit["unit_type"]
+
     def get_compressed_state(self) -> Dict[str, Any]:
         """Get compressed state for training (remove unnecessary data)"""
         compressed = {
@@ -567,8 +584,8 @@ class TrainingGameState(UseGameState):
                     "player": u["player"],
                     "col": u["col"],
                     "row": u["row"],
-                    "HP_LEFT": u.get("HP_LEFT", u.get("HP_MAX", 1)),
-                    "unit_type": u.get("unit_type", "unknown")
+                    "HP_LEFT": self._get_unit_hp_left(u),
+                    "unit_type": self._get_unit_type(u)
                 }
                 for u in self.game_state["units"]
             ],

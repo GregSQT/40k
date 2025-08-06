@@ -183,6 +183,17 @@ class GameController:
         log_data = use_game_log()
         self.game_log = log_data
         
+        # Initialize replay logger integration for training
+        self.replay_logger = None
+        try:
+            from ai.game_replay_logger import GameReplayLogger
+            self.replay_logger = GameReplayLogger(self)
+            if not hasattr(self, 'quiet') or not self.quiet:
+                print("✅ GameReplayLogger initialized in GameController")
+        except ImportError:
+            if not hasattr(self, 'quiet') or not self.quiet:
+                print("⚠️ GameReplayLogger not available for GameController")
+        
         # Set up game actions with game log (EXACT from TypeScript)
         actions_data = use_game_actions(
             game_state=self.game_state,
@@ -212,12 +223,22 @@ class GameController:
         self.current_step = 0
         
         # Log game start (EXACT from TypeScript)
-        self.game_log["log_turn_start"](1)
-        self.game_log["log_phase_change"]("move", 0, 1)
+        self.game_log["logTurnStart"](1)
+        self.game_log["logPhaseChange"]("move", 0, 1)
+        
+        # Capture initial state for replay
+        if self.replay_logger:
+            self.replay_logger.capture_initial_state()
 
     def stop_game(self) -> None:
         """Stop the game loop"""
         self.is_running = False
+
+    def connect_replay_logger(self, replay_logger) -> None:
+        """Connect external replay logger (for gym integration)"""
+        self.replay_logger = replay_logger
+        if hasattr(replay_logger, 'capture_initial_state'):
+            replay_logger.capture_initial_state()
 
     def step(self) -> bool:
         """
@@ -510,6 +531,17 @@ class TrainingGameController(GameController):
         self.log_manager = TrainingGameLog(max_events=500)
         self.game_log = self.log_manager.get_log_functions()
         
+        # Initialize replay logger for training
+        try:
+            from ai.game_replay_logger import GameReplayLogger
+            self.replay_logger = GameReplayLogger(self)
+            if not hasattr(self, 'quiet') or not self.quiet:
+                print("✅ Training GameReplayLogger initialized")
+        except ImportError:
+            if not hasattr(self, 'quiet') or not self.quiet:
+                print("⚠️ GameReplayLogger not available for training")
+            self.replay_logger = None
+        
         # Initialize training game actions
         self.actions_manager = TrainingGameActions(
             game_state=self.game_state,
@@ -545,7 +577,9 @@ class TrainingGameController(GameController):
         
         # Basic range check
         distance = max(abs(unit["col"] - target["col"]), abs(unit["row"] - target["row"]))
-        return distance <= unit.get("rng_rng", 1)
+        if "rng_rng" not in unit:
+            raise KeyError(f"Unit missing required 'rng_rng' field: {unit.get('name', 'unknown')}")
+        return distance <= unit["rng_rng"]
 
     def can_unit_charge_target(self, unit_id: int, target_id: int) -> bool:
         """Check if unit can charge target"""
@@ -567,7 +601,9 @@ class TrainingGameController(GameController):
         
         # Basic adjacency check for combat
         distance = max(abs(unit["col"] - target["col"]), abs(unit["row"] - target["row"]))
-        return distance <= unit.get("cc_rng", 1)
+        if "cc_rng" not in unit:
+            raise KeyError(f"Unit missing required 'cc_rng' field: {unit.get('name', 'unknown')}")
+        return distance <= unit["cc_rng"]
 
     def find_unit(self, unit_id: int) -> Optional[Dict[str, Any]]:
         """Find unit by ID"""
@@ -597,6 +633,10 @@ class TrainingGameController(GameController):
             self.actions_manager.reset_for_new_episode()
         if hasattr(self.phase_manager, 'reset_for_new_episode'):
             self.phase_manager.reset_for_new_episode()
+        
+        # Reset replay logger for new episode
+        if self.replay_logger:
+            self.replay_logger.capture_initial_state()
 
     def end_episode(self, final_reward: float = 0.0) -> Dict[str, Any]:
         """End current episode and return metrics"""
