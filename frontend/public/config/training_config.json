@@ -142,15 +142,15 @@
 
   "debug": {
     "description": "Ultra minimal to force working",
-    "total_timesteps": 1000,
+    "total_timesteps": 100,
     "eval_episodes": 3,
     "max_steps_per_episode": 50,
-    "eval_freq": 100,
+    "eval_freq": 10,
     "callback_params": {
       "eval_deterministic": true,
       "eval_render": false,
       "n_eval_episodes": 2,
-      "checkpoint_save_freq": 100,
+      "checkpoint_save_freq": 10,
       "checkpoint_name_prefix": "phase_model_checkpoint"
     },
     "model_params": {

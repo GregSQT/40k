@@ -665,8 +665,10 @@ class MultiAgentTrainer:
         
         # Create agent-specific environment with generated scenario and shared registry
         base_env = W40KEnv(
+            rewards_config=rewards_config_name,
             training_config_name=training_config_name,
             controlled_agent=agent_key,
+            active_agents=[agent_key],
             scenario_file=scenario_path,
             unit_registry=self.unit_registry,  # Pass shared registry
             quiet=True  # Enable quiet mode for training

@@ -55,7 +55,7 @@ class ConfigLoader:
     
     def get_game_config(self) -> Dict[str, Any]:
         """Get game configuration."""
-        return self.load_config("game_config")
+        return self.load_config("game_config", force_reload=False)
     
     def get_models_dir(self) -> str:
         """Get models directory path."""
@@ -81,7 +81,7 @@ class ConfigLoader:
     def get_model_path(self) -> str:
         """Get the model file path - AI_INSTRUCTIONS.md compliance."""
         try:
-            config = self.load_config("config")
+            config = self.load_config("config", force_reload=False)
             return config["paths"]["model_file"]
         except (KeyError, FileNotFoundError):
             # AI_INSTRUCTIONS.md: No hardcoded fallbacks allowed
@@ -123,11 +123,11 @@ class ConfigLoader:
      
     def get_training_config(self) -> Dict[str, Any]:
         """Get training configuration."""
-        return self.load_config("training_config")
+        return self.load_config("training_config", force_reload=False)
     
     def get_rewards_config(self) -> Dict[str, Any]:
         """Get rewards configuration."""
-        return self.load_config("rewards_config")
+        return self.load_config("rewards_config", force_reload=False)
     
     # ─── Alias methods for named config loading ─────────────────────────
     def load_training_config(self, name: str) -> Dict[str, Any]:
@@ -144,11 +144,11 @@ class ConfigLoader:
     
     def get_board_config(self) -> Dict[str, Any]:
         """Get board configuration."""
-        return self.load_config("board_config")
+        return self.load_config("board_config", force_reload=False)
     
     def get_unit_definitions(self) -> Dict[str, Any]:
         """Get unit definitions."""
-        return self.load_config("unit_definitions")
+        return self.load_config("unit_definitions", force_reload=False)
 
 # Global instance for easy access
 _config_loader = None
