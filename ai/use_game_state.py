@@ -488,7 +488,7 @@ def use_game_state(initial_units: List[Dict[str, Any]]) -> Dict[str, Any]:
     game_state_manager = UseGameState(initial_units)
     
     return {
-        "game_state": game_state_manager.get_game_state(),
+        "game_state": game_state_manager.game_state,
         "move_preview": game_state_manager.get_move_preview(),
         "attack_preview": game_state_manager.get_attack_preview(),
         "shooting_phase_state": game_state_manager.get_shooting_phase_state(),

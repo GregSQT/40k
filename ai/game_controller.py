@@ -171,7 +171,7 @@ class GameController:
         
         # Initialize game state with custom hook (EXACT from TypeScript)
         game_state_data = use_game_state(self.game_units)
-        self.game_state = game_state_data["game_state"]
+        self.game_state = game_state_data["manager"].game_state  # Use manager's actual object
         self.move_preview = game_state_data["move_preview"]
         self.attack_preview = game_state_data["attack_preview"]
         self.shooting_phase_state = game_state_data["shooting_phase_state"]
@@ -342,6 +342,7 @@ class GameController:
                     success = True if result is None else bool(result)
                 else:
                     success = False
+            
             print(f"🔧 move_unit: unit={unit_id}, pos=({col},{row}), success={success}")
             return success
         except Exception as e:

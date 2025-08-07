@@ -1073,11 +1073,15 @@ class W40KEnv(gym.Env):
             
             # Try to find a more interesting action based on phase
             if current_phase == "move":
-                # Simple movement towards center of board
-                center_col, center_row = 12, 9  # Board center
-                if bot_unit["col"] != center_col or bot_unit["row"] != center_row:
-                    new_col = bot_unit["col"] + (1 if center_col > bot_unit["col"] else -1 if center_col < bot_unit["col"] else 0)
-                    new_row = bot_unit["row"] + (1 if center_row > bot_unit["row"] else -1 if center_row < bot_unit["row"] else 0)
+                # Simple movement towards nearest enemy (like _bot_simple_move)
+                all_units = self.controller.get_units()
+                enemy_units = [u for u in all_units if u["player"] != bot_unit["player"] and u["alive"]]
+                if enemy_units:
+                    target = enemy_units[0]  # Move toward first enemy
+                    dx = 1 if target["col"] > bot_unit["col"] else (-1 if target["col"] < bot_unit["col"] else 0)
+                    dy = 1 if target["row"] > bot_unit["row"] else (-1 if target["row"] < bot_unit["row"] else 0)
+                    new_col = max(0, min(self.board_size[0] - 1, bot_unit["col"] + dx))
+                    new_row = max(0, min(self.board_size[1] - 1, bot_unit["row"] + dy))
                     mirror_action = {"type": "move", "col": new_col, "row": new_row}
                     action_type = 0  # Move action
             elif current_phase == "shoot":
