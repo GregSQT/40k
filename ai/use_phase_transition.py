@@ -311,6 +311,14 @@ class UsePhaseTransition:
             except (AttributeError, TypeError):
                 pass
         
+        # CRITICAL DEBUG: Show ALL object IDs before sync
+        print(f"🔧 PRE-SYNC DEBUG:")
+        print(f"    UsePhaseTransition.game_state ID: {id(self.game_state)}")
+        print(f"    Fresh candidate game_state ID: {id(fresh_game_state) if fresh_game_state else 'None'}")
+        if fresh_game_state:
+            print(f"    Current phase: {self.game_state.get('phase', 'missing')}")
+            print(f"    Fresh phase: {fresh_game_state.get('phase', 'missing')}")
+        
         # Force update to freshest available state
         if fresh_game_state and id(fresh_game_state) != id(self.game_state):
             # Validate required fields exist in both states - NO DEFAULTS
@@ -322,6 +330,7 @@ class UsePhaseTransition:
             print(f"🔧 STATE SYNC: Forced update from stale {id(self.game_state)} to fresh {id(fresh_game_state)}")
             print(f"🔧   Old phase: {self.game_state['phase']}, New phase: {fresh_game_state['phase']}")
             self.game_state = fresh_game_state
+            print(f"🔧 SYNC COMPLETE: UsePhaseTransition now uses game_state {id(self.game_state)}")
         elif fresh_game_state:
             print(f"🔧 STATE CONSISTENT: Using same game_state {id(self.game_state)}")
         else:
@@ -333,7 +342,23 @@ class UsePhaseTransition:
         if 'current_player' not in self.game_state:
             raise KeyError("Final game_state missing required 'current_player' field")
             
-        print(f"🔧 process_phase_transitions: phase={self.game_state['phase']}, player={self.game_state['current_player']}")
+        # CRITICAL DEBUG: Capture atomic phase readings to detect race conditions
+        phase_reading_1 = self.game_state["phase"]
+        player_reading_1 = self.game_state["current_player"] 
+        state_id = id(self.game_state)
+        
+        print(f"🔧 ATOMIC DEBUG: game_state[{state_id}] phase={phase_reading_1}, player={player_reading_1}")
+        
+        # Re-read immediately to detect changes
+        phase_reading_2 = self.game_state["phase"]
+        player_reading_2 = self.game_state["current_player"]
+        
+        if phase_reading_1 != phase_reading_2:
+            print(f"🚨 RACE CONDITION DETECTED: phase changed from {phase_reading_1} to {phase_reading_2} during same method!")
+        if player_reading_1 != player_reading_2:
+            print(f"🚨 RACE CONDITION DETECTED: player changed from {player_reading_1} to {player_reading_2} during same method!")
+        
+        print(f"🔧 process_phase_transitions: phase={phase_reading_2}, player={player_reading_2}")
         
         # Update local state references from synchronized game_state
         self.units = self.game_state["units"]
@@ -345,6 +370,14 @@ class UsePhaseTransition:
         self.units_fled = set(self.game_state.get("units_fled", []))
         self.combat_sub_phase = self.game_state.get("combat_sub_phase")
         self.combat_active_player = self.game_state.get("combat_active_player")
+
+        # CRITICAL DEBUG: Verify final cached values match dictionary values
+        dict_phase = self.game_state["phase"]
+        dict_player = self.game_state["current_player"]
+        if self.phase != dict_phase:
+            print(f"🚨 CACHE MISMATCH: self.phase={self.phase} != game_state['phase']={dict_phase}")
+        if self.current_player != dict_player:
+            print(f"🚨 CACHE MISMATCH: self.current_player={self.current_player} != game_state['current_player']={dict_player}")
 
         print(f"🔧 Synced state: phase={self.phase}, player={self.current_player}, units_moved={list(self.units_moved)}")
 

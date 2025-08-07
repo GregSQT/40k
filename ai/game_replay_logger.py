@@ -66,8 +66,8 @@ class GameReplayLogger:
             target_unit=target_unit,
             reward=reward,
             action_name=action_name,
-            turn_number=turn_number or self.env.training_state.game_state["current_turn"],
-            phase=phase or self.env.training_state.game_state["phase"],
+            turn_number=turn_number or self.env.controller.game_state["current_turn"],
+            phase=phase or self.env.controller.game_state["phase"],
             start_hex=start_hex,
             end_hex=end_hex,
             shoot_details=shoot_details
@@ -84,7 +84,7 @@ class GameReplayLogger:
     def log_game_start(self):
         """Log game start."""
         # Use environment's actual current turn for game start
-        start_turn = self.env.training_state.game_state["current_turn"]
+        start_turn = self.env.controller.game_state["current_turn"]
         self.add_entry(
             entry_type="turn_change",
             reward=0.0,
@@ -525,12 +525,12 @@ class GameReplayLogger:
             "game_info": {
                 "scenario": "training_episode",
                 "ai_behavior": "phase_based",
-                "total_turns": self.env.training_state.game_state["current_turn"],
+                "total_turns": self.env.controller.game_state["current_turn"],
                 "winner": None,  # Can be set by caller
             },
             "metadata": {
                 "total_combat_log_entries": len(self.combat_log_entries),
-                "final_turn": self.env.training_state.game_state["current_turn"],
+                "final_turn": self.env.controller.game_state["current_turn"],
                 "episode_reward": episode_reward,
                 "format_version": "2.0",
                 "replay_type": "training_enhanced"
@@ -555,7 +555,7 @@ class GameReplayLogger:
         if not self.quiet:
             print(f"💾 Saved enhanced replay: {filename}")
             print(f"   📊 {len(self.combat_log_entries)} combat log entries")
-            print(f"   🎮 {self.env.training_state.game_state['current_turn']} turns")
+            print(f"   🎮 {self.env.controller.game_state['current_turn']} turns")
             print(f"   💯 Reward: {episode_reward:.2f}")
             print(f"   ⚔️ Enhanced format with dice roll details")
         
@@ -635,7 +635,7 @@ class GameReplayLogger:
                     break
             
             if acting_unit_post:
-                current_turn = self.env.training_state.game_state["current_turn"]
+                current_turn = self.env.controller.game_state["current_turn"]
                 self.log_move(
                     acting_unit, 
                     acting_unit.get('col', 0), acting_unit.get('row', 0),
@@ -644,7 +644,7 @@ class GameReplayLogger:
                 )
             else:
                 # No movement occurred, log as no-move
-                current_turn = self.env.training_state.game_state["current_turn"]
+                current_turn = self.env.controller.game_state["current_turn"]
                 self.log_move(
                     acting_unit,
                     acting_unit.get('col', 0), acting_unit.get('row', 0),
@@ -656,7 +656,7 @@ class GameReplayLogger:
             if target_unit:
                 # Create minimal shoot_details for logging compatibility
                 shoot_details = {"summary": {"totalShots": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
-                current_turn = self.env.training_state.game_state["current_turn"]
+                current_turn = self.env.controller.game_state["current_turn"]
                 self.log_shoot(acting_unit, target_unit, shoot_details, 
                              current_turn, reward, action_type)
             else:
@@ -672,7 +672,7 @@ class GameReplayLogger:
                         break
                 
                 if acting_unit_post:
-                    current_turn = self.env.training_state.game_state["current_turn"]
+                    current_turn = self.env.controller.game_state["current_turn"]
                     self.log_charge(
                         acting_unit, target_unit,
                         acting_unit.get('col', 0), acting_unit.get('row', 0),
@@ -682,7 +682,7 @@ class GameReplayLogger:
                     
         elif action_type == 6:  # Wait
             # Log as move with no position change
-            current_turn = self.env.training_state.game_state["current_turn"]
+            current_turn = self.env.controller.game_state["current_turn"]
             self.log_move(
                 acting_unit,
                 acting_unit.get('col', 0), acting_unit.get('row', 0),
@@ -694,7 +694,7 @@ class GameReplayLogger:
             if target_unit:
                 # Create minimal combat_details for logging compatibility
                 combat_details = {"summary": {"totalAttacks": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
-                current_turn = self.env.training_state.game_state["current_turn"]
+                current_turn = self.env.controller.game_state["current_turn"]
                 self.log_combat(acting_unit, target_unit, combat_details,
                                current_turn, reward, action_type)
         

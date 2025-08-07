@@ -105,13 +105,14 @@ class W40KEnv(gym.Env):
         self._last_acting_unit = None
         self._last_target_unit = None
         
-        # Initialize replay logger with existing system
+        # Initialize replay logger after controller is ready
         try:
             from ai.game_replay_logger import GameReplayIntegration
-            self.replay_logger = GameReplayIntegration.enhance_training_env(self)
-            self.game_logger = self.replay_logger
+            # CRITICAL FIX: Initialize after controller is set up
+            self.replay_logger = None  # Will be set up after controller init
+            self.game_logger = None
             if not self.quiet:
-                print("✅ GameReplayLogger integrated with gym environment")
+                print("🔧 Replay logger will be initialized after controller setup")
         except ImportError as e:
             if not self.quiet:
                 print(f"⚠️ GameReplayLogger not available: {e}")
@@ -177,8 +178,8 @@ class W40KEnv(gym.Env):
         self.controller = TrainingGameController(config, quiet=self.quiet)
         self.controller.start_game()  # CRITICAL: Start the controller
         
-        # Initialize TrainingGameState for proper phase management
-        self.training_state = TrainingGameState(initial_units)
+        # CRITICAL FIX: Use controller's game_state directly - no separate training_state
+        self.training_state = None  # Remove separate state object
         
         # Cache board size for observations - use existing config_loader system
         from config_loader import get_board_size
@@ -311,8 +312,8 @@ class W40KEnv(gym.Env):
         self._last_acting_unit = None
         self._last_target_unit = None
         
-        # CRITICAL: Sync state from controller AFTER getting fresh objects
-        self._sync_state_from_controller()
+        # Update game status using controller state directly
+        self._update_game_status()
         
         # CRITICAL DEBUG: Verify we have fresh phase transition objects
         if hasattr(self.controller, 'phase_transitions'):
@@ -493,8 +494,8 @@ class W40KEnv(gym.Env):
         # Update tracking
         self._last_acting_unit = acting_unit
         
-        # Sync state from controller and validate consistency
-        self._sync_state_from_controller()
+        # Update game status using controller state directly
+        self._update_game_status()
         
         # Periodically validate state consistency (every 10 steps)
         if self.step_count % 10 == 0:
@@ -606,10 +607,12 @@ class W40KEnv(gym.Env):
             print(f"    🔍 Unit {unit['id']} controller eligibility: {controller_result}")
             return controller_result
         
-        # Fallback logic if controller method not available
-        units_moved = self.training_state.game_state.get("units_moved", [])
-        units_charged = self.training_state.game_state.get("units_charged", [])
-        units_attacked = self.training_state.game_state.get("units_attacked", [])
+        # Use controller's game_state directly - no fallbacks
+        if not hasattr(self.controller, 'game_state'):
+            raise AttributeError("Controller missing required game_state attribute")
+        units_moved = self.controller.game_state.get("units_moved", [])
+        units_charged = self.controller.game_state.get("units_charged", [])
+        units_attacked = self.controller.game_state.get("units_attacked", [])
         
         if phase == "move":
             return unit["id"] not in units_moved
@@ -624,7 +627,7 @@ class W40KEnv(gym.Env):
 
     def _mark_unit_as_acted_for_current_phase(self, unit):
         """Mark unit as having acted in current phase to prevent infinite loops."""
-        current_phase = self.training_state.game_state["phase"]
+        current_phase = self.controller.game_state["phase"]
         unit_id = unit["id"]
         
         if not self.quiet:
@@ -649,14 +652,25 @@ class W40KEnv(gym.Env):
 
     def _advance_phase_or_turn(self):
         """Delegate phase advancement to use_phase_transition.py system."""
-        current_phase = self.training_state.game_state["phase"]
-        current_player = self.training_state.game_state["current_player"]
+        # CRITICAL FIX: Use only controller's game_state - no separate training_state
+        if not hasattr(self.controller, 'game_state'):
+            raise RuntimeError("Controller missing required game_state object")
+        
+        controller_phase = self.controller.game_state["phase"]
+        controller_player = self.controller.game_state["current_player"] 
+        controller_state_id = id(self.controller.game_state)
+        
+        print(f"🔄 SINGLE STATE DEBUG: controller game_state[{controller_state_id}]: phase={controller_phase}, player={controller_player}")
+        
+        # Remove old debug logging - now using single state source
+        current_phase = controller_phase
+        current_player = controller_player
         
         # ALWAYS show critical phase debug (remove count limit)
         print(f"🔄 PHASE ADVANCE: Player {current_player}, Phase {current_phase}")
         # CRITICAL: Debug why phase won't advance
         eligible_units = self._get_eligible_units()
-        moved_units = self.training_state.game_state.get("units_moved", [])
+        moved_units = self.controller.game_state.get("units_moved", [])
         player_units = [u for u in self.controller.get_units() if u["player"] == current_player]
         player_unit_ids = [u["id"] for u in player_units]
         print(f"    🔍 Player {current_player} units: {player_unit_ids}")
@@ -908,36 +922,8 @@ class W40KEnv(gym.Env):
         
         return unit_rewards["base_actions"]["wait"]
 
-    def _sync_state_from_controller(self):
-        """Ensure gym environment references the exact same game_state object as controller."""
-        # CRITICAL: Verify and sync game_state object references for perfect consistency
-        if hasattr(self.controller, 'game_state'):
-            controller_game_state = self.controller.game_state
-            training_game_state = self.training_state.game_state
-            
-            # Verify both are referencing the same object
-            if id(controller_game_state) != id(training_game_state):
-                if not self.quiet:
-                    print(f"⚠️ State object mismatch detected:")
-                    print(f"    Controller game_state ID: {id(controller_game_state)}")
-                    print(f"    Training_state game_state ID: {id(training_game_state)}")
-                
-                # Fix: Update training_state to reference the same object as controller
-                self.training_state.game_state = controller_game_state
-                
-                if not self.quiet:
-                    print(f"✅ Synchronized: training_state now references controller's game_state")
-            
-            # Verify state actions are using the correct game_state object
-            if hasattr(self.controller, 'state_actions') and 'set_phase' in self.controller.state_actions:
-                action_game_state = self.controller.state_actions['set_phase'].__self__.game_state
-                if id(action_game_state) != id(controller_game_state):
-                    if not self.quiet:
-                        print(f"⚠️ State actions using different game_state object!")
-                        print(f"    Action game_state ID: {id(action_game_state)}")
-                        print(f"    Should be: {id(controller_game_state)}")
-                        
-        # Update game over status using consistent state
+    def _update_game_status(self):
+        """Update game over status using controller state directly."""
         if self.controller.is_game_over():
             self.game_over = True
             self.winner = self.controller.get_winner()
@@ -977,7 +963,7 @@ class W40KEnv(gym.Env):
         
         # Phase encoding (last 4 elements)
         phase_idx = self.max_units * 11
-        current_phase = self.training_state.game_state["phase"]
+        current_phase = self.controller.game_state["phase"]
         if current_phase == "move":
             obs[phase_idx] = 1.0
         elif current_phase == "shoot":
@@ -1007,8 +993,8 @@ class W40KEnv(gym.Env):
             self.game_over = True
         
         return {
-            "current_turn": self.training_state.game_state["current_turn"],
-            "current_phase": self.training_state.game_state["phase"],
+            "current_turn": self.controller.game_state["current_turn"],
+            "current_phase": self.controller.game_state["phase"], 
             "ai_units_alive": len(ai_units_alive),
             "enemy_units_alive": len(enemy_units_alive),
             "step_count": self.step_count,
