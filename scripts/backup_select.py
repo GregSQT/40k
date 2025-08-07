@@ -27,14 +27,11 @@ else:
 ######################################################################################################
 ##### root files
 ######################################################################################################
-
         
-        "AI_ARCHITECTURE_TRAINING.md",
+        "AI_ARCHITECTURE.md",
         "AI_GAME.md",
-        "AI_GAME_RULES.md",
-        "AI_INSTRUCTIONS.md",
+        "AI_PROTOCOLE.md",
         "config_loader.py",
-        "Technical_Overview.md",
 
 ######################################################################################################
 ##### ai files
@@ -73,13 +70,6 @@ else:
         "config/training_config.json", # AI Training Parameters
         "config/unit_definitions.json", # Unit Stats & Abilities
         "config/unit_registry.json", # 
-
-
-######################################################################################################
-##### Documentation files
-######################################################################################################
-
-        "docs/training_system.md",  # Main Project Overview
 
 ######################################################################################################
 ##### Frontend files

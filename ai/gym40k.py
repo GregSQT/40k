@@ -458,17 +458,20 @@ class W40KEnv(gym.Env):
         # Update tracking
         self._last_acting_unit = acting_unit
         
-        # Sync state from controller
+        # Sync state from controller and validate consistency
         self._sync_state_from_controller()
         
-        # CRITICAL: Check if phase should advance after successful action
+        # Periodically validate state consistency (every 10 steps)
+        if self.step_count % 10 == 0:
+            self._validate_state_consistency()
+        
+        # Let phase transition system handle automatic advancement
         remaining_eligible = self._get_eligible_units()
-        if not remaining_eligible:
-            if not self.quiet:
-                print(f"    ⏭️ No eligible units remaining - advancing phase")
-            self._advance_phase_or_turn()
-        elif not self.quiet:
-            print(f"    👥 {len(remaining_eligible)} eligible units remaining")
+        if not self.quiet:
+            if not remaining_eligible:
+                print(f"    ⏭️ No eligible units remaining - phase system will auto-advance")
+            else:
+                print(f"    👥 {len(remaining_eligible)} eligible units remaining")
         
         # Check if game ended
         terminated = self.controller.is_game_over()
@@ -477,12 +480,60 @@ class W40KEnv(gym.Env):
             self.winner = self.controller.get_winner()
         
         return self._get_obs(), reward, terminated, False, self._get_info()
+    
+    def _validate_state_consistency(self):
+        """Validate that all components are using the same game_state object."""
+        if not hasattr(self.controller, 'game_state'):
+            if not self.quiet:
+                print(f"⚠️ Controller missing game_state attribute")
+            return False
+            
+        controller_game_state_id = id(self.controller.game_state)
+        training_state_id = id(self.training_state.game_state)
+        
+        consistency_issues = []
+        
+        # Check training_state consistency
+        if controller_game_state_id != training_state_id:
+            consistency_issues.append(f"training_state game_state ID mismatch: {training_state_id} vs {controller_game_state_id}")
+        
+        # Check state_actions consistency
+        if hasattr(self.controller, 'state_actions') and 'set_phase' in self.controller.state_actions:
+            action_state_id = id(self.controller.state_actions['set_phase'].__self__.game_state)
+            if action_state_id != controller_game_state_id:
+                consistency_issues.append(f"state_actions game_state ID mismatch: {action_state_id} vs {controller_game_state_id}")
+        
+        # Check phase_manager consistency
+        if hasattr(self.controller, 'phase_manager') and hasattr(self.controller.phase_manager, 'game_state'):
+            phase_state_id = id(self.controller.phase_manager.game_state)
+            if phase_state_id != controller_game_state_id:
+                consistency_issues.append(f"phase_manager game_state ID mismatch: {phase_state_id} vs {controller_game_state_id}")
+        
+        if consistency_issues:
+            if not self.quiet:
+                print(f"❌ State consistency issues found:")
+                for issue in consistency_issues:
+                    print(f"    {issue}")
+            return False
+        
+        if not self.quiet:
+            print(f"✅ All components using consistent game_state object ID: {controller_game_state_id}")
+        return True
 
     def _get_eligible_units(self):
-        """Get units eligible for current phase using TrainingGameState."""
-        all_units = self.training_state.game_state["units"]
-        current_player = self.training_state.game_state["current_player"]
-        current_phase = self.training_state.game_state["phase"]
+        """Get units eligible for current phase using controller's consistent state."""
+        # Use controller's game_state for consistency (delegates to same TrainingGameState)
+        try:
+            current_player = self.controller.get_current_player()
+            current_phase = self.controller.get_current_phase()
+            all_units = self.controller.get_units()
+        except Exception as e:
+            if not self.quiet:
+                print(f"⚠️ Controller state access failed, falling back to training_state: {e}")
+            # Fallback to direct training_state access
+            all_units = self.training_state.game_state["units"]
+            current_player = self.training_state.game_state["current_player"]
+            current_phase = self.training_state.game_state["phase"]
         
         # Filter units for current player that are eligible for current phase
         eligible_units = []
@@ -532,38 +583,31 @@ class W40KEnv(gym.Env):
                     print(f"    ❌ Failed to mark unit as acted: {e}")
 
     def _advance_phase_or_turn(self):
-        """Use TrainingGameState for proper phase advancement."""
-        current_phase = self.training_state.game_state["phase"]
-        current_player = self.training_state.game_state["current_player"]
-        
+        """Delegate phase advancement to use_phase_transition.py system."""
         if not self.quiet:
-            print(f"🔄 Phase advance: Player {current_player}, Phase {current_phase}")
+            current_phase = self.training_state.game_state["phase"]
+            current_player = self.training_state.game_state["current_player"]
+            print(f"🔄 Delegating phase advance: Player {current_player}, Phase {current_phase}")
         
-        # Use TrainingGameState's proper phase progression
-        if current_phase == "move":
-            self.training_state.set_phase("shoot")
-            self.training_state.reset_moved_units()
-        elif current_phase == "shoot":
-            self.training_state.set_phase("charge")
-        elif current_phase == "charge":
-            self.training_state.set_phase("combat")
-            self.training_state.initialize_combat_phase()
-        elif current_phase == "combat":
-            # End turn - switch to next player
-            new_player = 1 if current_player == 0 else 0
-            self.training_state.set_current_player(new_player)
-            if new_player == 0:  # Increment turn when player 0 starts
-                current_turn = self.training_state.game_state["current_turn"]
-                self.training_state.set_current_turn(current_turn + 1)
-            self.training_state.set_phase("move")
-            self.training_state.reset_moved_units()
-            self.training_state.reset_charged_units()
-            self.training_state.reset_attacked_units()
-        
-        if not self.quiet:
-            final_phase = self.training_state.game_state["phase"]
-            final_player = self.training_state.game_state["current_player"]
-            print(f"🔄 New state: Player {final_player}, Phase {final_phase}")
+        # Delegate to proper phase transition system through controller
+        if hasattr(self.controller, 'phase_transitions'):
+            try:
+                # Use automatic phase transition system
+                transitions_occurred = self.controller.phase_transitions['auto_advance_phases']()
+                
+                if not self.quiet:
+                    final_phase = self.training_state.game_state["phase"]
+                    final_player = self.training_state.game_state["current_player"]
+                    status = "transitioned" if transitions_occurred else "no change"
+                    print(f"🔄 Phase delegation result ({status}): Player {final_player}, Phase {final_phase}")
+                    
+            except Exception as e:
+                if not self.quiet:
+                    print(f"❌ Phase transition delegation failed: {e}")
+                # Fallback: do nothing - let the system handle it naturally
+        else:
+            if not self.quiet:
+                print(f"⚠️ No phase_transitions available in controller - phase will advance naturally")
 
     def _convert_gym_action_to_mirror(self, unit, action_type):
         """Convert gym action type to mirror action format with phase validation."""
@@ -781,11 +825,35 @@ class W40KEnv(gym.Env):
         return unit_rewards["base_actions"]["wait"]
 
     def _sync_state_from_controller(self):
-        """Sync environment state from TrainingGameState."""
-        # No sync needed - TrainingGameState is the source of truth
-        pass
-        
-        # Update game over status
+        """Ensure gym environment references the exact same game_state object as controller."""
+        # CRITICAL: Verify and sync game_state object references for perfect consistency
+        if hasattr(self.controller, 'game_state'):
+            controller_game_state = self.controller.game_state
+            training_game_state = self.training_state.game_state
+            
+            # Verify both are referencing the same object
+            if id(controller_game_state) != id(training_game_state):
+                if not self.quiet:
+                    print(f"⚠️ State object mismatch detected:")
+                    print(f"    Controller game_state ID: {id(controller_game_state)}")
+                    print(f"    Training_state game_state ID: {id(training_game_state)}")
+                
+                # Fix: Update training_state to reference the same object as controller
+                self.training_state.game_state = controller_game_state
+                
+                if not self.quiet:
+                    print(f"✅ Synchronized: training_state now references controller's game_state")
+            
+            # Verify state actions are using the correct game_state object
+            if hasattr(self.controller, 'state_actions') and 'set_phase' in self.controller.state_actions:
+                action_game_state = self.controller.state_actions['set_phase'].__self__.game_state
+                if id(action_game_state) != id(controller_game_state):
+                    if not self.quiet:
+                        print(f"⚠️ State actions using different game_state object!")
+                        print(f"    Action game_state ID: {id(action_game_state)}")
+                        print(f"    Should be: {id(controller_game_state)}")
+                        
+        # Update game over status using consistent state
         if self.controller.is_game_over():
             self.game_over = True
             self.winner = self.controller.get_winner()

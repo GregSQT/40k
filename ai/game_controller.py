@@ -259,12 +259,11 @@ class GameController:
         return True
 
     def _update_state(self) -> None:
-        """Update all state references from managers - WITH FIXED DIRECT REFERENCES"""
-        # FIXED: No longer needed since we use direct references to live state objects
-        # self.game_state, self.move_preview, etc. are already direct references
-        # Just ensure any cached values are synced
+        """Update cached values - all state references are already consistent"""
+        # All components use the same game_state object, no synchronization needed
         self._current_phase = self.game_state.get("phase", "move")
-        print(f"🔧 _update_state: phase synced to {self._current_phase}")
+        if not self.quiet:
+            print(f"🔧 Cached phase updated to: {self._current_phase}")
 
     def _check_game_over(self) -> bool:
         """Check if game is over"""
@@ -510,77 +509,58 @@ class TrainingGameController(GameController):
         # Maintain compatibility with TrainingGameConfig cache
         self.config_manager = None  # Skip problematic TrainingGameConfig for now
         
-        # Initialize training game state
+        # Initialize training game state - SINGLE SOURCE OF TRUTH
         self.state_manager = TrainingGameState(self.game_units, max_history=50)
         
-        # CRITICAL FIX: Use direct references to state_manager properties
-        # This ensures all components reference the SAME live state objects
-        self.game_state = self.state_manager.game_state  # Direct reference, not copy
-        self.move_preview = self.state_manager.move_preview  # Direct reference
-        self.attack_preview = self.state_manager.attack_preview  # Direct reference  
-        self.shooting_phase_state = self.state_manager.shooting_phase_state  # Direct reference
-        self.charge_roll_popup = self.state_manager.charge_roll_popup  # Direct reference
-        self.state_actions = self.state_manager.get_actions()  # Action functions
+        # CRITICAL: Store the SINGLE game_state object reference that ALL components will use
+        self.game_state = self.state_manager.game_state
+        self.state_actions = self.state_manager.get_actions()
         
-        # Verify the state_actions has set_phase and it works
-        print(f"🔧 FIXED: state_actions keys: {list(self.state_actions.keys())}")
-        if "set_phase" in self.state_actions:
-            print(f"🔧 FIXED: set_phase function available: {self.state_actions['set_phase']}")
+        # Store other state references from the SAME manager
+        self.move_preview = self.state_manager.move_preview
+        self.attack_preview = self.state_manager.attack_preview  
+        self.shooting_phase_state = self.state_manager.shooting_phase_state
+        self.charge_roll_popup = self.state_manager.charge_roll_popup
+        
+        # Verify single object ID consistency
+        if not self.quiet:
+            print(f"🔧 SINGLE game_state object ID: {id(self.game_state)}")
+            print(f"🔧 State actions available: {list(self.state_actions.keys())}")
         
         # Initialize training game log
         self.log_manager = TrainingGameLog(max_events=500)
-        self.game_log = self.log_manager.get_log_functions()  # Pass the functions dict
+        self.game_log = self.log_manager.get_log_functions()
         
-        # Initialize replay logger for training
-        # DO NOT create a new instance - wait for gym to provide one
+        # Initialize replay logger for training - will be set by gym via connect_replay_logger
         self.replay_logger = None
-        # Replay logger will be set by gym environment via connect_replay_logger
         
-        # Initialize training game actions with direct method mapping
+        # Initialize training game actions - pass THE SAME game_state object
         self.actions_manager = TrainingGameActions(
-            game_state=self.game_state,
+            game_state=self.game_state,  # THE SAME object
             move_preview=self.move_preview,
             attack_preview=self.attack_preview,
             shooting_phase_state=self.shooting_phase_state,
             board_config=self.board_config,
             actions=self.state_actions,
-            game_log=self.log_manager  # Pass the manager object, not the functions dict
+            game_log=self.log_manager
         )
         self.game_actions = self.actions_manager.get_available_actions()
         
-        # Initialize training phase transitions with working actions
-        print(f"🔧 Initializing phase transitions with state_actions: {list(self.state_actions.keys())}")
-        
-        # Test the critical actions before using them
-        if "set_phase" in self.state_actions:
-            try:
-                test_phase = self.game_state.get("phase", "move")
-                print(f"🔧 Testing set_phase: current phase = {test_phase}")
-                # Don't actually change it, just test the call
-                print(f"🔧 set_phase function: {self.state_actions['set_phase']}")
-            except Exception as e:
-                print(f"🔧 set_phase test failed: {e}")
-        else:
-            print(f"🔧 ERROR: set_phase not found in state_actions!")
-        
-        # CRITICAL FIX: Ensure ALL components use the EXACT SAME game_state object
-        actual_game_state = self.state_actions['set_phase'].__self__.game_state
-        print(f"🔧 Using actual_game_state object id: {id(actual_game_state)} for phase transitions")
-        
-        # CRITICAL: Update controller's game_state reference to point to the SAME object
-        self.game_state = actual_game_state  # Now controller reads from same object as transitions modify
-        print(f"🔧 Updated controller game_state to same object: {id(self.game_state)}")
-        
+        # Initialize training phase transitions - pass THE SAME game_state object
         self.phase_manager = TrainingPhaseTransition(
-            game_state=actual_game_state,  # Use the EXACT object that set_phase modifies
+            game_state=self.game_state,  # THE SAME object used everywhere
             board_config=self.board_config,
             is_unit_eligible_func=self.game_actions["is_unit_eligible"],
             actions=self.state_actions
         )
         self.phase_transitions = self.phase_manager.get_transition_functions()
         
-        # Verify phase transition functions are available
-        print(f"🔧 Available phase transitions: {list(self.phase_transitions.keys())}")
+        # Verify single object consistency
+        if not self.quiet:
+            print(f"🔧 Phase manager using game_state ID: {id(self.phase_manager.game_state)}")
+            print(f"🔧 Controller using game_state ID: {id(self.game_state)}")
+            print(f"🔧 Object consistency: {id(self.phase_manager.game_state) == id(self.game_state)}")
+            print(f"🔧 Available phase transitions: {list(self.phase_transitions.keys())}")
 
         # Add phase property for training compatibility
         self._current_phase = self.game_state.get("phase", "move")
@@ -951,9 +931,3 @@ class TrainingGameController(GameController):
         self._current_phase = self.game_state.get("phase", "move")
         
         return result
-
-    def _update_state(self) -> None:
-        """Override to include phase tracking"""
-        super()._update_state()
-        # Keep phase property in sync
-        self._current_phase = self.game_state.get("phase", "move")
