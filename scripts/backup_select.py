@@ -28,7 +28,10 @@ else:
 ##### root files
 ######################################################################################################
 
+        
+        "AI_ARCHITECTURE_TRAINING.md",
         "AI_GAME.md",
+        "AI_GAME_RULES.md",
         "AI_INSTRUCTIONS.md",
         "config_loader.py",
         "Technical_Overview.md",
@@ -38,7 +41,6 @@ else:
 ######################################################################################################
 
     ### ai
-        "ai/ai_phase_transition.py",
         "ai/agent.py",
         "ai/bot_manager.py",
         "ai/evaluate.py",

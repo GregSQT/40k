@@ -1,161 +1,265 @@
---------------------------------------------------------------------------------------------------------
-GAME MECHANISM
---------------------------------------------------------------------------------------------------------
+# Warhammer 40K Game System - Complete Rules & AI Guidelines
 
-I want to develop a game based on warhammer 40k.
-The player would play against an AI
-For the AI training, I want it to train on the same scenaro as the game.
-To evaluate the AI, i make it play vs a scripted bot.
+## 🎯 GAME OVERVIEW
 
-UNIT'S LIFE AND DEATH
-At the start of the game, each unit's CUR_HP attribute is equal to its MAX_HP attribute.
-When a unit takes damages, reduce its CUR_HP by the attacks damages (RNG_DMG in the shooting phase or CC_DMG in the attack phase)
-When a unit's CUR_HP is reduced to 0, it is "dead" and can't be activated anymore.
+Turn-based tactical combat following official Warhammer 40K rules with phase-based gameplay. Each player completes all phases before opponent's turn begins.
 
-TURN MECHANISM
-Here are the main rules of the game, and behaviour for the ai :
-Each player plays his turn, alternatively.
-Each turn is divided consecutive phases : move -> Shoot -> Charge -> Combat
-At the end of a player's combay phase, his turn ends, and the turn of the other player begins with his movement phase.
+**Turn Structure:** Move → Shoot → Charge → Combat → Next Player
 
-MOVEMENT PHASE DEFINITION
-- The only available action in this phase is moving.
-- No unit can move more than once per movement phase.
-- No unit can move through enemy units
-- No unit can move through walls
-- Highlight Eligible Units
-    	- Only the eligible units get a green outline, and only those can be selected.
-- The active player activates his unit to move by left clicking on it.
-	- All the available move cells (cells within the active unit's MOVE attribute) are colored in green
-		- Left click on the unit : the unit won't move, it's move action is over.
-		- Left  click on a non green cell : nothing happen
-		- Left click on a green cell :
-			- Move the unit to this cell
-			- The cells at the RNG_RNG attribute distance are in red
-				- Left click on the active unit : validate the move, cancel colored cells, end of this unit's activability for the phase
-				- Right click on the active unit : cancel the move, cancel colored cells, unselect the unit, the unit is still selectable
-Once all the units have been moved once this way, the active player's move phase ends, and his shooting phase starts
+---
 
-SHOOTING PHASE DEFINITION
-- The only available action in this phase is shooting.
-- No unit can shoot more than once per shooting phase.
-- Highlight Eligible Units
-	- Only the active's player units having at least one enemy within their RNG_RNG (shooting range) and haven’t shot yet are selectable (green outline).
-	- Units that cannot shoot (nobody in range, or already shot this phase) are not selectable.
-- Highlight Eligible Units
-    	- Only those eligible units get a green outline, and only those can be selected.
-- The active player activates one of his activable unit to shoot by left clicking on it.
-	- The board highlights the selected shooter.
-	- The hexes within the unit's RNG_RNG are highlighted in red.
-	- The enemy units in range are highlighted with a red outline/circle
-		- 1st left lick on an enemy unit withing RNG_RNG range : the target unit's hp bar is temporarily displayed bigger, and alternates its value with its future value after the shoot.
-		For example, the target unit has CUR_HP = 4. If the RNG_DMG of the active unit is 1, the HP bar of the target will become bigger and switch every second from 4 CUR-HP to 3 CUR_HP
-		- Seconde Left click on an enemy unit withing RNG_RNG range : The active unit shoot this enemy unit.
-			- Reduce target enemy unit's CUR_HP by the active unit's RNG_DMG value
-			- Cancel colored cells, unselect the unit, end of this unit's activability for the phase
-		- Left click on the active unit : cancel the shoot, cancel colored cells, unselect the unit, end of this unit's activability for the phase
-		- Right click on the active unit : cancel the shoot, cancel colored cells, unselect the unit, the unit is still selectable
-		- Left click anywhere else on the board : Nothing happens
+# 🏃 MOVEMENT PHASE
 
+## Unit Eligibility
+✅ **Can Move**: Units that haven't moved this phase `!unitsMoved.includes(unit.id)`
+✅ **Adjacent Units Can Move**: Units adjacent to enemies can still move (flee mechanic)
 
-CHARGE PHASE DEFINITION
-- The only available action in this phase is charge.
-- No unit can charge more than once per charge phase.
-- Eligibility for Selection (charge phase):
-    	- A unit is eligible (gets green outline and is selectable) if:
-        	- It has NOT already charged this phase.
-        	- No enemy is adjacent to it.
-        	- At least one enemy is within its MOVE range.
-- Highlight Eligible Units
-    	- Only those eligible units get a green outline, and only those can be selected.
-- The active player activates one of his activable unit to charge by left clicking on it.
-	- The board highlights the selected shooter.
-	- The enemy units in range are highlighted with a red outline/circle
-	- Color in orage the followig cells:
-        	- Any cell within the charger’s MOVE range, AND that is adjacent (distance = 1) to at least one enemy within the charger’s MOVE range.
-	- Left Click on an orange cell: Moves the active unit to that cell, cancel colored cells, unselect the unit, end of this unit's activability for the phase
-	- Right click on the active unit : cancel the charge, cancel colored cells, unselect the unit, the unit is still selectable
-	- left click on the active unit : cancel the charge, cancel colored cells, unselect the unit, end of this unit's activability for the phase
+## Movement Restrictions
+❌ **Cannot Move TO Adjacent Enemy Hex**: `forbiddenSet` includes all hexes adjacent to enemies
+❌ **Cannot Move TO Occupied Hex**: `blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id)`
+❌ **Cannot Move TO Wall Hex**: `wallHexSet` added to `forbiddenSet`
+✅ **Can Move UP TO**: `MOVE` value in hexes using BFS pathfinding
 
+## Flee Mechanics
+✅ **Flee Trigger**: Unit was adjacent to enemy at start AND not adjacent at end
+❌ **Fled Unit Shooting Penalty**: `if (unitsFled.includes(unit.id)) return false`
+❌ **Fled Unit Charging Penalty**: `if (unitsFled.includes(unit.id)) return false`
+✅ **Fled Units Can Still Move**: No movement restrictions
+✅ **Fled Units Can Still Fight**: No combat restrictions
+⏰ **Penalty Duration**: Until end of current turn only
 
-COMBAT PHASE DEFINITION
-- The only available action in this phase is attack.
-- No unit can attack more than once per combat phase.
-- Highlight Eligible Units
-	- Only the active's player units having at least one enemy adjacent (distance = 1) and haven’t attacked yet are selectable (green outline).
-	- Units that cannot attack (no enemy unit adjacent, or it already attacked this phase) are not selectable.
-- The active player activates one of his activable unit to attack by left clicking on it.
-	- The board highlights the selected attacker.
-	- The enemy units adjacent to the active unit are highlighted with a red outline/circle
-- The active player activates one of his activable unit to attack by left clicking on it.
-	- The board highlights the selected attacker.
-	- The enemy units in range (adjacent) are highlighted with a red outline/circle
-		- Left click on an adjacent enemy unit : The active unit attacks this enemy unit:
-			- Reduce target enemy unit's CUR_HP by the active unit's CC_DMG value
-			- Cancel colored cells, unselect the unit, end of this unit's activability for the phase
-		- Left click on the active unit : cancel the attack, cancel colored cells, unselect the unit, end of this unit's activability for the phase
-		- Left click anywhere else on the board : Nothing happens
+## AI Movement Behavior
+**Ranged Units:**
+- Avoid being charged
+- Keep at least 1 enemy unit within `RNG_RNG` range
 
+**Melee Units:**
+- Try to be in charge position
 
---------------------------------------------------------------------------------------------------------
-AI GUIDELINES
---------------------------------------------------------------------------------------------------------
+---
 
+# 🎯 SHOOTING PHASE
 
-All the units on the board must respect and follow the GAME MECHANISM as described.
+## Unit Eligibility
+❌ **Already Shot**: `if (unitsMoved.includes(unit.id)) return false`
+❌ **Fled Units**: `if (unitsFled.includes(unit.id)) return false`
+❌ **Adjacent to Enemy**: `hasAdjacentEnemyShoot = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy))`
+✅ **Has Valid Targets**: Enemies in `RNG_RNG` range NOT adjacent to friendly units
 
-here are behaviour an AI should follow :
+## Target Restrictions
+❌ **Cannot Shoot Adjacent Enemies**: Units in combat cannot shoot
+❌ **Cannot Shoot Enemies Adjacent to Friendlies**: "Rule 2" - friendly fire prevention
+✅ **Must Have Line of Sight**: Wall blocking system
+✅ **Must Be In Range**: Within `RNG_RNG` hexes
 
-MOVEMENT PHASE
-Range Unit :
-	- Avoid to be charged.
-	- Will try to keep at least 1 enemy unit within it RNG_RNG range
+## 6-Step Shooting Sequence
+1. **Target Selection**: Choose valid target within range
+2. **Hit Roll**: Roll to hit based on shooter's skill (`RNG_ATK`)
+3. **Wound Roll**: Compare Strength (`RNG_STR`) vs Toughness (`T`)
+4. **Save Roll**: Target attempts armor/invulnerable save
+5. **Damage Application**: Apply `RNG_DMG` if save fails
+6. **Next Shot**: Continue until all `RNG_NB` shots resolved
 
-Melee Units :
-	Try to be in charge position.
+## AI Shooting Priority System
+**Priority Order:**
+1. **Tier 1**: Enemy with highest `RNG_DMG` or `CC_DMG` that:
+   - Cannot be killed by active unit in 1 shooting phase
+   - One or more of our melee units can charge
+   - Would not be killed by our units during charge phase
+   - Would be killed by one of our units during combat phase if this unit shoots it
 
+2. **Tier 2**: Enemy with highest `RNG_DMG` or `CC_DMG` that:
+   - Has the least HP
+   - Can be killed by active unit in 1 shooting phase
 
-SHOOTING PHASE
-First make the ranged units play. 
-A unit will shoot in priority order : 
-1 - the enemy unit at RNG_RNG range :
-	- with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score
-	- cannot be killed by the active unit in 1 shooting phase
-	- that one or more of our melee units can charge 
-	- would not be killed by our units that will be able to charge it during the attack phase
-	- would be killed by one of our units during the attack phase if this unit shoots it
-2 - the enemy unit at RNG_RNG range :
-	- with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score 
-	- having the less HP
-	- can be killed by the active unit in 1 shooting phase
-3 - the enemy unit at RNG_RNG range :
-	- with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score 
-	- can be killed by the active unit in 1 shooting phase
-4 - the enemy unit at RNG_RNG range :
-	- with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score 
-	- cannot be killed by the active unit in 1 shooting phase
+3. **Tier 3**: Enemy with highest `RNG_DMG` or `CC_DMG` that:
+   - Can be killed by active unit in 1 shooting phase
 
-For charge phase, a melee unit will charge :
-1 - the enemy unit at MOVE range with 
-	- the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
-	- can be killed by the active unit in 1 melee phase
-2 - the enemy unit at MOVE range :
-	-  with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
-	- has the less current HP and 
-	- its HPs >= the active unit's CC_DMG
-3 - the enemy unit at MOVE range with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
-	- has the less current HP
+4. **Tier 4**: Enemy with highest `RNG_DMG` or `CC_DMG` that:
+   - Cannot be killed by active unit in 1 shooting phase
 
-CHARGE PHASE
-Ranged unit will charg in priority ordere :
-1 - the enemy unit at MOVE range with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
-	- has the highest current HP 
-	- can be killed by the active unit in 1 melee phase
+---
 
-COMBAT PHASE
-A unit will attack in priority order :
-1 - the enemy unit with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) score and :
-	- can be killed by the active unit in 1 combat phase
-2 - the enemy unit with the highest RNG_DMG or CC_DMG (pick the best of all the enemy units at range) The 'Enhance Prompt' button helps improve your prompt by providing additional context, clarification, or rephrasing. Try typing a prompt in here and clicking the button again to see how it works. @ @ @ @ @ @ @ @ @score and :
-	- if there is more than one, target the enemy unit having the less current HP
+# ⚡ CHARGE PHASE
 
+## Unit Eligibility
+❌ **Already Charged**: `if (unitsCharged.includes(unit.id)) return false`
+❌ **Fled Units**: `if (unitsFled.includes(unit.id)) return false`
+❌ **Adjacent to Enemy**: `isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy))`
+✅ **Enemy Within 12 Hexes**: Fixed maximum charge range
+
+## Charge Mechanics
+🎲 **Charge Roll**: 2D6 when first selecting unit
+📏 **Distance Check**: Enemy must be within rolled distance AND ≤12 hexes
+🚧 **Pathfinding**: `checkPathfindingReachable` respects walls
+🎯 **Must End Adjacent**: Charge destination must be adjacent to target enemy
+⚡ **Priority in Combat**: Charged units fight first in combat phase
+
+## AI Charge Priority
+**Melee Units:**
+1. Enemy with highest `RNG_DMG` or `CC_DMG` that can be killed in 1 melee phase
+2. Enemy with highest `RNG_DMG` or `CC_DMG`, least current HP, and HP ≥ active unit's `CC_DMG`
+3. Enemy with highest `RNG_DMG` or `CC_DMG` and least current HP
+
+**Ranged Units:**
+1. Enemy with highest `RNG_DMG` or `CC_DMG`, highest current HP, that can be killed in 1 melee phase
+
+---
+
+# ⚔️ COMBAT PHASE
+
+## Two Sub-Phases
+1️⃣ **Charged Units Phase**: Only `unit.hasChargedThisTurn === true` can fight
+2️⃣ **Alternating Combat**: Non-charged units, alternating by `combatActivePlayer`
+
+## Unit Eligibility
+❌ **Already Attacked**: `if (unitsAttacked.includes(unit.id)) return false`
+✅ **Adjacent to Enemy**: Must be exactly `CC_RNG` distance (usually 1 hex)
+✅ **Correct Sub-Phase**: Charged units in phase 1, others in phase 2
+
+## Combat Resolution
+- **Combat Range**: Units fight enemies within `CC_RNG` (usually 1 hex)
+- **Multiple Attacks**: Each unit makes `CC_NB` attacks
+- **Hit/Wound/Save**: Same dice system as shooting but uses `CC_ATK`, `CC_STR`, `CC_AP`, `CC_DMG`
+- **Alternating Selection**: In sub-phase 2, players alternate selecting units to fight
+
+## AI Combat Priority
+1. Enemy with highest `RNG_DMG` or `CC_DMG` that can be killed in 1 combat phase
+2. Enemy with highest `RNG_DMG` or `CC_DMG` (if tie, target enemy with least current HP)
+
+---
+
+# 🎲 DICE SYSTEM & COMBAT MATHEMATICS
+
+## Wound Chart (Strength vs Toughness)
+```typescript
+function calculateWoundTarget(strength: number, toughness: number): number {
+  if (strength >= 2 * toughness) return 2;      // Overwhelming strength
+  if (strength > toughness) return 3;           // Higher strength  
+  if (strength === toughness) return 4;         // Equal strength
+  if (strength < toughness) return 5;           // Lower strength
+  if (strength <= toughness / 2) return 6;     // Inadequate strength
+  return 6; // Fallback
+}
+```
+
+## Armor Save System
+```typescript
+function calculateSaveTarget(armorSave: number, invulSave: number, armorPenetration: number): number {
+  const modifiedArmorSave = armorSave + armorPenetration;
+  
+  // Use invulnerable save if it exists and is better than modified armor
+  if (invulSave > 0 && invulSave < modifiedArmorSave) {
+    return invulSave;
+  }
+  
+  return modifiedArmorSave;
+}
+```
+
+---
+
+# 🗺️ PATHFINDING & COLLISION SYSTEM
+
+## BFS Movement Algorithm
+🗺️ **Cube Coordinates**: Proper hex neighbor calculation
+🚧 **Forbidden Set**: Adjacent to enemies + walls + occupied hexes
+📏 **Distance Limit**: Respects unit's `MOVE` value
+🔄 **Visited Tracking**: Prevents revisiting hexes with higher step cost
+
+## Wall System
+🧱 **Wall Hexes**: Defined in `boardConfig.wall_hexes`
+👀 **Line of Sight**: Ray casting through hex grid
+🚫 **Movement Blocking**: Walls completely block movement
+
+---
+
+# 🔄 TURN MANAGEMENT
+
+## Phase Order
+**Move** → **Shoot** → **Charge** → **Combat** (sub-phases) → **Next Player**
+
+## State Tracking
+📋 **Per Phase**: `unitsMoved`, `unitsCharged`, `unitsAttacked`
+🏃 **Per Turn**: `unitsFled`, `hasChargedThisTurn`
+♻️ **Reset**: Clear phase tracking, maintain turn tracking until turn end
+
+## Turn Transition
+✅ **Phase Advances**: When no eligible units remain
+✅ **Turn Increments**: At START of Player 1 (AI) move phase
+♻️ **State Reset**: Clear all tracking at turn start
+
+```typescript
+// At end of each complete turn
+actions.resetMovedUnits();
+actions.resetChargedUnits(); 
+actions.resetAttackedUnits();
+actions.resetFledUnits();
+// Reset hasChargedThisTurn for all units
+```
+
+---
+
+# ❤️ UNIT LIFE AND DEATH
+
+## Health System
+- **Initial HP**: `CUR_HP = MAX_HP` at game start
+- **Damage Application**: Reduce `CUR_HP` by attack damage (`RNG_DMG` or `CC_DMG`)
+- **Death**: When `CUR_HP ≤ 0`, unit is "dead" and cannot be activated
+
+## Damage Types
+- **Shooting Damage**: `RNG_DMG` per failed save
+- **Combat Damage**: `CC_DMG` per failed save
+- **Multiple Shots**: Each shot can cause separate damage
+
+---
+
+# 🎮 UI INTERACTION RULES
+
+## Movement Phase UI
+- **Green Outline**: Only eligible units
+- **Green Cells**: Available movement destinations within `MOVE` range
+- **Left Click Unit**: Cancel move, end activation
+- **Left Click Green Cell**: Move unit, show red range circles
+- **Right Click Unit**: Cancel move, keep unit selectable
+
+## Shooting Phase UI
+- **Green Outline**: Units with valid targets in `RNG_RNG` range
+- **Red Outline**: Enemy targets in range
+- **First Click Target**: Show HP preview (current vs future)
+- **Second Click Target**: Execute shot
+- **Right Click Unit**: Cancel shot, keep unit selectable
+
+## Charge Phase UI
+- **Green Outline**: Units eligible to charge
+- **Red Outline**: Enemy targets within `MOVE` range
+- **Orange Cells**: Valid charge destinations (adjacent to enemies)
+- **Left Click Orange**: Execute charge
+- **Right Click Unit**: Cancel charge, keep unit selectable
+
+## Combat Phase UI
+- **Green Outline**: Units with adjacent enemies
+- **Red Outline**: Adjacent enemy targets
+- **Left Click Target**: Execute attack
+- **Left Click Unit**: Cancel attack, end activation
+
+---
+
+# 🚨 CRITICAL GAME STATE RULES
+
+## Phase Eligibility Must Check:
+1. **Unit hasn't acted this phase** (moved/shot/charged/attacked)
+2. **Unit isn't fled** (for shooting/charging only)
+3. **Valid targets exist** (appropriate range, line of sight)
+4. **Correct sub-phase** (for combat phase)
+
+## State Consistency Rules:
+- Only ONE game_state object per game
+- ALL components reference the SAME game_state
+- NO copying or duplicating state objects
+- State changes through designated functions only
+
+## Turn End Conditions:
+- **Phase ends**: When no eligible units remain
+- **Turn ends**: After combat phase completion
+- **Game ends**: When one side has no units remaining
