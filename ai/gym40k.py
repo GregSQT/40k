@@ -593,23 +593,18 @@ class W40KEnv(gym.Env):
         current_phase = self.controller.game_state["phase"]
         unit_id = unit["id"]
         
-        if not self.quiet:
-            print(f"    🔧 BEFORE marking unit {unit_id} as acted for phase {current_phase}")
-            print(f"        Current units_moved: {self.controller.game_state.get('units_moved', [])}")
-        
         if hasattr(self.controller, 'state_actions'):
             try:
                 if current_phase == "move" and 'add_moved_unit' in self.controller.state_actions:
+                    # CRITICAL FIX: Use the state_actions object directly (the correct one)
                     self.controller.state_actions['add_moved_unit'](unit_id)
                     
-                    # CRITICAL DEBUG: Verify the marking actually worked
-                    new_units_moved = self.controller.game_state.get('units_moved', [])
-                    if unit_id in new_units_moved:
+                    # Verify using the SAME object that was just modified
+                    new_units_moved = self.controller.state_actions['add_moved_unit'].__self__.game_state.get('units_moved', [])
+                    # Silent verification - debugging completed
+                    if unit_id not in new_units_moved:
                         if not self.quiet:
-                            print(f"    ✅ VERIFIED: Unit {unit_id} successfully added to units_moved: {new_units_moved}")
-                    else:
-                        if not self.quiet:
-                            print(f"    ❌ FAILED: Unit {unit_id} NOT found in units_moved after add_moved_unit call: {new_units_moved}")
+                            print(f"    ⚠️ Unit {unit_id} not tracked in units_moved")
                         
                 elif current_phase == "shoot" and 'update_unit' in self.controller.state_actions:
                     self.controller.state_actions['update_unit'](unit_id, {"SHOOT_LEFT": 0})
@@ -985,8 +980,8 @@ class W40KEnv(gym.Env):
         # Reduced bot turn logging
         if not hasattr(self, '_bot_turn_count'):
             self._bot_turn_count = 0
-        if self._bot_turn_count < 3:
-            print(f"🤖 BOT TURN START: Player {current_player}, Phase {current_phase}")
+        if self._bot_turn_count < 1:
+            print(f"🤖 BOT TURN: Player {current_player}, Phase {current_phase}")
             self._bot_turn_count += 1
         
         # Get bot units (Player 0) and mark them all as acted

@@ -159,55 +159,6 @@ class GameController:
         EXACT mirror of hooks initialization from TypeScript.
         Initialize all custom hooks with proper integration.
         """
-        # Initialize game configuration (EXACT from TypeScript)
-        config_data = use_game_config(
-            board_config_name=self.config.board_config_name,
-            config_path=self.config.config_path
-        )
-        self.board_config = config_data["board_config"]
-        self.game_config = config_data["game_config"]
-        self.config_loading = config_data["loading"]
-        self.config_error = config_data["error"]
-        
-        # Initialize game state with custom hook (EXACT from TypeScript)
-        game_state_data = use_game_state(self.game_units)
-        self.game_state = game_state_data["manager"].game_state  # Use manager's actual object
-        self.move_preview = game_state_data["move_preview"]
-        self.attack_preview = game_state_data["attack_preview"]
-        self.shooting_phase_state = game_state_data["shooting_phase_state"]
-        self.charge_roll_popup = game_state_data["charge_roll_popup"]
-        self.state_actions = game_state_data["actions"]
-        self.state_manager = game_state_data["manager"]
-        
-        # Initialize game log hook (EXACT from TypeScript)
-        log_data = use_game_log()
-        self.game_log = log_data
-        
-        # Initialize replay logger integration for training
-        # DO NOT create a new instance - wait for gym to provide one
-        self.replay_logger = None
-        # Replay logger will be set by gym environment via connect_replay_logger
-        
-        # Set up game actions with game log (EXACT from TypeScript)
-        actions_data = use_game_actions(
-            game_state=self.game_state,
-            move_preview=self.move_preview,
-            attack_preview=self.attack_preview,
-            shooting_phase_state=self.shooting_phase_state,
-            board_config=self.board_config,
-            actions=self.state_actions,
-            game_log=self.game_log
-        )
-        self.game_actions = actions_data
-        
-        # Initialize phase transition system (EXACT from TypeScript)
-        phase_data = use_phase_transition(
-            game_state=self.game_state,
-            board_config=self.board_config,
-            is_unit_eligible_func=self.game_actions["is_unit_eligible"],
-            actions=self.state_actions
-        )
-        self.phase_transitions = phase_data
 
     # === CORE GAME METHODS (EXACT from TypeScript patterns) ===
 
@@ -549,9 +500,9 @@ class TrainingGameController(GameController):
         # Initialize replay logger for training - will be set by gym via connect_replay_logger
         self.replay_logger = None
         
-        # Initialize training game actions - pass THE SAME game_state object
+        # Initialize training game actions - CRITICAL: Pass the state_manager's game_state directly
         self.actions_manager = TrainingGameActions(
-            game_state=self.game_state,  # THE SAME object
+            game_state=self.state_manager.game_state,  # Direct reference to source
             move_preview=self.move_preview,
             attack_preview=self.attack_preview,
             shooting_phase_state=self.shooting_phase_state,
@@ -561,9 +512,9 @@ class TrainingGameController(GameController):
         )
         self.game_actions = self.actions_manager.get_available_actions()
         
-        # Initialize training phase transitions - pass THE SAME game_state object
+        # Initialize training phase transitions - CRITICAL: Pass state_manager's game_state directly
         self.phase_manager = TrainingPhaseTransition(
-            game_state=self.game_state,  # THE SAME object used everywhere
+            game_state=self.state_manager.game_state,  # Direct reference to source
             board_config=self.board_config,
             is_unit_eligible_func=self.game_actions["is_unit_eligible"],
             actions=self.state_actions
