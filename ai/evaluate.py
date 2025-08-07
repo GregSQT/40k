@@ -54,7 +54,7 @@ def setup_imports():
         print("AI_INSTRUCTIONS.md: Please ensure gym40k.py exists in ai/ directory and is properly configured")
         sys.exit(1)
 
-def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, deterministic=True, verbose=True):
+def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verbose):
     """
     Evaluate trained model with comprehensive AI_GAME.md compliance testing.
     AI_INSTRUCTIONS.md: "Use evaluation.py as the main evaluation script"
@@ -75,12 +75,12 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, 
             config = get_config_loader()
             training_config = config.load_training_config("default")
             callback_params = training_config.get("callback_params", {})
-            num_episodes = callback_params.get("n_eval_episodes", 50)
+            if "n_eval_episodes" not in callback_params:
+                raise KeyError("Missing 'n_eval_episodes' in callback_params section of training config")
+            num_episodes = callback_params["n_eval_episodes"]
             print(f"✅ Using num_episodes from config: {num_episodes}")
         except Exception as e:
-            print(f"⚠️ Failed to load num_episodes from config: {e}")
-            num_episodes = 50
-            print(f"⚠️ Using fallback num_episodes: {num_episodes}")
+            raise RuntimeError(f"Failed to load num_episodes from config: {e}")
     
     # Load model with proper config path handling
     try:
@@ -244,7 +244,7 @@ def evaluate_model(model_path, rewards_config="phase_based", num_episodes=None, 
     env.close()
     return results
 
-def analyze_phase_behavior(model_path, rewards_config="phase_based", num_episodes=None):
+def analyze_phase_behavior(model_path, rewards_config, num_episodes):
     """Detailed analysis of AI behavior in each phase following AI_GAME_OVERVIEW.md."""
     
     # AI_INSTRUCTIONS.md: Load num_episodes from config, no hardcoding
@@ -253,21 +253,21 @@ def analyze_phase_behavior(model_path, rewards_config="phase_based", num_episode
             config = get_config_loader()
             training_config = config.load_training_config("default")
             callback_params = training_config.get("callback_params", {})
-            num_episodes = min(callback_params.get("n_eval_episodes", 10), 10)  # Cap at 10 for detailed analysis
+            if "n_eval_episodes" not in callback_params:
+                raise KeyError("Missing 'n_eval_episodes' in callback_params section of training config for analysis")
+            num_episodes = min(callback_params["n_eval_episodes"])
             print(f"✅ Using num_episodes from config for analysis: {num_episodes}")
         except Exception as e:
-            print(f"⚠️ Failed to load num_episodes from config: {e}")
-            num_episodes = 10
-            print(f"⚠️ Using fallback num_episodes for analysis: {num_episodes}")
+            raise RuntimeError(f"Failed to load num_episodes from config for analysis: {e}")
 
 def main():
     """Main evaluation function following AI_INSTRUCTIONS.md exactly."""
     parser = argparse.ArgumentParser(description="Evaluate W40K AI following AI_GAME_OVERVIEW.md specifications")
-    parser.add_argument("--model", default=None,
-                       help="Path to model file (default: use config path)")
-    parser.add_argument("--rewards-config", default="default",
+    parser.add_argument("--model", required=True,
+                       help="Path to model file")
+    parser.add_argument("--rewards-config", required=True,
                        help="Rewards configuration to use for evaluation")
-    parser.add_argument("--episodes", type=int, default=50,
+    parser.add_argument("--episodes", type=int, required=True,
                        help="Number of evaluation episodes")
     parser.add_argument("--deterministic", action="store_true",
                        help="Use deterministic actions")
@@ -285,7 +285,7 @@ def main():
         config = get_config_loader()
         
         # Evaluate model
-        model_path = args.model or config.get_model_path()
+        model_path = args.model
         
         results = evaluate_model(
             model_path, 
@@ -297,8 +297,8 @@ def main():
         
         if results and args.analyze_phases:
             print("\n" + "=" * 70)
-            # Use config-based episodes or cap at 10 for performance
-            analysis_episodes = min(args.episodes, 10) if args.episodes != 50 else None
+            # Cap episodes at 10 for performance
+            analysis_episodes = min(args.episodes, 10)
             analyze_phase_behavior(model_path, args.rewards_config, analysis_episodes)  
         
         return 0

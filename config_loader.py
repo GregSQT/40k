@@ -13,22 +13,17 @@ from pathlib import Path
 class ConfigLoader:
     """Centralized configuration loader."""
     
-    def __init__(self, root_path: Optional[str] = None):
+    def __init__(self, root_path: str):
         """Initialize config loader.
         
         Args:
-            root_path: Optional root path. If None, assumes config_loader.py is in project root.
+            root_path: Root path for configuration directory.
         """
-        if root_path is None:
-            # config_loader.py should be in project root
-            self.root_path = Path(__file__).resolve().parent
-        else:
-            self.root_path = Path(root_path)
-        
+        self.root_path = Path(root_path)
         self.config_dir = self.root_path / "config"
         self._cache = {}
     
-    def load_config(self, config_name: str, force_reload: bool = False) -> Dict[str, Any]:
+    def load_config(self, config_name: str, force_reload: bool) -> Dict[str, Any]:
         """Load configuration file.
         
         Args:
@@ -135,17 +130,17 @@ class ConfigLoader:
         return self.load_config("rewards_config")
     
     # ─── Alias methods for named config loading ─────────────────────────
-    def load_training_config(self, name: str = "default") -> Dict[str, Any]:
+    def load_training_config(self, name: str) -> Dict[str, Any]:
         """Load a named training configuration from training_config.json."""
-        configs = self.load_config("training_config")
+        configs = self.load_config("training_config", force_reload=False)
         try:
             return configs[name]
         except KeyError:
             raise KeyError(f"Training config '{name}' not found in training_config.json")
 
-    def load_rewards_config(self, name: str = None) -> Dict[str, Any]:
+    def load_rewards_config(self, name: str) -> Dict[str, Any]:
         """Load rewards configuration directly (unit-type-based approach)."""
-        return self.load_config("rewards_config")
+        return self.load_config("rewards_config", force_reload=False)
     
     def get_board_config(self) -> Dict[str, Any]:
         """Get board configuration."""
@@ -162,7 +157,7 @@ def get_config_loader() -> ConfigLoader:
     """Get global config loader instance."""
     global _config_loader
     if _config_loader is None:
-        _config_loader = ConfigLoader()
+        _config_loader = ConfigLoader(root_path=str(Path(__file__).resolve().parent))
     return _config_loader
 
 def get_max_turns() -> int:
@@ -223,14 +218,14 @@ def get_phase_order(self) -> list[str]:
         raise ValueError("Phase order is empty in game_config.json")
     return phase_order
 
-def get_max_steps_per_episode(self, training_config_name: str = "default") -> int:
+def get_max_steps_per_episode(self, training_config_name: str) -> int:
     """Get max steps per episode - raises error if missing."""
     training_config = self.load_training_config(training_config_name)
     if "max_steps_per_episode" not in training_config:
         raise KeyError(f"max_steps_per_episode missing from training config '{training_config_name}'")
     return training_config["max_steps_per_episode"]
 
-def get_reward_value(self, unit_type: str, action: str, rewards_config_name: str = "phase_based") -> float:
+def get_reward_value(self, unit_type: str, action: str, rewards_config_name: str) -> float:
     """Get specific reward value - raises error if missing."""
     rewards_config = self.load_rewards_config(rewards_config_name)
     

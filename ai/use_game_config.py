@@ -125,7 +125,7 @@ class UseGameConfig:
     Configuration loading system with ALL features preserved.
     """
     
-    def __init__(self, board_config_name: str = "default", config_path: str = "config"):
+    def __init__(self, board_config_name: str, config_path: str):
         """Initialize with same parameters as TypeScript useGameConfig"""
         self.board_config_name = board_config_name
         self.config_path = config_path
@@ -244,18 +244,22 @@ class UseGameConfig:
             objective=colors_data["objective"]
         )
 
-        # Parse objective zones
+        # Parse objective zones - validate required section exists
+        if "objective_zones" not in config_data:
+            raise KeyError("Board config missing required 'objective_zones' section")
         objective_zones = []
-        for zone_data in config_data.get("objective_zones", []):
+        for zone_data in config_data["objective_zones"]:
             zone = ObjectiveZone(
                 id=zone_data["id"],
                 hexes=zone_data["hexes"]
             )
             objective_zones.append(zone)
 
-        # Parse walls
+        # Parse walls - validate required section exists
+        if "walls" not in config_data:
+            raise KeyError("Board config missing required 'walls' section")
         walls = []
-        for wall_data in config_data.get("walls", []):
+        for wall_data in config_data["walls"]:
             wall = Wall(
                 id=wall_data["id"],
                 start=wall_data["start"],
@@ -264,35 +268,48 @@ class UseGameConfig:
             )
             walls.append(wall)
 
-        # Parse display config
-        display_data = config_data.get("display", {})
+        # Parse display config - validate required section exists
+        if "display" not in config_data:
+            raise KeyError("Board config missing required 'display' section")
+        display_data = config_data["display"]
+        
+        # Validate all required display fields
+        required_display = ["resolution", "autoDensity", "antialias", "forceCanvas", 
+                           "icon_scale", "eligible_outline_width", "eligible_outline_alpha",
+                           "hp_bar_width_ratio", "hp_bar_height", "hp_bar_y_offset_ratio",
+                           "unit_circle_radius_ratio", "unit_text_size"]
+        
+        for display_key in required_display:
+            if display_key not in display_data:
+                raise KeyError(f"Display config missing required field '{display_key}'")
+        
         display = DisplayConfig(
-            resolution=display_data.get("resolution", "auto"),
-            auto_density=display_data.get("autoDensity", True),
-            antialias=display_data.get("antialias", True),
-            force_canvas=display_data.get("forceCanvas", False),
-            icon_scale=display_data.get("icon_scale", 1.0),
-            eligible_outline_width=display_data.get("eligible_outline_width", 2.0),
-            eligible_outline_alpha=display_data.get("eligible_outline_alpha", 0.8),
-            hp_bar_width_ratio=display_data.get("hp_bar_width_ratio", 0.8),
-            hp_bar_height=display_data.get("hp_bar_height", 4.0),
-            hp_bar_y_offset_ratio=display_data.get("hp_bar_y_offset_ratio", 0.3),
-            unit_circle_radius_ratio=display_data.get("unit_circle_radius_ratio", 0.85),
-            unit_text_size=display_data.get("unit_text_size", 10.0),
-            selected_border_width=display_data.get("selected_border_width", 3.0),
-            charge_target_border_width=display_data.get("charge_target_border_width", 2.0),
-            default_border_width=display_data.get("default_border_width", 1.0),
-            canvas_border=display_data.get("canvas_border", "1px solid #333"),
-            right_column_bottom_offset=display_data.get("right_column_bottom_offset", 20.0)
+            resolution=display_data["resolution"],
+            auto_density=display_data["autoDensity"],
+            antialias=display_data["antialias"],
+            force_canvas=display_data["forceCanvas"],
+            icon_scale=display_data["icon_scale"],
+            eligible_outline_width=display_data["eligible_outline_width"],
+            eligible_outline_alpha=display_data["eligible_outline_alpha"],
+            hp_bar_width_ratio=display_data["hp_bar_width_ratio"],
+            hp_bar_height=display_data["hp_bar_height"],
+            hp_bar_y_offset_ratio=display_data["hp_bar_y_offset_ratio"],
+            unit_circle_radius_ratio=display_data["unit_circle_radius_ratio"],
+            unit_text_size=display_data["unit_text_size"],
+            selected_border_width=display_data["selected_border_width"],
+            charge_target_border_width=display_data["charge_target_border_width"],
+            default_border_width=display_data["default_border_width"],
+            canvas_border=display_data["canvas_border"],
+            right_column_bottom_offset=display_data["right_column_bottom_offset"]
         )
 
         return BoardConfig(
             cols=config_data["cols"],
             rows=config_data["rows"],
             hex_radius=config_data["hex_radius"],
-            margin=config_data.get("margin", 20),
-            wall_hexes=config_data.get("wall_hexes", []),
-            objective_hexes=config_data.get("objective_hexes", []),
+            margin=config_data["margin"],
+            wall_hexes=config_data["wall_hexes"],
+            objective_hexes=config_data["objective_hexes"],
             colors=colors,
             objective_zones=objective_zones,
             walls=walls,
@@ -405,26 +422,32 @@ class UseGameConfig:
 
     def get_hex_radius(self) -> float:
         """Get hex radius for calculations"""
-        return self.board_config.hex_radius if self.board_config else 20.0
+        if not self.board_config:
+            raise RuntimeError("Board config not loaded - cannot access hex_radius")
+        return self.board_config.hex_radius
 
     def get_board_dimensions(self) -> Tuple[int, int]:
         """Get board dimensions (cols, rows)"""
-        if self.board_config:
-            return (self.board_config.cols, self.board_config.rows)
-        return (24, 18)
+        if not self.board_config:
+            raise RuntimeError("Board config not loaded - cannot access board dimensions")
+        return (self.board_config.cols, self.board_config.rows)
 
     def get_wall_hexes(self) -> List[Tuple[int, int]]:
         """Get wall hexes coordinates"""
-        return self.board_config.wall_hexes if self.board_config else []
+        if not self.board_config:
+            raise RuntimeError("Board config not loaded - cannot access wall_hexes")
+        return self.board_config.wall_hexes
 
     def get_objective_hexes(self) -> List[Tuple[int, int]]:
         """Get objective hexes coordinates"""
-        return self.board_config.objective_hexes if self.board_config else []
+        if not self.board_config:
+            raise RuntimeError("Board config not loaded - cannot access objective_hexes")
+        return self.board_config.objective_hexes
 
     def get_player_color(self, player: int) -> str:
         """Get color for specific player"""
         if not self.board_config:
-            return "0x0000FF" if player == 0 else "0xFF0000"
+            raise RuntimeError("Board config not loaded - cannot access player colors")
         
         return (self.board_config.colors.player_0 if player == 0 
                 else self.board_config.colors.player_1)
@@ -465,8 +488,8 @@ class UseGameConfig:
 
 # === FACTORY FUNCTION (Mirror of TypeScript hook usage) ===
 
-def use_game_config(board_config_name: str = "default", 
-                   config_path: str = "config") -> Dict[str, Any]:
+def use_game_config(board_config_name: str, 
+                   config_path: str) -> Dict[str, Any]:
     """
     Factory function that mirrors the TypeScript useGameConfig hook.
     Returns the same configuration data that the TypeScript hook returns.
@@ -483,9 +506,9 @@ class TrainingGameConfig(UseGameConfig):
     Adds performance optimizations and training-specific methods.
     """
     
-    def __init__(self, board_config_name: str = "default", 
-                 config_path: str = "config",
-                 cache_configs: bool = True):
+    def __init__(self, board_config_name: str, 
+                 config_path: str,
+                 cache_configs: bool):
         self.cache_configs = cache_configs
         self._config_cache: Dict[str, Any] = {}
         

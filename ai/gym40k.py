@@ -48,17 +48,17 @@ class W40KEnv(gym.Env):
     Maintains EXACT Gymnasium interface while using Python mirrors for ALL game logic.
     """
 
-    def __init__(self, rewards_config=None, training_config_name="default", 
-                 controlled_agent=None, active_agents=None, scenario_file=None, 
-                 unit_registry=None, quiet=False):
+    def __init__(self, rewards_config, training_config_name, 
+                 controlled_agent, active_agents, scenario_file, 
+                 unit_registry, quiet):
         super().__init__()
         
         self.quiet = quiet
         
         # Multi-agent support - reuse shared registry if provided
-        self.unit_registry = unit_registry if unit_registry is not None else UnitRegistry()
+        self.unit_registry = unit_registry
         self.controlled_agent = controlled_agent
-        self.active_agents = active_agents or []
+        self.active_agents = active_agents
         
         # Load configuration
         self.config = get_config_loader()
@@ -118,29 +118,33 @@ class W40KEnv(gym.Env):
             self.replay_logger = None
             self.game_logger = None
 
-    def _calculate_max_units_from_scenario(self, scenario_file=None):
+    def _calculate_max_units_from_scenario(self, scenario_file):
         """Calculate max_units dynamically from scenario file for action space."""
-        if scenario_file and os.path.exists(scenario_file):
-            try:
-                with open(scenario_file, 'r') as f:
-                    scenario_data = json.load(f)
-                
-                if isinstance(scenario_data, list):
-                    units = scenario_data
-                elif isinstance(scenario_data, dict) and "units" in scenario_data:
-                    units = scenario_data["units"]
-                else:
-                    units = list(scenario_data.values()) if isinstance(scenario_data, dict) else []
-                
-                # Count units per player
-                player_0_count = sum(1 for unit in units if unit.get("player") == 0)
-                player_1_count = sum(1 for unit in units if unit.get("player") == 1)
-                return max(player_0_count, player_1_count, 4)
-            except Exception as e:
-                raise RuntimeError(f"Failed to load scenario file {scenario_file}: {e}")
+        if not scenario_file:
+            raise ValueError("Scenario file path is required for max_units calculation")
         
-        # Raise error instead of fallback
-        raise FileNotFoundError(f"No valid scenario file found at {scenario_file}")
+        if not os.path.exists(scenario_file):
+            raise FileNotFoundError(f"Scenario file not found for max_units calculation: {scenario_file}")
+        
+        try:
+            with open(scenario_file, 'r') as f:
+                scenario_data = json.load(f)
+            
+            if isinstance(scenario_data, list):
+                units = scenario_data
+            elif isinstance(scenario_data, dict) and "units" in scenario_data:
+                units = scenario_data["units"]
+            elif isinstance(scenario_data, dict):
+                units = list(scenario_data.values())
+            else:
+                raise ValueError(f"Invalid scenario data structure in {scenario_file}")
+            
+            # Count units per player - validate player field exists
+            player_0_count = sum(1 for unit in units if unit["player"] == 0)
+            player_1_count = sum(1 for unit in units if unit["player"] == 1)
+            return max(player_0_count, player_1_count, 4)
+        except Exception as e:
+            raise RuntimeError(f"Failed to process scenario file {scenario_file} for max_units: {e}")
 
     def _load_scenario_metadata(self, scenario_file):
         """Load scenario metadata for replay compatibility."""
@@ -182,47 +186,30 @@ class W40KEnv(gym.Env):
         self.board_size = [cols, rows]
 
     def _load_scenario_units(self, scenario_file):
-        """Load units from scenario file or create default scenario."""
-        if scenario_file and os.path.exists(scenario_file):
-            try:
-                with open(scenario_file, 'r') as f:
-                    scenario_data = json.load(f)
-                
-                if isinstance(scenario_data, list):
-                    basic_units = scenario_data
-                elif isinstance(scenario_data, dict) and "units" in scenario_data:
-                    basic_units = scenario_data["units"]
-                elif isinstance(scenario_data, dict):
-                    basic_units = list(scenario_data.values())
-                else:
-                    basic_units = self._create_default_units()
-                
-                # Enhance units with full properties from unit registry
-                return self._enhance_units_with_properties(basic_units)
-            except Exception as e:
-                if not self.quiet:
-                    print(f"Failed to load scenario file {scenario_file}: {e}")
+        """Load units from scenario file - raises error if missing."""
+        if not scenario_file:
+            raise ValueError("Scenario file path is required")
         
-        # Create default scenario
-        basic_units = self._create_default_units()
-        return self._enhance_units_with_properties(basic_units)
-
-    def _create_default_units(self):
-        """Create default units for training."""
-        default_units = [
-            # Player 1 (AI) units
-            {"id": 1, "player": 1, "unit_type": "Intercessor", "col": 2, "row": 2},
-            {"id": 2, "player": 1, "unit_type": "Intercessor", "col": 4, "row": 2},
-            {"id": 3, "player": 1, "unit_type": "AssaultIntercessor", "col": 6, "row": 2},
-            {"id": 4, "player": 1, "unit_type": "AssaultIntercessor", "col": 8, "row": 2},
+        if not os.path.exists(scenario_file):
+            raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
+        
+        try:
+            with open(scenario_file, 'r') as f:
+                scenario_data = json.load(f)
             
-            # Player 0 (Enemy) units
-            {"id": 11, "player": 0, "unit_type": "Termagant", "col": 2, "row": 15},
-            {"id": 12, "player": 0, "unit_type": "Termagant", "col": 4, "row": 15},
-            {"id": 13, "player": 0, "unit_type": "Hormagaunt", "col": 6, "row": 15},
-            {"id": 14, "player": 0, "unit_type": "Hormagaunt", "col": 8, "row": 15},
-        ]
-        return default_units
+            if isinstance(scenario_data, list):
+                basic_units = scenario_data
+            elif isinstance(scenario_data, dict) and "units" in scenario_data:
+                basic_units = scenario_data["units"]
+            elif isinstance(scenario_data, dict):
+                basic_units = list(scenario_data.values())
+            else:
+                raise ValueError(f"Invalid scenario data format in {scenario_file}")
+            
+            # Enhance units with full properties from unit registry
+            return self._enhance_units_with_properties(basic_units)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load scenario file {scenario_file}: {e}")
 
     def _enhance_units_with_properties(self, basic_units):
         """Enhance basic unit data with all required properties from unit registry."""
@@ -233,7 +220,9 @@ class W40KEnv(gym.Env):
         
         for unit_data in basic_units:
             # Get unit type and validate it exists
-            unit_type = unit_data.get("unit_type")
+            if "unit_type" not in unit_data:
+                raise ValueError(f"Unit missing required 'unit_type' field: {unit_data}")
+            unit_type = unit_data["unit_type"]
             if not unit_type:
                 raise ValueError(f"Unit missing unit_type: {unit_data}")
             
@@ -247,7 +236,7 @@ class W40KEnv(gym.Env):
             enhanced_unit = {
                 # Basic scenario properties
                 "id": unit_data["id"],
-                "name": unit_data.get("name", f"{unit_type}_{unit_data['id']}"),
+                "name": unit_data["name"],
                 "player": unit_data["player"],
                 "unit_type": unit_type,
                 "col": unit_data["col"],
@@ -281,7 +270,7 @@ class W40KEnv(gym.Env):
                 
                 # Visual properties
                 "ICON": full_unit_data["ICON"],
-                "ICON_SCALE": full_unit_data.get("ICON_SCALE", 1.0),
+                "ICON_SCALE": full_unit_data["ICON_SCALE"],
                 
                 # Game state properties
                 "CUR_HP": full_unit_data["HP_MAX"],
@@ -373,9 +362,10 @@ class W40KEnv(gym.Env):
             print(f"🎮 Step: current_player={current_player}, eligible_units={len(eligible_units)}")
         
         if current_player == 0:
-            if not self.quiet:
-                print(f"🤖 Executing bot turn for player {current_player}")
+            # CRITICAL DEBUG: Verify bot turn execution
+            print(f"🤖 EXECUTING BOT TURN for player {current_player}")
             self._execute_bot_turn()
+            print(f"🤖 BOT TURN COMPLETED")
             # Force phase advancement after bot turn to prevent loops
             if not self._get_eligible_units():
                 self._advance_phase_or_turn()
@@ -567,7 +557,13 @@ class W40KEnv(gym.Env):
         # Filter units for current player that are eligible for current phase
         eligible_units = []
         for unit in all_units:
-            if unit["player"] == current_player and unit.get("alive", True):
+            # CRITICAL: Validate all units have required properties - NO DEFAULTS
+            if "alive" not in unit:
+                raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'alive' property: {unit}")
+            if "player" not in unit:
+                raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'player' property: {unit}")
+            
+            if unit["player"] == current_player and unit["alive"]:
                 if self._is_unit_eligible_for_phase(unit, current_phase):
                     eligible_units.append(unit)
         
@@ -580,9 +576,9 @@ class W40KEnv(gym.Env):
             print(f"    Player {current_player} units: {len(player_units)}")
             for unit in player_units[:3]:  # Show first 3 units
                 eligible = self._is_unit_eligible_for_phase(unit, current_phase)
-                print(f"      Unit {unit['id']}: alive={unit.get('alive', True)}, eligible={eligible}")
+                print(f"      Unit {unit['id']}: alive={unit['alive']}, eligible={eligible}")
                 if current_phase == "move":
-                    print(f"        has_moved={unit.get('has_moved', False)}")
+                    print(f"        has_moved={unit['has_moved']}")
         
         return eligible_units
 
@@ -601,7 +597,7 @@ class W40KEnv(gym.Env):
             return unit["id"] not in units_moved
         elif phase == "shoot":
             return (unit["id"] not in units_moved and 
-                    unit.get("SHOOT_LEFT", 0) > 0)
+                    unit["SHOOT_LEFT"] > 0)
         elif phase == "charge":
             return unit["id"] not in units_charged
         elif phase == "combat":
@@ -737,7 +733,7 @@ class W40KEnv(gym.Env):
     def _find_shoot_target(self, unit):
         """Find valid shooting target using controller logic."""
         all_units = self.controller.get_units()
-        enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("alive", True)]
+        enemy_units = [u for u in all_units if u["player"] != unit["player"] and u["alive"]]
         
         # Use controller's shooting logic to find valid target
         for target in enemy_units:
@@ -748,7 +744,7 @@ class W40KEnv(gym.Env):
     def _find_charge_target(self, unit):
         """Find valid charge target using controller logic."""
         all_units = self.controller.get_units()
-        enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("alive", True)]
+        enemy_units = [u for u in all_units if u["player"] != unit["player"] and u["alive"]]
         
         # Use controller's charge logic to find valid target
         for target in enemy_units:
@@ -759,7 +755,7 @@ class W40KEnv(gym.Env):
     def _find_combat_target(self, unit):
         """Find valid combat target using controller logic."""
         all_units = self.controller.get_units()
-        enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("alive", True)]
+        enemy_units = [u for u in all_units if u["player"] != unit["player"] and u["alive"]]
         
         # Use controller's combat logic to find valid target
         for target in enemy_units:
@@ -848,7 +844,9 @@ class W40KEnv(gym.Env):
 
     def _get_unit_reward_config(self, unit):
         """Get reward configuration for unit type."""
-        unit_type = unit.get("unit_type", "unknown")
+        if "unit_type" not in unit:
+            raise KeyError(f"Unit missing required 'unit_type' field: {unit}")
+        unit_type = unit["unit_type"]
         
         try:
             agent_key = self.unit_registry.get_model_key(unit_type)
@@ -923,28 +921,28 @@ class W40KEnv(gym.Env):
         all_units = self.controller.get_units()
         
         # AI units (first max_units * 7 elements)
-        ai_units = [u for u in all_units if u["player"] == 1 and u.get("alive", True)]
+        ai_units = [u for u in all_units if u["player"] == 1 and u["alive"]]
         for i in range(self.max_units):
             if i < len(ai_units):
                 unit = ai_units[i]
                 base_idx = i * 7
                 obs[base_idx] = unit["col"] / self.board_size[0]
                 obs[base_idx + 1] = unit["row"] / self.board_size[1]
-                obs[base_idx + 2] = unit.get("cur_hp", unit.get("hp_max", 1)) / unit.get("hp_max", 1)
-                obs[base_idx + 3] = 1.0 if unit.get("has_moved", False) else 0.0
-                obs[base_idx + 4] = 1.0 if unit.get("has_shot", False) else 0.0
-                obs[base_idx + 5] = 1.0 if unit.get("has_charged", False) else 0.0
-                obs[base_idx + 6] = 1.0 if unit.get("has_attacked", False) else 0.0
+                obs[base_idx + 2] = unit["CUR_HP"] / unit["HP_MAX"]
+                obs[base_idx + 3] = 1.0 if unit["has_moved"] else 0.0
+                obs[base_idx + 4] = 1.0 if unit["has_shot"] else 0.0
+                obs[base_idx + 5] = 1.0 if unit["has_charged"] else 0.0
+                obs[base_idx + 6] = 1.0 if unit["has_attacked"] else 0.0
         
         # Enemy units (next max_units * 4 elements)
-        enemy_units = [u for u in all_units if u["player"] == 0 and u.get("alive", True)]
+        enemy_units = [u for u in all_units if u["player"] == 0 and u["alive"]]
         for i in range(self.max_units):
             if i < len(enemy_units):
                 unit = enemy_units[i]
                 base_idx = self.max_units * 7 + i * 4
                 obs[base_idx] = unit["col"] / self.board_size[0]
                 obs[base_idx + 1] = unit["row"] / self.board_size[1]
-                obs[base_idx + 2] = unit.get("cur_hp", unit.get("hp_max", 1)) / unit.get("hp_max", 1)
+                obs[base_idx + 2] = unit["CUR_HP"] / unit["HP_MAX"]
                 obs[base_idx + 3] = 1.0  # alive flag
         
         # Phase encoding (last 4 elements)
@@ -964,8 +962,8 @@ class W40KEnv(gym.Env):
     def _get_info(self):
         """Get info dictionary for Gymnasium interface."""
         all_units = self.controller.get_units()
-        ai_units_alive = [u for u in all_units if u["player"] == 1 and u.get("alive", True) and u.get("HP_LEFT", u.get("CUR_HP", 1)) > 0]
-        enemy_units_alive = [u for u in all_units if u["player"] == 0 and u.get("alive", True) and u.get("HP_LEFT", u.get("CUR_HP", 1)) > 0]
+        ai_units_alive = [u for u in all_units if u["player"] == 1 and u["alive"] and u["HP_LEFT"] > 0]
+        enemy_units_alive = [u for u in all_units if u["player"] == 0 and u["alive"] and u["HP_LEFT"] > 0]
         
         # Check for game end conditions
         if len(ai_units_alive) == 0 and len(enemy_units_alive) > 0:
@@ -994,12 +992,15 @@ class W40KEnv(gym.Env):
         current_phase = self.controller.get_current_phase()
         current_player = self.controller.get_current_player()
         
+        # CRITICAL DEBUG: Always print bot turn start info
+        print(f"🤖 BOT TURN START: Player {current_player}, Phase {current_phase}")
+        
         if not self.quiet:
             print(f"🤖 Bot turn: Player {current_player}, Phase {current_phase} - auto-advancing")
         
         # Get bot units (Player 0) and mark them all as acted
         all_units = self.controller.get_units()
-        bot_units = [u for u in all_units if u["player"] == 0 and u.get("alive", True)]
+        bot_units = [u for u in all_units if u["player"] == 0 and u["alive"]]
         
         # Mark all bot units as having acted in current phase with debugging
         marked_units = 0
@@ -1023,7 +1024,7 @@ class W40KEnv(gym.Env):
                         
                         # FALLBACK: Direct state manipulation if state_actions fails
                         if hasattr(self.controller, 'game_state'):
-                            current_moved = self.controller.game_state.get("units_moved", [])
+                            current_moved = self.controller.game_state["units_moved"]
                             if bot_unit["id"] not in current_moved:
                                 if isinstance(current_moved, list):
                                     current_moved.append(bot_unit["id"])
@@ -1053,16 +1054,27 @@ class W40KEnv(gym.Env):
         
         # Verify the marking worked
         if not self.quiet:
-            current_moved = self.controller.game_state.get("units_moved", [])
+            current_moved = self.controller.game_state["units_moved"]
             print(f"    🤖 Units moved after marking: {current_moved}")
         
         # CRITICAL FIX: Force mark ALL bot units as moved to ensure phase transition
         for bot_unit in bot_units:
-            if bot_unit["id"] not in self.controller.game_state.get("units_moved", []):
+            if bot_unit["id"] not in self.controller.game_state["units_moved"]:
                 if hasattr(self.controller, 'state_actions') and 'add_moved_unit' in self.controller.state_actions:
                     self.controller.state_actions['add_moved_unit'](bot_unit["id"])
                     if not self.quiet:
                         print(f"    🔧 FORCE MARKED unit {bot_unit['id']} as moved")
+        
+        # DEBUG: Verify units_moved state after marking
+        current_moved = self.controller.game_state["units_moved"]
+        bot_unit_ids = [u["id"] for u in bot_units]
+        if not hasattr(self, '_units_debug_count'):
+            self._units_debug_count = 0
+        if self._units_debug_count < 3:
+            print(f"🔧 UNITS_MOVED DEBUG #{self._units_debug_count + 1}: {current_moved}")
+            print(f"    Bot unit IDs: {bot_unit_ids}")
+            print(f"    All bot units marked? {all(uid in current_moved for uid in bot_unit_ids)}")
+            self._units_debug_count += 1
         
         if not self.quiet:
             print(f"🤖 Bot marked {len(bot_units)} units as acted - advancing phase")
@@ -1098,7 +1110,7 @@ class W40KEnv(gym.Env):
         """Simple bot movement towards nearest enemy."""
         # Find nearest enemy
         all_units = self.controller.get_units()
-        enemies = [u for u in all_units if u["player"] != bot_unit["player"] and u.get("alive", True)]
+        enemies = [u for u in all_units if u["player"] != bot_unit["player"] and u["alive"]]
         
         if not enemies:
             # No enemies - just mark as moved to advance phase
@@ -1133,7 +1145,7 @@ class W40KEnv(gym.Env):
 
     def _bot_simple_shoot(self, bot_unit):
         """Simple bot shooting at nearest enemy in range."""
-        if bot_unit.get("RNG_RNG", 0) <= 0:
+        if bot_unit["RNG_RNG"] <= 0:
             # No ranged weapon - mark as moved to advance phase
             if hasattr(self.controller, 'state_actions') and 'add_moved_unit' in self.controller.state_actions:
                 self.controller.state_actions['add_moved_unit'](bot_unit["id"])
