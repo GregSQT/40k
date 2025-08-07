@@ -33,6 +33,26 @@ class UsePhaseTransition:
                  actions: Dict[str, Callable],
                  quiet: bool = False):
         """Initialize with same parameters as TypeScript usePhaseTransition"""
+        # CRITICAL DEBUG: Validate required fields and track initialization state
+        if 'phase' not in game_state:
+            raise KeyError("game_state missing required 'phase' field")
+        if 'current_player' not in game_state:
+            raise KeyError("game_state missing required 'current_player' field")
+        if 'units_moved' not in game_state:
+            raise KeyError("game_state missing required 'units_moved' field")
+            
+        print(f"🔧 UsePhaseTransition.__init__ called:")
+        print(f"🔧   game_state object ID: {id(game_state)}")
+        print(f"🔧   Initial phase: {game_state['phase']}")
+        print(f"🔧   Initial player: {game_state['current_player']}")
+        print(f"🔧   Initial units_moved: {game_state['units_moved']}")
+        if 'set_phase' in actions:
+            action_state_id = id(actions['set_phase'].__self__.game_state)
+            print(f"🔧   actions['set_phase'] state ID: {action_state_id}")
+            print(f"🔧   State objects match: {id(game_state) == action_state_id}")
+        else:
+            raise KeyError("actions missing required 'set_phase' function")
+        
         self.game_state = game_state
         self.board_config = board_config
         self.is_unit_eligible_func = is_unit_eligible_func
@@ -271,7 +291,51 @@ class UsePhaseTransition:
         EXACT mirror of the main useEffect logic from TypeScript.
         Process all phase transitions based on current game state.
         """
-        # Update local state references
+        # CRITICAL FIX: ALWAYS get the freshest game_state reference from multiple sources
+        fresh_game_state = None
+        
+        # Try multiple sources to find the current active game_state
+        if 'set_phase' in self.actions:
+            try:
+                candidate_state = self.actions['set_phase'].__self__.game_state
+                if candidate_state and isinstance(candidate_state, dict):
+                    fresh_game_state = candidate_state
+            except (AttributeError, TypeError):
+                pass
+        
+        if 'add_moved_unit' in self.actions and not fresh_game_state:
+            try:
+                candidate_state = self.actions['add_moved_unit'].__self__.game_state
+                if candidate_state and isinstance(candidate_state, dict):
+                    fresh_game_state = candidate_state
+            except (AttributeError, TypeError):
+                pass
+        
+        # Force update to freshest available state
+        if fresh_game_state and id(fresh_game_state) != id(self.game_state):
+            # Validate required fields exist in both states - NO DEFAULTS
+            if 'phase' not in self.game_state:
+                raise KeyError("Current game_state missing required 'phase' field")
+            if 'phase' not in fresh_game_state:
+                raise KeyError("Fresh game_state missing required 'phase' field")
+            
+            print(f"🔧 STATE SYNC: Forced update from stale {id(self.game_state)} to fresh {id(fresh_game_state)}")
+            print(f"🔧   Old phase: {self.game_state['phase']}, New phase: {fresh_game_state['phase']}")
+            self.game_state = fresh_game_state
+        elif fresh_game_state:
+            print(f"🔧 STATE CONSISTENT: Using same game_state {id(self.game_state)}")
+        else:
+            raise RuntimeError("Could not find fresh game_state reference from any action source")
+        
+        # Validate final state has required fields
+        if 'phase' not in self.game_state:
+            raise KeyError("Final game_state missing required 'phase' field")
+        if 'current_player' not in self.game_state:
+            raise KeyError("Final game_state missing required 'current_player' field")
+            
+        print(f"🔧 process_phase_transitions: phase={self.game_state['phase']}, player={self.game_state['current_player']}")
+        
+        # Update local state references from synchronized game_state
         self.units = self.game_state["units"]
         self.current_player = self.game_state["current_player"]
         self.phase = self.game_state["phase"]
@@ -282,10 +346,16 @@ class UsePhaseTransition:
         self.combat_sub_phase = self.game_state.get("combat_sub_phase")
         self.combat_active_player = self.game_state.get("combat_active_player")
 
+        print(f"🔧 Synced state: phase={self.phase}, player={self.current_player}, units_moved={list(self.units_moved)}")
+
         # Main phase transition logic (EXACT from TypeScript)
         if self.phase == "move":
+            print(f"🔧 In move phase, checking should_transition_from_move()")
             if self.should_transition_from_move():
+                print(f"🔧 should_transition_from_move returned True - transitioning to shoot")
                 self.transition_to_shoot()
+            else:
+                print(f"🔧 should_transition_from_move returned False - no transition")
                 
         elif self.phase == "shoot":
             if self.should_transition_from_shoot():

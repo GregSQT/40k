@@ -295,8 +295,11 @@ class W40KEnv(gym.Env):
         """Reset environment using mirror controller."""
         super().reset(seed=seed)
         
-        # Reset mirror controller
+        # Reset mirror controller - this creates NEW objects!
         self.controller.reset_game()
+        
+        # CRITICAL FIX: After reset_game(), controller has NEW objects - refresh our references
+        print(f"🔧 RESET: Refreshing references after controller.reset_game()")
         
         # Initialize new episode
         self.controller.start_new_episode()
@@ -308,8 +311,14 @@ class W40KEnv(gym.Env):
         self._last_acting_unit = None
         self._last_target_unit = None
         
-        # Sync state from controller
+        # CRITICAL: Sync state from controller AFTER getting fresh objects
         self._sync_state_from_controller()
+        
+        # CRITICAL DEBUG: Verify we have fresh phase transition objects
+        if hasattr(self.controller, 'phase_transitions'):
+            print(f"🔧 RESET: Fresh phase_transitions available: {list(self.controller.phase_transitions.keys())}")
+        else:
+            print(f"🔧 RESET: ERROR - No phase_transitions after reset!")
         
         # Reset replay data and ensure proper initial state capture
         self.replay_data = []
