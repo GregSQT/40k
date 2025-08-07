@@ -122,6 +122,8 @@ Turn-based tactical combat following official Warhammer 40K rules with phase-bas
 - **Multiple Attacks**: Each unit makes `CC_NB` attacks
 - **Hit/Wound/Save**: Same dice system as shooting but uses `CC_ATK`, `CC_STR`, `CC_AP`, `CC_DMG`
 - **Alternating Selection**: In sub-phase 2, players alternate selecting units to fight
+- **Post-Enemy-Death Validation**: After an enemy is killed, system checks for remaining valid targets within `CC_RNG`
+- **Automatic Termination**: If no enemies remain at combat range after a kill, unit activation ends immediately
 
 ## AI Combat Priority
 1. Enemy with highest `RNG_DMG` or `CC_DMG` that can be killed in 1 combat phase
@@ -242,6 +244,7 @@ actions.resetFledUnits();
 - **Red Outline**: Adjacent enemy targets
 - **Left Click Target**: Execute attack
 - **Left Click Unit**: Cancel attack, end activation
+- **Auto-End Activation**: Unit activation automatically ends when no enemies remain at CC_RNG distance after any attack resolution
 
 ---
 

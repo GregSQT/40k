@@ -53,7 +53,7 @@ class W40KEnv(gym.Env):
                  unit_registry=None, quiet=False):
         super().__init__()
         
-        self.quiet = False
+        self.quiet = quiet
         
         # Multi-agent support - reuse shared registry if provided
         self.unit_registry = unit_registry if unit_registry is not None else UnitRegistry()
@@ -170,7 +170,7 @@ class W40KEnv(gym.Env):
         )
         
         # Initialize TrainingGameController and start it
-        self.controller = TrainingGameController(config)
+        self.controller = TrainingGameController(config, quiet=self.quiet)
         self.controller.start_game()  # CRITICAL: Start the controller
         
         # Initialize TrainingGameState for proper phase management
@@ -391,7 +391,9 @@ class W40KEnv(gym.Env):
         # DETAILED ACTION EXECUTION LOGGING
         if not self.quiet:
             print(f"🎮 STEP {self.step_count}: Player {current_player}, Phase {self.controller.get_current_phase()}")
+            print(f"    Eligible units: {len(eligible_units)}")
             print(f"    Acting unit: {acting_unit['id']} at ({acting_unit['col']},{acting_unit['row']})")
+            print(f"    Gym action: {action} (unit_idx={unit_idx}, action_type={action_type})")
             print(f"    Mirror action: {mirror_action}")
             print(f"    Pre-action units count: {len(pre_action_units)}")
         
@@ -542,19 +544,41 @@ class W40KEnv(gym.Env):
                 if self._is_unit_eligible_for_phase(unit, current_phase):
                     eligible_units.append(unit)
         
+        # DEBUG: Show why no units are eligible
+        if not self.quiet and not eligible_units:
+            print(f"❌ NO ELIGIBLE UNITS FOUND:")
+            print(f"    Current player: {current_player}, Phase: {current_phase}")
+            print(f"    Total units: {len(all_units)}")
+            player_units = [u for u in all_units if u["player"] == current_player]
+            print(f"    Player {current_player} units: {len(player_units)}")
+            for unit in player_units[:3]:  # Show first 3 units
+                eligible = self._is_unit_eligible_for_phase(unit, current_phase)
+                print(f"      Unit {unit['id']}: alive={unit.get('alive', True)}, eligible={eligible}")
+                if current_phase == "move":
+                    print(f"        has_moved={unit.get('has_moved', False)}")
+        
         return eligible_units
 
     def _is_unit_eligible_for_phase(self, unit, phase):
         """Check if unit is eligible for specific phase using controller logic."""
-        # Use controller's phase eligibility logic
+        # Delegate to controller's proper eligibility logic
+        if hasattr(self.controller, 'game_actions') and 'is_unit_eligible' in self.controller.game_actions:
+            return self.controller.game_actions['is_unit_eligible'](unit)
+        
+        # Fallback logic if controller method not available
+        units_moved = self.training_state.game_state.get("units_moved", [])
+        units_charged = self.training_state.game_state.get("units_charged", [])
+        units_attacked = self.training_state.game_state.get("units_attacked", [])
+        
         if phase == "move":
-            return not unit.get("has_moved", False)
+            return unit["id"] not in units_moved
         elif phase == "shoot":
-            return not unit.get("has_shot", False)
+            return (unit["id"] not in units_moved and 
+                    unit.get("SHOOT_LEFT", 0) > 0)
         elif phase == "charge":
-            return not unit.get("has_charged", False)
+            return unit["id"] not in units_charged
         elif phase == "combat":
-            return not unit.get("has_attacked", False)
+            return unit["id"] not in units_attacked
         return False
 
     def _mark_unit_as_acted_for_current_phase(self, unit):

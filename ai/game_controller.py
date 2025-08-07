@@ -296,7 +296,6 @@ class GameController:
     def get_current_phase(self) -> str:
         """Get current phase"""
         phase = self.game_state["phase"]
-        print(f"🔧 get_current_phase: game_state id={id(self.game_state)}, phase={phase}")
         return phase
 
     def get_current_turn(self) -> int:
@@ -480,12 +479,13 @@ class TrainingGameController(GameController):
     Adds performance optimizations and training-specific methods.
     """
     
-    def __init__(self, config: GameControllerConfig):
+    def __init__(self, config: GameControllerConfig, quiet: bool = False):
         # Force training mode
         config.training_mode = True
-        super().__init__(config)
         
-        # Training-specific state
+        # Training-specific state - SET BEFORE super().__init__()
+        self.quiet = quiet
+        super().__init__(config)
         self.episode_count = 0
         self.total_steps = 0
         self.episode_rewards = []

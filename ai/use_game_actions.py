@@ -994,6 +994,7 @@ class UseGameActions:
             "start_attack_preview": self.start_attack_preview,
             "confirm_move": self.confirm_move,
             "cancel_move": self.cancel_move,
+            "handle_move": self.direct_move,
             "handle_shoot": self.handle_shoot,
             "handle_combat_attack": self.handle_combat_attack,
             "handle_charge": self.handle_charge,

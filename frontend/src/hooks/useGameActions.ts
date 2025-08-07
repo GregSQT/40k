@@ -386,7 +386,26 @@ export const useGameActions = ({
 
     // Special handling for combat phase
     if (phase === "combat") {
-      // Always show the attack preview for adjacent enemies
+      // Check if unit has valid targets in combat range
+      const enemies = units.filter(u => u.player !== unit.player);
+      if (unit.CC_RNG === undefined) {
+        throw new Error(`unit.CC_RNG is required but was undefined for unit ${unit.id}`);
+      }
+      const combatRange = unit.CC_RNG;
+      const hasValidTargets = enemies.some(enemy => {
+        const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
+        return distance === combatRange;
+      });
+      
+      if (!hasValidTargets) {
+        // No targets in range - end activation immediately
+        actions.addAttackedUnit(unitId);
+        actions.setSelectedUnitId(null);
+        actions.setMode("select");
+        return;
+      }
+      
+      // Has valid targets - show attack preview for adjacent enemies
       actions.setMovePreview(null);
       actions.setAttackPreview({ unitId, col: unit.col, row: unit.row });
       actions.setMode("attackPreview");
@@ -850,13 +869,17 @@ interface ShootingResult {
       } else {
       }
 
-      // Miss - decrease attacks and end
-      if (attacker.ATTACK_LEFT === undefined) {
-        throw new Error(`attacker.ATTACK_LEFT is required but was undefined for unit ${attacker.id}`);
+      // Miss - get fresh unit state and decrease attacks
+      const currentAttacker = findUnit(attackerId);
+      if (!currentAttacker) throw new Error(`Cannot find attacker unit ${attackerId}`);
+      if (currentAttacker.ATTACK_LEFT === undefined) {
+        throw new Error(`currentAttacker.ATTACK_LEFT is required but was undefined for unit ${currentAttacker.id}`);
       }
-      const currentAttacks = attacker.ATTACK_LEFT;
-      actions.updateUnit(attackerId, { ATTACK_LEFT: currentAttacks - 1 });
-      if (currentAttacks - 1 <= 0) {
+      const currentAttacksLeft = currentAttacker.ATTACK_LEFT;
+      const newAttacksLeft = currentAttacksLeft - 1;
+      actions.updateUnit(attackerId, { ATTACK_LEFT: newAttacksLeft });
+      
+      if (newAttacksLeft <= 0) {
         actions.addAttackedUnit(attackerId);
         actions.setSelectedUnitId(null);
         actions.setMode("select");
@@ -899,13 +922,17 @@ interface ShootingResult {
             gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
           }
 
-          // No wound - decrease attacks and end
-          if (attacker.ATTACK_LEFT === undefined) {
-            throw new Error(`attacker.ATTACK_LEFT is required but was undefined for unit ${attacker.id}`);
+          // No wound - get fresh unit state and decrease attacks
+          const currentAttacker = findUnit(attackerId);
+          if (!currentAttacker) throw new Error(`Cannot find attacker unit ${attackerId}`);
+          if (currentAttacker.ATTACK_LEFT === undefined) {
+            throw new Error(`currentAttacker.ATTACK_LEFT is required but was undefined for unit ${currentAttacker.id}`);
           }
-          const currentAttacks = attacker.ATTACK_LEFT;
-          actions.updateUnit(attackerId, { ATTACK_LEFT: currentAttacks - 1 });
-          if (currentAttacks - 1 <= 0) {
+          const currentAttacksLeft = currentAttacker.ATTACK_LEFT;
+          const newAttacksLeft = currentAttacksLeft - 1;
+          actions.updateUnit(attackerId, { ATTACK_LEFT: newAttacksLeft });
+          
+          if (newAttacksLeft <= 0) {
             actions.addAttackedUnit(attackerId);
             actions.setSelectedUnitId(null);
             actions.setMode("select");
@@ -983,6 +1010,27 @@ interface ShootingResult {
       actions.addAttackedUnit(attackerId);
       actions.setSelectedUnitId(null);
       actions.setMode("select");
+    } else {
+      // Check if any valid targets remain after this attack
+      const currentAttackerAfterAttack = findUnit(attackerId);
+      if (currentAttackerAfterAttack) {
+        const enemiesAfterAttack = units.filter(u => u.player !== currentAttackerAfterAttack.player);
+        if (currentAttackerAfterAttack.CC_RNG === undefined) {
+          throw new Error(`currentAttackerAfterAttack.CC_RNG is required but was undefined for unit ${currentAttackerAfterAttack.id}`);
+        }
+        const combatRange = currentAttackerAfterAttack.CC_RNG;
+        const hasValidTargetsAfterAttack = enemiesAfterAttack.some(enemy => {
+          const distance = Math.max(Math.abs(currentAttackerAfterAttack.col - enemy.col), Math.abs(currentAttackerAfterAttack.row - enemy.row));
+          return distance === combatRange;
+        });
+        
+        if (!hasValidTargetsAfterAttack) {
+          // No more valid targets - end activation immediately
+          actions.addAttackedUnit(attackerId);
+          actions.setSelectedUnitId(null);
+          actions.setMode("select");
+        }
+      }
     }
   }, 100);
 } else {
