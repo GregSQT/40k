@@ -668,7 +668,7 @@ class MultiAgentTrainer:
             rewards_config=rewards_config_name,
             training_config_name=training_config_name,
             controlled_agent=agent_key,
-            active_agents=[agent_key],
+            active_agents=[self.unit_registry.get_all_model_keys()],  # CRITICAL FIX: All agents active for proper training
             scenario_file=scenario_path,
             unit_registry=self.unit_registry,  # Pass shared registry
             quiet=True  # Enable quiet mode for training

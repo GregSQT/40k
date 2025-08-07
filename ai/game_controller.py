@@ -500,9 +500,9 @@ class TrainingGameController(GameController):
         # Initialize replay logger for training - will be set by gym via connect_replay_logger
         self.replay_logger = None
         
-        # Initialize training game actions - CRITICAL: Pass the state_manager's game_state directly
+        # Initialize training game actions - CRITICAL: Pass the SAME game_state object
         self.actions_manager = TrainingGameActions(
-            game_state=self.state_manager.game_state,  # Direct reference to source
+            game_state=self.game_state,  # Use controller's stored reference - ensures same object
             move_preview=self.move_preview,
             attack_preview=self.attack_preview,
             shooting_phase_state=self.shooting_phase_state,
@@ -512,9 +512,9 @@ class TrainingGameController(GameController):
         )
         self.game_actions = self.actions_manager.get_available_actions()
         
-        # Initialize training phase transitions - CRITICAL: Pass state_manager's game_state directly
+        # Initialize training phase transitions - CRITICAL: Pass controller's game_state directly
         self.phase_manager = TrainingPhaseTransition(
-            game_state=self.state_manager.game_state,  # Direct reference to source
+            game_state=self.game_state,  # Use controller's stored reference - ensures same object
             board_config=self.board_config,
             is_unit_eligible_func=self.game_actions["is_unit_eligible"],
             actions=self.state_actions
@@ -522,7 +522,7 @@ class TrainingGameController(GameController):
         self.phase_transitions = self.phase_manager.get_transition_functions()
         
         # CRITICAL FIX: Ensure phase_manager always references the same object
-        self.phase_manager.game_state = self.state_manager.game_state  # Direct reference to source
+        self.phase_manager.game_state = self.game_state  # Use controller's stored reference
         
         # Verify single object consistency
         if not self.quiet:
@@ -706,14 +706,11 @@ class TrainingGameController(GameController):
 
     def advance_phase(self) -> None:
         """Advance to next phase or turn with debugging"""
-        # CRITICAL FIX: Ensure ALL components use same game_state as state_manager
-        if hasattr(self, 'state_manager') and hasattr(self.state_manager, 'game_state'):
-            source_game_state = self.state_manager.game_state
-            print(f"🔧 SYNCING all objects to game_state ID: {id(source_game_state)}")
-            self.game_state = source_game_state
-            self.phase_manager.game_state = source_game_state
-            print(f"🔧 Controller now uses: {id(self.game_state)}")
-            print(f"🔧 Phase manager now uses: {id(self.phase_manager.game_state)}")
+        # CRITICAL FIX: All components already use same game_state - no sync needed
+        print(f"🔧 All components using game_state ID: {id(self.game_state)}")
+        # Remove syncing logic - all components should already reference same object
+        print(f"🔧 Controller now uses: {id(self.game_state)}")
+        print(f"🔧 Phase manager now uses: {id(self.phase_manager.game_state)}")
         
         # CRITICAL VERIFICATION: Check object consistency after sync
         controller_id = id(self.game_state)

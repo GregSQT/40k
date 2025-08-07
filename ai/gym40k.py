@@ -91,12 +91,12 @@ class W40KEnv(gym.Env):
         self.scenario_metadata = None
         self._load_scenario_metadata(scenario_file)
         
-        # Game state tracking for Gymnasium interface - use TrainingGameState
-        self.training_state = None  # Will be initialized in _initialize_mirror_controller
+        # Game state tracking for Gymnasium interface - use controller's state only
+        # CRITICAL FIX: Remove training_state entirely - only use controller.game_state
         self.game_over = False
         self.winner = None
         
-        # CRITICAL: Initialize mirror controller BEFORE other components try to access training_state
+        # CRITICAL: Initialize mirror controller BEFORE other components try to access controller state
         self._initialize_mirror_controller(scenario_file)
         self.step_count = 0
         self.max_steps_per_episode = 1000
@@ -631,7 +631,8 @@ class W40KEnv(gym.Env):
         
         print(f"🔄 SINGLE STATE DEBUG: controller game_state[{controller_state_id}]: phase={controller_phase}, player={controller_player}")
         
-        # Remove old debug logging - now using single state source
+        # CRITICAL FIX: Remove self.training_state entirely - only use controller's state
+        # self.training_state = None  # Line already shows this was removed
         current_phase = controller_phase
         current_player = controller_player
         
