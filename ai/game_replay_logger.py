@@ -597,10 +597,7 @@ class GameReplayLogger:
     
     def log_action(self, action: int, reward: float, pre_action_units: list, post_action_units: list,
                    acting_unit_id: int, target_unit_id: int = None, description: str = ""):
-        """Generic action logger that routes to specific log methods based on action type."""
-        # TEMPORARY DEBUG: Always print to verify log_action is being called
-        print(f"🔍 DEBUG: log_action called - action={action}, acting_unit_id={acting_unit_id}")
-        
+        """Generic action logger that routes to specific log methods based on action type."""        
         # Find acting unit and target unit from the unit lists
         acting_unit = None
         target_unit = None

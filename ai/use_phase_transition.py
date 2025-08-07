@@ -41,15 +41,8 @@ class UsePhaseTransition:
         if 'units_moved' not in game_state:
             raise KeyError("game_state missing required 'units_moved' field")
             
-        print(f"🔧 UsePhaseTransition.__init__ called:")
-        print(f"🔧   game_state object ID: {id(game_state)}")
-        print(f"🔧   Initial phase: {game_state['phase']}")
-        print(f"🔧   Initial player: {game_state['current_player']}")
-        print(f"🔧   Initial units_moved: {game_state['units_moved']}")
-        if 'set_phase' in actions:
-            action_state_id = id(actions['set_phase'].__self__.game_state)
-            print(f"🔧   actions['set_phase'] state ID: {action_state_id}")
-            print(f"🔧   State objects match: {id(game_state) == action_state_id}")
+        if not quiet:
+            print(f"🔧 UsePhaseTransition initialized: phase={game_state['phase']}, player={game_state['current_player']}")
         else:
             raise KeyError("actions missing required 'set_phase' function")
         

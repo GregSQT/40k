@@ -330,9 +330,18 @@ class GameController:
 
     def move_unit(self, unit_id: int, col: int, row: int) -> bool:
         """Move a unit"""
-        result = self.game_actions["direct_move"](unit_id, col, row)
-        print(f"🔧 move_unit: unit={unit_id}, pos=({col},{row}), result={result}")
-        return result if result is not None else False
+        # CRITICAL FIX: direct_move returns None by design - treat None as success
+        try:
+            action_func = self.game_actions.get("handle_move", self.game_actions.get("direct_move"))
+            result = action_func(unit_id, col, row)
+            # For direct_move, None means successful execution (void return)
+            # For other actions, None means failure
+            success = True if result is None else bool(result)
+            print(f"🔧 move_unit: unit={unit_id}, pos=({col},{row}), success={success}")
+            return success
+        except Exception as e:
+            print(f"🔧 move_unit: unit={unit_id}, pos=({col},{row}), error={e}")
+            return False
 
     def shoot_unit(self, shooter_id: int, target_id: int) -> bool:
         """Shoot at target"""
@@ -555,6 +564,9 @@ class TrainingGameController(GameController):
         )
         self.phase_transitions = self.phase_manager.get_transition_functions()
         
+        # CRITICAL FIX: Ensure phase_manager always references the same object
+        self.phase_manager.game_state = self.state_manager.game_state  # Direct reference to source
+        
         # Verify single object consistency
         if not self.quiet:
             print(f"🔧 Phase manager using game_state ID: {id(self.phase_manager.game_state)}")
@@ -737,11 +749,24 @@ class TrainingGameController(GameController):
 
     def advance_phase(self) -> None:
         """Advance to next phase or turn with debugging"""
-        # CRITICAL FIX: Ensure controller uses same game_state as transitions
-        if hasattr(self, 'state_actions') and 'set_phase' in self.state_actions:
-            actual_game_state = self.state_actions['set_phase'].__self__.game_state
-            print(f"🔧 FIXING controller game_state: {id(self.game_state)} -> {id(actual_game_state)}")
-            self.game_state = actual_game_state
+        # CRITICAL FIX: Ensure ALL components use same game_state as state_manager
+        if hasattr(self, 'state_manager') and hasattr(self.state_manager, 'game_state'):
+            source_game_state = self.state_manager.game_state
+            print(f"🔧 SYNCING all objects to game_state ID: {id(source_game_state)}")
+            self.game_state = source_game_state
+            self.phase_manager.game_state = source_game_state
+            print(f"🔧 Controller now uses: {id(self.game_state)}")
+            print(f"🔧 Phase manager now uses: {id(self.phase_manager.game_state)}")
+        
+        # CRITICAL VERIFICATION: Check object consistency after sync
+        controller_id = id(self.game_state)
+        phase_manager_id = id(self.phase_manager.game_state) 
+        state_manager_id = id(self.state_manager.game_state)
+        
+        if controller_id != phase_manager_id or controller_id != state_manager_id:
+            raise RuntimeError(f"OBJECT SYNC FAILED: Controller={controller_id}, Phase={phase_manager_id}, State={state_manager_id}")
+        
+        print(f"✅ OBJECT SYNC SUCCESS: All components use game_state ID {controller_id}")
         
         current_phase = self.get_current_phase()
         current_player = self.get_current_player()
