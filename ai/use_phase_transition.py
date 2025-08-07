@@ -296,9 +296,19 @@ class UsePhaseTransition:
                 self.transition_to_combat()
                 
         elif self.phase == "combat":
+            # CRITICAL DEBUG: Track combat phase progression
+            if not hasattr(self, '_combat_debug_count'):
+                self._combat_debug_count = 0
+            if self._combat_debug_count < 5:
+                print(f"🔍 COMBAT DEBUG #{self._combat_debug_count + 1}: combat_sub_phase={self.combat_sub_phase}")
+                print(f"    should_transition_from_charged_units={self.should_transition_from_charged_units_phase() if self.combat_sub_phase == 'charged_units' else 'N/A'}")
+                print(f"    should_end_alternating_combat={self.should_end_alternating_combat() if self.combat_sub_phase == 'alternating_combat' else 'N/A'}")
+                self._combat_debug_count += 1
+            
             # Handle combat sub-phase transitions (EXACT from TypeScript)
             if (self.combat_sub_phase == "charged_units" and 
                 self.should_transition_from_charged_units_phase()):
+                print(f"🔍 COMBAT TRANSITION: charged_units -> alternating_combat")
                 # Transition from charged units phase to alternating combat
                 next_combat_player = 1 if self.current_player == 0 else 0
                 
@@ -315,6 +325,7 @@ class UsePhaseTransition:
                 
             elif (self.combat_sub_phase == "alternating_combat" and 
                   self.should_end_alternating_combat()):
+                print(f"🔍 COMBAT TRANSITION: alternating_combat -> end_turn")
                 # End combat phase entirely
                 self.end_turn()
                 

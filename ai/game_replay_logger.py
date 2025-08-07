@@ -84,7 +84,7 @@ class GameReplayLogger:
     def log_game_start(self):
         """Log game start."""
         # Use environment's actual current turn for game start
-        start_turn = getattr(self.env, 'current_turn', 1)
+        start_turn = self.env.training_state.game_state["current_turn"]
         self.add_entry(
             entry_type="turn_change",
             reward=0.0,
@@ -525,12 +525,12 @@ class GameReplayLogger:
             "game_info": {
                 "scenario": "training_episode",
                 "ai_behavior": "phase_based",
-                "total_turns": self.env.current_turn,
+                "total_turns": self.env.training_state.game_state["current_turn"],
                 "winner": None,  # Can be set by caller
             },
             "metadata": {
                 "total_combat_log_entries": len(self.combat_log_entries),
-                "final_turn": self.env.current_turn,
+                "final_turn": self.env.training_state.game_state["current_turn"],
                 "episode_reward": episode_reward,
                 "format_version": "2.0",
                 "replay_type": "training_enhanced"
@@ -555,7 +555,7 @@ class GameReplayLogger:
         if not self.quiet:
             print(f"💾 Saved enhanced replay: {filename}")
             print(f"   📊 {len(self.combat_log_entries)} combat log entries")
-            print(f"   🎮 {self.current_turn} turns")
+            print(f"   🎮 {self.env.training_state.game_state['current_turn']} turns")
             print(f"   💯 Reward: {episode_reward:.2f}")
             print(f"   ⚔️ Enhanced format with dice roll details")
         
