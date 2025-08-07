@@ -422,9 +422,6 @@ class W40KEnv(gym.Env):
             self._mark_unit_as_acted_for_current_phase(acting_unit)
             reward = self._get_small_penalty_reward()
             return self._get_obs(), reward, False, False, self._get_info()
-        
-        # Log the action to replay logger
-        if self.replay_logger and hasattr(self.replay_logger, 'log_action'):
             # Get post-action units for logging
             post_units = self.controller.get_units()
             # Find target if action has one

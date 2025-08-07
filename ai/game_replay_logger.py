@@ -598,6 +598,9 @@ class GameReplayLogger:
     def log_action(self, action: int, reward: float, pre_action_units: list, post_action_units: list,
                    acting_unit_id: int, target_unit_id: int = None, description: str = ""):
         """Generic action logger that routes to specific log methods based on action type."""
+        # TEMPORARY DEBUG: Always print to verify log_action is being called
+        print(f"🔍 DEBUG: log_action called - action={action}, acting_unit_id={acting_unit_id}")
+        
         # Find acting unit and target unit from the unit lists
         acting_unit = None
         target_unit = None
@@ -632,27 +635,30 @@ class GameReplayLogger:
                     break
             
             if acting_unit_post:
+                current_turn = self.env.training_state.game_state["current_turn"]
                 self.log_move(
                     acting_unit, 
                     acting_unit.get('col', 0), acting_unit.get('row', 0),
                     acting_unit_post.get('col', 0), acting_unit_post.get('row', 0),
-                    self.env.current_turn, reward, action_type
+                    current_turn, reward, action_type
                 )
             else:
                 # No movement occurred, log as no-move
+                current_turn = self.env.training_state.game_state["current_turn"]
                 self.log_move(
                     acting_unit,
                     acting_unit.get('col', 0), acting_unit.get('row', 0),
                     acting_unit.get('col', 0), acting_unit.get('row', 0),
-                    self.env.current_turn, reward, action_type
+                    current_turn, reward, action_type
                 )
                 
         elif action_type == 4:  # Shooting
             if target_unit:
                 # Create minimal shoot_details for logging compatibility
                 shoot_details = {"summary": {"totalShots": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
+                current_turn = self.env.training_state.game_state["current_turn"]
                 self.log_shoot(acting_unit, target_unit, shoot_details, 
-                             self.env.current_turn, reward, action_type)
+                             current_turn, reward, action_type)
             else:
                 if not self.quiet:
                     print(f"⚠️ log_action: Shooting action without target")
@@ -666,28 +672,31 @@ class GameReplayLogger:
                         break
                 
                 if acting_unit_post:
+                    current_turn = self.env.training_state.game_state["current_turn"]
                     self.log_charge(
                         acting_unit, target_unit,
                         acting_unit.get('col', 0), acting_unit.get('row', 0),
                         acting_unit_post.get('col', 0), acting_unit_post.get('row', 0),
-                        self.env.current_turn, reward, action_type
+                        current_turn, reward, action_type
                     )
                     
         elif action_type == 6:  # Wait
             # Log as move with no position change
+            current_turn = self.env.training_state.game_state["current_turn"]
             self.log_move(
                 acting_unit,
                 acting_unit.get('col', 0), acting_unit.get('row', 0),
                 acting_unit.get('col', 0), acting_unit.get('row', 0),
-                self.env.current_turn, reward, action_type
+                current_turn, reward, action_type
             )
                                
         elif action_type == 7:  # Attack adjacent (Combat)
             if target_unit:
                 # Create minimal combat_details for logging compatibility
                 combat_details = {"summary": {"totalAttacks": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
+                current_turn = self.env.training_state.game_state["current_turn"]
                 self.log_combat(acting_unit, target_unit, combat_details,
-                               self.env.current_turn, reward, action_type)
+                               current_turn, reward, action_type)
         
         else:
             if not self.quiet:
@@ -701,14 +710,27 @@ class GameReplayIntegration:
     @staticmethod
     def enhance_training_env(env):
         """Add enhanced logging to training environment - creates 'replay_logger' attribute."""
-        # Create GameReplayLogger and attach as 'replay_logger' for compatibility
-        env.replay_logger = GameReplayLogger(env)
-        env.replay_logger.capture_initial_state()
+        # ABSOLUTELY UNAVOIDABLE DEBUG - Will print regardless of quiet mode
+        import sys
+        sys.stdout.write("🚨 ENHANCE_TRAINING_ENV CALLED\n")
+        sys.stdout.flush()
         
-        if not env.replay_logger.quiet:
-            print("✅ GameReplayLogger (as replay_logger) attached to environment")
-        
-        return env
+        try:
+            # Create GameReplayLogger and attach as 'replay_logger' for compatibility
+            env.replay_logger = GameReplayLogger(env)
+            env.replay_logger.capture_initial_state()
+            
+            sys.stdout.write("🚨 REPLAY_LOGGER CREATED SUCCESSFULLY\n")
+            sys.stdout.flush()
+            
+            if not env.replay_logger.quiet:
+                print("✅ GameReplayLogger (as replay_logger) attached to environment")
+            
+            return env
+        except Exception as e:
+            sys.stdout.write(f"🚨 ENHANCE_TRAINING_ENV FAILED: {e}\n")
+            sys.stdout.flush()
+            raise
     
     @staticmethod
     def save_episode_replay(env, episode_reward: float, output_dir: str = "ai/event_log", is_best: bool = False):
@@ -722,101 +744,4 @@ class GameReplayIntegration:
             
             return env.replay_logger.save_replay(filename, episode_reward)
         return None
-    
-    def log_action(self, action: int, reward: float, pre_action_units: list, post_action_units: list,
-                   acting_unit_id: int, target_unit_id: int = None, description: str = ""):
-        """Generic action logger that routes to specific log methods based on action type."""
-        # Find acting unit and target unit from the unit lists
-        acting_unit = None
-        target_unit = None
-        
-        # Find acting unit in pre-action state
-        for unit in pre_action_units:
-            if unit.get('id') == acting_unit_id:
-                acting_unit = unit
-                break
-        
-        # Find target unit in pre-action state if target_unit_id provided
-        if target_unit_id is not None:
-            for unit in pre_action_units:
-                if unit.get('id') == target_unit_id:
-                    target_unit = unit
-                    break
-        
-        if not acting_unit:
-            if not self.quiet:
-                print(f"⚠️ log_action: Could not find acting unit {acting_unit_id}")
-            return
-        
-        # Determine action type and route to appropriate method
-        action_type = action % 8 if isinstance(action, int) else action
-        
-        if action_type in [0, 1, 2, 3]:  # Movement actions
-            # Find position change
-            acting_unit_post = None
-            for unit in post_action_units:
-                if unit.get('id') == acting_unit_id:
-                    acting_unit_post = unit
-                    break
-            
-            if acting_unit_post:
-                self.log_move(
-                    acting_unit, 
-                    acting_unit.get('col', 0), acting_unit.get('row', 0),
-                    acting_unit_post.get('col', 0), acting_unit_post.get('row', 0),
-                    self.env.current_turn, reward, action_type
-                )
-            else:
-                # No movement occurred, log as no-move
-                self.log_move(
-                    acting_unit,
-                    acting_unit.get('col', 0), acting_unit.get('row', 0),
-                    acting_unit.get('col', 0), acting_unit.get('row', 0),
-                    self.env.current_turn, reward, action_type
-                )
-                
-        elif action_type == 4:  # Shooting
-            if target_unit:
-                # Create minimal shoot_details for logging compatibility
-                shoot_details = {"summary": {"totalShots": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
-                self.log_shoot(acting_unit, target_unit, shoot_details, 
-                             self.env.current_turn, reward, action_type)
-            else:
-                if not self.quiet:
-                    print(f"⚠️ log_action: Shooting action without target")
-                    
-        elif action_type == 5:  # Charge
-            if target_unit:
-                acting_unit_post = None
-                for unit in post_action_units:
-                    if unit.get('id') == acting_unit_id:
-                        acting_unit_post = unit
-                        break
-                
-                if acting_unit_post:
-                    self.log_charge(
-                        acting_unit, target_unit,
-                        acting_unit.get('col', 0), acting_unit.get('row', 0),
-                        acting_unit_post.get('col', 0), acting_unit_post.get('row', 0),
-                        self.env.current_turn, reward, action_type
-                    )
-                    
-        elif action_type == 6:  # Wait
-            # Log as move with no position change
-            self.log_move(
-                acting_unit,
-                acting_unit.get('col', 0), acting_unit.get('row', 0),
-                acting_unit.get('col', 0), acting_unit.get('row', 0),
-                self.env.current_turn, reward, action_type
-            )
-                               
-        elif action_type == 7:  # Attack adjacent (Combat)
-            if target_unit:
-                # Create minimal combat_details for logging compatibility
-                combat_details = {"summary": {"totalAttacks": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
-                self.log_combat(acting_unit, target_unit, combat_details,
-                               self.env.current_turn, reward, action_type)
-        
-        else:
-            if not self.quiet:
-                print(f"⚠️ log_action: Unknown action type {action_type}")
+

@@ -30,12 +30,14 @@ class UsePhaseTransition:
     def __init__(self, game_state: Dict[str, Any], 
                  board_config: Dict[str, Any],
                  is_unit_eligible_func: Callable,
-                 actions: Dict[str, Callable]):
+                 actions: Dict[str, Callable],
+                 quiet: bool = False):
         """Initialize with same parameters as TypeScript usePhaseTransition"""
         self.game_state = game_state
         self.board_config = board_config
         self.is_unit_eligible_func = is_unit_eligible_func
         self.actions = actions
+        self.quiet = quiet
         
         # Extract state for convenience (EXACT from TypeScript)
         self.units = game_state["units"]
@@ -70,11 +72,12 @@ class UsePhaseTransition:
             self.units, self.current_player, self.phase, 
             self.units_moved, self.units_charged, self.units_attacked, self.units_fled
         )
-        print(f"🔧 should_transition_from_shoot: result={result}, phase={self.phase}, player={self.current_player}")
-        print(f"🔧   units_moved={list(self.units_moved)}, units_charged={list(self.units_charged)}")
-        print(f"🔧   units_attacked={list(self.units_attacked)}, units_fled={list(self.units_fled)}")
-        current_player_units = [u for u in self.units if u["player"] == self.current_player]
-        print(f"🔧   current_player_units: {[(u['id'], u.get('SHOOT_LEFT', 'N/A')) for u in current_player_units]}")
+        # DEBUG: Uncomment for phase transition debugging
+        # print(f"🔧 should_transition_from_shoot: result={result}, phase={self.phase}, player={self.current_player}")
+        # print(f"🔧   units_moved={list(self.units_moved)}, units_charged={list(self.units_charged)}")
+        # print(f"🔧   units_attacked={list(self.units_attacked)}, units_fled={list(self.units_fled)}")
+        # current_player_units = [u for u in self.units if u["player"] == self.current_player]
+        # print(f"🔧   current_player_units: {[(u['id'], u.get('SHOOT_LEFT', 'N/A')) for u in current_player_units]}")
         return result
 
     def should_transition_from_charge(self) -> bool:
@@ -111,23 +114,25 @@ class UsePhaseTransition:
         """
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
-            print(f"🔧 BEFORE set_phase: calling set_phase('shoot')")
+            # DEBUG: Uncomment for phase transition debugging
+            # print(f"🔧 BEFORE set_phase: calling set_phase('shoot')")
             
             # CRITICAL FIX: Use the SAME game_state object that set_phase modifies
             set_phase_func = self.actions['set_phase']
             correct_game_state = set_phase_func.__self__.game_state
-            print(f"🔧 Switching to correct game_state object: {id(correct_game_state)}")
+            # print(f"🔧 Switching to correct game_state object: {id(correct_game_state)}")
             
             # Update self.game_state to point to the correct object
             self.game_state = correct_game_state
-            print(f"🔧 Updated UsePhaseTransition.game_state to correct object")
+            # print(f"🔧 Updated UsePhaseTransition.game_state to correct object")
             
             self.actions["set_phase"]("shoot")
             
-            print(f"🔧 AFTER set_phase call:")
-            print(f"🔧   UsePhaseTransition.game_state['phase']: {self.game_state.get('phase', 'unknown')}")
-            print(f"🔧   set_phase.__self__.game_state['phase']: {set_phase_func.__self__.game_state.get('phase', 'unknown')}")
-            print(f"🔧   Are they the same object? {id(self.game_state) == id(set_phase_func.__self__.game_state)}")
+            # DEBUG: Uncomment for phase transition debugging
+            # print(f"🔧 AFTER set_phase call:")
+            # print(f"🔧   UsePhaseTransition.game_state['phase']: {self.game_state.get('phase', 'unknown')}")
+            # print(f"🔧   set_phase.__self__.game_state['phase']: {set_phase_func.__self__.game_state.get('phase', 'unknown')}")
+            # print(f"🔧   Are they the same object? {id(self.game_state) == id(set_phase_func.__self__.game_state)}")
             
             self.actions["initialize_shooting_phase"]()  # MISSING FEATURE ADDED
             self.actions["reset_moved_units"]()
@@ -138,11 +143,11 @@ class UsePhaseTransition:
             for unit in current_player_units:
                 if unit.get("RNG_RNG", 0) > 0:  # Only ranged units need to be tracked for shooting
                     self.actions["add_moved_unit"](unit["id"])
-                    print(f"🔧 Added ranged unit {unit['id']} to units_moved for shoot phase")
+                    # print(f"🔧 Added ranged unit {unit['id']} to units_moved for shoot phase")
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
-            print(f"🔧 transition_to_shoot: phase updated to {self.phase}")
+            # print(f"🔧 transition_to_shoot: phase updated to {self.phase}")
         
         # Execute with 300ms delay equivalent (can be immediate in training)
         delayed_transition()
@@ -161,7 +166,8 @@ class UsePhaseTransition:
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
-            print(f"🔧 transition_to_charge: phase updated to {self.phase}")
+            # DEBUG: Uncomment for phase transition debugging
+            # print(f"🔧 transition_to_charge: phase updated to {self.phase}")
         
         # Execute with 300ms delay equivalent
         delayed_transition()
@@ -186,7 +192,8 @@ class UsePhaseTransition:
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
-            print(f"🔧 transition_to_combat: phase updated to {self.phase}")
+            # DEBUG: Uncomment for phase transition debugging
+            # print(f"🔧 transition_to_combat: phase updated to {self.phase}")
         
         # Execute with 300ms delay equivalent
         delayed_transition()

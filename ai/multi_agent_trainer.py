@@ -673,7 +673,7 @@ class MultiAgentTrainer:
         )
         
         # Enhance environment with clean game logger
-        from game_replay_logger import GameReplayIntegration
+        from ai.game_replay_logger import GameReplayIntegration
         enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
         
         # CRITICAL FIX: Connect replay_logger to game_logger for actual logging
@@ -758,7 +758,7 @@ class MultiAgentTrainer:
         )
 
         # Create enhanced evaluation environment with clean game logger
-        from game_replay_logger import GameReplayIntegration
+        from ai.game_replay_logger import GameReplayIntegration
         enhanced_eval_env = GameReplayIntegration.enhance_training_env(base_eval_env)
         
         # CRITICAL FIX: Connect replay_logger to game_logger for actual logging
