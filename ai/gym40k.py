@@ -583,28 +583,23 @@ class W40KEnv(gym.Env):
 
     def _is_unit_eligible_for_phase(self, unit, phase):
         """Check if unit is eligible for specific phase using controller logic."""
-        # DEBUG: Check which eligibility method is used
+        # CRITICAL FIX: Always use controller's eligibility system with proper debugging
         if hasattr(self.controller, 'game_actions') and 'is_unit_eligible' in self.controller.game_actions:
             controller_result = self.controller.game_actions['is_unit_eligible'](unit)
+            
+            # DEBUG: Show detailed eligibility check
+            if not self.quiet:
+                units_moved = self.controller.game_state.get("units_moved", [])
+                print(f"🔧 ELIGIBILITY DEBUG: Unit {unit['id']}, Phase {phase}")
+                print(f"    Controller result: {controller_result}")
+                print(f"    Units moved list: {units_moved}")
+                print(f"    Unit in moved list: {unit['id'] in units_moved}")
+            
             return controller_result
         
-        # Use controller's game_state directly - no fallbacks
-        if not hasattr(self.controller, 'game_state'):
-            raise AttributeError("Controller missing required game_state attribute")
-        units_moved = self.controller.game_state.get("units_moved", [])
-        units_charged = self.controller.game_state.get("units_charged", [])
-        units_attacked = self.controller.game_state.get("units_attacked", [])
-        
-        if phase == "move":
-            return unit["id"] not in units_moved
-        elif phase == "shoot":
-            return (unit["id"] not in units_moved and 
-                    unit["SHOOT_LEFT"] > 0)
-        elif phase == "charge":
-            return unit["id"] not in units_charged
-        elif phase == "combat":
-            return unit["id"] not in units_attacked
-        return False
+        # CRITICAL ERROR: Controller eligibility system missing
+        available_methods = list(self.controller.game_actions.keys()) if hasattr(self.controller, 'game_actions') else 'No game_actions'
+        raise RuntimeError(f"Controller missing required 'is_unit_eligible' method. Available: {available_methods}")
 
     def _mark_unit_as_acted_for_current_phase(self, unit):
         """Mark unit as having acted in current phase to prevent infinite loops."""
@@ -612,12 +607,23 @@ class W40KEnv(gym.Env):
         unit_id = unit["id"]
         
         if not self.quiet:
-            print(f"    🔧 Marking unit {unit_id} as acted for phase {current_phase}")
+            print(f"    🔧 BEFORE marking unit {unit_id} as acted for phase {current_phase}")
+            print(f"        Current units_moved: {self.controller.game_state.get('units_moved', [])}")
         
         if hasattr(self.controller, 'state_actions'):
             try:
                 if current_phase == "move" and 'add_moved_unit' in self.controller.state_actions:
                     self.controller.state_actions['add_moved_unit'](unit_id)
+                    
+                    # CRITICAL DEBUG: Verify the marking actually worked
+                    new_units_moved = self.controller.game_state.get('units_moved', [])
+                    if unit_id in new_units_moved:
+                        if not self.quiet:
+                            print(f"    ✅ VERIFIED: Unit {unit_id} successfully added to units_moved: {new_units_moved}")
+                    else:
+                        if not self.quiet:
+                            print(f"    ❌ FAILED: Unit {unit_id} NOT found in units_moved after add_moved_unit call: {new_units_moved}")
+                        
                 elif current_phase == "shoot" and 'update_unit' in self.controller.state_actions:
                     self.controller.state_actions['update_unit'](unit_id, {"SHOOT_LEFT": 0})
                 elif current_phase == "charge" and 'add_charged_unit' in self.controller.state_actions:
@@ -625,11 +631,11 @@ class W40KEnv(gym.Env):
                 elif current_phase == "combat" and 'add_attacked_unit' in self.controller.state_actions:
                     self.controller.state_actions['add_attacked_unit'](unit_id)
                 
-                if not self.quiet:
-                    print(f"    ✅ Unit {unit_id} marked as acted for {current_phase}")
             except Exception as e:
                 if not self.quiet:
-                    print(f"    ❌ Failed to mark unit as acted: {e}")
+                    print(f"    ❌ Exception in marking unit as acted: {e}")
+                    import traceback
+                    traceback.print_exc()
 
     def _advance_phase_or_turn(self):
         """Delegate phase advancement to use_phase_transition.py system."""
