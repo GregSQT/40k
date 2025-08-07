@@ -365,23 +365,10 @@ class W40KEnv(gym.Env):
         pre_action_units = self.controller.get_units()
         
         if current_player == 0:
-            # CRITICAL FIX: Log bot actions and ALWAYS try to advance phase
+            # Execute bot turn with proper action logging
             self._execute_bot_turn_with_logging(eligible_units, pre_action_units)
-            # ALWAYS force phase advancement after bot turn - don't wait for no eligible units
-            print(f"🔧 FORCING phase advancement after bot turn")
-            self._advance_phase_or_turn()
-            # Check if current player changed after phase advancement
-            new_player = self.controller.get_current_player()
-            new_phase = self.controller.get_current_phase()
-            print(f"🔧 After phase advance: Player {current_player}->{new_player}, Phase {new_phase}")
-            if new_player != current_player:
-                # Player switched - AI agent gets to act now
-                print(f"🔧 Player switched to {new_player} - AI agent turn!")
-                return self._get_obs(), 0.0, False, False, self._get_info()
-            else:
-                # Still bot turn - return and wait for next step
-                print(f"🔧 Still Player {new_player} turn - continuing bot actions")
-                return self._get_obs(), 0.0, False, False, self._get_info()
+            # Return to allow natural phase system to work
+            return self._get_obs(), 0.0, False, False, self._get_info()
         
         # Decode gym action to mirror action format
         unit_idx = action // 8
@@ -1061,30 +1048,13 @@ class W40KEnv(gym.Env):
             current_moved = self.controller.game_state["units_moved"]
             print(f"    🤖 Units moved after marking: {current_moved}")
         
-        # CRITICAL FIX: Force mark ALL bot units as moved to ensure phase transition
-        for bot_unit in bot_units:
-            if bot_unit["id"] not in self.controller.game_state["units_moved"]:
-                if hasattr(self.controller, 'state_actions') and 'add_moved_unit' in self.controller.state_actions:
-                    self.controller.state_actions['add_moved_unit'](bot_unit["id"])
-                    if not self.quiet:
-                        print(f"    🔧 FORCE MARKED unit {bot_unit['id']} as moved")
-        
-        # DEBUG: Verify units_moved state after marking
-        current_moved = self.controller.game_state["units_moved"]
-        bot_unit_ids = [u["id"] for u in bot_units]
-        if not hasattr(self, '_units_debug_count'):
-            self._units_debug_count = 0
-        if self._units_debug_count < 3:
-            print(f"🔧 UNITS_MOVED DEBUG #{self._units_debug_count + 1}: {current_moved}")
-            print(f"    Bot unit IDs: {bot_unit_ids}")
-            print(f"    All bot units marked? {all(uid in current_moved for uid in bot_unit_ids)}")
-            self._units_debug_count += 1
+        # Verify the marking worked
+        if not self.quiet:
+            current_moved = self.controller.game_state["units_moved"]
+            print(f"    🤖 Units moved after marking: {current_moved}")
         
         if not self.quiet:
-            print(f"🤖 Bot marked {len(bot_units)} units as acted - advancing phase")
-        
-        # Always advance to next phase after bot turn
-        self._advance_phase_or_turn()
+            print(f"🤖 Bot marked {len(bot_units)} units as acted")
 
     def _execute_bot_turn_with_logging(self, eligible_units, pre_action_units):
         """Execute bot turn WITH proper action logging for replay capture."""
@@ -1132,6 +1102,11 @@ class W40KEnv(gym.Env):
             # Execute the action through controller
             try:
                 success = self.controller.execute_action(bot_unit["id"], mirror_action)
+                # CRITICAL DEBUG: Check if units_moved was updated after successful move
+                if success and mirror_action["type"] == "move":
+                    current_moved = self.controller.game_state["units_moved"]
+                    print(f"🔧 AFTER move_unit: units_moved = {current_moved}")
+                    print(f"🔧 Bot unit {bot_unit['id']} in moved list: {bot_unit['id'] in current_moved}")
             except Exception as e:
                 print(f"    ❌ Bot unit {bot_unit['id']} action failed: {e}")
                 success = False

@@ -330,13 +330,18 @@ class GameController:
 
     def move_unit(self, unit_id: int, col: int, row: int) -> bool:
         """Move a unit"""
-        # CRITICAL FIX: direct_move returns None by design - treat None as success
         try:
-            action_func = self.game_actions.get("handle_move", self.game_actions.get("direct_move"))
-            result = action_func(unit_id, col, row)
-            # For direct_move, None means successful execution (void return)
-            # For other actions, None means failure
-            success = True if result is None else bool(result)
+            # CRITICAL FIX: Use direct_move which includes add_moved_unit call
+            if "direct_move" in self.game_actions:
+                self.game_actions["direct_move"](unit_id, col, row)
+                success = True
+            else:
+                action_func = self.game_actions.get("handle_move")
+                if action_func:
+                    result = action_func(unit_id, col, row)
+                    success = True if result is None else bool(result)
+                else:
+                    success = False
             print(f"🔧 move_unit: unit={unit_id}, pos=({col},{row}), success={success}")
             return success
         except Exception as e:
