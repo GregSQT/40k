@@ -490,6 +490,10 @@ class UseGameState:
             "set_attack_preview": self.set_attack_preview,
             "clear_attack_preview": self.clear_attack_preview,
             "set_target_preview": self.set_target_preview,
+            
+            # Episode step tracking for training
+            "set_episode_step_count": self.set_episode_step_count,
+            "increment_episode_step_count": self.increment_episode_step_count,
         }
 
 

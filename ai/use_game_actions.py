@@ -404,7 +404,7 @@ class UseGameActions:
                 charge_distance = min(charge_roll, 12)  # Maximum 12 hex charge
                 
                 # Check if any enemies within 12 hexes are also within the rolled charge distance
-                enemy_units = [u for u in self.units if u["player"] != unit["player"]]
+                enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
                 
                 enemies_in_range = []
                 for enemy in enemy_units:
@@ -498,7 +498,7 @@ class UseGameActions:
             unit = self.find_unit(self.move_preview["unit_id"])
             if unit and self.phase == "move":
                 # FLEE DETECTION LOGIC (EXACT from TypeScript)
-                enemy_units = [u for u in self.units if u["player"] != unit["player"]]
+                enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
                 
                 # Check if unit was adjacent to any enemy before moving
                 was_adjacent_to_enemy = any(
@@ -972,7 +972,7 @@ class UseGameActions:
                     
                     if not occupied_by_friendly:
                         # Check if there's an enemy adjacent to this position
-                        enemy_units = [u for u in self.units if u["player"] != unit["player"]]
+                        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
                         has_adjacent_enemy = any(
                             max(abs(target_col - enemy["col"]), abs(target_row - enemy["row"])) == 1
                             for enemy in enemy_units
@@ -1018,6 +1018,11 @@ class UseGameActions:
             
             # CRITICAL: Missing method needed by TrainingGameController
             "get_eligible_units": self.get_eligible_units,
+            
+            # TrainingGameController compatibility aliases
+            "find_valid_charge_targets": self.get_valid_charge_targets,
+            "find_valid_shoot_targets": self.get_valid_shooting_targets,
+            "find_valid_combat_targets": self.get_valid_combat_targets,
         }
 
     def get_eligible_units(self) -> List[Dict[str, Any]]:
@@ -1026,7 +1031,7 @@ class UseGameActions:
         current_phase = self.game_state.get("phase", "move")
         
         eligible_units = []
-        for unit in self.units:
+        for unit in self.game_state["units"]:
             if "alive" not in unit:
                 raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'alive' property")
             if "player" not in unit:
@@ -1041,7 +1046,7 @@ class UseGameActions:
     def get_valid_moves(self, unit_id: int) -> List[Dict[str, Any]]:
         """Get valid move positions for unit"""
         unit = self.find_unit(unit_id)
-        if not unit or not self.is_unit_eligible_local(unit) or self.phase != "move":
+        if not unit or not self.is_unit_eligible_local(unit) or self.game_state.get("phase") != "move":
             return []
         
         # Validate required unit fields
@@ -1075,7 +1080,7 @@ class UseGameActions:
     def get_valid_shooting_targets(self, unit_id: int) -> List[int]:
         """Get valid shooting targets for unit"""
         unit = self.find_unit(unit_id)
-        if not unit or not self.is_unit_eligible_local(unit) or self.phase != "shoot":
+        if not unit or not self.is_unit_eligible_local(unit) or self.game_state.get("phase") != "shoot":
             return []
         
         # Validate required unit fields
@@ -1083,7 +1088,7 @@ class UseGameActions:
             raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit.get('name', 'unknown')}")
         
         targets = []
-        enemy_units = [u for u in self.units if u["player"] != unit["player"]]
+        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
         for enemy in enemy_units:
             distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
             if distance <= unit["RNG_RNG"]:
@@ -1093,11 +1098,11 @@ class UseGameActions:
     def get_valid_charge_targets(self, unit_id: int) -> List[int]:
         """Get valid charge targets for unit"""
         unit = self.find_unit(unit_id)
-        if not unit or not self.is_unit_eligible_local(unit) or self.phase != "charge":
+        if not unit or not self.is_unit_eligible_local(unit) or self.game_state.get("phase") != "charge":
             return []
         
         targets = []
-        enemy_units = [u for u in self.units if u["player"] != unit["player"]]
+        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
         for enemy in enemy_units:
             distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
             if 1 < distance <= 12:  # Charge range 1-12 hexes
@@ -1107,7 +1112,7 @@ class UseGameActions:
     def get_valid_combat_targets(self, unit_id: int) -> List[int]:
         """Get valid combat targets for unit"""
         unit = self.find_unit(unit_id)
-        if not unit or not self.is_unit_eligible_local(unit) or self.phase != "combat":
+        if not unit or not self.is_unit_eligible_local(unit) or self.game_state.get("phase") != "combat":
             return []
         
         # Validate required unit fields
@@ -1115,7 +1120,7 @@ class UseGameActions:
             raise KeyError(f"Unit missing required 'CC_RNG' field: {unit.get('name', 'unknown')}")
         
         targets = []
-        enemy_units = [u for u in self.units if u["player"] != unit["player"]]
+        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
         for enemy in enemy_units:
             distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
             if distance <= unit["CC_RNG"]:

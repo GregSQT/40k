@@ -27,6 +27,7 @@ class GameControllerConfig:
     max_turns: int = 100
     enable_ai_player: bool = False
     training_mode: bool = False
+    training_config_name: str = "default"
 
 class GameController:
     """
@@ -555,8 +556,8 @@ class TrainingGameController(GameController):
             raise RuntimeError("TrainingGameController missing required game_actions")
         if 'find_valid_shoot_targets' not in self.game_actions:
             raise RuntimeError("game_actions missing required find_valid_shoot_targets method")
-        targets = self.game_actions['find_valid_shoot_targets'](unit["id"])
-        return targets[0] if targets else None
+        target_ids = self.game_actions['find_valid_shoot_targets'](unit["id"])
+        return self.find_unit(target_ids[0]) if target_ids else None
 
     def _find_gym_charge_target(self, unit: Dict) -> Optional[Dict]:
         """Delegate to use_game_actions.py for target finding"""
@@ -564,8 +565,8 @@ class TrainingGameController(GameController):
             raise RuntimeError("TrainingGameController missing required game_actions")
         if 'find_valid_charge_targets' not in self.game_actions:
             raise RuntimeError("game_actions missing required find_valid_charge_targets method")
-        targets = self.game_actions['find_valid_charge_targets'](unit["id"])
-        return targets[0] if targets else None
+        target_ids = self.game_actions['find_valid_charge_targets'](unit["id"])
+        return self.find_unit(target_ids[0]) if target_ids else None
 
     def _find_gym_combat_target(self, unit: Dict) -> Optional[Dict]:
         """Delegate to use_game_actions.py for target finding"""
@@ -573,8 +574,8 @@ class TrainingGameController(GameController):
             raise RuntimeError("TrainingGameController missing required game_actions")
         if 'find_valid_combat_targets' not in self.game_actions:
             raise RuntimeError("game_actions missing required find_valid_combat_targets method")
-        targets = self.game_actions['find_valid_combat_targets'](unit["id"])
-        return targets[0] if targets else None
+        target_ids = self.game_actions['find_valid_combat_targets'](unit["id"])
+        return self.find_unit(target_ids[0]) if target_ids else None
 
     def _log_gym_action(self, acting_unit: Dict, mirror_action: Dict, reward: float) -> None:
         """Log action using unified logging system"""

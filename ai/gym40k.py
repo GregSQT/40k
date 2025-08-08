@@ -53,7 +53,7 @@ class W40KEnv(gym.Env):
         self.config = get_config_loader()
         
         # Load rewards configuration
-        self.rewards_config = self.config.load_rewards_config("default")
+        self.rewards_config = self.config.load_rewards_config(rewards_config)
         if not self.rewards_config:
             raise RuntimeError("Failed to load rewards configuration from config_loader - check config/rewards_config.json")
         
@@ -86,9 +86,8 @@ class W40KEnv(gym.Env):
         self.winner = None
         
         # CRITICAL: Initialize mirror controller BEFORE other components try to access controller state
-        self._initialize_mirror_controller(scenario_file)
+        self._initialize_mirror_controller(scenario_file, training_config_name)
         self.step_count = 0
-        self.max_steps_per_episode = 1000
         
         # Explicit unit tracking for compatibility
         self._last_acting_unit = None
@@ -106,6 +105,10 @@ class W40KEnv(gym.Env):
 
         # CRITICAL: Connect gym environment to controller for delegation
         self.controller.connect_gym_env(self)
+
+    def _get_eligible_units(self):
+        """Delegate to controller for eligible units - compatibility method."""
+        return self.controller._get_gym_eligible_units()
 
     def _calculate_max_units_from_scenario(self, scenario_file):
         """Calculate max_units dynamically from scenario file for action space."""
@@ -131,7 +134,9 @@ class W40KEnv(gym.Env):
             # Count units per player - validate player field exists
             player_0_count = sum(1 for unit in units if unit["player"] == 0)
             player_1_count = sum(1 for unit in units if unit["player"] == 1)
-            return max(player_0_count, player_1_count, 4)
+            if player_0_count == 0 and player_1_count == 0:
+                raise ValueError(f"No valid units found in scenario file {scenario_file}")
+            return max(player_0_count, player_1_count)
         except Exception as e:
             raise RuntimeError(f"Failed to process scenario file {scenario_file} for max_units: {e}")
 
@@ -146,7 +151,7 @@ class W40KEnv(gym.Env):
             except Exception:
                 pass
 
-    def _initialize_mirror_controller(self, scenario_file):
+    def _initialize_mirror_controller(self, scenario_file, training_config_name):
         """Initialize TrainingGameController with scenario data."""
         # Load initial units from scenario
         initial_units = self._load_scenario_units(scenario_file)
@@ -156,10 +161,11 @@ class W40KEnv(gym.Env):
             initial_units=initial_units,
             game_mode="training",
             board_config_name="default",
-            config_path="config",
-            max_turns=100,
+            config_path=str(self.config.config_dir),
+            max_turns=self.config.get_max_turns(),
             enable_ai_player=False,
-            training_mode=True
+            training_mode=True,
+            training_config_name=training_config_name
         )
         
         # Initialize TrainingGameController and start it
@@ -327,89 +333,6 @@ class W40KEnv(gym.Env):
         self.step_count += 1
         
         return obs, reward, terminated, truncated, info
-        
-        # P1 execution pathway - validate unit index
-        if unit_idx >= len(p1_eligible_units):
-            self._advance_phase_or_turn()
-            reward = self._get_small_penalty_reward()
-            return self._get_obs(), reward, False, False, self._get_info()
-        
-        # Get P1 unit to act
-        acting_unit = p1_eligible_units[unit_idx]
-       
-        # Convert gym action to mirror action format
-        mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
-        
-        # Execute action through controller
-        try:
-            success = self.controller.execute_action(acting_unit["id"], mirror_action)
-        except Exception as e:
-            success = False
-        
-        # Log ALL actions to replay (both P0 and P1)
-        post_units = self.controller.get_units()
-        target_id = mirror_action.get("target_id") if mirror_action else None
-        
-        # Calculate reward first
-        reward_value = self._calculate_reward(acting_unit, mirror_action, success)
-        
-        # Use unified logging system for P1 actions - moved after action execution
-        try:
-            from shared.gameLogStructure import log_unified_action
-            
-            # Get required parameters - no defaults allowed
-            current_turn = self.controller.game_state["current_turn"]
-            current_phase = self.controller.game_state["phase"]
-            
-            # Find target unit if target_id exists
-            target_unit = None
-            if target_id:
-                all_units = self.controller.get_units()
-                for unit in all_units:
-                    if unit["id"] == target_id:
-                        target_unit = unit
-                        break
-            
-            log_unified_action(
-                env=self,
-                action_type=self._get_action_name_from_type(action_type),
-                acting_unit=acting_unit,
-                target_unit=target_unit,
-                reward=reward_value,
-                phase=current_phase,
-                turn_number=current_turn
-            )
-        except Exception as e:
-            # This should not be silent - we need to see if logging fails
-            raise RuntimeError(f"P1 unified logging failed: {e}")
-        if success:
-            self._mark_unit_as_acted_for_current_phase(acting_unit)
-
-        # CRITICAL FIX: If action execution fails, mark unit as acted and continue
-        if not success:
-            self._mark_unit_as_acted_for_current_phase(acting_unit)
-            reward = self._get_small_penalty_reward()
-            return self._get_obs(), reward, False, False, self._get_info()
-        
-        # Calculate reward
-        reward = self._calculate_reward(acting_unit, mirror_action, success)
-        
-        # Update tracking
-        self._last_acting_unit = acting_unit
-        
-        # Update game status using controller state directly
-        self._update_game_status()
-        
-        # Let phase transition system handle automatic advancement
-        remaining_eligible = self._get_eligible_units()
-        
-        # Check if game ended
-        terminated = self.controller.is_game_over()
-        if terminated:
-            self.game_over = True
-            self.winner = self.controller.get_winner()
-        
-        return self._get_obs(), reward, terminated, False, self._get_info()
     
     def _validate_state_consistency(self):
         """Validate that all components are using the same game_state object."""
