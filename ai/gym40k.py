@@ -653,10 +653,11 @@ class W40KEnv(gym.Env):
         self._phase_advance_count += 1
         
         # Delegate to proper phase transition system through controller
-        if hasattr(self.controller, 'phase_transitions'):
+        if hasattr(self.controller, 'advance_phase'):
             try:
-                # Use automatic phase transition system
-                transitions_occurred = self.controller.phase_transitions['auto_advance_phases']()
+                # CRITICAL FIX: Use controller's advance_phase method (has process_phase_transitions call)
+                self.controller.advance_phase()
+                transitions_occurred = True  # Assume success unless exception
                 
                 final_phase = self.controller.game_state["phase"]
                 final_player = self.controller.game_state["current_player"]

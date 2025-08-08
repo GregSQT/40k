@@ -130,14 +130,13 @@ class UsePhaseTransition:
             # DEBUG: Uncomment for phase transition debugging
             # print(f"🔧 BEFORE set_phase: calling set_phase('shoot')")
             
-            # CRITICAL FIX: Use the SAME game_state object that set_phase modifies
+            # CRITICAL FIX: Never switch state objects - maintain single source of truth
             set_phase_func = self.actions['set_phase']
-            correct_game_state = set_phase_func.__self__.game_state
-            # print(f"🔧 Switching to correct game_state object: {id(correct_game_state)}")
-            
-            # Update self.game_state to point to the correct object
-            self.game_state = correct_game_state
-            # print(f"🔧 Updated UsePhaseTransition.game_state to correct object")
+            # Verify we're using the correct object but don't switch references
+            if hasattr(set_phase_func, '__self__') and hasattr(set_phase_func.__self__, 'game_state'):
+                action_state_id = id(set_phase_func.__self__.game_state)
+                current_state_id = id(self.game_state)
+                print(f"🔧 State object verification: action={action_state_id}, current={current_state_id}, same={action_state_id == current_state_id}")
             
             self.actions["set_phase"]("shoot")
             
@@ -309,22 +308,16 @@ class UsePhaseTransition:
             print(f"    Current phase: {self.game_state.get('phase', 'missing')}")
             print(f"    Fresh phase: {fresh_game_state.get('phase', 'missing')}")
         
-        # Force update to freshest available state
+        # CRITICAL FIX: Never switch state objects - maintain single source of truth
         if fresh_game_state and id(fresh_game_state) != id(self.game_state):
-            # Validate required fields exist in both states - NO DEFAULTS
-            if 'phase' not in self.game_state:
-                raise KeyError("Current game_state missing required 'phase' field")
-            if 'phase' not in fresh_game_state:
-                raise KeyError("Fresh game_state missing required 'phase' field")
-            
-            print(f"🔧 STATE SYNC: Forced update from stale {id(self.game_state)} to fresh {id(fresh_game_state)}")
-            print(f"🔧   Old phase: {self.game_state['phase']}, New phase: {fresh_game_state['phase']}")
-            self.game_state = fresh_game_state
-            print(f"🔧 SYNC COMPLETE: UsePhaseTransition now uses game_state {id(self.game_state)}")
+            print(f"🚨 WARNING: Multiple game_state objects detected - keeping original reference")
+            print(f"🔧   Original object ID: {id(self.game_state)}")
+            print(f"🔧   Fresh object ID: {id(fresh_game_state)}")
+            print(f"🔧   Using original object to maintain single source of truth")
         elif fresh_game_state:
             print(f"🔧 STATE CONSISTENT: Using same game_state {id(self.game_state)}")
         else:
-            raise RuntimeError("Could not find fresh game_state reference from any action source")
+            print(f"🔧 No fresh state found - using initialized game_state {id(self.game_state)}")
         
         # Validate final state has required fields
         if 'phase' not in self.game_state:
