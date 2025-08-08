@@ -294,10 +294,10 @@ class GameController:
                 else:
                     success = False
             
-            print(f"🔧 move_unit: unit={unit_id}, pos=({col},{row}), success={success}")
             return success
         except Exception as e:
-            print(f"🔧 move_unit: unit={unit_id}, pos=({col},{row}), error={e}")
+            if not self.quiet:
+                print(f"❌ move_unit error: unit={unit_id}, {e}")
             return False
 
     def shoot_unit(self, shooter_id: int, target_id: int) -> bool:
@@ -511,6 +511,17 @@ class TrainingGameController(GameController):
             game_log=self.log_manager
         )
         self.game_actions = self.actions_manager.get_available_actions()
+        
+        # CRITICAL DEBUG: Verify all components use same game_state object
+        if not self.quiet:
+            controller_state_id = id(self.game_state)
+            actions_state_id = id(self.actions_manager.game_state)
+            state_actions_ref_id = id(self.state_actions['add_moved_unit'].__self__.game_state)
+            print(f"🔧 STATE OBJECT IDs:")
+            print(f"    Controller game_state: {controller_state_id}")
+            print(f"    Actions manager game_state: {actions_state_id}")
+            print(f"    state_actions game_state: {state_actions_ref_id}")
+            print(f"    All consistent: {controller_state_id == actions_state_id == state_actions_ref_id}")
         
         # Initialize training phase transitions - CRITICAL: Pass controller's game_state directly
         self.phase_manager = TrainingPhaseTransition(
@@ -745,6 +756,16 @@ class TrainingGameController(GameController):
                 import traceback
                 traceback.print_exc()
             
+            # Call the transition processor with detailed debugging
+            print(f"    Calling process_phase_transitions()...")
+            try:
+                self.phase_transitions.get("process_phase_transitions", lambda: None)()
+                print(f"    process_phase_transitions() completed")
+            except Exception as e:
+                print(f"    ERROR in process_phase_transitions(): {e}")
+                import traceback
+                traceback.print_exc()
+            
             # Check if transition actually occurred after process_phase_transitions
             new_phase = self.get_current_phase()
             new_player = self.get_current_player()
@@ -752,22 +773,17 @@ class TrainingGameController(GameController):
             if new_phase == current_phase and current_phase == "move" and phase_info.get('can_transition', {}).get('from_move', False):
                 print(f"    FORCING transition from move to shoot...")
                 
-                # Force direct state change - with FIXED state references, this should work now
+                # Force direct state change as fallback
                 try:
                     print(f"    Testing FIXED state_actions call...")
                     old_phase = self.game_state.get("phase", "unknown")
                     self.state_actions["set_phase"]("shoot")
-                    new_phase = self.game_state.get("phase", "unknown")  # Should work now with direct reference
-                    print(f"    FIXED call result: {old_phase} -> {new_phase}")
-                    
-                    if new_phase == "shoot":
-                        print(f"    SUCCESS: FIXED state_actions['set_phase'] works!")
-                        # Update local cached values
-                        self._current_phase = new_phase
-                    else:
-                        print(f"    STILL FAILED: state_actions['set_phase'] didn't work")
+                    self.state_actions["reset_moved_units"]()
+                    new_phase = self.game_state.get("phase", "unknown")
+                    print(f"    FORCED call result: {old_phase} -> {new_phase}")
+                        
                 except Exception as e:
-                    print(f"    ERROR in FIXED state_actions call: {e}")
+                    print(f"    EXCEPTION in forced transition: {e}")
                     import traceback
                     traceback.print_exc()
                 

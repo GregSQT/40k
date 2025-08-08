@@ -151,15 +151,12 @@ class UsePhaseTransition:
             self.actions["reset_moved_units"]()
             self.actions["set_selected_unit_id"](None)
             
-            # CRITICAL FIX: Add all current player units to units_moved for shoot phase tracking
-            current_player_units = [u for u in self.game_state["units"] if u["player"] == self.game_state["current_player"]]
-            for unit in current_player_units:
-                if unit.get("RNG_RNG", 0) > 0:  # Only ranged units need to be tracked for shooting
-                    self.actions["add_moved_unit"](unit["id"])
-                    # print(f"🔧 Added ranged unit {unit['id']} to units_moved for shoot phase")
+            # DON'T pre-populate units_moved - units should only be added AFTER they shoot
+            # Let units_moved remain empty so units are eligible to shoot
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
+            print(f"🔧 TRANSITION_TO_SHOOT: reset_moved_units called, units_moved should be empty now")
             # print(f"🔧 transition_to_shoot: phase updated to {self.phase}")
         
         # Execute with 300ms delay equivalent (can be immediate in training)

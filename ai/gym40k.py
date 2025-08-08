@@ -547,11 +547,10 @@ class W40KEnv(gym.Env):
             all_units = self.controller.get_units()
         except Exception as e:
             if not self.quiet:
-                print(f"⚠️ Controller state access failed, falling back to training_state: {e}")
-            # Fallback to direct training_state access
-            all_units = self.training_state.game_state["units"]
-            current_player = self.training_state.game_state["current_player"]
-            current_phase = self.training_state.game_state["phase"]
+                print(f"❌ Controller state access failed: {e}")
+                import traceback
+                traceback.print_exc()
+            raise RuntimeError(f"Controller state access failed - no fallback available: {e}")
         
         # Filter units for current player that are eligible for current phase
         eligible_units = []
@@ -978,11 +977,11 @@ class W40KEnv(gym.Env):
         current_phase = self.controller.get_current_phase()
         current_player = self.controller.get_current_player()
         
-        # Reduced bot turn logging
+        # Minimal bot turn logging
         if not hasattr(self, '_bot_turn_count'):
             self._bot_turn_count = 0
-        if self._bot_turn_count < 1:
-            print(f"🤖 BOT TURN: Player {current_player}, Phase {current_phase}")
+        if self._bot_turn_count < 1 and not self.quiet:
+            print(f"🤖 BOT: P{current_player} {current_phase}")
             self._bot_turn_count += 1
         
         # Get bot units (Player 0) and mark them all as acted
@@ -1105,8 +1104,6 @@ class W40KEnv(gym.Env):
                 # CRITICAL DEBUG: Check if units_moved was updated after successful move
                 if success and mirror_action["type"] == "move":
                     current_moved = self.controller.game_state["units_moved"]
-                    print(f"🔧 AFTER move_unit: units_moved = {current_moved}")
-                    print(f"🔧 Bot unit {bot_unit['id']} in moved list: {bot_unit['id'] in current_moved}")
             except Exception as e:
                 print(f"    ❌ Bot unit {bot_unit['id']} action failed: {e}")
                 success = False

@@ -238,23 +238,15 @@ class UseGameActions:
         self.actions = params.actions
         self.game_log = params.game_log
         
-        # Extract state for convenience (EXACT from TypeScript)
-        self.units = params.game_state["units"]
-        self.current_player = params.game_state["current_player"]
-        self.phase = params.game_state["phase"]
-        self.selected_unit_id = params.game_state["selected_unit_id"]
-        self.units_moved = set(params.game_state.get("units_moved", []))
-        self.units_charged = set(params.game_state.get("units_charged", []))
-        self.units_attacked = set(params.game_state.get("units_attacked", []))
-        self.units_fled = set(params.game_state.get("units_fled", []))
-        self.combat_sub_phase = params.game_state.get("combat_sub_phase")
-        self.combat_active_player = params.game_state.get("combat_active_player")
+        # Use live references instead of cached values to prevent stale data
+        # All state access will go through self.game_state directly
+        pass  # Remove all cached state extractions
 
     # === HELPER FUNCTIONS (EXACT from TypeScript) ===
     
     def find_unit(self, unit_id: int) -> Optional[Dict[str, Any]]:
         """Helper function to find unit by ID (EXACT from TypeScript)"""
-        for unit in self.units:
+        for unit in self.game_state["units"]:
             if unit["id"] == unit_id:
                 return unit
         return None
@@ -264,27 +256,31 @@ class UseGameActions:
         EXACT mirror of isUnitEligible from TypeScript.
         Complete phase-specific eligibility logic with ALL missing features.
         """
-        if unit["player"] != self.current_player:
+        current_player = self.game_state["current_player"]
+        if unit["player"] != current_player:
             return False
 
         # Get enemy units once for efficiency
-        enemy_units = [u for u in self.units if u["player"] != self.current_player]
+        enemy_units = [u for u in self.game_state["units"] if u["player"] != current_player]
 
-        if self.phase == "move":
-            return unit["id"] not in self.units_moved
+        phase = self.game_state["phase"]
+        units_moved = set(self.game_state.get("units_moved", []))
+        if phase == "move":
+            return unit["id"] not in units_moved
         
-        elif self.phase == "shoot":
-            if unit["id"] in self.units_moved:
+        elif phase == "shoot":
+            units_fled = set(self.game_state.get("units_fled", []))
+            if unit["id"] in units_moved:
                 return False
             # NEW RULE: Units that fled cannot shoot
-            if unit["id"] in self.units_fled:
+            if unit["id"] in units_fled:
                 return False
             # Check if unit is adjacent to any enemy (engaged in combat)
             has_adjacent_enemy_shoot = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             if has_adjacent_enemy_shoot:
                 return False
             # Check if unit has enemies in shooting range that are NOT adjacent to friendly units
-            friendly_units = [u for u in self.units if u["player"] == unit["player"] and u["id"] != unit["id"]]
+            friendly_units = [u for u in self.game_state["units"] if u["player"] == unit["player"] and u["id"] != unit["id"]]
             return any(
                 isUnitInRange(unit, enemy, unit["RNG_RNG"]) and
                 not any(max(abs(friendly["col"] - enemy["col"]), abs(friendly["row"] - enemy["row"])) == 1
@@ -292,35 +288,41 @@ class UseGameActions:
                 for enemy in enemy_units
             )
         
-        elif self.phase == "charge":
-            if unit["id"] in self.units_charged:
+        elif phase == "charge":
+            units_charged = set(self.game_state.get("units_charged", []))
+            units_fled = set(self.game_state.get("units_fled", []))
+            if unit["id"] in units_charged:
                 return False
             # NEW RULE: Units that fled cannot charge
-            if unit["id"] in self.units_fled:
+            if unit["id"] in units_fled:
                 return False
             is_adjacent = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             in_range = any(isUnitInRange(unit, enemy, unit["MOVE"]) for enemy in enemy_units)
             return not is_adjacent and in_range
         
-        elif self.phase == "combat":
-            if unit["id"] in self.units_attacked:
+        elif phase == "combat":
+            units_attacked = set(self.game_state.get("units_attacked", []))
+            combat_sub_phase = self.game_state.get("combat_sub_phase")
+            combat_active_player = self.game_state.get("combat_active_player")
+            
+            if unit["id"] in units_attacked:
                 return False
             if "CC_RNG" not in unit:
                 raise ValueError("unit.CC_RNG is required")
             combat_range = unit["CC_RNG"]
             
             # MISSING FEATURE: Combat sub-phase logic from TypeScript
-            if self.combat_sub_phase == "charged_units":
+            if combat_sub_phase == "charged_units":
                 if "has_charged_this_turn" not in unit:
                     raise KeyError(f"Unit missing required 'has_charged_this_turn' field: {unit.get('name', 'unknown')}")
                 return unit["has_charged_this_turn"] and any(
                     isUnitInRange(unit, enemy, combat_range) for enemy in enemy_units
                 )
-            elif self.combat_sub_phase == "alternating_combat":
+            elif combat_sub_phase == "alternating_combat":
                 if "has_charged_this_turn" not in unit:
                     raise KeyError(f"Unit missing required 'has_charged_this_turn' field: {unit.get('name', 'unknown')}")
                 return (not unit["has_charged_this_turn"] and 
-                       unit["player"] == self.combat_active_player and
+                       unit["player"] == combat_active_player and
                        any(isUnitInRange(unit, enemy, combat_range) for enemy in enemy_units))
             else:
                 # Default combat eligibility
@@ -890,11 +892,12 @@ class UseGameActions:
         Enables precise AI movement control for advanced training.
         """
         unit = self.find_unit(unit_id)
-        if not unit or not self.is_unit_eligible_local(unit) or self.phase != "move":
+        phase = self.game_state["phase"]
+        if not unit or not self.is_unit_eligible_local(unit) or phase != "move":
             return
 
         # Check if unit is fleeing (EXACT from TypeScript)
-        enemy_units = [u for u in self.units if u["player"] != unit["player"]]
+        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
         was_adjacent_to_enemy = any(
             max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"])) == 1
             for enemy in enemy_units

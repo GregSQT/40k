@@ -128,8 +128,11 @@ class UseGameState:
 
     def add_moved_unit(self, unit_id: int) -> None:
         """EXACT mirror of addMovedUnit from TypeScript"""
+        before_list = self.game_state["units_moved"].copy()
         if unit_id not in self.game_state["units_moved"]:
             self.game_state["units_moved"].append(unit_id)
+        after_list = self.game_state["units_moved"].copy()
+        print(f"🔧 ADD_MOVED_UNIT: unit={unit_id}, before={before_list}, after={after_list}, state_id={id(self.game_state)}")
 
     def add_charged_unit(self, unit_id: int) -> None:
         """EXACT mirror of addChargedUnit from TypeScript"""
@@ -148,7 +151,9 @@ class UseGameState:
 
     def reset_moved_units(self) -> None:
         """EXACT mirror of resetMovedUnits from TypeScript"""
+        before_count = len(self.game_state["units_moved"])
         self.game_state["units_moved"] = []
+        print(f"🔧 RESET_MOVED_UNITS: cleared {before_count} units, state_id={id(self.game_state)}")
 
     def reset_charged_units(self) -> None:
         """EXACT mirror of resetChargedUnits from TypeScript"""

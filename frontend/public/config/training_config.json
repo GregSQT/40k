@@ -142,7 +142,7 @@
 
   "debug": {
     "description": "Ultra minimal to force working",
-    "total_timesteps": 100,
+    "total_timesteps": 50,
     "eval_episodes": 3,
     "max_steps_per_episode": 50,
     "eval_freq": 10,
