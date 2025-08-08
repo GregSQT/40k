@@ -365,10 +365,17 @@ class W40KEnv(gym.Env):
         pre_action_units = self.controller.get_units()
         
         if current_player == 0:
-            # Execute bot turn with proper action logging
-            self._execute_bot_turn_with_logging(eligible_units, pre_action_units)
-            # Return to allow natural phase system to work
-            return self._get_obs(), 0.0, False, False, self._get_info()
+            # Execute bot turn - mark ALL bot units as acted quickly
+            for bot_unit in [u for u in eligible_units if u["player"] == 0]:
+                self._mark_unit_as_acted_for_current_phase(bot_unit)
+            
+            # Log bot actions for replay
+            if pre_action_units:
+                self._execute_bot_turn_with_logging(eligible_units, pre_action_units)
+            
+            # Force phase/turn advance to give control to P1
+            self._advance_phase_or_turn() 
+            # Don't return - let the agent act!
         
         # Decode gym action to mirror action format
         unit_idx = action // 8
@@ -598,9 +605,9 @@ class W40KEnv(gym.Env):
                     # CRITICAL FIX: Use the state_actions object directly (the correct one)
                     self.controller.state_actions['add_moved_unit'](unit_id)
                     
-                    # Verify using the SAME object that was just modified
-                    new_units_moved = self.controller.state_actions['add_moved_unit'].__self__.game_state.get('units_moved', [])
-                    # Silent verification - debugging completed
+                    # Verify using the controller's game_state directly
+                    new_units_moved = self.controller.game_state.get('units_moved', [])
+                    # This ensures we check the same state object
                     if unit_id not in new_units_moved:
                         if not self.quiet:
                             print(f"    ⚠️ Unit {unit_id} not tracked in units_moved")
@@ -882,7 +889,14 @@ class W40KEnv(gym.Env):
         # Use first available unit's reward config
         eligible_units = self._get_eligible_units()
         if not eligible_units:
-            raise RuntimeError("No eligible units available to determine penalty reward")
+            # If no eligible units, use any AI unit to get the penalty value
+            all_units = self.controller.get_units()
+            ai_units = [u for u in all_units if u["player"] == 1]
+            if ai_units:
+                unit_rewards = self._get_unit_reward_config(ai_units[0])
+                return unit_rewards.get("base_actions", {}).get("wait", -0.1)
+            # Final fallback
+            return -0.1
         
         unit_rewards = self._get_unit_reward_config(eligible_units[0])
         if "base_actions" not in unit_rewards:
@@ -1086,6 +1100,10 @@ class W40KEnv(gym.Env):
                 if target:
                     mirror_action = {"type": "shoot", "target_id": target["id"]}
                     action_type = 4  # Shoot action
+                else:
+                    # No target found - use wait action
+                    mirror_action = {"type": "wait"}
+                    action_type = 7  # Wait action
             elif current_phase == "charge":
                 # Try to find charge target  
                 target = self._find_charge_target(bot_unit)

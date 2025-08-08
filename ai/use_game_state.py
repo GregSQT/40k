@@ -132,7 +132,10 @@ class UseGameState:
         if unit_id not in self.game_state["units_moved"]:
             self.game_state["units_moved"].append(unit_id)
         after_list = self.game_state["units_moved"].copy()
-        print(f"🔧 ADD_MOVED_UNIT: unit={unit_id}, before={before_list}, after={after_list}, state_id={id(self.game_state)}")
+        # Find unit position for better debugging
+        unit = next((u for u in self.game_state["units"] if u["id"] == unit_id), None)
+        pos_info = f"pos=({unit['col']},{unit['row']})" if unit else "unit not found"
+        print(f"🔧 ADD_MOVED_UNIT: unit={unit_id} {pos_info}, moved_list={after_list}, state_id={id(self.game_state)}")
 
     def add_charged_unit(self, unit_id: int) -> None:
         """EXACT mirror of addChargedUnit from TypeScript"""
@@ -173,9 +176,10 @@ class UseGameState:
         """EXACT mirror of updateUnit from TypeScript"""
         for i, unit in enumerate(self.game_state["units"]):
             if unit["id"] == unit_id:
-                updated_unit = copy.deepcopy(unit)
-                updated_unit.update(updates)
-                self.game_state["units"][i] = updated_unit
+                # Direct update without deepcopy to ensure changes persist
+                for key, value in updates.items():
+                    self.game_state["units"][i][key] = value
+                print(f"🔧 UPDATED UNIT {unit_id}: col={self.game_state['units'][i].get('col')}, row={self.game_state['units'][i].get('row')}")
                 break
 
     def remove_unit(self, unit_id: int) -> None:
@@ -563,7 +567,22 @@ class TrainingGameState(UseGameState):
 
     def reset_for_new_episode(self, initial_units: List[Dict[str, Any]]) -> None:
         """Reset state for new training episode"""
-        self.__init__(initial_units, self.max_history)
+        # DON'T create a new object - just reset the existing game_state
+        processed_units = []
+        for unit in initial_units:
+            processed_unit = copy.deepcopy(unit)
+            processed_unit["SHOOT_LEFT"] = unit.get("RNG_NB", 0)
+            processed_units.append(processed_unit)
+        
+        # Reset the EXISTING game_state object instead of creating a new one
+        self.game_state["units"] = processed_units
+        self.game_state["current_player"] = 0
+        self.game_state["phase"] = "move"
+        self.game_state["units_moved"] = []
+        self.game_state["units_charged"] = []
+        self.game_state["units_attacked"] = []
+        self.game_state["units_fled"] = []
+        self.game_state["current_turn"] = 1
 
     def _get_unit_hp_left(self, unit: Dict[str, Any]) -> int:
         """Get unit HP_LEFT, validate required fields exist"""

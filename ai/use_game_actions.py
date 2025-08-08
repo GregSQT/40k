@@ -367,7 +367,7 @@ class UseGameActions:
             return  # Exit immediately - no phase handling
 
         # Special handling for move phase - second click marks as moved (EXACT from TypeScript)
-        if self.phase == "move" and self.selected_unit_id == unit_id:
+        if self.game_state["phase"] == "move" and self.game_state["selected_unit_id"] == unit_id:
             # Log the "no move" decision (MISSING from original Python)
             if self.game_log:
                 self.game_log.log_no_move_action(unit, self.game_state["current_turn"])
@@ -379,14 +379,14 @@ class UseGameActions:
             return
 
         # Special handling for shoot phase (EXACT from TypeScript)
-        if self.phase == "shoot":
+        if self.game_state["phase"] == "shoot":
             # Always show the attack preview…
             self.actions["set_move_preview"](None)
             self.actions["set_attack_preview"]({"unit_id": unit_id, "col": unit["col"], "row": unit["row"]})
             self.actions["set_mode"]("attack_preview")
 
             # …but only set the active shooter on the first click
-            if self.selected_unit_id is None:
+            if self.game_state["selected_unit_id"] is None:
                 self.actions["set_selected_unit_id"](unit_id)
             return
 
@@ -553,10 +553,10 @@ class UseGameActions:
         Complete shooting system with probability calculations and target preview.
         ALL MISSING FEATURES NOW IMPLEMENTED.
         """
-        if shooter_id in self.units_moved:
+        if shooter_id in self.game_state.get("units_moved", []):
             return
 
-        if shooter_id in self.units_fled:
+        if shooter_id in self.game_state.get("units_fled", []):
             return
 
         # ADDITIONAL CHECK: Prevent shooting if unit has no shots left
@@ -724,7 +724,7 @@ class UseGameActions:
         EXACT mirror of handleCombatAttack from TypeScript.
         Complete combat sequence with multiple attacks and probability calculations.
         """
-        if attacker_id in self.units_attacked:
+        if attacker_id in self.game_state.get("units_attacked", []):
             return
 
         attacker = self.find_unit(attacker_id)
