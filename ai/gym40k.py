@@ -111,11 +111,7 @@ class W40KEnv(gym.Env):
             # CRITICAL FIX: Initialize after controller is set up
             self.replay_logger = None  # Will be set up after controller init
             self.game_logger = None
-            if not self.quiet:
-                print("🔧 Replay logger will be initialized after controller setup")
         except ImportError as e:
-            if not self.quiet:
-                print(f"⚠️ GameReplayLogger not available: {e}")
             self.replay_logger = None
             self.game_logger = None
 
@@ -299,9 +295,6 @@ class W40KEnv(gym.Env):
         # Reset mirror controller - this creates NEW objects!
         self.controller.reset_game()
         
-        # CRITICAL FIX: After reset_game(), controller has NEW objects - refresh our references
-        print(f"🔧 RESET: Refreshing references after controller.reset_game()")
-        
         # Initialize new episode
         self.controller.start_new_episode()
         
@@ -314,12 +307,6 @@ class W40KEnv(gym.Env):
         
         # Update game status using controller state directly
         self._update_game_status()
-        
-        # CRITICAL DEBUG: Verify we have fresh phase transition objects
-        if hasattr(self.controller, 'phase_transitions'):
-            print(f"🔧 RESET: Fresh phase_transitions available: {list(self.controller.phase_transitions.keys())}")
-        else:
-            print(f"🔧 RESET: ERROR - No phase_transitions after reset!")
         
         # Reset replay data and ensure proper initial state capture
         self.replay_data = []
@@ -352,6 +339,7 @@ class W40KEnv(gym.Env):
         
         # Get eligible units for current phase
         eligible_units = self._get_eligible_units()
+        current_player = self.controller.get_current_player()
         
         if not eligible_units:
             # No eligible units, advance phase/turn
@@ -359,14 +347,16 @@ class W40KEnv(gym.Env):
             return self._get_obs(), 0.0, False, False, self._get_info()
         
         # Check if it's bot's turn (Player 0) - execute bot actions automatically
-        current_player = self.controller.get_current_player()
         
         # Capture pre-action state for logging BEFORE bot turn check
         pre_action_units = self.controller.get_units()
         
         if current_player == 0:
-            # Execute bot turn - mark ALL bot units as acted quickly
-            for bot_unit in [u for u in eligible_units if u["player"] == 0]:
+            # Execute ONE bot action per step (like P1 does)
+            bot_units = [u for u in eligible_units if u["player"] == 0]
+            if bot_units:
+                # Only act with the first eligible bot unit
+                bot_unit = bot_units[0]
                 self._mark_unit_as_acted_for_current_phase(bot_unit)
             
             # Log bot actions for replay
@@ -374,8 +364,9 @@ class W40KEnv(gym.Env):
                 self._execute_bot_turn_with_logging(eligible_units, pre_action_units)
             
             # Force phase/turn advance to give control to P1
-            self._advance_phase_or_turn() 
-            # Don't return - let the agent act!
+            self._advance_phase_or_turn()
+            # Return - next step() call will be for P1 with a NEW action
+            return self._get_obs(), 0.0, False, False, self._get_info()
         
         # Decode gym action to mirror action format
         unit_idx = action // 8
@@ -392,46 +383,37 @@ class W40KEnv(gym.Env):
        
         # Convert gym action to mirror action format
         mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
-       
-        # DETAILED ACTION EXECUTION LOGGING
-        if not self.quiet:
-            print(f"🎮 STEP {self.step_count}: Player {current_player}, Phase {self.controller.get_current_phase()}")
-            print(f"    Eligible units: {len(eligible_units)}")
-            print(f"    Acting unit: {acting_unit['id']} at ({acting_unit['col']},{acting_unit['row']})")
-            print(f"    Gym action: {action} (unit_idx={unit_idx}, action_type={action_type})")
-            print(f"    Mirror action: {mirror_action}")
-            print(f"    Pre-action units count: {len(pre_action_units)}")
         
-        # Execute action through controller with detailed logging
+        # Execute action through controller
         try:
             success = self.controller.execute_action(acting_unit["id"], mirror_action)
-            if not self.quiet:
-                print(f"    ✅ Controller.execute_action returned: {success}")
         except Exception as e:
-            if not self.quiet:
-                print(f"    ❌ Controller execution error: {e}")
-                import traceback
-                traceback.print_exc()
             success = False
         
-        # CRITICAL FIX: If action succeeds, ensure unit is marked as acted for current phase
+        # Log ALL actions to replay (both P0 and P1)
+        post_units = self.controller.get_units()
+        target_id = mirror_action.get("target_id") if mirror_action else None
+        
+        if hasattr(self, 'replay_logger') and self.replay_logger:
+            try:
+                self.replay_logger.log_action(
+                    action=int(action) if hasattr(action, '__int__') else action,
+                    reward=0,
+                    pre_action_units=pre_action_units,
+                    post_action_units=post_units,
+                    acting_unit_id=acting_unit["id"],
+                    target_unit_id=target_id,
+                    description=f"P{current_player} Action {action_type} by unit {acting_unit['id']} {'succeeded' if success else 'failed'}"
+                )
+            except Exception as e:
+                pass  # Silently ignore replay errors
         if success:
-            if not self.quiet:
-                print(f"    ✅ Action succeeded - ensuring unit is marked as acted")
             self._mark_unit_as_acted_for_current_phase(acting_unit)
         
         # Get post-action units for logging BEFORE any early returns
         post_units = self.controller.get_units()
         # Find target if action has one
         target_id = mirror_action.get("target_id") if mirror_action else None
-        
-        # CRITICAL DEBUG: Check replay logger connection step by step
-        print(f"🔍 DEBUG STEP 1: hasattr(self, 'replay_logger') = {hasattr(self, 'replay_logger')}")
-        if hasattr(self, 'replay_logger'):
-            print(f"🔍 DEBUG STEP 2: self.replay_logger exists = {self.replay_logger is not None}")
-            if self.replay_logger:
-                print(f"🔍 DEBUG STEP 3: replay_logger type = {type(self.replay_logger)}")
-                print(f"🔍 DEBUG STEP 4: hasattr log_action = {hasattr(self.replay_logger, 'log_action')}")
         
         # Log the action attempt regardless of success/failure
         if hasattr(self, 'replay_logger') and self.replay_logger:
@@ -441,12 +423,9 @@ class W40KEnv(gym.Env):
                 print(f"        Acting unit: {acting_unit['id']}, Target: {target_id}")
                 print(f"        Post-action units count: {len(post_units)}")
             
-            print(f"🔍 DEBUG STEP 5: About to call log_action method")
-            print(f"🔍 DEBUG ACTION DETAILS: gym_action={action}, action_type={action_type}, unit_id={acting_unit['id']}, target_id={target_id}")
-            print(f"🔍 DEBUG BEFORE CALL: combat_log_entries count = {len(self.replay_logger.combat_log_entries)}")
             try:
                 self.replay_logger.log_action(
-                    action=action,
+                    action=int(action) if hasattr(action, '__int__') else action,
                     reward=0,  # Will be calculated next
                     pre_action_units=pre_action_units,
                     post_action_units=post_units,
@@ -454,12 +433,7 @@ class W40KEnv(gym.Env):
                     target_unit_id=target_id,
                     description=f"Action {action_type} by unit {acting_unit['id']} {'succeeded' if success else 'failed'}"
                 )
-                print(f"🔍 DEBUG AFTER CALL: combat_log_entries count = {len(self.replay_logger.combat_log_entries)}")
-                print(f"🔍 DEBUG STEP 6: log_action call completed successfully")
-                if not self.quiet:
-                    print(f"        ✅ Replay logging successful")
             except Exception as e:
-                print(f"🔍 DEBUG STEP 6: log_action call FAILED with exception: {e}")
                 import traceback
                 traceback.print_exc()
                 if not self.quiet:
@@ -469,16 +443,12 @@ class W40KEnv(gym.Env):
 
         # CRITICAL FIX: If action execution fails, mark unit as acted and continue
         if not success:
-            if not self.quiet:
-                print(f"    ⚠️ Action execution FAILED - marking unit as acted for current phase")
             self._mark_unit_as_acted_for_current_phase(acting_unit)
             reward = self._get_small_penalty_reward()
             return self._get_obs(), reward, False, False, self._get_info()
         
         # Calculate reward
         reward = self._calculate_reward(acting_unit, mirror_action, success)
-        if not self.quiet:
-            print(f"    💰 Calculated reward: {reward}")
         
         # Update tracking
         self._last_acting_unit = acting_unit
@@ -492,11 +462,6 @@ class W40KEnv(gym.Env):
         
         # Let phase transition system handle automatic advancement
         remaining_eligible = self._get_eligible_units()
-        if not self.quiet:
-            if not remaining_eligible:
-                print(f"    ⏭️ No eligible units remaining - phase system will auto-advance")
-            else:
-                print(f"    👥 {len(remaining_eligible)} eligible units remaining")
         
         # Check if game ended
         terminated = self.controller.is_game_over()
@@ -509,8 +474,6 @@ class W40KEnv(gym.Env):
     def _validate_state_consistency(self):
         """Validate that all components are using the same game_state object."""
         if not hasattr(self.controller, 'game_state'):
-            if not self.quiet:
-                print(f"⚠️ Controller missing game_state attribute")
             return False
             
         controller_game_state_id = id(self.controller.game_state)
@@ -535,14 +498,7 @@ class W40KEnv(gym.Env):
                 consistency_issues.append(f"phase_manager game_state ID mismatch: {phase_state_id} vs {controller_game_state_id}")
         
         if consistency_issues:
-            if not self.quiet:
-                print(f"❌ State consistency issues found:")
-                for issue in consistency_issues:
-                    print(f"    {issue}")
             return False
-        
-        if not self.quiet:
-            print(f"✅ All components using consistent game_state object ID: {controller_game_state_id}")
         return True
 
     def _get_eligible_units(self):
@@ -580,14 +536,7 @@ class W40KEnv(gym.Env):
         if hasattr(self.controller, 'game_actions') and 'is_unit_eligible' in self.controller.game_actions:
             controller_result = self.controller.game_actions['is_unit_eligible'](unit)
             
-            # DEBUG: Show detailed eligibility check
-            if not self.quiet:
-                units_moved = self.controller.game_state.get("units_moved", [])
-                print(f"🔧 ELIGIBILITY DEBUG: Unit {unit['id']}, Phase {phase}")
-                print(f"    Controller result: {controller_result}")
-                print(f"    Units moved list: {units_moved}")
-                print(f"    Unit in moved list: {unit['id'] in units_moved}")
-            
+            # Return controller's eligibility result
             return controller_result
         
         # CRITICAL ERROR: Controller eligibility system missing
@@ -612,8 +561,12 @@ class W40KEnv(gym.Env):
                         if not self.quiet:
                             print(f"    ⚠️ Unit {unit_id} not tracked in units_moved")
                         
-                elif current_phase == "shoot" and 'update_unit' in self.controller.state_actions:
-                    self.controller.state_actions['update_unit'](unit_id, {"SHOOT_LEFT": 0})
+                elif current_phase == "shoot":
+                    # In shoot phase, mark unit as moved AND set SHOOT_LEFT to 0
+                    if 'add_moved_unit' in self.controller.state_actions:
+                        self.controller.state_actions['add_moved_unit'](unit_id)
+                    if 'update_unit' in self.controller.state_actions:
+                        self.controller.state_actions['update_unit'](unit_id, {"SHOOT_LEFT": 0})
                 elif current_phase == "charge" and 'add_charged_unit' in self.controller.state_actions:
                     self.controller.state_actions['add_charged_unit'](unit_id)
                 elif current_phase == "combat" and 'add_attacked_unit' in self.controller.state_actions:
@@ -635,24 +588,9 @@ class W40KEnv(gym.Env):
         controller_player = self.controller.game_state["current_player"] 
         controller_state_id = id(self.controller.game_state)
         
-        print(f"🔄 SINGLE STATE DEBUG: controller game_state[{controller_state_id}]: phase={controller_phase}, player={controller_player}")
-        
-        # CRITICAL FIX: Remove self.training_state entirely - only use controller's state
-        # self.training_state = None  # Line already shows this was removed
+        # Get current state for phase advancement
         current_phase = controller_phase
         current_player = controller_player
-        
-        # ALWAYS show critical phase debug (remove count limit)
-        print(f"🔄 PHASE ADVANCE: Player {current_player}, Phase {current_phase}")
-        # CRITICAL: Debug why phase won't advance
-        eligible_units = self._get_eligible_units()
-        moved_units = self.controller.game_state.get("units_moved", [])
-        player_units = [u for u in self.controller.get_units() if u["player"] == current_player]
-        player_unit_ids = [u["id"] for u in player_units]
-        print(f"    🔍 Player {current_player} units: {player_unit_ids}")
-        print(f"    🔍 Units moved: {moved_units}")
-        print(f"    🔍 Eligible units: {len(eligible_units)}")
-        print(f"    🔍 All player units marked as moved? {all(uid in moved_units for uid in player_unit_ids)}")
         
         # Count for bot turn limiting only
         if not hasattr(self, '_phase_advance_count'):
@@ -665,11 +603,6 @@ class W40KEnv(gym.Env):
                 # CRITICAL FIX: Use controller's advance_phase method (has process_phase_transitions call)
                 self.controller.advance_phase()
                 transitions_occurred = True  # Assume success unless exception
-                
-                final_phase = self.controller.game_state["phase"]
-                final_player = self.controller.game_state["current_player"]
-                status = "transitioned" if transitions_occurred else "no change"
-                print(f"🔄 Phase result ({status}): Player {final_player}, Phase {final_phase}")
                 if not transitions_occurred:
                     print(f"    ❌ PHASE STUCK: Phase transition system failed to advance")
                     print(f"    🔍 Expected: All Player {current_player} units should be in units_moved to advance")
@@ -799,9 +732,11 @@ class W40KEnv(gym.Env):
         action_type = action["type"]
         if action_type == "move":
             if success:
-                if "move" not in base_actions:
-                    raise KeyError(f"Base actions missing required 'move' reward")
-                base_reward = base_actions["move"]
+                # Use move_close as default move reward (PvP uses specific move types)
+                move_key = "move_close" if "move_close" in base_actions else "wait"
+                if move_key not in base_actions:
+                    raise KeyError(f"Base actions missing required '{move_key}' reward")
+                base_reward = base_actions[move_key]
             else:
                 if "wait" not in base_actions:
                     raise KeyError(f"Base actions missing required 'wait' reward")
@@ -842,24 +777,22 @@ class W40KEnv(gym.Env):
                 raise KeyError(f"Base actions missing required 'wait' reward")
             base_reward = base_actions["wait"]
         
-        # Add win/lose bonuses
+        # Add win/lose bonuses from situational_modifiers
         if self.game_over:
-            if "outcomes" not in unit_rewards:
-                raise KeyError(f"Unit rewards missing required 'outcomes' section")
+            modifiers = unit_rewards.get("situational_modifiers", {})
             
-            outcomes = unit_rewards["outcomes"]
             if self.winner == 1:  # AI wins
-                if "win" not in outcomes:
-                    raise KeyError(f"Outcomes missing required 'win' reward")
-                base_reward += outcomes["win"]
+                if "win" not in modifiers:
+                    raise KeyError(f"Situational modifiers missing required 'win' reward")
+                base_reward += modifiers["win"]
             elif self.winner == 0:  # AI loses
-                if "lose" not in outcomes:
-                    raise KeyError(f"Outcomes missing required 'lose' reward")
-                base_reward += outcomes["lose"]
+                if "lose" not in modifiers:
+                    raise KeyError(f"Situational modifiers missing required 'lose' reward")
+                base_reward += modifiers["lose"]
             else:  # Draw
-                if "draw" not in outcomes:
-                    raise KeyError(f"Outcomes missing required 'draw' reward")
-                base_reward += outcomes["draw"]
+                if "draw" not in modifiers:
+                    raise KeyError(f"Situational modifiers missing required 'draw' reward")
+                base_reward += modifiers["draw"]
         
         return base_reward
 
@@ -1042,11 +975,16 @@ class W40KEnv(gym.Env):
                             marked_units += 1
                             if not self.quiet:
                                 print(f"    🤖 Set unit {bot_unit['id']} SHOOT_LEFT to 0")
-                    elif current_phase == "charge" and 'add_charged_unit' in self.controller.state_actions:
-                        self.controller.state_actions['add_charged_unit'](bot_unit["id"])
-                        marked_units += 1
-                        if not self.quiet:
-                            print(f"    🤖 Marked unit {bot_unit['id']} as charged")
+                    elif current_phase == "charge":
+                        # Mark ALL bot units as charged, even if they can't actually charge
+                        if 'add_charged_unit' in self.controller.state_actions:
+                            self.controller.state_actions['add_charged_unit'](bot_unit["id"])
+                            marked_units += 1
+                            if not self.quiet:
+                                print(f"    🤖 Marked unit {bot_unit['id']} as charged")
+                        # Also mark as moved (acted) for charge phase
+                        if 'add_moved_unit' in self.controller.state_actions:
+                            self.controller.state_actions['add_moved_unit'](bot_unit["id"])
                     elif current_phase == "combat" and 'add_attacked_unit' in self.controller.state_actions:
                         self.controller.state_actions['add_attacked_unit'](bot_unit["id"])
                         marked_units += 1
@@ -1070,8 +1008,6 @@ class W40KEnv(gym.Env):
         """Execute bot turn WITH proper action logging for replay capture."""
         current_phase = self.controller.get_current_phase()
         current_player = self.controller.get_current_player()
-        
-        print(f"🤖 BOT TURN WITH LOGGING: Player {current_player}, Phase {current_phase}")
         
         # Get bot units (Player 0) and execute/log actual actions
         bot_units = [u for u in eligible_units if u["player"] == 0]
@@ -1150,8 +1086,6 @@ class W40KEnv(gym.Env):
             
             # Mark unit as acted for current phase to prevent infinite loops
             self._mark_unit_as_acted_for_current_phase(bot_unit)
-        
-        print(f"🤖 Bot logged {len(bot_units)} actions for phase {current_phase}")
 
     def _execute_simple_bot_action(self, bot_unit, current_phase):
         """Execute simple scripted action for bot unit."""

@@ -709,7 +709,6 @@ class GameReplayIntegration:
         """Add enhanced logging to training environment - creates 'replay_logger' attribute."""
         # ABSOLUTELY UNAVOIDABLE DEBUG - Will print regardless of quiet mode
         import sys
-        sys.stdout.write("🚨 ENHANCE_TRAINING_ENV CALLED\n")
         sys.stdout.flush()
         
         try:
@@ -725,7 +724,6 @@ class GameReplayIntegration:
             
             return env
         except Exception as e:
-            sys.stdout.write(f"🚨 ENHANCE_TRAINING_ENV FAILED: {e}\n")
             sys.stdout.flush()
             raise
     

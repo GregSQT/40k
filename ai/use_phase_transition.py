@@ -40,11 +40,6 @@ class UsePhaseTransition:
             raise KeyError("game_state missing required 'current_player' field")
         if 'units_moved' not in game_state:
             raise KeyError("game_state missing required 'units_moved' field")
-            
-        if not quiet:
-            print(f"🔧 UsePhaseTransition initialized: phase={game_state['phase']}, player={game_state['current_player']}")
-        else:
-            raise KeyError("actions missing required 'set_phase' function")
         
         self.game_state = game_state
         self.board_config = board_config
@@ -85,12 +80,6 @@ class UsePhaseTransition:
             self.units, self.current_player, self.phase, 
             self.units_moved, self.units_charged, self.units_attacked, self.units_fled
         )
-        # DEBUG: Uncomment for phase transition debugging
-        # print(f"🔧 should_transition_from_shoot: result={result}, phase={self.phase}, player={self.current_player}")
-        # print(f"🔧   units_moved={list(self.units_moved)}, units_charged={list(self.units_charged)}")
-        # print(f"🔧   units_attacked={list(self.units_attacked)}, units_fled={list(self.units_fled)}")
-        # current_player_units = [u for u in self.units if u["player"] == self.current_player]
-        # print(f"🔧   current_player_units: {[(u['id'], u.get('SHOOT_LEFT', 'N/A')) for u in current_player_units]}")
         return result
 
     def should_transition_from_charge(self) -> bool:
@@ -127,8 +116,6 @@ class UsePhaseTransition:
         """
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
-            # DEBUG: Uncomment for phase transition debugging
-            # print(f"🔧 BEFORE set_phase: calling set_phase('shoot')")
             
             # CRITICAL FIX: Never switch state objects - maintain single source of truth
             set_phase_func = self.actions['set_phase']
@@ -136,27 +123,15 @@ class UsePhaseTransition:
             if hasattr(set_phase_func, '__self__') and hasattr(set_phase_func.__self__, 'game_state'):
                 action_state_id = id(set_phase_func.__self__.game_state)
                 current_state_id = id(self.game_state)
-                print(f"🔧 State object verification: action={action_state_id}, current={current_state_id}, same={action_state_id == current_state_id}")
             
             self.actions["set_phase"]("shoot")
-            
-            # DEBUG: Uncomment for phase transition debugging
-            # print(f"🔧 AFTER set_phase call:")
-            # print(f"🔧   UsePhaseTransition.game_state['phase']: {self.game_state.get('phase', 'unknown')}")
-            # print(f"🔧   set_phase.__self__.game_state['phase']: {set_phase_func.__self__.game_state.get('phase', 'unknown')}")
-            # print(f"🔧   Are they the same object? {id(self.game_state) == id(set_phase_func.__self__.game_state)}")
             
             self.actions["initialize_shooting_phase"]()  # MISSING FEATURE ADDED
             self.actions["reset_moved_units"]()
             self.actions["set_selected_unit_id"](None)
             
-            # DON'T pre-populate units_moved - units should only be added AFTER they shoot
-            # Let units_moved remain empty so units are eligible to shoot
-            
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
-            print(f"🔧 TRANSITION_TO_SHOOT: reset_moved_units called, units_moved should be empty now")
-            # print(f"🔧 transition_to_shoot: phase updated to {self.phase}")
         
         # Execute with 300ms delay equivalent (can be immediate in training)
         delayed_transition()
@@ -175,8 +150,6 @@ class UsePhaseTransition:
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
-            # DEBUG: Uncomment for phase transition debugging
-            # print(f"🔧 transition_to_charge: phase updated to {self.phase}")
         
         # Execute with 300ms delay equivalent
         delayed_transition()
@@ -201,8 +174,6 @@ class UsePhaseTransition:
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
-            # DEBUG: Uncomment for phase transition debugging
-            # print(f"🔧 transition_to_combat: phase updated to {self.phase}")
         
         # Execute with 300ms delay equivalent
         delayed_transition()
@@ -250,7 +221,6 @@ class UsePhaseTransition:
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
             self.current_player = self.game_state["current_player"]
-            print(f"🔧 end_turn: phase={self.phase}, player={self.current_player}")
         
         # Execute with delay to mirror setTimeout (can be immediate in training)
         delayed_end_turn()
@@ -299,26 +269,7 @@ class UsePhaseTransition:
                     fresh_game_state = candidate_state
             except (AttributeError, TypeError):
                 pass
-        
-        # CRITICAL DEBUG: Show ALL object IDs before sync
-        print(f"🔧 PRE-SYNC DEBUG:")
-        print(f"    UsePhaseTransition.game_state ID: {id(self.game_state)}")
-        print(f"    Fresh candidate game_state ID: {id(fresh_game_state) if fresh_game_state else 'None'}")
-        if fresh_game_state:
-            print(f"    Current phase: {self.game_state.get('phase', 'missing')}")
-            print(f"    Fresh phase: {fresh_game_state.get('phase', 'missing')}")
-        
-        # CRITICAL FIX: Never switch state objects - maintain single source of truth
-        if fresh_game_state and id(fresh_game_state) != id(self.game_state):
-            print(f"🚨 WARNING: Multiple game_state objects detected - keeping original reference")
-            print(f"🔧   Original object ID: {id(self.game_state)}")
-            print(f"🔧   Fresh object ID: {id(fresh_game_state)}")
-            print(f"🔧   Using original object to maintain single source of truth")
-        elif fresh_game_state:
-            print(f"🔧 STATE CONSISTENT: Using same game_state {id(self.game_state)}")
-        else:
-            print(f"🔧 No fresh state found - using initialized game_state {id(self.game_state)}")
-        
+                
         # Validate final state has required fields
         if 'phase' not in self.game_state:
             raise KeyError("Final game_state missing required 'phase' field")
@@ -330,18 +281,9 @@ class UsePhaseTransition:
         player_reading_1 = self.game_state["current_player"] 
         state_id = id(self.game_state)
         
-        print(f"🔧 ATOMIC DEBUG: game_state[{state_id}] phase={phase_reading_1}, player={player_reading_1}")
-        
-        # Re-read immediately to detect changes
+        # Check state consistency
         phase_reading_2 = self.game_state["phase"]
         player_reading_2 = self.game_state["current_player"]
-        
-        if phase_reading_1 != phase_reading_2:
-            print(f"🚨 RACE CONDITION DETECTED: phase changed from {phase_reading_1} to {phase_reading_2} during same method!")
-        if player_reading_1 != player_reading_2:
-            print(f"🚨 RACE CONDITION DETECTED: player changed from {player_reading_1} to {player_reading_2} during same method!")
-        
-        print(f"🔧 process_phase_transitions: phase={phase_reading_2}, player={player_reading_2}")
         
         # Update local state references from synchronized game_state
         self.units = self.game_state["units"]
@@ -357,21 +299,11 @@ class UsePhaseTransition:
         # CRITICAL DEBUG: Verify final cached values match dictionary values
         dict_phase = self.game_state["phase"]
         dict_player = self.game_state["current_player"]
-        if self.phase != dict_phase:
-            print(f"🚨 CACHE MISMATCH: self.phase={self.phase} != game_state['phase']={dict_phase}")
-        if self.current_player != dict_player:
-            print(f"🚨 CACHE MISMATCH: self.current_player={self.current_player} != game_state['current_player']={dict_player}")
-
-        print(f"🔧 Synced state: phase={self.phase}, player={self.current_player}, units_moved={list(self.units_moved)}")
 
         # Main phase transition logic (EXACT from TypeScript)
         if self.phase == "move":
-            print(f"🔧 In move phase, checking should_transition_from_move()")
             if self.should_transition_from_move():
-                print(f"🔧 should_transition_from_move returned True - transitioning to shoot")
                 self.transition_to_shoot()
-            else:
-                print(f"🔧 should_transition_from_move returned False - no transition")
                 
         elif self.phase == "shoot":
             if self.should_transition_from_shoot():
@@ -386,15 +318,11 @@ class UsePhaseTransition:
             if not hasattr(self, '_combat_debug_count'):
                 self._combat_debug_count = 0
             if self._combat_debug_count < 5:
-                print(f"🔍 COMBAT DEBUG #{self._combat_debug_count + 1}: combat_sub_phase={self.combat_sub_phase}")
-                print(f"    should_transition_from_charged_units={self.should_transition_from_charged_units_phase() if self.combat_sub_phase == 'charged_units' else 'N/A'}")
-                print(f"    should_end_alternating_combat={self.should_end_alternating_combat() if self.combat_sub_phase == 'alternating_combat' else 'N/A'}")
                 self._combat_debug_count += 1
             
             # Handle combat sub-phase transitions (EXACT from TypeScript)
             if (self.combat_sub_phase == "charged_units" and 
                 self.should_transition_from_charged_units_phase()):
-                print(f"🔍 COMBAT TRANSITION: charged_units -> alternating_combat")
                 # Transition from charged units phase to alternating combat
                 next_combat_player = 1 if self.current_player == 0 else 0
                 
@@ -411,7 +339,6 @@ class UsePhaseTransition:
                 
             elif (self.combat_sub_phase == "alternating_combat" and 
                   self.should_end_alternating_combat()):
-                print(f"🔍 COMBAT TRANSITION: alternating_combat -> end_turn")
                 # End combat phase entirely
                 self.end_turn()
                 

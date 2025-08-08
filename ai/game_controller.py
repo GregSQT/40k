@@ -213,8 +213,6 @@ class GameController:
         """Update cached values - all state references are already consistent"""
         # All components use the same game_state object, no synchronization needed
         self._current_phase = self.game_state.get("phase", "move")
-        if not self.quiet:
-            print(f"🔧 Cached phase updated to: {self._current_phase}")
 
     def _check_game_over(self) -> bool:
         """Check if game is over"""
@@ -488,11 +486,6 @@ class TrainingGameController(GameController):
         self.shooting_phase_state = self.state_manager.shooting_phase_state
         self.charge_roll_popup = self.state_manager.charge_roll_popup
         
-        # Verify single object ID consistency
-        if not self.quiet:
-            print(f"🔧 SINGLE game_state object ID: {id(self.game_state)}")
-            print(f"🔧 State actions available: {list(self.state_actions.keys())}")
-        
         # Initialize training game log
         self.log_manager = TrainingGameLog(max_events=500)
         self.game_log = self.log_manager.get_log_functions()
@@ -512,17 +505,6 @@ class TrainingGameController(GameController):
         )
         self.game_actions = self.actions_manager.get_available_actions()
         
-        # CRITICAL DEBUG: Verify all components use same game_state object
-        if not self.quiet:
-            controller_state_id = id(self.game_state)
-            actions_state_id = id(self.actions_manager.game_state)
-            state_actions_ref_id = id(self.state_actions['add_moved_unit'].__self__.game_state)
-            print(f"🔧 STATE OBJECT IDs:")
-            print(f"    Controller game_state: {controller_state_id}")
-            print(f"    Actions manager game_state: {actions_state_id}")
-            print(f"    state_actions game_state: {state_actions_ref_id}")
-            print(f"    All consistent: {controller_state_id == actions_state_id == state_actions_ref_id}")
-        
         # Initialize training phase transitions - CRITICAL: Pass controller's game_state directly
         self.phase_manager = TrainingPhaseTransition(
             game_state=self.game_state,  # Use controller's stored reference - ensures same object
@@ -534,13 +516,6 @@ class TrainingGameController(GameController):
         
         # CRITICAL FIX: Ensure phase_manager always references the same object
         self.phase_manager.game_state = self.game_state  # Use controller's stored reference
-        
-        # Verify single object consistency
-        if not self.quiet:
-            print(f"🔧 Phase manager using game_state ID: {id(self.phase_manager.game_state)}")
-            print(f"🔧 Controller using game_state ID: {id(self.game_state)}")
-            print(f"🔧 Object consistency: {id(self.phase_manager.game_state) == id(self.game_state)}")
-            print(f"🔧 Available phase transitions: {list(self.phase_transitions.keys())}")
 
         # Add phase property for training compatibility
         self._current_phase = self.game_state.get("phase", "move")
@@ -557,7 +532,6 @@ class TrainingGameController(GameController):
 
     def save_replay(self, filename: str, episode_reward: float = 0.0):
         """Custom save_replay method for TrainingGameController"""
-        print(f"🔧 Controller save_replay called: {filename}")
         
         # If we have a replay_logger with captured initial state, use it
         if self.replay_logger and hasattr(self.replay_logger, 'save_replay'):
@@ -571,7 +545,6 @@ class TrainingGameController(GameController):
         
         # Get units from controller and format them for replay
         units = self.get_units()
-        print(f"🔧 Found {len(units)} units to save")
         
         for unit in units:
             replay_unit = {
@@ -617,16 +590,12 @@ class TrainingGameController(GameController):
             "episode_reward": episode_reward
         }
         
-        print(f"🔧 Saving replay with {len(initial_units)} units in initial_state")
-        
         # Save to file
         import os
         import json
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(replay_data, f, indent=2)
-        
-        print(f"🔧 Replay saved successfully to {filename}")
         return filename
 
     def _get_board_size_from_config(self) -> List[int]:
@@ -716,14 +685,7 @@ class TrainingGameController(GameController):
         return self.game_actions.get("get_valid_combat_targets", lambda x: [])(unit_id)
 
     def advance_phase(self) -> None:
-        """Advance to next phase or turn with debugging"""
-        # CRITICAL FIX: All components already use same game_state - no sync needed
-        print(f"🔧 All components using game_state ID: {id(self.game_state)}")
-        # Remove syncing logic - all components should already reference same object
-        print(f"🔧 Controller now uses: {id(self.game_state)}")
-        print(f"🔧 Phase manager now uses: {id(self.phase_manager.game_state)}")
-        
-        # CRITICAL VERIFICATION: Check object consistency after sync
+        """Advance to next phase or turn"""
         controller_id = id(self.game_state)
         phase_manager_id = id(self.phase_manager.game_state) 
         state_manager_id = id(self.state_manager.game_state)
@@ -731,47 +693,16 @@ class TrainingGameController(GameController):
         if controller_id != phase_manager_id or controller_id != state_manager_id:
             raise RuntimeError(f"OBJECT SYNC FAILED: Controller={controller_id}, Phase={phase_manager_id}, State={state_manager_id}")
         
-        print(f"✅ OBJECT SYNC SUCCESS: All components use game_state ID {controller_id}")
-        
         current_phase = self.get_current_phase()
         current_player = self.get_current_player()
-        
-        print(f"🔧 TrainingGameController.advance_phase(): Player {current_player}, Phase {current_phase}")
-        print(f"    Units moved: {self.game_state.get('units_moved', [])}")
-        print(f"    Units charged: {self.game_state.get('units_charged', [])}")
-        print(f"    Units attacked: {self.game_state.get('units_attacked', [])}")
         
         # Check if phase transition conditions are met
         if hasattr(self, 'phase_transitions'):
             phase_info = self.phase_transitions.get("get_phase_info", lambda: {})()
-            print(f"    Phase transition conditions: {phase_info.get('can_transition', {})}")
-            
-            # Call the transition processor with detailed debugging
-            print(f"    Calling process_phase_transitions()...")
             try:
                 self.phase_transitions.get("process_phase_transitions", lambda: None)()
-                print(f"    process_phase_transitions() completed")
             except Exception as e:
-                print(f"    ERROR in process_phase_transitions(): {e}")
-                import traceback
-                traceback.print_exc()
-            
-            # Call the transition processor with detailed debugging
-            print(f"    Calling process_phase_transitions()...")
-            try:
-                self.phase_transitions.get("process_phase_transitions", lambda: None)()
-                print(f"    process_phase_transitions() completed")
-            except Exception as e:
-                print(f"    ERROR in process_phase_transitions(): {e}")
-                import traceback
-                traceback.print_exc()
-            
-            # Check if transition actually occurred after process_phase_transitions
-            new_phase = self.get_current_phase()
-            new_player = self.get_current_player()
-            
-            if new_phase == current_phase and current_phase == "move" and phase_info.get('can_transition', {}).get('from_move', False):
-                print(f"    FORCING transition from move to shoot...")
+                pass
                 
                 # Force direct state change as fallback
                 try:
@@ -794,8 +725,6 @@ class TrainingGameController(GameController):
                     print(f"    transition_to_shoot result: {new_phase}")
                 except Exception as e:
                     print(f"    ERROR in forced transition: {e}")
-            
-            print(f"    After transition: Player {new_player}, Phase {new_phase}")
         else:
             print(f"    ERROR: No phase_transitions available!")
 
@@ -859,9 +788,6 @@ class TrainingGameController(GameController):
             # Set both attributes that SelectiveEpisodeTracker might access
             self.replay_logger.initial_game_state = initial_state_data
             self.replay_logger.initial_state = initial_state_data
-            
-            print(f"🔧 Set initial_game_state with {len(formatted_units)} units")
-            print(f"🔧 First unit: {formatted_units[0] if formatted_units else 'None'}")
 
     def end_episode(self, final_reward: float = 0.0) -> Dict[str, Any]:
         """End current episode and return metrics"""

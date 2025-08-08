@@ -135,7 +135,6 @@ class UseGameState:
         # Find unit position for better debugging
         unit = next((u for u in self.game_state["units"] if u["id"] == unit_id), None)
         pos_info = f"pos=({unit['col']},{unit['row']})" if unit else "unit not found"
-        print(f"🔧 ADD_MOVED_UNIT: unit={unit_id} {pos_info}, moved_list={after_list}, state_id={id(self.game_state)}")
 
     def add_charged_unit(self, unit_id: int) -> None:
         """EXACT mirror of addChargedUnit from TypeScript"""
@@ -156,7 +155,6 @@ class UseGameState:
         """EXACT mirror of resetMovedUnits from TypeScript"""
         before_count = len(self.game_state["units_moved"])
         self.game_state["units_moved"] = []
-        print(f"🔧 RESET_MOVED_UNITS: cleared {before_count} units, state_id={id(self.game_state)}")
 
     def reset_charged_units(self) -> None:
         """EXACT mirror of resetChargedUnits from TypeScript"""
@@ -179,7 +177,6 @@ class UseGameState:
                 # Direct update without deepcopy to ensure changes persist
                 for key, value in updates.items():
                     self.game_state["units"][i][key] = value
-                print(f"🔧 UPDATED UNIT {unit_id}: col={self.game_state['units'][i].get('col')}, row={self.game_state['units'][i].get('row')}")
                 break
 
     def remove_unit(self, unit_id: int) -> None:
