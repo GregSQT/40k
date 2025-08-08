@@ -161,7 +161,16 @@ else:
         "frontend/src/utils/probabilityCalculator.ts",
         "frontend/src/utils/ShootingSequenceManager.ts",
 
+######################################################################################################
+##### Shared files
+######################################################################################################
+
         # shared
+        "shared/gameLogStructure.py",
+        "shared/gameLogStructure.ts",
+        "shared/gameLogUtils.py",
+        "shared/gameLogUtils.ts",
+        "shared/gameLogUtils.py",
         "shared/gameRules.py",
         "shared/gameRules.ts",
 

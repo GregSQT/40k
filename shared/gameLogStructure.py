@@ -314,3 +314,89 @@ def get_event_type_class(event: Union[BaseLogEntry, Dict]) -> str:
         return 'game-log-entry--cancel'
     else:
         return 'game-log-entry--default'
+
+def log_unified_action(env, action_type: str, acting_unit: Dict, target_unit: Optional[Dict], 
+                      reward: float, phase: str, turn_number: int) -> None:
+    """
+    Unified action logger for BOTH P0 and P1 - replaces direct replay_logger calls
+    This ensures identical logging format regardless of player type, matching PvP mode
+    """
+    # STRICT VALIDATION: No defaults - all parameters required
+    if not hasattr(env, 'replay_logger'):
+        raise RuntimeError("Environment missing required replay_logger")
+    if not env.replay_logger:
+        raise RuntimeError("Environment replay_logger is None")
+    if not action_type:
+        raise ValueError("action_type is required")
+    if not acting_unit:
+        raise ValueError("acting_unit is required")
+    if not phase:
+        raise ValueError("phase is required")
+    if turn_number < 1:
+        raise ValueError("turn_number must be >= 1")
+    
+    # STRICT MAPPING: No defaults - raise error for unknown action types
+    action_type_mapping = {
+        "move": "move",
+        "shoot": "shoot", 
+        "charge": "charge",
+        "combat": "combat",
+        "wait": "move"
+    }
+    
+    if action_type not in action_type_mapping:
+        raise ValueError(f"Unknown action_type '{action_type}'. Valid types: {list(action_type_mapping.keys())}")
+    
+    log_entry_type = action_type_mapping[action_type]
+    
+    # STRICT UNIT VALIDATION: Required fields must exist
+    required_unit_fields = ["id", "col", "row"]
+    for field in required_unit_fields:
+        if field not in acting_unit:
+            raise KeyError(f"acting_unit missing required field '{field}': {acting_unit}")
+    
+    if target_unit:
+        for field in required_unit_fields:
+            if field not in target_unit:
+                raise KeyError(f"target_unit missing required field '{field}': {target_unit}")
+    
+    # Create standardized log entry using shared format - NO DEFAULTS
+    log_entry = create_training_log_entry(
+        entry_type=log_entry_type,
+        acting_unit=acting_unit,
+        target_unit=target_unit,
+        reward=reward,
+        action_name=action_type,
+        turn_number=turn_number,
+        phase=phase,
+        start_hex=f"({acting_unit['col']}, {acting_unit['row']})",
+        end_hex=f"({target_unit['col']}, {target_unit['row']})" if target_unit else None
+    )
+    
+    # STRICT LOGGING: No fallbacks - must succeed or raise error
+    if hasattr(env.replay_logger, 'add_entry'):
+        env.replay_logger.add_entry(
+            entry_type=log_entry.type,
+            acting_unit=acting_unit,
+            target_unit=target_unit,
+            turn_number=log_entry.turnNumber,
+            phase=log_entry.phase,
+            reward=log_entry.reward,
+            action_name=log_entry.actionName
+        )
+    elif hasattr(env.replay_logger, 'log_action'):
+        # STRICT: Must provide required parameters - no defaults
+        pre_action_units = [acting_unit]
+        post_action_units = [acting_unit]
+        
+        env.replay_logger.log_action(
+            action=action_type,
+            reward=reward,
+            pre_action_units=pre_action_units,
+            post_action_units=post_action_units,
+            acting_unit_id=acting_unit['id'],
+            target_unit_id=target_unit['id'] if target_unit else None,
+            description=f"Unified {action_type} action by unit {acting_unit['id']}"
+        )
+    else:
+        raise RuntimeError("replay_logger missing required methods: add_entry or log_action")

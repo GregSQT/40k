@@ -199,7 +199,7 @@ class MultiAgentTrainer:
         """Initialize multi-agent trainer."""
         self.config = config_loader or get_config_loader()
         self.unit_registry = UnitRegistry()
-        self.scenario_manager = ScenarioManager(self.config)
+        self.scenario_manager = ScenarioManager(self.config, self.unit_registry)
         
         # Determine optimal concurrent sessions
         if max_concurrent_sessions is None:
@@ -558,6 +558,20 @@ class MultiAgentTrainer:
             try:
                 if episode_tracker:
                     replay_files_saved = episode_tracker.save_selective_replays()
+                    
+                    # CRITICAL DEBUG: Check P1 action logging
+                    if episode_tracker.best_reward_episode:
+                        p1_analysis = self._analyze_player_actions(episode_tracker.best_reward_episode.replay_data)
+                        print(f"🔍 P1 ACTION ANALYSIS for {session.agent_key} vs {session.opponent_agent}:")
+                        print(f"   📊 Total actions logged: {p1_analysis['total_actions']}")
+                        print(f"   🤖 P0 (Bot) actions: {p1_analysis['p0_actions']} ({p1_analysis['p0_percentage']:.1f}%)")
+                        print(f"   🧠 P1 (AI) actions: {p1_analysis['p1_actions']} ({p1_analysis['p1_percentage']:.1f}%)")
+                        print(f"   🎯 P1 action types: {p1_analysis['p1_action_types']}")
+                        
+                        if p1_analysis['p1_actions'] == 0:
+                            print(f"   ❌ CRITICAL: NO P1 ACTIONS LOGGED - P1 is not acting!")
+                        else:
+                            print(f"   ✅ P1 actions are being logged correctly")
             except Exception as replay_error:
                 pass  # Silent failure for replay saving
             
@@ -1013,6 +1027,53 @@ class MultiAgentTrainer:
         
         print(f"💾 Training state saved: {state_path}")
         return state_path
+
+    def _analyze_player_actions(self, replay_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze replay data to check P0 vs P1 action distribution."""
+        if not replay_data or 'combat_log' not in replay_data:
+            return {
+                'total_actions': 0,
+                'p0_actions': 0,
+                'p1_actions': 0,
+                'p0_percentage': 0.0,
+                'p1_percentage': 0.0,
+                'p1_action_types': []
+            }
+        
+        combat_log = replay_data['combat_log']
+        total_actions = 0
+        p0_actions = 0
+        p1_actions = 0
+        p1_action_types = []
+        
+        for entry in combat_log:
+            # Skip turn_change and phase_change entries
+            if entry.get('type') in ['turn_change', 'phase_change']:
+                continue
+                
+            # Count actual game actions
+            if 'player' in entry:
+                total_actions += 1
+                if entry['player'] == 0:
+                    p0_actions += 1
+                elif entry['player'] == 1:
+                    p1_actions += 1
+                    action_type = entry.get('type', 'unknown')
+                    if action_type not in p1_action_types:
+                        p1_action_types.append(action_type)
+        
+        # Calculate percentages
+        p0_percentage = (p0_actions / total_actions * 100) if total_actions > 0 else 0.0
+        p1_percentage = (p1_actions / total_actions * 100) if total_actions > 0 else 0.0
+        
+        return {
+            'total_actions': total_actions,
+            'p0_actions': p0_actions,
+            'p1_actions': p1_actions,
+            'p0_percentage': p0_percentage,
+            'p1_percentage': p1_percentage,
+            'p1_action_types': p1_action_types
+        }
 
 # Test and validation functions
 def test_multi_agent_trainer():

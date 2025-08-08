@@ -53,10 +53,10 @@ class ScenarioManager:
     Follows AI_INSTRUCTIONS.md: Zero hardcoding, config-driven, uses Unit Registry.
     """
     
-    def __init__(self, config_loader=None):
+    def __init__(self, config_loader=None, unit_registry=None):
         """Initialize scenario manager with dynamic agent discovery."""
         self.config = config_loader or get_config_loader()
-        self.unit_registry = UnitRegistry()
+        self.unit_registry = unit_registry or UnitRegistry()
         
         # Load scenario templates from config
         self.scenario_templates = self._load_scenario_templates()

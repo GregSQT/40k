@@ -180,7 +180,15 @@ def create_model(config, training_config_name="default", rewards_config_name="de
     scenario_file = os.path.join(cfg.config_dir, "scenario.json")
     if not os.path.isfile(scenario_file):
         raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
-    base_env = W40KEnv(rewards_config=rewards_config_name, training_config_name=training_config_name)
+    base_env = W40KEnv(
+    rewards_config=rewards_config_name,
+    training_config_name=training_config_name,
+    controlled_agent=None,
+    active_agents=None,
+    scenario_file=None,
+    unit_registry=None,
+    quiet=False
+)
     
     # DISABLED: No logging during training for speed
     # Enhanced logging only during evaluation
@@ -405,12 +413,12 @@ def test_scenario_manager_integration():
     try:
         config = get_config_loader()
         
-        # Test scenario manager
-        scenario_manager = ScenarioManager(config)
-        print(f"✅ ScenarioManager initialized with {len(scenario_manager.get_available_templates())} templates")
-        
         # Test unit registry integration
         unit_registry = UnitRegistry()
+        
+        # Test scenario manager
+        scenario_manager = ScenarioManager(config, unit_registry)
+        print(f"✅ ScenarioManager initialized with {len(scenario_manager.get_available_templates())} templates")
         agents = unit_registry.get_required_models()
         print(f"✅ UnitRegistry found {len(agents)} agents: {agents}")
         

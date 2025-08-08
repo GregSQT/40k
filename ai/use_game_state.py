@@ -36,6 +36,8 @@ class AttackPreview:
         self.attacker_id = attacker_id
         self.target_id = target_id
         self.attack_type = attack_type  # "shoot" or "combat"
+        self.col = None  # Support TypeScript interface
+        self.row = None  # Support TypeScript interface
 
 class ShootingPhaseState:
     """EXACT mirror of ShootingPhaseState interface from TypeScript"""
@@ -294,13 +296,20 @@ class UseGameState:
         """Clear movement preview"""
         self.move_preview = None
 
-    def set_attack_preview(self, attacker_id: int, target_id: int, attack_type: str) -> None:
-        """Set attack preview"""
-        self.attack_preview = AttackPreview(
-            attacker_id=attacker_id,
-            target_id=target_id,
-            attack_type=attack_type
-        )
+    def set_attack_preview(self, preview_data: Optional[Dict[str, Any]]) -> None:
+        """Set attack preview - EXACT mirror of TypeScript interface"""
+        if preview_data is None:
+            self.attack_preview = None
+        else:
+            # TypeScript interface: { unitId, col, row }
+            self.attack_preview = AttackPreview(
+                attacker_id=preview_data["unitId"],
+                target_id=None,  # Not provided in TypeScript interface
+                attack_type="preview"  # Default for preview mode
+            )
+            # Store col/row for position-based preview
+            self.attack_preview.col = preview_data["col"]
+            self.attack_preview.row = preview_data["row"]
 
     def clear_attack_preview(self) -> None:
         """EXACT mirror of clearAttackPreview from TypeScript"""

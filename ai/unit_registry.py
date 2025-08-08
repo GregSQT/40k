@@ -34,23 +34,22 @@ class UnitRegistry:
         self.faction_role_matrix: Dict[str, List[str]] = {}
         
         # Initialize the registry
-        self._discover_all_units()
+        self._discover_all_units(verbose=False)
         self._build_faction_role_matrix()
     
-    def _discover_all_units(self):
+    def _discover_all_units(self, verbose: bool = False):
         """Scan TypeScript files and extract all unit definitions dynamically."""
-        print("🔍 Discovering units from TypeScript files...")
-        
         if not self.roster_dir.exists():
             raise FileNotFoundError(f"Roster directory not found: {self.roster_dir}")
         
         unit_count = 0
+        faction_units = {}
         
         # Scan all faction directories
         for faction_dir in self.roster_dir.iterdir():
             if faction_dir.is_dir() and not faction_dir.name.startswith('.'):
                 faction_name = faction_dir.name
-                print(f"  📁 Scanning faction: {faction_name}")
+                faction_units[faction_name] = []
                 
                 # Scan TypeScript files in the units subfolder only
                 units_dir = faction_dir / "units"
@@ -65,13 +64,19 @@ class UnitRegistry:
                             self.factions.add(unit_data['faction'])
                             self.roles.add(unit_data['role'])
                             self.faction_role_combinations.add((unit_data['faction'], unit_data['role']))
+                            faction_units[faction_name].append(f"{unit_data['unit_type']} ({unit_data['role']})")
                             unit_count += 1
-                            print(f"    ✅ {unit_data['unit_type']} ({unit_data['faction']} {unit_data['role']})")
-                else:
-                    print(f"    ⚠️ No units folder found in {faction_dir}")
         
-        print(f"📊 Discovery complete: {unit_count} units, {len(self.factions)} factions, {len(self.roles)} roles")
-        print(f"🎯 Faction-Role combinations: {sorted(self.faction_role_combinations)}")
+        # Streamlined single-line summary
+        faction_summary = []
+        for faction, units in faction_units.items():
+            if units:
+                faction_summary.append(f"{faction}({len(units)})")
+        
+        print(f"🔍 Units discovered: {unit_count} total | {' | '.join(faction_summary)}")
+        
+        if verbose:
+            print(f"🎯 Faction-Role combinations: {sorted(self.faction_role_combinations)}")
     
     def _parse_unit_file(self, ts_file: Path, faction_name: str) -> Dict:
         """Parse a TypeScript unit file and extract all unit data."""
@@ -202,8 +207,6 @@ class UnitRegistry:
                 self.faction_role_matrix[agent_key] = []
             
             self.faction_role_matrix[agent_key].append(unit_type)
-        
-        print(f"🎯 Built faction-role matrix: {list(self.faction_role_matrix.keys())}")
     
     def _generate_advanced_agent_key(self, unit_type: str, unit_data: Dict) -> str:
         """Generate 4-part agent key: Faction_MoveType_TankingLevel_AttackTypeTarget"""
