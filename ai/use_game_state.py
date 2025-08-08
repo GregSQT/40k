@@ -571,6 +571,18 @@ class TrainingGameState(UseGameState):
         """Get state history for training analysis"""
         return copy.deepcopy(self.state_history)
 
+    def set_episode_step_count(self, count: int) -> None:
+        """Set episode step count in game state"""
+        if "episode_step_count" not in self.game_state:
+            self.game_state["episode_step_count"] = 0
+        self.game_state["episode_step_count"] = count
+
+    def increment_episode_step_count(self) -> None:
+        """Increment episode step count in game state"""
+        if "episode_step_count" not in self.game_state:
+            self.game_state["episode_step_count"] = 0
+        self.game_state["episode_step_count"] += 1
+
     def reset_for_new_episode(self, initial_units: List[Dict[str, Any]]) -> None:
         """Reset state for new training episode"""
         # DON'T create a new object - just reset the existing game_state

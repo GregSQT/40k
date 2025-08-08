@@ -1015,7 +1015,28 @@ class UseGameActions:
             "get_valid_shooting_targets": self.get_valid_shooting_targets,
             "get_valid_charge_targets": self.get_valid_charge_targets,
             "get_valid_combat_targets": self.get_valid_combat_targets,
+            
+            # CRITICAL: Missing method needed by TrainingGameController
+            "get_eligible_units": self.get_eligible_units,
         }
+
+    def get_eligible_units(self) -> List[Dict[str, Any]]:
+        """Get all eligible units for current phase and player"""
+        current_player = self.game_state.get("current_player", 0)
+        current_phase = self.game_state.get("phase", "move")
+        
+        eligible_units = []
+        for unit in self.units:
+            if "alive" not in unit:
+                raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'alive' property")
+            if "player" not in unit:
+                raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'player' property")
+            
+            if unit["player"] == current_player and unit["alive"]:
+                if self.is_unit_eligible_local(unit):
+                    eligible_units.append(unit)
+        
+        return eligible_units
 
     def get_valid_moves(self, unit_id: int) -> List[Dict[str, Any]]:
         """Get valid move positions for unit"""

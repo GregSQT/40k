@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """
-ai/game_controller.py
-EXACT Python mirror of frontend/src/components/GameController.tsx
-Master orchestrator component - ALL features preserved.
-
-This is the complete functional equivalent of the PvP GameController system.
+ai/game_controller.py - Training Game Controller with mirror architecture
+EXACT Python mirror of PvP frontend GameController component
 """
 
-from typing import Dict, List, Any, Optional, Callable
 import copy
 import time
-from dataclasses import dataclass
+import numpy as np
+from typing import Dict, List, Any, Optional, Union, Tuple
+from dataclasses import dataclass, field
 
 # Import all our Python mirrors
 from use_game_state import use_game_state, TrainingGameState
@@ -459,6 +457,269 @@ class TrainingGameController(GameController):
             "wins_by_player": {0: 0, 1: 0},
             "average_episode_length": 0.0
         }
+        
+        # Training-specific properties from config - NO HARDCODED VALUES
+        if not hasattr(config, 'training_config_name'):
+            raise ValueError("GameControllerConfig missing required training_config_name for max_steps_per_episode")
+        
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        self.max_steps_per_episode = config_loader.get_max_steps_per_episode(config.training_config_name)
+        
+        # Step count managed by game state - NO SEPARATE TRACKING
+        if not hasattr(self, 'game_state'):
+            raise RuntimeError("TrainingGameController missing required game_state for step tracking")
+
+    def _get_gym_eligible_units(self) -> List[Dict]:
+        """Delegate to use_game_actions.py for unit eligibility"""
+        if not hasattr(self, 'game_actions') or 'get_eligible_units' not in self.game_actions:
+            raise RuntimeError("TrainingGameController missing required game_actions.get_eligible_units")
+        return self.game_actions['get_eligible_units']()
+
+    def _advance_gym_phase_or_turn(self) -> None:
+        """Delegate to use_phase_transition.py for phase advancement"""
+        if not hasattr(self, 'phase_transitions') or 'process_phase_transitions' not in self.phase_transitions:
+            raise RuntimeError("TrainingGameController missing required phase_transitions.process_phase_transitions")
+        self.phase_transitions['process_phase_transitions']()
+
+    def _execute_gym_bot_turn(self) -> None:
+        """Execute bot turn with proper logging through mirror architecture"""
+        eligible_units = self._get_gym_eligible_units()
+        bot_units = [u for u in eligible_units if u["player"] == 0]
+        
+        for bot_unit in bot_units:
+            # Execute simple wait action for bot
+            mirror_action = {"type": "wait"}
+            self.execute_action(bot_unit["id"], mirror_action)
+            
+            # Log bot action using unified logging
+            self._log_gym_action(bot_unit, mirror_action, 0.0)
+            self._mark_gym_unit_as_acted(bot_unit)
+
+    def _mark_gym_unit_as_acted(self, unit: Dict) -> None:
+        """Delegate to use_game_state.py for unit state tracking"""
+        current_phase = self.get_current_phase()
+        unit_id = unit["id"]
+        
+        if not hasattr(self, 'state_actions'):
+            raise RuntimeError("TrainingGameController missing required state_actions")
+        
+        if current_phase == "move" and 'add_moved_unit' in self.state_actions:
+            self.state_actions['add_moved_unit'](unit_id)
+        elif current_phase == "shoot" and 'add_moved_unit' in self.state_actions:
+            self.state_actions['add_moved_unit'](unit_id)
+        elif current_phase == "charge" and 'add_charged_unit' in self.state_actions:
+            self.state_actions['add_charged_unit'](unit_id)
+        elif current_phase == "combat" and 'add_attacked_unit' in self.state_actions:
+            self.state_actions['add_attacked_unit'](unit_id)
+
+    def _convert_gym_action_to_mirror(self, unit: Dict, action_type: int) -> Dict:
+        """Convert gym action to mirror action format with phase validation"""
+        current_phase = self.get_current_phase()
+        
+        if current_phase == "move":
+            if action_type == 0:  # move_north
+                return {"type": "move", "col": unit["col"], "row": unit["row"] - 1}
+            elif action_type == 1:  # move_south
+                return {"type": "move", "col": unit["col"], "row": unit["row"] + 1}
+            elif action_type == 2:  # move_east
+                return {"type": "move", "col": unit["col"] + 1, "row": unit["row"]}
+            elif action_type == 3:  # move_west
+                return {"type": "move", "col": unit["col"] - 1, "row": unit["row"]}
+            else:
+                return {"type": "wait"}
+        elif current_phase == "shoot":
+            if action_type == 4:  # shoot
+                target = self._find_gym_shoot_target(unit)
+                return {"type": "shoot", "target_id": target["id"]} if target else {"type": "wait"}
+            else:
+                return {"type": "wait"}
+        elif current_phase == "charge":
+            if action_type == 5:  # charge
+                target = self._find_gym_charge_target(unit)
+                return {"type": "charge", "target_id": target["id"]} if target else {"type": "wait"}
+            else:
+                return {"type": "wait"}
+        elif current_phase == "combat":
+            if action_type == 6:  # attack
+                target = self._find_gym_combat_target(unit)
+                return {"type": "combat", "target_id": target["id"]} if target else {"type": "wait"}
+            else:
+                return {"type": "wait"}
+        else:
+            return {"type": "wait"}
+
+    def _find_gym_shoot_target(self, unit: Dict) -> Optional[Dict]:
+        """Delegate to use_game_actions.py for target finding"""
+        if not hasattr(self, 'game_actions'):
+            raise RuntimeError("TrainingGameController missing required game_actions")
+        if 'find_valid_shoot_targets' not in self.game_actions:
+            raise RuntimeError("game_actions missing required find_valid_shoot_targets method")
+        targets = self.game_actions['find_valid_shoot_targets'](unit["id"])
+        return targets[0] if targets else None
+
+    def _find_gym_charge_target(self, unit: Dict) -> Optional[Dict]:
+        """Delegate to use_game_actions.py for target finding"""
+        if not hasattr(self, 'game_actions'):
+            raise RuntimeError("TrainingGameController missing required game_actions")
+        if 'find_valid_charge_targets' not in self.game_actions:
+            raise RuntimeError("game_actions missing required find_valid_charge_targets method")
+        targets = self.game_actions['find_valid_charge_targets'](unit["id"])
+        return targets[0] if targets else None
+
+    def _find_gym_combat_target(self, unit: Dict) -> Optional[Dict]:
+        """Delegate to use_game_actions.py for target finding"""
+        if not hasattr(self, 'game_actions'):
+            raise RuntimeError("TrainingGameController missing required game_actions")
+        if 'find_valid_combat_targets' not in self.game_actions:
+            raise RuntimeError("game_actions missing required find_valid_combat_targets method")
+        targets = self.game_actions['find_valid_combat_targets'](unit["id"])
+        return targets[0] if targets else None
+
+    def _log_gym_action(self, acting_unit: Dict, mirror_action: Dict, reward: float) -> None:
+        """Log action using unified logging system"""
+        try:
+            from shared.gameLogStructure import log_unified_action
+            current_turn = self.get_current_turn()
+            current_phase = self.get_current_phase()
+            
+            # Find target unit if target_id exists
+            target_unit = None
+            target_id = mirror_action.get("target_id")
+            if target_id:
+                all_units = self.get_units()
+                for unit in all_units:
+                    if unit["id"] == target_id:
+                        target_unit = unit
+                        break
+            
+            # Use gym environment reference if available
+            env = getattr(self, 'gym_env', self)
+            
+            log_unified_action(
+                env=env,
+                action_type=mirror_action["type"],
+                acting_unit=acting_unit,
+                target_unit=target_unit,
+                reward=reward,
+                phase=current_phase,
+                turn_number=current_turn
+            )
+        except Exception as e:
+            if not self.quiet:
+                print(f"❌ Gym action logging failed: {e}")
+
+    def _get_gym_obs(self) -> np.ndarray:
+        """Get gymnasium observation - delegates to gym environment"""
+        if not hasattr(self, 'gym_env'):
+            raise RuntimeError("TrainingGameController not connected to gym environment")
+        return self.gym_env._get_obs()
+
+    def _get_gym_info(self) -> Dict:
+        """Get gymnasium info - delegates to gym environment"""
+        if not hasattr(self, 'gym_env'):
+            raise RuntimeError("TrainingGameController not connected to gym environment")
+        return self.gym_env._get_info()
+
+    def _calculate_gym_reward(self, acting_unit: Dict, mirror_action: Dict, success: bool) -> float:
+        """Calculate reward - delegates to gym environment"""
+        if not hasattr(self, 'gym_env'):
+            raise RuntimeError("TrainingGameController not connected to gym environment")
+        return self.gym_env._calculate_reward(acting_unit, mirror_action, success)
+
+    def _get_gym_penalty_reward(self) -> float:
+        """Get penalty reward - delegates to gym environment"""
+        if not hasattr(self, 'gym_env'):
+            raise RuntimeError("TrainingGameController not connected to gym environment")
+        return self.gym_env._get_small_penalty_reward()
+
+    def connect_gym_env(self, gym_env) -> None:
+        """Connect gym environment for observation/reward delegation"""
+        self.gym_env = gym_env
+
+    def _get_current_step_count(self) -> int:
+        """Get current step count from game state - NO SEPARATE TRACKING"""
+        if 'episode_step_count' not in self.game_state:
+            # Initialize if not present
+            if not hasattr(self, 'state_actions') or 'set_episode_step_count' not in self.state_actions:
+                raise RuntimeError("state_actions missing required set_episode_step_count method")
+            self.state_actions['set_episode_step_count'](0)
+        return self.game_state['episode_step_count']
+
+    def _increment_step_count(self) -> None:
+        """Increment step count in game state - delegates to use_game_state.py"""
+        if not hasattr(self, 'state_actions') or 'increment_episode_step_count' not in self.state_actions:
+            raise RuntimeError("state_actions missing required increment_episode_step_count method")
+        self.state_actions['increment_episode_step_count']()
+
+    def execute_gym_action(self, action: int) -> tuple:
+        """
+        Execute gymnasium action and return (obs, reward, terminated, truncated, info).
+        ARCHITECTURAL COMPLIANCE: All game logic delegated to use_*.py mirror files.
+        """
+        # Check game over conditions
+        if self.is_game_over():
+            return self._get_gym_obs(), 0.0, True, False, self._get_gym_info()
+        
+        # Check step limit using game state tracking - NO SEPARATE STEP COUNTER
+        current_step = self._get_current_step_count()
+        if current_step >= self.max_steps_per_episode:
+            return self._get_gym_obs(), 0.0, True, False, self._get_gym_info()
+        
+        # Increment step count in game state
+        self._increment_step_count()
+        
+        # Get eligible units using mirror architecture
+        eligible_units = self._get_gym_eligible_units()
+        current_player = self.get_current_player()
+        
+        if not eligible_units:
+            # No eligible units, advance phase/turn using mirror architecture
+            self._advance_gym_phase_or_turn()
+            return self._get_gym_obs(), 0.0, False, False, self._get_gym_info()
+        
+        # Single-agent control: only P1 controlled through gym actions
+        controlled_player = 1
+        controlled_eligible_units = [u for u in eligible_units if u["player"] == controlled_player]
+        
+        # Auto-execute bot turn if current player is P0
+        if current_player == 0:
+            self._execute_gym_bot_turn()
+            eligible_units = self._get_gym_eligible_units()
+            controlled_eligible_units = [u for u in eligible_units if u["player"] == controlled_player]
+        
+        # No controlled units eligible - advance until controlled player can act
+        if not controlled_eligible_units:
+            self._advance_gym_phase_or_turn()
+            return self._get_gym_obs(), 0.0, False, False, self._get_gym_info()
+        
+        # Decode and execute P1 action
+        unit_idx = action // 8
+        action_type = action % 8
+        
+        if unit_idx >= len(controlled_eligible_units):
+            self._advance_gym_phase_or_turn()
+            reward = self._get_gym_penalty_reward()
+            return self._get_gym_obs(), reward, False, False, self._get_gym_info()
+        
+        # Execute action through mirror architecture
+        acting_unit = controlled_eligible_units[unit_idx]
+        mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
+        
+        success = self.execute_action(acting_unit["id"], mirror_action)
+        reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
+        
+        # Log action using unified logging
+        self._log_gym_action(acting_unit, mirror_action, reward)
+        
+        # Mark unit as acted if successful
+        if success:
+            self._mark_gym_unit_as_acted(acting_unit)
+        
+        # Check if game ended
+        terminated = self.is_game_over()
+        
+        return self._get_gym_obs(), reward, terminated, False, self._get_gym_info()
 
     def _initialize_hooks(self) -> None:
         """Override to use training-optimized hooks"""
