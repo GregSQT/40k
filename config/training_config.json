@@ -4,7 +4,7 @@
     "_training_duration_comments": {
       "total_timesteps": "Total number of environment steps to train for (1M steps = substantial learning)",
       "eval_episodes": "Final evaluation of the trained model before saving ",
-      "max_steps_per_episode": "Maximum steps before episode is truncated (800 steps for longer tactical episodes)",
+      "max_steps_per_episode": "Maximum steps before episode is truncated (100 steps for longer tactical episodes)",
       "eval_freq": "How often to evaluate model performance (every 10k steps = 100 evaluations total)"
     },
     "_callback_comments": {
@@ -33,7 +33,7 @@
     "description": "Balanced training for active AI learning",
     "total_timesteps": 100000,
     "eval_episodes": 20,
-    "max_steps_per_episode": 800,
+    "max_steps_per_episode": 100,
     "eval_freq": 5000,
     "callback_params": {
       "eval_deterministic": true,
@@ -70,7 +70,7 @@
     "description": "Conservative increase from original",
     "total_timesteps": 100000,
     "eval_episodes": 20,
-    "max_steps_per_episode": 800,
+    "max_steps_per_episode": 100,
     "eval_freq": 9999,
     "callback_params": {
       "eval_deterministic": true,
@@ -107,7 +107,7 @@
     "description": "Aggressive parameters for faster learning",
     "total_timesteps": 2000000,
     "eval_episodes": 50,
-    "max_steps_per_episode": 800,
+    "max_steps_per_episode": 100,
     "eval_freq": 9999,
     "callback_params": {
       "eval_deterministic": true,
@@ -142,7 +142,7 @@
 
   "debug": {
     "description": "Ultra minimal to force working",
-    "total_timesteps": 100,
+    "total_timesteps": 1000,
     "eval_episodes": 3,
     "max_steps_per_episode": 50,
     "eval_freq": 50,
@@ -163,43 +163,6 @@
       "train_freq": 1,
       "target_update_interval": 10,
       "exploration_fraction": 0.1,
-      "exploration_final_eps": 0.1,
-      "tensorboard_log": "./tensorboard/",
-      "device": "cuda"
-      },
-    "replay_config": {
-      "default_file": "ai/event_log/train_best_game_replay.json",
-      "backup_files": [
-        "ai/event_log/phase_based_replay_latest.json",
-        "ai/event_log/web_replay_latest.json"
-      ]
-    }
-  },
-
-  
-  "emergency": {
-    "description": "Emergency config for broken training recovery",
-    "total_timesteps": 100000,
-    "eval_episodes": 20,
-    "max_steps_per_episode": 800,
-    "eval_freq": 500,
-    "callback_params": {
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 5,
-      "checkpoint_save_freq": 25000,
-      "checkpoint_name_prefix": "phase_model_checkpoint"
-    },
-    "model_params": {
-      "policy": "MlpPolicy",
-      "verbose": 1,
-      "buffer_size": 25000,
-      "learning_rate": 0.001,
-      "learning_starts": 2000,
-      "batch_size": 64,
-      "train_freq": 4,
-      "target_update_interval": 1000,
-      "exploration_fraction": 0.5,
       "exploration_final_eps": 0.1,
       "tensorboard_log": "./tensorboard/",
       "device": "cuda"

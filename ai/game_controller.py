@@ -475,7 +475,9 @@ class TrainingGameController(GameController):
         """Delegate to use_game_actions.py for unit eligibility"""
         if not hasattr(self, 'game_actions') or 'get_eligible_units' not in self.game_actions:
             raise RuntimeError("TrainingGameController missing required game_actions.get_eligible_units")
-        return self.game_actions['get_eligible_units']()
+        eligible_units = self.game_actions['get_eligible_units']()
+        
+        return eligible_units
 
     def _advance_gym_phase_or_turn(self) -> None:
         """Delegate to use_phase_transition.py for phase advancement"""
@@ -679,15 +681,16 @@ class TrainingGameController(GameController):
             self._advance_gym_phase_or_turn()
             return self._get_gym_obs(), 0.0, False, False, self._get_gym_info()
         
-        # Single-agent control: only P1 controlled through gym actions
+       # Single-agent control: only P1 controlled through gym actions
         controlled_player = 1
         controlled_eligible_units = [u for u in eligible_units if u["player"] == controlled_player]
-        
-        # Auto-execute bot turn if current player is P0
+
+        # Always execute bot turn first when current player is P0 (bot starts episode/turn)
         if current_player == 0:
             self._execute_gym_bot_turn()
-            eligible_units = self._get_gym_eligible_units()
-            controlled_eligible_units = [u for u in eligible_units if u["player"] == controlled_player]
+            # After bot turn, advance to controlled player (P1)
+            self._advance_gym_phase_or_turn()
+            return self._get_gym_obs(), 0.0, False, False, self._get_gym_info()
         
         # No controlled units eligible - advance until controlled player can act
         if not controlled_eligible_units:
@@ -710,8 +713,9 @@ class TrainingGameController(GameController):
         success = self.execute_action(acting_unit["id"], mirror_action)
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
         
-        # Log action using unified logging
-        self._log_gym_action(acting_unit, mirror_action, reward)
+        # Log action using unified logging  
+        if hasattr(self, '_log_gym_action'):
+            self._log_gym_action(acting_unit, mirror_action, reward)
         
         # Mark unit as acted if successful
         if success:

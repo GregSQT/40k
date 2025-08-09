@@ -196,7 +196,8 @@ class UsePhaseTransition:
             
             # Increment turn when player 0 starts their turn (EXACT from TypeScript)
             if new_player == 0:
-                self.actions["set_current_turn"](self.game_state["current_turn"] + 1)
+                current_turn = self.game_state.get("current_turn", 1)
+                self.actions["set_current_turn"](current_turn + 1)
             
             self.actions["set_phase"]("move")
             self.actions["reset_moved_units"]()
