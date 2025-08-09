@@ -288,16 +288,46 @@ class GameController:
         """Execute a game action for specified unit"""
         action_type = action.get("type")
         
-        if action_type == "move":
-            return self.move_unit(unit_id, action["col"], action["row"])
-        elif action_type == "shoot":
-            return self.shoot_unit(unit_id, action["target_id"])
-        elif action_type == "charge":
-            return self.charge_unit(unit_id, action["target_id"])
-        elif action_type == "combat":
-            return self.combat_attack(unit_id, action["target_id"])
-        else:
+        # Find acting unit for logging
+        acting_unit = self.find_unit(unit_id)
+        if not acting_unit:
             return False
+        
+        # Execute the action
+        success = False
+        if action_type == "move":
+            success = self.move_unit(unit_id, action["col"], action["row"])
+        elif action_type == "shoot":
+            success = self.shoot_unit(unit_id, action["target_id"])
+        elif action_type == "charge":
+            success = self.charge_unit(unit_id, action["target_id"])
+        elif action_type == "combat":
+            success = self.combat_attack(unit_id, action["target_id"])
+        else:
+            success = False
+        
+        # Log action using unified logging system if successful
+        if success and hasattr(self, 'gym_env') and hasattr(self.gym_env, 'replay_logger'):
+            try:
+                target_unit = None
+                if "target_id" in action:
+                    target_unit = self.find_unit(action["target_id"])
+                
+                from shared.gameLogStructure import log_unified_action
+                log_unified_action(
+                    env=self.gym_env,
+                    action_type=action_type,
+                    acting_unit=acting_unit,
+                    target_unit=target_unit,
+                    reward=0.0,
+                    phase=self.get_current_phase(),
+                    turn_number=self.get_current_turn()
+                )
+            except Exception as e:
+                if not self.quiet:
+                    print(f"❌ execute_action logging failed: {e}")
+        
+        return success
 
     def get_game_state_for_training(self) -> Dict[str, Any]:
         """Get compressed game state for training"""
@@ -407,18 +437,35 @@ class TrainingGameController(GameController):
             # Create proper action that includes move details for logging
             current_phase = self.get_current_phase()
             
-            # Create action that will generate proper log messages
-            mirror_action = {
-                "type": "move", 
-                "unit_id": bot_unit["id"],
-                "col": bot_unit["col"], 
-                "row": bot_unit["row"]
-            }
+            # Create realistic action based on current phase
+            if current_phase == "move":
+                # Simple move towards nearest enemy
+                enemy_units = [u for u in self.get_units() if u["player"] != bot_unit["player"]]
+                if enemy_units:
+                    target = enemy_units[0]
+                    dx = 1 if target["col"] > bot_unit["col"] else (-1 if target["col"] < bot_unit["col"] else 0)
+                    dy = 1 if target["row"] > bot_unit["row"] else (-1 if target["row"] < bot_unit["row"] else 0)
+                    mirror_action = {"type": "move", "col": bot_unit["col"] + dx, "row": bot_unit["row"] + dy}
+                else:
+                    mirror_action = {"type": "wait"}
+            elif current_phase == "shoot":
+                # Try to find shoot target
+                target_ids = self.game_actions.get('get_valid_shooting_targets', lambda x: [])(bot_unit["id"])
+                if target_ids:
+                    mirror_action = {"type": "shoot", "target_id": target_ids[0]}
+                else:
+                    mirror_action = {"type": "wait"}
+            else:
+                mirror_action = {"type": "wait"}
             
             self.execute_action(bot_unit["id"], mirror_action)
             
             # Log bot action using unified logging
-            self._log_gym_action(bot_unit, mirror_action, 0.0)
+            try:
+                self._log_gym_action(bot_unit, mirror_action, 0.0)
+            except Exception as e:
+                if not self.quiet:
+                    print(f"❌ Bot action logging failed: {e}")
             self._mark_gym_unit_as_acted(bot_unit)
 
     def _mark_gym_unit_as_acted(self, unit: Dict) -> None:
@@ -451,28 +498,36 @@ class TrainingGameController(GameController):
                 return {"type": "move", "col": unit["col"] + 1, "row": unit["row"]}
             elif action_type == 3:  # move_west
                 return {"type": "move", "col": unit["col"] - 1, "row": unit["row"]}
-            else:
+            elif action_type == 7:  # wait in move phase
                 return {"type": "wait"}
+            else:
+                return {"type": "move", "col": unit["col"], "row": unit["row"]}  # Default: no movement
         elif current_phase == "shoot":
             if action_type == 4:  # shoot
                 target = self._find_gym_shoot_target(unit)
                 return {"type": "shoot", "target_id": target["id"]} if target else {"type": "wait"}
-            else:
+            elif action_type == 7:  # wait in shoot phase
                 return {"type": "wait"}
+            else:
+                return {"type": "wait"}  # Invalid actions become wait
         elif current_phase == "charge":
             if action_type == 5:  # charge
                 target = self._find_gym_charge_target(unit)
                 return {"type": "charge", "target_id": target["id"]} if target else {"type": "wait"}
-            else:
+            elif action_type == 7:  # wait in charge phase
                 return {"type": "wait"}
+            else:
+                return {"type": "wait"}  # Invalid actions become wait
         elif current_phase == "combat":
             if action_type == 6:  # attack
                 target = self._find_gym_combat_target(unit)
                 return {"type": "combat", "target_id": target["id"]} if target else {"type": "wait"}
-            else:
+            elif action_type == 7:  # wait in combat phase
                 return {"type": "wait"}
+            else:
+                return {"type": "wait"}  # Invalid actions become wait
         else:
-            return {"type": "wait"}
+            return {"type": "wait"}  # Unknown phase
 
     def _find_gym_shoot_target(self, unit: Dict) -> Optional[Dict]:
         """Delegate to use_game_actions.py for target finding"""
@@ -503,6 +558,12 @@ class TrainingGameController(GameController):
 
     def _log_gym_action(self, acting_unit: Dict, mirror_action: Dict, reward: float) -> None:
         """Log action using unified logging system"""
+        # Validate replay logger connection
+        if not hasattr(self, 'gym_env') or not self.gym_env:
+            return
+        if not hasattr(self.gym_env, 'replay_logger') or not self.gym_env.replay_logger:
+            return
+        
         try:
             from shared.gameLogStructure import log_unified_action
             current_turn = self.get_current_turn()
@@ -537,7 +598,9 @@ class TrainingGameController(GameController):
             )
         except Exception as e:
             if not self.quiet:
-                print(f"❌ Gym action logging failed: {e}")
+                print(f"❌ Gym action logging failed for unit {acting_unit.get('id', 'unknown')} action {mirror_action.get('type', 'unknown')}: {e}")
+                import traceback
+                traceback.print_exc()
 
     def _get_gym_obs(self) -> np.ndarray:
         """Get gymnasium observation - delegates to gym environment"""
@@ -640,9 +703,8 @@ class TrainingGameController(GameController):
         success = self.execute_action(acting_unit["id"], mirror_action)
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
         
-        # Log action using unified logging  
-        if hasattr(self, '_log_gym_action'):
-            self._log_gym_action(acting_unit, mirror_action, reward)
+        # Log action using unified logging - ALWAYS REQUIRED
+        self._log_gym_action(acting_unit, mirror_action, reward)
         
         # Mark unit as acted if successful
         if success:
@@ -717,6 +779,14 @@ class TrainingGameController(GameController):
         """Connect replay logger for GameReplayIntegration compatibility."""
         self.replay_logger = replay_logger
         self.game_logger = replay_logger
+        # CRITICAL FIX: Ensure replay logger has proper environment reference
+        if hasattr(replay_logger, 'env') and hasattr(self, 'gym_env'):
+            replay_logger.env = self.gym_env
+        # Force immediate connection verification
+        if hasattr(replay_logger, 'env') and replay_logger.env:
+            replay_logger.env.controller = self
+        if not self.quiet:
+            print(f"✅ TrainingGameController connected replay_logger: {type(replay_logger).__name__}")
 
     @property
     def units(self) -> List[Dict[str, Any]]:
@@ -944,6 +1014,8 @@ class TrainingGameController(GameController):
         
         # CRITICAL: Force complete episode isolation - direct attribute reset
         if self.replay_logger:
+            if not self.quiet:
+                print(f"🔄 Resetting replay logger for new episode {self.episode_count}")
             # Force complete reset of ALL replay data structures
             self.replay_logger.combat_log_entries = []
             self.replay_logger.game_states = []

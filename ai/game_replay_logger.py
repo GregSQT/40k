@@ -563,12 +563,17 @@ class GameReplayLogger:
     
     def clear(self):
         """Clear all logged data for new episode."""
-        self.combat_log_entries = []
-        self.game_states = []
-        self.next_event_id = 1
-        
-        if not self.quiet:
-            print("🔄 GameLogger cleared for new episode")
+        # CRITICAL: Only clear if we have no logged actions yet
+        # This prevents clearing mid-episode and losing action logs
+        if len(self.combat_log_entries) <= 1:  # Only "game_start" entry
+            self.combat_log_entries = []
+            self.game_states = []
+            self.next_event_id = 1
+            if not self.quiet:
+                print("🔄 GameLogger cleared for new episode")
+        else:
+            if not self.quiet:
+                print(f"🔄 GameLogger NOT cleared - preserving {len(self.combat_log_entries)} entries")
     
     def log_turn_change(self, turn_number: int):
         """Log turn change event."""

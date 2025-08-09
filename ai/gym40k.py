@@ -310,15 +310,16 @@ class W40KEnv(gym.Env):
         # Reset replay data and ensure proper initial state capture
         self.replay_data = []
         
-        # Connect and initialize replay logger - SINGLE INSTANCE
+        # Connect and initialize replay logger - CRITICAL ORDER
         if hasattr(self, 'replay_logger') and self.replay_logger:
-            # Give the SAME replay logger to controller
+            # CRITICAL: Reset replay logger for new episode FIRST
+            self.replay_logger.clear()
+            # Set replay logger env reference BEFORE connecting to controller
+            self.replay_logger.env = self
+            # Connect to controller AFTER env reference is set
             if hasattr(self.controller, 'connect_replay_logger'):
                 self.controller.connect_replay_logger(self.replay_logger)
-            # Set replay logger env reference for backward compatibility
-            if hasattr(self.replay_logger, 'env'):
-                self.replay_logger.env = self
-            # Capture initial state with enhanced unit data
+            # Capture initial state LAST
             self.replay_logger.capture_initial_state()
         
         return self._get_obs(), self._get_info()

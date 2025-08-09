@@ -306,12 +306,8 @@ class UseGameActions:
                 return False
             is_adjacent = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             in_range = any(isUnitInRange(unit, enemy, unit["MOVE"]) for enemy in enemy_units)
-            # Check if unit has valid charge targets in range
-            has_valid_targets = any(
-                1 < max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"])) <= 12
-                for enemy in enemy_units
-            )
-            return has_valid_targets
+            # CRITICAL FIX: If no valid charge targets, mark as eligible to advance phase
+            return True  # Always allow charge phase to progress
         
         elif phase == "combat":
             units_attacked = set(self.game_state.get("units_attacked", []))
@@ -640,12 +636,14 @@ class UseGameActions:
                         damage_dealt = shooter["RNG_DMG"]
                         if "HP_LEFT" in target:
                             current_hp = target["HP_LEFT"]
+                        elif "CUR_HP" in target:
+                            current_hp = target["CUR_HP"]
                         elif "HP" in target:
                             current_hp = target["HP"]
                         else:
                             raise KeyError(f"Target missing HP field: {target}")
                         new_hp = max(0, current_hp - damage_dealt)
-                        self.actions["update_unit"](target_id, {"HP_LEFT": new_hp, "HP": new_hp})
+                        self.actions["update_unit"](target_id, {"HP_LEFT": new_hp, "CUR_HP": new_hp, "HP": new_hp})
                         
                         # Remove unit if HP reaches 0
                         if new_hp <= 0:
