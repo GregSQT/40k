@@ -227,14 +227,15 @@ class UseGameActions:
     
     def __init__(self, params: UseGameActionsParams):
         """Initialize with EXACT same parameters as TypeScript useGameActions"""
-        # Validate actions object structure
+        if not params:
+            raise ValueError("UseGameActionsParams is required")
         validate_actions_object(params.actions)
         
         self.game_state = params.game_state
         self.move_preview = params.move_preview
         self.attack_preview = params.attack_preview
         self.shooting_phase_state = params.shooting_phase_state
-        self.board_config = params.board_config  # NOW REQUIRED as in TypeScript
+        self.board_config = params.board_config
         self.actions = params.actions
         self.game_log = params.game_log
         
@@ -261,12 +262,13 @@ class UseGameActions:
             return False
 
         # CRITICAL DEBUG: Check SpaceMarine unit field validation
-        if "SpaceMarine" in unit.get("unit_type", "") or "CaptainGravis" in unit.get("unit_type", ""):
+        if "unit_type" not in unit:
+            raise KeyError(f"Unit missing required 'unit_type' field: {unit}")
+        if "SpaceMarine" in unit["unit_type"] or "CaptainGravis" in unit["unit_type"]:
             required_fields = ["RNG_RNG", "CC_RNG", "has_charged_this_turn"]
             for field in required_fields:
                 if field not in unit:
-                    print(f"❌ SpaceMarine unit {unit.get('id')} missing field '{field}': {unit}")
-                    return False
+                    raise KeyError(f"Unit missing required field '{field}': {unit}")
 
         # Get enemy units once for efficiency
         enemy_units = [u for u in self.game_state["units"] if u["player"] != current_player]
@@ -310,15 +312,20 @@ class UseGameActions:
             return True  # Always allow charge phase to progress
         
         elif phase == "combat":
-            units_attacked = set(self.game_state.get("units_attacked", []))
-            combat_sub_phase = self.game_state.get("combat_sub_phase")
-            combat_active_player = self.game_state.get("combat_active_player")
+            if "units_attacked" not in self.game_state:
+                raise KeyError("Game state missing required 'units_attacked' field")
+            if "combat_sub_phase" not in self.game_state:
+                raise KeyError("Game state missing required 'combat_sub_phase' field")
+            if "combat_active_player" not in self.game_state:
+                raise KeyError("Game state missing required 'combat_active_player' field")
+            units_attacked = set(self.game_state["units_attacked"])
+            combat_sub_phase = self.game_state["combat_sub_phase"]
+            combat_active_player = self.game_state["combat_active_player"]
             
             if unit["id"] in units_attacked:
                 return False
             if "CC_RNG" not in unit:
-                print(f"❌ Unit {unit.get('id')} missing CC_RNG field - marking ineligible")
-                return False  # Don't raise error, just mark ineligible
+                raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
             combat_range = unit["CC_RNG"]
             
             # MISSING FEATURE: Combat sub-phase logic from TypeScript
@@ -408,7 +415,9 @@ class UseGameActions:
             else:
                 # Roll charge distance (MISSING from original Python)
                 charge_roll = roll2D6()
-                charge_distance = min(charge_roll, 12)  # Maximum 12 hex charge
+                if "max_charge_distance" not in self.board_config:
+                    raise KeyError("Board config missing required 'max_charge_distance' field")
+                charge_distance = min(charge_roll, self.board_config["max_charge_distance"])
                 
                 # Check if any enemies within 12 hexes are also within the rolled charge distance
                 enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
@@ -634,16 +643,10 @@ class UseGameActions:
                         if "RNG_DMG" not in shooter:
                             raise KeyError(f"Shooter missing required 'RNG_DMG' field: {shooter['name']}")
                         damage_dealt = shooter["RNG_DMG"]
-                        if "HP_LEFT" in target:
-                            current_hp = target["HP_LEFT"]
-                        elif "CUR_HP" in target:
-                            current_hp = target["CUR_HP"]
-                        elif "HP" in target:
-                            current_hp = target["HP"]
-                        else:
-                            raise KeyError(f"Target missing HP field: {target}")
-                        new_hp = max(0, current_hp - damage_dealt)
-                        self.actions["update_unit"](target_id, {"HP_LEFT": new_hp, "CUR_HP": new_hp, "HP": new_hp})
+                        if "cur_hp" not in target:
+                            raise KeyError(f"Target missing required 'cur_hp' field: {target.get('name', 'unknown')}")
+                        new_hp = max(0, target["cur_hp"] - damage_dealt)
+                        self.actions["update_unit"](target_id, {"cur_hp": new_hp})
                         
                         # Remove unit if HP reaches 0
                         if new_hp <= 0:
@@ -1079,6 +1082,10 @@ class UseGameActions:
             raise KeyError("Board config missing required 'rows' field")
         
         # Simple implementation: return adjacent hexes within movement range
+        if "cols" not in self.board_config:
+            raise KeyError("Board config missing required 'cols' field")
+        if "rows" not in self.board_config:
+            raise KeyError("Board config missing required 'rows' field")
         valid_moves = []
         for col in range(max(0, unit["col"] - unit["MOVE"]), 
                         min(self.board_config["cols"], unit["col"] + unit["MOVE"] + 1)):

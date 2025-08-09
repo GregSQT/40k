@@ -54,12 +54,16 @@ class UseGameState:
     
     def __init__(self, initial_units: List[Dict[str, Any]]):
         """Initialize with same parameters as TypeScript useGameState"""
+        if not initial_units:
+            raise ValueError("initial_units is required and cannot be empty")
         
         # Validate and process initial units (EXACT from TypeScript)
         processed_units = []
         for unit in initial_units:
             if "RNG_NB" not in unit:
-                raise ValueError(f"unit.RNG_NB is required for unit: {unit.get('name', 'unknown')}")
+                raise ValueError(f"unit.RNG_NB is required for unit: {unit}")
+            if "name" not in unit:
+                raise ValueError(f"unit.name is required for unit: {unit}")
             if unit["RNG_NB"] is None:
                 raise ValueError(f"unit.RNG_NB cannot be None for unit: {unit.get('name', 'unknown')}")
             
@@ -592,7 +596,7 @@ class TrainingGameState(UseGameState):
         processed_units = []
         for unit in initial_units:
             processed_unit = copy.deepcopy(unit)
-            processed_unit["SHOOT_LEFT"] = unit.get("RNG_NB")
+            processed_unit["SHOOT_LEFT"] = unit.get("RNG_NB", 0)
             processed_units.append(processed_unit)
         
         # Reset the EXISTING game_state object for new episode (per specification)
@@ -605,16 +609,16 @@ class TrainingGameState(UseGameState):
         self.game_state["units_attacked"] = []
         self.game_state["units_fled"] = []
 
-    def _get_unit_hp_left(self, unit: Dict[str, Any]) -> int:
-        """Get unit HP, validate required field exists"""
-        if "HP" not in unit:
-            raise KeyError(f"Unit missing required 'HP' field: {unit.get('name', 'unknown')}")
-        return unit["HP"]
+    def _get_unit_cur_hp(self, unit: Dict[str, Any]) -> int:
+        """Get unit cur_hp, validate required fields exist"""
+        if "cur_hp" not in unit:
+            raise KeyError(f"Unit missing required 'cur_hp' field: {unit.get('name', 'unknown')}")
+        return unit["cur_hp"]
 
     def _get_unit_type(self, unit: Dict[str, Any]) -> str:
         """Get unit type, validate field exists"""
         if "unit_type" not in unit:
-            raise KeyError(f"Unit missing required 'unit_type' field: {unit.get('name', 'unknown')}")
+            raise KeyError(f"Unit missing required 'unit_type' field: {unit}")
         return unit["unit_type"]
 
     def get_compressed_state(self) -> Dict[str, Any]:
@@ -626,7 +630,7 @@ class TrainingGameState(UseGameState):
                     "player": u["player"],
                     "col": u["col"],
                     "row": u["row"],
-                    "HP_LEFT": self._get_unit_hp_left(u),
+                    "cur_hp": self._get_unit_cur_hp(u),
                     "unit_type": self._get_unit_type(u)
                 }
                 for u in self.game_state["units"]

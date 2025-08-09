@@ -54,11 +54,19 @@ class UnitManager:
     
     def get_alive_units(self) -> List[Dict[str, Any]]:
         """Get all alive units (units with cur_hp > 0)."""
-        return [u for u in self.units if u.get("cur_hp", 0) > 0]
+        for u in self.units:
+            if "cur_hp" not in u:
+                raise KeyError(f"Unit missing required 'cur_hp' field: {u}")
+        return [u for u in self.units if u["cur_hp"] > 0]
     
     def get_alive_ai_units(self) -> List[Dict[str, Any]]:
         """Get alive AI units only."""
-        return [u for u in self.ai_units if u.get("HP", 0) > 0 and u["alive"]]
+        for u in self.ai_units:
+            if "cur_hp" not in u:
+                raise KeyError(f"Unit missing required 'cur_hp' field: {u}")
+            if "alive" not in u:
+                raise KeyError(f"Unit missing required 'alive' field: {u}")
+        return [u for u in self.ai_units if u["cur_hp"] > 0 and u["alive"]]
     
     def get_alive_enemy_units(self) -> List[Dict[str, Any]]:
         """Get alive enemy units only."""

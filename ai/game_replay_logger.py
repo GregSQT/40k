@@ -403,7 +403,7 @@ class GameReplayLogger:
                 for unit in units:
                     # Validate ALL required fields - NO DEFAULTS
                     required_fields = ["id", "unit_type", "player", "col", "row",
-                                     "HP_MAX", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
+                                 "cur_hp", "hp_max", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
                     for field in required_fields:
                         if field not in unit:
                             raise ValueError(f"Unit missing required field '{field}': {unit}")
@@ -414,7 +414,7 @@ class GameReplayLogger:
                         "player": unit["player"],
                         "col": unit["col"],
                         "row": unit["row"],
-                        "hp_max": unit["HP_MAX"],
+                        "hp_max": unit["hp_max"],
                         "move": unit["MOVE"],
                         "rng_rng": unit["RNG_RNG"],
                         "rng_dmg": unit["RNG_DMG"],
@@ -460,7 +460,7 @@ class GameReplayLogger:
                 for unit in controller_units:
                     # Validate ALL required fields - NO DEFAULTS
                     required_fields = ["id", "unit_type", "player", "col", "row", 
-                                     "HP_MAX", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
+                                     "cur_hp", "hp_max", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
                     for field in required_fields:
                         if field not in unit:
                             raise ValueError(f"Unit missing required field '{field}': {unit}")
@@ -471,8 +471,8 @@ class GameReplayLogger:
                         "player": unit["player"],
                         "col": unit["col"],
                         "row": unit["row"],
-                        "HP_MAX": unit["HP_MAX"],
-                        "hp_max": unit["HP_MAX"],
+                        "cur_hp": unit["cur_hp"],
+                        "hp_max": unit["hp_max"],
                         "move": unit["MOVE"],
                         "rng_rng": unit["RNG_RNG"],
                         "rng_dmg": unit["RNG_DMG"],
@@ -504,12 +504,21 @@ class GameReplayLogger:
                         if stat not in unit_stats:
                             raise ValueError(f"Unit type '{unit_type}' missing required stat '{stat}'")
                     
+                    if "id" not in unit:
+                        raise ValueError(f"Unit {i} missing required 'id' field")
+                    if "player" not in unit:
+                        raise ValueError(f"Unit {i} missing required 'player' field") 
+                    if "col" not in unit:
+                        raise ValueError(f"Unit {i} missing required 'col' field")
+                    if "row" not in unit:
+                        raise ValueError(f"Unit {i} missing required 'row' field")
+                    
                     initial_units.append({
-                        "id": unit.get("id", i),
+                        "id": unit["id"],
                         "unit_type": unit_type,
-                        "player": unit.get("player", 0),
-                        "col": unit.get("col", 0),
-                        "row": unit.get("row", 0),
+                        "player": unit["player"],
+                        "col": unit["col"],
+                        "row": unit["row"],
                         "HP_MAX": unit_stats["hp_max"],
                         "hp_max": unit_stats["hp_max"],
                         "move": unit_stats["move"],
