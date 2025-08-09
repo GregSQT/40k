@@ -58,11 +58,11 @@ class UnitManager:
     
     def get_alive_ai_units(self) -> List[Dict[str, Any]]:
         """Get alive AI units only."""
-        return [u for u in self.ai_units if u.get("cur_hp", 0) > 0 and u.get("alive", False)]
+        return [u for u in self.ai_units if u.get("HP", 0) > 0 and u["alive"]]
     
     def get_alive_enemy_units(self) -> List[Dict[str, Any]]:
         """Get alive enemy units only."""
-        return [u for u in self.enemy_units if u.get("cur_hp", 0) > 0 and u.get("alive", False)]
+        return [u for u in self.enemy_units if u.get("HP", 0) > 0 and u["alive"]]
     
     def handle_unit_death(self, unit: Dict[str, Any]) -> bool:
         """

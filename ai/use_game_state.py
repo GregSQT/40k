@@ -592,7 +592,7 @@ class TrainingGameState(UseGameState):
         processed_units = []
         for unit in initial_units:
             processed_unit = copy.deepcopy(unit)
-            processed_unit["SHOOT_LEFT"] = unit.get("RNG_NB", 0)
+            processed_unit["SHOOT_LEFT"] = unit.get("RNG_NB")
             processed_units.append(processed_unit)
         
         # Reset the EXISTING game_state object for new episode (per specification)
@@ -606,13 +606,10 @@ class TrainingGameState(UseGameState):
         self.game_state["units_fled"] = []
 
     def _get_unit_hp_left(self, unit: Dict[str, Any]) -> int:
-        """Get unit HP_LEFT, validate required fields exist"""
-        if "HP_LEFT" in unit:
-            return unit["HP_LEFT"]
-        elif "HP_MAX" in unit:
-            return unit["HP_MAX"]
-        else:
-            raise KeyError(f"Unit missing both 'HP_LEFT' and 'HP_MAX' fields: {unit.get('name', 'unknown')}")
+        """Get unit HP, validate required field exists"""
+        if "HP" not in unit:
+            raise KeyError(f"Unit missing required 'HP' field: {unit.get('name', 'unknown')}")
+        return unit["HP"]
 
     def _get_unit_type(self, unit: Dict[str, Any]) -> str:
         """Get unit type, validate field exists"""

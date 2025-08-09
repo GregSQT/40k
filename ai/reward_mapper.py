@@ -29,13 +29,15 @@ class RewardMapper:
            - can be killed by active unit in 1 shooting phase
         """
         unit_rewards = self._get_unit_rewards(unit)
-        base_reward = unit_rewards.get("ranged_attack", 1.0)
+        if "ranged_attack" not in unit_rewards:
+            raise ValueError("ranged_attack reward not found in unit rewards config")
+        base_reward = unit_rewards["ranged_attack"]
         
         # Calculate target threat score (highest RNG_DMG or CC_DMG)
         if "rng_dmg" not in target:
-            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.rng_dmg is required for unit {target['name']}")
         if "cc_dmg" not in target:
-            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.cc_dmg is required for unit {target['name']}")
         target_threat = max(target["rng_dmg"], target["cc_dmg"])
         if "rng_dmg" not in unit:
             raise ValueError(f"unit.rng_dmg is required for unit {unit.get('name', 'unknown')}")
@@ -46,15 +48,21 @@ class RewardMapper:
             melee_damage = self._get_max_melee_damage_vs_target(target)
             if target["cur_hp"] > melee_damage:  # Won't be killed by melee in 1 phase
                 if self._is_highest_threat_in_range(target, all_targets):
-                    return base_reward + unit_rewards.get("shoot_priority_1", 2.0)
+                    if "shoot_priority_1" not in unit_rewards:
+                        raise ValueError("shoot_priority_1 reward not found in unit rewards config")
+                    return base_reward + unit_rewards["shoot_priority_1"]
         
         # Priority 2: High threat target that can be killed in 1 shooting phase
         if can_kill_1_phase and self._is_highest_threat_in_range(target, all_targets):
-            return base_reward + unit_rewards.get("shoot_priority_2", 1.5)
+            if "shoot_priority_2" not in unit_rewards:
+                raise ValueError("shoot_priority_2 reward not found in unit rewards config")
+            return base_reward + unit_rewards["shoot_priority_2"]
         
         # Priority 3: High threat, lowest HP target that can be killed in 1 phase
         if can_kill_1_phase and self._is_lowest_hp_high_threat(target, all_targets):
-            return base_reward + unit_rewards.get("shoot_priority_3", 1.0)
+            if "shoot_priority_3" not in unit_rewards:
+                raise ValueError("shoot_priority_3 reward not found in unit rewards config")
+            return base_reward + unit_rewards["shoot_priority_3"]
         
         # Standard shooting reward
         return base_reward
@@ -72,38 +80,50 @@ class RewardMapper:
         1. Enemy with highest threat score, highest current HP, can be killed in 1 melee phase
         """
         unit_rewards = self._get_unit_rewards(unit)
-        base_reward = unit_rewards.get("charge_success", 1.5)
+        if "charge_success" not in unit_rewards:
+            raise ValueError("charge_success reward not found in unit rewards config")
+        base_reward = unit_rewards["charge_success"]
 
         if "rng_dmg" not in target:
-            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.rng_dmg is required for unit {target['name']}")
         if "cc_dmg" not in target:
-            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.cc_dmg is required for unit {target['name']}")
         target_threat = max(target["rng_dmg"], target["cc_dmg"])
         if "cc_dmg" not in unit:
             raise ValueError(f"unit.cc_dmg is required for unit {unit.get('name', 'unknown')}")
         can_kill_1_phase = target["cur_hp"] <= unit["cc_dmg"]
         
-        if unit.get("is_melee", True):  # Melee unit charge priorities
+        if "is_melee" not in unit:
+            raise ValueError(f"unit.is_melee is required for unit {unit.get('name', 'unknown')}")
+        if unit["is_melee"]:  # Melee unit charge priorities
             # Priority 1: Can kill in 1 melee phase
             if can_kill_1_phase and self._is_highest_threat_in_range(target, all_targets):
-                return base_reward + unit_rewards.get("charge_priority_1", 2.0)
+                if "charge_priority_1" not in unit_rewards:
+                    raise ValueError("charge_priority_1 reward not found in unit rewards config")
+                return base_reward + unit_rewards["charge_priority_1"]
             
             # Priority 2: High threat, low HP, HP >= unit's damage
             if (target["cur_hp"] >= unit["cc_dmg"] and 
                 self._is_highest_threat_in_range(target, all_targets) and
                 self._is_lowest_hp_among_threats(target, all_targets)):
-                return base_reward + unit_rewards.get("charge_priority_2", 1.5)
+                if "charge_priority_2" not in unit_rewards:
+                    raise ValueError("charge_priority_2 reward not found in unit rewards config")
+                return base_reward + unit_rewards["charge_priority_2"]
             
             # Priority 3: High threat, lowest HP
             if (self._is_highest_threat_in_range(target, all_targets) and
                 self._is_lowest_hp_among_threats(target, all_targets)):
-                return base_reward + unit_rewards.get("charge_priority_3", 1.0)
+                if "charge_priority_3" not in unit_rewards:
+                    raise ValueError("charge_priority_3 reward not found in unit rewards config")
+                return base_reward + unit_rewards["charge_priority_3"]
         
         else:  # Ranged unit charge priorities (different logic)
             if (can_kill_1_phase and 
                 self._is_highest_threat_in_range(target, all_targets) and
                 self._is_highest_hp_among_threats(target, all_targets)):
-                return base_reward + unit_rewards.get("charge_priority_1", 2.0)
+                if "charge_priority_1" not in unit_rewards:
+                    raise ValueError("charge_priority_1 reward not found in unit rewards config")
+                return base_reward + unit_rewards["charge_priority_1"]
         
         return base_reward
     
@@ -115,7 +135,9 @@ class RewardMapper:
         2. Enemy with highest threat score, if multiple then lowest current HP
         """
         unit_rewards = self._get_unit_rewards(unit)
-        base_reward = unit_rewards.get("attack", 1.0)
+        if "attack" not in unit_rewards:
+            raise ValueError("attack reward not found in unit rewards config")
+        base_reward = unit_rewards["attack"]
 
         if "cc_dmg" not in unit:
             raise ValueError(f"unit.cc_dmg is required for unit {unit.get('name', 'unknown')}")
@@ -123,12 +145,16 @@ class RewardMapper:
 
         # Priority 1: Can kill in 1 melee phase with highest threat
         if can_kill_1_phase and self._is_highest_threat_adjacent(target, all_targets):
-            return base_reward + unit_rewards.get("attack_priority_1", 2.0)
+            if "attack_priority_1" not in unit_rewards:
+                raise ValueError("attack_priority_1 reward not found in unit rewards config")
+            return base_reward + unit_rewards["attack_priority_1"]
         
         # Priority 2: Highest threat, lowest HP if multiple high threats
         if (self._is_highest_threat_adjacent(target, all_targets) and
             self._is_lowest_hp_among_adjacent_threats(target, all_targets)):
-            return base_reward + unit_rewards.get("attack_priority_2", 1.5)
+            if "attack_priority_2" not in unit_rewards:
+                raise ValueError("attack_priority_2 reward not found in unit rewards config")
+            return base_reward + unit_rewards["attack_priority_2"]
         
         return base_reward
     
@@ -140,27 +166,47 @@ class RewardMapper:
             phase = self._get_current_phase()
             
             if phase == "shoot":
-                base_kill = unit_rewards.get("enemy_killed_r", 5.0)
+                if "enemy_killed_r" not in unit_rewards:
+                    raise ValueError("enemy_killed_r reward not found in unit rewards config")
+                base_kill = unit_rewards["enemy_killed_r"]
             else:  # melee combat
-                base_kill = unit_rewards.get("enemy_killed_m", 5.0)
+                if "enemy_killed_m" not in unit_rewards:
+                    raise ValueError("enemy_killed_m reward not found in unit rewards config")
+                base_kill = unit_rewards["enemy_killed_m"]
             
             # No overkill bonus
             if target["cur_hp"] == damage_dealt:
                 if phase == "shoot":
-                    base_kill += unit_rewards.get("enemy_killed_no_overkill_r", 7.0) - unit_rewards.get("enemy_killed_r", 5.0)
+                    if "enemy_killed_no_overkill_r" not in unit_rewards:
+                        raise ValueError("enemy_killed_no_overkill_r reward not found in unit rewards config")
+                    if "enemy_killed_r" not in unit_rewards:
+                        raise ValueError("enemy_killed_r reward not found in unit rewards config")
+                    base_kill += unit_rewards["enemy_killed_no_overkill_r"] - unit_rewards["enemy_killed_r"]
                 else:
-                    base_kill += unit_rewards.get("enemy_killed_no_overkill_m", 7.0) - unit_rewards.get("enemy_killed_m", 5.0)
+                    if "enemy_killed_no_overkill_m" not in unit_rewards:
+                        raise ValueError("enemy_killed_no_overkill_m reward not found in unit rewards config")
+                    if "enemy_killed_m" not in unit_rewards:
+                        raise ValueError("enemy_killed_m reward not found in unit rewards config")
+                    base_kill += unit_rewards["enemy_killed_no_overkill_m"] - unit_rewards["enemy_killed_m"]
             
             # Lowest HP target bonus
             if self._was_lowest_hp_target(target):
                 if phase == "shoot":
-                    base_kill += unit_rewards.get("enemy_killed_lowests_hp_r", 6.0) - unit_rewards.get("enemy_killed_r", 5.0)
+                    if "enemy_killed_lowests_hp_r" not in unit_rewards:
+                        raise ValueError("enemy_killed_lowests_hp_r reward not found in unit rewards config")
+                    if "enemy_killed_r" not in unit_rewards:
+                        raise ValueError("enemy_killed_r reward not found in unit rewards config")
+                    base_kill += unit_rewards["enemy_killed_lowests_hp_r"] - unit_rewards["enemy_killed_r"]
                 else:
-                    base_kill += unit_rewards.get("enemy_killed_lowests_hp_m", 6.0) - unit_rewards.get("enemy_killed_m", 5.0)
+                    if "enemy_killed_lowests_hp_m" not in unit_rewards:
+                        raise ValueError("enemy_killed_lowests_hp_m reward not found in unit rewards config")
+                    if "enemy_killed_m" not in unit_rewards:
+                        raise ValueError("enemy_killed_m reward not found in unit rewards config")
+                    base_kill += unit_rewards["enemy_killed_lowests_hp_m"] - unit_rewards["enemy_killed_m"]
             
             return base_kill
         
-        return 0.0
+        raise ValueError("Target was not killed - no kill bonus applicable")
     
     def get_movement_reward(self, unit, old_pos, new_pos, tactical_context):
         """Calculate movement rewards based on tactical positioning."""
@@ -169,42 +215,64 @@ class RewardMapper:
         if unit.get("is_ranged", False):
             # Ranged unit movement priorities
             if tactical_context.get("moved_to_optimal_range"):
-                return unit_rewards.get("move_to_rng", 0.8)
+                if "move_to_rng" not in unit_rewards:
+                    raise ValueError("move_to_rng reward not found in unit rewards config")
+                return unit_rewards["move_to_rng"]
             elif tactical_context.get("moved_closer"):
-                return unit_rewards.get("move_close", 0.2)
+                if "move_close" not in unit_rewards:
+                    raise ValueError("move_close reward not found in unit rewards config")
+                return unit_rewards["move_close"]
             elif tactical_context.get("moved_away"):
-                return unit_rewards.get("move_away", 0.1)
+                if "move_away" not in unit_rewards:
+                    raise ValueError("move_away reward not found in unit rewards config")
+                return unit_rewards["move_away"]
             elif tactical_context.get("moved_to_safety"):
-                return unit_rewards.get("move_to_safe", 0.3)
+                if "move_to_safe" not in unit_rewards:
+                    raise ValueError("move_to_safe reward not found in unit rewards config")
+                return unit_rewards["move_to_safe"]
+            else:
+                raise ValueError("No valid ranged unit movement context found in tactical_context")
         else:
             # Melee unit movement priorities
             if tactical_context.get("moved_to_charge_range"):
-                return unit_rewards.get("move_to_charge", 0.8)
+                if "move_to_charge" not in unit_rewards:
+                    raise ValueError("move_to_charge reward not found in unit rewards config")
+                return unit_rewards["move_to_charge"]
             elif tactical_context.get("moved_closer"):
-                return unit_rewards.get("move_close", 0.3)
+                if "move_close" not in unit_rewards:
+                    raise ValueError("move_close reward not found in unit rewards config")
+                return unit_rewards["move_close"]
             elif tactical_context.get("moved_away"):
-                return unit_rewards.get("move_away", -0.2)
-        
-        return 0.0
+                if "move_away" not in unit_rewards:
+                    raise ValueError("move_away reward not found in unit rewards config")
+                return unit_rewards["move_away"]
+            else:
+                raise ValueError("No valid melee unit movement context found in tactical_context")
     
     def _get_unit_rewards(self, unit):
         """Get reward configuration for unit type."""
-        if unit.get("is_ranged", False):
-            return self.rewards_config.get("SpaceMarineRanged", {})
+        if "is_ranged" not in unit:
+            raise ValueError(f"unit.is_ranged is required for unit {unit.get('name', 'unknown')}")
+        if unit["is_ranged"]:
+            if "SpaceMarineRanged" not in self.rewards_config:
+                raise ValueError("SpaceMarineRanged configuration not found in rewards_config")
+            return self.rewards_config["SpaceMarineRanged"]
         else:
-            return self.rewards_config.get("SpaceMarineMelee", {})
+            if "SpaceMarineMelee" not in self.rewards_config:
+                raise ValueError("SpaceMarineMelee configuration not found in rewards_config")
+            return self.rewards_config["SpaceMarineMelee"]
     
     def _is_highest_threat_in_range(self, target, all_targets):
         """Check if target has highest threat score among all targets in range."""
         if "rng_dmg" not in target:
-            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.rng_dmg is required for unit {target['name']}")
         if "cc_dmg" not in target:
-            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.cc_dmg is required for unit {target['name']}")
         target_threat = max(target["rng_dmg"], target["cc_dmg"])
         for other in all_targets:
             if other != target:
                 if "rng_dmg" not in other or "cc_dmg" not in other:
-                    raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
+                    raise ValueError(f"other target missing required damage fields: {other['name']}")
                 other_threat = max(other["rng_dmg"], other["cc_dmg"])
                 if other_threat > target_threat:
                     return False
@@ -213,14 +281,14 @@ class RewardMapper:
     def _is_highest_threat_adjacent(self, target, adjacent_targets):
         """Check if target has highest threat score among adjacent targets."""
         if "rng_dmg" not in target:
-            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.rng_dmg is required for unit {target['name']}")
         if "cc_dmg" not in target:
-            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.cc_dmg is required for unit {target['name']}")
         target_threat = max(target["rng_dmg"], target["cc_dmg"])
         for other in adjacent_targets:
             if other != target:
                 if "rng_dmg" not in other or "cc_dmg" not in other:
-                    raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
+                    raise ValueError(f"other target missing required damage fields: {other['name']}")
                 other_threat = max(other["rng_dmg"], other["cc_dmg"])
                 if other_threat > target_threat:
                     return False
@@ -229,9 +297,9 @@ class RewardMapper:
     def _is_lowest_hp_high_threat(self, target, all_targets):
         """Check if target has lowest HP among high threat targets."""
         if "rng_dmg" not in target:
-            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.rng_dmg is required for unit {target['name']}")
         if "cc_dmg" not in target:
-            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.cc_dmg is required for unit {target['name']}")
         target_threat = max(target["rng_dmg"], target["cc_dmg"])
         max_threat = max(max(t["rng_dmg"], t["cc_dmg"]) for t in all_targets 
                         if "rng_dmg" in t and "cc_dmg" in t)
@@ -239,7 +307,7 @@ class RewardMapper:
         if target_threat == max_threat:
             for other in all_targets:
                 if "rng_dmg" not in other or "cc_dmg" not in other:
-                    raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
+                    raise ValueError(f"other target missing required damage fields: {other['name']}")
                 other_threat = max(other["rng_dmg"], other["cc_dmg"])
                 if other_threat == max_threat and other["cur_hp"] < target["cur_hp"]:
                     return False
@@ -249,9 +317,9 @@ class RewardMapper:
     def _is_lowest_hp_among_threats(self, target, all_targets):
         """Check if target has lowest HP among targets of same threat level.""" 
         if "rng_dmg" not in target:
-            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.rng_dmg is required for unit {target['name']}")
         if "cc_dmg" not in target:
-            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.cc_dmg is required for unit {target['name']}")
         target_threat = max(target["rng_dmg"], target["cc_dmg"])
         for other in all_targets:
             if "rng_dmg" not in other or "cc_dmg" not in other:
@@ -264,9 +332,9 @@ class RewardMapper:
     def _is_highest_hp_among_threats(self, target, all_targets):
         """Check if target has highest HP among targets of same threat level."""
         if "rng_dmg" not in target:
-            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.rng_dmg is required for unit {target['name']}")
         if "cc_dmg" not in target:
-            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.cc_dmg is required for unit {target['name']}")
         target_threat = max(target["rng_dmg"], target["cc_dmg"])
         for other in all_targets:
             if "rng_dmg" not in other or "cc_dmg" not in other:
@@ -279,14 +347,14 @@ class RewardMapper:
     def _is_lowest_hp_among_adjacent_threats(self, target, adjacent_targets):
         """Check if target has lowest HP among adjacent targets of same threat level."""
         if "rng_dmg" not in target:
-            raise ValueError(f"target.rng_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.rng_dmg is required for unit {target['name']}")
         if "cc_dmg" not in target:
-            raise ValueError(f"target.cc_dmg is required for unit {target.get('name', 'unknown')}")
+            raise ValueError(f"target.cc_dmg is required for unit {target['name']}")
         target_threat = max(target["rng_dmg"], target["cc_dmg"])
         for other in adjacent_targets:
             if other != target:
                 if "rng_dmg" not in other or "cc_dmg" not in other:
-                    raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
+                    raise ValueError(f"other target missing required damage fields: {other['name']}")
                 other_threat = max(other["rng_dmg"], other["cc_dmg"])
                 if other_threat == target_threat and other["cur_hp"] < target["cur_hp"]:
                     return False
@@ -301,9 +369,9 @@ class RewardMapper:
     def _get_current_phase(self):
         """Get current game phase."""
         # This would need access to game state
-        return "shoot"  # Default for now
+        raise NotImplementedError("_get_current_phase requires access to game state - no fallback defaults allowed")
     
     def _was_lowest_hp_target(self, target):
         """Check if this was the lowest HP target when action was taken."""
         # This would need access to game state at time of action
-        return False  # Default for now
+        raise NotImplementedError("_was_lowest_hp_target requires access to game state at action time - no fallback defaults allowed")

@@ -145,16 +145,31 @@ class BotManager:
             # Create units data with current positions
             units_data = []
             for unit_snapshot in self.env.unit_manager.units:
+                # Validate required fields exist - no defaults allowed
+                if 'id' not in unit_snapshot:
+                    raise ValueError(f"Unit missing required 'id' field")
+                if 'unit_type' not in unit_snapshot:
+                    raise ValueError(f"Unit {unit_snapshot['id']} missing required 'unit_type' field")
+                if 'player' not in unit_snapshot:
+                    raise ValueError(f"Unit {unit_snapshot['id']} missing required 'player' field")
+                if 'row' not in unit_snapshot:
+                    raise ValueError(f"Unit {unit_snapshot['id']} missing required 'row' field")
+                if 'col' not in unit_snapshot:
+                    raise ValueError(f"Unit {unit_snapshot['id']} missing required 'col' field")
+                if 'HP' not in unit_snapshot:
+                    raise ValueError(f"Unit {unit_snapshot['id']} missing required 'HP' field")
+                if 'alive' not in unit_snapshot:
+                    raise ValueError(f"Unit {unit_snapshot['id']} missing required 'alive' field")
+                
                 unit_data = {
-                    "id": unit_snapshot.get('id'),
-                    "name": unit_snapshot.get("name", f"{unit_snapshot.get('unit_type', 'Unit')} {unit_snapshot.get('id', 0)+1}"),
-                    "unit_type": unit_snapshot.get("unit_type", "Unknown"),
-                    "player": unit_snapshot.get("player", 0),
-                    "row": unit_snapshot.get("row", 0),
-                    "col": unit_snapshot.get("col", 0),
-                    "cur_hp": unit_snapshot.get("cur_hp", unit_snapshot.get("hp_max")),
-                    "hp_max": unit_snapshot.get("hp_max"),
-                    "alive": unit_snapshot.get("alive", True)
+                    "id": unit_snapshot['id'],
+                    "name": unit_snapshot.get("name", f"{unit_snapshot['unit_type']} {unit_snapshot['id']+1}"),
+                    "unit_type": unit_snapshot['unit_type'],
+                    "player": unit_snapshot['player'],
+                    "row": unit_snapshot['row'],
+                    "col": unit_snapshot['col'],
+                    "HP": unit_snapshot['HP'],
+                    "alive": unit_snapshot['alive']
                 }
                 units_data.append(unit_data)
                 
@@ -320,7 +335,10 @@ class BotManager:
             # In shoot phase, target units in shooting range
             in_range = [u for u in ai_units if self._get_hex_distance(bot_unit, u) <= bot_unit.get("rng_rng", 1)]
             if in_range:
-                target = min(in_range, key=lambda u: u.get("cur_hp", 0))  # Lowest HP in range
+                for unit in in_range:
+                    if 'HP' not in unit:
+                        raise ValueError(f"Unit {unit.get('id', 'unknown')} missing required 'HP' field")
+                target = min(in_range, key=lambda u: u['HP'])  # Lowest HP in range
             else:
                 target = min(ai_units, key=lambda u: self._get_hex_distance(bot_unit, u))  # Nearest
         elif phase == "charge":
@@ -328,14 +346,20 @@ class BotManager:
             move_range = bot_unit.get("move", 6)
             chargeable = [u for u in ai_units if 1 < self._get_hex_distance(bot_unit, u) <= move_range]
             if chargeable:
-                target = min(chargeable, key=lambda u: u.get("cur_hp", 0))  # Lowest HP chargeable
+                for unit in chargeable:
+                    if 'HP' not in unit:
+                        raise ValueError(f"Unit {unit.get('id', 'unknown')} missing required 'HP' field")
+                target = min(chargeable, key=lambda u: u['HP'])  # Lowest HP chargeable
             else:
                 target = None  # No chargeable targets
         elif phase == "combat":
             # In combat phase, target adjacent units
             adjacent = [u for u in ai_units if self._get_hex_distance(bot_unit, u) <= bot_unit.get("cc_rng", 1)]
             if adjacent:
-                target = min(adjacent, key=lambda u: u.get("cur_hp", 0))  # Lowest HP adjacent
+                for unit in adjacent:
+                    if 'HP' not in unit:
+                        raise ValueError(f"Unit {unit.get('id', 'unknown')} missing required 'HP' field")
+                target = min(adjacent, key=lambda u: u['HP'])  # Lowest HP adjacent
             else:
                 target = None  # No adjacent targets
         else:
@@ -385,8 +409,12 @@ class BotManager:
             return False
         
         # Check basic validity
-        cur_hp = target.get("cur_hp")
-        alive = target.get("alive", True)
+        if 'HP' not in target:
+            raise ValueError(f"Target unit missing required 'HP' field")
+        if 'alive' not in target:
+            raise ValueError(f"Target unit missing required 'alive' field")
+        cur_hp = target['HP']
+        alive = target['alive']
         
         if cur_hp <= 0:
             return False
