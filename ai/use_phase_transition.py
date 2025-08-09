@@ -315,6 +315,11 @@ class UsePhaseTransition:
                 self.transition_to_combat()
                 
         elif self.phase == "combat":
+            # Check if turn should end first
+            if self.should_end_turn():
+                self.end_turn()
+                return
+            
             # CRITICAL DEBUG: Track combat phase progression
             if not hasattr(self, '_combat_debug_count'):
                 self._combat_debug_count = 0
