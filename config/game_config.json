@@ -17,5 +17,8 @@
     "prefix": "/ai",
     "action_endpoint": "/action",
     "actions_endpoint": "/actions"
+  },
+  "ui": {
+    "log_available_height": 220
   }
 }

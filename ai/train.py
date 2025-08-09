@@ -51,74 +51,14 @@ class SelectiveEvalCallback(EvalCallback):
         return continue_training
     
     def _save_selective_replays(self):
-        """Save best/worst/shortest replays from evaluation episodes."""
-        if not hasattr(self.eval_env, 'replay_logger') or not self.eval_env.replay_logger:
-            return
+        """Save best/worst/shortest replays from evaluation episodes per specification."""
+        # Access SelectiveEpisodeTracker for proper best/worst/shortest selection
+        if not hasattr(self.eval_env, 'episode_tracker'):
+            raise RuntimeError("Environment missing required episode_tracker for replay selection")
+        if not self.eval_env.episode_tracker:
+            raise RuntimeError("Environment episode_tracker is None")
         
-        replay_logger = self.eval_env.replay_logger
-        
-        # Find best/worst/shortest from recent evaluation episodes
-        recent_episodes = []
-        
-        # Simulate episode data from replay logger
-        if hasattr(replay_logger, 'game_states') and replay_logger.game_states:
-            total_reward = sum(state.get('event_flags', {}).get('reward', 0) 
-                             for state in replay_logger.game_states)
-            step_count = len(replay_logger.game_states)
-            
-            episode_data = {
-                'step_count': step_count,
-                'total_reward': total_reward,
-                'replay_data': {
-                    'game_states': replay_logger.game_states,
-                    'combat_log': getattr(replay_logger, 'combat_log_entries', [])
-                }
-            }
-            recent_episodes.append(episode_data)
-        
-        if not recent_episodes:
-            return
-        
-        # Save the 3 types of replays
-        best_episode = max(recent_episodes, key=lambda x: x['total_reward'])
-        worst_episode = min(recent_episodes, key=lambda x: x['total_reward'])
-        shortest_episode = min(recent_episodes, key=lambda x: x['step_count'])
-        
-        replay_types = [
-            (best_episode, "eval_best_replay.json"),
-            (worst_episode, "eval_worst_replay.json"),
-            (shortest_episode, "eval_shortest_replay.json")
-        ]
-        
-        for episode_data, filename in replay_types:
-            filepath = os.path.join(self.output_dir, filename)
-            
-            replay_content = {
-                "game_info": {
-                    "scenario": "evaluation_episode",
-                    "total_turns": episode_data['step_count'],
-                    "episode_reward": episode_data['total_reward'],
-                    "ai_behavior": "evaluation"
-                },
-                "metadata": {
-                    "evaluation_timestep": self.num_timesteps,
-                    "replay_type": filename.replace('.json', '').replace('eval_', ''),
-                    "format_version": "2.0"
-                },
-                "initial_state": {
-                    "units": episode_data['replay_data'].get('game_states', [{}])[0].get('units', []),
-                    "board_size": [24, 18]
-                },
-                "combat_log": episode_data['replay_data'].get('combat_log', []),
-                "game_states": episode_data['replay_data'].get('game_states', [])
-            }
-            
-            try:
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    json.dump(replay_content, f, indent=2)
-                print(f"💾 Saved {filename}")
-            except Exception as e:
-                print(f"⚠️ Failed to save {filename}: {e}")
+        self.eval_env.episode_tracker.save_selective_replays(self.output_dir)
 
 def check_gpu_availability():
     """Check and display GPU availability for training."""

@@ -595,16 +595,15 @@ class TrainingGameState(UseGameState):
             processed_unit["SHOOT_LEFT"] = unit.get("RNG_NB", 0)
             processed_units.append(processed_unit)
         
-        # Reset the EXISTING game_state object instead of creating a new one
+        # Reset the EXISTING game_state object for new episode (per specification)
         self.game_state["units"] = processed_units
-        self.game_state["current_player"] = 0
-        self.game_state["phase"] = "move"
-        self.game_state["current_turn"] = 1  # Initialize turn counter for new episode
+        self.game_state["current_player"] = 0  # Episode starts with player 0
+        self.game_state["phase"] = "move"      # Episode starts with move phase
+        self.game_state["current_turn"] = 1    # Turns start at 1 at episode beginning
         self.game_state["units_moved"] = []
         self.game_state["units_charged"] = []
         self.game_state["units_attacked"] = []
         self.game_state["units_fled"] = []
-        self.game_state["current_turn"] = 1
 
     def _get_unit_hp_left(self, unit: Dict[str, Any]) -> int:
         """Get unit HP_LEFT, validate required fields exist"""

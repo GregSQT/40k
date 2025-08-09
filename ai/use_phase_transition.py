@@ -215,12 +215,11 @@ class UsePhaseTransition:
             new_player = 1 if self.current_player == 0 else 0
             self.actions["set_current_player"](new_player)
             
-            # Increment turn when switching FROM player 1 TO player 0 (P0 starting new turn)
-            if self.current_player == 1 and new_player == 0:
+            # Increment turn when Player 0 starts their movement phase (per specification)
+            if new_player == 0:  # Player 0 is about to start their turn
                 current_turn = self.game_state["current_turn"]
                 new_turn = current_turn + 1
                 self.actions["set_current_turn"](new_turn)
-                # CRITICAL FIX: Log turn change to replay
                 self._log_turn_change(new_turn)
             
             self.actions["set_phase"]("move")

@@ -120,6 +120,15 @@ class ConfigLoader:
             raise KeyError(f"Action '{action}' not found for unit type '{unit_type}'. Available: {available_actions}")
         
         return unit_rewards[action]    
+    
+    def get_log_available_height(self) -> int:
+        """Get log available height from game config."""
+        game_config = self.get_game_config()
+        if "ui" not in game_config:
+            raise KeyError("Missing 'ui' section in game_config.json")
+        if "log_available_height" not in game_config["ui"]:
+            raise KeyError("Missing 'log_available_height' in ui section of game_config.json")
+        return game_config["ui"]["log_available_height"]
      
     def get_training_config(self) -> Dict[str, Any]:
         """Get training configuration."""

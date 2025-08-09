@@ -20,14 +20,15 @@ from use_game_config import use_game_config, TrainingGameConfig
 @dataclass
 class GameControllerConfig:
     """Configuration for GameController"""
-    initial_units: Optional[List[Dict[str, Any]]] = None
-    game_mode: str = "pvp"  # "pvp", "pve", "training"
-    board_config_name: str = "default"
-    config_path: str = "config"
-    max_turns: int = 100
-    enable_ai_player: bool = False
-    training_mode: bool = False
-    training_config_name: str = "default"
+    initial_units: List[Dict[str, Any]]
+    game_mode: str
+    board_config_name: str
+    config_path: str
+    max_turns: int
+    enable_ai_player: bool
+    training_mode: bool
+    training_config_name: str
+    log_available_height: int
 
 class GameController:
     """
@@ -42,11 +43,13 @@ class GameController:
         # Initialize game units (EXACT from TypeScript)
         self.game_units = self._initialize_units()
         
-        # Track UI state (mirrors TypeScript state)
+        # Track UI state (mirrors TypeScript state) - NO DEFAULTS
         self.clicked_unit_id: Optional[int] = None
         self.player0_collapsed = False
         self.player1_collapsed = False
-        self.log_available_height = 220
+        if not hasattr(config, 'log_available_height'):
+            raise ValueError("Config missing required log_available_height")
+        self.log_available_height = config.log_available_height
         
         # Initialize all hooks/managers (EXACT from TypeScript)
         self._initialize_hooks()
@@ -63,95 +66,8 @@ class GameController:
         if self.config.initial_units:
             return copy.deepcopy(self.config.initial_units)
         
-        # Default units (EXACT from TypeScript GameController)
-        default_units = [
-            {
-                "id": 0,
-                "name": "P-I",
-                "unit_type": "Intercessor",
-                "player": 0,
-                "col": 23,
-                "row": 12,
-                "color": 0x244488,
-                "HP_MAX": 2,
-                "HP_LEFT": 2,
-                "MOVE": 6,
-                "RNG_RNG": 24,
-                "RNG_NB": 2,
-                "RNG_DMG": 1,
-                "CC_RNG": 1,
-                "CC_NB": 1,
-                "CC_DMG": 1,
-                "ICON": "👨‍🚀",
-                "SHOOT_LEFT": 2,
-                "has_charged_this_turn": False
-            },
-            {
-                "id": 1,
-                "name": "P-A",
-                "unit_type": "AssaultIntercessor",
-                "player": 0,
-                "col": 1,
-                "row": 12,
-                "color": 0xff3333,
-                "HP_MAX": 2,
-                "HP_LEFT": 2,
-                "MOVE": 6,
-                "RNG_RNG": 12,
-                "RNG_NB": 1,
-                "RNG_DMG": 1,
-                "CC_RNG": 1,
-                "CC_NB": 2,
-                "CC_DMG": 1,
-                "ICON": "⚔️",
-                "SHOOT_LEFT": 1,
-                "has_charged_this_turn": False
-            },
-            {
-                "id": 2,
-                "name": "A-T",
-                "unit_type": "Termagant",
-                "player": 1,
-                "col": 0,
-                "row": 5,
-                "color": 0x882222,
-                "HP_MAX": 1,
-                "HP_LEFT": 1,
-                "MOVE": 6,
-                "RNG_RNG": 18,
-                "RNG_NB": 1,
-                "RNG_DMG": 1,
-                "CC_RNG": 1,
-                "CC_NB": 1,
-                "CC_DMG": 1,
-                "ICON": "🐛",
-                "SHOOT_LEFT": 1,
-                "has_charged_this_turn": False
-            },
-            {
-                "id": 3,
-                "name": "A-H",
-                "unit_type": "Hormagaunt",
-                "player": 1,
-                "col": 22,
-                "row": 3,
-                "color": 0x6633cc,
-                "HP_MAX": 1,
-                "HP_LEFT": 1,
-                "MOVE": 8,
-                "RNG_RNG": 0,
-                "RNG_NB": 0,
-                "RNG_DMG": 0,
-                "CC_RNG": 1,
-                "CC_NB": 2,
-                "CC_DMG": 1,
-                "ICON": "🦂",
-                "SHOOT_LEFT": 0,
-                "has_charged_this_turn": False
-            }
-        ]
-        
-        return default_units
+        # NO DEFAULT UNITS - initial_units required
+        raise ValueError("Config initial_units is required - no default units allowed")
 
     def _initialize_hooks(self) -> None:
         """
@@ -281,39 +197,33 @@ class GameController:
 
     def move_unit(self, unit_id: int, col: int, row: int) -> bool:
         """Move a unit"""
-        try:
-            # CRITICAL FIX: Use direct_move which includes add_moved_unit call
-            if "direct_move" in self.game_actions:
-                self.game_actions["direct_move"](unit_id, col, row)
-                success = True
-            else:
-                action_func = self.game_actions.get("handle_move")
-                if action_func:
-                    result = action_func(unit_id, col, row)
-                    success = True if result is None else bool(result)
-                else:
-                    success = False
-            
-            return success
-        except Exception as e:
-            if not self.quiet:
-                print(f"❌ move_unit error: unit={unit_id}, {e}")
-            return False
+        # No fallbacks - direct_move must exist
+        if "direct_move" not in self.game_actions:
+            raise RuntimeError("game_actions missing required direct_move method")
+        
+        self.game_actions["direct_move"](unit_id, col, row)
+        return True
 
     def shoot_unit(self, shooter_id: int, target_id: int) -> bool:
         """Shoot at target"""
-        result = self.game_actions["handle_shoot"](shooter_id, target_id)
-        return result if result is not None else False
+        if "handle_shoot" not in self.game_actions:
+            raise RuntimeError("game_actions missing required handle_shoot method")
+        self.game_actions["handle_shoot"](shooter_id, target_id)
+        return True
 
     def charge_unit(self, charger_id: int, target_id: int) -> bool:
         """Charge at target"""
-        result = self.game_actions["handle_charge"](charger_id, target_id)
-        return result if result is not None else False
+        if "handle_charge" not in self.game_actions:
+            raise RuntimeError("game_actions missing required handle_charge method")
+        self.game_actions["handle_charge"](charger_id, target_id)
+        return True
 
     def combat_attack(self, attacker_id: int, target_id: int) -> bool:
         """Attack in combat"""
-        result = self.game_actions["handle_combat_attack"](attacker_id, target_id)
-        return result if result is not None else False
+        if "handle_combat_attack" not in self.game_actions:
+            raise RuntimeError("game_actions missing required handle_combat_attack method")
+        self.game_actions["handle_combat_attack"](attacker_id, target_id)
+        return True
 
     # === TRAINING INTEGRATION METHODS ===
 
@@ -1032,33 +942,45 @@ class TrainingGameController(GameController):
         if hasattr(self.phase_manager, 'reset_for_new_episode'):
             self.phase_manager.reset_for_new_episode()
         
-        # Reset replay logger for new episode
+        # CRITICAL: Force complete episode isolation - direct attribute reset
         if self.replay_logger:
-            # Save previous episode if it exists and has data
-            if hasattr(self.replay_logger, 'combat_log_entries') and self.replay_logger.combat_log_entries:
-                episode_filename = f"ai/event_log/episode_{self.episode_count-1}_{int(time.time())}.json"
-                self.replay_logger.save_replay(episode_filename, 0.0)
+            # Force complete reset of ALL replay data structures
+            self.replay_logger.combat_log_entries = []
+            self.replay_logger.game_states = []
+            if hasattr(self.replay_logger, 'web_events'):
+                self.replay_logger.web_events = []
+            if hasattr(self.replay_logger, 'initial_state'):
+                self.replay_logger.initial_state = None
+            if hasattr(self.replay_logger, 'initial_game_state'):
+                self.replay_logger.initial_game_state = None
             
-            self.replay_logger.clear()  # Clear previous episode data
+            # Only THEN capture new episode initial state
             self.replay_logger.capture_initial_state()
             # Set initial_game_state for SelectiveEpisodeTracker compatibility
             units = self.get_units()
             formatted_units = []
             for unit in units:
+                # Validate ALL required fields - NO DEFAULTS
+                required_fields = ["id", "unit_type", "player", "col", "row", "HP_MAX", 
+                                 "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG", "alive"]
+                for field in required_fields:
+                    if field not in unit:
+                        raise KeyError(f"Unit missing required field '{field}': {unit}")
+                
                 formatted_units.append({
-                    "id": unit.get("id"),
-                    "unit_type": unit.get("unit_type"),
-                    "player": unit.get("player"),
-                    "col": unit.get("col"),
-                    "row": unit.get("row"),
-                    "hp_max": unit.get("HP_MAX"),
-                    "move": unit.get("MOVE"),
-                    "rng_rng": unit.get("RNG_RNG"),
-                    "rng_dmg": unit.get("RNG_DMG"),
-                    "cc_dmg": unit.get("CC_DMG"),
-                    "is_ranged": unit.get("RNG_RNG", 0) > 0,
-                    "is_melee": unit.get("CC_RNG", 0) > 0,
-                    "alive": unit.get("alive", True)
+                    "id": unit["id"],
+                    "unit_type": unit["unit_type"],
+                    "player": unit["player"],
+                    "col": unit["col"],
+                    "row": unit["row"],
+                    "hp_max": unit["HP_MAX"],
+                    "move": unit["MOVE"],
+                    "rng_rng": unit["RNG_RNG"],
+                    "rng_dmg": unit["RNG_DMG"],
+                    "cc_dmg": unit["CC_DMG"],
+                    "is_ranged": unit["RNG_RNG"] > 0,
+                    "is_melee": unit["CC_RNG"] > 0,
+                    "alive": unit["alive"]
                 })
             # Get board size from config instead of hardcoding
             try:
@@ -1080,11 +1002,15 @@ class TrainingGameController(GameController):
 
     def end_episode(self, final_reward: float = 0.0) -> Dict[str, Any]:
         """End current episode and return metrics"""
-        # Save episode replay immediately before ending
-        if self.replay_logger and hasattr(self.replay_logger, 'combat_log_entries') and self.replay_logger.combat_log_entries:
+        # Save episode replay immediately before ending - ONE EPISODE ONLY
+        if self.replay_logger:
             episode_filename = f"ai/event_log/episode_{self.episode_count}_{int(time.time())}.json"
             self.replay_logger.save_replay(episode_filename, final_reward)
-            self.replay_logger.clear()  # Clear for next episode
+            # CRITICAL: Force complete reset immediately after save
+            self.replay_logger.combat_log_entries = []
+            self.replay_logger.game_states = []
+            if hasattr(self.replay_logger, 'web_events'):
+                self.replay_logger.web_events = []
         
         episode_duration = time.time() - getattr(self, 'episode_start_time', time.time())
         winner = self.get_winner()

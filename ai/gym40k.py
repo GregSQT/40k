@@ -165,7 +165,8 @@ class W40KEnv(gym.Env):
             max_turns=self.config.get_max_turns(),
             enable_ai_player=False,
             training_mode=True,
-            training_config_name=training_config_name
+            training_config_name=training_config_name,
+            log_available_height=self.config.get_log_available_height()
         )
         
         # Initialize TrainingGameController and start it
