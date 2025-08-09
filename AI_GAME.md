@@ -188,7 +188,7 @@ function calculateSaveTarget(armorSave: number, invulSave: number, armorPenetrat
 
 ## Turn Transition
 ✅ **Phase Advances**: When no eligible units remain
-✅ **Turn Increments**: At START of Player 1 (AI) move phase
+✅ **Turn Increments**: Training / Replay mode : At START of Player 0 (Bot) move phase
 ♻️ **State Reset**: Clear all tracking at turn start
 
 ```typescript

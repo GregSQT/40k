@@ -130,13 +130,8 @@ class UseGameState:
 
     def add_moved_unit(self, unit_id: int) -> None:
         """EXACT mirror of addMovedUnit from TypeScript"""
-        before_list = self.game_state["units_moved"].copy()
         if unit_id not in self.game_state["units_moved"]:
             self.game_state["units_moved"].append(unit_id)
-        after_list = self.game_state["units_moved"].copy()
-        # Find unit position for better debugging
-        unit = next((u for u in self.game_state["units"] if u["id"] == unit_id), None)
-        pos_info = f"pos=({unit['col']},{unit['row']})" if unit else "unit not found"
 
     def add_charged_unit(self, unit_id: int) -> None:
         """EXACT mirror of addChargedUnit from TypeScript"""
@@ -301,15 +296,19 @@ class UseGameState:
         if preview_data is None:
             self.attack_preview = None
         else:
-            # TypeScript interface: { unitId, col, row }
+            # Handle both TypeScript camelCase and Python snake_case
+            unit_id_key = "unit_id" if "unit_id" in preview_data else "unitId"
+            if unit_id_key not in preview_data:
+                raise KeyError(f"Attack preview missing unit ID. Available keys: {list(preview_data.keys())}")
+            
             self.attack_preview = AttackPreview(
-                attacker_id=preview_data["unitId"],
+                attacker_id=preview_data[unit_id_key],
                 target_id=None,  # Not provided in TypeScript interface
                 attack_type="preview"  # Default for preview mode
             )
             # Store col/row for position-based preview
-            self.attack_preview.col = preview_data["col"]
-            self.attack_preview.row = preview_data["row"]
+            self.attack_preview.col = preview_data.get("col")
+            self.attack_preview.row = preview_data.get("row")
 
     def clear_attack_preview(self) -> None:
         """EXACT mirror of clearAttackPreview from TypeScript"""

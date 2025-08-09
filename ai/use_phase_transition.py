@@ -197,7 +197,11 @@ class UsePhaseTransition:
             # Increment turn when player 0 starts their turn (EXACT from TypeScript)
             if new_player == 0:
                 current_turn = self.game_state.get("current_turn", 1)
-                self.actions["set_current_turn"](current_turn + 1)
+                new_turn = current_turn + 1
+                print(f"🔢 Turn increment: {current_turn} → {new_turn} (Player 1 starting)")
+                self.actions["set_current_turn"](new_turn)
+            else:
+                print(f"🔢 No turn increment (Player 0 starting, turn remains {self.game_state.get('current_turn', 1)})")
             
             self.actions["set_phase"]("move")
             self.actions["reset_moved_units"]()
@@ -304,19 +308,23 @@ class UsePhaseTransition:
         # Main phase transition logic (EXACT from TypeScript)
         if self.phase == "move":
             if self.should_transition_from_move():
+                print(f"🔄 Phase transition: move → shoot (Player {self.current_player})")
                 self.transition_to_shoot()
                 
         elif self.phase == "shoot":
             if self.should_transition_from_shoot():
+                print(f"🔄 Phase transition: shoot → charge (Player {self.current_player})")
                 self.transition_to_charge()
                 
         elif self.phase == "charge":
             if self.should_transition_from_charge():
+                print(f"🔄 Phase transition: charge → combat (Player {self.current_player})")
                 self.transition_to_combat()
                 
         elif self.phase == "combat":
             # Check if turn should end first
             if self.should_end_turn():
+                print(f"🔄 Turn ending: Player {self.current_player} → Player {1 if self.current_player == 0 else 0}")
                 self.end_turn()
                 return
             

@@ -200,7 +200,7 @@ def create_log_entry(
         player_name = f"Player {acting_unit.get('player', 0) + 1}"
         message = format_phase_change_message(player_name, phase or "unknown")
     else:
-        message = f"Unknown action: {entry_type}"
+        raise ValueError(f"Unsupported entry_type '{entry_type}'. Valid types: shoot, move, combat, charge, death, move_cancel, charge_cancel, turn_change, phase_change")
     
     # Create base log entry
     return BaseLogEntry(
@@ -285,7 +285,9 @@ def get_event_icon(event_type: str) -> str:
         'move_cancel': '❌',
         'charge_cancel': '❌'
     }
-    return icons.get(event_type, '📝')
+    if event_type not in icons:
+        raise ValueError(f"Unsupported event_type '{event_type}' for icon")
+    return icons[event_type]
 
 def get_event_type_class(event: Union[BaseLogEntry, Dict]) -> str:
     """Get CSS class for event type (for display purposes)"""
@@ -313,7 +315,7 @@ def get_event_type_class(event: Union[BaseLogEntry, Dict]) -> str:
     elif event_type in ['move_cancel', 'charge_cancel']:
         return 'game-log-entry--cancel'
     else:
-        return 'game-log-entry--default'
+        raise ValueError(f"Unsupported event_type '{event_type}' for CSS class")
 
 def log_unified_action(env, action_type: str, acting_unit: Dict, target_unit: Optional[Dict], 
                       reward: float, phase: str, turn_number: int) -> None:

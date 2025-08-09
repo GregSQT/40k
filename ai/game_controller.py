@@ -491,8 +491,17 @@ class TrainingGameController(GameController):
         bot_units = [u for u in eligible_units if u["player"] == 0]
         
         for bot_unit in bot_units:
-            # Execute simple wait action for bot
-            mirror_action = {"type": "wait"}
+            # Create proper action that includes move details for logging
+            current_phase = self.get_current_phase()
+            
+            # Create action that will generate proper log messages
+            mirror_action = {
+                "type": "move", 
+                "unit_id": bot_unit["id"],
+                "col": bot_unit["col"], 
+                "row": bot_unit["row"]
+            }
+            
             self.execute_action(bot_unit["id"], mirror_action)
             
             # Log bot action using unified logging
@@ -596,12 +605,17 @@ class TrainingGameController(GameController):
                         target_unit = unit
                         break
             
+            # Map action types to create proper log messages
+            action_type = mirror_action["type"]
+            if action_type == "wait":
+                action_type = "move"  # Wait actions are logged as moves in the system
+            
             # Use gym environment reference if available
             env = getattr(self, 'gym_env', self)
             
             log_unified_action(
                 env=env,
-                action_type=mirror_action["type"],
+                action_type=action_type,
                 acting_unit=acting_unit,
                 target_unit=target_unit,
                 reward=reward,

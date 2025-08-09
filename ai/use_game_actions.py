@@ -363,18 +363,14 @@ class UseGameActions:
             return
 
         unit = self.find_unit(unit_id)
-        print(f"[useGameActions] Found unit: {unit}")
         
         if not unit:
-            print(f"[useGameActions] Unit {unit_id} not found in units array")
             return
         
         eligible = self.is_unit_eligible_local(unit)
-        print(f"[useGameActions] Unit {unit_id} eligibility check: {eligible}")
         
         # CRITICAL FIX: Block ALL actions if unit is not eligible (EXACT from TypeScript)
         if not eligible:
-            print(f"[useGameActions] Unit {unit_id} not eligible for phase {self.phase} - selection completely blocked")
             return  # Exit immediately - no phase handling
 
         # Special handling for move phase - second click marks as moved (EXACT from TypeScript)

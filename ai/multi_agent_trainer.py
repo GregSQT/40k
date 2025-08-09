@@ -558,20 +558,6 @@ class MultiAgentTrainer:
             try:
                 if episode_tracker:
                     replay_files_saved = episode_tracker.save_selective_replays()
-                    
-                    # CRITICAL DEBUG: Check P1 action logging
-                    if episode_tracker.best_reward_episode:
-                        p1_analysis = self._analyze_player_actions(episode_tracker.best_reward_episode.replay_data)
-                        print(f"🔍 P1 ACTION ANALYSIS for {session.agent_key} vs {session.opponent_agent}:")
-                        print(f"   📊 Total actions logged: {p1_analysis['total_actions']}")
-                        print(f"   🤖 P0 (Bot) actions: {p1_analysis['p0_actions']} ({p1_analysis['p0_percentage']:.1f}%)")
-                        print(f"   🧠 P1 (AI) actions: {p1_analysis['p1_actions']} ({p1_analysis['p1_percentage']:.1f}%)")
-                        print(f"   🎯 P1 action types: {p1_analysis['p1_action_types']}")
-                        
-                        if p1_analysis['p1_actions'] == 0:
-                            print(f"   ❌ CRITICAL: NO P1 ACTIONS LOGGED - P1 is not acting!")
-                        else:
-                            print(f"   ✅ P1 actions are being logged correctly")
             except Exception as replay_error:
                 pass  # Silent failure for replay saving
             
