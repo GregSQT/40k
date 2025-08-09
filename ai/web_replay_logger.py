@@ -30,8 +30,8 @@ class WebReplayLogger:
         self.web_events = []
         self.current_turn = 1
         self.game_metadata = {
-            "board_size": getattr(env, 'board_size', (24, 18)),
-            "max_turns": getattr(env, 'max_turns', 100),
+            "board_size": getattr(env, 'board_size'),
+            "max_turns": getattr(env, 'max_turns'),
             "scenario": "training_episode",
             "timestamp": datetime.now().isoformat(),
             "replay_format": "web_compatible_v1"

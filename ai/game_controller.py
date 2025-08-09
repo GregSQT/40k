@@ -182,6 +182,9 @@ class GameController:
     def connect_replay_logger(self, replay_logger) -> None:
         """Connect external replay logger (for gym integration)"""
         self.replay_logger = replay_logger
+        # CRITICAL FIX: Give replay logger direct reference to same game_state object
+        if hasattr(replay_logger, 'env') and hasattr(replay_logger.env, 'controller'):
+            replay_logger.env.controller.game_state = self.game_state  # Force same object
         if hasattr(replay_logger, 'capture_initial_state'):
             replay_logger.capture_initial_state()
 
@@ -1031,6 +1034,12 @@ class TrainingGameController(GameController):
         
         # Reset replay logger for new episode
         if self.replay_logger:
+            # Save previous episode if it exists and has data
+            if hasattr(self.replay_logger, 'combat_log_entries') and self.replay_logger.combat_log_entries:
+                episode_filename = f"ai/event_log/episode_{self.episode_count-1}_{int(time.time())}.json"
+                self.replay_logger.save_replay(episode_filename, 0.0)
+            
+            self.replay_logger.clear()  # Clear previous episode data
             self.replay_logger.capture_initial_state()
             # Set initial_game_state for SelectiveEpisodeTracker compatibility
             units = self.get_units()
@@ -1071,6 +1080,12 @@ class TrainingGameController(GameController):
 
     def end_episode(self, final_reward: float = 0.0) -> Dict[str, Any]:
         """End current episode and return metrics"""
+        # Save episode replay immediately before ending
+        if self.replay_logger and hasattr(self.replay_logger, 'combat_log_entries') and self.replay_logger.combat_log_entries:
+            episode_filename = f"ai/event_log/episode_{self.episode_count}_{int(time.time())}.json"
+            self.replay_logger.save_replay(episode_filename, final_reward)
+            self.replay_logger.clear()  # Clear for next episode
+        
         episode_duration = time.time() - getattr(self, 'episode_start_time', time.time())
         winner = self.get_winner()
         

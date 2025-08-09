@@ -90,8 +90,29 @@ class UsePhaseTransition:
         )
 
     def should_end_turn(self) -> bool:
-        """EXACT mirror of shouldEndTurn from TypeScript"""
-        return should_end_turn(self.units)
+        """EXACT mirror of shouldEndTurn from TypeScript PvP logic"""
+        from shared.gameRules import is_unit_in_range as isUnitInRange
+        
+        player_units = self.get_current_player_units()
+        enemy_units = self.get_enemy_units()
+        
+        if len(player_units) == 0:
+            return True
+        
+        # Find units that can still attack in combat (EXACT from TypeScript)
+        attackable_units = []
+        for unit in player_units:
+            if unit["id"] in self.units_attacked:
+                continue
+            if "CC_RNG" not in unit:
+                continue
+            combat_range = unit["CC_RNG"]
+            can_attack = any(isUnitInRange(unit, enemy, combat_range) for enemy in enemy_units)
+            if can_attack:
+                attackable_units.append(unit)
+        
+        should_end = len(attackable_units) == 0
+        return should_end
 
     def should_transition_from_charged_units_phase(self) -> bool:
         """EXACT mirror of shouldTransitionFromChargedUnitsPhase from TypeScript"""
@@ -194,14 +215,13 @@ class UsePhaseTransition:
             new_player = 1 if self.current_player == 0 else 0
             self.actions["set_current_player"](new_player)
             
-            # Increment turn when player 0 starts their turn (EXACT from TypeScript)
-            if new_player == 0:
-                current_turn = self.game_state.get("current_turn", 1)
+            # Increment turn when switching FROM player 1 TO player 0 (P0 starting new turn)
+            if self.current_player == 1 and new_player == 0:
+                current_turn = self.game_state["current_turn"]
                 new_turn = current_turn + 1
-                print(f"🔢 Turn increment: {current_turn} → {new_turn} (Player 1 starting)")
                 self.actions["set_current_turn"](new_turn)
-            else:
-                print(f"🔢 No turn increment (Player 0 starting, turn remains {self.game_state.get('current_turn', 1)})")
+                # CRITICAL FIX: Log turn change to replay
+                self._log_turn_change(new_turn)
             
             self.actions["set_phase"]("move")
             self.actions["reset_moved_units"]()
@@ -308,23 +328,19 @@ class UsePhaseTransition:
         # Main phase transition logic (EXACT from TypeScript)
         if self.phase == "move":
             if self.should_transition_from_move():
-                print(f"🔄 Phase transition: move → shoot (Player {self.current_player})")
                 self.transition_to_shoot()
                 
         elif self.phase == "shoot":
             if self.should_transition_from_shoot():
-                print(f"🔄 Phase transition: shoot → charge (Player {self.current_player})")
                 self.transition_to_charge()
                 
         elif self.phase == "charge":
             if self.should_transition_from_charge():
-                print(f"🔄 Phase transition: charge → combat (Player {self.current_player})")
                 self.transition_to_combat()
                 
         elif self.phase == "combat":
             # Check if turn should end first
             if self.should_end_turn():
-                print(f"🔄 Turn ending: Player {self.current_player} → Player {1 if self.current_player == 0 else 0}")
                 self.end_turn()
                 return
             
@@ -361,6 +377,16 @@ class UsePhaseTransition:
                 self.ensure_charged_this_turn_defaults()
                 self.actions["set_combat_sub_phase"]("charged_units")
                 self.actions["set_selected_unit_id"](None)
+
+    def _log_turn_change(self, turn_number: int) -> None:
+        """Log turn change to replay logger"""
+        # Find and call the replay logger
+        if hasattr(self, 'actions') and 'set_phase' in self.actions:
+            # Get controller reference from actions
+            if hasattr(self.actions['set_phase'], '__self__'):
+                controller = self.actions['set_phase'].__self__
+                if hasattr(controller, 'replay_logger') and controller.replay_logger:
+                    controller.replay_logger.log_turn_change(turn_number)
 
     def process_alternating_combat_player_switch(self) -> None:
         """

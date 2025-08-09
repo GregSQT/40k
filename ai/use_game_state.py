@@ -599,6 +599,7 @@ class TrainingGameState(UseGameState):
         self.game_state["units"] = processed_units
         self.game_state["current_player"] = 0
         self.game_state["phase"] = "move"
+        self.game_state["current_turn"] = 1  # Initialize turn counter for new episode
         self.game_state["units_moved"] = []
         self.game_state["units_charged"] = []
         self.game_state["units_attacked"] = []
