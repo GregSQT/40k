@@ -306,8 +306,12 @@ class UseGameActions:
                 return False
             is_adjacent = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             in_range = any(isUnitInRange(unit, enemy, unit["MOVE"]) for enemy in enemy_units)
-            # CRITICAL FIX: If no valid charge targets, mark as eligible to advance phase
-            return True  # Always allow charge phase to progress
+            # Check if unit has valid charge targets in range
+            has_valid_targets = any(
+                1 < max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"])) <= 12
+                for enemy in enemy_units
+            )
+            return has_valid_targets
         
         elif phase == "combat":
             units_attacked = set(self.game_state.get("units_attacked", []))
