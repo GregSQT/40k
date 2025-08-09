@@ -41,12 +41,12 @@ class RewardMapper:
         target_threat = max(target["rng_dmg"], target["cc_dmg"])
         if "rng_dmg" not in unit:
             raise ValueError(f"unit.rng_dmg is required for unit {unit.get('name', 'unknown')}")
-        can_kill_1_phase = target["cur_hp"] <= unit["rng_dmg"]
+        can_kill_1_phase = target["CUR_HP"] <= unit["rng_dmg"]
         
         # Priority 1: High threat target that melee can charge but won't kill in 1 melee phase
         if can_melee_charge_target:
             melee_damage = self._get_max_melee_damage_vs_target(target)
-            if target["cur_hp"] > melee_damage:  # Won't be killed by melee in 1 phase
+            if target["CUR_HP"] > melee_damage:  # Won't be killed by melee in 1 phase
                 if self._is_highest_threat_in_range(target, all_targets):
                     if "shoot_priority_1" not in unit_rewards:
                         raise ValueError("shoot_priority_1 reward not found in unit rewards config")
@@ -91,7 +91,7 @@ class RewardMapper:
         target_threat = max(target["rng_dmg"], target["cc_dmg"])
         if "cc_dmg" not in unit:
             raise ValueError(f"unit.cc_dmg is required for unit {unit.get('name', 'unknown')}")
-        can_kill_1_phase = target["cur_hp"] <= unit["cc_dmg"]
+        can_kill_1_phase = target["CUR_HP"] <= unit["cc_dmg"]
         
         if "is_melee" not in unit:
             raise ValueError(f"unit.is_melee is required for unit {unit.get('name', 'unknown')}")
@@ -103,7 +103,7 @@ class RewardMapper:
                 return base_reward + unit_rewards["charge_priority_1"]
             
             # Priority 2: High threat, low HP, HP >= unit's damage
-            if (target["cur_hp"] >= unit["cc_dmg"] and 
+            if (target["CUR_HP"] >= unit["cc_dmg"] and 
                 self._is_highest_threat_in_range(target, all_targets) and
                 self._is_lowest_hp_among_threats(target, all_targets)):
                 if "charge_priority_2" not in unit_rewards:
@@ -141,7 +141,7 @@ class RewardMapper:
 
         if "cc_dmg" not in unit:
             raise ValueError(f"unit.cc_dmg is required for unit {unit.get('name', 'unknown')}")
-        can_kill_1_phase = target["cur_hp"] <= unit["cc_dmg"]
+        can_kill_1_phase = target["CUR_HP"] <= unit["cc_dmg"]
 
         # Priority 1: Can kill in 1 melee phase with highest threat
         if can_kill_1_phase and self._is_highest_threat_adjacent(target, all_targets):
@@ -162,7 +162,7 @@ class RewardMapper:
         """Calculate kill bonus rewards using existing parameter names."""
         unit_rewards = self._get_unit_rewards(unit)
         
-        if target["cur_hp"] - damage_dealt <= 0:  # Target will be killed
+        if target["CUR_HP"] - damage_dealt <= 0:  # Target will be killed
             phase = self._get_current_phase()
             
             if phase == "shoot":
@@ -175,7 +175,7 @@ class RewardMapper:
                 base_kill = unit_rewards["enemy_killed_m"]
             
             # No overkill bonus
-            if target["cur_hp"] == damage_dealt:
+            if target["CUR_HP"] == damage_dealt:
                 if phase == "shoot":
                     if "enemy_killed_no_overkill_r" not in unit_rewards:
                         raise ValueError("enemy_killed_no_overkill_r reward not found in unit rewards config")
@@ -309,7 +309,7 @@ class RewardMapper:
                 if "rng_dmg" not in other or "cc_dmg" not in other:
                     raise ValueError(f"other target missing required damage fields: {other['name']}")
                 other_threat = max(other["rng_dmg"], other["cc_dmg"])
-                if other_threat == max_threat and other["cur_hp"] < target["cur_hp"]:
+                if other_threat == max_threat and other["CUR_HP"] < target["CUR_HP"]:
                     return False
             return True
         return False
@@ -325,7 +325,7 @@ class RewardMapper:
             if "rng_dmg" not in other or "cc_dmg" not in other:
                 raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
             other_threat = max(other["rng_dmg"], other["cc_dmg"])
-            if other_threat == target_threat and other["cur_hp"] < target["cur_hp"]:
+            if other_threat == target_threat and other["CUR_HP"] < target["CUR_HP"]:
                 return False
         return True
     
@@ -340,7 +340,7 @@ class RewardMapper:
             if "rng_dmg" not in other or "cc_dmg" not in other:
                 raise ValueError(f"other target missing required damage fields: {other.get('name', 'unknown')}")
             other_threat = max(other["rng_dmg"], other["cc_dmg"])
-            if other_threat == target_threat and other["cur_hp"] > target["cur_hp"]:
+            if other_threat == target_threat and other["CUR_HP"] > target["CUR_HP"]:
                 return False
         return True
     
@@ -356,7 +356,7 @@ class RewardMapper:
                 if "rng_dmg" not in other or "cc_dmg" not in other:
                     raise ValueError(f"other target missing required damage fields: {other['name']}")
                 other_threat = max(other["rng_dmg"], other["cc_dmg"])
-                if other_threat == target_threat and other["cur_hp"] < target["cur_hp"]:
+                if other_threat == target_threat and other["CUR_HP"] < target["CUR_HP"]:
                     return False
         return True
     

@@ -340,7 +340,6 @@ class GameController:
             "units_moved": copy.copy(self.game_state["units_moved"]),
             "units_charged": copy.copy(self.game_state["units_charged"]),
             "units_attacked": copy.copy(self.game_state["units_attacked"]),
-            "units_fled": copy.copy(self.game_state["units_fled"]),
             "combat_sub_phase": self.game_state.get("combat_sub_phase"),
             "combat_active_player": self.game_state.get("combat_active_player"),
             "is_game_over": self.is_game_over(),
@@ -773,7 +772,9 @@ class TrainingGameController(GameController):
         self.phase_manager.game_state = self.game_state  # Use controller's stored reference
 
         # Add phase property for training compatibility
-        self._current_phase = self.game_state.get("phase", "move")
+        if "phase" not in self.game_state:
+            raise KeyError("Game state missing required 'phase' field")
+        self._current_phase = self.game_state["phase"]
 
     def connect_replay_logger(self, replay_logger):
         """Connect replay logger for GameReplayIntegration compatibility."""
@@ -817,7 +818,6 @@ class TrainingGameController(GameController):
                 "col": unit.get("col"),
                 "row": unit.get("row"),
                 "HP_MAX": unit.get("HP_MAX"),
-                "hp_max": unit.get("HP_MAX"),
                 "move": unit.get("MOVE"),
                 "rng_rng": unit.get("RNG_RNG"),
                 "rng_dmg": unit.get("RNG_DMG"),
@@ -849,7 +849,7 @@ class TrainingGameController(GameController):
             },
             "combat_log": getattr(self.replay_logger, 'combat_log_entries', []) if self.replay_logger else [],
             "game_states": [],
-            "episode_steps": 500,  # Default
+            "episode_steps": len(self.combat_log_entries) if hasattr(self.replay_logger, 'combat_log_entries') else 0,
             "episode_reward": episode_reward
         }
         
@@ -949,47 +949,24 @@ class TrainingGameController(GameController):
 
     def advance_phase(self) -> None:
         """Advance to next phase or turn"""
-        controller_id = id(self.game_state)
-        phase_manager_id = id(self.phase_manager.game_state) 
-        state_manager_id = id(self.state_manager.game_state)
-        
-        if controller_id != phase_manager_id or controller_id != state_manager_id:
-            raise RuntimeError(f"OBJECT SYNC FAILED: Controller={controller_id}, Phase={phase_manager_id}, State={state_manager_id}")
+        # Validate object synchronization
+        if id(self.game_state) != id(self.phase_manager.game_state) or id(self.game_state) != id(self.state_manager.game_state):
+            raise RuntimeError("Game state object synchronization failed")
         
         current_phase = self.get_current_phase()
         current_player = self.get_current_player()
         
         # Check if phase transition conditions are met
         if hasattr(self, 'phase_transitions'):
-            phase_info = self.phase_transitions.get("get_phase_info", lambda: {})()
             try:
-                self.phase_transitions.get("process_phase_transitions", lambda: None)()
+                if "process_phase_transitions" not in self.phase_transitions:
+                    raise KeyError("phase_transitions missing required 'process_phase_transitions' method")
+                self.phase_transitions["process_phase_transitions"]()
             except Exception as e:
                 pass
                 
-                # Force direct state change as fallback
-                try:
-                    print(f"    Testing FIXED state_actions call...")
-                    old_phase = self.game_state.get("phase", "unknown")
-                    self.state_actions["set_phase"]("shoot")
-                    self.state_actions["reset_moved_units"]()
-                    new_phase = self.game_state.get("phase", "unknown")
-                    print(f"    FORCED call result: {old_phase} -> {new_phase}")
-                        
-                except Exception as e:
-                    print(f"    EXCEPTION in forced transition: {e}")
-                    import traceback
-                    traceback.print_exc()
-                
-                # Second test: Call transition_to_shoot
-                try:
-                    self.phase_transitions.get("transition_to_shoot", lambda: None)()
-                    new_phase = self.get_current_phase()
-                    print(f"    transition_to_shoot result: {new_phase}")
-                except Exception as e:
-                    print(f"    ERROR in forced transition: {e}")
-        else:
-            print(f"    ERROR: No phase_transitions available!")
+                # Handle transition failure
+                raise RuntimeError(f"Phase transition failed: {e}")
 
     def start_new_episode(self, scenario_units: Optional[List[Dict[str, Any]]] = None) -> None:
         """Start a new training episode"""
@@ -1045,7 +1022,7 @@ class TrainingGameController(GameController):
                     "player": unit["player"],
                     "col": unit["col"],
                     "row": unit["row"],
-                    "hp_max": unit["HP_MAX"],
+                    "HP_MAX": unit["HP_MAX"],
                     "move": unit["MOVE"],
                     "rng_rng": unit["RNG_RNG"],
                     "rng_dmg": unit["RNG_DMG"],

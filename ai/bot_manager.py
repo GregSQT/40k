@@ -413,10 +413,10 @@ class BotManager:
             raise ValueError(f"Target unit missing required 'HP' field")
         if 'alive' not in target:
             raise ValueError(f"Target unit missing required 'alive' field")
-        cur_hp = target['HP']
+        CUR_HP = target['HP']
         alive = target['alive']
         
-        if cur_hp <= 0:
+        if CUR_HP <= 0:
             return False
         if not alive:
             return False

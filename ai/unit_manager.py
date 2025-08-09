@@ -53,24 +53,27 @@ class UnitManager:
         return next((u for u in self.units if u["id"] == unit_id), None)
     
     def get_alive_units(self) -> List[Dict[str, Any]]:
-        """Get all alive units (units with cur_hp > 0)."""
+        """Get all alive units (units with CUR_HP > 0)."""
         for u in self.units:
-            if "cur_hp" not in u:
-                raise KeyError(f"Unit missing required 'cur_hp' field: {u}")
-        return [u for u in self.units if u["cur_hp"] > 0]
+            if "CUR_HP" not in u:
+                raise KeyError(f"Unit missing required 'CUR_HP' field: {u}")
+        return [u for u in self.units if u["CUR_HP"] > 0]
     
     def get_alive_ai_units(self) -> List[Dict[str, Any]]:
         """Get alive AI units only."""
         for u in self.ai_units:
-            if "cur_hp" not in u:
-                raise KeyError(f"Unit missing required 'cur_hp' field: {u}")
+            if "CUR_HP" not in u:
+                raise KeyError(f"Unit missing required 'CUR_HP' field: {u}")
             if "alive" not in u:
                 raise KeyError(f"Unit missing required 'alive' field: {u}")
-        return [u for u in self.ai_units if u["cur_hp"] > 0 and u["alive"]]
+        return [u for u in self.ai_units if u["CUR_HP"] > 0 and u["alive"]]
     
     def get_alive_enemy_units(self) -> List[Dict[str, Any]]:
         """Get alive enemy units only."""
-        return [u for u in self.enemy_units if u.get("HP", 0) > 0 and u["alive"]]
+        for u in self.enemy_units:
+            if "HP" not in u:
+                raise KeyError(f"Unit missing required 'HP' field: {u}")
+        return [u for u in self.enemy_units if u["HP"] > 0 and u["alive"]]
     
     def handle_unit_death(self, unit: Dict[str, Any]) -> bool:
         """
@@ -79,10 +82,10 @@ class UnitManager:
         
         Returns True if unit died and was removed.
         """
-        if unit.get("cur_hp", 0) <= 0:
+        if unit.get("CUR_HP", 0) <= 0:
             # Mark as dead immediately
             unit["alive"] = False
-            unit["cur_hp"] = 0
+            unit["CUR_HP"] = 0
             self.remove_unit(unit["id"])
             return True
         return False
@@ -95,14 +98,16 @@ class UnitManager:
         # Validate unit is still alive before applying damage
         if not self.is_target_valid(unit):
             return False  # Unit already dead, no damage applied
-        old_hp = unit.get("cur_hp", 0)
+        if "CUR_HP" not in unit:
+            raise KeyError(f"Unit missing required 'CUR_HP' field: {unit}")
+        old_hp = unit["CUR_HP"]
         new_hp = max(0, old_hp - damage)
-        unit["cur_hp"] = new_hp
+        unit["CUR_HP"] = new_hp
         
         if new_hp <= 0:
             # Mark as dead immediately
             unit["alive"] = False
-            unit["cur_hp"] = 0
+            unit["CUR_HP"] = 0
             
             # CRITICAL: Log death event to replay logger before removing unit
             if hasattr(self, 'replay_logger') and self.replay_logger:
@@ -153,19 +158,23 @@ class UnitManager:
         if not target:
             return False
         
-        cur_hp = target.get("cur_hp", 0)
-        alive = target.get("alive", False)
-        target_id = target.get("id")
+        if "CUR_HP" not in target:
+            raise KeyError(f"Target missing required 'CUR_HP' field: {target}")
+        if "alive" not in target:
+            raise KeyError(f"Target missing required 'alive' field: {target}")
+        if "id" not in target:
+            raise KeyError(f"Target missing required 'id' field: {target}")
         
-        if cur_hp <= 0:
-            print(f"DEBUG: Target {target_id} invalid - HP: {cur_hp}")
+        CUR_HP = target["CUR_HP"]
+        alive = target["alive"]
+        target_id = target["id"]
+        
+        if CUR_HP <= 0:
             return False
         if not alive:
-            print(f"DEBUG: Target {target_id} invalid - alive: {alive}")
             return False
         # Verify target still exists in our managed lists
         exists = self.find_unit(target_id) is not None
         if not exists:
-            print(f"DEBUG: Target {target_id} invalid - not in unit lists")
             return False
         return True

@@ -102,13 +102,19 @@ class TargetPreview:
 
 def calculate_hit_probability(shooter: Dict[str, Any]) -> float:
     """EXACT mirror of calculateHitProbability from TypeScript"""
-    hit_target = shooter.get("RNG_ATK", 4)
+    if "RNG_ATK" not in shooter:
+        raise KeyError(f"Shooter missing required 'RNG_ATK' field: {shooter}")
+    hit_target = shooter["RNG_ATK"]
     return max(0, (7 - hit_target) / 6 * 100)
 
 def calculate_wound_probability(shooter: Dict[str, Any], target: Dict[str, Any]) -> float:
     """EXACT mirror of calculateWoundProbability from TypeScript"""
-    strength = shooter.get("RNG_STR", 4)
-    toughness = target.get("T", 4)
+    if "RNG_STR" not in shooter:
+        raise KeyError(f"Shooter missing required 'RNG_STR' field: {shooter}")
+    if "T" not in target:
+        raise KeyError(f"Target missing required 'T' field: {target}")
+    strength = shooter["RNG_STR"]
+    toughness = target["T"]
     
     if strength >= toughness * 2:
         wound_target = 2
@@ -125,9 +131,15 @@ def calculate_wound_probability(shooter: Dict[str, Any], target: Dict[str, Any])
 
 def calculate_save_probability(shooter: Dict[str, Any], target: Dict[str, Any], in_cover: bool = False) -> float:
     """EXACT mirror of calculateSaveProbability from TypeScript"""
-    armor_save = target.get("ARMOR_SAVE", 5)
-    invul_save = target.get("INVUL_SAVE", 0)
-    armor_penetration = shooter.get("RNG_AP", 0)
+    if "ARMOR_SAVE" not in target:
+        raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target}")
+    if "INVUL_SAVE" not in target:
+        raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target}")
+    if "RNG_AP" not in shooter:
+        raise KeyError(f"Shooter missing required 'RNG_AP' field: {shooter}")
+    armor_save = target["ARMOR_SAVE"]
+    invul_save = target["INVUL_SAVE"]
+    armor_penetration = shooter["RNG_AP"]
     
     # Apply cover bonus - +1 to armor save (better save)
     if in_cover:
@@ -150,13 +162,19 @@ def calculate_overall_probability(shooter: Dict[str, Any], target: Dict[str, Any
 # Combat-specific probability functions (MISSING from original Python)
 def calculate_combat_hit_probability(attacker: Dict[str, Any]) -> float:
     """EXACT mirror of calculateCombatHitProbability from TypeScript"""
-    hit_target = attacker.get("CC_ATK", 4)
+    if "CC_ATK" not in attacker:
+        raise KeyError(f"Attacker missing required 'CC_ATK' field: {attacker}")
+    hit_target = attacker["CC_ATK"]
     return max(0, (7 - hit_target) / 6 * 100)
 
 def calculate_combat_wound_probability(attacker: Dict[str, Any], target: Dict[str, Any]) -> float:
     """EXACT mirror of calculateCombatWoundProbability from TypeScript"""
-    strength = attacker.get("CC_STR", 4)
-    toughness = target.get("T", 4)
+    if "CC_STR" not in attacker:
+        raise KeyError(f"Attacker missing required 'CC_STR' field: {attacker}")
+    if "T" not in target:
+        raise KeyError(f"Target missing required 'T' field: {target}")
+    strength = attacker["CC_STR"]
+    toughness = target["T"]
     
     if strength >= toughness * 2:
         wound_target = 2
@@ -174,15 +192,15 @@ def calculate_combat_wound_probability(attacker: Dict[str, Any], target: Dict[st
 def calculate_combat_save_probability(attacker: Dict[str, Any], target: Dict[str, Any]) -> float:
     """EXACT mirror of calculateCombatSaveProbability from TypeScript"""
     if "ARMOR_SAVE" not in target:
-        raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target.get('name', 'unknown')}")
+        raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target.get('name')}")
     armor_save = target["ARMOR_SAVE"]
     
     if "INVUL_SAVE" not in target:
-        raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target.get('name', 'unknown')}")
+        raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target.get('name')}")
     invul_save = target["INVUL_SAVE"]
     
     if "CC_AP" not in attacker:
-        raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker.get('name', 'unknown')}")
+        raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker.get('name')}")
     armor_penetration = attacker["CC_AP"]
     
     modified_armor = armor_save + armor_penetration
@@ -338,7 +356,7 @@ class UseGameActions:
                 )
             elif combat_sub_phase == "alternating_combat":
                 if "has_charged_this_turn" not in unit:
-                    raise KeyError(f"Unit missing required 'has_charged_this_turn' field: {unit.get('name', 'unknown')}")
+                    raise KeyError(f"Unit missing required 'has_charged_this_turn' field: {unit.get('name')}")
                 return (not unit["has_charged_this_turn"] and 
                        unit["player"] == combat_active_player and
                        any(isUnitInRange(unit, enemy, combat_range) for enemy in enemy_units))
@@ -636,17 +654,19 @@ class UseGameActions:
                 
                 if wound_success:
                     save_roll = random.randint(1, 6)
-                    save_target = calculateSaveTarget(target_armor_save, target.get("INVUL_SAVE", 0), shooter_ap)
+                    if "INVUL_SAVE" not in target:
+                        raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target}")
+                    save_target = calculateSaveTarget(target_armor_save, target["INVUL_SAVE"], shooter_ap)
                     save_success = save_roll >= save_target
                     
                     if not save_success:
                         if "RNG_DMG" not in shooter:
-                            raise KeyError(f"Shooter missing required 'RNG_DMG' field: {shooter['name']}")
+                            raise KeyError(f"Shooter missing required 'RNG_DMG' field: {shooter}")
                         damage_dealt = shooter["RNG_DMG"]
-                        if "cur_hp" not in target:
-                            raise KeyError(f"Target missing required 'cur_hp' field: {target.get('name', 'unknown')}")
-                        new_hp = max(0, target["cur_hp"] - damage_dealt)
-                        self.actions["update_unit"](target_id, {"cur_hp": new_hp})
+                        if "CUR_HP" not in target:
+                            raise KeyError(f"Target missing required 'CUR_HP' field: {target}")
+                        new_hp = max(0, target["CUR_HP"] - damage_dealt)
+                        self.actions["update_unit"](target_id, {"CUR_HP": new_hp})
                         
                         # Remove unit if HP reaches 0
                         if new_hp <= 0:
@@ -780,20 +800,24 @@ class UseGameActions:
             if hit_success:
                 wound_roll = random.randint(1, 6)
                 if "CC_STR" not in attacker:
-                    raise KeyError(f"Attacker missing required 'CC_STR' field: {attacker.get('name', 'unknown')}")
+                    raise KeyError(f"Attacker missing required 'CC_STR' field: {attacker.get('name')}")
                 wound_target = calculateWoundTarget(attacker["CC_STR"], target["T"])
                 wound_success = wound_roll >= wound_target
                 
                 if wound_success:
                     save_roll = random.randint(1, 6)
-                    save_target = calculateSaveTarget(target["ARMOR_SAVE"], target.get("INVUL_SAVE", 0), attacker.get("CC_AP", 0))
+                    if "INVUL_SAVE" not in target:
+                        raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target}")
+                    if "CC_AP" not in attacker:
+                        raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker}")
+                    save_target = calculateSaveTarget(target["ARMOR_SAVE"], target["INVUL_SAVE"], attacker["CC_AP"])
                     save_success = save_roll >= save_target
                     
                     if not save_success:
                         if "CC_DMG" not in attacker:
-                            raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker.get('name', 'unknown')}")
+                            raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker}")
                         damage_dealt = attacker["CC_DMG"]
-                        new_hp = max(0, target["HP"] - damage_dealt)
+                        new_hp = max(0, target["CUR_HP"] - damage_dealt)
                         self.actions["update_unit"](target_id, {"HP": new_hp})
                         
                         if new_hp <= 0:
@@ -1051,9 +1075,9 @@ class UseGameActions:
         eligible_units = []
         for unit in self.game_state["units"]:
             if "alive" not in unit:
-                raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'alive' property")
+                raise KeyError(f"Unit {unit.get('id')} missing required 'alive' property")
             if "player" not in unit:
-                raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'player' property")
+                raise KeyError(f"Unit {unit.get('id')} missing required 'player' property")
             
             if unit["player"] == current_player and unit["alive"]:
                 if self.is_unit_eligible_local(unit):
@@ -1069,11 +1093,11 @@ class UseGameActions:
         
         # Validate required unit fields
         if "MOVE" not in unit:
-            raise KeyError(f"Unit missing required 'MOVE' field: {unit.get('name', 'unknown')}")
+            raise KeyError(f"Unit missing required 'MOVE' field: {unit.get('name')}")
         if "col" not in unit:
-            raise KeyError(f"Unit missing required 'col' field: {unit.get('name', 'unknown')}")
+            raise KeyError(f"Unit missing required 'col' field: {unit.get('name')}")
         if "row" not in unit:
-            raise KeyError(f"Unit missing required 'row' field: {unit.get('name', 'unknown')}")
+            raise KeyError(f"Unit missing required 'row' field: {unit.get('name')}")
         
         # Validate required board config fields
         if "cols" not in self.board_config:
@@ -1107,7 +1131,7 @@ class UseGameActions:
         
         # Validate required unit fields
         if "RNG_RNG" not in unit:
-            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit.get('name', 'unknown')}")
+            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
         
         targets = []
         enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
@@ -1139,7 +1163,7 @@ class UseGameActions:
         
         # Validate required unit fields
         if "CC_RNG" not in unit:
-            raise KeyError(f"Unit missing required 'CC_RNG' field: {unit.get('name', 'unknown')}")
+            raise KeyError(f"Unit missing required 'CC_RNG' field: {unit.get('name')}")
         
         targets = []
         enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]

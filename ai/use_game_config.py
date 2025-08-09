@@ -554,13 +554,23 @@ class TrainingGameConfig(UseGameConfig):
     def validate_training_scenario(self, scenario: Dict[str, Any]) -> bool:
         """Validate a training scenario against configuration"""
         # Check board size compatibility
-        board_size = scenario.get("board", {}).get("size", self.board_size)
+        if "board" not in scenario:
+            raise KeyError("Scenario missing required 'board' section")
+        if "size" not in scenario["board"]:
+            raise KeyError("Scenario board missing required 'size' field")
+        board_size = scenario["board"]["size"]
         if board_size != self.board_size:
             return False
 
         # Check unit positions are valid
-        for unit in scenario.get("units", []):
-            col, row = unit.get("col", -1), unit.get("row", -1)
+        if "units" not in scenario:
+            raise KeyError("Scenario missing required 'units' section")
+        for unit in scenario["units"]:
+            if "col" not in unit:
+                raise KeyError(f"Unit missing required 'col' field: {unit}")
+            if "row" not in unit:
+                raise KeyError(f"Unit missing required 'row' field: {unit}")
+            col, row = unit["col"], unit["row"]
             if not self.is_valid_position(col, row) or self.is_wall_hex(col, row):
                 return False
 

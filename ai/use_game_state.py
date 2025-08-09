@@ -65,7 +65,7 @@ class UseGameState:
             if "name" not in unit:
                 raise ValueError(f"unit.name is required for unit: {unit}")
             if unit["RNG_NB"] is None:
-                raise ValueError(f"unit.RNG_NB cannot be None for unit: {unit.get('name', 'unknown')}")
+                raise ValueError(f"unit.RNG_NB cannot be None for unit: {unit}")
             
             processed_unit = copy.deepcopy(unit)
             processed_unit["SHOOT_LEFT"] = unit["RNG_NB"]
@@ -200,7 +200,9 @@ class UseGameState:
         """
         updated_units = []
         for unit in self.game_state["units"]:
-            if unit.get("RNG_NB") is None:
+            if "RNG_NB" not in unit:
+                raise ValueError("unit.RNG_NB is required")
+            if unit["RNG_NB"] is None:
                 raise ValueError("unit.RNG_NB is required")
             
             updated_unit = copy.deepcopy(unit)
@@ -216,7 +218,9 @@ class UseGameState:
         """
         updated_units = []
         for unit in self.game_state["units"]:
-            if unit.get("CC_NB") is None:
+            if "CC_NB" not in unit:
+                raise ValueError("unit.CC_NB is required")
+            if unit["CC_NB"] is None:
                 raise ValueError("unit.CC_NB is required")
             
             updated_unit = copy.deepcopy(unit)
@@ -240,7 +244,9 @@ class UseGameState:
         """EXACT mirror of decrementShotsLeft from TypeScript"""
         for i, unit in enumerate(self.game_state["units"]):
             if unit["id"] == unit_id:
-                if unit.get("SHOOT_LEFT") is None:
+                if "SHOOT_LEFT" not in unit:
+                    raise ValueError("unit.SHOOT_LEFT is required")
+                if unit["SHOOT_LEFT"] is None:
                     raise ValueError("unit.SHOOT_LEFT is required")
                 
                 updated_unit = copy.deepcopy(unit)
@@ -596,7 +602,9 @@ class TrainingGameState(UseGameState):
         processed_units = []
         for unit in initial_units:
             processed_unit = copy.deepcopy(unit)
-            processed_unit["SHOOT_LEFT"] = unit.get("RNG_NB", 0)
+            if "RNG_NB" not in unit:
+                raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
+            processed_unit["SHOOT_LEFT"] = unit["RNG_NB"]
             processed_units.append(processed_unit)
         
         # Reset the EXISTING game_state object for new episode (per specification)
@@ -609,11 +617,11 @@ class TrainingGameState(UseGameState):
         self.game_state["units_attacked"] = []
         self.game_state["units_fled"] = []
 
-    def _get_unit_cur_hp(self, unit: Dict[str, Any]) -> int:
-        """Get unit cur_hp, validate required fields exist"""
-        if "cur_hp" not in unit:
-            raise KeyError(f"Unit missing required 'cur_hp' field: {unit.get('name', 'unknown')}")
-        return unit["cur_hp"]
+    def _get_unit_CUR_HP(self, unit: Dict[str, Any]) -> int:
+        """Get unit CUR_HP, validate required fields exist"""
+        if "CUR_HP" not in unit:
+            raise KeyError(f"Unit missing required 'CUR_HP' field: {unit}")
+        return unit["CUR_HP"]
 
     def _get_unit_type(self, unit: Dict[str, Any]) -> str:
         """Get unit type, validate field exists"""
@@ -630,7 +638,7 @@ class TrainingGameState(UseGameState):
                     "player": u["player"],
                     "col": u["col"],
                     "row": u["row"],
-                    "cur_hp": self._get_unit_cur_hp(u),
+                    "CUR_HP": self._get_unit_CUR_HP(u),
                     "unit_type": self._get_unit_type(u)
                 }
                 for u in self.game_state["units"]

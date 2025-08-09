@@ -186,12 +186,26 @@ class GameReplayLogger:
             return None
             
         # Try both lowercase and uppercase field names for compatibility
-        hit_target = shooter.get("rng_atk") or shooter.get("RNG_ATK")
-        shooter_str = shooter.get("rng_str") or shooter.get("RNG_STR")
-        target_t = target.get("t") or target.get("T")
-        target_armor = target.get("armor_save") or target.get("ARMOR_SAVE")
-        target_invul = target.get("invul_save") or target.get("INVUL_SAVE")
-        shooter_ap = shooter.get("rng_ap") or shooter.get("RNG_AP")
+        # Validate required fields exist - no fallbacks allowed
+        if "RNG_ATK" not in shooter:
+            raise ValueError(f"Shooter missing required 'RNG_ATK' field: {shooter}")
+        if "RNG_STR" not in shooter:
+            raise ValueError(f"Shooter missing required 'RNG_STR' field: {shooter}")
+        if "T" not in target:
+            raise ValueError(f"Target missing required 'T' field: {target}")
+        if "ARMOR_SAVE" not in target:
+            raise ValueError(f"Target missing required 'ARMOR_SAVE' field: {target}")
+        if "INVUL_SAVE" not in target:
+            raise ValueError(f"Target missing required 'INVUL_SAVE' field: {target}")
+        if "RNG_AP" not in shooter:
+            raise ValueError(f"Shooter missing required 'RNG_AP' field: {shooter}")
+        
+        hit_target = shooter["RNG_ATK"]
+        shooter_str = shooter["RNG_STR"]
+        target_t = target["T"]
+        target_armor = target["ARMOR_SAVE"]
+        target_invul = target["INVUL_SAVE"]
+        shooter_ap = shooter["RNG_AP"]
         
         # Validate all required stats exist - no defaults allowed
         if any(x is None for x in [hit_target, shooter_str, target_t, target_armor, target_invul, shooter_ap]):
@@ -205,22 +219,32 @@ class GameReplayLogger:
             # Use detailed individual shot data - NO MORE DEFAULTS!
             shoot_details = []
             for i, shot in enumerate(shoot_result["shots"]):
-                # Fix save target - calculate it even if shot missed/failed to wound
-                save_target = shot.get("save_target", 0)
-                if save_target == 0 and target:
+                # Validate save target exists or calculate it properly
+                if "save_target" not in shot:
+                    if not target or "ARMOR_SAVE" not in target or "INVUL_SAVE" not in target:
+                        raise ValueError("Cannot calculate save_target: missing target data")
+                    if not shooter or "RNG_AP" not in shooter:
+                        raise ValueError("Cannot calculate save_target: missing shooter data")
                     save_target = calculate_save_target(
-                        target.get("armor_save", 4), 
-                        target.get("invul_save", 0), 
-                        shooter.get("rng_ap", 0) if shooter else 0
+                        target["ARMOR_SAVE"], 
+                        target["INVUL_SAVE"], 
+                        shooter["RNG_AP"]
                     )
+                else:
+                    save_target = shot["save_target"]
                 
-                # Fix wound target - calculate it even if shot missed
-                wound_target = shot.get("wound_target", 0)  
-                if wound_target == 0 and shooter and target:
+                # Validate wound target exists or calculate it properly
+                if "wound_target" not in shot:
+                    if not shooter or "RNG_STR" not in shooter:
+                        raise ValueError("Cannot calculate wound_target: missing shooter data")
+                    if not target or "T" not in target:
+                        raise ValueError("Cannot calculate wound_target: missing target data")
                     wound_target = calculate_wound_target(
-                        shooter.get("rng_str", 4), 
-                        target.get("t", 4)
+                        shooter["RNG_STR"], 
+                        target["T"]
                     )
+                else:
+                    wound_target = shot["wound_target"] 
                 
                 shoot_details.append({
                     "shotNumber": i + 1,
@@ -243,10 +267,19 @@ class GameReplayLogger:
             print(f"⚠️ WARNING: No shoot_result summary data - cannot create shooting details")
             return None
             
-        total_shots = summary.get("totalShots")
-        hits = summary.get("hits") 
-        wounds = summary.get("wounds")
-        failed_saves = summary.get("failedSaves")
+        if "totalShots" not in summary:
+            raise ValueError("Summary missing required 'totalShots' field")
+        if "hits" not in summary:
+            raise ValueError("Summary missing required 'hits' field")
+        if "wounds" not in summary:
+            raise ValueError("Summary missing required 'wounds' field")
+        if "failedSaves" not in summary:
+            raise ValueError("Summary missing required 'failedSaves' field")
+        
+        total_shots = summary["totalShots"]
+        hits = summary["hits"]
+        wounds = summary["wounds"]
+        failed_saves = summary["failedSaves"]
         
         if total_shots is None:
             raise ValueError(f"execute_shooting_sequence() returned None for totalShots - Unit: {shooter.get('unit_type', 'unknown') if shooter else 'None'} vs Target: {target.get('unit_type', 'unknown') if target else 'None'}")
@@ -315,27 +348,39 @@ class GameReplayLogger:
                     # Calculate real target numbers using same rules as combat
                     from shared.gameRules import calculate_wound_target, calculate_save_target
                     
-                    # Validate required combat stats
-                    required_attacker_stats = ["cc_atk", "cc_str", "cc_ap"]
-                    required_target_stats = ["t", "armor_save", "invul_save"]
-                    
-                    for stat in required_attacker_stats:
-                        if stat not in attacker:
-                            raise ValueError(f"attacker.{stat} is required for combat details conversion")
-                    
-                    for stat in required_target_stats:
-                        if stat not in target:
-                            raise ValueError(f"target.{stat} is required for combat details conversion")
+                    # Validate required combat stats exist - no defaults allowed
+                    if "cc_atk" not in attacker:
+                        raise ValueError("attacker.cc_atk is required for combat details conversion")
+                    if "cc_str" not in attacker:
+                        raise ValueError("attacker.cc_str is required for combat details conversion")
+                    if "cc_ap" not in attacker:
+                        raise ValueError("attacker.cc_ap is required for combat details conversion")
+                    if "t" not in target:
+                        raise ValueError("target.t is required for combat details conversion")
+                    if "armor_save" not in target:
+                        raise ValueError("target.armor_save is required for combat details conversion")
+                    if "invul_save" not in target:
+                        raise ValueError("target.invul_save is required for combat details conversion")
                     
                     hit_target = attacker["cc_atk"]
                     wound_target = calculate_wound_target(attacker["cc_str"], target["t"])
                     save_target = calculate_save_target(target["armor_save"], target["invul_save"], attacker["cc_ap"])
                     
                     # Validate all required combat attack data exists
-                    required_attack_fields = ["hit_roll", "hit_success", "wound_roll", "wound_success", "save_roll", "save_success", "damage_dealt"]
-                    for field in required_attack_fields:
-                        if field not in attack:
-                            raise ValueError(f"Combat attack missing required {field}")
+                    if "hit_roll" not in attack:
+                        raise ValueError("Combat attack missing required hit_roll")
+                    if "hit_success" not in attack:
+                        raise ValueError("Combat attack missing required hit_success")
+                    if "wound_roll" not in attack:
+                        raise ValueError("Combat attack missing required wound_roll")
+                    if "wound_success" not in attack:
+                        raise ValueError("Combat attack missing required wound_success")
+                    if "save_roll" not in attack:
+                        raise ValueError("Combat attack missing required save_roll")
+                    if "save_success" not in attack:
+                        raise ValueError("Combat attack missing required save_success")
+                    if "damage_dealt" not in attack:
+                        raise ValueError("Combat attack missing required damage_dealt")
                     
                     shot = {
                         "hit_roll": attack["hit_roll"],
@@ -403,7 +448,7 @@ class GameReplayLogger:
                 for unit in units:
                     # Validate ALL required fields - NO DEFAULTS
                     required_fields = ["id", "unit_type", "player", "col", "row",
-                                 "cur_hp", "hp_max", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
+                                 "CUR_HP", "HP_MAX", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
                     for field in required_fields:
                         if field not in unit:
                             raise ValueError(f"Unit missing required field '{field}': {unit}")
@@ -414,7 +459,7 @@ class GameReplayLogger:
                         "player": unit["player"],
                         "col": unit["col"],
                         "row": unit["row"],
-                        "hp_max": unit["hp_max"],
+                        "HP_MAX": unit["HP_MAX"],
                         "move": unit["MOVE"],
                         "rng_rng": unit["RNG_RNG"],
                         "rng_dmg": unit["RNG_DMG"],
@@ -460,7 +505,7 @@ class GameReplayLogger:
                 for unit in controller_units:
                     # Validate ALL required fields - NO DEFAULTS
                     required_fields = ["id", "unit_type", "player", "col", "row", 
-                                     "cur_hp", "hp_max", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
+                                     "CUR_HP", "HP_MAX", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
                     for field in required_fields:
                         if field not in unit:
                             raise ValueError(f"Unit missing required field '{field}': {unit}")
@@ -471,8 +516,8 @@ class GameReplayLogger:
                         "player": unit["player"],
                         "col": unit["col"],
                         "row": unit["row"],
-                        "cur_hp": unit["cur_hp"],
-                        "hp_max": unit["hp_max"],
+                        "CUR_HP": unit["CUR_HP"],
+                        "HP_MAX": unit["HP_MAX"],
                         "move": unit["MOVE"],
                         "rng_rng": unit["RNG_RNG"],
                         "rng_dmg": unit["RNG_DMG"],
@@ -499,7 +544,7 @@ class GameReplayLogger:
                         raise ValueError(f"Unit type '{unit_type}' not found in unit_definitions")
                     
                     # Validate all required stats exist - NO DEFAULTS
-                    required_stats = ["hp_max", "move", "rng_rng", "rng_dmg", "cc_dmg", "is_ranged", "is_melee"]
+                    required_stats = ["HP_MAX", "move", "rng_rng", "rng_dmg", "cc_dmg", "is_ranged", "is_melee"]
                     for stat in required_stats:
                         if stat not in unit_stats:
                             raise ValueError(f"Unit type '{unit_type}' missing required stat '{stat}'")
@@ -519,8 +564,8 @@ class GameReplayLogger:
                         "player": unit["player"],
                         "col": unit["col"],
                         "row": unit["row"],
-                        "HP_MAX": unit_stats["hp_max"],
-                        "hp_max": unit_stats["hp_max"],
+                        "HP_MAX": unit_stats["HP_MAX"],
+                        "HP_MAX": unit_stats["HP_MAX"],
                         "move": unit_stats["move"],
                         "rng_rng": unit_stats["rng_rng"],
                         "rng_dmg": unit_stats["rng_dmg"],

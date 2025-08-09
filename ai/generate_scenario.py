@@ -12,7 +12,7 @@ def extract_unit_stats_from_ts(file_path):
             content = f.read()
         
         stats = {
-            "hp_max": 4,
+            "HP_MAX": 4,
             "move": 6,
             "rng_rng": 4,
             "rng_dmg": 1,
@@ -31,7 +31,7 @@ def extract_unit_stats_from_ts(file_path):
             elif 'static HP_MAX =' in line:
                 match = re.search(r'static HP_MAX\s*=\s*(\d+)', line)
                 if match:
-                    stats["hp_max"] = int(match.group(1))
+                    stats["HP_MAX"] = int(match.group(1))
             elif 'static RNG_RNG =' in line:
                 match = re.search(r'static RNG_RNG\s*=\s*(\d+)', line)
                 if match:
@@ -176,7 +176,7 @@ def main():
     for unit in scenario_units:
         unit_type = unit.get('unit_type', 'Intercessor')
         stats = unit_stats.get(unit_type, {
-            "hp_max": 4, "move": 6, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1,
+            "HP_MAX": 4, "move": 6, "rng_rng": 8, "rng_dmg": 2, "cc_dmg": 1,
             "is_ranged": True, "is_melee": False
         })
         
@@ -186,8 +186,8 @@ def main():
             "player": unit.get('player', 0),
             "col": unit.get('col', 5),
             "row": unit.get('row', 5),
-            "cur_hp": stats["hp_max"],
-            "hp_max": stats["hp_max"],
+            "CUR_HP": stats["HP_MAX"],
+            "HP_MAX": stats["HP_MAX"],
             "move": stats["move"],
             "rng_rng": stats["rng_rng"],
             "rng_dmg": stats["rng_dmg"],
