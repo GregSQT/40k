@@ -119,9 +119,7 @@ class SelectiveEpisodeTracker:
         for episode, episode_type in episodes_to_save:
             if episode is not None:
                 # Add unique timestamp to prevent overwrites
-                import time
-                timestamp = int(time.time())
-                filename = f"replay_{self.agent_key}_vs_{enemy_name}_{episode_type}_{timestamp}.json"
+                filename = f"replay_{self.agent_key}_vs_{enemy_name}_{episode_type}.json"
                 filepath = os.path.join(output_dir, filename)
                 
                 # Save replay data to file with JSON serialization fix

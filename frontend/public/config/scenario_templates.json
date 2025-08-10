@@ -9,7 +9,7 @@
     },
     "deployment_zones": {
       "0": [[13,13], [19,13]],
-      "1": [[11,16], [5,7]]
+      "1": [[11,6], [5,7]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -24,7 +24,7 @@
     },
     "deployment_zones": {
       "0": [[13,13], [19,13]],
-      "1": [[11,16], [5,7]]
+      "1": [[11,6], [5,7]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -39,7 +39,7 @@
     },
     "deployment_zones": {
       "0": [[13,13], [19,13]],
-      "1": [[11,16], [5,7]]
+      "1": [[11,6], [5,7]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -54,7 +54,7 @@
     },
     "deployment_zones": {
       "0": [[13,13], [19,13]],
-      "1": [[11,16], [5,7]]
+      "1": [[11,6], [5,7]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -69,7 +69,7 @@
     },
     "deployment_zones": {
       "0": [[13,13], [19,13]],
-      "1": [[11,16], [5,7]]
+      "1": [[11,6], [5,7]]
     },
     "difficulty": "easy",
     "training_focus": "solo"
@@ -86,7 +86,7 @@
     },
     "deployment_zones": {
       "0": [[13,13], [19,13]],
-      "1": [[11,16], [5,7], [17,6], [15,4]]
+      "1": [[11,6], [5,7], [17,6], [15,4]]
     },
     "difficulty": "medium",
     "training_focus": "cross_faction"
@@ -103,7 +103,7 @@
     },
     "deployment_zones": {
       "0": [[13,13], [19,13]],
-      "1": [[11,16], [5,7]]
+      "1": [[11,6], [5,7]]
     },
     "difficulty": "medium",
     "training_focus": "cross_faction"
@@ -120,7 +120,7 @@
     },
     "deployment_zones": {
       "0": [[13,13], [19,13]],
-      "1": [[11,16], [5,7]]
+      "1": [[11,6], [5,7]]
     },
     "difficulty": "hard",
     "training_focus": "cross_faction"
@@ -141,7 +141,7 @@
     },
     "deployment_zones": {
       "0": [[13,13], [19,13], [7,14]],
-      "1": [[11,16], [5,7], [17,6], [15,4], [15,9], [16,5], [5,8]]
+      "1": [[11,6], [5,7], [17,6], [15,4], [15,9], [16,5], [5,8]]
     },
     "difficulty": "hard",
     "training_focus": "balanced"
@@ -162,7 +162,7 @@
     },
     "deployment_zones": {
       "0": [[13,13], [19,13], [7,14]],
-      "1": [[11,16], [5,7], [17,6], [15,4], [15,9], [16,5], [5,8]]
+      "1": [[11,6], [5,7], [17,6], [15,4], [15,9], [16,5], [5,8]]
     },
     "difficulty": "hard",
     "training_focus": "balanced"
