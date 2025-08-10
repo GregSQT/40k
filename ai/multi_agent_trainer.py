@@ -485,13 +485,19 @@ class MultiAgentTrainer:
             # Save scenario to temporary file
             scenario_path = self._save_session_scenario(session.session_id, scenario)
             
-            # Create/load model for this agent
-            model, env = self._create_agent_model(
-                session.agent_key, 
-                training_config_name, 
-                rewards_config_name,
-                scenario_path
-            )
+            # Create/load model for this agent - with explicit error handling
+            try:
+                model_result = self._create_agent_model(
+                    session.agent_key, 
+                    training_config_name, 
+                    rewards_config_name,
+                    scenario_path
+                )
+                if model_result is None:
+                    raise ValueError(f"_create_agent_model returned None for agent {session.agent_key}")
+                model, env = model_result
+            except Exception as model_error:
+                raise RuntimeError(f"Model creation failed for {session.agent_key}: {model_error}")
             
             # Initialize selective replay tracking
             episode_tracker = SelectiveEpisodeTracker(session.agent_key, session.opponent_agent)
@@ -655,25 +661,33 @@ class MultiAgentTrainer:
         try:
             from gym40k import W40KEnv
         except ImportError:
-            from ai.gym40k import W40KEnv
+            try:
+                from ai.gym40k import W40KEnv
+            except ImportError as e:
+                raise ImportError(f"Cannot import W40KEnv: {e}")
         
         # Load training configuration
         training_config = self.config.load_training_config(training_config_name)
+        if not training_config:
+            raise ValueError(f"Failed to load training config: {training_config_name}")
         model_params = training_config["model_params"]
         
         # Override verbose setting from config for multi-agent training
         model_params["verbose"] = 0
         
         # Create agent-specific environment with generated scenario and shared registry
-        base_env = W40KEnv(
-            rewards_config=rewards_config_name,
-            training_config_name=training_config_name,
-            controlled_agent=agent_key,
-            active_agents=[self.unit_registry.get_all_model_keys()],  # CRITICAL FIX: All agents active for proper training
-            scenario_file=scenario_path,
-            unit_registry=self.unit_registry,  # Pass shared registry
-            quiet=True  # Enable quiet mode for training
-        )
+        try:
+            base_env = W40KEnv(
+                rewards_config=rewards_config_name,
+                training_config_name=training_config_name,
+                controlled_agent=agent_key,
+                active_agents=[self.unit_registry.get_all_model_keys()],  # CRITICAL FIX: All agents active for proper training
+                scenario_file=scenario_path,
+                unit_registry=self.unit_registry,  # Pass shared registry
+                quiet=True  # Enable quiet mode for training
+            )
+        except Exception as env_error:
+            raise RuntimeError(f"Failed to create W40KEnv for agent {agent_key}: {env_error}")
         
         # Enhance environment with clean game logger
         from ai.game_replay_logger import GameReplayIntegration
@@ -791,6 +805,21 @@ class MultiAgentTrainer:
             episode_reward = 0
             done = False
             step_count = 0
+            
+            # CRITICAL FIX: Clear replay logger for each evaluation episode to ensure single-episode replays
+            if episode_tracker:
+                try:
+                    # Find and clear replay logger for new episode
+                    actual_env = env
+                    if hasattr(actual_env, 'env'):
+                        actual_env = actual_env.env
+                    
+                    if hasattr(actual_env, 'replay_logger') and actual_env.replay_logger:
+                        actual_env.replay_logger.clear()
+                    elif hasattr(actual_env, 'unwrapped') and hasattr(actual_env.unwrapped, 'replay_logger'):
+                        actual_env.unwrapped.replay_logger.clear()
+                except Exception:
+                    pass  # Silent failure for clearing
             
             while not done and step_count < 500:  # Prevent infinite episodes
                 action, _ = model.predict(obs, deterministic=True)

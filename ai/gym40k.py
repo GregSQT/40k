@@ -297,10 +297,21 @@ class W40KEnv(gym.Env):
         # Initialize new episode
         self.controller.start_new_episode()
         
+        # CRITICAL: Mark this as evaluation mode if needed
+        if hasattr(self, 'replay_logger') and self.replay_logger:
+            self.is_evaluation_mode = True
+        else:
+            self.is_evaluation_mode = False
+        
         # Reset environment state
         self.game_over = False
         self.winner = None
         self.step_count = 0
+        
+        # CRITICAL: Ensure episode starts correctly at Turn 1, Player 0, Move phase
+        self.controller.game_state["current_turn"] = 1
+        self.controller.game_state["current_player"] = 0
+        self.controller.game_state["phase"] = "move"
         self._last_acting_unit = None
         self._last_target_unit = None
         
@@ -310,17 +321,11 @@ class W40KEnv(gym.Env):
         # Reset replay data and ensure proper initial state capture
         self.replay_data = []
         
-        # Connect and initialize replay logger - CRITICAL ORDER
-        if hasattr(self, 'replay_logger') and self.replay_logger:
-            # CRITICAL: Reset replay logger for new episode FIRST
-            self.replay_logger.clear()
-            # Set replay logger env reference BEFORE connecting to controller
-            self.replay_logger.env = self
-            # Connect to controller AFTER env reference is set
-            if hasattr(self.controller, 'connect_replay_logger'):
-                self.controller.connect_replay_logger(self.replay_logger)
-            # Capture initial state LAST
-            self.replay_logger.capture_initial_state()
+    def capture_initial_state(self):
+        """Capture initial game state - compatibility method for GameReplayLogger interface."""
+        # CRITICAL FIX: Only log game start if this is truly a new episode (no existing entries)
+        if len(self.combat_log_entries) == 0:
+            self.log_game_start()
         
         return self._get_obs(), self._get_info()
 

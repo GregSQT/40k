@@ -59,6 +59,10 @@ class GameReplayLogger:
                   phase: str = None, start_hex: str = None, end_hex: str = None, 
                   shoot_details: List = None):
         """Add entry to combat log using shared structure."""
+        # CRITICAL: Only log during evaluation mode
+        if not getattr(self.env, 'is_evaluation_mode', False):
+            return None  # Skip logging during training
+            
         # Use shared structure for creating log entry
         log_entry = create_training_log_entry(
             entry_type=entry_type,
@@ -438,6 +442,10 @@ class GameReplayLogger:
     
     def capture_initial_state(self):
         """Capture initial game state - compatibility method for GameReplayLogger interface."""
+        # CRITICAL: Only capture during evaluation, not training
+        if not getattr(self.env, 'is_evaluation_mode', False):
+            return  # Skip capture during training
+            
         self.log_game_start()
         
         # CRITICAL: Save initial units NOW when capture is called
@@ -577,7 +585,7 @@ class GameReplayLogger:
         # Enhanced replay data structure compatible with frontend
         replay_data = {
             "game_info": {
-                "scenario": "training_episode",
+                "scenario": "evaluation_episode",  # Mark as evaluation replay
                 "ai_behavior": "phase_based",
                 "total_turns": self.env.controller.game_state["current_turn"],
                 "winner": None,  # Can be set by caller
