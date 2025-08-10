@@ -1,0 +1,388 @@
+# W40K AI Training Concepts Guide
+
+## Overview
+
+This document explains the key concepts for training AI models in the W40K Tactics system, including model loading strategies, parameter management, and reward system configuration.
+
+---
+
+## 🔧 Model Loading Strategies
+
+### 1. Default Loading
+**What it does:** Loads existing models as-is without parameter updates.
+
+```python
+# Command
+python ai/train.py --orchestrate
+
+# Code behavior
+if os.path.exists(model_path):
+    model = DQN.load(model_path, env=env)
+    # ❌ NO parameter updates - uses model's original saved settings
+else:
+    model = DQN(env=env, **model_params)
+```
+
+**Use when:**
+- Continuing training with same settings
+- Model parameters haven't changed
+- Quick resume of training
+
+**Log output:**
+```
+📁 Loading existing model: ai/models/current/model_Agent.zip
+```
+
+### 2. Append Training
+**What it does:** Loads existing models AND updates them with current configuration parameters.
+
+```python
+# Command  
+python ai/train.py --orchestrate --append
+
+# Code behavior
+if append_training:
+    model = DQN.load(model_path, env=env, device=device)
+    # ✅ Update model with current config parameters
+    model.tensorboard_log = model_params["tensorboard_log"]
+    model.verbose = model_params["verbose"]
+```
+
+**Use when:**
+- Training config has changed
+- Need to update logging paths
+- Reconciling old model with new settings
+
+**Log output:**
+```
+📁 Loading existing model for continued training: ai/models/current/model_Agent.zip
+```
+
+### 3. New Model Creation
+**What it does:** Creates fresh models from scratch.
+
+```python
+# Command
+python ai/train.py --orchestrate --new
+
+# Code behavior
+if new_model or not os.path.exists(model_path):
+    model = DQN(env=env, **model_params)
+    # ✅ Brand new model with current parameters
+```
+
+**Use when:**
+- Starting completely fresh
+- Previous models are problematic
+- Architecture changes require new models
+
+**Log output:**
+```
+🆕 Creating new model on CUDA...
+```
+
+---
+
+## 🧠 Model Parameters vs Training Settings
+
+### Model Parameters (`model_params`)
+**Definition:** Core neural network and learning settings that are SAVED WITH the model.
+
+```json
+{
+  "policy": "MlpPolicy",           // Neural network architecture
+  "learning_rate": 0.0003,         // How fast the AI learns
+  "buffer_size": 200000,           // Memory of past experiences
+  "batch_size": 512,               // Learning batch size
+  "learning_starts": 5000,         // Exploration before learning
+  "train_freq": 1,                 // Learning frequency
+  "target_update_interval": 1000,  // Target network updates
+  "exploration_fraction": 0.3,     // Exploration strategy
+  "exploration_final_eps": 0.02,   // Final exploration rate
+  "verbose": 1,                    // Logging level
+  "tensorboard_log": "./tensorboard/",  // Metrics location
+  "device": "cuda"                 // GPU/CPU selection
+}
+```
+
+**Impact:** These fundamentally change HOW the AI learns and behaves.
+
+### Training Settings (separate from model)
+**Definition:** Control the training process duration and evaluation, NOT saved with model.
+
+```json
+{
+  "total_timesteps": 100000,       // How long to train
+  "eval_episodes": 20,             // Evaluation episode count
+  "max_steps_per_episode": 500,    // Episode length limit
+  "eval_freq": 5000,               // Evaluation frequency
+  "checkpoint_save_freq": 25000    // Backup frequency
+}
+```
+
+**Impact:** These control WHEN and HOW LONG training happens.
+
+---
+
+## ⚙️ Configuration Handling
+
+### Default Loading Behavior
+```python
+# Uses model's ORIGINAL parameters
+model = DQN.load("model.zip", env=env)
+
+# Example scenario:
+# - Model was trained with learning_rate=0.001
+# - Config now has learning_rate=0.0003  
+# - Model STILL uses 0.001 (original value)
+```
+
+### Append Training Behavior
+```python
+# Loads model then updates with current config
+model = DQN.load("model.zip", env=env, device=device)
+model.tensorboard_log = current_config["tensorboard_log"]
+model.verbose = current_config["verbose"]
+
+# Example scenario:
+# - Model was trained with tensorboard_log="./old_logs/"
+# - Config now has tensorboard_log="./tensorboard/"
+# - Model UPDATED to use "./tensorboard/" (new value)
+```
+
+### Multi-Agent Trainer Behavior
+The multi-agent trainer uses a **hybrid approach**:
+
+```python
+# Always loads existing models if they exist
+if os.path.exists(model_path):
+    model = DQN.load(model_path, env=env)
+    # Always updates tensorboard_log (like append mode)
+    model.tensorboard_log = model_params["tensorboard_log"]
+else:
+    model = DQN(env=env, **model_params)
+```
+
+**Result:** Persistent learning with updated logging paths.
+
+---
+
+## 🎯 Rewards Management
+
+### Key Concept: Rewards are NOT Saved with Models
+**Critical understanding:** Reward values are loaded fresh from configuration files every training session.
+
+```python
+# Every time environment is created:
+self.rewards_config = self.config.load_rewards_config(rewards_config_name)
+
+# Every action gets current reward values:
+unit_rewards = self._get_unit_reward_config(acting_unit)
+base_reward = unit_rewards["base_actions"]["move_close"]  # Current value from file
+```
+
+### Immediate Impact of Reward Changes
+
+**Before (config/rewards_config.json):**
+```json
+{
+  "SpaceMarine_Infantry_LeaderElite_MeleeElite": {
+    "base_actions": {
+      "move_close": 0.3,
+      "ranged_attack": 0.8,
+      "wait": -0.1
+    },
+    "situational_modifiers": {
+      "win": 10.0,
+      "lose": -10.0
+    }
+  }
+}
+```
+
+**After (edit config file):**
+```json
+{
+  "SpaceMarine_Infantry_LeaderElite_MeleeElite": {
+    "base_actions": {
+      "move_close": 0.8,        // ⬆️ Increased!
+      "ranged_attack": 0.3,     // ⬇️ Decreased!
+      "wait": -0.1
+    },
+    "situational_modifiers": {
+      "win": 15.0,              // ⬆️ Increased!
+      "lose": -5.0              // ⬇️ Less penalty!
+    }
+  }
+}
+```
+
+**Result:** Next training session immediately uses new reward values.
+
+### Available Reward Configurations
+
+```bash
+# Use default sophisticated rewards
+python ai/train.py --orchestrate --rewards-config default
+
+# Use simplified rewards for faster learning  
+python ai/train.py --orchestrate --rewards-config simplified
+
+# Use balanced intermediate rewards
+python ai/train.py --orchestrate --rewards-config balanced
+```
+
+### Progressive Reward Training Strategy
+
+```bash
+# Phase 1: Simple rewards for basic learning
+python ai/train.py --orchestrate --training-config debug --rewards-config simplified
+
+# Phase 2: Balanced rewards for intermediate tactics
+python ai/train.py --orchestrate --training-config default --rewards-config balanced  
+
+# Phase 3: Complex rewards for advanced strategy
+python ai/train.py --orchestrate --training-config default --rewards-config default
+```
+
+---
+
+## 🔄 Practical Training Workflows
+
+### Scenario 1: Resume Training (Default)
+```bash
+# Uses existing models as-is, continues with same parameters
+python ai/train.py --orchestrate --training-config debug
+```
+- ✅ Fastest startup
+- ✅ Maintains exact training state
+- ❌ Won't use updated config parameters
+
+### Scenario 2: Update Training Configuration
+```bash
+# Loads models but updates them with current config
+python ai/train.py --orchestrate --training-config conservative --append
+```
+- ✅ Keeps learned knowledge
+- ✅ Uses updated parameters
+- ⚠️ May need readjustment period
+
+### Scenario 3: Fresh Start
+```bash
+# Creates completely new models
+python ai/train.py --orchestrate --training-config aggressive --new
+```
+- ✅ Clean slate with new parameters
+- ❌ Loses all previous learning
+- 🕐 Takes longer to achieve competency
+
+### Scenario 4: Experiment with Rewards
+```bash
+# Keep models, change only reward structure
+python ai/train.py --orchestrate --rewards-config experimental
+```
+- ✅ Instant reward changes
+- ✅ Maintains learned knowledge  
+- 📊 Observe adaptation in Tensorboard
+
+---
+
+## 📊 Monitoring and Debugging
+
+### Tensorboard Monitoring
+```bash
+tensorboard --logdir ./tensorboard/
+```
+
+**Key metrics to watch:**
+- **Episode rewards:** How reward changes affect total scores
+- **Learning curves:** Model adaptation to new parameters/rewards
+- **Win rates:** Overall performance trends
+
+### Log Analysis
+
+**Model Loading Logs:**
+```
+📁 Loading existing model: model_Agent.zip           # Default loading
+📁 Loading existing model for continued training...  # Append mode  
+🆕 Creating new model on CUDA...                    # New model
+```
+
+**Training Progress:**
+```
+🐌 SpaceMar vs SpaceMar: 99%|████████| 990/1000 [00:18<00:00, 52.3steps/s]
+✅ Session 1/4: Agent vs Agent | WR:45% R:-12.3
+```
+
+### Debug Configuration
+For quick testing and parameter validation:
+
+```bash
+python ai/train.py --orchestrate --training-config debug --rewards-config simplified
+```
+
+**Debug config characteristics:**
+- 1,000 timesteps (vs 100,000 default)
+- Small batch sizes and buffers
+- Frequent evaluation
+- Perfect for testing changes
+
+---
+
+## 🎯 Best Practices
+
+### 1. Parameter Updates
+- Use `--append` when training configs change
+- Use default loading for consistent continuation
+- Use `--new` only when necessary
+
+### 2. Reward Experimentation
+- Start with simplified rewards
+- Make gradual reward adjustments
+- Monitor impact via Tensorboard
+- Test with debug config first
+
+### 3. Progressive Training
+- Begin with debug config for validation
+- Scale to default config for real training
+- Use conservative config for stable learning
+- Try aggressive config for fast iteration
+
+### 4. Model Management
+- Each agent maintains one persistent model
+- Models continue learning across sessions
+- Reward changes take effect immediately
+- Parameter changes require append mode
+
+---
+
+## 🚨 Common Pitfalls
+
+### 1. Parameter Confusion
+**Problem:** Changing config but using default loading
+**Solution:** Use `--append` flag when config changes
+
+### 2. Reward Shock
+**Problem:** Dramatic reward changes confuse trained models
+**Solution:** Make incremental reward adjustments
+
+### 3. Lost Progress
+**Problem:** Using `--new` flag unnecessarily
+**Solution:** Understand when fresh models are actually needed
+
+### 4. Configuration Mismatch
+**Problem:** Model trained with different device/settings than current config
+**Solution:** Use append mode to reconcile differences
+
+---
+
+## 📝 Summary
+
+- **Model Parameters:** Core learning settings saved with model
+- **Training Settings:** Process control settings, not saved with model  
+- **Default Loading:** Fast resume with original model parameters
+- **Append Training:** Resume with updated configuration parameters
+- **Rewards:** Loaded fresh every session, immediate impact on training
+- **Multi-Agent:** Hybrid approach with persistent learning and updated logging
+
+Understanding these concepts enables effective AI training management and experimentation while preserving valuable learned knowledge.

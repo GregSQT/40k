@@ -321,6 +321,9 @@ class W40KEnv(gym.Env):
         # Reset replay data and ensure proper initial state capture
         self.replay_data = []
         
+        # CRITICAL FIX: Return observation and info as required by Gymnasium interface
+        return self._get_obs(), self._get_info()
+        
     def capture_initial_state(self):
         """Capture initial game state - compatibility method for GameReplayLogger interface."""
         # CRITICAL FIX: Only log game start if this is truly a new episode (no existing entries)
