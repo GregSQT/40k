@@ -585,8 +585,8 @@ class W40KEnv(gym.Env):
     def _get_info(self):
         """Get info dictionary for Gymnasium interface."""
         all_units = self.controller.get_units()
-        ai_units_alive = [u for u in all_units if u["player"] == 1 and u["alive"] and u["HP_LEFT"] > 0]
-        enemy_units_alive = [u for u in all_units if u["player"] == 0 and u["alive"] and u["HP_LEFT"] > 0]
+        ai_units_alive = [u for u in all_units if u["player"] == 1 and u["alive"] and u["CUR_HP"] > 0]
+        enemy_units_alive = [u for u in all_units if u["player"] == 0 and u["alive"] and u["CUR_HP"] > 0]
         
         # Check for game end conditions
         if len(ai_units_alive) == 0 and len(enemy_units_alive) > 0:

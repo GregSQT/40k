@@ -423,7 +423,7 @@ class UseGameActions:
             return
 
         # Special handling for charge phase (MISSING charge roll logic from original Python)
-        if self.phase == "charge":
+        if self.game_state["phase"] == "charge":
             existing_roll = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
             if existing_roll is not None:
                 # Unit already has a charge roll, keep it selected and show move mode
@@ -475,7 +475,7 @@ class UseGameActions:
                 return
 
         # Special handling for combat phase (EXACT from TypeScript)
-        if self.phase == "combat":
+        if self.game_state["phase"] == "combat":
             # Always show the attack preview for adjacent enemies
             self.actions["set_move_preview"](None)
             self.actions["set_attack_preview"]({"unit_id": unit_id, "col": unit["col"], "row": unit["row"]})
@@ -818,7 +818,7 @@ class UseGameActions:
                             raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker}")
                         damage_dealt = attacker["CC_DMG"]
                         new_hp = max(0, target["CUR_HP"] - damage_dealt)
-                        self.actions["update_unit"](target_id, {"HP": new_hp})
+                        self.actions["update_unit"](target_id, {"CUR_HP": new_hp})
                         
                         if new_hp <= 0:
                             self.actions["remove_unit"](target_id)
@@ -913,7 +913,7 @@ class UseGameActions:
 
     def cancel_charge(self) -> None:
         """EXACT mirror of cancelCharge from TypeScript"""
-        if self.selected_unit_id is not None:
+        if self.game_state["selected_unit_id"] is not None:
             self.actions["add_charged_unit"](self.selected_unit_id)
         self.actions["set_selected_unit_id"](None)
         self.actions["set_mode"]("select")
@@ -1118,7 +1118,7 @@ class UseGameActions:
                 if col != unit["col"] or row != unit["row"]:
                     # Check if hex is not occupied by friendly unit
                     occupied = any(u["col"] == col and u["row"] == row and u["player"] == unit["player"] 
-                                 for u in self.units if u["id"] != unit["id"])
+                            for u in self.game_state["units"] if u["id"] != unit["id"])
                     if not occupied:
                         valid_moves.append({"col": col, "row": row})
         return valid_moves

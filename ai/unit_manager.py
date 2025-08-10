@@ -71,7 +71,7 @@ class UnitManager:
     def get_alive_enemy_units(self) -> List[Dict[str, Any]]:
         """Get alive enemy units only."""
         for u in self.enemy_units:
-            if "HP" not in u:
+            if "CUR_HP" not in u:
                 raise KeyError(f"Unit missing required 'HP' field: {u}")
         return [u for u in self.enemy_units if u["HP"] > 0 and u["alive"]]
     
@@ -147,7 +147,7 @@ class UnitManager:
         # Validate target is still alive before applying damage
         if not self.is_target_valid(target):
             return False  # Target already dead, no damage applied
-        damage = attacker["cc_dmg"]
+        damage = attacker["CC_DMG"]
         return self.apply_damage_and_check_death(target, damage)
     
     def is_target_valid(self, target: Dict[str, Any]) -> bool:
