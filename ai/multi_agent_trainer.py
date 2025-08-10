@@ -225,7 +225,9 @@ class MultiAgentTrainer:
         self.total_sessions = 0
         self.completed_sessions = 0
         self.session_progress = {}  # Track progress of each active session
+        self.evaluation_progress = {}  # Track evaluation progress of each active session
         self.progress_lock = threading.Lock()
+        self.eval_pbar = None  # Shared evaluation progress bar
         
         # Load training configuration
         self.training_config = self.config.load_training_config("default")
@@ -313,8 +315,6 @@ class MultiAgentTrainer:
         self.completed_sessions = 0
         self.session_progress = {}
         
-        print(f"🤖 Starting {self.total_sessions} training sessions...")
-        
         # Create progress bar showing slowest agent
         self.overall_pbar = tqdm(
             total=timesteps_per_session,
@@ -394,8 +394,8 @@ class MultiAgentTrainer:
                             del self.session_progress[session_id]
                         self._update_slowest_progress()
                     
-                    print(f"✅ Session {self.completed_sessions}/{self.total_sessions}: {result['agent_key']} vs {result['opponent_agent']} | "
-                          f"WR:{result.get('final_win_rate', 0):.0%} R:{result.get('final_avg_reward', 0):.1f}")
+                    #print(f"✅ Session {self.completed_sessions}/{self.total_sessions}: {result['agent_key']} vs {result['opponent_agent']} | "
+                    #      f"WR:{result.get('final_win_rate', 0):.0%} R:{result.get('final_avg_reward', 0):.1f}")
                     
                 except Exception as e:
                     orchestration_results["session_results"].append({
@@ -433,10 +433,9 @@ class MultiAgentTrainer:
         progress_report = self.scenario_manager.get_training_progress_report()
         orchestration_results["progress_report"] = progress_report
         
-        print(f"🎉 Balanced training completed!")        
         print(f"🏋️ Training time: {orchestration_results['total_training_time']:.2f} seconds")
-        print(f"🧪 Evaluation time: {orchestration_results['total_duration']:.2f} seconds")
-        print(f"⏱️ Total duration: {orchestration_results['total_evaluation_time']:.2f} seconds")
+        print(f"🧪 Evaluation time: {orchestration_results['total_evaluation_time']:.2f} seconds")
+        print(f"⏱️ Total duration: {orchestration_results['total_duration']:.2f} seconds")
         print(f"📊 Successful sessions: {len([r for r in orchestration_results['session_results'] if r.get('status') == 'completed'])}")
         
         # Save orchestration results
@@ -659,16 +658,13 @@ class MultiAgentTrainer:
     def _create_agent_model(self, agent_key: str, training_config_name: str,
                            rewards_config_name: str, scenario_path: str) -> Tuple[DQN, Any]:
         """Create or load DQN model for specific agent."""
-        print(f"🔧 Creating model for agent: {agent_key}")
         try:
             # Import environment here to avoid circular imports
             try:
                 from gym40k import W40KEnv
-                print(f"✅ W40KEnv imported successfully from gym40k")
             except ImportError:
                 try:
                     from ai.gym40k import W40KEnv
-                    print(f"✅ W40KEnv imported successfully from ai.gym40k")
                 except ImportError as e:
                     print(f"❌ Failed to import W40KEnv: {e}")
                     raise ImportError(f"Cannot import W40KEnv: {e}")
@@ -684,7 +680,6 @@ class MultiAgentTrainer:
             
             # Create agent-specific environment with generated scenario and shared registry
             try:
-                print(f"🏗️ Creating W40KEnv for {agent_key} with scenario {scenario_path}")
                 base_env = W40KEnv(
                     rewards_config=rewards_config_name,
                     training_config_name=training_config_name,
@@ -694,42 +689,30 @@ class MultiAgentTrainer:
                     unit_registry=self.unit_registry,  # Pass shared registry
                     quiet=True  # Enable quiet mode for training
                 )
-                print(f"✅ W40KEnv created successfully for {agent_key}")
             except Exception as env_error:
                 print(f"❌ W40KEnv creation failed for {agent_key}: {env_error}")
                 raise RuntimeError(f"Failed to create W40KEnv for agent {agent_key}: {env_error}")
             
             # Enhance environment with clean game logger
             from ai.game_replay_logger import GameReplayIntegration
-            print(f"🔧 Enhancing environment for {agent_key}")
             enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
-            print(f"✅ Environment enhanced for {agent_key}")
             
             # CRITICAL FIX: Connect replay_logger to game_logger for actual logging
             if hasattr(enhanced_env, 'replay_logger'):
                 enhanced_env.game_logger = enhanced_env.replay_logger
             
             env = Monitor(enhanced_env, allow_early_resets=True)
-            print(f"✅ Monitor wrapper applied for {agent_key}")
             
             # Agent-specific model path
             model_path = self._get_agent_model_path(agent_key)
-            print(f"🎯 Model path for {agent_key}: {model_path}")
             
             # Create or load model (reduced verbosity)
-            print(f"🤖 Creating/loading DQN model for {agent_key}")
             if os.path.exists(model_path):
-                print(f"📁 Loading existing model: {model_path}")
                 model = DQN.load(model_path, env=env)
                 # Update model parameters for continued training
                 model.tensorboard_log = model_params["tensorboard_log"]
-                print(f"✅ Model loaded successfully for {agent_key}")
             else:
-                print(f"🆕 Creating new model for {agent_key}")
                 model = DQN(env=env, **model_params)
-                print(f"✅ Model created successfully for {agent_key}")
-            
-            print(f"🎯 Returning model and env for {agent_key}")
             return model, env
             
         except Exception as create_error:
@@ -817,11 +800,24 @@ class MultiAgentTrainer:
         wins = 0
         total_rewards = []
         
-        # Add single evaluation progress bar per session (fixed to prevent concurrent display issues)
+        # Use shared evaluation progress bar instead of individual ones
         session_id = getattr(self, '_current_session_id', 'unknown')
-        eval_pbar = tqdm(total=num_episodes, desc=f"🧪 Eval {session_id[:8]}", 
-                         bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} episodes',
-                         leave=False, ncols=80, position=1)
+        
+        # Initialize shared evaluation progress bar if not exists
+        with self.progress_lock:
+            if not hasattr(self, 'eval_pbar') or self.eval_pbar is None:
+                self.eval_pbar = tqdm(total=num_episodes, desc=f"🧪 Eval {session_id[:8]}", 
+                                     bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} episodes',
+                                     leave=True, ncols=100, position=2)
+            
+            # Track this session's evaluation progress
+            self.evaluation_progress[session_id] = {
+                'episodes': 0,
+                'total': num_episodes,
+                'agent': session_id[:8],
+                'wins': 0,
+                'total_reward': 0.0
+            }
         
         for episode in range(num_episodes):
             obs, info = env.reset()
@@ -900,13 +896,22 @@ class MultiAgentTrainer:
             if info.get('winner') == 1:  # AI won
                 wins += 1
            
-            # Update progress bar with current stats
-            eval_pbar.update(1)
-            current_win_rate = wins / (episode + 1)
-            current_avg_reward = sum(total_rewards) / len(total_rewards)
-            eval_pbar.set_postfix({'WR': f'{current_win_rate:.1%}', 'Reward': f'{current_avg_reward:.1f}'})
+            # Update shared evaluation progress tracking
+            with self.progress_lock:
+                if session_id in self.evaluation_progress:
+                    self.evaluation_progress[session_id]['episodes'] = episode + 1
+                    self.evaluation_progress[session_id]['wins'] = wins
+                    self.evaluation_progress[session_id]['total_reward'] = sum(total_rewards) / len(total_rewards)
+                    self._update_slowest_evaluation_progress()
        
-        eval_pbar.close()
+        # Clean up evaluation progress tracking for this session
+        with self.progress_lock:
+            if session_id in self.evaluation_progress:
+                del self.evaluation_progress[session_id]
+            # Close shared evaluation progress bar when no more evaluations
+            if not self.evaluation_progress and hasattr(self, 'eval_pbar') and self.eval_pbar:
+                self.eval_pbar.close()
+                self.eval_pbar = None
        
         win_rate = wins / num_episodes
         avg_reward = sum(total_rewards) / len(total_rewards)
@@ -916,6 +921,32 @@ class MultiAgentTrainer:
             "avg_reward": avg_reward,
             "total_episodes": num_episodes
         }
+
+    def _update_slowest_evaluation_progress(self):
+        """Update shared evaluation progress bar to show the slowest evaluation."""
+        if not self.evaluation_progress or not hasattr(self, 'eval_pbar') or not self.eval_pbar:
+            return
+        
+        # Find the session with the lowest evaluation completion percentage
+        slowest_eval = None
+        slowest_progress = 1.0
+        
+        for session_id, progress in self.evaluation_progress.items():
+            if progress['total'] > 0:
+                completion = progress['episodes'] / progress['total']
+                if completion < slowest_progress:
+                    slowest_progress = completion
+                    slowest_eval = progress
+        
+        if slowest_eval:
+            # Update shared evaluation progress bar to show slowest evaluation
+            self.eval_pbar.n = slowest_eval['episodes']
+            if self.eval_pbar.total != slowest_eval['total']:
+                self.eval_pbar.total = slowest_eval['total']
+            current_wr = slowest_eval['wins'] / max(1, slowest_eval['episodes'])
+            self.eval_pbar.set_description(f"🧪 Eval {slowest_eval['agent']}")
+            self.eval_pbar.set_postfix({'WR': f'{current_wr:.1%}', 'Reward': f'{slowest_eval["total_reward"]:.1f}'})
+            self.eval_pbar.refresh()
 
     def _update_agent_state(self, session: TrainingSession, training_duration: float,
                            test_results: Dict[str, float]):
@@ -992,8 +1023,6 @@ class MultiAgentTrainer:
         
         with open(results_path, 'w') as f:
             json.dump(serializable_results, f, indent=2, default=str)
-        
-        print(f"📊 Orchestration results saved: {results_path}")
 
     def _generate_session_id(self) -> str:
         """Generate unique session ID."""
@@ -1063,8 +1092,6 @@ class MultiAgentTrainer:
         
         with open(state_path, 'w') as f:
             json.dump(training_state, f, indent=2, default=str)
-        
-        print(f"💾 Training state saved: {state_path}")
         return state_path
 
     def _analyze_player_actions(self, replay_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1126,14 +1153,12 @@ def test_multi_agent_trainer():
         
         # Test status
         status = trainer.get_training_status()
-        print(f"✅ Training status: {len(status['agent_states'])} agents tracked")
         
         # Test small training run (would need actual environment)
         print("⚠️ Skipping actual training test (requires full environment)")
         
         # Test state saving
         state_path = trainer.save_training_state()
-        print(f"✅ Training state saved: {os.path.exists(state_path)}")
         
         print("🎉 Multi-agent trainer tests passed!")
         return True

@@ -376,6 +376,320 @@ python ai/train.py --orchestrate --training-config debug --rewards-config simpli
 
 ---
 
+## 🚀 Advanced Features
+
+### Multi-Agent Orchestration
+
+**Concurrent Training System:**
+```bash
+# Train 4 agents simultaneously with load balancing
+python ai/train.py --orchestrate --training-phase solo
+```
+
+**Key Features:**
+- **Load Balancing:** Uses 50% of CPU cores (max 4 concurrent sessions)
+- **Progress Tracking:** Shows slowest agent progress across all sessions
+- **Automatic Scaling:** Handles 2-6 agents with balanced matchups
+
+**Orchestration Metrics:**
+```
+🤖 Starting 4 training sessions...
+🐌 SpaceMar vs SpaceMar: 99%|████████| 990/1000 [00:18<00:00, 52.3steps/s]
+✅ Session 1/4: Agent vs Agent | WR:45% R:-12.3
+📊 Orchestration results saved: models/orchestration_results_*.json
+```
+
+### Selective Replay System
+
+**Episode Tracking:**
+```python
+class SelectiveEpisodeTracker:
+    # Automatically tracks during training:
+    # - Best reward episode
+    # - Worst reward episode  
+    # - Shortest episode (fastest win)
+```
+
+**Replay File Generation:**
+```
+ai/event_log/
+├── replay_Agent_vs_Bot_best.json      # Highest reward episode
+├── replay_Agent_vs_Bot_worst.json     # Lowest reward episode
+└── replay_Agent_vs_Bot_shortest.json  # Fastest completion
+```
+
+**Memory Management:**
+- Keeps top 20 episode candidates during training
+- Prunes less interesting episodes automatically
+- Saves only 3 most valuable replays per agent
+
+### Training Phase System
+
+**Progressive Training Phases:**
+```bash
+# Phase 1: Solo self-play for basic tactics
+python ai/train.py --orchestrate --training-phase solo
+
+# Phase 2: Cross-faction learning  
+python ai/train.py --orchestrate --training-phase cross_faction
+
+# Phase 3: Full composition complexity
+python ai/train.py --orchestrate --training-phase full_composition
+```
+
+**Phase Benefits:**
+- **Solo:** Agents learn basic unit capabilities
+- **Cross-faction:** Learn counter-strategies against different unit types
+- **Full:** Master complex multi-unit coordination
+
+### Callback System
+
+**Built-in Callbacks:**
+```python
+# Progress tracking across concurrent sessions
+class ProgressTracker(BaseCallback):
+    # Updates every 10 steps for responsive progress bars
+    # Coordinates with multi-agent trainer for slowest agent display
+
+# Selective episode evaluation  
+class SelectiveEvalCallback(EvalCallback):
+    # Captures best/worst/shortest episodes during evaluation
+    # Integrates with replay system for automatic saving
+```
+
+**Callback Features:**
+- **Real-time Progress:** Live updates during concurrent training
+- **Evaluation Integration:** Automatic replay capture during model testing
+- **Memory Efficient:** Selective saving prevents disk space issues
+
+---
+
+## 🔧 Advanced Configuration
+
+### GPU/CPU Management
+
+**Automatic Device Detection:**
+```python
+# Check GPU availability
+gpu_available = check_gpu_availability()
+device = "cuda" if gpu_available else "cpu"
+model_params["device"] = device
+```
+
+**Multi-Session GPU Sharing:**
+- Concurrent sessions share GPU memory efficiently
+- Automatic fallback to CPU if GPU memory exhausted
+- Device-specific model parameter updates
+
+### Training Configuration Profiles
+
+**Available Profiles:**
+```json
+{
+  "debug": {
+    "total_timesteps": 1000,      // Ultra-fast testing
+    "buffer_size": 100,
+    "batch_size": 8
+  },
+  "conservative": {
+    "total_timesteps": 100000,    // Stable learning
+    "learning_rate": 0.0007,
+    "exploration_fraction": 0.4
+  },
+  "aggressive": {
+    "total_timesteps": 2000000,   // Fast learning
+    "buffer_size": 200000,
+    "learning_rate": 0.0003
+  }
+}
+```
+
+### Reward System Architecture
+
+**Multi-Configuration Support:**
+```bash
+# Switch reward systems without restarting models
+python ai/train.py --orchestrate --rewards-config simplified
+python ai/train.py --orchestrate --rewards-config balanced  
+python ai/train.py --orchestrate --rewards-config default
+```
+
+**Reward Categories:**
+- **Base Actions:** Move, shoot, charge, combat, wait
+- **Tactical Context:** Range optimization, positioning, safety
+- **Situational Modifiers:** Win/lose bonuses, draw penalties
+- **Unit-Specific:** Different rewards per unit type/role
+
+---
+
+## 📊 Advanced Monitoring
+
+### Tensorboard Integration
+
+**Multi-Agent Metrics:**
+```bash
+tensorboard --logdir ./tensorboard/
+```
+
+**Tracked Metrics:**
+- **Per-Agent Learning Curves:** Individual agent progress
+- **Cross-Agent Comparisons:** Relative performance analysis
+- **Reward Distribution:** How reward changes affect behavior
+- **Win Rate Trends:** Performance vs different opponents
+
+### Orchestration Results
+
+**Comprehensive Session Data:**
+```json
+{
+  "total_matchups": 4,
+  "total_episodes": 1000,
+  "training_config": "debug",
+  "session_results": [
+    {
+      "agent_key": "SpaceMarine_Infantry_LeaderElite_MeleeElite",
+      "final_win_rate": 0.45,
+      "final_avg_reward": -12.3,
+      "training_duration": 18.5,
+      "pure_training_time": 15.2,
+      "evaluation_time": 3.3
+    }
+  ]
+}
+```
+
+### Performance Analytics
+
+**Training Efficiency Metrics:**
+- **Pure Training Time:** Actual model learning duration
+- **Evaluation Time:** Model testing and replay generation
+- **Orchestration Overhead:** Multi-agent coordination costs
+- **Successful Sessions:** Training completion rate
+
+---
+
+## 🎯 Expert Workflows
+
+### Development Workflow
+
+```bash
+# 1. Quick validation
+python ai/train.py --orchestrate --training-config debug --rewards-config simplified
+
+# 2. Feature development  
+python ai/train.py --orchestrate --training-config conservative --rewards-config balanced
+
+# 3. Production training
+python ai/train.py --orchestrate --training-config default --rewards-config default
+```
+
+### Research Workflow
+
+```bash
+# Baseline establishment
+python ai/train.py --orchestrate --new --training-config conservative
+
+# Reward experimentation
+python ai/train.py --orchestrate --rewards-config experimental_v1
+python ai/train.py --orchestrate --rewards-config experimental_v2
+
+# Parameter optimization
+python ai/train.py --orchestrate --training-config aggressive --append
+```
+
+### Production Workflow
+
+```bash
+# Continuous learning (daily)
+python ai/train.py --orchestrate --training-config default
+
+# Weekly evaluation  
+python ai/evaluate.py --episodes 100
+
+# Monthly model archival
+cp -r ai/models/current/ ai/models/archive/$(date +%Y%m%d)/
+```
+
+---
+
+## 🚨 Advanced Troubleshooting
+
+### Memory Management
+
+**Large-Scale Training Issues:**
+```bash
+# Reduce concurrent sessions if memory issues
+python ai/train.py --orchestrate --max-concurrent-sessions 2
+
+# Use smaller batch sizes for GPU memory
+# Edit config/training_config.json: "batch_size": 256
+```
+
+**Replay System Memory:**
+- SelectiveEpisodeTracker automatically prunes episodes
+- Maximum 20 candidates per tracker (configurable)
+- Automatic cleanup of temporary scenario files
+
+### Training Instability
+
+**Convergence Issues:**
+```bash
+# Use conservative settings for stability
+python ai/train.py --orchestrate --training-config conservative --rewards-config simplified
+
+# Gradual reward complexity increase
+# Start simple → balanced → default rewards
+```
+
+**Multi-Agent Desynchronization:**
+- Progress tracking handles concurrent session coordination
+- Automatic cleanup on session failures
+- Graceful degradation with partial session completion
+
+### Performance Optimization
+
+**Training Speed:**
+```python
+# Optimizations automatically applied:
+log_interval=1000        # Reduced logging frequency
+progress_bar=False       # Disabled individual progress bars
+quiet=True              # Minimal console output during training
+```
+
+**Evaluation Efficiency:**
+- Configurable evaluation episode counts
+- Deterministic evaluation for consistent metrics
+- Selective replay capture prevents excessive disk I/O
+
+---
+
+## 📋 Feature Checklist
+
+### Core Features ✅
+- [x] Model loading strategies (default/append/new)
+- [x] Parameter vs settings distinction  
+- [x] Reward system management
+- [x] Configuration handling
+
+### Advanced Features ✅  
+- [x] Multi-agent orchestration
+- [x] Selective replay system
+- [x] Training phase progression
+- [x] Callback system integration
+- [x] GPU/CPU management
+- [x] Tensorboard monitoring
+- [x] Performance analytics
+
+### Expert Features ✅
+- [x] Development workflows
+- [x] Research methodologies  
+- [x] Production deployment
+- [x] Advanced troubleshooting
+- [x] Memory management
+- [x] Performance optimization
+
+---
+
 ## 📝 Summary
 
 - **Model Parameters:** Core learning settings saved with model
@@ -384,5 +698,9 @@ python ai/train.py --orchestrate --training-config debug --rewards-config simpli
 - **Append Training:** Resume with updated configuration parameters
 - **Rewards:** Loaded fresh every session, immediate impact on training
 - **Multi-Agent:** Hybrid approach with persistent learning and updated logging
+- **Orchestration:** Concurrent training with load balancing and progress tracking
+- **Replay System:** Automatic capture of best/worst/shortest episodes
+- **Phase Training:** Progressive complexity for optimal learning
+- **Monitoring:** Comprehensive metrics via Tensorboard and orchestration results
 
-Understanding these concepts enables effective AI training management and experimentation while preserving valuable learned knowledge.
+Understanding these concepts enables effective AI training management, advanced experimentation, and production-scale deployment while preserving valuable learned knowledge and maintaining system performance.
