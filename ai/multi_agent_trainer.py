@@ -552,9 +552,9 @@ class MultiAgentTrainer:
             # Calculate total session duration (training + evaluation + model saving)
             training_duration = time.time() - session_start_time
             
-            # Save final model
-            final_model_path = session.model_path.replace('.zip', f'_session_{session.session_id}.zip')
-            model.save(final_model_path)
+            # Save agent model (persistent learning)
+            agent_model_path = self._get_agent_model_path(session.agent_key)
+            model.save(agent_model_path)
 
             # Save selective replays using episode tracker
             replay_files_saved = []
@@ -590,7 +590,7 @@ class MultiAgentTrainer:
                 "evaluation_time": evaluation_time,
                 "final_win_rate": test_results["win_rate"],
                 "final_avg_reward": test_results["avg_reward"],
-                "model_path": final_model_path,
+                "model_path": agent_model_path,
                 "selective_replay_files": replay_files_saved
             }
             

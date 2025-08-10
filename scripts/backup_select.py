@@ -38,7 +38,7 @@ else:
 ######################################################################################################
 
     ### ai
-        "ai/agent.py",
+        #"ai/agent.py",
         "ai/bot_manager.py",
         "ai/evaluate.py",
         "ai/game_controller.py",
@@ -46,7 +46,7 @@ else:
         "ai/gym40k.py",
         "ai/multi_agent_trainer.py",
         "ai/reward_mapper.py",
-        "ai/scenario.json",
+        #"ai/scenario.json",
         "ai/scenario_manager.py",
         "ai/train.py",
         "ai/unit_manager.py",
