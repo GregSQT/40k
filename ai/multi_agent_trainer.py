@@ -495,6 +495,8 @@ class MultiAgentTrainer:
                 )
                 if model_result is None:
                     raise ValueError(f"_create_agent_model returned None for agent {session.agent_key}")
+                if not isinstance(model_result, tuple) or len(model_result) != 2:
+                    raise ValueError(f"_create_agent_model returned invalid result: {type(model_result)}")
                 model, env = model_result
             except Exception as model_error:
                 raise RuntimeError(f"Model creation failed for {session.agent_key}: {model_error}")
@@ -657,60 +659,81 @@ class MultiAgentTrainer:
     def _create_agent_model(self, agent_key: str, training_config_name: str,
                            rewards_config_name: str, scenario_path: str) -> Tuple[DQN, Any]:
         """Create or load DQN model for specific agent."""
-        # Import environment here to avoid circular imports
+        print(f"🔧 Creating model for agent: {agent_key}")
         try:
-            from gym40k import W40KEnv
-        except ImportError:
+            # Import environment here to avoid circular imports
             try:
-                from ai.gym40k import W40KEnv
-            except ImportError as e:
-                raise ImportError(f"Cannot import W40KEnv: {e}")
-        
-        # Load training configuration
-        training_config = self.config.load_training_config(training_config_name)
-        if not training_config:
-            raise ValueError(f"Failed to load training config: {training_config_name}")
-        model_params = training_config["model_params"]
-        
-        # Override verbose setting from config for multi-agent training
-        model_params["verbose"] = 0
-        
-        # Create agent-specific environment with generated scenario and shared registry
-        try:
-            base_env = W40KEnv(
-                rewards_config=rewards_config_name,
-                training_config_name=training_config_name,
-                controlled_agent=agent_key,
-                active_agents=[self.unit_registry.get_all_model_keys()],  # CRITICAL FIX: All agents active for proper training
-                scenario_file=scenario_path,
-                unit_registry=self.unit_registry,  # Pass shared registry
-                quiet=True  # Enable quiet mode for training
-            )
-        except Exception as env_error:
-            raise RuntimeError(f"Failed to create W40KEnv for agent {agent_key}: {env_error}")
-        
-        # Enhance environment with clean game logger
-        from ai.game_replay_logger import GameReplayIntegration
-        enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
-        
-        # CRITICAL FIX: Connect replay_logger to game_logger for actual logging
-        if hasattr(enhanced_env, 'replay_logger'):
-            enhanced_env.game_logger = enhanced_env.replay_logger
-        
-        env = Monitor(enhanced_env, allow_early_resets=True)
-        
-        # Agent-specific model path
-        model_path = self._get_agent_model_path(agent_key)
-        
-        # Create or load model (reduced verbosity)
-        if os.path.exists(model_path):
-            model = DQN.load(model_path, env=env)
-            # Update model parameters for continued training
-            model.tensorboard_log = model_params["tensorboard_log"]
-        else:
-            model = DQN(env=env, **model_params)
-        
-        return model, env
+                from gym40k import W40KEnv
+                print(f"✅ W40KEnv imported successfully from gym40k")
+            except ImportError:
+                try:
+                    from ai.gym40k import W40KEnv
+                    print(f"✅ W40KEnv imported successfully from ai.gym40k")
+                except ImportError as e:
+                    print(f"❌ Failed to import W40KEnv: {e}")
+                    raise ImportError(f"Cannot import W40KEnv: {e}")
+            
+            # Load training configuration
+            training_config = self.config.load_training_config(training_config_name)
+            if not training_config:
+                raise ValueError(f"Failed to load training config: {training_config_name}")
+            model_params = training_config["model_params"].copy()  # Create copy to avoid modifying original
+            
+            # Override verbose setting from config for multi-agent training
+            model_params["verbose"] = 0
+            
+            # Create agent-specific environment with generated scenario and shared registry
+            try:
+                print(f"🏗️ Creating W40KEnv for {agent_key} with scenario {scenario_path}")
+                base_env = W40KEnv(
+                    rewards_config=rewards_config_name,
+                    training_config_name=training_config_name,
+                    controlled_agent=agent_key,
+                    active_agents=[self.unit_registry.get_all_model_keys()],  # CRITICAL FIX: All agents active for proper training
+                    scenario_file=scenario_path,
+                    unit_registry=self.unit_registry,  # Pass shared registry
+                    quiet=True  # Enable quiet mode for training
+                )
+                print(f"✅ W40KEnv created successfully for {agent_key}")
+            except Exception as env_error:
+                print(f"❌ W40KEnv creation failed for {agent_key}: {env_error}")
+                raise RuntimeError(f"Failed to create W40KEnv for agent {agent_key}: {env_error}")
+            
+            # Enhance environment with clean game logger
+            from ai.game_replay_logger import GameReplayIntegration
+            print(f"🔧 Enhancing environment for {agent_key}")
+            enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
+            print(f"✅ Environment enhanced for {agent_key}")
+            
+            # CRITICAL FIX: Connect replay_logger to game_logger for actual logging
+            if hasattr(enhanced_env, 'replay_logger'):
+                enhanced_env.game_logger = enhanced_env.replay_logger
+            
+            env = Monitor(enhanced_env, allow_early_resets=True)
+            print(f"✅ Monitor wrapper applied for {agent_key}")
+            
+            # Agent-specific model path
+            model_path = self._get_agent_model_path(agent_key)
+            print(f"🎯 Model path for {agent_key}: {model_path}")
+            
+            # Create or load model (reduced verbosity)
+            print(f"🤖 Creating/loading DQN model for {agent_key}")
+            if os.path.exists(model_path):
+                print(f"📁 Loading existing model: {model_path}")
+                model = DQN.load(model_path, env=env)
+                # Update model parameters for continued training
+                model.tensorboard_log = model_params["tensorboard_log"]
+                print(f"✅ Model loaded successfully for {agent_key}")
+            else:
+                print(f"🆕 Creating new model for {agent_key}")
+                model = DQN(env=env, **model_params)
+                print(f"✅ Model created successfully for {agent_key}")
+            
+            print(f"🎯 Returning model and env for {agent_key}")
+            return model, env
+            
+        except Exception as create_error:
+            raise RuntimeError(f"_create_agent_model failed for {agent_key}: {create_error}")
 
     def _update_slowest_progress(self):
         """Update progress bar to show the slowest agent's progress."""
