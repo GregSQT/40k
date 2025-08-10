@@ -219,9 +219,33 @@ class GameController:
         return True
 
     def combat_attack(self, attacker_id: int, target_id: int) -> bool:
-        """Attack in combat"""
+        """Attack in combat with detailed dice results"""
         if "handle_combat_attack" not in self.game_actions:
             raise RuntimeError("game_actions missing required handle_combat_attack method")
+        
+        # Get units for detailed combat execution
+        attacker = self.find_unit(attacker_id)
+        target = self.find_unit(target_id)
+        if not attacker or not target:
+            return False
+        
+        # Execute detailed combat sequence and capture results
+        from shared.gameRules import execute_combat_sequence
+        combat_result = execute_combat_sequence(attacker, target)
+        
+        # Apply damage from combat result
+        if combat_result["totalDamage"] > 0:
+            new_hp = target["CUR_HP"] - combat_result["totalDamage"]
+            if new_hp <= 0:
+                self.state_actions["remove_unit"](target_id)
+            else:
+                self.state_actions["update_unit"](target_id, {"CUR_HP": new_hp})
+        
+        # Store combat result for logging
+        if hasattr(self, '_last_combat_result'):
+            self._last_combat_result = combat_result
+        
+        # Still call original action for state management
         self.game_actions["handle_combat_attack"](attacker_id, target_id)
         return True
 
@@ -313,19 +337,31 @@ class GameController:
                 if "target_id" in action:
                     target_unit = self.find_unit(action["target_id"])
                 
-                from shared.gameLogStructure import log_unified_action
-                log_unified_action(
-                    env=self.gym_env,
-                    action_type=action_type,
-                    acting_unit=acting_unit,
-                    target_unit=target_unit,
-                    reward=0.0,
-                    phase=self.get_current_phase(),
-                    turn_number=self.get_current_turn()
-                )
+                # Get detailed results for combat/shooting actions
+                action_details = None
+                if action_type == "combat" and hasattr(self, '_last_combat_result'):
+                    action_details = self._last_combat_result
+                
+                # Use proper logging with details
+                if action_type == "combat" and action_details:
+                    self.gym_env.replay_logger.log_combat(
+                        acting_unit, target_unit, action_details,
+                        self.get_current_turn(), 0.0, 6  # action_int 6 for combat
+                    )
+                else:
+                    from shared.gameLogStructure import log_unified_action
+                    log_unified_action(
+                        env=self.gym_env,
+                        action_type=action_type,
+                        acting_unit=acting_unit,
+                        target_unit=target_unit,
+                        reward=0.0,
+                        phase=self.get_current_phase(),
+                        turn_number=self.get_current_turn()
+                    )
             except Exception as e:
                 if not self.quiet:
-                    print(f"❌ execute_action logging failed: {e}")
+                    print(f"⚠️ Logging failed: {e}")
         
         return success
 

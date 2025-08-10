@@ -217,6 +217,50 @@ def calculate_combat_overall_probability(attacker: Dict[str, Any], target: Dict[
     
     return (hit_prob / 100) * (wound_prob / 100) * (save_fail_prob / 100) * 100
 
+# === FIELD CONVERSION UTILITY FOR SHARED RULES ===
+
+def convert_unit_for_shared_rules(unit: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert unit data from uppercase to lowercase field names for shared rules compatibility."""
+    return {
+        # Basic info
+        "id": unit.get("id"),
+        "unit_type": unit.get("unit_type"),
+        "player": unit.get("player"),
+        "col": unit.get("col"),
+        "row": unit.get("row"),
+        
+        # Health
+        "cur_hp": unit.get("CUR_HP"),
+        "hp_max": unit.get("HP_MAX"),
+        
+        # Movement
+        "move": unit.get("MOVE"),
+        
+        # Ranged combat
+        "rng_rng": unit.get("RNG_RNG"),
+        "rng_nb": unit.get("RNG_NB"),
+        "rng_atk": unit.get("RNG_ATK"),
+        "rng_str": unit.get("RNG_STR"),
+        "rng_ap": unit.get("RNG_AP"),
+        "rng_dmg": unit.get("RNG_DMG"),
+        
+        # Close combat
+        "cc_nb": unit.get("CC_NB"),
+        "cc_rng": unit.get("CC_RNG"),
+        "cc_atk": unit.get("CC_ATK"),
+        "cc_str": unit.get("CC_STR"),
+        "cc_ap": unit.get("CC_AP"),
+        "cc_dmg": unit.get("CC_DMG"),
+        
+        # Armor
+        "t": unit.get("T"),
+        "armor_save": unit.get("ARMOR_SAVE"),
+        "invul_save": unit.get("INVUL_SAVE"),
+        
+        # Status
+        "alive": unit.get("alive", True)
+    }
+
 # === MISSING SINGLE SHOT SEQUENCE MANAGER (EXACT from TypeScript) ===
 
 class SingleShotSequenceManager:
@@ -292,12 +336,14 @@ class UseGameActions:
         enemy_units = [u for u in self.game_state["units"] if u["player"] != current_player]
 
         phase = self.game_state["phase"]
-        units_moved = set(self.game_state.get("units_moved", []))
+        if "units_moved" not in self.game_state:
+            raise KeyError("Game state missing required 'units_moved' field")
+        units_moved = set(self.game_state["units_moved"])
         if phase == "move":
             return unit["id"] not in units_moved
         
         elif phase == "shoot":
-            units_fled = set(self.game_state.get("units_fled", []))
+            units_fled = set(self.game_state.get("units_fled"))
             if unit["id"] in units_moved:
                 return False
             # NEW RULE: Units that fled cannot shoot
@@ -595,7 +641,7 @@ class UseGameActions:
 
         # ADDITIONAL CHECK: Prevent shooting if unit has no shots left
         pre_shooter = self.find_unit(shooter_id)
-        if pre_shooter and pre_shooter.get("SHOOT_LEFT", 0) <= 0:
+        if pre_shooter and pre_shooter.get("SHOOT_LEFT") <= 0:
             return
 
         shooter = self.find_unit(shooter_id)
@@ -761,6 +807,7 @@ class UseGameActions:
         """
         EXACT mirror of handleCombatAttack from TypeScript.
         Complete combat sequence with multiple attacks and probability calculations.
+        Enhanced with detailed dice results for training replay capture.
         """
         if attacker_id in self.game_state.get("units_attacked", []):
             return
@@ -789,43 +836,73 @@ class UseGameActions:
                 pass  # Handle timer cleanup
             self.actions["set_target_preview"](None)
             
-            # Execute combat attacks (simplified single attack for Python mirror)
-            hit_roll = random.randint(1, 6)
-            if "CC_ATK" not in attacker:
-                raise ValueError(f"attacker.CC_ATK is required but was undefined for unit {attacker['id']}")
-            hit_success = hit_roll >= attacker["CC_ATK"]
-            
-            damage_dealt = 0
-            
-            if hit_success:
-                wound_roll = random.randint(1, 6)
-                if "CC_STR" not in attacker:
-                    raise KeyError(f"Attacker missing required 'CC_STR' field: {attacker.get('name')}")
-                wound_target = calculateWoundTarget(attacker["CC_STR"], target["T"])
-                wound_success = wound_roll >= wound_target
+            # Execute detailed combat sequence for training replay capture
+            try:
+                from shared.gameRules import execute_combat_sequence
                 
-                if wound_success:
-                    save_roll = random.randint(1, 6)
-                    if "INVUL_SAVE" not in target:
-                        raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target}")
-                    if "CC_AP" not in attacker:
-                        raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker}")
-                    save_target = calculateSaveTarget(target["ARMOR_SAVE"], target["INVUL_SAVE"], attacker["CC_AP"])
-                    save_success = save_roll >= save_target
+                # Convert units to lowercase field names for shared rules
+                attacker_converted = convert_unit_for_shared_rules(attacker)
+                target_converted = convert_unit_for_shared_rules(target)
+                
+                # Validate conversion before calling shared rules
+                if not attacker_converted.get("CC_NB"):
+                    raise ValueError(f"Field conversion failed: attacker missing CC_NB. Original: {attacker.get('CC_NB')}")
+                
+                # Execute detailed combat sequence and capture results
+                combat_result = execute_combat_sequence(attacker_converted, target_converted)
+                
+                # Apply damage from combat result
+                if "totalDamage" not in combat_result:
+                    raise KeyError("Combat result missing required 'totalDamage' field")
+                damage_dealt = combat_result["totalDamage"]
+                if damage_dealt > 0:
+                    new_hp = max(0, target["CUR_HP"] - damage_dealt)
+                    self.actions["update_unit"](target_id, {"CUR_HP": new_hp})
                     
-                    if not save_success:
-                        if "CC_DMG" not in attacker:
-                            raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker}")
-                        damage_dealt = attacker["CC_DMG"]
-                        new_hp = max(0, target["CUR_HP"] - damage_dealt)
-                        self.actions["update_unit"](target_id, {"CUR_HP": new_hp})
+                    if new_hp <= 0:
+                        self.actions["remove_unit"](target_id)
+                
+                # Log combat action with detailed dice results
+                if self.game_log:
+                    self.game_log.log_combat_action(attacker, target, combat_result, self.game_state["current_turn"])
+                
+            except ImportError:
+                # Fallback to simplified combat if shared rules not available
+                hit_roll = random.randint(1, 6)
+                if "CC_ATK" not in attacker:
+                    raise ValueError(f"attacker.CC_ATK is required but was undefined for unit {attacker['id']}")
+                hit_success = hit_roll >= attacker["CC_ATK"]
+                
+                damage_dealt = 0
+                if hit_success:
+                    wound_roll = random.randint(1, 6)
+                    if "CC_STR" not in attacker:
+                        raise KeyError(f"Attacker missing required 'CC_STR' field: {attacker.get('name')}")
+                    wound_target = calculateWoundTarget(attacker["CC_STR"], target["T"])
+                    wound_success = wound_roll >= wound_target
+                    
+                    if wound_success:
+                        save_roll = random.randint(1, 6)
+                        if "INVUL_SAVE" not in target:
+                            raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target}")
+                        if "CC_AP" not in attacker:
+                            raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker}")
+                        save_target = calculateSaveTarget(target["ARMOR_SAVE"], target["INVUL_SAVE"], attacker["CC_AP"])
+                        save_success = save_roll >= save_target
                         
-                        if new_hp <= 0:
-                            self.actions["remove_unit"](target_id)
-
-            # Log combat action (MISSING from original Python)
-            if self.game_log:
-                self.game_log.log_combat_action(attacker, target, damage_dealt, self.game_state["current_turn"])
+                        if not save_success:
+                            if "CC_DMG" not in attacker:
+                                raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker}")
+                            damage_dealt = attacker["CC_DMG"]
+                            new_hp = max(0, target["CUR_HP"] - damage_dealt)
+                            self.actions["update_unit"](target_id, {"CUR_HP": new_hp})
+                            
+                            if new_hp <= 0:
+                                self.actions["remove_unit"](target_id)
+                
+                # Log simplified combat action
+                if self.game_log:
+                    self.game_log.log_combat_action(attacker, target, damage_dealt, self.game_state["current_turn"])
             
             # Mark attacker as having attacked
             self.actions["add_attacked_unit"](attacker_id)

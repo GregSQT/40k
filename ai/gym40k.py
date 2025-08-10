@@ -297,9 +297,11 @@ class W40KEnv(gym.Env):
         # Initialize new episode
         self.controller.start_new_episode()
         
-        # CRITICAL: Mark this as evaluation mode if needed
+        # CRITICAL: Set evaluation mode BEFORE any logging
         if hasattr(self, 'replay_logger') and self.replay_logger:
             self.is_evaluation_mode = True
+            # Capture initial state immediately after setting evaluation mode
+            self.replay_logger.capture_initial_state()
         else:
             self.is_evaluation_mode = False
         
@@ -318,7 +320,7 @@ class W40KEnv(gym.Env):
         # Update game status using controller state directly
         self._update_game_status()
         
-        # Reset replay data and ensure proper initial state capture
+        # Reset replay data
         self.replay_data = []
         
         # CRITICAL FIX: Return observation and info as required by Gymnasium interface
@@ -326,9 +328,10 @@ class W40KEnv(gym.Env):
         
     def capture_initial_state(self):
         """Capture initial game state - compatibility method for GameReplayLogger interface."""
-        # CRITICAL FIX: Only log game start if this is truly a new episode (no existing entries)
-        if len(self.combat_log_entries) == 0:
-            self.log_game_start()
+        # CRITICAL FIX: Only log game start if evaluation mode is active and no entries exist yet
+        if hasattr(self, 'replay_logger') and self.replay_logger:
+            if len(self.replay_logger.combat_log_entries) == 0:
+                self.replay_logger.log_game_start()
         
         return self._get_obs(), self._get_info()
 
@@ -900,6 +903,8 @@ class W40KEnv(gym.Env):
         """Connect replay logger for GameReplayIntegration compatibility."""
         self.replay_logger = replay_logger
         self.game_logger = replay_logger
+        # Set evaluation mode when logger is connected
+        self.is_evaluation_mode = True
         if hasattr(self, 'controller'):
             self.controller.connect_replay_logger(replay_logger)
 
