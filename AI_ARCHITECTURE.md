@@ -336,6 +336,10 @@ wh40k-tactics/
 │   ├── rewards_config.json               # Reward system definitions
 │   ├── board_config.json                 # Board layout
 │   └── unit_registry.json                # Unit mappings
+├── models/
+│   ├── default_model_{agent_key}.zip     # Persistent agent models
+│   ├── orchestration_results_*.json      # Training session metadata
+│   └── eval_logs/                        # Evaluation histories
 └── config_loader.py                      # Centralized config manager
 ```
 
@@ -513,7 +517,17 @@ python ai/evaluate.py --episodes 50
 
 ---
 
-# ✅ ARCHITECTURE COMPLIANCE CHECKS
+---
+
+# 🤖 MODEL SAVING ARCHITECTURE
+
+## Agent-Based Model Storage
+**Core Principle:**
+- **Persistent Learning**: Each agent maintains one evolving model across training sessions
+- **No Session Models**: Eliminated temporary session-specific model files
+- **Storage Efficiency**: One model per agent instead of hundreds of session snapshots
+
+**Model File Structure:**
 
 ## Required Validations:
 - gym40k.py has no game state variables (`current_phase`, etc.)
