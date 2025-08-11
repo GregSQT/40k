@@ -1,4 +1,4 @@
-// frontend/src/components/Board.tsx
+// frontend/src/components/BoardPvp.tsx
 import React, { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview, CombatSubPhase, PlayerId, GameState } from "../types/game";
@@ -286,14 +286,14 @@ export default function Board({
 
     const gridWidth = (BOARD_COLS - 1) * HEX_HORIZ_SPACING + HEX_WIDTH;
     const gridHeight = (BOARD_ROWS - 1) * HEX_VERT_SPACING + HEX_HEIGHT;
-    const width = gridWidth + 2 * MARGIN;
-    const height = gridHeight + 2 * MARGIN;
+    const canvasWidth = gridWidth + 2 * MARGIN;
+    const canvasHeight = gridHeight + 2 * MARGIN;
 
     // ✅ OPTIMIZED PIXI CONFIG - NO FALLBACKS, RAISE ERRORS IF MISSING
     const pixiConfig = {
-      width,
-      height,
-      backgroundColor: parseColor(boardConfig.colors.background),
+      width: canvasWidth,
+      height: canvasHeight,
+      backgroundColor: parseInt(boardConfig.colors.background.replace('0x', ''), 16),
       antialias: displayConfig.antialias!,
       powerPreference: "high-performance" as WebGLPowerPreference,
       resolution: displayConfig.resolution === "auto" ? (window.devicePixelRatio || 1) : displayConfig.resolution!,
@@ -308,16 +308,15 @@ export default function Board({
     const app = new PIXI.Application(pixiConfig);
     app.stage.sortableChildren = true;
 
-    // ✅ CANVAS STYLING FROM CONFIG WITH RESPONSIVE SCALING
+    // ✅ CANVAS STYLING FROM CONFIG - EXACT BOARDREPLAY MATCH
     const canvas = app.view as HTMLCanvasElement;
     canvas.style.display = 'block';
     canvas.style.maxWidth = '100%';
-    canvas.style.maxHeight = '100vh';
-    canvas.style.width = 'auto';
     canvas.style.height = 'auto';
-    canvas.style.objectFit = 'contain';
-    canvas.style.border = CANVAS_BORDER;
+    canvas.style.border = displayConfig?.canvas_border ?? '1px solid #333';
     
+    // Clear container and append canvas - EXACT BOARDREPLAY MATCH
+    containerRef.current.innerHTML = '';
     containerRef.current.appendChild(canvas);
 
     // Set up board click handler to prevent event conflicts
@@ -872,7 +871,7 @@ export default function Board({
         popupTextObj.position.set(150, 40);
         
         // Position popup in center of screen
-        popupContainer.position.set((width - 300) / 2, (height - 80) / 2);
+        popupContainer.position.set((canvasWidth - 300) / 2, (canvasHeight - 80) / 2);
         popupContainer.addChild(popupBg);
         popupContainer.addChild(popupTextObj);
         
@@ -922,8 +921,8 @@ export default function Board({
 
       // Simple container return - loading/error handled inside useEffect
       return (
-        <div className="w-full">
-          <div ref={containerRef} className="w-full" />
+        <div>
+          <div ref={containerRef} />
           {shootingPhaseState?.singleShotState && (
             <SingleShotDisplay
               singleShotState={shootingPhaseState.singleShotState}
