@@ -48,14 +48,15 @@ const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: 
   const movingUnit = units.find(u => u.col === unitCol && u.row === unitRow);
   const movingUnitPlayer = movingUnit ? movingUnit.player : 0;
   
-  // EXACT COPY of BoardPvp.tsx forbidden set logic
+  // CORRECTED: Only forbid destination hexes, not source hexes (allows flee mechanic)
   for (const enemy of units) {
     if (enemy.player === movingUnitPlayer) continue; // Skip friendly units
 
-    // Add enemy position itself
+    // Add enemy position itself as forbidden destination
     forbiddenSet.add(`${enemy.col},${enemy.row}`);
 
-    // Use cube coordinates for proper hex adjacency
+    // Add hexes adjacent to enemies as forbidden DESTINATIONS only
+    // Units CAN move FROM adjacent positions (flee) but NOT TO them
     const enemyCube = offsetToCube(enemy.col, enemy.row);
     for (const [dx, dy, dz] of cubeDirections) {
       const adjCube = {
@@ -91,10 +92,7 @@ const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: 
 
     visited.set(key, steps);
 
-    // ⛔ Skip forbidden positions completely - don't expand from them
-    if (forbiddenSet.has(key) && steps > 0) {
-      continue;
-    }
+    // ⛔ Allow units to move FROM forbidden positions (flee mechanic) - expansion check removed
 
     const blocked = units.some(u => u.col === col && u.row === row && !(u.col === unitCol && u.row === unitRow));
 

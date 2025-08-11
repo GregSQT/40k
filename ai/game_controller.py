@@ -794,7 +794,8 @@ class TrainingGameController(GameController):
         # Initialize game configuration - use existing working config_loader
         from config_loader import get_config_loader
         config_loader = get_config_loader()
-        self.board_config = config_loader.get_board_config()
+        raw_board_config = config_loader.get_board_config()
+        self.board_config = raw_board_config["default"]  # Extract "default" section like frontend
         self.game_config = config_loader.get_game_config()
         
         # Maintain compatibility with TrainingGameConfig cache

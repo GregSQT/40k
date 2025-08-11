@@ -53,8 +53,8 @@
       "Hormagaunt": 2
     },
     "deployment_zones": {
-      "0": [[13,13], [19,12]],
-      "1": [[11,6], [5,7]]
+      "0": [[13,13], [15,9]],
+      "1": [[11,6], [9,10]]
     },
     "difficulty": "easy",
     "training_focus": "solo"

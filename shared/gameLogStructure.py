@@ -163,6 +163,22 @@ def create_log_entry(
             target_unit.get("id", 0)
         )
     elif entry_type == "charge" and acting_unit and target_unit and start_hex and end_hex:
+        # Extract coordinates from hex strings for proper formatting
+        try:
+            start_coords = start_hex.strip('()').split(', ')
+            end_coords = end_hex.strip('()').split(', ')
+            start_col, start_row = int(start_coords[0]), int(start_coords[1])
+            end_col, end_row = int(end_coords[0]), int(end_coords[1])
+            message = format_charge_message(
+                acting_unit.get("unitType", "unknown"),
+                acting_unit.get("id", 0),
+                target_unit.get("unitType", "unknown"), 
+                target_unit.get("id", 0),
+                start_col, start_row, end_col, end_row
+            )
+        except:
+            message = f"Unit {acting_unit.get('unitType', 'unknown')} {acting_unit.get('id', 0)} CHARGED unit {target_unit.get('unitType', 'unknown')} {target_unit.get('id', 0)} from {start_hex} to {end_hex}"
+    elif entry_type == "charge" and acting_unit and target_unit and start_hex and end_hex:
         try:
             start_coords = start_hex.strip('()').split(', ')
             end_coords = end_hex.strip('()').split(', ')

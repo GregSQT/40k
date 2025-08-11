@@ -173,8 +173,8 @@ class GameReplayLogger:
             reward=reward,
             action_name=self.action_names.get(action_int, f"action_{action_int}"),
             turn_number=turn_number,
-            start_hex=f"({start_col},{start_row})",
-            end_hex=f"({end_col},{end_row})",
+            start_hex=f"({start_col}, {start_row})",
+            end_hex=f"({end_col}, {end_row})",
             shoot_details=charge_details  # Reuse shoot_details field for charge roll info
         )
     

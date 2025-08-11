@@ -457,11 +457,23 @@ class UseGameActions:
                     
                     # Check if enemy is within rolled charge distance (12-hex limit already checked in eligibility)
                     if hex_distance <= charge_roll and hex_distance <= 12:
-                        # Use pathfinding logic for walls if available
+                        # Use proper pathfinding logic for walls - EXACT from PvP mode
                         if self.board_config.get("wall_hexes"):
-                            wall_hex_set = set(f"{c},{r}" for c, r in self.board_config["wall_hexes"])
-                            # Simplified pathfinding check for Python
-                            is_reachable = hex_distance <= charge_roll  # Simplified
+                            from shared.gameMechanics import calculate_charge_destinations
+                            from config_loader import get_board_size
+                            board_cols, board_rows = get_board_size()
+                            
+                            # Use shared pathfinding that respects walls (same as PvP/replay)
+                            valid_destinations = calculate_charge_destinations(
+                                unit, charge_roll, self.game_state["units"], 
+                                self.board_config, board_cols, board_rows
+                            )
+                            
+                            # Check if any valid charge destination is adjacent to this enemy
+                            is_reachable = any(
+                                max(abs(dest["col"] - enemy["col"]), abs(dest["row"] - enemy["row"])) == 1
+                                for dest in valid_destinations
+                            )
                             if is_reachable:
                                 enemies_in_range.append(enemy)
                         else:
@@ -1169,22 +1181,15 @@ class UseGameActions:
                 from shared.gameRules import has_line_of_sight
                 wall_hexes = self.board_config.get("wall_hexes", [])
                 
-                # DEBUG: Check wall_hexes and line of sight calculation
-                print(f"🔍 LoS Check: Unit {unit['id']} ({unit['col']},{unit['row']}) -> Enemy {enemy['id']} ({enemy['col']},{enemy['row']})")
-                print(f"🧱 Wall hexes: {wall_hexes}")
-                
                 line_of_sight = has_line_of_sight(
                     {"col": unit["col"], "row": unit["row"]},
                     {"col": enemy["col"], "row": enemy["row"]},
                     wall_hexes
                 )
                 
-                print(f"👀 LoS Result: canSee={line_of_sight.get('canSee', False)}, inCover={line_of_sight.get('inCover', False)}")
-                
                 # Only add target if line of sight is clear (blocked targets cannot be shot at all)
                 if line_of_sight.get("canSee", False):
                     targets.append(enemy["id"])
-                    print(f"✅ Target {enemy['id']} ADDED to valid targets")
                     
                     # Store cover information for this target (for shooting execution)
                     if not hasattr(self, 'target_cover_info'):
@@ -1192,7 +1197,6 @@ class UseGameActions:
                     self.target_cover_info[enemy["id"]] = line_of_sight.get("inCover", False)
                 else:
                     # Unit cannot see target through walls - skip completely
-                    print(f"❌ Target {enemy['id']} BLOCKED by walls - not added to valid targets")
                     continue
         return targets
 
