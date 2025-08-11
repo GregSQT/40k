@@ -58,9 +58,9 @@ def calculate_wound_target(strength: int, toughness: int) -> int:
     else:  # strength < toughness
         return 5  # S < T: wound on 5+
 
-def calculate_save_target(armor_save: int, invul_save: int, armor_penetration: int) -> int:
+def calculate_save_target(ARMOR_SAVE: int, invul_save: int, armor_penetration: int) -> int:
     """Calculate save target accounting for AP and invulnerable saves (EXACT from frontend)."""
-    modified_armor = armor_save + armor_penetration
+    modified_armor = ARMOR_SAVE + armor_penetration
     
     # Use invulnerable save if it's better than modified armor save (and invul > 0)
     if invul_save > 0 and invul_save < modified_armor:
@@ -93,7 +93,7 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
     if "INVUL_SAVE" not in target:
         raise ValueError("target.INVUL_SAVE is required")
     
-    number_of_shots = shooter["rng_nb"]
+    number_of_shots = shooter["RNG_NB"]
     total_damage = 0
     hits = 0
     wounds = 0
@@ -104,7 +104,7 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
     for shot in range(1, number_of_shots + 1):
         # Hit roll
         hit_roll = roll_d6()
-        hit_target = shooter["rng_atk"]
+        hit_target = shooter["RNG_ATK"]
         did_hit = hit_roll >= hit_target
         
         # Initialize shot record
@@ -128,7 +128,7 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
         
         # Wound roll
         wound_roll = roll_d6()
-        wound_target = calculate_wound_target(shooter["rng_str"], target["t"])
+        wound_target = calculate_wound_target(shooter["RNG_STR"], target["T"])
         did_wound = wound_roll >= wound_target
         
         shot_record.update({
@@ -144,7 +144,7 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
         
         # Save roll
         save_roll = roll_d6()
-        save_target = calculate_save_target(target["armor_save"], target["invul_save"], shooter["rng_ap"])
+        save_target = calculate_save_target(target["ARMOR_SAVE"], target["INVUL_SAVE"], shooter["RNG_AP"])
         saved_wound = save_roll >= save_target
         
         shot_record.update({
@@ -159,7 +159,7 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
         failed_saves += 1
         
         # Inflict damage
-        damage_dealt = shooter["rng_dmg"]
+        damage_dealt = shooter["RNG_DMG"]
         total_damage += damage_dealt
         shot_record["damage"] = damage_dealt
         
@@ -240,11 +240,11 @@ def execute_combat_sequence(attacker: Dict[str, Any], target: Dict[str, Any]) ->
         # Step 4: Armor save
         save_roll = roll_d6()
         attack_result["save_roll"] = save_roll
-        base_armor_save = target["ARMOR_SAVE"]
+        base_ARMOR_SAVE = target["ARMOR_SAVE"]
         invul_save = target.get("INVUL_SAVE", 0)
         armor_penetration = attacker["CC_AP"]
         
-        save_target = calculate_save_target(base_armor_save, invul_save, armor_penetration)
+        save_target = calculate_save_target(base_ARMOR_SAVE, invul_save, armor_penetration)
         saved_wound = save_roll >= save_target
         attack_result["save_success"] = saved_wound
         
@@ -271,73 +271,6 @@ def execute_combat_sequence(attacker: Dict[str, Any], target: Dict[str, Any]) ->
             "failedSaves": failed_saves
         },
         "attackDetails": attack_details  # NEW: Detailed dice roll information
-    }
-    # Get number of attacks
-    if "cc_nb" not in attacker:
-        raise ValueError("attacker.cc_nb is required")
-    number_of_attacks = attacker["cc_nb"]
-
-    total_damage = 0
-    hits = 0
-    wounds = 0
-    failed_saves = 0
-
-    # Process each attack
-    for attack in range(1, number_of_attacks + 1):
-        # Hit roll
-        hit_roll = roll_d6()
-        if "cc_atk" not in attacker:
-            raise ValueError("attacker.cc_atk is required")
-        hit_target = attacker["cc_atk"]
-        did_hit = hit_roll >= hit_target
-        
-        if not did_hit:
-            continue  # Miss - next attack
-        hits += 1
-        
-        # Wound roll
-        wound_roll = roll_d6()
-        if "cc_str" not in attacker:
-            raise ValueError("attacker.cc_str is required")
-        if "t" not in target:
-            raise ValueError("target.t is required")
-        wound_target = calculate_wound_target(attacker["cc_str"], target["t"])
-        did_wound = wound_roll >= wound_target
-        
-        if not did_wound:
-            continue  # Failed to wound - next attack
-        wounds += 1
-        
-        # Save roll
-        save_roll = roll_d6()
-        if "armor_save" not in target:
-            raise ValueError("target.armor_save is required")
-        if "cc_ap" not in attacker:
-            raise ValueError("attacker.cc_ap is required")
-        save_target = calculate_save_target(
-            target["armor_save"], 
-            target.get("invul_save", 0), 
-            attacker["cc_ap"]
-        )
-        saved_wound = save_roll >= save_target
-        
-        if saved_wound:
-            continue  # Save successful - next attack
-        failed_saves += 1
-        
-        # Inflict damage
-        if "cc_dmg" not in attacker:
-            raise ValueError("attacker.cc_dmg is required")
-        total_damage += attacker["cc_dmg"]
-
-    return {
-        "totalDamage": total_damage,
-        "summary": {
-            "totalShots": number_of_attacks,  # Reuse same interface
-            "hits": hits,
-            "wounds": wounds,
-            "failedSaves": failed_saves
-        }
     }
 
 # === CHARGE SYSTEM (EXACT from frontend implementation) ===

@@ -215,15 +215,9 @@ class GameController:
         if not shooter or not target:
             return False
         
-        # Execute detailed shooting sequence with uppercase field names fix
+        # Execute detailed shooting sequence - shared rules must use uppercase
         from shared.gameRules import execute_shooting_sequence
-        
-        # Fix field names inline for shared rules compatibility
-        shooter_fixed = {**shooter, "rng_nb": shooter.get("RNG_NB"), "rng_atk": shooter.get("RNG_ATK"), 
-                        "rng_str": shooter.get("RNG_STR"), "rng_ap": shooter.get("RNG_AP"), "rng_dmg": shooter.get("RNG_DMG")}
-        target_fixed = {**target, "t": target.get("T"), "armor_save": target.get("ARMOR_SAVE"), "invul_save": target.get("INVUL_SAVE")}
-        
-        shoot_result = execute_shooting_sequence(shooter_fixed, target_fixed)
+        shoot_result = execute_shooting_sequence(shooter, target)
         self._last_shoot_units = (shooter, target)
         
         # Apply damage from shooting result
@@ -250,21 +244,18 @@ class GameController:
 
     def combat_attack(self, attacker_id: int, target_id: int) -> bool:
         """Attack in combat with detailed dice results"""
-        # Execute detailed combat in controller to avoid use_game_actions field conversion
+        if "handle_combat_attack" not in self.game_actions:
+            raise RuntimeError("game_actions missing required handle_combat_attack method")
+        
+        # Get units for detailed combat execution
         attacker = self.find_unit(attacker_id)
         target = self.find_unit(target_id)
         if not attacker or not target:
             return False
         
-        # Execute detailed combat sequence with uppercase field names fix
+        # Execute detailed combat sequence - shared rules must use uppercase
         from shared.gameRules import execute_combat_sequence
-        
-        # Fix field names inline for shared rules compatibility
-        attacker_fixed = {**attacker, "cc_nb": attacker.get("CC_NB"), "cc_atk": attacker.get("CC_ATK"), 
-                         "cc_str": attacker.get("CC_STR"), "cc_ap": attacker.get("CC_AP"), "cc_dmg": attacker.get("CC_DMG")}
-        target_fixed = {**target, "t": target.get("T"), "armor_save": target.get("ARMOR_SAVE"), "invul_save": target.get("INVUL_SAVE")}
-        
-        combat_result = execute_combat_sequence(attacker_fixed, target_fixed)
+        combat_result = execute_combat_sequence(attacker, target)
         self._last_combat_units = (attacker, target)
         
         # Apply damage from combat result
@@ -279,13 +270,8 @@ class GameController:
         if hasattr(self, '_last_combat_result'):
             self._last_combat_result = combat_result
         
-        # Apply damage and manage state directly to avoid use_game_actions field conversion
-        if combat_result["totalDamage"] > 0:
-            if new_hp <= 0:
-                self.state_actions["remove_unit"](target_id)
-        
-        # Mark unit as attacked for state management
-        self.state_actions["add_attacked_unit"](attacker_id)
+        # Still call original action for state management
+        self.game_actions["handle_combat_attack"](attacker_id, target_id)
         return True
 
     # === TRAINING INTEGRATION METHODS ===

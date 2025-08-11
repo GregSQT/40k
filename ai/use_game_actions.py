@@ -137,15 +137,15 @@ def calculate_save_probability(shooter: Dict[str, Any], target: Dict[str, Any], 
         raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target}")
     if "RNG_AP" not in shooter:
         raise KeyError(f"Shooter missing required 'RNG_AP' field: {shooter}")
-    armor_save = target["ARMOR_SAVE"]
+    ARMOR_SAVE = target["ARMOR_SAVE"]
     invul_save = target["INVUL_SAVE"]
     armor_penetration = shooter["RNG_AP"]
     
     # Apply cover bonus - +1 to armor save (better save)
     if in_cover:
-        armor_save = max(2, armor_save - 1)  # Improve armor save by 1, minimum 2+
+        ARMOR_SAVE = max(2, ARMOR_SAVE - 1)  # Improve armor save by 1, minimum 2+
     
-    modified_armor = armor_save + armor_penetration
+    modified_armor = ARMOR_SAVE + armor_penetration
     save_target = invul_save if (invul_save > 0 and invul_save < modified_armor) else modified_armor
     
     save_probability = max(0, (7 - save_target) / 6 * 100)
@@ -193,7 +193,7 @@ def calculate_combat_save_probability(attacker: Dict[str, Any], target: Dict[str
     """EXACT mirror of calculateCombatSaveProbability from TypeScript"""
     if "ARMOR_SAVE" not in target:
         raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target.get('name')}")
-    armor_save = target["ARMOR_SAVE"]
+    ARMOR_SAVE = target["ARMOR_SAVE"]
     
     if "INVUL_SAVE" not in target:
         raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target.get('name')}")
@@ -203,7 +203,7 @@ def calculate_combat_save_probability(attacker: Dict[str, Any], target: Dict[str
         raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker.get('name')}")
     armor_penetration = attacker["CC_AP"]
     
-    modified_armor = armor_save + armor_penetration
+    modified_armor = ARMOR_SAVE + armor_penetration
     save_target = invul_save if (invul_save > 0 and invul_save < modified_armor) else modified_armor
     
     save_probability = max(0, (7 - save_target) / 6 * 100)
@@ -220,23 +220,7 @@ def calculate_combat_overall_probability(attacker: Dict[str, Any], target: Dict[
 # === FIELD CONVERSION UTILITY FOR SHARED RULES ===
 
 def convert_unit_for_shared_rules(unit: Dict[str, Any]) -> Dict[str, Any]:
-    """Pass unit data directly to shared rules - no field name conversion needed."""
-    # Validate required combat fields exist
-    unit_info = f"Unit {unit.get('id', 'unknown')} ({unit.get('unit_type', 'unknown_type')})"
-    missing_fields = []
-    
-    # Check all required combat fields
-    required_combat_fields = ["CC_NB", "CC_ATK", "CC_STR", "CC_AP", "CC_DMG"]
-    for field in required_combat_fields:
-        if field not in unit:
-            missing_fields.append(field)
-    
-    if missing_fields:
-        # Log available fields for debugging
-        available_fields = [k for k in unit.keys() if k.startswith(('CC_', 'RNG_', 'T', 'ARMOR_', 'INVUL_'))]
-        raise ValueError(f"{unit_info} missing required combat fields: {missing_fields}. Available fields: {available_fields}")
-    
-    # Return unit as-is since shared rules now use uppercase field names
+    """Return unit unchanged since shared rules use uppercase field names."""
     return unit
 
 # === MISSING SINGLE SHOT SEQUENCE MANAGER (EXACT from TypeScript) ===
@@ -665,7 +649,7 @@ class UseGameActions:
             
             if "ARMOR_SAVE" not in target:
                 raise ValueError(f"target.ARMOR_SAVE is required but was undefined for unit {target['id']}")
-            target_armor_save = target["ARMOR_SAVE"]
+            target_ARMOR_SAVE = target["ARMOR_SAVE"]
             
             if "RNG_AP" not in shooter:
                 raise ValueError(f"shooter.RNG_AP is required but was undefined for unit {shooter['id']}")
@@ -680,7 +664,7 @@ class UseGameActions:
                     save_roll = random.randint(1, 6)
                     if "INVUL_SAVE" not in target:
                         raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target}")
-                    save_target = calculateSaveTarget(target_armor_save, target["INVUL_SAVE"], shooter_ap)
+                    save_target = calculateSaveTarget(target_ARMOR_SAVE, target["INVUL_SAVE"], shooter_ap)
                     save_success = save_roll >= save_target
                     
                     if not save_success:
@@ -821,10 +805,6 @@ class UseGameActions:
                 # Convert units to lowercase field names for shared rules
                 attacker_converted = convert_unit_for_shared_rules(attacker)
                 target_converted = convert_unit_for_shared_rules(target)
-                
-                # Validate conversion before calling shared rules
-                if not attacker_converted.get("cc_nb"):
-                    raise ValueError(f"Field conversion failed: attacker missing cc_nb after conversion. Original: {attacker.get('CC_NB')}")
                 
                 # Execute detailed combat sequence and capture results
                 combat_result = execute_combat_sequence(attacker_converted, target_converted)
