@@ -297,13 +297,14 @@ class W40KEnv(gym.Env):
         # Initialize new episode
         self.controller.start_new_episode()
         
-        # CRITICAL: Set evaluation mode BEFORE any logging
+        # CRITICAL: Only enable replay logging during evaluation, not training
+        self.is_evaluation_mode = getattr(self, '_force_evaluation_mode', False)
         if hasattr(self, 'replay_logger') and self.replay_logger:
-            self.is_evaluation_mode = True
-            # Capture initial state immediately after setting evaluation mode
-            self.replay_logger.capture_initial_state()
-        else:
-            self.is_evaluation_mode = False
+            # Set evaluation mode on replay logger
+            self.replay_logger.is_evaluation_mode = self.is_evaluation_mode
+            # Only capture initial state during evaluation
+            if self.is_evaluation_mode:
+                self.replay_logger.capture_initial_state()
         
         # Reset environment state
         self.game_over = False

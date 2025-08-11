@@ -697,8 +697,9 @@ class MultiAgentTrainer:
             from ai.game_replay_logger import GameReplayIntegration
             enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
             
-            # CRITICAL FIX: Connect replay_logger to game_logger for actual logging
+            # CRITICAL FIX: DISABLE replay logging during training - only enable for evaluation
             if hasattr(enhanced_env, 'replay_logger'):
+                enhanced_env.replay_logger.is_evaluation_mode = False  # Disable during training
                 enhanced_env.game_logger = enhanced_env.replay_logger
             
             env = Monitor(enhanced_env, allow_early_resets=True)
@@ -825,18 +826,22 @@ class MultiAgentTrainer:
             done = False
             step_count = 0
             
-            # CRITICAL FIX: Clear replay logger for each evaluation episode to ensure single-episode replays
+            # CRITICAL FIX: Enable replay logging and clear for each evaluation episode
             if episode_tracker:
                 try:
-                    # Find and clear replay logger for new episode
+                    # Find replay logger and enable evaluation mode
                     actual_env = env
                     if hasattr(actual_env, 'env'):
                         actual_env = actual_env.env
                     
                     if hasattr(actual_env, 'replay_logger') and actual_env.replay_logger:
+                        actual_env.replay_logger.is_evaluation_mode = True  # Enable for evaluation
                         actual_env.replay_logger.clear()
+                        actual_env._force_evaluation_mode = True  # Flag for reset method
                     elif hasattr(actual_env, 'unwrapped') and hasattr(actual_env.unwrapped, 'replay_logger'):
+                        actual_env.unwrapped.replay_logger.is_evaluation_mode = True  # Enable for evaluation
                         actual_env.unwrapped.replay_logger.clear()
+                        actual_env.unwrapped._force_evaluation_mode = True  # Flag for reset method
                 except Exception:
                     pass  # Silent failure for clearing
             

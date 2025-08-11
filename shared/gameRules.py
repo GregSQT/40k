@@ -74,24 +74,24 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
     """Execute complete shooting sequence with individual shot tracking."""
     
     # Validate required shooter stats
-    if "rng_nb" not in shooter:
-        raise ValueError("shooter.rng_nb is required")
-    if "rng_atk" not in shooter:
-        raise ValueError("shooter.rng_atk is required")
-    if "rng_str" not in shooter:
-        raise ValueError("shooter.rng_str is required")
-    if "rng_ap" not in shooter:
-        raise ValueError("shooter.rng_ap is required")
-    if "rng_dmg" not in shooter:
-        raise ValueError("shooter.rng_dmg is required")
+    if "RNG_NB" not in shooter:
+        raise ValueError("shooter.RNG_NB is required")
+    if "RNG_ATK" not in shooter:
+        raise ValueError("shooter.RNG_ATK is required")
+    if "RNG_STR" not in shooter:
+        raise ValueError("shooter.RNG_STR is required")
+    if "RNG_AP" not in shooter:
+        raise ValueError("shooter.RNG_AP is required")
+    if "RNG_DMG" not in shooter:
+        raise ValueError("shooter.RNG_DMG is required")
     
     # Validate required target stats
-    if "t" not in target:
-        raise ValueError("target.t is required")
-    if "armor_save" not in target:
-        raise ValueError("target.armor_save is required")
-    if "invul_save" not in target:
-        raise ValueError("target.invul_save is required")
+    if "T" not in target:
+        raise ValueError("target.T is required")
+    if "ARMOR_SAVE" not in target:
+        raise ValueError("target.ARMOR_SAVE is required")
+    if "INVUL_SAVE" not in target:
+        raise ValueError("target.INVUL_SAVE is required")
     
     number_of_shots = shooter["rng_nb"]
     total_damage = 0
@@ -182,9 +182,9 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
 def execute_combat_sequence(attacker: Dict[str, Any], target: Dict[str, Any]) -> Dict[str, Any]:
     """Execute combat sequence (EXACT from frontend logic)."""
     # Step 1: Number of attacks
-    if "cc_nb" not in attacker:
-        raise ValueError("attacker.cc_nb is required")
-    number_of_attacks = attacker["cc_nb"]
+    if "CC_NB" not in attacker:
+        raise ValueError("attacker.CC_NB is required")
+    number_of_attacks = attacker["CC_NB"]
 
     total_damage = 0
     hits = 0
@@ -210,9 +210,9 @@ def execute_combat_sequence(attacker: Dict[str, Any], target: Dict[str, Any]) ->
         # Step 2: Hit roll
         hit_roll = roll_d6()
         attack_result["hit_roll"] = hit_roll
-        if "cc_atk" not in attacker:
-            raise ValueError("attacker.cc_atk is required")
-        hit_target = attacker["cc_atk"]
+        if "CC_ATK" not in attacker:
+            raise ValueError("attacker.CC_ATK is required")
+        hit_target = attacker["CC_ATK"]
         did_hit = hit_roll >= hit_target
         attack_result["hit_success"] = did_hit
         
@@ -224,11 +224,11 @@ def execute_combat_sequence(attacker: Dict[str, Any], target: Dict[str, Any]) ->
         # Step 3: Wound roll  
         wound_roll = roll_d6()
         attack_result["wound_roll"] = wound_roll
-        if "cc_str" not in attacker:
-            raise ValueError("attacker.cc_str is required")
-        if "t" not in target:
-            raise ValueError("target.t is required")
-        wound_target = calculate_wound_target(attacker["cc_str"], target["t"])
+        if "CC_STR" not in attacker:
+            raise ValueError("attacker.CC_STR is required")
+        if "T" not in target:
+            raise ValueError("target.T is required")
+        wound_target = calculate_wound_target(attacker["CC_STR"], target["T"])
         did_wound = wound_roll >= wound_target
         attack_result["wound_success"] = did_wound
         
@@ -240,9 +240,9 @@ def execute_combat_sequence(attacker: Dict[str, Any], target: Dict[str, Any]) ->
         # Step 4: Armor save
         save_roll = roll_d6()
         attack_result["save_roll"] = save_roll
-        base_armor_save = target["armor_save"]
-        invul_save = target.get("invul_save", 0)
-        armor_penetration = attacker["cc_ap"]
+        base_armor_save = target["ARMOR_SAVE"]
+        invul_save = target.get("INVUL_SAVE", 0)
+        armor_penetration = attacker["CC_AP"]
         
         save_target = calculate_save_target(base_armor_save, invul_save, armor_penetration)
         saved_wound = save_roll >= save_target
@@ -254,9 +254,9 @@ def execute_combat_sequence(attacker: Dict[str, Any], target: Dict[str, Any]) ->
         failed_saves += 1
         
         # Step 5: Inflict damage
-        if "cc_dmg" not in attacker:
-            raise ValueError("attacker.cc_dmg is required")
-        damage = attacker["cc_dmg"]
+        if "CC_DMG" not in attacker:
+            raise ValueError("attacker.CC_DMG is required")
+        damage = attacker["CC_DMG"]
         total_damage += damage
         attack_result["damage_dealt"] = damage
         

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Board from './Board_save';
 import { Unit } from '../types/game';
-import { Intercessor } from '../roster/spaceMarine/Intercessor';
+import { Intercessor } from '../roster/spaceMarine/units/Intercessor';
 import { AssaultIntercessor } from '../roster/spaceMarine/units/AssaultIntercessor';
 import { useGameConfig } from '../hooks/useGameConfig';
 

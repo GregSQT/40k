@@ -308,11 +308,14 @@ export default function Board({
     const app = new PIXI.Application(pixiConfig);
     app.stage.sortableChildren = true;
 
-    // ✅ CANVAS STYLING FROM CONFIG
+    // ✅ CANVAS STYLING FROM CONFIG WITH RESPONSIVE SCALING
     const canvas = app.view as HTMLCanvasElement;
     canvas.style.display = 'block';
     canvas.style.maxWidth = '100%';
+    canvas.style.maxHeight = '100vh';
+    canvas.style.width = 'auto';
     canvas.style.height = 'auto';
+    canvas.style.objectFit = 'contain';
     canvas.style.border = CANVAS_BORDER;
     
     containerRef.current.appendChild(canvas);

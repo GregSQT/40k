@@ -220,46 +220,24 @@ def calculate_combat_overall_probability(attacker: Dict[str, Any], target: Dict[
 # === FIELD CONVERSION UTILITY FOR SHARED RULES ===
 
 def convert_unit_for_shared_rules(unit: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert unit data from uppercase to lowercase field names for shared rules compatibility."""
-    return {
-        # Basic info
-        "id": unit.get("id"),
-        "unit_type": unit.get("unit_type"),
-        "player": unit.get("player"),
-        "col": unit.get("col"),
-        "row": unit.get("row"),
-        
-        # Health
-        "cur_hp": unit.get("CUR_HP"),
-        "hp_max": unit.get("HP_MAX"),
-        
-        # Movement
-        "move": unit.get("MOVE"),
-        
-        # Ranged combat
-        "rng_rng": unit.get("RNG_RNG"),
-        "rng_nb": unit.get("RNG_NB"),
-        "rng_atk": unit.get("RNG_ATK"),
-        "rng_str": unit.get("RNG_STR"),
-        "rng_ap": unit.get("RNG_AP"),
-        "rng_dmg": unit.get("RNG_DMG"),
-        
-        # Close combat
-        "cc_nb": unit.get("CC_NB"),
-        "cc_rng": unit.get("CC_RNG"),
-        "cc_atk": unit.get("CC_ATK"),
-        "cc_str": unit.get("CC_STR"),
-        "cc_ap": unit.get("CC_AP"),
-        "cc_dmg": unit.get("CC_DMG"),
-        
-        # Armor
-        "t": unit.get("T"),
-        "armor_save": unit.get("ARMOR_SAVE"),
-        "invul_save": unit.get("INVUL_SAVE"),
-        
-        # Status
-        "alive": unit.get("alive", True)
-    }
+    """Pass unit data directly to shared rules - no field name conversion needed."""
+    # Validate required combat fields exist
+    unit_info = f"Unit {unit.get('id', 'unknown')} ({unit.get('unit_type', 'unknown_type')})"
+    missing_fields = []
+    
+    # Check all required combat fields
+    required_combat_fields = ["CC_NB", "CC_ATK", "CC_STR", "CC_AP", "CC_DMG"]
+    for field in required_combat_fields:
+        if field not in unit:
+            missing_fields.append(field)
+    
+    if missing_fields:
+        # Log available fields for debugging
+        available_fields = [k for k in unit.keys() if k.startswith(('CC_', 'RNG_', 'T', 'ARMOR_', 'INVUL_'))]
+        raise ValueError(f"{unit_info} missing required combat fields: {missing_fields}. Available fields: {available_fields}")
+    
+    # Return unit as-is since shared rules now use uppercase field names
+    return unit
 
 # === MISSING SINGLE SHOT SEQUENCE MANAGER (EXACT from TypeScript) ===
 
@@ -845,8 +823,8 @@ class UseGameActions:
                 target_converted = convert_unit_for_shared_rules(target)
                 
                 # Validate conversion before calling shared rules
-                if not attacker_converted.get("CC_NB"):
-                    raise ValueError(f"Field conversion failed: attacker missing CC_NB. Original: {attacker.get('CC_NB')}")
+                if not attacker_converted.get("cc_nb"):
+                    raise ValueError(f"Field conversion failed: attacker missing cc_nb after conversion. Original: {attacker.get('CC_NB')}")
                 
                 # Execute detailed combat sequence and capture results
                 combat_result = execute_combat_sequence(attacker_converted, target_converted)
