@@ -68,6 +68,10 @@ class GameReplayLogger:
         if not is_eval_mode:
             return None  # Skip logging during training
         
+        # CRITICAL FIX: Prevent duplicate entries for same action
+        if entry_type == "shoot" and shoot_details is None:
+            return None
+        
         # Debug logging for first entry only
         if len(self.combat_log_entries) == 0 and not self.quiet:
             print(f"✅ GameReplayLogger: Logging enabled for evaluation - entry_type: {entry_type}")
@@ -91,6 +95,10 @@ class GameReplayLogger:
         entry_dict["id"] = self.next_event_id  # Add sequential ID
         self.combat_log_entries.append(entry_dict)
         self.next_event_id += 1
+        
+        # CRITICAL FIX: Capture game state after each significant action
+        if entry_type in ["move", "shoot", "charge", "combat"]:
+            self._capture_game_state_snapshot()
                 
         return entry_dict
     
@@ -435,10 +443,12 @@ class GameReplayLogger:
         # Extract initial state from environment if available
         initial_units = []
         
+        # CRITICAL FIX: Capture final game state before saving
+        self._capture_game_state_snapshot()
+        
         # FIRST: Check if we have initial_game_state that was set in start_new_episode
         if hasattr(self, 'initial_game_state') and self.initial_game_state and 'units' in self.initial_game_state:
             initial_units = self.initial_game_state['units']
-            print(f"💾 Using stored initial_game_state with {len(initial_units)} units")
         # SECOND: Try to get from controller if available
         elif hasattr(self.env, 'controller'):
             # The controller and env share the SAME replay_logger instance
@@ -461,14 +471,13 @@ class GameReplayLogger:
                         "row": unit["row"],
                         "CUR_HP": unit["CUR_HP"],
                         "HP_MAX": unit["HP_MAX"],
-                        "move": unit["MOVE"],
-                        "rng_rng": unit["RNG_RNG"],
-                        "rng_dmg": unit["RNG_DMG"],
-                        "cc_dmg": unit["CC_DMG"],
-                        "is_ranged": unit["RNG_RNG"] > 0,
-                        "is_melee": unit["CC_RNG"] > 0
+                        "MOVE": unit["MOVE"],
+                        "RNG_RNG": unit["RNG_RNG"],
+                        "RNG_DMG": unit["RNG_DMG"],
+                        "CC_DMG": unit["CC_DMG"],
+                        "RNG_RNG": unit["RNG_RNG"],
+                        "CC_RNG": unit["CC_RNG"]
                     })
-                print(f"💾 Using controller's units with {len(initial_units)} units")
         # THIRD: Try direct environment units
         elif hasattr(self.env, 'units') and self.env.units:
             for i, unit in enumerate(self.env.units):
@@ -508,11 +517,11 @@ class GameReplayLogger:
                         "col": unit["col"],
                         "row": unit["row"],
                         "HP_MAX": unit_stats["HP_MAX"],
-                        "HP_MAX": unit_stats["HP_MAX"],
-                        "move": unit_stats["move"],
-                        "rng_rng": unit_stats["rng_rng"],
-                        "rng_dmg": unit_stats["rng_dmg"],
-                        "cc_dmg": unit_stats["cc_dmg"],
+                        "MOVE": unit_stats["MOVE"],
+                        "RNG_RNG": unit_stats["RNG_RNG"],
+                        "RNG_DMG": unit_stats["RNG_DMG"],
+                        "CC_DMG": unit_stats["CC_DMG"],
+                        "CC_RNG": unit_stats["CC_RNG"],
                         "is_ranged": unit_stats["is_ranged"],
                         "is_melee": unit_stats["is_melee"]
                     })
@@ -523,7 +532,7 @@ class GameReplayLogger:
                 "scenario": "evaluation_episode",  # Mark as evaluation replay
                 "ai_behavior": "phase_based",
                 "total_turns": self.env.controller.game_state["current_turn"],
-                "winner": None,  # Can be set by caller
+                "winner": self._determine_winner(),
             },
             "metadata": {
                 "total_combat_log_entries": len(self.combat_log_entries),
@@ -533,7 +542,7 @@ class GameReplayLogger:
                 "replay_type": "training_enhanced"
             },
             "initial_state": {
-                "units": initial_units,
+                "units": initial_units if initial_units else [],
                 "board_size": self._get_board_size_from_env()
             },
             "combat_log": self.combat_log_entries,
@@ -541,6 +550,20 @@ class GameReplayLogger:
             "episode_steps": len(self.combat_log_entries),
             "episode_reward": episode_reward
         }
+        
+        # CRITICAL FIX: If initial_state is still empty, populate it from current units
+        if not replay_data["initial_state"]["units"] and hasattr(self.env, 'controller'):
+            current_units = self.env.controller.get_units()
+            if current_units:
+                replay_data["initial_state"]["units"] = [{
+                    "id": unit.get("id"),
+                    "unit_type": unit.get("unit_type"),
+                    "player": unit.get("player"),
+                    "col": unit.get("col"),
+                    "row": unit.get("row"),
+                    "HP_MAX": unit.get("HP_MAX"),
+                    "alive": unit.get("alive", True)
+                } for unit in current_units]
         
         # Ensure directory exists
         os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -552,11 +575,54 @@ class GameReplayLogger:
         if not self.quiet:
             print(f"💾 Saved enhanced replay: {filename}")
             print(f"   📊 {len(self.combat_log_entries)} combat log entries")
+            print(f"   🎯 {len(self.game_states)} game state snapshots")
             print(f"   🎮 {self.env.controller.game_state['current_turn']} turns")
             print(f"   💯 Reward: {episode_reward:.2f}")
-            print(f"   ⚔️ Enhanced format with dice roll details")
         
         return filename
+    
+    def _capture_game_state_snapshot(self):
+        """Capture current game state for replay timeline."""
+        if not hasattr(self.env, 'controller'):
+            raise ValueError("Environment missing controller")
+            
+        units = self.env.controller.get_units()
+        if not units:
+            raise ValueError("No units available for capture")
+        
+        current_units = []
+        for unit in units:
+            if "id" not in unit:
+                raise ValueError("Unit missing required 'id' field")
+            if "CUR_HP" not in unit:
+                raise ValueError("Unit missing required 'CUR_HP' field")
+            if "HP_MAX" not in unit:
+                raise ValueError("Unit missing required 'HP_MAX' field")
+            
+            current_units.append({
+                "id": unit["id"],
+                "unit_type": unit["unit_type"],
+                "player": unit["player"],
+                "col": unit["col"],
+                "row": unit["row"],
+                "CUR_HP": unit["CUR_HP"],
+                "HP_MAX": unit["HP_MAX"],
+                "alive": unit["alive"]
+            })
+        
+        game_state_snapshot = {
+            "turn": self.env.controller.game_state["current_turn"],
+            "phase": self.env.controller.game_state["phase"],
+            "player": self.env.controller.game_state["current_player"],
+            "units": current_units,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        self.game_states.append(game_state_snapshot)
+    
+    def capture_turn_state(self):
+        """Public method to capture state at turn transitions."""
+        self._capture_game_state_snapshot()
     
     def clear(self):
         """Clear all logged data for new episode."""
@@ -566,11 +632,8 @@ class GameReplayLogger:
             self.combat_log_entries = []
             self.game_states = []
             self.next_event_id = 1
-            if not self.quiet:
-                print("🔄 GameLogger cleared for new episode")
         else:
-            if not self.quiet:
-                print(f"🔄 GameLogger NOT cleared - preserving {len(self.combat_log_entries)} entries")
+            pass
     
     def log_turn_change(self, turn_number: int):
         """Log turn change event."""
@@ -581,8 +644,39 @@ class GameReplayLogger:
             action_name="turn_change"
         )
     
+    def _determine_winner(self):
+        """Determine game winner based on remaining units."""
+        if not hasattr(self.env, 'controller'):
+            return None
+            
+        units = self.env.controller.get_units()
+        if not units:
+            return None
+            
+        # Count alive units by player - be more specific about alive status
+        player_0_alive = 0
+        player_1_alive = 0
+        
+        for unit in units:
+            if unit.get("player") == 0 and unit.get("alive", True) and unit.get("CUR_HP", 1) > 0:
+                player_0_alive += 1
+            elif unit.get("player") == 1 and unit.get("alive", True) and unit.get("CUR_HP", 1) > 0:
+                player_1_alive += 1
+        
+        if player_0_alive > 0 and player_1_alive == 0:
+            return 0
+        elif player_1_alive > 0 and player_0_alive == 0:
+            return 1
+        elif player_0_alive == 0 and player_1_alive == 0:
+            return "draw"
+        else:
+            return None  # Game still ongoing
+    
     def log_phase_change(self, phase: str, player: int, turn_number: int):
         """Log phase change event."""
+        # Capture game state at phase changes
+        self._capture_game_state_snapshot()
+        
         acting_unit = {
             "id": 0,
             "unitType": "",

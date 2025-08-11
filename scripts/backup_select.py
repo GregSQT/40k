@@ -170,6 +170,7 @@ else:
         "shared/gameLogUtils.py",
         "shared/gameLogUtils.ts",
         "shared/gameLogUtils.py",
+        "shared/gameMechanics.py",
         "shared/gameRules.py",
         "shared/gameRules.ts",
 

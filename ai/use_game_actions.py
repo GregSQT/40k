@@ -1140,23 +1140,21 @@ class UseGameActions:
         if "rows" not in self.board_config:
             raise KeyError("Board config missing required 'rows' field")
         
-        # Simple implementation: return adjacent hexes within movement range
-        if "cols" not in self.board_config:
-            raise KeyError("Board config missing required 'cols' field")
-        if "rows" not in self.board_config:
-            raise KeyError("Board config missing required 'rows' field")
-        valid_moves = []
-        for col in range(max(0, unit["col"] - unit["MOVE"]), 
-                        min(self.board_config["cols"], unit["col"] + unit["MOVE"] + 1)):
-            for row in range(max(0, unit["row"] - unit["MOVE"]), 
-                            min(self.board_config["rows"], unit["row"] + unit["MOVE"] + 1)):
-                if col != unit["col"] or row != unit["row"]:
-                    # Check if hex is not occupied by friendly unit
-                    occupied = any(u["col"] == col and u["row"] == row and u["player"] == unit["player"] 
-                            for u in self.game_state["units"] if u["id"] != unit["id"])
-                    if not occupied:
-                        valid_moves.append({"col": col, "row": row})
-        return valid_moves
+        # Use proper BFS pathfinding with forbidden adjacency (EXACT from gameMechanics.py)
+        from shared.gameMechanics import calculate_available_move_cells
+        
+        try:
+            return calculate_available_move_cells(
+                unit=unit,
+                units=self.game_state["units"], 
+                board_config=self.board_config,
+                board_cols=self.board_config["cols"],
+                board_rows=self.board_config["rows"]
+            )
+        except Exception as e:
+            # Fallback to empty list if BFS fails
+            print(f"Movement BFS failed: {e}")
+            return []
 
     def get_valid_shooting_targets(self, unit_id: int) -> List[int]:
         """Get valid shooting targets for unit"""

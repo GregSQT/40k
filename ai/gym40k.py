@@ -305,6 +305,15 @@ class W40KEnv(gym.Env):
             # Only capture initial state during evaluation
             if self.is_evaluation_mode:
                 self.replay_logger.capture_initial_state()
+                # CRITICAL FIX: Force initial_game_state population
+                units = self.controller.get_units()
+                if units:
+                    self.replay_logger.initial_game_state = {"units": [{
+                        "id": unit["id"], "unit_type": unit["unit_type"], "player": unit["player"],
+                        "col": unit["col"], "row": unit["row"], "HP_MAX": unit["HP_MAX"],
+                        "MOVE": unit["MOVE"], "RNG_RNG": unit["RNG_RNG"], "RNG_DMG": unit["RNG_DMG"],
+                        "CC_DMG": unit["CC_DMG"], "CC_RNG": unit["CC_RNG"], "alive": unit["alive"]
+                    } for unit in units]}
         
         # Reset environment state
         self.game_over = False
