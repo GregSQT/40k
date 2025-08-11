@@ -11,6 +11,7 @@ import { renderUnit } from './UnitRenderer';
 import { drawBoard } from './BoardDisplay';
 import { hasLineOfSight, offsetToCube, cubeDistance, getHexLine } from '../utils/gameHelpers';
 import { getEventIcon, getEventTypeClass } from '../../../shared/gameLogStructure';
+import { GameLog } from './GameLog';
 
 // Pathfinding utilities now imported from gameHelpers (same as BoardPvp.tsx)
 
@@ -619,6 +620,36 @@ const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
 const openFileBrowser = () => {
   fileInputRef.current?.click();
 };
+
+// Transform battleLog entries to GameLogEvent format for shared GameLog component
+const transformToGameLogEvents = useCallback(() => {
+  return battleLog.map((event: any) => ({
+    id: event.id || `event_${event.turn}_${event.unitId || 0}`,
+    timestamp: new Date(event.timestamp || Date.now()),
+    type: event.type,
+    message: event.message,
+    turnNumber: event.turnNumber || event.turn,
+    phase: event.phase,
+    unitType: event.unitType,
+    unitId: event.unitId,
+    targetUnitType: event.targetUnitType,
+    targetUnitId: event.targetUnitId,
+    player: event.player,
+    startHex: event.startHex,
+    endHex: event.endHex,
+    shootDetails: event.shootDetails
+  }));
+}, [battleLog]);
+
+// Helper for elapsed time calculation (same as PvP)
+const getElapsedTime = useCallback((timestamp: Date): string => {
+  const start = battleLog.length > 0 ? new Date(battleLog[0].timestamp || Date.now()) : new Date();
+  const elapsed = (timestamp.getTime() - start.getTime()) / 1000;
+  
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = Math.floor(elapsed % 60);
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}, [battleLog]);
 
 // Dynamic unit registry initialization
 const initializeUnitRegistry = async () => {
@@ -2009,138 +2040,13 @@ const validateUnitRegistry = () => {
         </>
       )}
 
-      {/* Training Log - Same format as PvP Game Log */}
-      <div className="game-log">
-        <div className="game-log__header">
-          <h3 className="game-log__title">Training Log</h3>
-          <div className="game-log__count">
-            {battleLog.length} actions
-          </div>
-        </div>
-        <div className="game-log__content">
-          {battleLog.length === 0 ? (
-            <div className="game-log__empty">No actions yet...</div>
-          ) : (
-            <div 
-              className="game-log__events"
-              style={{
-                overflowY: 'auto',
-                overflowX: 'hidden'
-              }}
-            >
-              {(() => {
-                // First render: show all events without height constraint to allow DOM measurement
-                // Second render: apply dynamic height based on measurements
-                const sampleLogEntry = document.querySelector('.game-log-entry');
-                let actualRowHeight;
-                let maxEvents;
-                
-                if (!sampleLogEntry) {
-                  // First render - show limited entries to establish DOM structure for measurement
-                  maxEvents = Math.min(battleLog.length, 5); // Show up to 5 entries initially
-                } else {
-                  // Measure actual log entry height and apply dynamic constraints
-                  actualRowHeight = sampleLogEntry.getBoundingClientRect().height;
-                  maxEvents = Math.max(1, Math.floor(logAvailableHeight / actualRowHeight));
-                  
-                  // Apply exact height for complete rows by updating the container style
-                  const container = document.querySelector('.game-log__events') as HTMLElement;
-                  if (container) {
-                    const exactHeight = Math.floor(logAvailableHeight / actualRowHeight) * actualRowHeight;
-                    container.style.height = `${exactHeight}px`;
-                    container.style.maxHeight = `${exactHeight}px`;
-                  }
-                }
-                                
-                // First sort the entire battleLog by ID, then slice
-                const sortedBattleLog = [...battleLog].sort((a: any, b: any) => {
-                  const aId = parseInt(a.id) || 0;
-                  const bId = parseInt(b.id) || 0;
-                  return aId - bId; // Ascending order (chronological)
-                });
-                
-                // Show ALL events up to current step, newest first, enable scrolling for older events
-                const eventsToDisplay = sortedBattleLog
-                  .slice(0, currentStep + 1)
-                  .reverse();
-                  
-                return eventsToDisplay;
-              })().map((event: any, index: number) => {
-                const originalIndex = battleLog.indexOf(event);
-                const rawEvent = event as any;
-                
-                // Only new format (combat_log) is supported
-                const eventType = rawEvent.type;
-                
-                return (
-                  <div 
-                    key={originalIndex}
-                    className={`game-log-entry ${getEventTypeClass(rawEvent)} ${originalIndex === currentStep ? 'game-log-entry--active' : ''}`}
-                    onClick={() => setCurrentStep(originalIndex)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <div className="game-log-entry__single-line">
-                      <span className="game-log-entry__icon">{getEventIcon(eventType)}</span>
-                      <span className="game-log-entry__id" style={{ fontSize: '10px', color: '#666', marginRight: '4px' }}>#{rawEvent.id}</span>
-                      <span className="game-log-entry__turn">T{rawEvent.turnNumber || event.turn}</span>
-                      <span className={`game-log-entry__player ${(rawEvent.player || event.player) === 0 ? 'game-log-entry__player--blue' : 'game-log-entry__player--red'}`}>
-                        P{rawEvent.player || event.player}
-                      </span>
-                      <span className="game-log-entry__message">
-                        {rawEvent.message}
-                        {/* Add dice details for shooting and combat actions */}
-                        {(eventType === 'shoot' || eventType === 'combat') && rawEvent.shootDetails && Array.isArray(rawEvent.shootDetails) && (
-                          <span className="game-log-entry__dice-details">
-                            {rawEvent.shootDetails.map((shot: any, shotIndex: number) => (
-                              <span key={shotIndex} className="game-log-entry__shot-detail">
-                                {rawEvent.shootDetails.length > 1 && ` - Shot ${shot.shotNumber || shotIndex + 1}:`}
-                                {shot.hitTarget > 0 && (
-                                  <span className={`game-log-entry__dice-roll ${shot.hitResult === 'HIT' ? 'game-log-entry__dice-roll--success' : 'game-log-entry__dice-roll--failure'}`}>
-                                    {` Hit (${shot.hitTarget}+) ${shot.attackRoll}: ${shot.hitResult === 'HIT' ? 'Success!' : 'Failed!'}`}
-                                  </span>
-                                )}
-                                {shot.hitResult === 'HIT' && shot.woundTarget > 0 && (
-                                  <span className={`game-log-entry__dice-roll ${shot.strengthResult === 'SUCCESS' ? 'game-log-entry__dice-roll--success' : 'game-log-entry__dice-roll--failure'}`}>
-                                    {` - Wound (${shot.woundTarget}+) ${shot.strengthRoll}: ${shot.strengthResult === 'SUCCESS' ? 'Success!' : 'Failed!'}`}
-                                  </span>
-                                )}
-                                {shot.strengthResult === 'SUCCESS' && shot.saveTarget > 0 && (
-                                  <span className={`game-log-entry__dice-roll ${shot.saveSuccess ? 'game-log-entry__dice-roll--failure' : 'game-log-entry__dice-roll--success'}`}>
-                                    {` - Armor (${shot.saveTarget}+) ${shot.saveRoll}: ${shot.saveSuccess ? 'Saved!' : 'Failed!'}`}
-                                  </span>
-                                )}
-                                {shot.damageDealt > 0 && (
-                                  <span className="game-log-entry__damage">
-                                    {` : -${shot.damageDealt} HP`}
-                                  </span>
-                                )}
-                              </span>
-                            ))}
-                          </span>
-                        )}
-                      </span>
-                      <span className="game-log-entry__reward">
-                        {(rawEvent.reward !== undefined) ? (
-                          <span 
-                            className={`game-log-entry__reward-value ${(rawEvent.reward || 0) >= 0 ? 'game-log-entry__reward-value--positive' : 'game-log-entry__reward-value--negative'}`}
-                          >
-                            {(rawEvent.reward || 0) >= 0 ? '+' : ''}{(rawEvent.reward || 0)?.toFixed(1)}
-                          </span>
-                        ) : (
-                          <span className="game-log-entry__reward-value--none">-</span>
-                        )}
-                      </span>
-                      <span style={{ fontSize: '11px', color: '#888', marginLeft: '8px' }}>
-                        {rawEvent.actionName || eventType}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Use shared GameLog component - exactly like PvP mode */}
+      <GameLog
+        events={transformToGameLogEvents().slice(0, currentStep + 1)}
+        maxEvents={Math.floor(logAvailableHeight / 40)}
+        getElapsedTime={getElapsedTime}
+        availableHeight={logAvailableHeight}
+      />
     </>
   );
 

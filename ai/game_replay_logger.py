@@ -59,9 +59,18 @@ class GameReplayLogger:
                   phase: str = None, start_hex: str = None, end_hex: str = None, 
                   shoot_details: List = None):
         """Add entry to combat log using shared structure."""
-        # CRITICAL: Only log during evaluation mode
-        if not getattr(self.env, 'is_evaluation_mode', False):
+        # CRITICAL: Only log during evaluation mode - check multiple sources
+        is_eval_mode = (
+            getattr(self.env, 'is_evaluation_mode', False) or
+            getattr(self, 'is_evaluation_mode', False) or
+            getattr(self.env, '_force_evaluation_mode', False)
+        )
+        if not is_eval_mode:
             return None  # Skip logging during training
+        
+        # Debug logging for first entry only
+        if len(self.combat_log_entries) == 0 and not self.quiet:
+            print(f"✅ GameReplayLogger: Logging enabled for evaluation - entry_type: {entry_type}")
             
         # Use shared structure for creating log entry
         log_entry = create_training_log_entry(
@@ -442,8 +451,13 @@ class GameReplayLogger:
     
     def capture_initial_state(self):
         """Capture initial game state - compatibility method for GameReplayLogger interface."""
-        # CRITICAL: Only capture during evaluation, not training
-        if not getattr(self.env, 'is_evaluation_mode', False):
+        # CRITICAL: Only capture during evaluation, not training - check multiple sources
+        is_eval_mode = (
+            getattr(self.env, 'is_evaluation_mode', False) or
+            getattr(self, 'is_evaluation_mode', False) or
+            getattr(self.env, '_force_evaluation_mode', False)
+        )
+        if not is_eval_mode:
             return  # Skip capture during training
             
         self.log_game_start()
