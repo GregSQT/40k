@@ -113,6 +113,10 @@ Frontend TypeScript Components
 - **Same Interfaces**: Function signatures and return types must be equivalent
 - **Consistent State**: Both systems must maintain identical game state representation
 - **Shared Rules**: Both use identical shared/gameRules.* for calculations
+- **CRITICAL FIELD NAMING**: All unit fields MUST use UPPERCASE consistently
+  - ✅ CORRECT: `unit["RNG_ATK"]`, `target["ARMOR_SAVE"]`, `attacker["CC_STR"]`
+  - ❌ FORBIDDEN: `unit["rng_atk"]`, `target["armor_save"]`, `attacker["cc_str"]`
+  - Both TypeScript and Python shared rules MUST use identical uppercase field names
 
 ---
 
@@ -290,6 +294,12 @@ current_phase = env.current_phase  # This attribute should not exist
 - Fix root causes, not symptoms
 - Use proper architecture, not quick patches
 - Remove broken features rather than band-aid them
+
+## MANDATORY FIELD NAMING CONSISTENCY
+- **ALL unit field names MUST be UPPERCASE**: RNG_ATK, CC_STR, ARMOR_SAVE, INVUL_SAVE, T
+- **ZERO tolerance for lowercase**: rng_atk, cc_str, armor_save cause immediate KeyError
+- **Both languages must match**: Python and TypeScript use identical field names
+- **Shared rules compliance**: All shared/gameRules files must use uppercase consistently
 
 ---
 

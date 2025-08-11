@@ -165,6 +165,9 @@ When you violate protocols, user will say:
 - Use proper PIXI.js cleanup (removeChildren, destroy) to prevent memory leaks
 - Validate all JSON data before use - check for required properties
 - Use consistent naming: camelCase for JS/TS, snake_case for Python
+- **MANDATORY**: All unit field names MUST be UPPERCASE (RNG_ATK, CC_STR, ARMOR_SAVE, etc.)
+- **FORBIDDEN**: Lowercase field access (rng_atk, cc_str, armor_save) - causes KeyError
+- **CRITICAL**: shared/gameRules files MUST use uppercase field names consistently
 
 ---
 
