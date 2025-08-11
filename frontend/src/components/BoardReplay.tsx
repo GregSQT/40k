@@ -48,8 +48,9 @@ const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: 
   const movingUnit = units.find(u => u.col === unitCol && u.row === unitRow);
   const movingUnitPlayer = movingUnit ? movingUnit.player : 0;
   
+  // EXACT COPY of BoardPvp.tsx forbidden set logic
   for (const enemy of units) {
-    if (enemy.player === movingUnitPlayer || !enemy.alive) continue; // Skip friendly units and dead units
+    if (enemy.player === movingUnitPlayer) continue; // Skip friendly units
 
     // Add enemy position itself
     forbiddenSet.add(`${enemy.col},${enemy.row}`);
@@ -212,28 +213,85 @@ const calculateShootingTargets = (
   
   const shooterCube = offsetToCube(shooterCol, shooterRow);
   const wallHexes = boardConfig.wall_hexes || [];
+  const BOARD_COLS = boardConfig.cols;
+  const BOARD_ROWS = boardConfig.rows;
   
-  // Check all enemy units within range
-  units.filter(unit => unit.alive).forEach(target => {
-    const targetCube = offsetToCube(target.col, target.row);
-    const distance = cubeDistance(shooterCube, targetCube);
+  // EXACT COPY of BoardPvP.tsx shooting logic
+  // First, find all enemies in range and mark cover paths
+  const coverPathHexes = new Set<string>();
+  const enemyUnits = units.filter(u => u.alive);
+  const shootingUnit = units.find(u => u.col === shooterCol && u.row === shooterRow);
+  if (!shootingUnit) return { clearTargets, coverTargets, blockedTargets };
+  
+  // First process actual enemy units
+  for (const enemy of enemyUnits) {
+    if (enemy.player === shootingUnit.player) continue;
     
+    const distance = cubeDistance(shooterCube, offsetToCube(enemy.col, enemy.row));
     if (distance > 0 && distance <= range) {
       const lineOfSight = hasLineOfSight(
         { col: shooterCol, row: shooterRow },
-        { col: target.col, row: target.row },
+        { col: enemy.col, row: enemy.row },
         wallHexes
       );
       
-      if (!lineOfSight.canSee) {
-        blockedTargets.add(`${target.col},${target.row}`);
-      } else if (lineOfSight.inCover) {
-        coverTargets.push({ col: target.col, row: target.row });
+      if (lineOfSight.canSee && lineOfSight.inCover) {
+        // Mark this enemy as in cover
+        coverTargets.push({ col: enemy.col, row: enemy.row });
+        
+        // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
+        const pathHexes = getHexLine(shooterCol, shooterRow, enemy.col, enemy.row);
+        const wallHexSet = new Set<string>(wallHexes.map(([c, r]: [number, number]) => `${c},${r}`));
+        pathHexes.forEach(hex => {
+          const hexKey = `${hex.col},${hex.row}`;
+          if (!wallHexSet.has(hexKey)) {
+            coverPathHexes.add(hexKey);
+          }
+        });
+      } else if (lineOfSight.canSee) {
+        // Clear line of sight enemy
+        clearTargets.push({ col: enemy.col, row: enemy.row });
       } else {
-        clearTargets.push({ col: target.col, row: target.row });
+        // Blocked enemy
+        blockedTargets.add(`${enemy.col},${enemy.row}`);
       }
     }
-  });
+  }
+  
+  // Now show all hexes in range with appropriate colors (exact PvP logic)
+  for (let col = 0; col < BOARD_COLS; col++) {
+    for (let row = 0; row < BOARD_ROWS; row++) {
+      const targetCube = offsetToCube(col, row);
+      const dist = cubeDistance(shooterCube, targetCube);
+      if (dist > 0 && dist <= range) {
+        const hexKey = `${col},${row}`;
+        const hasEnemy = units.some(u => 
+          u.player !== shootingUnit.player && 
+          u.col === col && 
+          u.row === row
+        );
+        
+        if (!hasEnemy) {
+          // For empty hexes, show orange if part of cover path, red if clear
+          if (coverPathHexes.has(hexKey)) {
+            coverTargets.push({ col, row });
+          } else {
+            const lineOfSight = hasLineOfSight(
+              { col: shooterCol, row: shooterRow },
+              { col, row },
+              wallHexes
+            );
+            
+            if (lineOfSight.canSee && !lineOfSight.inCover) {
+              clearTargets.push({ col, row });
+            } else if (lineOfSight.canSee && lineOfSight.inCover) {
+              coverTargets.push({ col, row });
+            }
+          }
+        }
+      }
+    }
+  }
   
   return { clearTargets, coverTargets, blockedTargets };
 };
@@ -1550,7 +1608,7 @@ const validateUnitRegistry = () => {
                 
                 // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
                 const pathHexes = getHexLine(shootingUnit.col, shootingUnit.row, enemy.col, enemy.row);
-                const wallHexSet = new Set<string>(wallHexes.map(([c, r]) => `${c},${r}`));
+                const wallHexSet = new Set<string>(wallHexes.map(([c, r]: [number, number]) => `${c},${r}`));
                 pathHexes.forEach(hex => {
                   const hexKey = `${hex.col},${hex.row}`;
                   if (!wallHexSet.has(hexKey)) {

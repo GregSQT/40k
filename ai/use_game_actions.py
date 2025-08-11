@@ -1165,7 +1165,29 @@ class UseGameActions:
         for enemy in enemy_units:
             distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
             if distance <= unit["RNG_RNG"]:
-                targets.append(enemy["id"])
+                # CRITICAL FIX: Add line of sight validation like PvP mode
+                try:
+                    from shared.gameRules import has_line_of_sight
+                    wall_hexes = self.board_config.get("wall_hexes", [])
+                    
+                    line_of_sight = has_line_of_sight(
+                        {"col": unit["col"], "row": unit["row"]},
+                        {"col": enemy["col"], "row": enemy["row"]},
+                        wall_hexes
+                    )
+                    
+                    # Only add target if line of sight is clear (blocked targets cannot be shot at all)
+                    if line_of_sight.get("canSee", False):
+                        targets.append(enemy["id"])
+                        
+                        # Store cover information for this target (for shooting execution)
+                        if not hasattr(self, 'target_cover_info'):
+                            self.target_cover_info = {}
+                        self.target_cover_info[enemy["id"]] = line_of_sight.get("inCover", False)
+                        
+                except ImportError:
+                    # Fallback if shared function not available
+                    targets.append(enemy["id"])
         return targets
 
     def get_valid_charge_targets(self, unit_id: int) -> List[int]:
