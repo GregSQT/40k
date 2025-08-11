@@ -1124,15 +1124,15 @@ class UseGameActions:
         """Get valid move positions for unit"""
         unit = self.find_unit(unit_id)
         if not unit or not self.is_unit_eligible_local(unit) or self.game_state.get("phase") != "move":
-            return []
+            raise ValueError("Unit not found, not eligible, or not in move phase")
         
         # Validate required unit fields
         if "MOVE" not in unit:
-            raise KeyError(f"Unit missing required 'MOVE' field: {unit.get('name')}")
+            raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
         if "col" not in unit:
-            raise KeyError(f"Unit missing required 'col' field: {unit.get('name')}")
+            raise KeyError(f"Unit missing required 'col' field: {unit}")
         if "row" not in unit:
-            raise KeyError(f"Unit missing required 'row' field: {unit.get('name')}")
+            raise KeyError(f"Unit missing required 'row' field: {unit}")
         
         # Validate required board config fields
         if "cols" not in self.board_config:
@@ -1140,21 +1140,15 @@ class UseGameActions:
         if "rows" not in self.board_config:
             raise KeyError("Board config missing required 'rows' field")
         
-        # Use proper BFS pathfinding with forbidden adjacency (EXACT from gameMechanics.py)
+        # Use shared.gameMechanics function - NO FALLBACKS
         from shared.gameMechanics import calculate_available_move_cells
-        
-        try:
-            return calculate_available_move_cells(
-                unit=unit,
-                units=self.game_state["units"], 
-                board_config=self.board_config,
-                board_cols=self.board_config["cols"],
-                board_rows=self.board_config["rows"]
-            )
-        except Exception as e:
-            # Fallback to empty list if BFS fails
-            print(f"Movement BFS failed: {e}")
-            return []
+        return calculate_available_move_cells(
+            unit=unit,
+            units=self.game_state["units"], 
+            board_config=self.board_config,
+            board_cols=self.board_config["cols"],
+            board_rows=self.board_config["rows"]
+        )
 
     def get_valid_shooting_targets(self, unit_id: int) -> List[int]:
         """Get valid shooting targets for unit"""

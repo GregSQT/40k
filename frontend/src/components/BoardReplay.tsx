@@ -44,8 +44,12 @@ const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: 
     forbiddenSet.add(`${deadUnit.col},${deadUnit.row}`);
   });
   
+  // Find the moving unit to determine which player we're calculating for
+  const movingUnit = units.find(u => u.col === unitCol && u.row === unitRow);
+  const movingUnitPlayer = movingUnit ? movingUnit.player : 0;
+  
   for (const enemy of units) {
-    if (enemy.player === 1 || !enemy.alive) continue; // Skip friendly units (player 1) and dead units
+    if (enemy.player === movingUnitPlayer || !enemy.alive) continue; // Skip friendly units and dead units
 
     // Add enemy position itself
     forbiddenSet.add(`${enemy.col},${enemy.row}`);
@@ -1428,16 +1432,18 @@ const validateUnitRegistry = () => {
         if ((event.type === 'shoot' || event.type === 'combat') && event.targetUnitId !== undefined) {
           const targetUnit = newUnits.find(u => u.id === event.targetUnitId);
           if (targetUnit && event.shootDetails && Array.isArray(event.shootDetails)) {
-            const totalDamage = event.shootDetails.reduce((sum: number, shot: any) => sum + (shot.damageDealt || 0), 0);
+            const totalDamage = event.shootDetails.reduce((sum: number, shot: any) => {
+              if (shot.damageDealt === undefined) {
+                throw new Error(`Shot missing required 'damageDealt' field: ${JSON.stringify(shot)}`);
+              }
+              return sum + shot.damageDealt;
+            }, 0);
             if (totalDamage > 0) {
               targetUnit.hp_current = Math.max(0, targetUnit.hp_current - totalDamage);
-              targetUnit.cur_hp = targetUnit.hp_current;
-              targetUnit.CUR_HP = targetUnit.hp_current;
-              console.log(`💥 Unit ${targetUnit.id} took ${totalDamage} damage, HP: ${targetUnit.hp_current}/${targetUnit.hp_max}`);
               
+              // CRITICAL FIX: Only mark as dead if HP actually reaches 0
               if (targetUnit.hp_current <= 0) {
                 targetUnit.alive = false;
-                console.log(`💀 Unit ${targetUnit.id} died`);
               }
             }
           }
