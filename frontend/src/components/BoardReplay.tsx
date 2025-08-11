@@ -161,14 +161,96 @@ const calculateChargeTargets = (
   
   if (!boardConfig) return { chargeCells, adjacentToEnemyCells };
   
-  // Get all available move cells using same logic as moves
-  const availableCells = calculateAvailableMoveCells(chargerCol, chargerRow, maxMove, boardConfig, units);
+  const BOARD_COLS = boardConfig.cols;
+  const BOARD_ROWS = boardConfig.rows;
   
-  // Find enemy units for this charging unit
+  const visited = new Map<string, number>();
+  const queue: [number, number, number][] = [[chargerCol, chargerRow, 0]];
+  
+  // Use cube coordinate system for proper hex neighbors
+  const cubeDirections = [
+    [1, -1, 0], [1, 0, -1], [0, 1, -1], 
+    [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+  ];
+  
+  // CHARGE RULES: Only forbid walls and occupied hexes - NOT enemy-adjacent hexes
+  const forbiddenSet = new Set<string>();
+  
+  // Add all wall hexes as forbidden
+  const wallHexSet = new Set<string>(
+    (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+  );
+  wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
+  
+  // Add occupied unit positions as forbidden (including dead units)
+  units.forEach(unit => {
+    forbiddenSet.add(`${unit.col},${unit.row}`);
+  });
+  
+  // Find the charging unit to determine which player we're calculating for
   const chargingUnit = units.find(u => u.col === chargerCol && u.row === chargerRow);
   if (!chargingUnit) return { chargeCells, adjacentToEnemyCells };
+
+  const availableCells: { col: number; row: number }[] = [];
+
+  while (queue.length > 0) {
+    const next = queue.shift();
+    if (!next) continue;
+    const [col, row, steps] = next;
+    const key = `${col},${row}`;
+    
+    if (visited.has(key) && steps >= visited.get(key)!) {
+      continue;
+    }
+
+    visited.set(key, steps);
+
+    // For charges, units can move FROM any position (including adjacent to enemies)
+    const blocked = units.some(u => u.col === col && u.row === row && !(u.col === chargerCol && u.row === chargerRow));
+
+    if (steps > 0 && steps <= maxMove && !blocked && !forbiddenSet.has(key)) {
+      availableCells.push({ col, row });
+    }
+
+    if (steps >= maxMove) {
+      continue;
+    }
+
+    // Use cube coordinates for proper hex neighbors
+    const currentCube = offsetToCube(col, row);
+    for (const [dx, dy, dz] of cubeDirections) {
+      const neighborCube = {
+        x: currentCube.x + dx,
+        y: currentCube.y + dy,
+        z: currentCube.z + dz
+      };
+      
+      // Convert back to offset coordinates
+      const ncol = neighborCube.x;
+      const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+      
+      const nkey = `${ncol},${nrow}`;
+      const nextSteps = steps + 1;
+
+      if (
+        ncol >= 0 && ncol < BOARD_COLS &&
+        nrow >= 0 && nrow < BOARD_ROWS &&
+        nextSteps <= maxMove &&
+        !forbiddenSet.has(nkey)
+      ) {
+        const nblocked = units.some(u => u.col === ncol && u.row === nrow && !(u.col === chargerCol && u.row === chargerRow));
+        
+        if (
+          !nblocked &&
+          (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
+        ) {
+          queue.push([ncol, nrow, nextSteps]);
+        }
+      }
+    }
+  }
   
-  // CRITICAL FIX: Only consider enemies within the charger's MOVE range per AI_GAME.md
+  // Find enemy units for this charging unit - only consider enemies within MOVE range
   const enemyUnits = units.filter(u => u.player !== chargingUnit.player && u.alive);
   const enemiesInMoveRange = enemyUnits.filter(enemy => {
     const distanceToEnemy = Math.max(Math.abs(chargerCol - enemy.col), Math.abs(chargerRow - enemy.row));

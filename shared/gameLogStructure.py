@@ -129,6 +129,7 @@ def create_log_entry(
     start_hex: Optional[str] = None,
     end_hex: Optional[str] = None,
     shoot_details: Optional[List[Dict]] = None,
+    env: Optional[Any] = None,
     **kwargs
 ) -> BaseLogEntry:
     """
@@ -136,85 +137,122 @@ def create_log_entry(
     This function ensures both PvP and replay generate identical base structure
     """
     
+    # PERFORMANCE FIX: Skip all processing during training
+    if env and hasattr(env, 'replay_logger'):
+        is_eval_mode = (
+            getattr(env, 'is_evaluation_mode', False) or
+            getattr(env.replay_logger, 'is_evaluation_mode', False) or
+            getattr(env, '_force_evaluation_mode', False)
+        )
+        if not is_eval_mode:
+            # Return minimal entry to avoid validation overhead during training
+            return BaseLogEntry(entry_type=entry_type, message="training_skipped")
+    
     # Generate message based on type using existing shared functions
     message = ""
     
     if entry_type == "shoot" and acting_unit and target_unit:
+        if "id" not in acting_unit:
+            raise KeyError("acting_unit missing required 'id' field")
+        if "id" not in target_unit:
+            raise KeyError("target_unit missing required 'id' field")
         message = format_shooting_message(
-            acting_unit.get("id", 0), 
-            target_unit.get("id", 0)
+            acting_unit["id"], 
+            target_unit["id"]
         )
     elif entry_type == "move" and acting_unit and start_hex and end_hex:
-        # Extract coordinates from hex strings
-        try:
-            start_coords = start_hex.strip('()').split(', ')
-            end_coords = end_hex.strip('()').split(', ')
-            start_col, start_row = int(start_coords[0]), int(start_coords[1])
-            end_col, end_row = int(end_coords[0]), int(end_coords[1])
-            message = format_move_message(
-                acting_unit.get("id", 0),
-                start_col, start_row, end_col, end_row
-            )
-        except:
-            message = f"Unit {acting_unit.get('id', 0)} MOVED from {start_hex} to {end_hex}"
+        if "id" not in acting_unit:
+            raise KeyError("acting_unit missing required 'id' field")
+        # Extract coordinates from hex strings - NO FALLBACKS
+        start_coords = start_hex.strip('()').split(', ')
+        end_coords = end_hex.strip('()').split(', ')
+        if len(start_coords) != 2 or len(end_coords) != 2:
+            raise ValueError(f"Invalid hex format: start_hex='{start_hex}', end_hex='{end_hex}'")
+        start_col, start_row = int(start_coords[0]), int(start_coords[1])
+        end_col, end_row = int(end_coords[0]), int(end_coords[1])
+        message = format_move_message(
+            acting_unit["id"],
+            start_col, start_row, end_col, end_row
+        )
     elif entry_type == "combat" and acting_unit and target_unit:
+        if "id" not in acting_unit:
+            raise KeyError("acting_unit missing required 'id' field")
+        if "id" not in target_unit:
+            raise KeyError("target_unit missing required 'id' field")
         message = format_combat_message(
-            acting_unit.get("id", 0),
-            target_unit.get("id", 0)
+            acting_unit["id"],
+            target_unit["id"]
         )
     elif entry_type == "charge" and acting_unit and target_unit and start_hex and end_hex:
-        # Extract coordinates from hex strings for proper formatting
-        try:
-            start_coords = start_hex.strip('()').split(', ')
-            end_coords = end_hex.strip('()').split(', ')
-            start_col, start_row = int(start_coords[0]), int(start_coords[1])
-            end_col, end_row = int(end_coords[0]), int(end_coords[1])
-            message = format_charge_message(
-                acting_unit.get("unitType", "unknown"),
-                acting_unit.get("id", 0),
-                target_unit.get("unitType", "unknown"), 
-                target_unit.get("id", 0),
-                start_col, start_row, end_col, end_row
-            )
-        except:
-            message = f"Unit {acting_unit.get('unitType', 'unknown')} {acting_unit.get('id', 0)} CHARGED unit {target_unit.get('unitType', 'unknown')} {target_unit.get('id', 0)} from {start_hex} to {end_hex}"
-    elif entry_type == "charge" and acting_unit and target_unit and start_hex and end_hex:
-        try:
-            start_coords = start_hex.strip('()').split(', ')
-            end_coords = end_hex.strip('()').split(', ')
-            start_col, start_row = int(start_coords[0]), int(start_coords[1])
-            end_col, end_row = int(end_coords[0]), int(end_coords[1])
-            
-            message = format_charge_message(
-                acting_unit.get("unit_type", "unknown"),
-                acting_unit.get("id", 0),
-                target_unit.get("unit_type", "unknown"),
-                target_unit.get("id", 0),
-                start_col, start_row, end_col, end_row
-            )
-        except:
-            message = f"Unit {acting_unit.get('unit_type', 'unknown')} {acting_unit.get('id', 0)} CHARGED unit {target_unit.get('unit_type', 'unknown')} {target_unit.get('id', 0)}"
+        # Validate required fields
+        if "id" not in acting_unit:
+            raise KeyError("acting_unit missing required 'id' field")
+        if "id" not in target_unit:
+            raise KeyError("target_unit missing required 'id' field")
+        
+        # Get unit types - check both formats, raise error if neither exists
+        acting_unit_type = acting_unit.get("unitType") or acting_unit.get("unit_type")
+        if not acting_unit_type:
+            raise KeyError("acting_unit missing required 'unitType' or 'unit_type' field")
+        
+        target_unit_type = target_unit.get("unitType") or target_unit.get("unit_type")
+        if not target_unit_type:
+            raise KeyError("target_unit missing required 'unitType' or 'unit_type' field")
+        
+        # Extract coordinates - NO FALLBACKS
+        start_coords = start_hex.strip('()').split(', ')
+        end_coords = end_hex.strip('()').split(', ')
+        if len(start_coords) != 2 or len(end_coords) != 2:
+            raise ValueError(f"Invalid hex format: start_hex='{start_hex}', end_hex='{end_hex}'")
+        start_col, start_row = int(start_coords[0]), int(start_coords[1])
+        end_col, end_row = int(end_coords[0]), int(end_coords[1])
+        
+        message = format_charge_message(
+            acting_unit_type,
+            acting_unit["id"],
+            target_unit_type,
+            target_unit["id"],
+            start_col, start_row, end_col, end_row
+        )
     elif entry_type == "death" and (target_unit or acting_unit):
         unit = target_unit or acting_unit
-        message = format_death_message(
-            unit.get("id", 0),
-            unit.get("unit_type", "unknown")
-        )
+        if "id" not in unit:
+            raise KeyError("unit missing required 'id' field")
+        
+        unit_type = unit.get("unitType") or unit.get("unit_type")
+        if not unit_type:
+            raise KeyError("unit missing required 'unitType' or 'unit_type' field")
+        
+        message = format_death_message(unit["id"], unit_type)
     elif entry_type == "move_cancel" and acting_unit:
-        message = format_move_cancel_message(
-            acting_unit.get("unit_type", "unknown"),
-            acting_unit.get("id", 0)
-        )
+        if "id" not in acting_unit:
+            raise KeyError("acting_unit missing required 'id' field")
+        
+        unit_type = acting_unit.get("unitType") or acting_unit.get("unit_type")
+        if not unit_type:
+            raise KeyError("acting_unit missing required 'unitType' or 'unit_type' field")
+        
+        message = format_move_cancel_message(unit_type, acting_unit["id"])
     elif entry_type == "charge_cancel" and acting_unit:
-        message = format_charge_cancel_message(
-            acting_unit.get("unit_type", "unknown"),
-            acting_unit.get("id", 0)
-        )
+        if "id" not in acting_unit:
+            raise KeyError("acting_unit missing required 'id' field")
+        
+        unit_type = acting_unit.get("unitType") or acting_unit.get("unit_type")
+        if not unit_type:
+            raise KeyError("acting_unit missing required 'unitType' or 'unit_type' field")
+        
+        message = format_charge_cancel_message(unit_type, acting_unit["id"])
     elif entry_type == "turn_change":
-        message = format_turn_start_message(turn_number or 1)
+        if not turn_number or turn_number < 1:
+            raise ValueError("turn_number is required and must be >= 1")
+        message = format_turn_start_message(turn_number)
     elif entry_type == "phase_change" and acting_unit:
-        player_name = f"Player {acting_unit.get('player', 0) + 1}"
-        message = format_phase_change_message(player_name, phase or "unknown")
+        if "player" not in acting_unit:
+            raise KeyError("acting_unit missing required 'player' field")
+        if not phase:
+            raise ValueError("phase is required for phase_change entries")
+        player_name = f"Player {acting_unit['player'] + 1}"
+        message = format_phase_change_message(player_name, phase)
     else:
         raise ValueError(f"Unsupported entry_type '{entry_type}'. Valid types: shoot, move, combat, charge, death, move_cancel, charge_cancel, turn_change, phase_change")
     
