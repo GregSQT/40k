@@ -46,7 +46,10 @@ const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: 
   
   // Find the moving unit to determine which player we're calculating for
   const movingUnit = units.find(u => u.col === unitCol && u.row === unitRow);
-  const movingUnitPlayer = movingUnit ? movingUnit.player : 0;
+  if (!movingUnit) {
+    throw new Error(`No unit found at position (${unitCol}, ${unitRow})`);
+  }
+  const movingUnitPlayer = movingUnit.player;
   
   for (const enemy of units) {
     if (enemy.player === movingUnitPlayer || !enemy.alive) continue; // Skip friendly units and dead units
