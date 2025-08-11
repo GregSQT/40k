@@ -239,10 +239,14 @@ class ScenarioManager:
         # Generate units for player 0 - Use template composition if specified
         if player_0_agent in template.agent_compositions:
             agent_0_units = template.agent_compositions[player_0_agent]
-            # Using template composition
+            print(f"✅ Using template composition for {player_0_agent}: {agent_0_units}")
         else:
+            # DEBUG: Show what compositions are available vs what was requested
+            available_compositions = list(template.agent_compositions.keys())
+            print(f"❌ SCENARIO DEBUG: {player_0_agent} not found in template '{template_name}'")
+            print(f"    Available compositions: {available_compositions}")
+            print(f"    Falling back to unit registry for {player_0_agent}")
             agent_0_units = self.unit_registry.get_units_for_model(player_0_agent)
-            print(f"⚠️ No template composition found for {player_0_agent}, using registry: {agent_0_units}")
         
         if not agent_0_units:
             raise ValueError(f"No units found for agent: {player_0_agent}")
@@ -278,9 +282,14 @@ class ScenarioManager:
         # Generate units for player 1 - Use template composition if specified
         if player_1_agent in template.agent_compositions:
             agent_1_units = template.agent_compositions[player_1_agent]
+            print(f"✅ Using template composition for {player_1_agent}: {agent_1_units}")
         else:
+            # DEBUG: Show what compositions are available vs what was requested
+            available_compositions = list(template.agent_compositions.keys())
+            print(f"❌ SCENARIO DEBUG: {player_1_agent} not found in template '{template_name}'")
+            print(f"    Available compositions: {available_compositions}")
+            print(f"    Falling back to unit registry for {player_1_agent}")
             agent_1_units = self.unit_registry.get_units_for_model(player_1_agent)
-            print(f"⚠️ No template composition found for {player_1_agent}, using registry: {agent_1_units}")
         
         if not agent_1_units:
             raise ValueError(f"No units found for agent: {player_1_agent}")

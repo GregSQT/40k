@@ -205,9 +205,39 @@ class GameController:
         return True
 
     def shoot_unit(self, shooter_id: int, target_id: int) -> bool:
-        """Shoot at target"""
+        """Shoot at target with detailed dice results"""
         if "handle_shoot" not in self.game_actions:
             raise RuntimeError("game_actions missing required handle_shoot method")
+        
+        # Get units for detailed shooting execution
+        shooter = self.find_unit(shooter_id)
+        target = self.find_unit(target_id)
+        if not shooter or not target:
+            return False
+        
+        # Execute detailed shooting sequence with uppercase field names fix
+        from shared.gameRules import execute_shooting_sequence
+        
+        # Fix field names inline for shared rules compatibility
+        shooter_fixed = {**shooter, "rng_nb": shooter.get("RNG_NB"), "rng_atk": shooter.get("RNG_ATK"), 
+                        "rng_str": shooter.get("RNG_STR"), "rng_ap": shooter.get("RNG_AP"), "rng_dmg": shooter.get("RNG_DMG")}
+        target_fixed = {**target, "t": target.get("T"), "armor_save": target.get("ARMOR_SAVE"), "invul_save": target.get("INVUL_SAVE")}
+        
+        shoot_result = execute_shooting_sequence(shooter_fixed, target_fixed)
+        self._last_shoot_units = (shooter, target)
+        
+        # Apply damage from shooting result
+        if shoot_result["totalDamage"] > 0:
+            new_hp = target["CUR_HP"] - shoot_result["totalDamage"]
+            if new_hp <= 0:
+                self.state_actions["remove_unit"](target_id)
+            else:
+                self.state_actions["update_unit"](target_id, {"CUR_HP": new_hp})
+        
+        # Store shooting result for logging
+        self._last_shoot_result = shoot_result
+        
+        # Still call original action for state management
         self.game_actions["handle_shoot"](shooter_id, target_id)
         return True
 
@@ -220,18 +250,22 @@ class GameController:
 
     def combat_attack(self, attacker_id: int, target_id: int) -> bool:
         """Attack in combat with detailed dice results"""
-        if "handle_combat_attack" not in self.game_actions:
-            raise RuntimeError("game_actions missing required handle_combat_attack method")
-        
-        # Get units for detailed combat execution
+        # Execute detailed combat in controller to avoid use_game_actions field conversion
         attacker = self.find_unit(attacker_id)
         target = self.find_unit(target_id)
         if not attacker or not target:
             return False
         
-        # Execute detailed combat sequence and capture results
+        # Execute detailed combat sequence with uppercase field names fix
         from shared.gameRules import execute_combat_sequence
-        combat_result = execute_combat_sequence(attacker, target)
+        
+        # Fix field names inline for shared rules compatibility
+        attacker_fixed = {**attacker, "cc_nb": attacker.get("CC_NB"), "cc_atk": attacker.get("CC_ATK"), 
+                         "cc_str": attacker.get("CC_STR"), "cc_ap": attacker.get("CC_AP"), "cc_dmg": attacker.get("CC_DMG")}
+        target_fixed = {**target, "t": target.get("T"), "armor_save": target.get("ARMOR_SAVE"), "invul_save": target.get("INVUL_SAVE")}
+        
+        combat_result = execute_combat_sequence(attacker_fixed, target_fixed)
+        self._last_combat_units = (attacker, target)
         
         # Apply damage from combat result
         if combat_result["totalDamage"] > 0:
@@ -245,8 +279,13 @@ class GameController:
         if hasattr(self, '_last_combat_result'):
             self._last_combat_result = combat_result
         
-        # Still call original action for state management
-        self.game_actions["handle_combat_attack"](attacker_id, target_id)
+        # Apply damage and manage state directly to avoid use_game_actions field conversion
+        if combat_result["totalDamage"] > 0:
+            if new_hp <= 0:
+                self.state_actions["remove_unit"](target_id)
+        
+        # Mark unit as attacked for state management
+        self.state_actions["add_attacked_unit"](attacker_id)
         return True
 
     # === TRAINING INTEGRATION METHODS ===
@@ -342,22 +381,34 @@ class GameController:
                 if action_type == "combat" and hasattr(self, '_last_combat_result'):
                     action_details = self._last_combat_result
                 
-                # Use proper logging with details
-                if action_type == "combat" and action_details:
-                    self.gym_env.replay_logger.log_combat(
-                        acting_unit, target_unit, action_details,
-                        self.get_current_turn(), 0.0, 6  # action_int 6 for combat
+                # Use detailed logging for ALL action types
+                if action_type == "shoot" and hasattr(self, '_last_shoot_result'):
+                    stored_shooter, stored_target = getattr(self, '_last_shoot_units', (acting_unit, target_unit))
+                    self.gym_env.replay_logger.log_shoot(
+                        stored_shooter, stored_target, self._last_shoot_result,
+                        self.get_current_turn(), 0.0, 4
                     )
-                else:
-                    from shared.gameLogStructure import log_unified_action
-                    log_unified_action(
-                        env=self.gym_env,
-                        action_type=action_type,
-                        acting_unit=acting_unit,
-                        target_unit=target_unit,
-                        reward=0.0,
-                        phase=self.get_current_phase(),
-                        turn_number=self.get_current_turn()
+                elif action_type == "combat" and hasattr(self, '_last_combat_result'):
+                    stored_attacker, stored_target = getattr(self, '_last_combat_units', (acting_unit, target_unit))
+                    self.gym_env.replay_logger.log_combat(
+                        stored_attacker, stored_target, self._last_combat_result,
+                        self.get_current_turn(), 0.0, 6
+                    )
+                elif action_type == "move":
+                    # Log move with start/end positions
+                    start_col, start_row = acting_unit["col"], acting_unit["row"]
+                    end_col, end_row = action.get("col", start_col), action.get("row", start_row)
+                    self.gym_env.replay_logger.log_move(
+                        acting_unit, start_col, start_row, end_col, end_row,
+                        self.get_current_turn(), 0.0, 0
+                    )
+                elif action_type == "charge" and target_unit:
+                    # Log charge with proper parameters
+                    start_col, start_row = acting_unit["col"], acting_unit["row"]
+                    end_col, end_row = target_unit["col"], target_unit["row"]
+                    self.gym_env.replay_logger.log_charge(
+                        acting_unit, target_unit, start_col, start_row, end_col, end_row,
+                        self.get_current_turn(), 0.0, 5
                     )
             except Exception as e:
                 if not self.quiet:

@@ -103,7 +103,6 @@ else:
         "frontend/src/components/GameLog.tsx",
         "frontend/src/components/GameRightColumn.tsx",
         "frontend/src/components/GameStatus.tsx",
-        "frontend/src/components/ReplayBoard.tsx",
         "frontend/src/components/SharedLayout.tsx",
         "frontend/src/components/SingleShotDisplay.tsx",
         "frontend/src/components/TurnPhaseTracker.tsx",
