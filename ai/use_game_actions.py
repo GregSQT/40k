@@ -1166,28 +1166,34 @@ class UseGameActions:
             distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
             if distance <= unit["RNG_RNG"]:
                 # CRITICAL FIX: Add line of sight validation like PvP mode
-                try:
-                    from shared.gameRules import has_line_of_sight
-                    wall_hexes = self.board_config.get("wall_hexes", [])
-                    
-                    line_of_sight = has_line_of_sight(
-                        {"col": unit["col"], "row": unit["row"]},
-                        {"col": enemy["col"], "row": enemy["row"]},
-                        wall_hexes
-                    )
-                    
-                    # Only add target if line of sight is clear (blocked targets cannot be shot at all)
-                    if line_of_sight.get("canSee", False):
-                        targets.append(enemy["id"])
-                        
-                        # Store cover information for this target (for shooting execution)
-                        if not hasattr(self, 'target_cover_info'):
-                            self.target_cover_info = {}
-                        self.target_cover_info[enemy["id"]] = line_of_sight.get("inCover", False)
-                        
-                except ImportError:
-                    # Fallback if shared function not available
+                from shared.gameRules import has_line_of_sight
+                wall_hexes = self.board_config.get("wall_hexes", [])
+                
+                # DEBUG: Check wall_hexes and line of sight calculation
+                print(f"🔍 LoS Check: Unit {unit['id']} ({unit['col']},{unit['row']}) -> Enemy {enemy['id']} ({enemy['col']},{enemy['row']})")
+                print(f"🧱 Wall hexes: {wall_hexes}")
+                
+                line_of_sight = has_line_of_sight(
+                    {"col": unit["col"], "row": unit["row"]},
+                    {"col": enemy["col"], "row": enemy["row"]},
+                    wall_hexes
+                )
+                
+                print(f"👀 LoS Result: canSee={line_of_sight.get('canSee', False)}, inCover={line_of_sight.get('inCover', False)}")
+                
+                # Only add target if line of sight is clear (blocked targets cannot be shot at all)
+                if line_of_sight.get("canSee", False):
                     targets.append(enemy["id"])
+                    print(f"✅ Target {enemy['id']} ADDED to valid targets")
+                    
+                    # Store cover information for this target (for shooting execution)
+                    if not hasattr(self, 'target_cover_info'):
+                        self.target_cover_info = {}
+                    self.target_cover_info[enemy["id"]] = line_of_sight.get("inCover", False)
+                else:
+                    # Unit cannot see target through walls - skip completely
+                    print(f"❌ Target {enemy['id']} BLOCKED by walls - not added to valid targets")
+                    continue
         return targets
 
     def get_valid_charge_targets(self, unit_id: int) -> List[int]:
