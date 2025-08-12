@@ -13,9 +13,10 @@ interface GameLogProps {
   maxEvents?: number;
   getElapsedTime: (timestamp: Date) => string;
   availableHeight?: number;
+  useStepNumbers?: boolean;
 }
 
-export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElapsedTime, availableHeight = 220 }) => {
+export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElapsedTime, availableHeight = 220, useStepNumbers = false }) => {
   const [visibleRowCount, setVisibleRowCount] = React.useState(4);
   const eventsContainerRef = React.useRef<HTMLDivElement>(null);
   
@@ -42,7 +43,10 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
     .slice(0, visibleRowCount);
 
-  const formatTime = (timestamp: Date): string => {
+  const formatTime = (timestamp: Date, eventIndex?: number): string => {
+    if (useStepNumbers && eventIndex !== undefined) {
+      return `#${eventIndex + 1}`;
+    }
     return getElapsedTime(timestamp);
   };
 
@@ -66,7 +70,7 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
             className="game-log__events"
             style={{
               maxHeight: `${availableHeight}px`, // Use full available height
-              overflow: 'hidden'
+              overflow: 'auto'
             }}
           >
             {displayedEvents.map((event) => (
@@ -79,7 +83,7 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
                     {getEventIcon(event.type)}
                   </span>
                   <span className="game-log-entry__time">
-                    {formatTime(event.timestamp)}
+                    {formatTime(event.timestamp, events.length - 1 - displayedEvents.findIndex(e => e.id === event.id))}
                   </span>
                   {event.turnNumber && (
                     <span className="game-log-entry__turn">

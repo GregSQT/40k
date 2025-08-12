@@ -1559,10 +1559,35 @@ const validateUnitRegistry = () => {
         if (event.type === 'move' && event.unitId !== undefined) {
           const unit = newUnits.find(u => u.id === event.unitId);
           if (unit && event.endHex) {
-            const [newCol, newRow] = event.endHex.match(/\d+/g)?.map(Number) || [unit.col, unit.row];
-            unit.col = newCol;
-            unit.row = newRow;
-            console.log(`📍 Unit ${unit.id} moved to (${newCol}, ${newRow})`);
+            // CRITICAL FIX: Parse coordinates properly from "(col, row)" format
+            const endMatch = event.endHex.match(/\((\d+),\s*(\d+)\)/);
+            if (endMatch) {
+              const newCol = parseInt(endMatch[1]);
+              const newRow = parseInt(endMatch[2]);
+              unit.col = newCol;
+              unit.row = newRow;
+            console.log(`📍 Unit ${unit.id} moved to (${newCol}, ${newRow}) from endHex: ${event.endHex}`);
+            } else {
+              console.error(`❌ Failed to parse endHex coordinates: ${event.endHex}`);
+            }
+          }
+        }
+        
+        // Process charge events
+        if (event.type === 'charge' && event.unitId !== undefined) {
+          const unit = newUnits.find(u => u.id === event.unitId);
+          if (unit && event.endHex) {
+            // CRITICAL FIX: Parse coordinates properly from "(col, row)" format for charges
+            const endMatch = event.endHex.match(/\((\d+),\s*(\d+)\)/);
+            if (endMatch) {
+              const newCol = parseInt(endMatch[1]);
+              const newRow = parseInt(endMatch[2]);
+              unit.col = newCol;
+              unit.row = newRow;
+              console.log(`⚡ Unit ${unit.id} charged to (${newCol}, ${newRow}) from endHex: ${event.endHex}`);
+            } else {
+              console.error(`❌ Failed to parse charge endHex coordinates: ${event.endHex}`);
+            }
           }
         }
         
@@ -2190,6 +2215,7 @@ const validateUnitRegistry = () => {
         maxEvents={Math.floor(logAvailableHeight / 40)}
         getElapsedTime={getElapsedTime}
         availableHeight={logAvailableHeight}
+        useStepNumbers={true}
       />
     </>
   );
