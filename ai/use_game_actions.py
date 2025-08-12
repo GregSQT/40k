@@ -277,6 +277,64 @@ class UseGameActions:
                 return unit
         return None
 
+    def _check_pathfinding_reachable(self, unit: Dict[str, Any], enemy: Dict[str, Any], 
+                                   wall_hex_set: Set[str], max_distance: int) -> bool:
+        """Helper function to check if enemy is reachable via pathfinding around walls (EXACT from TypeScript)"""
+        if not self.board_config.get("cols") or not self.board_config.get("rows"):
+            raise ValueError("board_config.cols and board_config.rows are required for pathfinding")
+        
+        visited = set()
+        queue = [{"col": unit["col"], "row": unit["row"], "distance": 0}]
+        
+        # Cube directions for proper hex neighbors (EXACT from TypeScript)
+        cube_directions = [
+            [1, -1, 0], [1, 0, -1], [0, 1, -1], 
+            [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+        ]
+
+        while queue:
+            current = queue.pop(0)
+            key = f"{current['col']},{current['row']}"
+            
+            if key in visited:
+                continue
+            visited.add(key)
+            
+            # Found the enemy (EXACT from TypeScript)
+            if current["col"] == enemy["col"] and current["row"] == enemy["row"]:
+                return True
+            
+            # Don't expand beyond max distance (EXACT from TypeScript)
+            if current["distance"] >= max_distance:
+                continue
+            
+            # Expand to neighbors (EXACT from TypeScript)
+            from shared.gameRules import offset_to_cube
+            current_cube = offset_to_cube(current["col"], current["row"])
+            for dx, dy, dz in cube_directions:
+                neighbor_cube = {
+                    "x": current_cube["x"] + dx,
+                    "y": current_cube["y"] + dy,
+                    "z": current_cube["z"] + dz
+                }
+                
+                ncol = neighbor_cube["x"]
+                nrow = neighbor_cube["z"] + ((neighbor_cube["x"] - (neighbor_cube["x"] & 1)) >> 1)
+                nkey = f"{ncol},{nrow}"
+                
+                # Skip if out of bounds, already visited, or is a wall (EXACT from TypeScript)
+                if (ncol < 0 or ncol >= self.board_config["cols"] or 
+                    nrow < 0 or nrow >= self.board_config["rows"]):
+                    continue
+                if nkey in visited:
+                    continue
+                if nkey in wall_hex_set:
+                    continue
+                
+                queue.append({"col": ncol, "row": nrow, "distance": current["distance"] + 1})
+        
+        return False  # Enemy not reachable
+
     def is_unit_eligible_local(self, unit: Dict[str, Any]) -> bool:
         """
         EXACT mirror of isUnitEligible from TypeScript.
@@ -438,46 +496,105 @@ class UseGameActions:
                 self.actions["set_selected_unit_id"](unit_id)
             return
 
-        # Special handling for charge phase (COMPLETE charge roll logic with proper logging)
+        # Special handling for charge phase (EXACT from TypeScript)
         if self.game_state["phase"] == "charge":
             existing_roll = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
-            if existing_roll is not None:
-                # Unit already has a charge roll, keep it selected and show move mode
-                self.actions["set_selected_unit_id"](unit_id)
-                self.actions["set_mode"]("charge_preview")
-                return
-            else:
-                # Roll 2d6 for charge distance with individual dice tracking
-                die1 = roll_d6()
-                die2 = roll_d6()
+            
+            if not existing_roll:
+                # First time selecting this unit - roll 2d6 for charge distance (EXACT from TypeScript)
+                die1 = random.randint(1, 6)
+                die2 = random.randint(1, 6)
                 charge_roll = die1 + die2
-                from shared.gameMechanics import CHARGE_MAX_DISTANCE
-                charge_distance = min(charge_roll, CHARGE_MAX_DISTANCE)
                 
-                # CRITICAL: Store charge roll in TypeScript format for compatibility
-                if "unit_charge_rolls" not in self.game_state:
-                    self.game_state["unit_charge_rolls"] = {}
-                # Store as simple number like TypeScript (dice details logged separately)
-                self.game_state["unit_charge_rolls"][unit_id] = charge_roll
+                # Check if any enemies within 12 hexes are also within the rolled charge distance (EXACT from TypeScript)
+                enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
                 
-                # CRITICAL FIX: Log charge roll immediately for display like TypeScript
+                enemies_in_range = []
+                for enemy in enemy_units:
+                    # First check if enemy is within 12 hexes (eligibility already passed this)
+                    from shared.gameRules import get_hex_distance
+                    hex_distance = get_hex_distance(unit, enemy)
+                    
+                    # Check if enemy is within rolled charge distance (12-hex limit already checked in eligibility)
+                    if hex_distance > charge_roll or hex_distance > 12:
+                        continue
+                    
+                    # Use same pathfinding logic as eligibility check (EXACT from TypeScript)
+                    if self.board_config.get("wall_hexes"):
+                        wall_hex_set = set(f"{c},{r}" for c, r in self.board_config["wall_hexes"])
+                        is_reachable = self._check_pathfinding_reachable(unit, enemy, wall_hex_set, charge_roll)
+                        if not is_reachable:
+                            continue
+                    
+                    enemies_in_range.append(enemy)
+                
+                can_charge = len(enemies_in_range) > 0
+
+                # Log the charge roll with correct format using proper addEvent method (EXACT from TypeScript)
                 if self.game_log:
-                    # Format charge roll message exactly like frontend  
-                    charge_message = f"Unit {unit.get('name', unit['unit_type'])} {unit['id']} rolled {charge_roll} for charge (dice: {die1}, {die2})"
-                    self.game_log.log_game_event({
-                        "type": "charge_roll",
-                        "message": charge_message,
-                        "turn": self.game_state["current_turn"],
+                    charge_event = {
+                        "id": f"charge-roll-{int(time.time()*1000)}-{unit['id']}",
+                        "timestamp": time.time(),
+                        "type": "charge",
+                        "message": (f"Unit {unit.get('name', unit['unit_type'])} CHARGE ROLL : {charge_roll} : "
+                                  f"{'Enemy unit(s) in range' if can_charge else 'No enemy unit(s) in range'}"),
+                        "turnNumber": self.game_state["current_turn"],
                         "phase": "charge",
                         "player": unit["player"],
-                        "unit_id": unit["id"],
-                        "dice_roll": charge_roll,
-                        "die1": die1,
-                        "die2": die2
-                    })
+                        "unitType": unit.get("unit_type", "unknown"),
+                        "unitId": unit["id"]
+                    }
+                    if hasattr(self.game_log, 'events'):
+                        self.game_log.events.insert(0, charge_event)
                 
-                self.actions["set_selected_unit_id"](unit_id)
-                self.actions["set_mode"]("charge_preview")
+                # Show popup with exact format required (call action if available)
+                if "show_charge_roll_popup" in self.actions:
+                    self.actions["show_charge_roll_popup"](unit_id, charge_roll, not can_charge)
+                
+                # Store the roll and handle game logic (EXACT from TypeScript)
+                if "unit_charge_rolls" not in self.game_state:
+                    self.game_state["unit_charge_rolls"] = {}
+                self.game_state["unit_charge_rolls"][unit_id] = charge_roll
+                
+                # Continue with state management (EXACT from TypeScript)
+                if can_charge:
+                    self.actions["set_selected_unit_id"](unit_id)
+                    self.actions["set_mode"]("charge_preview")
+                else:
+                    self.actions["add_charged_unit"](unit_id)
+                    if "reset_unit_charge_roll" in self.actions:
+                        self.actions["reset_unit_charge_roll"](unit_id)
+                    self.actions["set_selected_unit_id"](None)
+                    self.actions["set_mode"]("select")
+
+                return
+            else:
+                # Unit already has a charge roll (EXACT from TypeScript)
+                if self.game_state["selected_unit_id"] == unit_id:
+                    # Second click on same unit - cancel charge and end activation (EXACT from TypeScript)
+                    if self.game_log:
+                        cancel_event = {
+                            "id": f"charge-cancel-{int(time.time()*1000)}-{unit['id']}",
+                            "timestamp": time.time(),
+                            "type": "charge_cancel",
+                            "message": f"Unit {unit.get('name', unit['unit_type'])} CHARGE CANCELLED",
+                            "turnNumber": self.game_state["current_turn"],
+                            "phase": "charge",
+                            "player": unit["player"],
+                            "unitType": unit.get("unit_type", "unknown"),
+                            "unitId": unit["id"]
+                        }
+                        if hasattr(self.game_log, 'events'):
+                            self.game_log.events.insert(0, cancel_event)
+                    if "reset_unit_charge_roll" in self.actions:
+                        self.actions["reset_unit_charge_roll"](unit_id)
+                    self.actions["add_charged_unit"](unit_id)
+                    self.actions["set_selected_unit_id"](None)
+                    self.actions["set_mode"]("select")
+                else:
+                    # Different unit with existing roll - show preview (EXACT from TypeScript)
+                    self.actions["set_selected_unit_id"](unit_id)
+                    self.actions["set_mode"]("charge_preview")
                 return
 
         # Special handling for combat phase (EXACT from TypeScript)
@@ -1088,84 +1205,114 @@ class UseGameActions:
 
     def get_charge_destinations(self, unit_id: int) -> List[Dict[str, int]]:
         """
-        PVP ESSENTIAL: Calculate valid charge destinations for visual preview.
+        Calculate valid charge destinations for visual preview (EXACT from TypeScript).
         Only shows hexes adjacent to reachable enemies within charge roll distance.
         """
         unit = self.find_unit(unit_id)
         if not unit:
             return []
         
-        charge_data = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
-        if charge_data is None:
+        charge_distance = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
+        if not charge_distance:
             return []
         
-        # Extract charge distance from rolled dice (NOT from MOVE stat)
-        charge_distance = charge_data
+        if not self.board_config.get("cols") or not self.board_config.get("rows"):
+            return []
         
-        # Get all enemy units
-        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
+        BOARD_COLS = self.board_config["cols"]
+        BOARD_ROWS = self.board_config["rows"]
         
+        visited = {}
+        queue = [[unit["col"], unit["row"], 0]]
         valid_destinations = []
-        wall_hexes = self.board_config.get('wall_hexes', [])
+
+        # Cube directions for proper hex neighbors (EXACT from TypeScript)
+        cube_directions = [
+            [1, -1, 0], [1, 0, -1], [0, 1, -1], 
+            [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+        ]
+
+        # Collect forbidden hexes (walls + other units) (EXACT from TypeScript)
+        forbidden_set = set()
         
-        # For each enemy, check if reachable and get adjacent hexes
-        for enemy in enemy_units:
-            # Check if enemy is within charge distance using pathfinding
-            from shared.gameRules import get_hex_distance
-            straight_distance = get_hex_distance(unit, enemy)
-            
-            # Skip if enemy is too far even in straight line
-            if straight_distance > charge_distance:
+        # Add wall hexes (EXACT from TypeScript)
+        wall_hex_set = set(f"{c},{r}" for c, r in self.board_config.get("wall_hexes", []))
+        forbidden_set.update(wall_hex_set)
+        
+        # Add other units (but not the charging unit itself) (EXACT from TypeScript)
+        for u in self.game_state["units"]:
+            if u["id"] != unit["id"]:
+                forbidden_set.add(f"{u['col']},{u['row']}")
+
+        while queue:
+            next_item = queue.pop(0)
+            if not next_item:
                 continue
+            col, row, steps = next_item
+            key = f"{col},{row}"
             
-            # Check pathfinding around walls if walls exist
-            if wall_hexes:
-                from shared.gameMechanics import calculate_charge_destinations
-                wall_checked_destinations = calculate_charge_destinations(
-                    unit, charge_distance, self.game_state["units"], 
-                    self.board_config, 
-                    self.board_config["cols"],
-                    self.board_config["rows"]
-                )
-                
-                # Only include destinations adjacent to this specific enemy
-                enemy_adjacent_destinations = []
-                for dest in wall_checked_destinations:
-                    distance_to_enemy = max(abs(dest["col"] - enemy["col"]), abs(dest["row"] - enemy["row"]))
-                    if distance_to_enemy == 1:  # Adjacent to enemy
-                        enemy_adjacent_destinations.append(dest)
-                
-                valid_destinations.extend(enemy_adjacent_destinations)
-            else:
-                # No walls - check direct adjacency to enemy within charge range
-                adjacent_positions = [
-                    (enemy["col"] + 1, enemy["row"]),
-                    (enemy["col"] - 1, enemy["row"]),
-                    (enemy["col"], enemy["row"] + 1),
-                    (enemy["col"], enemy["row"] - 1),
-                    (enemy["col"] + 1, enemy["row"] - 1),
-                    (enemy["col"] - 1, enemy["row"] + 1)
-                ]
-                
-                for adj_col, adj_row in adjacent_positions:
-                    # Check if within board bounds
-                    if not (0 <= adj_col < self.board_config["cols"] and 0 <= adj_row < self.board_config["rows"]):
+            if key in visited and steps >= visited[key]:
+                continue
+
+            visited[key] = steps
+
+            # Skip forbidden positions (can't move through them) (EXACT from TypeScript)
+            if key in forbidden_set and steps > 0:
+                continue
+
+            # Check if this position is adjacent to a chargeable enemy and within charge range (EXACT from TypeScript)
+            if steps > 0 and steps <= charge_distance and key not in forbidden_set:
+                chargeable_enemy_adjacent = False
+                for u in self.game_state["units"]:
+                    if u["player"] == unit["player"]:
                         continue
                     
-                    # Check if within charge distance from unit
-                    distance = get_hex_distance(unit, {"col": adj_col, "row": adj_row})
-                    if distance > charge_distance or distance == 0:
+                    # Check if this enemy is adjacent to the destination using cube coordinates (EXACT from TypeScript)
+                    from shared.gameRules import offset_to_cube, cube_distance
+                    dest_cube = offset_to_cube(col, row)
+                    target_enemy_cube = offset_to_cube(u["col"], u["row"])
+                    hex_distance = cube_distance(dest_cube, target_enemy_cube)
+                    is_adjacent = hex_distance == 1
+                    if not is_adjacent:
                         continue
                     
-                    # Check if position is not occupied
-                    occupied = any(u["col"] == adj_col and u["row"] == adj_row for u in self.game_state["units"])
-                    if occupied:
+                    # Additional check: enemy must be within the original charge eligibility range (12 hexes) (EXACT from TypeScript)
+                    enemy_cube = offset_to_cube(u["col"], u["row"])
+                    unit_cube = offset_to_cube(unit["col"], unit["row"])
+                    distance_to_enemy = cube_distance(unit_cube, enemy_cube)
+                    if distance_to_enemy > 12:
                         continue
                     
-                    dest = {"col": adj_col, "row": adj_row}
-                    if dest not in valid_destinations:
-                        valid_destinations.append(dest)
-        
+                    chargeable_enemy_adjacent = True
+                    break
+                
+                if chargeable_enemy_adjacent:
+                    valid_destinations.append({"col": col, "row": row})
+
+            if steps >= charge_distance:
+                continue
+
+            # Explore neighbors using cube coordinates (EXACT from TypeScript)
+            from shared.gameRules import offset_to_cube
+            current_cube = offset_to_cube(col, row)
+            for dx, dy, dz in cube_directions:
+                neighbor_cube = {
+                    "x": current_cube["x"] + dx,
+                    "y": current_cube["y"] + dy,
+                    "z": current_cube["z"] + dz
+                }
+                
+                ncol = neighbor_cube["x"]
+                nrow = neighbor_cube["z"] + ((neighbor_cube["x"] - (neighbor_cube["x"] & 1)) >> 1)
+                nkey = f"{ncol},{nrow}"
+                next_steps = steps + 1
+
+                if (ncol >= 0 and ncol < BOARD_COLS and
+                    nrow >= 0 and nrow < BOARD_ROWS and
+                    next_steps <= charge_distance and
+                    (nkey not in visited or visited[nkey] > next_steps)):
+                    queue.append([ncol, nrow, next_steps])
+
         return valid_destinations
 
     def move_charger(self, charger_id: int, dest_col: int, dest_row: int) -> None:
@@ -1187,25 +1334,37 @@ class UseGameActions:
                 "unitType": charger.get("unit_type", "unknown"),
                 "unitId": charger["id"]
             }
-            # Direct log entry addition (simplified for AI training)
             if hasattr(self.game_log, 'events'):
                 self.game_log.events.insert(0, charge_event)
         
-        # Move unit to EXACT destination (not adjacent - player chooses where)
+        # Move unit to destination and mark as charged (EXACT from TypeScript)
         self.actions["update_unit"](charger_id, {
             "col": dest_col, 
             "row": dest_row, 
             "has_charged_this_turn": True
         })
         
-        # Clean up charge state (EXACT from TypeScript)
-        if "unit_charge_rolls" in self.game_state and charger_id in self.game_state["unit_charge_rolls"]:
-            del self.game_state["unit_charge_rolls"][charger_id]
-        
-        # Mark as charged and reset UI
+        # Clean up charge state (EXACT from TypeScript) 
+        if "reset_unit_charge_roll" in self.actions:
+            self.actions["reset_unit_charge_roll"](charger_id)
         self.actions["add_charged_unit"](charger_id)
+        
+        # Reset UI state (EXACT from TypeScript)
         self.actions["set_selected_unit_id"](None)
         self.actions["set_mode"]("select")
+        
+        # CRITICAL: Clear ALL preview states to reset colored hexes (EXACT from TypeScript)
+        if "clear_move_preview" in self.actions:
+            self.actions["clear_move_preview"]()
+        self.actions["set_attack_preview"](None)
+        
+        # CRITICAL: Force clear any remaining charge preview states
+        if "clear_charge_preview" in self.actions:
+            self.actions["clear_charge_preview"]()
+        
+        # Ensure mode is definitely set to select to trigger Board clearing
+        self.actions["set_mode"]("select")
+        self.actions["set_selected_unit_id"](None)
 
     def _calculate_charge_destinations_simple(self, unit: Dict[str, Any], charge_distance: int) -> List[Dict[str, int]]:
         """Simplified charge destinations - ensures ALL are adjacent to enemies"""
