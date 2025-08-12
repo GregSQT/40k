@@ -978,15 +978,36 @@ class TrainingGameController(GameController):
         return distance <= unit["RNG_RNG"]
 
     def can_unit_charge_target(self, unit_id: int, target_id: int) -> bool:
-        """Check if unit can charge target"""
+        """Check if unit can charge target with proper 2D6 roll validation"""
         unit = self.find_unit(unit_id)
         target = self.find_unit(target_id)
         if not unit or not target:
             return False
         
-        # Basic range check (1-12 hex charge range)
+        # CRITICAL FIX: Use proper charge roll validation like use_game_actions.py
+        charge_data = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
+        if not charge_data:
+            return False  # No charge roll = cannot charge
+        
+        # Get charge roll distance
+        if isinstance(charge_data, dict):
+            charge_roll = charge_data.get("total", charge_data.get("charge_roll", 0))
+        else:
+            charge_roll = charge_data
+        
+        # Validate distance and pathfinding
         distance = max(abs(unit["col"] - target["col"]), abs(unit["row"] - target["row"]))
-        return 1 < distance <= 12
+        if distance <= 1 or distance > min(charge_roll, 12):
+            return False
+        
+        # Check pathfinding around walls if walls exist
+        if self.board_config.get("wall_hexes"):
+            wall_hex_set = set(f"{c},{r}" for c, r in self.board_config["wall_hexes"])
+            if not hasattr(self, 'game_actions') or '_check_pathfinding_reachable' not in self.game_actions:
+                return distance <= charge_roll  # Fallback without pathfinding
+            return self.game_actions['_check_pathfinding_reachable'](unit, target, wall_hex_set, charge_roll)
+        
+        return True
 
     def can_unit_attack_target(self, unit_id: int, target_id: int) -> bool:
         """Check if unit can attack target in combat"""

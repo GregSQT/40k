@@ -395,12 +395,21 @@ class UseGameActions:
             is_adjacent = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             if is_adjacent:
                 return False
-            # EXACT from TypeScript: Check if any enemies within 12-hex charge range (NOT using MOVE)
+            # EXACT from TypeScript: Check if any enemies within 12-hex charge range with pathfinding
             from shared.gameMechanics import CHARGE_MAX_DISTANCE
             has_enemies_within_12_hexes = any(
                 getHexDistance(unit, enemy) <= CHARGE_MAX_DISTANCE and getHexDistance(unit, enemy) > 1
                 for enemy in enemy_units
             )
+            # CRITICAL FIX: Must check pathfinding around walls like TypeScript
+            if has_enemies_within_12_hexes and self.board_config.get("wall_hexes"):
+                wall_hex_set = set(f"{c},{r}" for c, r in self.board_config["wall_hexes"])
+                has_reachable_enemies = any(
+                    getHexDistance(unit, enemy) <= CHARGE_MAX_DISTANCE and getHexDistance(unit, enemy) > 1 and
+                    self._check_pathfinding_reachable(unit, enemy, wall_hex_set, CHARGE_MAX_DISTANCE)
+                    for enemy in enemy_units
+                )
+                return has_reachable_enemies
             return has_enemies_within_12_hexes
         
         elif phase == "combat":
@@ -551,10 +560,15 @@ class UseGameActions:
                 if "show_charge_roll_popup" in self.actions:
                     self.actions["show_charge_roll_popup"](unit_id, charge_roll, not can_charge)
                 
-                # Store the roll and handle game logic (EXACT from TypeScript)
+                # CRITICAL FIX: Store the roll as dict with dice details (EXACT from TypeScript)
                 if "unit_charge_rolls" not in self.game_state:
                     self.game_state["unit_charge_rolls"] = {}
-                self.game_state["unit_charge_rolls"][unit_id] = charge_roll
+                self.game_state["unit_charge_rolls"][unit_id] = {
+                    "total": charge_roll,
+                    "charge_roll": charge_roll,  # Legacy compatibility
+                    "die1": die1,
+                    "die2": die2
+                }
                 
                 # Continue with state management (EXACT from TypeScript)
                 if can_charge:
@@ -1129,13 +1143,21 @@ class UseGameActions:
         self.actions["set_selected_unit_id"](None)
         self.actions["set_mode"]("select")
         
-        # Clear charge roll data to prevent reuse  
+        # CRITICAL FIX: Clear charge roll data to prevent reuse  
         if "unit_charge_rolls" in self.game_state and charger_id in self.game_state["unit_charge_rolls"]:
             del self.game_state["unit_charge_rolls"][charger_id]
         
-        # CRITICAL: Clear charge preview hexes by setting phase state
-        if hasattr(self.actions, 'clear_charge_roll'):
-            self.actions["clear_charge_roll"](charger_id)
+        # CRITICAL FIX: Clear ALL charge preview states to reset colored hexes
+        if "reset_unit_charge_roll" in self.actions:
+            self.actions["reset_unit_charge_roll"](charger_id)
+        
+        # CRITICAL FIX: Clear charge preview hexes by resetting mode and previews
+        self.actions["clear_move_preview"]()
+        self.actions["set_attack_preview"](None)
+        
+        # Additional cleanup to ensure orange hexes are cleared
+        if "clear_charge_preview" in self.actions:
+            self.actions["clear_charge_preview"]()
 
     def move_charger(self, charger_id: int, dest_col: int, dest_row: int) -> None:
         """EXACT mirror of moveCharger from TypeScript"""
@@ -1212,8 +1234,18 @@ class UseGameActions:
         if not unit:
             return []
         
-        charge_distance = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
-        if not charge_distance:
+        # CRITICAL FIX: Get proper charge roll value from stored data
+        charge_data = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
+        if not charge_data:
+            return []
+        
+        # Handle both old int format and new dict format (EXACT from TypeScript)
+        if isinstance(charge_data, dict):
+            charge_distance = charge_data.get("total", charge_data.get("charge_roll", 0))
+        else:
+            charge_distance = charge_data  # Legacy int format
+        
+        if charge_distance <= 0:
             return []
         
         if not self.board_config.get("cols") or not self.board_config.get("rows"):
@@ -1232,14 +1264,14 @@ class UseGameActions:
             [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
         ]
 
-        # Collect forbidden hexes (walls + other units) (EXACT from TypeScript)
+        # CRITICAL FIX: For charges, only forbid walls and occupied hexes - NOT enemy-adjacent hexes
         forbidden_set = set()
         
         # Add wall hexes (EXACT from TypeScript)
         wall_hex_set = set(f"{c},{r}" for c, r in self.board_config.get("wall_hexes", []))
         forbidden_set.update(wall_hex_set)
         
-        # Add other units (but not the charging unit itself) (EXACT from TypeScript)
+        # Add occupied unit positions (including dead units) - EXACT from BoardReplay.tsx
         for u in self.game_state["units"]:
             if u["id"] != unit["id"]:
                 forbidden_set.add(f"{u['col']},{u['row']}")
@@ -1264,7 +1296,7 @@ class UseGameActions:
             if steps > 0 and steps <= charge_distance and key not in forbidden_set:
                 chargeable_enemy_adjacent = False
                 for u in self.game_state["units"]:
-                    if u["player"] == unit["player"]:
+                    if u["player"] == unit["player"] or not u.get("alive", True):
                         continue
                     
                     # Check if this enemy is adjacent to the destination using cube coordinates (EXACT from TypeScript)
@@ -1543,17 +1575,37 @@ class UseGameActions:
         return targets
 
     def get_valid_charge_targets(self, unit_id: int) -> List[int]:
-        """Get valid charge targets for unit"""
+        """Get valid charge targets for unit with proper 2D6 roll validation"""
         unit = self.find_unit(unit_id)
         if not unit or not self.is_unit_eligible_local(unit) or self.game_state.get("phase") != "charge":
             return []
         
+        # CRITICAL FIX: Must have valid charge roll to get targets
+        charge_data = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
+        if not charge_data:
+            return []  # No charge roll = no valid targets
+        
+        # Get charge roll distance
+        if isinstance(charge_data, dict):
+            charge_roll = charge_data.get("total", charge_data.get("charge_roll", 0))
+        else:
+            charge_roll = charge_data
+        
+        if charge_roll <= 0:
+            return []
+        
         targets = []
-        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
+        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
         for enemy in enemy_units:
             distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
-            if 1 < distance <= 12:  # Charge range 1-12 hexes
-                targets.append(enemy["id"])
+            if 1 < distance <= min(charge_roll, 12):  # Must be within rolled distance AND 12-hex limit
+                # Check pathfinding around walls
+                if self.board_config.get("wall_hexes"):
+                    wall_hex_set = set(f"{c},{r}" for c, r in self.board_config["wall_hexes"])
+                    if self._check_pathfinding_reachable(unit, enemy, wall_hex_set, charge_roll):
+                        targets.append(enemy["id"])
+                else:
+                    targets.append(enemy["id"])
         return targets
 
     def get_valid_combat_targets(self, unit_id: int) -> List[int]:

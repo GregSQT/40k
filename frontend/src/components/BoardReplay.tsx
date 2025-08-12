@@ -151,7 +151,7 @@ const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: 
 const calculateChargeTargets = (
   chargerCol: number,
   chargerRow: number,
-  maxMove: number,
+  chargeRoll: number,
   boardConfig: any,
   units: ReplayUnit[]
 ): {
@@ -175,8 +175,14 @@ const calculateChargeTargets = (
     [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
   ];
   
-  // CHARGE RULES: Only forbid walls and occupied hexes - NOT enemy-adjacent hexes
+  // CRITICAL FIX: Add wall hexes to forbidden set for charge pathfinding
   const forbiddenSet = new Set<string>();
+  
+  // Add wall hexes as forbidden (EXACT from useGameActions.ts)
+  const wallHexSet = new Set<string>(
+    (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+  );
+  wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
   
   // Add occupied unit positions as forbidden (including dead units)
   units.forEach(unit => {
@@ -204,11 +210,12 @@ const calculateChargeTargets = (
     // For charges, units can move FROM any position (including adjacent to enemies)
     const blocked = units.some(u => u.col === col && u.row === row && !(u.col === chargerCol && u.row === chargerRow));
 
-    if (steps > 0 && steps <= maxMove && !blocked && !forbiddenSet.has(key)) {
+    // Check if this position is adjacent to a chargeable enemy and within charge range
+    if (steps > 0 && steps <= chargeRoll && !blocked && !forbiddenSet.has(key)) {
       availableCells.push({ col, row });
     }
 
-    if (steps >= maxMove) {
+    if (steps >= chargeRoll) {
       continue;
     }
 
@@ -231,31 +238,24 @@ const calculateChargeTargets = (
       if (
         ncol >= 0 && ncol < BOARD_COLS &&
         nrow >= 0 && nrow < BOARD_ROWS &&
-        nextSteps <= maxMove &&
-        !forbiddenSet.has(nkey)
+        nextSteps <= chargeRoll &&
+        (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
       ) {
-        const nblocked = units.some(u => u.col === ncol && u.row === nrow && !(u.col === chargerCol && u.row === chargerRow));
-        
-        if (
-          !nblocked &&
-          (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
-        ) {
-          queue.push([ncol, nrow, nextSteps]);
-        }
+        queue.push([ncol, nrow, nextSteps]);
       }
     }
   }
   
-  // Find enemy units for this charging unit - only consider enemies within MOVE range
+  // Find enemy units for this charging unit - only consider enemies within charge roll range
   const enemyUnits = units.filter(u => u.player !== chargingUnit.player && u.alive);
-  const enemiesInMoveRange = enemyUnits.filter(enemy => {
+  const enemiesInChargeRange = enemyUnits.filter(enemy => {
     const distanceToEnemy = Math.max(Math.abs(chargerCol - enemy.col), Math.abs(chargerRow - enemy.row));
-    return distanceToEnemy <= maxMove;
+    return distanceToEnemy <= Math.min(chargeRoll, 12); // Respect both charge roll and 12-hex limit
   });
   
-  // Check each available cell to see if it's adjacent to an enemy WITHIN MOVE RANGE
+  // Check each available cell to see if it's adjacent to an enemy WITHIN CHARGE RANGE
   availableCells.forEach(cell => {
-    const isAdjacentToEnemyInRange = enemiesInMoveRange.some(enemy => {
+    const isAdjacentToEnemyInRange = enemiesInChargeRange.some(enemy => {
       const distance = Math.max(Math.abs(cell.col - enemy.col), Math.abs(cell.row - enemy.row));
       return distance === 1; // Adjacent means distance of 1
     });
