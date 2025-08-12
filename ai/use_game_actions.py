@@ -920,7 +920,7 @@ class UseGameActions:
     # === CHARGE SYSTEM (EXACT from TypeScript) ===
 
     def handle_charge(self, charger_id: int, target_id: int) -> None:
-        """EXACT mirror of handleCharge from TypeScript with proper validation"""
+        """EXACT mirror of handleCharge from TypeScript with proper validation and adjacent placement"""
         charger = self.find_unit(charger_id)
         target = self.find_unit(target_id)
         
@@ -933,28 +933,94 @@ class UseGameActions:
             # No charge roll exists - this should not happen
             return
         
-        # Validate charge distance
-        from shared.gameRules import get_hex_distance, CHARGE_MAX_DISTANCE
+        # Get charge roll value (handle both old int format and new dict format)
+        if isinstance(charge_data, dict):
+            charge_roll = charge_data.get("total", charge_data.get("charge_roll", 0))
+            die1 = charge_data.get("die1", 0)
+            die2 = charge_data.get("die2", 0)
+        else:
+            charge_roll = charge_data  # Legacy int format
+            die1 = 0
+            die2 = 0
+        
+        # Validate charge distance to target
+        from shared.gameRules import get_hex_distance
         distance = get_hex_distance(charger, target)
-        if distance > charge_data or distance > CHARGE_MAX_DISTANCE:
+        CHARGE_MAX_DISTANCE = 12  # EXACT from frontend
+        if distance > charge_roll or distance > CHARGE_MAX_DISTANCE:
             return
         
-        # Log charge action with dice details
-        if self.game_log:
-            self.game_log.log_charge(charger, target, charger["col"], charger["row"], 
-                                   target["col"], target["row"], self.game_state["current_turn"],
-                                   0.0, 5, charge_data, charge_data.get("die1"), charge_data.get("die2"), True)
+        # Store original position for logging
+        original_col, original_row = charger["col"], charger["row"]
+        
+        # Find valid adjacent position to target (not ON target) - EXACT from frontend logic
+        valid_adjacent_positions = []
+        from shared.gameMechanics import get_cube_neighbors
+        for adj_col, adj_row in get_cube_neighbors(target["col"], target["row"]):
+            # Check if position is within board bounds
+            if not (0 <= adj_col < self.board_config.get("cols", 24) and 
+                   0 <= adj_row < self.board_config.get("rows", 18)):
+                continue
+            
+            # Check if position is within charge distance
+            adj_distance = get_hex_distance(charger, {"col": adj_col, "row": adj_row})
+            if adj_distance <= charge_roll:
+                # Check if position is not occupied by any unit
+                occupied = any(u["col"] == adj_col and u["row"] == adj_row and u["id"] != charger_id 
+                             for u in self.game_state["units"])
+                
+                # Check if position is not a wall hex
+                wall_hexes = self.board_config.get('wall_hexes', [])
+                is_wall = any(
+                    wall[0] == adj_col and wall[1] == adj_row 
+                    for wall in wall_hexes if isinstance(wall, (list, tuple)) and len(wall) == 2
+                )
+                
+                if not occupied and not is_wall:
+                    valid_adjacent_positions.append((adj_col, adj_row))
+        
+        if not valid_adjacent_positions:
+            return  # No valid adjacent positions
+        
+        # Choose closest valid position to charger
+        best_position = min(valid_adjacent_positions, 
+                           key=lambda pos: get_hex_distance(charger, {"col": pos[0], "row": pos[1]}))
+        final_col, final_row = best_position
+        
+        # Move charger to adjacent position (not target hex) and mark as charged
+        self.actions["update_unit"](charger_id, {
+            "col": final_col, 
+            "row": final_row,
+            "has_charged_this_turn": True
+        })
 
-        self.actions["update_unit"](charger_id, {"has_charged_this_turn": True})
+        # Log charge action with dice details and correct positioning - CRITICAL for replay
+        if self.game_log:
+            # Format charge data for game log compatibility
+            formatted_charge_data = {
+                "total": charge_roll,
+                "die1": die1,
+                "die2": die2
+            }
+            self.game_log.log_charge(charger, target, original_col, original_row, 
+                                   final_col, final_row, self.game_state["current_turn"],
+                                   0.0, 5, formatted_charge_data, die1, die2, True)
+
         self.actions["add_charged_unit"](charger_id)
         self.actions["set_selected_unit_id"](None)
         self.actions["set_mode"]("select")
         
-        # Clear charge preview state to reset colored hexes
+        # CRITICAL: Clear ALL preview states to reset colored hexes
         self.actions["set_move_preview"](None)
         self.actions["set_attack_preview"](None)
         
-        # Clear charge roll data
+        # Clear charge-specific preview states (missing from previous implementation)
+        if hasattr(self.actions, 'set_charge_preview'):
+            self.actions["set_charge_preview"](None)
+        if hasattr(self.actions, 'clear_charge_destinations'):
+            self.actions["clear_charge_destinations"]()
+        
+        # Clear charge roll data to prevent reuse
         if "unit_charge_rolls" in self.game_state and charger_id in self.game_state["unit_charge_rolls"]:
             del self.game_state["unit_charge_rolls"][charger_id]
 
@@ -1050,18 +1116,24 @@ class UseGameActions:
         if not unit:
             return []
         
-        charge_distance = self.game_state.get("unit_charge_rolls", {}).get(str(unit_id))
-        if charge_distance is None:
+        charge_data = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
+        if charge_data is None:
             return []
+        
+        # Extract charge distance from data format (handle both int and dict)
+        if isinstance(charge_data, dict):
+            charge_distance = charge_data.get("total", charge_data.get("charge_roll", 0))
+        else:
+            charge_distance = charge_data  # Legacy int format
 
         # Use shared gameMechanics function for consistency
         try:
             from shared.gameMechanics import calculate_charge_destinations
             return calculate_charge_destinations(
-                unit, charge_distance, self.units, 
+                unit, charge_distance, self.game_state["units"], 
                 self.board_config, 
-                self.board_config.get("board_cols", 24),
-                self.board_config.get("board_rows", 18)
+                self.board_config.get("cols", 24),
+                self.board_config.get("rows", 18)
             )
         except ImportError:
             # Fallback implementation if shared function not available
