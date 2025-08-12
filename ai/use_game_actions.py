@@ -444,13 +444,13 @@ class UseGameActions:
                 die1 = roll_d6()
                 die2 = roll_d6()
                 charge_roll = die1 + die2
-                if "max_charge_distance" not in self.board_config:
-                    raise KeyError("Board config missing required 'max_charge_distance' field")
-                charge_distance = min(charge_roll, self.board_config["max_charge_distance"])
+                from shared.gameMechanics import CHARGE_MAX_DISTANCE
+                charge_distance = min(charge_roll, CHARGE_MAX_DISTANCE)
                 
-                # CRITICAL: Store charge roll in game state immediately
+                # CRITICAL: Store charge roll in TypeScript format for compatibility
                 if "unit_charge_rolls" not in self.game_state:
                     self.game_state["unit_charge_rolls"] = {}
+                # Store as simple number like TypeScript (dice details logged separately)
                 self.game_state["unit_charge_rolls"][unit_id] = charge_roll
                 
                 # Check if any enemies within 12 hexes are also within the rolled charge distance
@@ -489,14 +489,18 @@ class UseGameActions:
                 
                 can_charge = len(enemies_in_range) > 0
                 
-                # CRITICAL: Store charge roll in game state immediately
-                if "unit_charge_rolls" not in self.game_state:
-                    self.game_state["unit_charge_rolls"] = {}
-                self.game_state["unit_charge_rolls"][unit_id] = charge_roll
-                
-                # Log charge roll with dice details
+                # Log charge roll with dice details - create dummy target for roll logging
                 if self.game_log:
-                    self.game_log.log_charge_roll(unit, charge_roll, die1, die2, self.game_state["current_turn"])
+                    # Create charge roll log entry with shootDetails format for dice visibility
+                    charge_roll_details = [{
+                        "rollType": "charge",
+                        "die1": die1,
+                        "die2": die2,
+                        "totalRoll": charge_roll,
+                        "rollResult": "ROLLED"
+                    }]
+                    # Log as shoot to ensure dice details appear in combatlog
+                    self.game_log.log_shooting_action(unit, unit, charge_roll_details, self.game_state["current_turn"])
                 
                 self.actions["set_selected_unit_id"](unit_id)
                 self.actions["set_mode"]("charge_preview")
@@ -943,12 +947,17 @@ class UseGameActions:
             die1 = 0
             die2 = 0
         
-        # Validate charge distance to target
+        # Validate charge distance to target with proper 2d6 roll requirements
         from shared.gameRules import get_hex_distance
         distance = get_hex_distance(charger, target)
-        CHARGE_MAX_DISTANCE = 12  # EXACT from frontend
+        from shared.gameMechanics import CHARGE_MAX_DISTANCE
+        
+        # CRITICAL: Ensure charge roll is legitimate 2d6 (2-12 range)
+        if charge_roll < 2 or charge_roll > 12:
+            raise ValueError(f"Invalid charge roll {charge_roll} for unit {charger_id} - must be 2d6 (2-12)")
+        
         if distance > charge_roll or distance > CHARGE_MAX_DISTANCE:
-            return
+            raise ValueError(f"Charge failed: distance {distance} > roll {charge_roll} or > max {CHARGE_MAX_DISTANCE}")
         
         # Store original position for logging
         original_col, original_row = charger["col"], charger["row"]
@@ -958,8 +967,12 @@ class UseGameActions:
         from shared.gameMechanics import get_cube_neighbors
         for adj_col, adj_row in get_cube_neighbors(target["col"], target["row"]):
             # Check if position is within board bounds
-            if not (0 <= adj_col < self.board_config.get("cols", 24) and 
-                   0 <= adj_row < self.board_config.get("rows", 18)):
+            if "cols" not in self.board_config:
+                raise KeyError("Board config missing required 'cols' field")
+            if "rows" not in self.board_config:
+                raise KeyError("Board config missing required 'rows' field") 
+            if not (0 <= adj_col < self.board_config["cols"] and 
+                   0 <= adj_row < self.board_config["rows"]):
                 continue
             
             # Check if position is within charge distance
@@ -970,7 +983,9 @@ class UseGameActions:
                              for u in self.game_state["units"])
                 
                 # Check if position is not a wall hex
-                wall_hexes = self.board_config.get('wall_hexes', [])
+                wall_hexes = self.board_config.get('wall_hexes')
+                if wall_hexes is None:
+                    wall_hexes = []
                 is_wall = any(
                     wall[0] == adj_col and wall[1] == adj_row 
                     for wall in wall_hexes if isinstance(wall, (list, tuple)) and len(wall) == 2
@@ -994,17 +1009,20 @@ class UseGameActions:
             "has_charged_this_turn": True
         })
 
-        # Log charge action with dice details and correct positioning - CRITICAL for replay
+        # Log charge action with dice details in shootDetails format - CRITICAL for replay
         if self.game_log:
-            # Format charge data for game log compatibility
-            formatted_charge_data = {
-                "total": charge_roll,
+            # Format charge dice details for combatlog visibility
+            charge_details = [{
+                "rollType": "charge",
                 "die1": die1,
-                "die2": die2
-            }
-            self.game_log.log_charge(charger, target, original_col, original_row, 
-                                   final_col, final_row, self.game_state["current_turn"],
-                                   0.0, 5, formatted_charge_data, die1, die2, True)
+                "die2": die2,
+                "totalRoll": charge_roll,
+                "targetDistance": distance,
+                "chargeSucceeded": True,
+                "rollResult": "SUCCESS"
+            }]
+            self.game_log.log_charge_action(charger, target, original_col, original_row, 
+                                          final_col, final_row, self.game_state["current_turn"])
 
         self.actions["add_charged_unit"](charger_id)
         self.actions["set_selected_unit_id"](None)
@@ -1014,15 +1032,17 @@ class UseGameActions:
         self.actions["set_move_preview"](None)
         self.actions["set_attack_preview"](None)
         
-        # Clear charge-specific preview states (missing from previous implementation)
-        if hasattr(self.actions, 'set_charge_preview'):
-            self.actions["set_charge_preview"](None)
-        if hasattr(self.actions, 'clear_charge_destinations'):
-            self.actions["clear_charge_destinations"]()
+        # CRITICAL: Clear charge preview states - MUST call these actions
+        self.actions["set_selected_unit_id"](None)
+        self.actions["set_mode"]("select")
         
-        # Clear charge roll data to prevent reuse
+        # Clear charge roll data to prevent reuse  
         if "unit_charge_rolls" in self.game_state and charger_id in self.game_state["unit_charge_rolls"]:
             del self.game_state["unit_charge_rolls"][charger_id]
+        
+        # CRITICAL: Clear charge preview hexes by setting phase state
+        if hasattr(self.actions, 'clear_charge_roll'):
+            self.actions["clear_charge_roll"](charger_id)
 
     def move_charger(self, charger_id: int, dest_col: int, dest_row: int) -> None:
         """EXACT mirror of moveCharger from TypeScript"""
@@ -1120,57 +1140,110 @@ class UseGameActions:
         if charge_data is None:
             return []
         
-        # Extract charge distance from data format (handle both int and dict)
-        if isinstance(charge_data, dict):
-            charge_distance = charge_data.get("total", charge_data.get("charge_roll", 0))
-        else:
-            charge_distance = charge_data  # Legacy int format
+        # Extract charge distance (now stored as simple number like TypeScript)
+        charge_distance = charge_data
 
         # Use shared gameMechanics function for consistency
         try:
             from shared.gameMechanics import calculate_charge_destinations
+            if "cols" not in self.board_config:
+                raise KeyError("Board config missing required 'cols' field")
+            if "rows" not in self.board_config:
+                raise KeyError("Board config missing required 'rows' field")
             return calculate_charge_destinations(
                 unit, charge_distance, self.game_state["units"], 
                 self.board_config, 
-                self.board_config.get("cols", 24),
-                self.board_config.get("rows", 18)
+                self.board_config["cols"],
+                self.board_config["rows"]
             )
-        except ImportError:
-            # Fallback implementation if shared function not available
-            return self._calculate_charge_destinations_fallback(unit, charge_distance)
+        except ImportError as e:
+            raise ImportError(f"Required shared.gameMechanics module not available: {e}")
 
-    def _calculate_charge_destinations_fallback(self, unit: Dict[str, Any], charge_distance: int) -> List[Dict[str, int]]:
-        """Fallback implementation for charge destination calculation"""
-        valid_destinations = []
+    def move_charger(self, charger_id: int, dest_col: int, dest_row: int) -> None:
+        """EXACT mirror of moveCharger from TypeScript"""
+        charger = self.find_unit(charger_id)
+        if not charger:
+            return
         
-        # Simple implementation: find all hexes within charge distance that are adjacent to enemies
-        for target_col in range(self.board_config.get("board_cols", 24)):
-            for target_row in range(self.board_config.get("board_rows", 18)):
-                # Calculate distance using cube coordinates
-                from shared.gameRules import offsetToCube, cubeDistance
-                distance = cubeDistance(
-                    offsetToCube(unit["col"], unit["row"]),
-                    offsetToCube(target_col, target_row)
-                )
-                
-                if distance <= charge_distance and distance > 0:
-                    # Check if hex is valid (not occupied by friendly unit)
-                    occupied_by_friendly = any(
-                        u["col"] == target_col and u["row"] == target_row and u["player"] == unit["player"]
-                        for u in self.units if u["id"] != unit["id"]
-                    )
-                    
-                    if not occupied_by_friendly:
-                        # Check if there's an enemy adjacent to this position
-                        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
-                        has_adjacent_enemy = any(
-                            max(abs(target_col - enemy["col"]), abs(target_row - enemy["row"])) == 1
-                            for enemy in enemy_units
-                        )
-                        
-                        if has_adjacent_enemy:
-                            valid_destinations.append({"col": target_col, "row": target_row})
+        # Create charge event for game log (EXACT from TypeScript)
+        if self.game_log:
+            charge_event = {
+                "id": f"charge-move-{int(time.time()*1000)}-{charger['id']}",
+                "timestamp": time.time(),
+                "type": "charge",
+                "message": f"Unit {charger.get('name', charger['unit_type'])} CHARGED from ({charger['col']}, {charger['row']}) to ({dest_col}, {dest_row})",
+                "turnNumber": self.game_state["current_turn"],
+                "phase": "charge",
+                "player": charger["player"],
+                "unitType": charger.get("unit_type", "unknown"),
+                "unitId": charger["id"]
+            }
+            # Direct log entry addition (simplified for AI training)
+            if hasattr(self.game_log, 'events'):
+                self.game_log.events.insert(0, charge_event)
+        
+        # Move unit to EXACT destination (not adjacent - player chooses where)
+        self.actions["update_unit"](charger_id, {
+            "col": dest_col, 
+            "row": dest_row, 
+            "has_charged_this_turn": True
+        })
+        
+        # Clean up charge state (EXACT from TypeScript)
+        if "unit_charge_rolls" in self.game_state and charger_id in self.game_state["unit_charge_rolls"]:
+            del self.game_state["unit_charge_rolls"][charger_id]
+        
+        # Mark as charged and reset UI
+        self.actions["add_charged_unit"](charger_id)
+        self.actions["set_selected_unit_id"](None)
+        self.actions["set_mode"]("select")
 
+    def _calculate_charge_destinations_simple(self, unit: Dict[str, Any], charge_distance: int) -> List[Dict[str, int]]:
+        """Simplified charge destinations - ensures ALL are adjacent to enemies"""
+        valid_destinations = []
+        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
+        
+        # For each enemy, find adjacent hexes within charge distance
+        for enemy in enemy_units:
+            # Get 6 adjacent positions around each enemy
+            adjacent_positions = [
+                (enemy["col"] + 1, enemy["row"]),
+                (enemy["col"] - 1, enemy["row"]),
+                (enemy["col"], enemy["row"] + 1),
+                (enemy["col"], enemy["row"] - 1),
+                (enemy["col"] + 1, enemy["row"] - 1),
+                (enemy["col"] - 1, enemy["row"] + 1)
+            ]
+            
+            for adj_col, adj_row in adjacent_positions:
+                # Check if within board bounds
+                if not (0 <= adj_col < self.board_config["cols"] and 0 <= adj_row < self.board_config["rows"]):
+                    continue
+                
+                # Check if within charge distance from unit
+                from shared.gameRules import get_hex_distance
+                distance = get_hex_distance(unit, {"col": adj_col, "row": adj_row})
+                if distance > charge_distance or distance == 0:
+                    continue
+                
+                # Check if position is not occupied
+                occupied = any(u["col"] == adj_col and u["row"] == adj_row for u in self.game_state["units"])
+                if occupied:
+                    continue
+                
+                # Check if position is not a wall
+                wall_hexes = self.board_config.get('wall_hexes')
+                if wall_hexes:
+                    is_wall = any(wall[0] == adj_col and wall[1] == adj_row 
+                                for wall in wall_hexes if isinstance(wall, (list, tuple)) and len(wall) == 2)
+                    if is_wall:
+                        continue
+                
+                # Valid destination - adjacent to enemy and within charge range
+                dest = {"col": adj_col, "row": adj_row}
+                if dest not in valid_destinations:
+                    valid_destinations.append(dest)
+        
         return valid_destinations
 
     def get_available_actions(self) -> Dict[str, Callable]:
