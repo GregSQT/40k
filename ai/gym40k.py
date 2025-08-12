@@ -320,10 +320,9 @@ class W40KEnv(gym.Env):
         self.winner = None
         self.step_count = 0
         
-        # CRITICAL: Ensure episode starts correctly - Turn 1 begins when P0 starts move phase
-        if self.controller.game_state["current_turn"] != 1:
-            self.controller.game_state["current_turn"] = 1
-        self.controller.game_state["current_player"] = 0
+        # CRITICAL: Episode starts at beginning of first Player 0 turn (movement phase) - Turn 1
+        self.controller.game_state["current_turn"] = 1  # Always start at Turn 1 per specification
+        self.controller.game_state["current_player"] = 0  # Episode starts with Player 0
         self.controller.game_state["phase"] = "move"
         self._last_acting_unit = None
         self._last_target_unit = None

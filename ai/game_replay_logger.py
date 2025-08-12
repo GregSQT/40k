@@ -103,9 +103,9 @@ class GameReplayLogger:
         return entry_dict
     
     def log_game_start(self):
-        """Log game start."""
-        # Use environment's actual current turn for game start
-        start_turn = self.env.controller.game_state["current_turn"]
+        """Log game start - episode starts at beginning of first Player 0 turn."""
+        # CRITICAL: Episode always starts at Turn 1, Player 0 movement phase per specification
+        start_turn = 1  # Force Turn 1 for episode start consistency
         self.add_entry(
             entry_type="turn_change",
             reward=0.0,

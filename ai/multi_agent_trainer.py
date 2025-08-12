@@ -885,8 +885,8 @@ class MultiAgentTrainer:
                             "combat_log": combat_log_entries.copy() if combat_log_entries else [],
                             "initial_state": initial_state.copy() if initial_state else {},
                             "game_info": {
-                                "scenario": "evaluation_episode",
-                                "total_turns": current_turn,
+                                "scenario": "evaluation_episode", 
+                                "total_turns": max(1, current_turn),  # Ensure minimum turn count of 1
                                 "winner": getattr(actual_env, 'winner', None) if hasattr(actual_env, 'winner') else None
                             }
                         }
