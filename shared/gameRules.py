@@ -422,11 +422,32 @@ def can_unit_charge_basic(unit: Dict[str, Any], enemy_units: List[Dict[str, Any]
         enemy["player"] != unit["player"] and 
         enemy.get("alive", True) and
         get_hex_distance(unit, enemy) <= CHARGE_MAX_DISTANCE and
-        get_hex_distance(unit, enemy) > 1
+        get_hex_distance(unit, enemy) > 1  # CRITICAL: Must be more than 1 hex away
         for enemy in enemy_units
     )
     
     return has_enemies_within_12_hexes
+
+def validate_charge_destination(unit: Dict[str, Any], dest_col: int, dest_row: int, 
+                              target: Dict[str, Any], charge_roll: int) -> bool:
+    """Validate that charge destination is valid."""
+    # Destination must be adjacent to target
+    dest_to_target_distance = get_hex_distance(
+        {"col": dest_col, "row": dest_row}, 
+        target
+    )
+    if dest_to_target_distance != 1:
+        return False
+    
+    # Charge distance must be achievable  
+    unit_to_dest_distance = get_hex_distance(
+        unit, 
+        {"col": dest_col, "row": dest_row}
+    )
+    if unit_to_dest_distance > charge_roll or unit_to_dest_distance > CHARGE_MAX_DISTANCE:
+        return False
+        
+    return True
 
 def get_valid_charge_targets(unit: Dict[str, Any], enemy_units: List[Dict[str, Any]], charge_roll: int) -> List[Dict[str, Any]]:
     """Get valid charge targets within rolled distance (EXACT from frontend logic)."""

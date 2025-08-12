@@ -215,20 +215,15 @@ class UsePhaseTransition:
             new_player = 1 if self.current_player == 0 else 0
             self.actions["set_current_player"](new_player)
             
-            # CRITICAL FIX: Increment turn ONLY when Player 0 starts movement phase
-            # AND only after phase is actually set to "move"
+            # Set phase to move first
+            self.actions["set_phase"]("move")
+            
+            # CRITICAL FIX: Increment turn ONLY when Player 0 starts movement phase (EXACT from frontend)
             if new_player == 0:  # Player 0 is about to start their turn
                 current_turn = self.game_state["current_turn"]
                 new_turn = current_turn + 1
-                # Defer turn increment until after phase is set to "move"
-                def increment_turn_after_phase_set():
-                    if self.game_state["phase"] == "move" and self.game_state["current_player"] == 0:
-                        self.actions["set_current_turn"](new_turn)
-                        self._log_turn_change(new_turn)
-                # Execute after all phase transitions are complete
-                increment_turn_after_phase_set()
-            
-            self.actions["set_phase"]("move")
+                self.actions["set_current_turn"](new_turn)
+                self._log_turn_change(new_turn)
             self.actions["reset_moved_units"]()
             self.actions["reset_charged_units"]()
             self.actions["reset_attacked_units"]()

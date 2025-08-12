@@ -155,7 +155,26 @@ class GameReplayLogger:
         # Create charge details with dice information
         charge_details = []
         if charge_roll is not None and die1 is not None and die2 is not None:
-            distance_needed = max(abs(start_col - target["col"]), abs(start_row - target["row"]))
+            # Use proper hex distance calculation for charge validation
+            from shared.gameRules import get_hex_distance
+            distance_needed = get_hex_distance(charger, target)
+            charge_details.append({
+                "rollType": "charge",
+                "die1": die1,
+                "die2": die2,
+                "totalRoll": charge_roll,
+                "targetDistance": distance_needed,
+                "chargeSucceeded": charge_succeeded,
+                "rollResult": "SUCCESS" if charge_succeeded else "FAILED"
+            })
+        else:
+            # Generate missing charge roll data for logging consistency
+            from shared.gameRules import roll_d6, get_hex_distance
+            die1 = roll_d6()
+            die2 = roll_d6()
+            charge_roll = die1 + die2
+            distance_needed = get_hex_distance(charger, target)
+            charge_succeeded = distance_needed <= charge_roll and distance_needed <= 12
             charge_details.append({
                 "rollType": "charge",
                 "die1": die1,

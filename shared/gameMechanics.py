@@ -69,15 +69,21 @@ def calculate_available_move_cells(unit: Dict[str, Any],
             forbidden_set.add(f"{wall_hex[0]},{wall_hex[1]}")
     
     # Add enemy positions and all adjacent hexes as forbidden (EXACT from BoardPvp.tsx)
-    for enemy in units:
-        if enemy["player"] == unit["player"]:
+    moving_unit_player = unit["player"]
+    for other_unit in units:
+        # Skip friendly units - only enemy units create forbidden zones
+        if other_unit["player"] == moving_unit_player:
+            continue
+        
+        # Skip dead units - they don't create forbidden zones
+        if not other_unit.get("alive", True):
             continue
         
         # Add enemy position itself
-        forbidden_set.add(f"{enemy['col']},{enemy['row']}")
+        forbidden_set.add(f"{other_unit['col']},{other_unit['row']}")
         
         # Use cube coordinates for proper hex adjacency (EXACT from BoardPvp.tsx)
-        enemy_neighbors = get_cube_neighbors(enemy["col"], enemy["row"])
+        enemy_neighbors = get_cube_neighbors(other_unit["col"], other_unit["row"])
         for adj_col, adj_row in enemy_neighbors:
             if (0 <= adj_col < board_cols and 0 <= adj_row < board_rows):
                 forbidden_set.add(f"{adj_col},{adj_row}")

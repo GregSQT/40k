@@ -25,6 +25,7 @@ from shared.gameRules import (
     offset_to_cube as offsetToCube, 
     cube_distance as cubeDistance, 
     roll_d6 as rollD6, 
+    roll_d6,
     calculate_wound_target as calculateWoundTarget, 
     calculate_save_target as calculateSaveTarget,
     roll_2d6 as roll2D6
@@ -430,7 +431,7 @@ class UseGameActions:
                 self.actions["set_selected_unit_id"](unit_id)
             return
 
-        # Special handling for charge phase (MISSING charge roll logic from original Python)
+        # Special handling for charge phase (COMPLETE charge roll logic with proper logging)
         if self.game_state["phase"] == "charge":
             existing_roll = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
             if existing_roll is not None:
@@ -439,11 +440,18 @@ class UseGameActions:
                 self.actions["set_mode"]("charge_preview")
                 return
             else:
-                # Roll charge distance (MISSING from original Python)
-                charge_roll = roll2D6()
+                # Roll 2d6 for charge distance with individual dice tracking
+                die1 = roll_d6()
+                die2 = roll_d6()
+                charge_roll = die1 + die2
                 if "max_charge_distance" not in self.board_config:
                     raise KeyError("Board config missing required 'max_charge_distance' field")
                 charge_distance = min(charge_roll, self.board_config["max_charge_distance"])
+                
+                # CRITICAL: Store charge roll in game state immediately
+                if "unit_charge_rolls" not in self.game_state:
+                    self.game_state["unit_charge_rolls"] = {}
+                self.game_state["unit_charge_rolls"][unit_id] = charge_roll
                 
                 # Check if any enemies within 12 hexes are also within the rolled charge distance
                 enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
@@ -481,14 +489,14 @@ class UseGameActions:
                 
                 can_charge = len(enemies_in_range) > 0
                 
-                # Update game state with charge roll
-                charge_rolls = self.game_state.get("unit_charge_rolls", {})
-                charge_rolls[unit_id] = charge_roll
-                # Note: In a real implementation, we'd need a way to update the game state
+                # CRITICAL: Store charge roll in game state immediately
+                if "unit_charge_rolls" not in self.game_state:
+                    self.game_state["unit_charge_rolls"] = {}
+                self.game_state["unit_charge_rolls"][unit_id] = charge_roll
                 
-                # Log charge roll (MISSING from original Python)
+                # Log charge roll with dice details
                 if self.game_log:
-                    self.game_log.log_charge_roll(unit, charge_roll, self.game_state["current_turn"])
+                    self.game_log.log_charge_roll(unit, charge_roll, die1, die2, self.game_state["current_turn"])
                 
                 self.actions["set_selected_unit_id"](unit_id)
                 self.actions["set_mode"]("charge_preview")
@@ -912,22 +920,43 @@ class UseGameActions:
     # === CHARGE SYSTEM (EXACT from TypeScript) ===
 
     def handle_charge(self, charger_id: int, target_id: int) -> None:
-        """EXACT mirror of handleCharge from TypeScript"""
+        """EXACT mirror of handleCharge from TypeScript with proper validation"""
         charger = self.find_unit(charger_id)
         target = self.find_unit(target_id)
         
         if not charger or not target:
             return
 
-        # Log charge action (MISSING from original Python)
+        # CRITICAL: Validate charge roll and distance
+        charge_data = self.game_state.get("unit_charge_rolls", {}).get(charger_id)
+        if not charge_data:
+            # No charge roll exists - this should not happen
+            return
+        
+        # Validate charge distance
+        from shared.gameRules import get_hex_distance, CHARGE_MAX_DISTANCE
+        distance = get_hex_distance(charger, target)
+        if distance > charge_data or distance > CHARGE_MAX_DISTANCE:
+            return
+        
+        # Log charge action with dice details
         if self.game_log:
-            self.game_log.log_charge_action(charger, target, charger["col"], charger["row"], 
-                                           target["col"], target["row"], self.game_state["current_turn"])
+            self.game_log.log_charge(charger, target, charger["col"], charger["row"], 
+                                   target["col"], target["row"], self.game_state["current_turn"],
+                                   0.0, 5, charge_data, charge_data.get("die1"), charge_data.get("die2"), True)
 
         self.actions["update_unit"](charger_id, {"has_charged_this_turn": True})
         self.actions["add_charged_unit"](charger_id)
         self.actions["set_selected_unit_id"](None)
         self.actions["set_mode"]("select")
+        
+        # Clear charge preview state to reset colored hexes
+        self.actions["set_move_preview"](None)
+        self.actions["set_attack_preview"](None)
+        
+        # Clear charge roll data
+        if "unit_charge_rolls" in self.game_state and charger_id in self.game_state["unit_charge_rolls"]:
+            del self.game_state["unit_charge_rolls"][charger_id]
 
     def move_charger(self, charger_id: int, dest_col: int, dest_row: int) -> None:
         """EXACT mirror of moveCharger from TypeScript"""
