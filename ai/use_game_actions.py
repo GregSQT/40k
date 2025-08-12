@@ -333,10 +333,17 @@ class UseGameActions:
             # NEW RULE: Units that fled cannot charge
             if unit["id"] in units_fled:
                 return False
+            # EXACT from TypeScript: Check if adjacent to any enemy (already in combat)
             is_adjacent = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
-            in_range = any(isUnitInRange(unit, enemy, unit["MOVE"]) for enemy in enemy_units)
-            # CRITICAL FIX: If no valid charge targets, mark as eligible to advance phase
-            return True  # Always allow charge phase to progress
+            if is_adjacent:
+                return False
+            # EXACT from TypeScript: Check if any enemies within 12-hex charge range (NOT using MOVE)
+            from shared.gameMechanics import CHARGE_MAX_DISTANCE
+            has_enemies_within_12_hexes = any(
+                getHexDistance(unit, enemy) <= CHARGE_MAX_DISTANCE and getHexDistance(unit, enemy) > 1
+                for enemy in enemy_units
+            )
+            return has_enemies_within_12_hexes
         
         elif phase == "combat":
             if "units_attacked" not in self.game_state:
@@ -391,7 +398,7 @@ class UseGameActions:
 
         if unit_id is None:
             self.actions["set_selected_unit_id"](None)
-            self.actions["set_move_preview"](None)
+            self.actions["clear_move_preview"]()
             self.actions["set_attack_preview"](None)
             self.actions["set_mode"]("select")
             return
@@ -415,14 +422,14 @@ class UseGameActions:
             
             self.actions["add_moved_unit"](unit_id)
             self.actions["set_selected_unit_id"](None)
-            self.actions["set_move_preview"](None)
+            self.actions["clear_move_preview"]()
             self.actions["set_mode"]("select")
             return
 
         # Special handling for shoot phase (EXACT from TypeScript)
         if self.game_state["phase"] == "shoot":
             # Always show the attack preview…
-            self.actions["set_move_preview"](None)
+            self.actions["clear_move_preview"]()
             self.actions["set_attack_preview"]({"unit_id": unit_id, "col": unit["col"], "row": unit["row"]})
             self.actions["set_mode"]("attack_preview")
 
@@ -453,54 +460,21 @@ class UseGameActions:
                 # Store as simple number like TypeScript (dice details logged separately)
                 self.game_state["unit_charge_rolls"][unit_id] = charge_roll
                 
-                # Check if any enemies within 12 hexes are also within the rolled charge distance
-                enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
-                
-                enemies_in_range = []
-                for enemy in enemy_units:
-                    # First check if enemy is within 12 hexes (eligibility already passed this)
-                    cube1 = offsetToCube(unit["col"], unit["row"])
-                    cube2 = offsetToCube(enemy["col"], enemy["row"])
-                    hex_distance = cubeDistance(cube1, cube2)
-                    
-                    # Check if enemy is within rolled charge distance (12-hex limit already checked in eligibility)
-                    if hex_distance <= charge_roll and hex_distance <= 12:
-                        # Use proper pathfinding logic for walls - EXACT from PvP mode
-                        if self.board_config.get("wall_hexes"):
-                            from shared.gameMechanics import calculate_charge_destinations
-                            from config_loader import get_board_size
-                            board_cols, board_rows = get_board_size()
-                            
-                            # Use shared pathfinding that respects walls (same as PvP/replay)
-                            valid_destinations = calculate_charge_destinations(
-                                unit, charge_roll, self.game_state["units"], 
-                                self.board_config, board_cols, board_rows
-                            )
-                            
-                            # Check if any valid charge destination is adjacent to this enemy
-                            is_reachable = any(
-                                max(abs(dest["col"] - enemy["col"]), abs(dest["row"] - enemy["row"])) == 1
-                                for dest in valid_destinations
-                            )
-                            if is_reachable:
-                                enemies_in_range.append(enemy)
-                        else:
-                            enemies_in_range.append(enemy)
-                
-                can_charge = len(enemies_in_range) > 0
-                
-                # Log charge roll with dice details - create dummy target for roll logging
+                # CRITICAL FIX: Log charge roll immediately for display like TypeScript
                 if self.game_log:
-                    # Create charge roll log entry with shootDetails format for dice visibility
-                    charge_roll_details = [{
-                        "rollType": "charge",
+                    # Format charge roll message exactly like frontend  
+                    charge_message = f"Unit {unit.get('name', unit['unit_type'])} {unit['id']} rolled {charge_roll} for charge (dice: {die1}, {die2})"
+                    self.game_log.log_game_event({
+                        "type": "charge_roll",
+                        "message": charge_message,
+                        "turn": self.game_state["current_turn"],
+                        "phase": "charge",
+                        "player": unit["player"],
+                        "unit_id": unit["id"],
+                        "dice_roll": charge_roll,
                         "die1": die1,
-                        "die2": die2,
-                        "totalRoll": charge_roll,
-                        "rollResult": "ROLLED"
-                    }]
-                    # Log as shoot to ensure dice details appear in combatlog
-                    self.game_log.log_shooting_action(unit, unit, charge_roll_details, self.game_state["current_turn"])
+                        "die2": die2
+                    })
                 
                 self.actions["set_selected_unit_id"](unit_id)
                 self.actions["set_mode"]("charge_preview")
@@ -509,7 +483,7 @@ class UseGameActions:
         # Special handling for combat phase (EXACT from TypeScript)
         if self.game_state["phase"] == "combat":
             # Always show the attack preview for adjacent enemies
-            self.actions["set_move_preview"](None)
+            self.actions["clear_move_preview"]()
             self.actions["set_attack_preview"]({"unit_id": unit_id, "col": unit["col"], "row": unit["row"]})
             self.actions["set_mode"]("attack_preview")
             self.actions["set_selected_unit_id"](unit_id)
@@ -517,7 +491,7 @@ class UseGameActions:
 
         # Default selection (EXACT from TypeScript)
         self.actions["set_selected_unit_id"](unit_id)
-        self.actions["set_move_preview"](None)
+        self.actions["clear_move_preview"]()
         self.actions["set_attack_preview"](None)
         self.actions["set_mode"]("select")
 
@@ -541,7 +515,9 @@ class UseGameActions:
         if not unit or not self.is_unit_eligible_local(unit):
             return
 
-        self.actions["set_move_preview"]({"unit_id": unit_id, "dest_col": col, "dest_row": row})
+        # Calculate path for move preview (simple straight line for now)
+        path = [{"col": col, "row": row}]
+        self.actions["set_move_preview"](unit_id, unit["col"], unit["row"], col, row, path)
         self.actions["set_mode"]("move_preview")
 
     def start_attack_preview(self, unit_id: int, col: int, row: int) -> None:
@@ -600,14 +576,14 @@ class UseGameActions:
         if moved_unit_id is not None:
             self.actions["add_moved_unit"](moved_unit_id)
 
-        self.actions["set_move_preview"](None)
+        self.actions["clear_move_preview"]()
         self.actions["set_attack_preview"](None)
         self.actions["set_selected_unit_id"](None)
         self.actions["set_mode"]("select")
 
     def cancel_move(self) -> None:
         """EXACT mirror of cancelMove from TypeScript"""
-        self.actions["set_move_preview"](None)
+        self.actions["clear_move_preview"]()
         self.actions["set_attack_preview"](None)
         self.actions["set_mode"]("select")
 
@@ -1029,7 +1005,7 @@ class UseGameActions:
         self.actions["set_mode"]("select")
         
         # CRITICAL: Clear ALL preview states to reset colored hexes
-        self.actions["set_move_preview"](None)
+        self.actions["clear_move_preview"]()
         self.actions["set_attack_preview"](None)
         
         # CRITICAL: Clear charge preview states - MUST call these actions
@@ -1079,7 +1055,7 @@ class UseGameActions:
             self.actions["add_charged_unit"](self.selected_unit_id)
         self.actions["set_selected_unit_id"](None)
         self.actions["set_mode"]("select")
-        self.actions["set_move_preview"](None)
+        self.actions["clear_move_preview"]()
         self.actions["set_attack_preview"](None)
 
     def validate_charge(self, charger_id: int) -> None:
@@ -1090,47 +1066,30 @@ class UseGameActions:
 
     # === ADDITIONAL METHODS FOR TRAINING & PVP ENHANCEMENT ===
 
-    def direct_move(self, unit_id: int, col: int, row: int) -> None:
+    def validated_move(self, unit_id: int, col: int, row: int) -> bool:
         """
-        TRAINING-SPECIFIC: Direct movement without preview system.
-        Enables precise AI movement control for advanced training.
+        WALL-SAFE movement using existing validation system.
+        Returns True if move was successful, False if invalid.
         """
         unit = self.find_unit(unit_id)
         phase = self.game_state["phase"]
         if not unit or not self.is_unit_eligible_local(unit) or phase != "move":
-            return
+            return False
 
-        # Check if unit is fleeing (EXACT from TypeScript)
-        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
-        was_adjacent_to_enemy = any(
-            max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"])) == 1
-            for enemy in enemy_units
-        )
-        
-        if was_adjacent_to_enemy:
-            will_be_adjacent_to_enemy = any(
-                max(abs(col - enemy["col"]), abs(row - enemy["row"])) == 1
-                for enemy in enemy_units
-            )
-            
-            if not will_be_adjacent_to_enemy:
-                self.actions["add_fled_unit"](unit_id)
+        # CRITICAL: Validate movement using wall-checking system
+        valid_moves = self.get_valid_moves(unit_id)
+        if not any(move["col"] == col and move["row"] == row for move in valid_moves):
+            return False  # Invalid destination - movement blocked by walls
 
-        # Log the move action (MISSING from original Python)
-        if self.game_log:
-            self.game_log.log_move_action(unit, unit["col"], unit["row"], col, row, 
-                                         self.game_state["current_turn"])
-
-        # Move the unit directly
+        # Direct unit update without preview system to avoid complications
         self.actions["update_unit"](unit_id, {"col": col, "row": row})
         self.actions["add_moved_unit"](unit_id)
-        self.actions["set_selected_unit_id"](None)
-        self.actions["set_mode"]("select")
+        return True
 
     def get_charge_destinations(self, unit_id: int) -> List[Dict[str, int]]:
         """
         PVP ESSENTIAL: Calculate valid charge destinations for visual preview.
-        Used by Board.tsx for showing green charge destination hexes.
+        Only shows hexes adjacent to reachable enemies within charge roll distance.
         """
         unit = self.find_unit(unit_id)
         if not unit:
@@ -1140,24 +1099,74 @@ class UseGameActions:
         if charge_data is None:
             return []
         
-        # Extract charge distance (now stored as simple number like TypeScript)
+        # Extract charge distance from rolled dice (NOT from MOVE stat)
         charge_distance = charge_data
-
-        # Use shared gameMechanics function for consistency
-        try:
-            from shared.gameMechanics import calculate_charge_destinations
-            if "cols" not in self.board_config:
-                raise KeyError("Board config missing required 'cols' field")
-            if "rows" not in self.board_config:
-                raise KeyError("Board config missing required 'rows' field")
-            return calculate_charge_destinations(
-                unit, charge_distance, self.game_state["units"], 
-                self.board_config, 
-                self.board_config["cols"],
-                self.board_config["rows"]
-            )
-        except ImportError as e:
-            raise ImportError(f"Required shared.gameMechanics module not available: {e}")
+        
+        # Get all enemy units
+        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
+        
+        valid_destinations = []
+        wall_hexes = self.board_config.get('wall_hexes', [])
+        
+        # For each enemy, check if reachable and get adjacent hexes
+        for enemy in enemy_units:
+            # Check if enemy is within charge distance using pathfinding
+            from shared.gameRules import get_hex_distance
+            straight_distance = get_hex_distance(unit, enemy)
+            
+            # Skip if enemy is too far even in straight line
+            if straight_distance > charge_distance:
+                continue
+            
+            # Check pathfinding around walls if walls exist
+            if wall_hexes:
+                from shared.gameMechanics import calculate_charge_destinations
+                wall_checked_destinations = calculate_charge_destinations(
+                    unit, charge_distance, self.game_state["units"], 
+                    self.board_config, 
+                    self.board_config["cols"],
+                    self.board_config["rows"]
+                )
+                
+                # Only include destinations adjacent to this specific enemy
+                enemy_adjacent_destinations = []
+                for dest in wall_checked_destinations:
+                    distance_to_enemy = max(abs(dest["col"] - enemy["col"]), abs(dest["row"] - enemy["row"]))
+                    if distance_to_enemy == 1:  # Adjacent to enemy
+                        enemy_adjacent_destinations.append(dest)
+                
+                valid_destinations.extend(enemy_adjacent_destinations)
+            else:
+                # No walls - check direct adjacency to enemy within charge range
+                adjacent_positions = [
+                    (enemy["col"] + 1, enemy["row"]),
+                    (enemy["col"] - 1, enemy["row"]),
+                    (enemy["col"], enemy["row"] + 1),
+                    (enemy["col"], enemy["row"] - 1),
+                    (enemy["col"] + 1, enemy["row"] - 1),
+                    (enemy["col"] - 1, enemy["row"] + 1)
+                ]
+                
+                for adj_col, adj_row in adjacent_positions:
+                    # Check if within board bounds
+                    if not (0 <= adj_col < self.board_config["cols"] and 0 <= adj_row < self.board_config["rows"]):
+                        continue
+                    
+                    # Check if within charge distance from unit
+                    distance = get_hex_distance(unit, {"col": adj_col, "row": adj_row})
+                    if distance > charge_distance or distance == 0:
+                        continue
+                    
+                    # Check if position is not occupied
+                    occupied = any(u["col"] == adj_col and u["row"] == adj_row for u in self.game_state["units"])
+                    if occupied:
+                        continue
+                    
+                    dest = {"col": adj_col, "row": adj_row}
+                    if dest not in valid_destinations:
+                        valid_destinations.append(dest)
+        
+        return valid_destinations
 
     def move_charger(self, charger_id: int, dest_col: int, dest_row: int) -> None:
         """EXACT mirror of moveCharger from TypeScript"""
@@ -1260,7 +1269,7 @@ class UseGameActions:
             "start_attack_preview": self.start_attack_preview,
             "confirm_move": self.confirm_move,
             "cancel_move": self.cancel_move,
-            "handle_move": self.direct_move,
+            "handle_move": self.validated_move,
             "handle_shoot": self.handle_shoot,
             "handle_combat_attack": self.handle_combat_attack,
             "handle_charge": self.handle_charge,
@@ -1269,9 +1278,9 @@ class UseGameActions:
             "validate_charge": self.validate_charge,
             
             # MISSING methods exposed in GameController.tsx:
-            "is_unit_eligible": self.is_unit_eligible_local,  # ❌ WAS MISSING!
-            "get_charge_destinations": self.get_charge_destinations,  # ❌ WAS MISSING!
-            "direct_move": self.direct_move,  # ❌ WAS MISSING!
+            "is_unit_eligible": self.is_unit_eligible_local,
+            "get_charge_destinations": self.get_charge_destinations,
+            "validated_move": self.validated_move,
             
             # MISSING training methods:
             "get_valid_moves": self.get_valid_moves,
@@ -1477,7 +1486,7 @@ class TrainingGameActions(UseGameActions):
         return {
             "handle_unit_selection": self.select_unit,
             "confirm_move": self.confirm_move,
-            "direct_move": self.direct_move,
+            "direct_move": self.validated_move,
             "handle_shoot": self.handle_shoot,
             "handle_charge": self.handle_charge,
             "handle_combat_attack": self.handle_combat_attack,

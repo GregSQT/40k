@@ -196,12 +196,16 @@ class GameController:
         return self.game_actions["handle_unit_selection"](unit_id)
 
     def move_unit(self, unit_id: int, col: int, row: int) -> bool:
-        """Move a unit"""
-        # No fallbacks - direct_move must exist
-        if "direct_move" not in self.game_actions:
-            raise RuntimeError("game_actions missing required direct_move method")
+        """Move a unit using validated movement system"""
+        # Use existing validated movement methods instead of direct_move
+        if "start_move_preview" not in self.game_actions:
+            raise RuntimeError("game_actions missing required start_move_preview method")
+        if "confirm_move" not in self.game_actions:
+            raise RuntimeError("game_actions missing required confirm_move method")
         
-        self.game_actions["direct_move"](unit_id, col, row)
+        # Use the validated preview system that checks walls
+        self.game_actions["start_move_preview"](unit_id, col, row)
+        self.game_actions["confirm_move"]()
         return True
 
     def shoot_unit(self, shooter_id: int, target_id: int) -> bool:

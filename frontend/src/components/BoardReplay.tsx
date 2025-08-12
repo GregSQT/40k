@@ -15,7 +15,7 @@ import { GameLog } from './GameLog';
 
 // Pathfinding utilities now imported from gameHelpers (same as BoardPvp.tsx)
 
-const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: number, boardConfig: any, units: ReplayUnit[]): { col: number; row: number }[] => {
+const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: number, boardConfig: any, units: ReplayUnit[], currentPlayer: number): { col: number; row: number }[] => {
   if (!boardConfig) return [];
   
   const BOARD_COLS = boardConfig.cols;
@@ -44,20 +44,22 @@ const calculateAvailableMoveCells = (unitCol: number, unitRow: number, maxMove: 
     forbiddenSet.add(`${deadUnit.col},${deadUnit.row}`);
   });
   
-  // Find the moving unit to determine which player we're calculating for
-  const movingUnit = units.find(u => u.col === unitCol && u.row === unitRow);
-  const movingUnitPlayer = movingUnit ? movingUnit.player : 0;
+  // Use the provided current player instead of guessing from position
+  const movingUnitPlayer = currentPlayer;
   
-  // CORRECTED: Only forbid destination hexes, not source hexes (allows flee mechanic)
-  for (const enemy of units) {
-    if (enemy.player === movingUnitPlayer) continue; // Skip friendly units
-
+  // Only forbid hexes adjacent to ENEMY units, not friendly units
+  for (const unit of units) {
+    // Skip dead units
+    if (!unit.alive) continue;
+    
+    // Skip friendly units - only enemy units create forbidden zones
+    if (unit.player === movingUnitPlayer) continue;
+    
     // Add enemy position itself as forbidden destination
-    forbiddenSet.add(`${enemy.col},${enemy.row}`);
+    forbiddenSet.add(`${unit.col},${unit.row}`);
 
     // Add hexes adjacent to enemies as forbidden DESTINATIONS only
-    // Units CAN move FROM adjacent positions (flee) but NOT TO them
-    const enemyCube = offsetToCube(enemy.col, enemy.row);
+    const enemyCube = offsetToCube(unit.col, unit.row);
     for (const [dx, dy, dz] of cubeDirections) {
       const adjCube = {
         x: enemyCube.x + dx,
@@ -175,12 +177,6 @@ const calculateChargeTargets = (
   
   // CHARGE RULES: Only forbid walls and occupied hexes - NOT enemy-adjacent hexes
   const forbiddenSet = new Set<string>();
-  
-  // Add all wall hexes as forbidden
-  const wallHexSet = new Set<string>(
-    (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
-  );
-  wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
   
   // Add occupied unit positions as forbidden (including dead units)
   units.forEach(unit => {
@@ -1650,7 +1646,7 @@ const validateUnitRegistry = () => {
             // Calculate path using pathfinding
             console.log('🔍 Unit MOVE value:', movingUnit.MOVE);
             console.log('🔍 Current units for pathfinding:', newUnits.map(u => ({ id: u.id, col: u.col, row: u.row, alive: u.alive })));
-            const availableCells = calculateAvailableMoveCells(fromCol, fromRow, movingUnit.MOVE, boardConfig, newUnits);
+            const availableCells = calculateAvailableMoveCells(fromCol, fromRow, movingUnit.MOVE, boardConfig, newUnits, logEntry.player || 0);
             console.log('🔍 Available move cells:', availableCells);
             
             if (availableCells.length > 0) {
