@@ -312,10 +312,18 @@ class UseGameActions:
             from shared.gameRules import offset_to_cube
             current_cube = offset_to_cube(current["col"], current["row"])
             for dx, dy, dz in cube_directions:
+                # Handle both tuple and dict formats from offsetToCube
+                if isinstance(current_cube, tuple):
+                    # Convert tuple (x, y, z) to dict format
+                    current_x, current_y, current_z = current_cube
+                else:
+                    # Already dict format
+                    current_x, current_y, current_z = current_cube["x"], current_cube["y"], current_cube["z"]
+                
                 neighbor_cube = {
-                    "x": current_cube["x"] + dx,
-                    "y": current_cube["y"] + dy,
-                    "z": current_cube["z"] + dz
+                    "x": current_x + dx,
+                    "y": current_y + dy,
+                    "z": current_z + dz
                 }
                 
                 ncol = neighbor_cube["x"]
@@ -1328,10 +1336,18 @@ class UseGameActions:
             from shared.gameRules import offset_to_cube
             current_cube = offset_to_cube(col, row)
             for dx, dy, dz in cube_directions:
+                # Handle both tuple and dict formats from offsetToCube
+                if isinstance(current_cube, tuple):
+                    # Convert tuple (x, y, z) to dict format
+                    current_x, current_y, current_z = current_cube
+                else:
+                    # Already dict format
+                    current_x, current_y, current_z = current_cube["x"], current_cube["y"], current_cube["z"]
+                
                 neighbor_cube = {
-                    "x": current_cube["x"] + dx,
-                    "y": current_cube["y"] + dy,
-                    "z": current_cube["z"] + dz
+                    "x": current_x + dx,
+                    "y": current_y + dy,
+                    "z": current_z + dz
                 }
                 
                 ncol = neighbor_cube["x"]

@@ -475,11 +475,20 @@ class MultiAgentTrainer:
             if thread.is_alive():
                 raise TimeoutError("Scenario generation timeout (10 seconds)")
             if scenario_error[0]:
+                print(f"❌ Scenario generation error: {scenario_error[0]}")
                 raise scenario_error[0]
             if scenario_result[0] is None:
                 raise RuntimeError("Scenario generation failed without error")
                 
             scenario = scenario_result[0]
+            
+            # CRITICAL: Validate scenario structure before proceeding
+            if not isinstance(scenario, dict):
+                raise TypeError(f"Generated scenario must be dict, got {type(scenario)}")
+            if "metadata" not in scenario:
+                raise KeyError(f"Generated scenario missing metadata: {list(scenario.keys())}")
+            if not isinstance(scenario["metadata"], dict):
+                raise TypeError(f"Scenario metadata must be dict, got {type(scenario['metadata'])}")
             
             # Save scenario to temporary file
             scenario_path = self._save_session_scenario(session.session_id, scenario)
@@ -604,6 +613,9 @@ class MultiAgentTrainer:
             
         except Exception as e:
             print(f"❌ Session {session.session_id} failed: {e}")
+            import traceback
+            print(f"Full traceback:")
+            traceback.print_exc()
             session.status = 'failed'
             
             # Calculate duration for failed session
@@ -986,10 +998,24 @@ class MultiAgentTrainer:
 
     def _save_session_scenario(self, session_id: str, scenario: Dict[str, Any]) -> str:
         """Save scenario for training session."""
-        # Extract agent names from scenario metadata
-        player_0_agent = scenario["metadata"]["player_0_agent"]
-        player_1_agent = scenario["metadata"]["player_1_agent"]
-        timestamp = scenario["metadata"]["generated_timestamp"]
+        # Extract agent names from scenario metadata - validate structure
+        if "metadata" not in scenario:
+            raise KeyError(f"Scenario missing required 'metadata' field: {type(scenario)}")
+        
+        metadata = scenario["metadata"]
+        if not isinstance(metadata, dict):
+            raise TypeError(f"Scenario metadata must be dict, got {type(metadata)}: {metadata}")
+        
+        if "player_0_agent" not in metadata:
+            raise KeyError(f"Scenario metadata missing 'player_0_agent': {list(metadata.keys())}")
+        if "player_1_agent" not in metadata:
+            raise KeyError(f"Scenario metadata missing 'player_1_agent': {list(metadata.keys())}")
+        if "generated_timestamp" not in metadata:
+            raise KeyError(f"Scenario metadata missing 'generated_timestamp': {list(metadata.keys())}")
+        
+        player_0_agent = metadata["player_0_agent"]
+        player_1_agent = metadata["player_1_agent"]
+        timestamp = metadata["generated_timestamp"]
         
         session_scenario_path = os.path.join(
             os.path.dirname(self.config.config_dir), 

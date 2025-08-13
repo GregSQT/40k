@@ -83,116 +83,37 @@ class ScenarioManager:
                 with open(template_file, 'r') as f:
                     template_data = json.load(f)
                 
+                # Get board size from board config as single source of truth
+                board_size = self.config.get_board_size()
+                
                 for name, data in template_data.items():
+                    # CRITICAL FIX: Normalize deployment_zones keys from JSON string keys to integer keys
+                    if "deployment_zones" not in data:
+                        raise KeyError(f"Template '{name}' missing required 'deployment_zones' field")
+                    raw_deployment_zones = data["deployment_zones"]
+                    normalized_deployment_zones = {}
+                    for key, value in raw_deployment_zones.items():
+                        # Convert string keys to integers (JSON saves player keys as strings)
+                        int_key = int(key) if isinstance(key, str) and key.isdigit() else key
+                        normalized_deployment_zones[int_key] = value
+                    
                     templates[name] = ScenarioTemplate(
                         name=name,
-                        description=data.get("description", ""),
-                        board_size=tuple(data.get("board_size", [24, 18])),
-                        agent_compositions=data.get("agent_compositions", {}),
-                        unit_counts=data.get("unit_counts", {}),
-                        deployment_zones=data.get("deployment_zones", {}),
-                        difficulty=data.get("difficulty", "medium"),
-                        training_focus=data.get("training_focus", "balanced")
+                        description=data["description"],
+                        board_size=board_size,
+                        agent_compositions=data["agent_compositions"],
+                        unit_counts=data["unit_counts"],
+                        deployment_zones=normalized_deployment_zones,
+                        difficulty=data["difficulty"],
+                        training_focus=data["training_focus"]
                     )
                     
                 # Templates loaded
                 
             except Exception as e:
-                print(f"⚠️ Failed to load scenario templates: {e}")
-                # Create default templates
-                templates = self._create_default_templates()
+                raise RuntimeError(f"Failed to load scenario templates from {template_file}: {e}")
         else:
-            print(f"⚠️ Scenario templates not found at {template_file}")
-            # Create default templates and save them
-            templates = self._create_default_templates()
-            self._save_scenario_templates(templates, template_file)
-        
-        return templates
-
-    def _create_default_templates(self) -> Dict[str, ScenarioTemplate]:
-        """Create default scenario templates based on available agents."""
-        templates = {}
-        
-        # Get board size from config
-        board_size = self.config.get_board_size()
-        
-        # Get available agents from unit registry directly
-        available_agents = self.unit_registry.get_required_models()
-        
-        # Solo training templates - one agent type vs scripted bot
-        for agent_key in available_agents:
-            agent_units = self.unit_registry.get_units_for_model(agent_key)
-            if agent_units:
-                primary_unit = agent_units[0]  # Use first unit as primary
-                
-                templates[f"solo_{agent_key.lower()}"] = ScenarioTemplate(
-                    name=f"solo_{agent_key.lower()}",
-                    description=f"Solo training for {agent_key} agent",
-                    board_size=board_size,
-                    agent_compositions={agent_key: [primary_unit]},
-                    unit_counts={primary_unit: 2},
-                    deployment_zones={
-                        0: [(0, board_size[1]//2-1), (0, board_size[1]//2+1)],  # Bot side
-                        1: [(board_size[0]-1, board_size[1]//2-1), (board_size[0]-1, board_size[1]//2+1)]  # AI side
-                    },
-                    difficulty="easy",
-                    training_focus="solo"
-                )
-        
-        # Cross-faction balanced templates
-        faction_agents = defaultdict(list)
-        for agent_key in available_agents:
-            faction = agent_key.split('_')[0]  # Extract faction from agent key
-            faction_agents[faction].append(agent_key)
-        
-        # Create cross-faction matchups
-        factions = list(faction_agents.keys())
-        for i, faction1 in enumerate(factions):
-            for faction2 in factions[i+1:]:
-                for agent1 in faction_agents[faction1]:
-                    for agent2 in faction_agents[faction2]:
-                        template_name = f"cross_{agent1.lower()}_vs_{agent2.lower()}"
-                        
-                        # Get representative units
-                        units1 = self.unit_registry.get_units_for_model(agent1)
-                        units2 = self.unit_registry.get_units_for_model(agent2)
-                        
-                        if units1 and units2:
-                            templates[template_name] = ScenarioTemplate(
-                                name=template_name,
-                                description=f"Cross-faction training: {agent1} vs {agent2}",
-                                board_size=board_size,
-                                agent_compositions={
-                                    agent1: [units1[0]],
-                                    agent2: [units2[0]]
-                                },
-                                unit_counts={units1[0]: 2, units2[0]: 2},
-                                deployment_zones={
-                                    0: [(1, board_size[1]//2-1), (1, board_size[1]//2+1)],
-                                    1: [(board_size[0]-2, board_size[1]//2-1), (board_size[0]-2, board_size[1]//2+1)]
-                                },
-                                difficulty="medium",
-                                training_focus="cross_faction"
-                            )
-        
-        # Mixed composition templates - multiple agents per side
-        templates["mixed_balanced"] = ScenarioTemplate(
-            name="mixed_balanced",
-            description="Balanced mixed composition training",
-            board_size=board_size,
-            agent_compositions={
-                # Mix different agent types
-                agent_key: self.unit_registry.get_units_for_model(agent_key)[:2] 
-                for agent_key in available_agents[:2]  # Use first 2 agents
-            },
-            unit_counts={},  # Will be populated dynamically
-            deployment_zones={
-                0: [(2, board_size[1]//2-2), (2, board_size[1]//2), (2, board_size[1]//2+2), (3, board_size[1]//2-1)],
-                1: [(board_size[0]-3, board_size[1]//2-2), (board_size[0]-3, board_size[1]//2), (board_size[0]-3, board_size[1]//2+2), (board_size[0]-4, board_size[1]//2-1)]
-            },
-            difficulty="hard",
-            training_focus="mixed"
-        )
+            raise FileNotFoundError(f"Scenario templates not found at {template_file}. No fallbacks allowed - file must exist.")
         
         return templates
 
@@ -237,22 +158,17 @@ class ScenarioManager:
         unit_id = 1
         
         # Generate units for player 0 - Use template composition if specified
-        if player_0_agent in template.agent_compositions:
-            agent_0_units = template.agent_compositions[player_0_agent]
-            #print(f"✅ Using template composition for {player_0_agent}: {agent_0_units}")
-        else:
-            # DEBUG: Show what compositions are available vs what was requested
-            available_compositions = list(template.agent_compositions.keys())
-            print(f"❌ SCENARIO DEBUG: {player_0_agent} not found in template '{template_name}'")
-            print(f"    Available compositions: {available_compositions}")
-            print(f"    Falling back to unit registry for {player_0_agent}")
-            agent_0_units = self.unit_registry.get_units_for_model(player_0_agent)
+        if player_0_agent not in template.agent_compositions:
+            raise ValueError(f"Agent '{player_0_agent}' not found in template '{template_name}' agent_compositions. Available: {list(template.agent_compositions.keys())}")
         
+        agent_0_units = template.agent_compositions[player_0_agent]
         if not agent_0_units:
-            raise ValueError(f"No units found for agent: {player_0_agent}")
+            raise ValueError(f"No units defined for agent '{player_0_agent}' in template '{template_name}'")
         
         # CRITICAL FIX: Handle string keys from JSON properly
-        deployment_0 = template.deployment_zones.get(0) or template.deployment_zones.get("0", [(0, 0), (1, 0)])
+        if 0 not in template.deployment_zones:
+            raise KeyError(f"Template '{template_name}' missing required deployment_zones for player 0")
+        deployment_0 = template.deployment_zones[0]
         units_per_player = units_per_player_setup  # Deploy 2 units per player for better battles
         
         # Validate enough deployment positions with detailed error
@@ -280,22 +196,17 @@ class ScenarioManager:
             unit_id += 1
         
         # Generate units for player 1 - Use template composition if specified
-        if player_1_agent in template.agent_compositions:
-            agent_1_units = template.agent_compositions[player_1_agent]
-            #print(f"✅ Using template composition for {player_1_agent}: {agent_1_units}")
-        else:
-            # DEBUG: Show what compositions are available vs what was requested
-            available_compositions = list(template.agent_compositions.keys())
-            print(f"❌ SCENARIO DEBUG: {player_1_agent} not found in template '{template_name}'")
-            print(f"    Available compositions: {available_compositions}")
-            print(f"    Falling back to unit registry for {player_1_agent}")
-            agent_1_units = self.unit_registry.get_units_for_model(player_1_agent)
+        if player_1_agent not in template.agent_compositions:
+            raise ValueError(f"Agent '{player_1_agent}' not found in template '{template_name}' agent_compositions. Available: {list(template.agent_compositions.keys())}")
         
+        agent_1_units = template.agent_compositions[player_1_agent]
         if not agent_1_units:
-            raise ValueError(f"No units found for agent: {player_1_agent}")
+            raise ValueError(f"No units defined for agent '{player_1_agent}' in template '{template_name}'")
         
         # CRITICAL FIX: Handle string keys from JSON properly  
-        deployment_1 = template.deployment_zones.get(1) or template.deployment_zones.get("1", [(23, 17), (22, 17)])
+        if 1 not in template.deployment_zones:
+            raise KeyError(f"Template '{template_name}' missing required deployment_zones for player 1")
+        deployment_1 = template.deployment_zones[1]
         
         # Validate enough deployment positions with detailed error
         if len(deployment_1) < units_per_player:
@@ -334,7 +245,6 @@ class ScenarioManager:
         for pos, units_at_pos in position_conflicts.items():
             if len(units_at_pos) > 1:
                 conflicts_found = True
-                print(f"❌ SCENARIO CONFLICT DETECTED at position {pos}: {units_at_pos}")
         
         if conflicts_found:
             raise ValueError(f"SCENARIO GENERATION FAILED: Unit position conflicts detected in template '{template_name}'. Check deployment zones.")
@@ -368,8 +278,7 @@ class ScenarioManager:
         # Calculate balanced allocation
         num_agents = len(self.available_agents)
         if num_agents < 2:
-            print("⚠️ Need at least 2 agents for training rotation")
-            return matchups
+            raise ValueError(f"Need at least 2 agents for training rotation, got {num_agents}")
 
     def get_phase_based_training_rotation(self, total_episodes: int, phase: str) -> List[TrainingMatchup]:
         """
@@ -493,17 +402,16 @@ class ScenarioManager:
             cross_template = f"cross_{agent1.lower()}_vs_{agent2.lower()}"
             if cross_template in self.scenario_templates:
                 return cross_template
-            # Fallback to reverse
             reverse_template = f"cross_{agent2.lower()}_vs_{agent1.lower()}"
             if reverse_template in self.scenario_templates:
                 return reverse_template
+            raise ValueError(f"No cross-faction template found for {agent1} vs {agent2}")
         
         # Same faction - use balanced template
         if "mixed_balanced" in self.scenario_templates:
             return "mixed_balanced"
         
-        # Ultimate fallback - use any available template
-        return list(self.scenario_templates.keys())[0]
+        raise ValueError(f"No suitable template found for same-faction matchup {agent1} vs {agent2}")
 
     def _calculate_training_priority(self, agent1: str, agent2: str) -> float:
         """Calculate training priority for agent matchup based on history."""
