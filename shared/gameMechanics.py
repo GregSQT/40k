@@ -144,7 +144,12 @@ def is_valid_move_destination(unit: Dict[str, Any],
 
 # === CHARGE MECHANICS (EXACT from useGameActions.ts) ===
 
-CHARGE_MAX_DISTANCE = 12  # Fixed 12-hex charge limit (EXACT from frontend)
+def get_charge_max_distance() -> int:
+    """Get charge max distance from config"""
+    from config_loader import get_config_loader
+    config = get_config_loader()
+    game_config = config.get_game_config()
+    return game_config["game_rules"]["charge_max_distance"]
 
 def calculate_charge_destinations(unit: Dict[str, Any], 
                                  charge_roll: int,
@@ -194,7 +199,7 @@ def calculate_charge_destinations(unit: Dict[str, Any],
                 enemy["player"] != unit["player"] and
                 max(abs(col - enemy["col"]), abs(row - enemy["row"])) == 1 and
                 cubeDistance(offsetToCube(unit["col"], unit["row"]), 
-                           offsetToCube(enemy["col"], enemy["row"])) <= CHARGE_MAX_DISTANCE
+                           offsetToCube(enemy["col"], enemy["row"])) <= get_charge_max_distance()
                 for enemy in units
             )
             
@@ -238,7 +243,7 @@ def can_unit_charge_basic(unit: Dict[str, Any],
     # Check if any enemies within 12-hex charge range
     has_enemies_within_12_hexes = any(
         cubeDistance(offsetToCube(unit["col"], unit["row"]), 
-                    offsetToCube(enemy["col"], enemy["row"])) <= CHARGE_MAX_DISTANCE
+                    offsetToCube(enemy["col"], enemy["row"])) <= get_charge_max_distance()
         for enemy in enemy_units
     )
     
@@ -388,13 +393,13 @@ def should_transition_from_shoot(units: List[Dict[str, Any]],
     if len(player_units) == 0:
         return True
 
-    # Find units that can still shoot (using same eligibility logic)
-    shootable_units = [
+    # Check if all units have acted in shoot phase (moved or fled)
+    units_that_can_act = [
         unit for unit in player_units 
-        if is_unit_eligible(unit, current_player, "shoot", units, units_moved, units_charged, units_attacked, units_fled)
+        if unit["id"] not in units_moved and unit["id"] not in units_fled
     ]
     
-    return len(shootable_units) == 0
+    return len(units_that_can_act) == 0
 
 def should_transition_from_charge(units: List[Dict[str, Any]], 
                                  current_player: int, 
@@ -409,13 +414,13 @@ def should_transition_from_charge(units: List[Dict[str, Any]],
     if len(player_units) == 0:
         return True
 
-    # Find units that can still charge (using same eligibility logic)
-    chargeable_units = [
+    # Check if all units have acted in charge phase (moved, fled, or charged)
+    units_that_can_act = [
         unit for unit in player_units 
-        if is_unit_eligible(unit, current_player, "charge", units, units_moved, units_charged, units_attacked, units_fled)
+        if unit["id"] not in units_moved and unit["id"] not in units_fled and unit["id"] not in units_charged
     ]
     
-    return len(chargeable_units) == 0
+    return len(units_that_can_act) == 0
 
 def should_transition_from_charged_units_phase(units: List[Dict[str, Any]], 
                                               current_player: int, 
@@ -431,13 +436,13 @@ def should_transition_from_charged_units_phase(units: List[Dict[str, Any]],
     
     active_player_units = [u for u in units if u["player"] == current_player]
     
-    # Use the same eligibility function as PvP
-    eligible_charged_units = [
+    # Check if all charged units have attacked
+    charged_units_not_attacked = [
         unit for unit in active_player_units 
-        if is_unit_eligible(unit, current_player, phase, units, units_moved, units_charged, units_attacked, units_fled, combat_sub_phase)
+        if unit.get("hasChargedThisTurn", False) and unit["id"] not in units_attacked
     ]
     
-    return len(eligible_charged_units) == 0
+    return len(charged_units_not_attacked) == 0
 
 def should_end_alternating_combat(units: List[Dict[str, Any]], 
                                  phase: str, 
@@ -456,10 +461,15 @@ def should_end_alternating_combat(units: List[Dict[str, Any]],
     for player in all_players:
         player_units = [u for u in units if u["player"] == player]
         
-        # Use the same eligibility function as PvP
+        # Check non-charged units that haven't attacked and are adjacent to enemies
         eligible_units = [
             unit for unit in player_units 
-            if is_unit_eligible(unit, player, phase, units, units_moved, units_charged, units_attacked, units_fled, combat_sub_phase, player)
+            if (not unit.get("hasChargedThisTurn", False) and 
+                unit["id"] not in units_attacked and
+                any(max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"])) <= (
+                    unit["CC_RNG"] if "CC_RNG" in unit else 
+                    (_ for _ in ()).throw(KeyError(f"Unit missing required 'CC_RNG' field: {unit}"))
+                ) for enemy in units if enemy["player"] != player))
         ]
         
         if len(eligible_units) > 0:

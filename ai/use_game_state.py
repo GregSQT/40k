@@ -220,6 +220,18 @@ class UseGameState:
             
             # Direct update to maintain object references
             self.game_state["units"][i]["ATTACK_LEFT"] = unit["CC_NB"]
+        """
+        EXACT mirror of initializeCombatPhase from TypeScript.
+        Reset ATTACK_LEFT for all units to CC_NB.
+        """
+        for i, unit in enumerate(self.game_state["units"]):
+            if "CC_NB" not in unit:
+                raise ValueError(f"unit.CC_NB is required for unit: {unit}")
+            if unit["CC_NB"] is None:
+                raise ValueError(f"unit.CC_NB cannot be None for unit: {unit}")
+            
+            # Direct update to maintain object references
+            self.game_state["units"][i]["ATTACK_LEFT"] = unit["CC_NB"]
 
     # === SHOOTING PHASE STATE (EXACT from TypeScript) ===
 

@@ -404,17 +404,17 @@ class UseGameActions:
             if is_adjacent:
                 return False
             # EXACT from TypeScript: Check if any enemies within 12-hex charge range with pathfinding
-            from shared.gameMechanics import CHARGE_MAX_DISTANCE
+            from shared.gameMechanics import get_charge_max_distance
             has_enemies_within_12_hexes = any(
-                getHexDistance(unit, enemy) <= CHARGE_MAX_DISTANCE and getHexDistance(unit, enemy) > 1
+                getHexDistance(unit, enemy) <= get_charge_max_distance() and getHexDistance(unit, enemy) > 1
                 for enemy in enemy_units
             )
             # CRITICAL FIX: Must check pathfinding around walls like TypeScript
             if has_enemies_within_12_hexes and self.board_config.get("wall_hexes"):
                 wall_hex_set = set(f"{c},{r}" for c, r in self.board_config["wall_hexes"])
                 has_reachable_enemies = any(
-                    getHexDistance(unit, enemy) <= CHARGE_MAX_DISTANCE and getHexDistance(unit, enemy) > 1 and
-                    self._check_pathfinding_reachable(unit, enemy, wall_hex_set, CHARGE_MAX_DISTANCE)
+                    getHexDistance(unit, enemy) <= get_charge_max_distance() and getHexDistance(unit, enemy) > 1 and
+                    self._check_pathfinding_reachable(unit, enemy, wall_hex_set, get_charge_max_distance())
                     for enemy in enemy_units
                 )
                 return has_reachable_enemies
@@ -1065,14 +1065,14 @@ class UseGameActions:
         # Validate charge distance to target with proper 2d6 roll requirements
         from shared.gameRules import get_hex_distance
         distance = get_hex_distance(charger, target)
-        from shared.gameMechanics import CHARGE_MAX_DISTANCE
+        from shared.gameMechanics import get_charge_max_distance
         
         # CRITICAL: Ensure charge roll is legitimate 2d6 (2-12 range)
         if charge_roll < 2 or charge_roll > 12:
             raise ValueError(f"Invalid charge roll {charge_roll} for unit {charger_id} - must be 2d6 (2-12)")
         
-        if distance > charge_roll or distance > CHARGE_MAX_DISTANCE:
-            raise ValueError(f"Charge failed: distance {distance} > roll {charge_roll} or > max {CHARGE_MAX_DISTANCE}")
+        if distance > charge_roll or distance > get_charge_max_distance():
+            raise ValueError(f"Charge failed: distance {distance} > roll {charge_roll} or > max {get_charge_max_distance()}")
         
         # Store original position for logging
         original_col, original_row = charger["col"], charger["row"]

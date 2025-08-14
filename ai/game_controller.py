@@ -852,6 +852,9 @@ class TrainingGameController(GameController):
         # Add phase property for training compatibility
         if "phase" not in self.game_state:
             raise KeyError("Game state missing required 'phase' field")
+        
+        # CRITICAL FIX: Define self.actions to enable combat phase initialization
+        self.actions = self.state_actions
         self._current_phase = self.game_state["phase"]
 
     def connect_replay_logger(self, replay_logger):
