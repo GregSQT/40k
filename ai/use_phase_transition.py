@@ -99,51 +99,35 @@ class UsePhaseTransition:
         )
 
     def should_end_turn(self) -> bool:
-        """EXACT mirror of shouldEndTurn from TypeScript PvP logic"""
+        """Check if current player's turn should end (advance to next player)"""
         from shared.gameRules import is_unit_in_range as isUnitInRange
         
         player_units = self.get_current_player_units()
         enemy_units = self.get_enemy_units()
         
-        # CRITICAL: Episode ends when ANY player has no units (not just current player)
-        all_units = self.units
-        player_0_units = []
-        for u in all_units:
-            if u["player"] == 0 and u["alive"]:
-                if "CUR_HP" not in u:
-                    raise KeyError(f"Unit {u.get('id', 'unknown')} missing required 'CUR_HP' field")
-                if u["CUR_HP"] > 0:
-                    player_0_units.append(u)
-        
-        player_1_units = []
-        for u in all_units:
-            if u["player"] == 1 and u["alive"]:
-                if "CUR_HP" not in u:
-                    raise KeyError(f"Unit {u.get('id', 'unknown')} missing required 'CUR_HP' field")
-                if u["CUR_HP"] > 0:
-                    player_1_units.append(u)
-        
-        # Episode ends if either player has no units
-        if len(player_0_units) == 0 or len(player_1_units) == 0:
-            return True
-            
+        # Turn ends if current player has no units
         if len(player_units) == 0:
             return True
         
-        # Find units that can still attack in combat (EXACT from TypeScript)
-        attackable_units = []
-        for unit in player_units:
-            if unit["id"] in self.units_attacked:
-                continue
-            if "CC_RNG" not in unit:
-                continue
-            combat_range = unit["CC_RNG"]
-            can_attack = any(isUnitInRange(unit, enemy, combat_range) for enemy in enemy_units)
-            if can_attack:
-                attackable_units.append(unit)
+        # In combat phase only: check if current player has units that can still attack
+        if self.phase == "combat":
+            attackable_units = []
+            for unit in player_units:
+                if unit["id"] in self.units_attacked:
+                    continue
+                if "CC_RNG" not in unit:
+                    continue
+                combat_range = unit["CC_RNG"]
+                can_attack = any(isUnitInRange(unit, enemy, combat_range) for enemy in enemy_units)
+                if can_attack:
+                    attackable_units.append(unit)
+            
+            should_end = len(attackable_units) == 0
+            return should_end
         
-        should_end = len(attackable_units) == 0
-        return should_end
+        # For other phases (move, shoot, charge), turn ending is handled by phase transition logic
+        # This method should not be called outside combat phase in normal operation
+        return False
 
     def should_transition_from_charged_units_phase(self) -> bool:
         """EXACT mirror of shouldTransitionFromChargedUnitsPhase from TypeScript"""
