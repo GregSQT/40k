@@ -661,6 +661,9 @@ class TrainingGameState(UseGameState):
 
     def reset_for_new_episode(self, initial_units: List[Dict[str, Any]]) -> None:
         """Reset state for new training episode"""
+        # CRITICAL FIX: Reset episode_step_count FIRST before any other operations
+        self.game_state["episode_step_count"] = 0
+        
         # DON'T create a new object - just reset the existing game_state
         processed_units = []
         for unit in initial_units:
@@ -675,7 +678,7 @@ class TrainingGameState(UseGameState):
         self.game_state["current_player"] = 0  # Episode starts with player 0
         self.game_state["phase"] = "move"      # Episode starts with move phase
         self.game_state["current_turn"] = 1    # Turns start at 1 at episode beginning
-        self.game_state["episode_step_count"] = 0  # CRITICAL: Reset step count for new episode
+        # episode_step_count already reset at start of method
         self.game_state["units_moved"] = []
         self.game_state["units_charged"] = []
         self.game_state["units_attacked"] = []

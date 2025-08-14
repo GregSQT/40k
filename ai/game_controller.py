@@ -730,11 +730,6 @@ class TrainingGameController(GameController):
         if self.is_game_over():
             return self._get_gym_obs(), 0.0, True, False, self._get_gym_info()
         
-        # Check step limit using game state tracking - NO SEPARATE STEP COUNTER
-        current_step = self._get_current_step_count()
-        if current_step >= self.max_steps_per_episode:
-            return self._get_gym_obs(), 0.0, True, False, self._get_gym_info()
-        
         # Get eligible units using mirror architecture
         eligible_units = self._get_gym_eligible_units()
         current_player = self.get_current_player()
@@ -771,6 +766,11 @@ class TrainingGameController(GameController):
         
         # CRITICAL FIX: Only increment step count when executing actual player action
         self._increment_step_count()
+        
+        # Check step limit AFTER incrementing - use truncated flag properly
+        current_step = self._get_current_step_count()
+        if current_step >= self.max_steps_per_episode:
+            return self._get_gym_obs(), 0.0, False, True, self._get_gym_info()  # Truncated, not terminated
         
         # Execute action through mirror architecture
         acting_unit = controlled_eligible_units[unit_idx]
@@ -930,7 +930,7 @@ class TrainingGameController(GameController):
             },
             "combat_log": getattr(self.replay_logger, 'combat_log_entries', []) if self.replay_logger else [],
             "game_states": [],
-            "episode_steps": len(self.combat_log_entries) if hasattr(self.replay_logger, 'combat_log_entries') else 0,
+            "episode_steps": len(getattr(self.replay_logger, 'combat_log_entries', [])) if self.replay_logger else 0,
             "episode_reward": episode_reward
         }
         
@@ -1079,7 +1079,8 @@ class TrainingGameController(GameController):
         
         self.episode_count += 1
         self.episode_start_time = time.time()
-        self.episode_step_count = 0
+        # CRITICAL FIX: Reset step count in game_state, not local variable
+        self.state_actions['set_episode_step_count'](0)
         
         # Reset training-specific state
         if hasattr(self.state_manager, 'reset_for_new_episode'):
@@ -1168,7 +1169,9 @@ class TrainingGameController(GameController):
         
         # Update training metrics
         self.training_metrics["episodes_completed"] += 1
-        self.training_metrics["total_actions"] += self.episode_step_count
+        # CRITICAL FIX: Use actual step count from game_state
+        actual_steps = self._get_current_step_count()
+        self.training_metrics["total_actions"] += actual_steps
         
         if winner is not None:
             self.training_metrics["wins_by_player"][winner] += 1
@@ -1181,7 +1184,7 @@ class TrainingGameController(GameController):
         
         episode_metrics = {
             "episode": self.episode_count,
-            "steps": self.episode_step_count,
+            "steps": actual_steps,  # Use actual_steps from above
             "duration": episode_duration,
             "winner": winner,
             "final_reward": final_reward,
@@ -1217,7 +1220,7 @@ class TrainingGameController(GameController):
     def step(self) -> bool:
         """Override step to include training metrics"""
         result = super().step()
-        self.episode_step_count += 1
+        # Use game_state step count, not local variable
         self.total_steps += 1
         
         # Update phase tracking for training compatibility
