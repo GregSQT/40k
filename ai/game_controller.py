@@ -499,10 +499,10 @@ class TrainingGameController(GameController):
         return eligible_units
 
     def _advance_gym_phase_or_turn(self) -> None:
-        """Delegate to use_phase_transition.py for phase advancement"""
-        if not hasattr(self, 'phase_transitions') or 'process_phase_transitions' not in self.phase_transitions:
-            raise RuntimeError("TrainingGameController missing required phase_transitions.process_phase_transitions")
-        self.phase_transitions['process_phase_transitions']()
+        """Delegate to use_phase_transition.py for automatic phase advancement"""
+        if not hasattr(self, 'phase_transitions') or 'auto_advance_phases' not in self.phase_transitions:
+            raise RuntimeError("TrainingGameController missing required phase_transitions.auto_advance_phases")
+        self.phase_transitions['auto_advance_phases']()
 
     def _execute_gym_bot_turn(self) -> None:
         """Execute bot turn with proper logging through mirror architecture"""

@@ -56,10 +56,12 @@ class EpisodeMetrics:
 class SelectiveEpisodeTracker:
     """Track best/worst/shortest episodes during training for selective replay saving."""
     
-    def __init__(self, agent_key: str, enemy_key: str, max_candidates: int = 20):
+    def __init__(self, agent_key: str, enemy_key: str, max_candidates: int):
+        if max_candidates <= 0:
+            raise ValueError("max_candidates must be positive")
         self.agent_key = agent_key
         self.enemy_key = enemy_key
-        self.max_candidates = max_candidates  # Memory management
+        self.max_candidates = max_candidates
         self.episode_candidates: List[EpisodeMetrics] = []
         self.current_episode = 0
         self.shortest_episode: Optional[EpisodeMetrics] = None
@@ -94,16 +96,21 @@ class SelectiveEpisodeTracker:
         sorted_by_reward = sorted(self.episode_candidates, key=lambda x: x.total_reward, reverse=True)
         sorted_by_worst = sorted(self.episode_candidates, key=lambda x: x.total_reward)
         
-        # Keep top 5 in each category + recent episodes
+        # Use config values for episode pruning
+        config_loader = get_config_loader()
+        full_config = config_loader.get_training_config()
+        training_config = full_config["default"]
+        shared_config = full_config["shared_parameters"]
+        keep_count = shared_config["episode_tracker"]["keep_per_category"]
         keep_episodes = set()
-        keep_episodes.update(sorted_by_steps[:5])  # Shortest
-        keep_episodes.update(sorted_by_reward[:5])  # Best rewards
-        keep_episodes.update(sorted_by_worst[:5])   # Worst rewards
-        keep_episodes.update(self.episode_candidates[-5:])  # Recent episodes
+        keep_episodes.update(sorted_by_steps[:keep_count])  # Shortest
+        keep_episodes.update(sorted_by_reward[:keep_count])  # Best rewards
+        keep_episodes.update(sorted_by_worst[:keep_count])   # Worst rewards
+        keep_episodes.update(self.episode_candidates[-keep_count:])  # Recent episodes
         
         self.episode_candidates = list(keep_episodes)
     
-    def save_selective_replays(self, output_dir: str = "ai/event_log"):
+    def save_selective_replays(self, output_dir: str):
         """Save the 3 selective replays from training episodes."""
         saved_files = []
         
@@ -127,8 +134,12 @@ class SelectiveEpisodeTracker:
                 try:
                     # Convert numpy arrays to lists for JSON serialization
                     serializable_data = self._make_json_serializable(episode.replay_data)
+                    config_loader = get_config_loader()
+                    full_config = get_config_loader().get_training_config()
+                    shared_config = full_config["shared_parameters"]
+                    indent_size = shared_config["json_output"]["indent_size"]
                     with open(filepath, 'w', encoding='utf-8') as f:
-                        json.dump(serializable_data, f, indent=2)
+                        json.dump(serializable_data, f, indent=indent_size)
                     
                     saved_files.append(filepath)
                 except Exception as e:
@@ -202,12 +213,13 @@ class MultiAgentTrainer:
         self.unit_registry = UnitRegistry()
         self.scenario_manager = ScenarioManager(self.config, self.unit_registry)
         
-        # Determine optimal concurrent sessions
+        # Get concurrent sessions from config or parameter
         if max_concurrent_sessions is None:
-            cpu_count = mp.cpu_count()
-            # Use 50% of available CPUs for training, minimum 1, maximum 4
-            self.max_concurrent_sessions = max(1, min(4, cpu_count // 2))
+            training_config = self.config.load_training_config("default")
+            self.max_concurrent_sessions = training_config["max_concurrent_sessions"]
         else:
+            if max_concurrent_sessions <= 0:
+                raise ValueError("max_concurrent_sessions must be positive")
             self.max_concurrent_sessions = max_concurrent_sessions
         
         # Training state
@@ -230,7 +242,9 @@ class MultiAgentTrainer:
         self.eval_pbar = None  # Shared evaluation progress bar
         
         # Load training configuration
-        self.training_config = self.config.load_training_config("default")
+        full_config = self.config.get_training_config()
+        self.training_config = full_config
+        self.shared_config = full_config["shared_parameters"]
         
         # Initialize agent states
         self._initialize_agent_states()
@@ -315,13 +329,14 @@ class MultiAgentTrainer:
         self.completed_sessions = 0
         self.session_progress = {}
         
-        # Create progress bar showing slowest agent
+        # Create progress bar showing slowest agent with config values
+        progress_config = self.shared_config["progress_bar"]
         self.overall_pbar = tqdm(
             total=timesteps_per_session,
-            desc="🐌 Slowest Agent",
-            unit="steps",
-            leave=True,
-            ncols=100
+            desc=progress_config["description"],
+            unit=progress_config["unit"],
+            leave=progress_config["leave"],
+            ncols=progress_config["ncols"]
         )
         
         # Process training rotation in batches to respect concurrent session limits
@@ -371,7 +386,9 @@ class MultiAgentTrainer:
             # Wait for batch completion with proper progress bar updates
             for session_id, future in batch_futures:
                 try:
-                    result = future.result(timeout=3600)  # 1 hour timeout per session
+                    shared_config = self.config.get_training_config()["shared_parameters"]
+                    timeout_seconds = shared_config["session_timeout_seconds"]
+                    result = future.result(timeout=timeout_seconds)
                     orchestration_results["session_results"].append(result)
                     completed_sessions += 1
                     
@@ -447,6 +464,8 @@ class MultiAgentTrainer:
                                  rewards_config_name: str) -> Dict[str, Any]:
         """Execute individual training session for specific agent matchup."""
         try:
+            # Load training configuration at start of method
+            training_config = self.config.load_training_config(training_config_name)
             # Silent execution to prevent log spam
             
             # Generate scenario for this matchup (Windows-compatible timeout)
@@ -470,10 +489,12 @@ class MultiAgentTrainer:
             thread = threading.Thread(target=generate_with_timeout)
             thread.daemon = True
             thread.start()
-            thread.join(timeout=10)  # 10 second timeout
+            shared_config = self.config.get_training_config()["shared_parameters"]
+            timeout_seconds = shared_config["session_timeout_seconds"]
+            thread.join(timeout=timeout_seconds)
             
             if thread.is_alive():
-                raise TimeoutError("Scenario generation timeout (10 seconds)")
+                raise TimeoutError(f"Scenario generation timeout ({timeout_seconds} seconds)")
             if scenario_error[0]:
                 print(f"❌ Scenario generation error: {scenario_error[0]}")
                 raise scenario_error[0]
@@ -509,16 +530,19 @@ class MultiAgentTrainer:
             except Exception as model_error:
                 raise RuntimeError(f"Model creation failed for {session.agent_key}: {model_error}")
             
-            # Initialize selective replay tracking
-            episode_tracker = SelectiveEpisodeTracker(session.agent_key, session.opponent_agent)
+            # Initialize selective replay tracking with config
+            full_config = self.config.get_training_config()
+            shared_config = full_config["shared_parameters"]
+            max_candidates = shared_config["episode_tracker"]["max_candidates"]
+            episode_tracker = SelectiveEpisodeTracker(session.agent_key, session.opponent_agent, max_candidates)
             
             # Setup callbacks for this session (simplified - no evaluation callback)
             callbacks = self._setup_session_callbacks(session, model, episode_tracker, training_config_name)
             
             # Execute training
             session_start_time = time.time()
-            training_config = self.config.load_training_config(training_config_name)
-            total_timesteps = training_config["total_timesteps"]
+            current_training_config = self.config.load_training_config(training_config_name)
+            total_timesteps = current_training_config["total_timesteps"]
             
             # Add progress tracking callback
             class ProgressTracker(BaseCallback):
@@ -530,7 +554,8 @@ class MultiAgentTrainer:
                 
                 def _on_step(self) -> bool:
                     # Update every 10 steps for more responsive progress tracking
-                    if self.num_timesteps - self.last_update >= 10:
+                    update_interval = self.trainer.training_config["progress_update_interval"]
+                    if self.num_timesteps - self.last_update >= update_interval:
                         with self.trainer.progress_lock:
                             if self.session_id in self.trainer.session_progress:
                                 self.trainer.session_progress[self.session_id]['steps'] = self.num_timesteps
@@ -545,8 +570,8 @@ class MultiAgentTrainer:
             model.learn(
                 total_timesteps=total_timesteps,
                 callback=all_callbacks,
-                log_interval=1000,  # Reduce log frequency
-                progress_bar=False  # Disable built-in progress bar
+                log_interval=training_config["log_interval"],
+                progress_bar=training_config["show_progress_bar"]
             )
             
             # Record pure training time
@@ -560,7 +585,7 @@ class MultiAgentTrainer:
             
             # Test the trained model WITH episode tracker for selective replay capture
             evaluation_start = time.time()
-            test_results = self._test_trained_model(model, env, eval_episodes, episode_tracker)  # Use configurable evaluation episodes
+            test_results = self._test_trained_model(model, env, eval_episodes, episode_tracker)
             evaluation_time = time.time() - evaluation_start
             
             # Calculate total session duration (training + evaluation + model saving)
@@ -574,7 +599,8 @@ class MultiAgentTrainer:
             replay_files_saved = []
             try:
                 if episode_tracker:
-                    replay_files_saved = episode_tracker.save_selective_replays()
+                    output_dir = shared_config["episode_tracker"]["output_dir"]
+                    replay_files_saved = episode_tracker.save_selective_replays(output_dir)
             except Exception as replay_error:
                 pass  # Silent failure for replay saving
             
@@ -808,7 +834,7 @@ class MultiAgentTrainer:
         
         return eval_env
 
-    def _test_trained_model(self, model, env, num_episodes: int = 10, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
+    def _test_trained_model(self, model, env, num_episodes: int, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
         """Test trained model - episode_tracker should be None to prevent test episode capture"""
         wins = 0
         total_rewards = []
@@ -819,9 +845,10 @@ class MultiAgentTrainer:
         # Initialize shared evaluation progress bar if not exists
         with self.progress_lock:
             if not hasattr(self, 'eval_pbar') or self.eval_pbar is None:
-                self.eval_pbar = tqdm(total=num_episodes, desc=f"🧪 Eval {session_id[:8]}", 
-                                     bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} episodes',
-                                     leave=True, ncols=100, position=2)
+                eval_config = self.shared_config["evaluation"]["progress_bar"]
+                self.eval_pbar = tqdm(total=num_episodes, desc=f"{eval_config['prefix']} {session_id[:8]}", 
+                                     bar_format=eval_config["bar_format"],
+                                     leave=eval_config["leave"], ncols=eval_config["ncols"], position=eval_config["position"])
             
             # Track this session's evaluation progress
             self.evaluation_progress[session_id] = {
@@ -857,7 +884,11 @@ class MultiAgentTrainer:
                 except Exception:
                     pass  # Silent failure for clearing
             
-            while not done and step_count < 500:  # Prevent infinite episodes
+            # Get training config that was loaded earlier in the method
+            # Use the training_config that was already loaded in the method scope
+            training_config_obj = self.training_config
+            max_steps = training_config_obj["max_steps_per_episode"]
+            while not done and step_count < max_steps:
                 action, _ = model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(action)
                 episode_reward += reward

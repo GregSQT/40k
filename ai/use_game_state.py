@@ -198,36 +198,28 @@ class UseGameState:
         EXACT mirror of initializeShootingPhase from TypeScript.
         Reset SHOOT_LEFT for all units to RNG_NB.
         """
-        updated_units = []
-        for unit in self.game_state["units"]:
+        for i, unit in enumerate(self.game_state["units"]):
             if "RNG_NB" not in unit:
-                raise ValueError("unit.RNG_NB is required")
+                raise ValueError(f"unit.RNG_NB is required for unit: {unit}")
             if unit["RNG_NB"] is None:
-                raise ValueError("unit.RNG_NB is required")
+                raise ValueError(f"unit.RNG_NB cannot be None for unit: {unit}")
             
-            updated_unit = copy.deepcopy(unit)
-            updated_unit["SHOOT_LEFT"] = unit["RNG_NB"]
-            updated_units.append(updated_unit)
-        
-        self.game_state["units"] = updated_units
+            # Direct update to maintain object references
+            self.game_state["units"][i]["SHOOT_LEFT"] = unit["RNG_NB"]
 
     def initialize_combat_phase(self) -> None:
         """
         EXACT mirror of initializeCombatPhase from TypeScript.
         Reset ATTACK_LEFT for all units to CC_NB.
         """
-        updated_units = []
-        for unit in self.game_state["units"]:
+        for i, unit in enumerate(self.game_state["units"]):
             if "CC_NB" not in unit:
-                raise ValueError("unit.CC_NB is required")
+                raise ValueError(f"unit.CC_NB is required for unit: {unit}")
             if unit["CC_NB"] is None:
-                raise ValueError("unit.CC_NB is required")
+                raise ValueError(f"unit.CC_NB cannot be None for unit: {unit}")
             
-            updated_unit = copy.deepcopy(unit)
-            updated_unit["ATTACK_LEFT"] = unit["CC_NB"]
-            updated_units.append(updated_unit)
-        
-        self.game_state["units"] = updated_units
+            # Direct update to maintain object references
+            self.game_state["units"][i]["ATTACK_LEFT"] = unit["CC_NB"]
 
     # === SHOOTING PHASE STATE (EXACT from TypeScript) ===
 
@@ -612,6 +604,7 @@ class TrainingGameState(UseGameState):
         self.game_state["current_player"] = 0  # Episode starts with player 0
         self.game_state["phase"] = "move"      # Episode starts with move phase
         self.game_state["current_turn"] = 1    # Turns start at 1 at episode beginning
+        self.game_state["episode_step_count"] = 0  # CRITICAL: Reset step count for new episode
         self.game_state["units_moved"] = []
         self.game_state["units_charged"] = []
         self.game_state["units_attacked"] = []

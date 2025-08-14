@@ -1,11 +1,44 @@
 {
+  "shared_parameters": {
+    "description": "Parameters shared across all training configurations",
+    "session_timeout_seconds": 3600,
+    "episode_tracker": {
+      "max_candidates": 20,
+      "keep_per_category": 5,
+      "output_dir": "ai/event_log"
+    },
+    "json_output": {
+      "indent_size": 2
+    },
+    "progress_bar": {
+      "description": "🌌 Slowest Agent",
+      "unit": "steps",
+      "leave": true,
+      "ncols": 100
+    },
+    "evaluation": {
+      "progress_bar": {
+        "prefix": "🧪 Eval",
+        "bar_format": "{l_bar}{bar}| {n_fmt}/{total_fmt} episodes",
+        "leave": true,
+        "ncols": 100,
+        "position": 2
+      }
+    }
+  },
+  
   "training_parameters": {
     "description": "Optimized parameters for complex reward learning",
     "_training_duration_comments": {
       "total_timesteps": "Total number of environment steps to train for (1M steps = substantial learning)",
       "eval_episodes": "Final evaluation of the trained model before saving ",
       "max_steps_per_episode": "Maximum steps before episode is truncated (100 steps for longer tactical episodes)",
-      "eval_freq": "How often to evaluate model performance (every 10k steps = 100 evaluations total)"
+      "eval_freq": "How often to evaluate model performance (every 10k steps = 100 evaluations total)",
+      "max_concurrent_sessions": "Maximum number of concurrent training sessions for multi-agent orchestration",
+      "progress_update_interval": "How often to update progress bars during training (in timesteps)",
+      "scenario_generation_timeout": "Timeout in seconds for scenario generation",
+      "log_interval": "How often to log training progress",
+      "show_progress_bar": "Whether to show built-in progress bars during training"
     },
     "_callback_comments": {
       "eval_deterministic": "Use deterministic policy during evaluation (no random exploration)",
@@ -35,6 +68,11 @@
     "eval_episodes": 20,
     "max_steps_per_episode": 1000,
     "eval_freq": 5000,
+    "max_concurrent_sessions": 4,
+    "progress_update_interval": 10,
+    "scenario_generation_timeout": 10,
+    "log_interval": 1000,
+    "show_progress_bar": false,
     "callback_params": {
       "eval_deterministic": true,
       "eval_render": false,
@@ -72,6 +110,11 @@
     "eval_episodes": 20,
     "max_steps_per_episode": 1000,
     "eval_freq": 9999,
+    "max_concurrent_sessions": 4,
+    "progress_update_interval": 10,
+    "scenario_generation_timeout": 10,
+    "log_interval": 1000,
+    "show_progress_bar": false,
     "callback_params": {
       "eval_deterministic": true,
       "eval_render": false,
@@ -109,6 +152,11 @@
     "eval_episodes": 50,
     "max_steps_per_episode": 1000,
     "eval_freq": 9999,
+    "max_concurrent_sessions": 4,
+    "progress_update_interval": 10,
+    "scenario_generation_timeout": 10,
+    "log_interval": 1000,
+    "show_progress_bar": false,
     "callback_params": {
       "eval_deterministic": true,
       "eval_render": false,
@@ -146,6 +194,11 @@
     "eval_episodes": 3,
     "max_steps_per_episode": 1000,
     "eval_freq": 50,
+    "max_concurrent_sessions": 4,
+    "progress_update_interval": 10,
+    "scenario_generation_timeout": 10,
+    "log_interval": 1000,
+    "show_progress_bar": false,
     "callback_params": {
       "eval_deterministic": true,
       "eval_render": false,
