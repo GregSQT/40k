@@ -502,7 +502,11 @@ class TrainingGameController(GameController):
         """Delegate to use_phase_transition.py for automatic phase advancement"""
         if not hasattr(self, 'phase_transitions') or 'auto_advance_phases' not in self.phase_transitions:
             raise RuntimeError("TrainingGameController missing required phase_transitions.auto_advance_phases")
-        self.phase_transitions['auto_advance_phases']()
+        # CRITICAL FIX: Only advance once per call to prevent oscillation
+        advanced = self.phase_transitions['auto_advance_phases']()
+        if not advanced:
+            # Force advance if stuck
+            self.phase_transitions['process_phase_transitions']()
 
     def _execute_gym_bot_turn(self) -> None:
         """Execute bot turn with proper logging through mirror architecture"""
@@ -726,6 +730,10 @@ class TrainingGameController(GameController):
         Execute gymnasium action and return (obs, reward, terminated, truncated, info).
         ARCHITECTURAL COMPLIANCE: All game logic delegated to use_*.py mirror files.
         """
+        # DEBUG: Track step count issue
+        current_step = self._get_current_step_count()
+        print(f"DEBUG execute_gym_action: step={current_step}, turn={self.game_state['current_turn']}, phase={self.game_state['phase']}, player={self.game_state['current_player']}")
+        
         # Check game over conditions
         if self.is_game_over():
             return self._get_gym_obs(), 0.0, True, False, self._get_gym_info()
@@ -767,10 +775,10 @@ class TrainingGameController(GameController):
         # CRITICAL FIX: Only increment step count when executing actual player action
         self._increment_step_count()
         
-        # Check step limit AFTER incrementing - use truncated flag properly
+        # Check step limit AFTER incrementing
         current_step = self._get_current_step_count()
         if current_step >= self.max_steps_per_episode:
-            return self._get_gym_obs(), 0.0, False, True, self._get_gym_info()  # Truncated, not terminated
+            return self._get_gym_obs(), 0.0, False, True, self._get_gym_info()  # Truncated
         
         # Execute action through mirror architecture
         acting_unit = controlled_eligible_units[unit_idx]
@@ -1079,12 +1087,14 @@ class TrainingGameController(GameController):
         
         self.episode_count += 1
         self.episode_start_time = time.time()
-        # CRITICAL FIX: Reset step count in game_state, not local variable
-        self.state_actions['set_episode_step_count'](0)
+        # Reset step count in game_state, not local variable
+        if hasattr(self, 'state_actions') and 'set_episode_step_count' in self.state_actions:
+            self.state_actions['set_episode_step_count'](0)
         
         # Reset training-specific state
         if hasattr(self.state_manager, 'reset_for_new_episode'):
             self.state_manager.reset_for_new_episode(self.game_units)
+            print(f"DEBUG after reset_for_new_episode: episode_step_count={self.game_state.get('episode_step_count', 'MISSING')}")
         if hasattr(self.log_manager, 'reset_for_new_episode'):
             self.log_manager.reset_for_new_episode()
         if hasattr(self.actions_manager, 'reset_for_new_episode'):

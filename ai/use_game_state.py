@@ -678,7 +678,7 @@ class TrainingGameState(UseGameState):
         self.game_state["current_player"] = 0  # Episode starts with player 0
         self.game_state["phase"] = "move"      # Episode starts with move phase
         self.game_state["current_turn"] = 1    # Turns start at 1 at episode beginning
-        # episode_step_count already reset at start of method
+        self.game_state["episode_step_count"] = 0  # Ensure step count is reset
         self.game_state["units_moved"] = []
         self.game_state["units_charged"] = []
         self.game_state["units_attacked"] = []
