@@ -735,9 +735,6 @@ class TrainingGameController(GameController):
         if current_step >= self.max_steps_per_episode:
             return self._get_gym_obs(), 0.0, True, False, self._get_gym_info()
         
-        # Increment step count in game state
-        self._increment_step_count()
-        
         # Get eligible units using mirror architecture
         eligible_units = self._get_gym_eligible_units()
         current_player = self.get_current_player()
@@ -771,6 +768,9 @@ class TrainingGameController(GameController):
             self._advance_gym_phase_or_turn()
             reward = self._get_gym_penalty_reward()
             return self._get_gym_obs(), reward, False, False, self._get_gym_info()
+        
+        # CRITICAL FIX: Only increment step count when executing actual player action
+        self._increment_step_count()
         
         # Execute action through mirror architecture
         acting_unit = controlled_eligible_units[unit_idx]

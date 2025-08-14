@@ -420,19 +420,78 @@ class UseGameState:
     # === GAME STATE QUERIES (EXACT from TypeScript patterns) ===
 
     def is_game_over(self) -> bool:
-        """Check if game is over (one player has no units)"""
-        players = set(unit["player"] for unit in self.game_state["units"])
-        return len(players) < 2
+        """Check if game is over (one player has no living units)"""
+        player_0_alive = []
+        player_1_alive = []
+        
+        for unit in self.game_state["units"]:
+            # Validate required fields exist
+            if "alive" not in unit:
+                raise KeyError(f"Unit missing required 'alive' field: {unit}")
+            if "CUR_HP" not in unit:
+                raise KeyError(f"Unit missing required 'CUR_HP' field: {unit}")
+            if "player" not in unit:
+                raise KeyError(f"Unit missing required 'player' field: {unit}")
+            
+            # Check if unit is alive and has HP > 0
+            if unit["alive"] and unit["CUR_HP"] > 0:
+                if unit["player"] == 0:
+                    player_0_alive.append(unit)
+                elif unit["player"] == 1:
+                    player_1_alive.append(unit)
+        
+        # Game is over if either player has no living units
+        return len(player_0_alive) == 0 or len(player_1_alive) == 0
 
     def get_winner(self) -> Optional[int]:
         """Get winner if game is over, None otherwise"""
         if not self.is_game_over():
             return None
         
-        if len(self.game_state["units"]) == 0:
-            return None  # Draw
+        # Count living units by player
+        player_0_alive = []
+        player_1_alive = []
         
-        return self.game_state["units"][0]["player"]
+        for unit in self.game_state["units"]:
+            if "alive" not in unit:
+                raise KeyError(f"Unit missing required 'alive' field: {unit}")
+            if "CUR_HP" not in unit:
+                raise KeyError(f"Unit missing required 'CUR_HP' field: {unit}")
+            if "player" not in unit:
+                raise KeyError(f"Unit missing required 'player' field: {unit}")
+                
+            if unit["alive"] and unit["CUR_HP"] > 0:
+                if unit["player"] == 0:
+                    player_0_alive.append(unit)
+                elif unit["player"] == 1:
+                    player_1_alive.append(unit)
+        
+        # Determine winner based on who has living units
+        if len(player_0_alive) > 0 and len(player_1_alive) == 0:
+            return 0  # Player 0 wins
+        elif len(player_1_alive) > 0 and len(player_0_alive) == 0:
+            return 1  # Player 1 wins
+        else:
+            return None  # Draw (shouldn't happen if is_game_over() is correct)
+        
+        # Count living units by player
+        player_0_alive = []
+        player_1_alive = []
+        
+        for unit in self.game_state["units"]:
+            if unit.get("alive", True) and unit.get("CUR_HP", 0) > 0:
+                if unit["player"] == 0:
+                    player_0_alive.append(unit)
+                elif unit["player"] == 1:
+                    player_1_alive.append(unit)
+        
+        # Determine winner based on who has living units
+        if len(player_0_alive) > 0 and len(player_1_alive) == 0:
+            return 0  # Player 0 wins
+        elif len(player_1_alive) > 0 and len(player_0_alive) == 0:
+            return 1  # Player 1 wins
+        else:
+            return None  # Draw (shouldn't happen if is_game_over() is correct)
 
     def is_unit_moved(self, unit_id: int) -> bool:
         """Check if unit has moved this phase"""
