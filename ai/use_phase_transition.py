@@ -85,11 +85,18 @@ class UsePhaseTransition:
 
     def should_transition_from_shoot(self) -> bool:
         """EXACT mirror of shouldTransitionFromShoot from TypeScript"""
-        result = should_transition_from_shoot(
-            self.units, self.current_player, self.phase, 
-            self.units_moved, self.units_charged, self.units_attacked, self.units_fled
-        )
-        return result
+        player_units = [u for u in self.units if u["player"] == self.current_player]
+        
+        if len(player_units) == 0:
+            return True
+
+        # Check if all units have acted in shoot phase (moved or fled)
+        units_that_can_act = [
+            unit for unit in player_units 
+            if unit["id"] not in self.units_moved and unit["id"] not in self.units_fled
+        ]
+        
+        return len(units_that_can_act) == 0
 
     def should_transition_from_charge(self) -> bool:
         """EXACT mirror of shouldTransitionFromCharge from TypeScript"""

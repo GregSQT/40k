@@ -798,14 +798,6 @@ class TrainingGameController(GameController):
             reward = self._get_gym_penalty_reward()
             return self._get_gym_obs(), reward, False, False, self._get_gym_info()
         
-        # CRITICAL FIX: Check step limit BEFORE any processing
-        current_step = self._get_current_step_count()
-        if current_step >= self.max_steps_per_episode:
-            return self._get_gym_obs(), 0.0, False, True, self._get_gym_info()  # Truncated
-        
-        # Only increment step count for meaningful player decisions (not wait actions)
-        # Step increment moved after action execution and success validation
-        
         # Execute action through mirror architecture
         acting_unit = controlled_eligible_units[unit_idx]
         mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
@@ -816,6 +808,10 @@ class TrainingGameController(GameController):
         # CRITICAL FIX: Only increment step count for successful meaningful actions
         if success and mirror_action.get("type") != "wait":
             self._increment_step_count()
+            # Check step limit AFTER successful action
+            current_step = self._get_current_step_count()
+            if current_step >= self.max_steps_per_episode:
+                return self._get_gym_obs(), reward, False, True, self._get_gym_info()  # Truncated
         
         # Log action using unified logging - ALWAYS REQUIRED
         self._log_gym_action(acting_unit, mirror_action, reward)
