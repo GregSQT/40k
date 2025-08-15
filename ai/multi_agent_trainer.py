@@ -460,6 +460,13 @@ class MultiAgentTrainer:
                         session.opponent_agent,  # Player 0 (bot)
                         session.agent_key       # Player 1 (AI)
                     )
+                    # DEBUG: Verify scenario generation creates units for both players
+                    if scenario_result[0] and 'units' in scenario_result[0]:
+                        units = scenario_result[0]['units']
+                        p0_units = [u for u in units if u.get('player') == 0]
+                        p1_units = [u for u in units if u.get('player') == 1]
+                        print(f"🔍 SCENARIO DEBUG: Generated {len(p0_units)} P0 units, {len(p1_units)} P1 units")
+                        print(f"🔍 SCENARIO UNITS: {[(u['id'], u['player'], u['unit_type']) for u in units]}")
                 except Exception as e:
                     scenario_error[0] = e
             
@@ -801,6 +808,13 @@ class MultiAgentTrainer:
         
         for episode in range(num_episodes):
             obs, info = env.reset()
+            # DEBUG: Check units in controller after environment reset
+            if hasattr(env, 'controller'):
+                controller_units = env.controller.get_units()
+                p0_units = [u for u in controller_units if u.get('player') == 0]
+                p1_units = [u for u in controller_units if u.get('player') == 1]
+                print(f"🔍 CONTROLLER DEBUG: After reset - {len(p0_units)} P0 units, {len(p1_units)} P1 units")
+                print(f"🔍 CONTROLLER UNITS: {[(u['id'], u['player'], u['unit_type']) for u in controller_units]}")
             episode_reward = 0
             done = False
            
@@ -908,24 +922,16 @@ class MultiAgentTrainer:
                             
                             # Create new method with logging enabled
                             def patched_execute_gym_action(self, action: int):
-                                print(f"🔍 PATCHED METHOD CALLED with action {action}")
                                 try:
                                     eligible_units = self._get_gym_eligible_units()
-                                    print(f"🔍 ELIGIBLE UNITS: {len(eligible_units)}")
                                     controlled_eligible_units = [u for u in eligible_units if u["player"] == 1]
-                                    print(f"🔍 CONTROLLED UNITS: {len(controlled_eligible_units)}")
-                                    print(f"🔍 UNIT PLAYERS: {[u.get('player', 'unknown') for u in eligible_units]}")
-                                    print(f"🔍 UNIT IDS: {[u.get('id', 'unknown') for u in eligible_units]}")
                                     
                                     if not controlled_eligible_units:
-                                        print(f"🔍 NO CONTROLLED UNITS - returning penalty")
                                         return self._get_gym_obs(), self._get_gym_penalty_reward(), False, False, self._get_gym_info()
                                     
                                     unit_idx = action // 8
                                     action_type = action % 8
-                                    print(f"🔍 ACTION DECODE: unit_idx={unit_idx}, action_type={action_type}")
                                 except Exception as e:
-                                    print(f"🔍 ERROR IN PATCHED METHOD: {e}")
                                     raise
                                 
                                 if unit_idx >= len(controlled_eligible_units):
@@ -934,16 +940,11 @@ class MultiAgentTrainer:
                                 acting_unit = controlled_eligible_units[unit_idx]
                                 mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
                                 
-                                print(f"🔍 EXECUTING ACTION: Unit {acting_unit['id']} action {mirror_action}")
                                 success = self.execute_action(acting_unit["id"], mirror_action)
-                                print(f"🔍 ACTION RESULT: Success={success}")
                                 reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
-                                print(f"🔍 REWARD CALCULATED: {reward}")
                                 
                                 # ENABLE LOGGING FOR EVALUATION
-                                print(f"🔍 LOGGING ACTION: Unit {acting_unit['id']} action {mirror_action['type']} reward {reward}")
                                 self._log_gym_action(acting_unit, mirror_action, reward)
-                                print(f"🔍 LOGGED - Combat log entries: {len(self.gym_env.replay_logger.combat_log_entries) if hasattr(self, 'gym_env') and hasattr(self.gym_env, 'replay_logger') else 'NO LOGGER'}")
                                 
                                 self._mark_gym_unit_as_acted(acting_unit)
                                 self._advance_gym_phase_or_turn()
@@ -954,8 +955,6 @@ class MultiAgentTrainer:
                             # Replace the method and verify it worked
                             original_method = controller.execute_gym_action
                             controller.execute_gym_action = types.MethodType(patched_execute_gym_action, controller)
-                            print(f"🔍 CONTROLLER PATCHED: Logging enabled for evaluation episode {episode + 1}")
-                            print(f"🔍 METHOD REPLACED: Original={original_method}, New={controller.execute_gym_action}")
                         
                         # Now get the data
                         game_states = getattr(replay_logger, 'game_states', [])
