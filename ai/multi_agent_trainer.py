@@ -524,7 +524,7 @@ class MultiAgentTrainer:
             
             all_callbacks = callbacks if callbacks else []
             
-            # Execute training with individual progress tracking
+            # Execute training
             model.learn(
                 total_timesteps=total_timesteps,
                 callback=all_callbacks,
@@ -541,10 +541,12 @@ class MultiAgentTrainer:
             # Get number of evaluation episodes from config
             eval_episodes = training_config.get("eval_episodes")
             
-            # Test the trained model WITH episode tracker for selective replay capture
+            # Test the trained model using SAME environment as training (has fixes applied)
+            print(f"🔍 DEBUG: Starting evaluation - using training environment to avoid controller differences")
             evaluation_start = time.time()
             test_results = self._test_trained_model(model, env, eval_episodes, episode_tracker)
             evaluation_time = time.time() - evaluation_start
+            print(f"🔍 DEBUG: Evaluation completed")
             
             # Calculate total session duration (training + evaluation + model saving)
             training_duration = time.time() - session_start_time
@@ -680,10 +682,10 @@ class MultiAgentTrainer:
                     rewards_config=rewards_config_name,
                     training_config_name=training_config_name,
                     controlled_agent=agent_key,
-                    active_agents=[self.unit_registry.get_all_model_keys()],  # CRITICAL FIX: All agents active for proper training
+                    active_agents=[self.unit_registry.get_all_model_keys()],
                     scenario_file=scenario_path,
-                    unit_registry=self.unit_registry,  # Pass shared registry
-                    quiet=True  # Enable quiet mode for training
+                    unit_registry=self.unit_registry,
+                    quiet=True
                 )
             except Exception as env_error:
                 print(f"❌ W40KEnv creation failed for {agent_key}: {env_error}")
@@ -748,7 +750,7 @@ class MultiAgentTrainer:
             json.dump(scenario, f, indent=2)
             temp_scenario_path = f.name
         
-        # Create environment
+        # Create environment with same fixes as training environment
         base_eval_env = W40KEnv(
             controlled_agent=session.agent_key,
             scenario_file=temp_scenario_path,
@@ -756,23 +758,17 @@ class MultiAgentTrainer:
             quiet=True
         )
 
-        # Create enhanced evaluation environment with clean game logger
-        from ai.game_replay_logger import GameReplayIntegration
-        enhanced_eval_env = GameReplayIntegration.enhance_training_env(base_eval_env)
-        
-        # CRITICAL FIX: Connect replay_logger to game_logger for actual logging
-        if hasattr(enhanced_eval_env, 'replay_logger'):
-            enhanced_eval_env.game_logger = enhanced_eval_env.replay_logger
-        
-        # Wrap with Monitor for proper evaluation callback integration
+        # Skip problematic replay logging during evaluation to prevent hangs
+        # evaluation environments should use the same controller fixes as training
         from stable_baselines3.common.monitor import Monitor
-        eval_env = Monitor(enhanced_eval_env, allow_early_resets=True)
+        eval_env = Monitor(base_eval_env, allow_early_resets=True)
         pass
         
         return eval_env
 
     def _test_trained_model(self, model, env, num_episodes: int, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
         """Test trained model - episode_tracker should be None to prevent test episode capture"""
+        print(f"🔍 DEBUG: _test_trained_model called with {num_episodes} episodes")
         wins = 0
         total_rewards = []
         
@@ -797,10 +793,12 @@ class MultiAgentTrainer:
             }
         
         for episode in range(num_episodes):
+            print(f"🔍 DEBUG: Starting evaluation episode {episode + 1}/{num_episodes}")
             obs, info = env.reset()
+            print(f"🔍 DEBUG: Environment reset completed")
             episode_reward = 0
             done = False
-            
+           
             # CRITICAL FIX: Enable replay logging and clear for each evaluation episode
             if episode_tracker:
                 try:
@@ -808,7 +806,7 @@ class MultiAgentTrainer:
                     actual_env = env
                     if hasattr(actual_env, 'env'):
                         actual_env = actual_env.env
-                    
+                   
                     if hasattr(actual_env, 'replay_logger') and actual_env.replay_logger:
                         actual_env.replay_logger.is_evaluation_mode = True  # Enable for evaluation
                         actual_env.replay_logger.clear()
@@ -819,13 +817,18 @@ class MultiAgentTrainer:
                         actual_env.unwrapped._force_evaluation_mode = True  # Flag for reset method
                 except Exception:
                     pass  # Silent failure for clearing
-            
+           
             # Get training config that was loaded earlier in the method
+            print(f"🔍 DEBUG: Starting episode loop")
             while not done:
                 action, _ = model.predict(obs, deterministic=True)
+                print(f"🔍 DEBUG: Model predicted action {action}")
                 obs, reward, terminated, truncated, info = env.step(action)
+                print(f"🔍 DEBUG: Environment step completed, done={terminated or truncated}")
                 episode_reward += reward
                 done = terminated or truncated
+            
+            print(f"🔍 DEBUG: Episode {episode + 1} completed with reward {episode_reward}")
             total_rewards.append(episode_reward)
             
             # Track episode for selective replay saving using direct access to replay logger

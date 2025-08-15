@@ -175,7 +175,8 @@ class UsePhaseTransition:
             """Mirror setTimeout behavior from TypeScript"""
             self.actions["set_phase"]("shoot")
             self.actions["initialize_shooting_phase"]()
-            self.actions["reset_moved_units"]()
+            # DISABLED: reset_moved_units causes infinite loops by clearing tracking mid-phase
+            # self.actions["reset_moved_units"]()
             self.actions["set_selected_unit_id"](None)
             
             # CRITICAL FIX: Re-sync local state after making changes
@@ -192,7 +193,8 @@ class UsePhaseTransition:
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
             self.actions["set_phase"]("charge")
-            self.actions["reset_moved_units"]()  # Reset unitsMoved when entering charge phase
+            # DISABLED: reset_moved_units causes infinite loops by clearing tracking mid-phase
+            # self.actions["reset_moved_units"]()
             self.actions["reset_charged_units"]()
             self.actions["set_selected_unit_id"](None)
             

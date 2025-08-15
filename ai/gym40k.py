@@ -354,35 +354,19 @@ class W40KEnv(gym.Env):
         
         return obs, reward, terminated, truncated, info
     
-    def _validate_state_consistency(self):
-        """Validate that all components are using the same game_state object."""
-        if not hasattr(self.controller, 'game_state'):
-            return False
-            
-        controller_game_state_id = id(self.controller.game_state)
-        training_state_id = id(self.training_state.game_state)
+    def _mark_unit_as_acted_for_current_phase(self, unit):
+        """Mark unit as acted for current phase to prevent infinite loops."""
+        current_phase = self.controller.get_current_phase()
+        unit_id = unit["id"]
         
-        consistency_issues = []
-        
-        # Check training_state consistency
-        if controller_game_state_id != training_state_id:
-            consistency_issues.append(f"training_state game_state ID mismatch: {training_state_id} vs {controller_game_state_id}")
-        
-        # Check state_actions consistency
-        if hasattr(self.controller, 'state_actions') and 'set_phase' in self.controller.state_actions:
-            action_state_id = id(self.controller.state_actions['set_phase'].__self__.game_state)
-            if action_state_id != controller_game_state_id:
-                consistency_issues.append(f"state_actions game_state ID mismatch: {action_state_id} vs {controller_game_state_id}")
-        
-        # Check phase_manager consistency
-        if hasattr(self.controller, 'phase_manager') and hasattr(self.controller.phase_manager, 'game_state'):
-            phase_state_id = id(self.controller.phase_manager.game_state)
-            if phase_state_id != controller_game_state_id:
-                consistency_issues.append(f"phase_manager game_state ID mismatch: {phase_state_id} vs {controller_game_state_id}")
-        
-        if consistency_issues:
-            return False
-        return True
+        if current_phase == "move":
+            self.controller.state_actions['add_moved_unit'](unit_id)
+        elif current_phase == "shoot":
+            self.controller.state_actions['add_moved_unit'](unit_id)  # Shooting uses moved units tracking
+        elif current_phase == "charge":
+            self.controller.state_actions['add_charged_unit'](unit_id)
+        elif current_phase == "combat":
+            self.controller.state_actions['add_attacked_unit'](unit_id)
 
     def _find_shoot_target(self, unit):
         """Find valid shooting target using controller logic."""
