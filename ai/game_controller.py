@@ -525,7 +525,7 @@ class TrainingGameController(GameController):
         eligible_units = self._get_gym_eligible_units()
         bot_units = [u for u in eligible_units if u["player"] == 0]
         
-        # CRITICAL FIX: Execute only ONE bot action per call to reduce step consumption
+        # Execute only ONE bot action per call to reduce step consumption
         if bot_units:
             bot_unit = bot_units[0]  # Take first eligible unit only
             current_phase = self.get_current_phase()
@@ -705,9 +705,7 @@ class TrainingGameController(GameController):
             )
         except Exception as e:
             if not self.quiet:
-                print(f"❌ Gym action logging failed for unit {acting_unit.get('id', 'unknown')} action {mirror_action.get('type', 'unknown')}: {e}")
-                import traceback
-                traceback.print_exc()
+                print(f"⚠️ Gym action logging failed for unit {acting_unit.get('id', 'unknown')} action {mirror_action.get('type', 'unknown')}: {e}")
 
     def _get_gym_obs(self) -> np.ndarray:
         """Get gymnasium observation - delegates to gym environment"""
@@ -757,11 +755,9 @@ class TrainingGameController(GameController):
         Execute gymnasium action and return (obs, reward, terminated, truncated, info).
         ARCHITECTURAL COMPLIANCE: All game logic delegated to use_*.py mirror files.
         """
-        # Check step count for truncation
-        current_step = self._get_current_step_count()
-        
         # Get eligible units using mirror architecture
         eligible_units = self._get_gym_eligible_units()
+        current_step = self._get_current_step_count()
         current_player = self.get_current_player()
         
         if not eligible_units:
@@ -797,37 +793,9 @@ class TrainingGameController(GameController):
         # Execute action through mirror architecture
         acting_unit = controlled_eligible_units[unit_idx]
         mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
-        
+       
         success = self.execute_action(acting_unit["id"], mirror_action)
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
-        
-        # Increment step count for all gym actions, not just successful ones
-        self._increment_step_count()
-        # Check step limit AFTER action
-        current_step = self._get_current_step_count()
-        if current_step >= self.max_steps_per_episode:
-            # --- Drain to end-of-turn before truncating ---
-            try:
-                def _at_turn_boundary():
-                    try:
-                        phase = self.get_current_phase()
-                        player = self.get_current_player()
-                        return phase == "move" and player == 0
-                    except Exception:
-                        return False
-
-                safety_iters = 64
-                while safety_iters > 0 and not _at_turn_boundary():
-                    if self.phase_transitions and "auto_advance_phases" in self.phase_transitions:
-                        self.phase_transitions["auto_advance_phases"]()
-                    else:
-                        break
-                    safety_iters -= 1
-            except Exception:
-                pass
-
-            return self._get_gym_obs(), reward, False, True, self._get_gym_info()  # Truncated
-        
         # Log action using unified logging - ALWAYS REQUIRED
         self._log_gym_action(acting_unit, mirror_action, reward)
         
