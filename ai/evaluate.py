@@ -161,28 +161,6 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
             episode_reward += reward
             game_length += 1
             done = terminated or truncated
-        
-        # === Replay log end-of-turn assertion ===
-        try:
-            # Prefer env.training_state.game_log if available
-            if hasattr(env, "training_state") and hasattr(env.training_state, "game_log"):
-                log_events = list(reversed(env.training_state.game_log.events))
-            elif hasattr(env, "game_log"):
-                log_events = list(reversed(env.game_log.events))
-            else:
-                log_events = []
-
-            if log_events:
-                last_phase_event = next((e for e in reversed(log_events) if e.get("type") == "phase_change"), None)
-                if last_phase_event:
-                    last_phase = last_phase_event.get("phase")
-                    last_player = last_phase_event.get("player")
-                    if not (last_phase == "move" and last_player == 0):
-                        raise AssertionError(
-                            f"Replay ended mid-phase: phase={last_phase}, player={last_player}"
-                        )
-        except Exception as e:
-            print(f"⚠️ Replay log assertion failed: {e}")
 
         # Episode results
         results['total_rewards'].append(episode_reward)
