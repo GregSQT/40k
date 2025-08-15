@@ -121,6 +121,15 @@ class ConfigLoader:
         
         return unit_rewards[action]    
     
+    def get_max_history(self, training_config_name: str = "default") -> int:
+        """Get max history for state management - raises error if missing."""
+        full_config = self.load_config("training_config", force_reload=False)
+        shared_params = full_config.get("shared_parameters", {})
+        state_mgmt = shared_params.get("state_management", {})
+        if "max_history" not in state_mgmt:
+            raise KeyError(f"max_history missing from global shared_parameters.state_management")
+        return state_mgmt["max_history"]
+
     def get_log_available_height(self) -> int:
         """Get log available height from game config."""
         game_config = self.get_game_config()

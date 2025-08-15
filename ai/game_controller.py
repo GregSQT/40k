@@ -835,7 +835,11 @@ class TrainingGameController(GameController):
         self.config_manager = None  # Skip problematic TrainingGameConfig for now
         
         # Initialize training game state - SINGLE SOURCE OF TRUTH
-        self.state_manager = TrainingGameState(self.game_units, max_history=50)
+        max_history = config_loader.get_max_history(self.config.training_config_name)
+        self.state_manager = TrainingGameState(self.game_units, max_history=max_history)
+        
+        # CRITICAL: Enable debugging for game over checks to identify premature episode termination
+        self.state_manager._debug_game_over = True
         
         # CRITICAL: Store the SINGLE game_state object reference that ALL components will use
         self.game_state = self.state_manager.game_state

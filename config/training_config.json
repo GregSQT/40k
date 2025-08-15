@@ -2,6 +2,9 @@
   "shared_parameters": {
     "description": "Parameters shared across all training configurations",
     "session_timeout_seconds": 3600,
+    "state_management": {
+      "max_history": 50
+    },
     "episode_tracker": {
       "max_candidates": 20,
       "keep_per_category": 5,
@@ -186,7 +189,6 @@
       ]
     }
   },
-
 
   "debug": {
     "description": "Ultra minimal to force working",

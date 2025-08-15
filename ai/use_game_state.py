@@ -433,6 +433,10 @@ class UseGameState:
             if "player" not in unit:
                 raise KeyError(f"Unit missing required 'player' field: {unit}")
             
+            # DEBUG: Log unit state for debugging
+            if hasattr(self, '_debug_game_over'):
+                print(f"🐛 Unit {unit['id']}: player={unit['player']}, alive={unit['alive']}, HP={unit['CUR_HP']}")
+            
             # Check if unit is alive and has HP > 0
             if unit["alive"] and unit["CUR_HP"] > 0:
                 if unit["player"] == 0:
@@ -440,8 +444,13 @@ class UseGameState:
                 elif unit["player"] == 1:
                     player_1_alive.append(unit)
         
+        # DEBUG: Log counts for debugging
+        game_over = len(player_0_alive) == 0 or len(player_1_alive) == 0
+        if hasattr(self, '_debug_game_over'):
+            print(f"🐛 P0 alive: {len(player_0_alive)}, P1 alive: {len(player_1_alive)}, Game over: {game_over}")
+        
         # Game is over if either player has no living units
-        return len(player_0_alive) == 0 or len(player_1_alive) == 0
+        return game_over
 
     def get_winner(self) -> Optional[int]:
         """Get winner if game is over, None otherwise"""
