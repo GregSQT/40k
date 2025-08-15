@@ -920,8 +920,6 @@ class TrainingGameController(GameController):
         # Force immediate connection verification
         if hasattr(replay_logger, 'env') and replay_logger.env:
             replay_logger.env.controller = self
-        if not self.quiet:
-            print(f"✅ TrainingGameController connected replay_logger: {type(replay_logger).__name__}")
 
     @property
     def units(self) -> List[Dict[str, Any]]:
@@ -1148,8 +1146,6 @@ class TrainingGameController(GameController):
         
         # CRITICAL: Force complete episode isolation - direct attribute reset
         if self.replay_logger:
-            if not self.quiet:
-                print(f"🔄 Resetting replay logger for new episode {self.episode_count}")
             # Force complete reset of ALL replay data structures
             self.replay_logger.combat_log_entries = []
             self.replay_logger.game_states = []
