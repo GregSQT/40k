@@ -524,12 +524,20 @@ class MultiAgentTrainer:
             
             all_callbacks = callbacks if callbacks else []
             
-            # Execute training
+            # Execute training - track progress for slowest agent monitoring
+            with self.progress_lock:
+                self.session_progress[session.session_id] = {
+                    'current_step': 0,
+                    'total_steps': total_timesteps,
+                    'session_id': session.session_id
+                }
+            
+            # Execute training with progress tracking
             model.learn(
                 total_timesteps=total_timesteps,
                 callback=all_callbacks,
                 log_interval=training_config["log_interval"],
-                progress_bar=training_config["show_progress_bar"]
+                progress_bar=self.shared_config["progress_bar"].get("show_progress_bar", True) and (self.completed_sessions == 0)  # Only first session shows progress
             )
             
             # Record pure training time
@@ -768,7 +776,6 @@ class MultiAgentTrainer:
 
     def _test_trained_model(self, model, env, num_episodes: int, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
         """Test trained model - episode_tracker should be None to prevent test episode capture"""
-        print(f"🔍 DEBUG: _test_trained_model called with {num_episodes} episodes")
         wins = 0
         total_rewards = []
         
@@ -793,42 +800,79 @@ class MultiAgentTrainer:
             }
         
         for episode in range(num_episodes):
-            print(f"🔍 DEBUG: Starting evaluation episode {episode + 1}/{num_episodes}")
             obs, info = env.reset()
-            print(f"🔍 DEBUG: Environment reset completed")
             episode_reward = 0
             done = False
            
-            # CRITICAL FIX: Enable replay logging and clear for each evaluation episode
+            # CRITICAL FIX: Enable replay logging for evaluation episode
             if episode_tracker:
                 try:
-                    # Find replay logger and enable evaluation mode
+                    # Set evaluation mode flags at ALL levels
+                    env.is_evaluation_mode = True
+                    env._force_evaluation_mode = True
+                    
+                    # Find actual environment through wrappers
                     actual_env = env
-                    if hasattr(actual_env, 'env'):
+                    while hasattr(actual_env, 'env'):
+                        actual_env.is_evaluation_mode = True
+                        actual_env._force_evaluation_mode = True
                         actual_env = actual_env.env
-                   
+                    
+                    # Enable on unwrapped environment
+                    if hasattr(actual_env, 'unwrapped'):
+                        actual_env.unwrapped.is_evaluation_mode = True
+                        actual_env.unwrapped._force_evaluation_mode = True
+                    
+                    # Enable on replay logger directly
                     if hasattr(actual_env, 'replay_logger') and actual_env.replay_logger:
-                        actual_env.replay_logger.is_evaluation_mode = True  # Enable for evaluation
+                        actual_env.replay_logger.is_evaluation_mode = True
+                        actual_env.replay_logger.env.is_evaluation_mode = True
+                        actual_env.replay_logger.env._force_evaluation_mode = True
                         actual_env.replay_logger.clear()
-                        actual_env._force_evaluation_mode = True  # Flag for reset method
-                    elif hasattr(actual_env, 'unwrapped') and hasattr(actual_env.unwrapped, 'replay_logger'):
-                        actual_env.unwrapped.replay_logger.is_evaluation_mode = True  # Enable for evaluation
-                        actual_env.unwrapped.replay_logger.clear()
-                        actual_env.unwrapped._force_evaluation_mode = True  # Flag for reset method
-                except Exception:
-                    pass  # Silent failure for clearing
+                except Exception as e:
+                    print(f"⚠️ Failed to enable replay logging: {e}")
            
-            # Get training config that was loaded earlier in the method
-            print(f"🔍 DEBUG: Starting episode loop")
-            while not done:
+            # Add step counter to prevent infinite loops
+            step_count = 0
+            max_steps = 1000  # Prevent infinite episodes
+            while not done and step_count < max_steps:
                 action, _ = model.predict(obs, deterministic=True)
-                print(f"🔍 DEBUG: Model predicted action {action}")
                 obs, reward, terminated, truncated, info = env.step(action)
-                print(f"🔍 DEBUG: Environment step completed, done={terminated or truncated}")
+                done = terminated or truncated
+                step_count += 1
+                
+                # CRITICAL FIX: Auto-advance phases when no units are eligible OR turn limit reached
+                if not done:
+                    current_turn = info.get('current_turn', 0)
+                    eligible_units = info.get('eligible_units', 0)
+                    
+                    # Force end after 50 turns to prevent infinite games
+                    if current_turn > 50:
+                        print(f"⚠️ Episode {episode + 1} auto-terminated due to turn limit (turn {current_turn})")
+                        done = True
+                        episode_reward += reward
+                    elif eligible_units == 0:
+                        # Force phase advancement when stuck
+                        if hasattr(env, 'controller') and hasattr(env.controller, '_advance_gym_phase_or_turn'):
+                            try:
+                                env.controller._advance_gym_phase_or_turn()
+                                # Re-check after phase advancement
+                                obs = env._get_obs()
+                                info = env._get_info()
+                            except Exception:
+                                pass  # Continue if phase advancement fails
+            
+            # Debug infinite loop detection
+            if step_count >= max_steps:
+                print(f"⚠️ Episode {episode + 1} terminated due to max steps ({max_steps})")
+                print(f"   Last action: {action}, Last reward: {reward}")
+                print(f"   Info: {info}")
+                # Force game over for stuck episodes
+                done = True
+                episode_reward += reward  # Add final reward
                 episode_reward += reward
                 done = terminated or truncated
             
-            print(f"🔍 DEBUG: Episode {episode + 1} completed with reward {episode_reward}")
             total_rewards.append(episode_reward)
             
             # Track episode for selective replay saving using direct access to replay logger
@@ -849,11 +893,74 @@ class MultiAgentTrainer:
                         replay_logger = actual_env.unwrapped.replay_logger
                     
                     if replay_logger:
-                        # Get data directly from replay logger like PvP mode
+                        # Force replay logger to capture data by directly calling log methods
+                        current_turn = info.get('current_turn', 1)
+                        
+                        # CRITICAL FIX: Enable the disabled logging line in controller
+                        actual_env = env
+                        while hasattr(actual_env, 'env'):
+                            actual_env = actual_env.env
+                        
+                        if hasattr(actual_env, 'controller'):
+                            # Get the controller's execute_gym_action method source and patch it
+                            import types
+                            controller = actual_env.controller
+                            
+                            # Create new method with logging enabled
+                            def patched_execute_gym_action(self, action: int):
+                                print(f"🔍 PATCHED METHOD CALLED with action {action}")
+                                try:
+                                    eligible_units = self._get_gym_eligible_units()
+                                    print(f"🔍 ELIGIBLE UNITS: {len(eligible_units)}")
+                                    controlled_eligible_units = [u for u in eligible_units if u["player"] == 1]
+                                    print(f"🔍 CONTROLLED UNITS: {len(controlled_eligible_units)}")
+                                    print(f"🔍 UNIT PLAYERS: {[u.get('player', 'unknown') for u in eligible_units]}")
+                                    print(f"🔍 UNIT IDS: {[u.get('id', 'unknown') for u in eligible_units]}")
+                                    
+                                    if not controlled_eligible_units:
+                                        print(f"🔍 NO CONTROLLED UNITS - returning penalty")
+                                        return self._get_gym_obs(), self._get_gym_penalty_reward(), False, False, self._get_gym_info()
+                                    
+                                    unit_idx = action // 8
+                                    action_type = action % 8
+                                    print(f"🔍 ACTION DECODE: unit_idx={unit_idx}, action_type={action_type}")
+                                except Exception as e:
+                                    print(f"🔍 ERROR IN PATCHED METHOD: {e}")
+                                    raise
+                                
+                                if unit_idx >= len(controlled_eligible_units):
+                                    return self._get_gym_obs(), self._get_gym_penalty_reward(), False, False, self._get_gym_info()
+                                
+                                acting_unit = controlled_eligible_units[unit_idx]
+                                mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
+                                
+                                print(f"🔍 EXECUTING ACTION: Unit {acting_unit['id']} action {mirror_action}")
+                                success = self.execute_action(acting_unit["id"], mirror_action)
+                                print(f"🔍 ACTION RESULT: Success={success}")
+                                reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
+                                print(f"🔍 REWARD CALCULATED: {reward}")
+                                
+                                # ENABLE LOGGING FOR EVALUATION
+                                print(f"🔍 LOGGING ACTION: Unit {acting_unit['id']} action {mirror_action['type']} reward {reward}")
+                                self._log_gym_action(acting_unit, mirror_action, reward)
+                                print(f"🔍 LOGGED - Combat log entries: {len(self.gym_env.replay_logger.combat_log_entries) if hasattr(self, 'gym_env') and hasattr(self.gym_env, 'replay_logger') else 'NO LOGGER'}")
+                                
+                                self._mark_gym_unit_as_acted(acting_unit)
+                                self._advance_gym_phase_or_turn()
+                                terminated = self.is_game_over()
+                                
+                                return self._get_gym_obs(), reward, terminated, False, self._get_gym_info()
+                            
+                            # Replace the method and verify it worked
+                            original_method = controller.execute_gym_action
+                            controller.execute_gym_action = types.MethodType(patched_execute_gym_action, controller)
+                            print(f"🔍 CONTROLLER PATCHED: Logging enabled for evaluation episode {episode + 1}")
+                            print(f"🔍 METHOD REPLACED: Original={original_method}, New={controller.execute_gym_action}")
+                        
+                        # Now get the data
                         game_states = getattr(replay_logger, 'game_states', [])
                         combat_log_entries = getattr(replay_logger, 'combat_log_entries', [])
                         initial_state = getattr(replay_logger, 'initial_game_state', {})
-                        current_turn = getattr(replay_logger, 'current_turn', 0)
                         
                         replay_data = {
                             "episode_reward": episode_reward,
@@ -862,14 +969,14 @@ class MultiAgentTrainer:
                             "initial_state": initial_state.copy() if initial_state else {},
                             "game_info": {
                                 "scenario": "evaluation_episode", 
-                                "total_turns": max(1, current_turn),  # Ensure minimum turn count of 1
-                                "winner": getattr(actual_env, 'winner', None) if hasattr(actual_env, 'winner') else None
+                                "total_turns": max(1, current_turn),
+                                "winner": info.get('winner', None)
                             }
                         }
                         
                         episode_tracker.update_episode(episode_reward, replay_data)
                     else:
-                        raise ValueError(f"No replay logger found in environment for episode {episode+1}")
+                        raise ValueError(f"No replay logger found for episode {episode+1}")
                         
                 except Exception as replay_error:
                     raise ValueError(f"No replay data captured for episode {episode+1}: {replay_error}")

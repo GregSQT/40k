@@ -17,7 +17,8 @@
       "description": "🌌 Slowest Agent",
       "unit": "steps",
       "leave": true,
-      "ncols": 100
+      "ncols": 100,
+      "show_progress_bar": true
     },
     "evaluation": {
       "progress_bar": {
@@ -75,7 +76,6 @@
     "progress_update_interval": 10,
     "scenario_generation_timeout": 10,
     "log_interval": 1000,
-    "show_progress_bar": false,
     "callback_params": {
       "eval_deterministic": true,
       "eval_render": false,
@@ -117,7 +117,6 @@
     "progress_update_interval": 10,
     "scenario_generation_timeout": 10,
     "log_interval": 1000,
-    "show_progress_bar": false,
     "callback_params": {
       "eval_deterministic": true,
       "eval_render": false,
@@ -159,7 +158,6 @@
     "progress_update_interval": 10,
     "scenario_generation_timeout": 10,
     "log_interval": 1000,
-    "show_progress_bar": false,
     "callback_params": {
       "eval_deterministic": true,
       "eval_render": false,
@@ -200,7 +198,6 @@
     "progress_update_interval": 10,
     "scenario_generation_timeout": 10,
     "log_interval": 1000,
-    "show_progress_bar": false,
     "callback_params": {
       "eval_deterministic": true,
       "eval_render": false,
