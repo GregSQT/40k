@@ -99,13 +99,6 @@ class ConfigLoader:
             raise ValueError("Phase order is empty in game_config.json")
         return phase_order
 
-    def get_max_steps_per_episode(self, training_config_name: str = "default") -> int:
-        """Get max steps per episode - raises error if missing."""
-        training_config = self.load_training_config(training_config_name)
-        if "max_steps_per_episode" not in training_config:
-            raise KeyError(f"max_steps_per_episode missing from training config '{training_config_name}'")
-        return training_config["max_steps_per_episode"]
-
     def get_reward_value(self, unit_type: str, action: str) -> float:
         """Get specific reward value - raises error if missing."""
         rewards_config = self.load_rewards_config()
@@ -235,13 +228,6 @@ def get_phase_order(self) -> list[str]:
     if not phase_order:
         raise ValueError("Phase order is empty in game_config.json")
     return phase_order
-
-def get_max_steps_per_episode(self, training_config_name: str) -> int:
-    """Get max steps per episode - raises error if missing."""
-    training_config = self.load_training_config(training_config_name)
-    if "max_steps_per_episode" not in training_config:
-        raise KeyError(f"max_steps_per_episode missing from training config '{training_config_name}'")
-    return training_config["max_steps_per_episode"]
 
 def get_reward_value(self, unit_type: str, action: str, rewards_config_name: str) -> float:
     """Get specific reward value - raises error if missing."""

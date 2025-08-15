@@ -87,7 +87,6 @@ class W40KEnv(gym.Env):
         
         # CRITICAL: Initialize mirror controller BEFORE other components try to access controller state
         self._initialize_mirror_controller(scenario_file, training_config_name)
-        self.step_count = 0
         
         # Explicit unit tracking for compatibility
         self._last_acting_unit = None
@@ -318,7 +317,6 @@ class W40KEnv(gym.Env):
         # Reset environment state
         self.game_over = False
         self.winner = None
-        self.step_count = 0
         
         # CRITICAL: Episode starts at beginning of first Player 0 turn (movement phase) - Turn 1
         self.controller.game_state["current_turn"] = 1  # Always start at Turn 1 per specification
@@ -353,7 +351,6 @@ class W40KEnv(gym.Env):
         # Update environment state from controller
         self.game_over = terminated
         self.winner = info.get('winner')
-        # CRITICAL FIX: Remove duplicate step increment - controller handles step counting
         
         return obs, reward, terminated, truncated, info
     
@@ -617,7 +614,6 @@ class W40KEnv(gym.Env):
             "current_phase": self.controller.game_state["phase"], 
             "ai_units_alive": len(ai_units_alive),
             "enemy_units_alive": len(enemy_units_alive),
-            "step_count": self.step_count,
             "game_over": self.game_over,
             "winner": self.winner,
             "eligible_units": len(self._get_eligible_units())
@@ -949,12 +945,12 @@ if __name__ == "__main__":
         print(f"   Units: {info['ai_units_alive']} AI, {info['enemy_units_alive']} enemy")
         print(f"   Eligible units: {info['eligible_units']}")
         
-        # Test a few steps
+        # Test a few actions
         print("\n🎯 Testing mirror-based actions...")
-        for step in range(5):
+        for action_count in range(5):
             action = env.action_space.sample()
             obs, reward, done, truncated, info = env.step(action)
-            print(f"   Step {step}: Phase {info['current_phase']}, Reward {reward:.2f}, Eligible {info['eligible_units']}")
+            print(f"   Action {action_count}: Phase {info['current_phase']}, Reward {reward:.2f}, Eligible {info['eligible_units']}")
             
             if done:
                 print(f"   Game ended! Winner: {info['winner']}")

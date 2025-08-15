@@ -565,11 +565,7 @@ class UseGameState:
             "set_attack_preview": self.set_attack_preview,
             "clear_attack_preview": self.clear_attack_preview,
             "set_target_preview": self.set_target_preview,
-            
-            # Episode step tracking for training
-            "set_episode_step_count": self.set_episode_step_count,
-            "increment_episode_step_count": self.increment_episode_step_count,
-        }
+            }
 
 
 # === FACTORY FUNCTION (Mirror of TypeScript hook usage) ===
@@ -650,22 +646,8 @@ class TrainingGameState(UseGameState):
         """Get state history for training analysis"""
         return copy.deepcopy(self.state_history)
 
-    def set_episode_step_count(self, count: int) -> None:
-        """Set episode step count in game state"""
-        if "episode_step_count" not in self.game_state:
-            self.game_state["episode_step_count"] = 0
-        self.game_state["episode_step_count"] = count
-
-    def increment_episode_step_count(self) -> None:
-        """Increment episode step count in game state"""
-        if "episode_step_count" not in self.game_state:
-            self.game_state["episode_step_count"] = 0
-        self.game_state["episode_step_count"] += 1
-
     def reset_for_new_episode(self, initial_units: List[Dict[str, Any]]) -> None:
         """Reset state for new training episode"""
-        # CRITICAL FIX: Reset episode_step_count FIRST before any other operations
-        self.game_state["episode_step_count"] = 0
         
         # DON'T create a new object - just reset the existing game_state
         processed_units = []
@@ -681,7 +663,6 @@ class TrainingGameState(UseGameState):
         self.game_state["current_player"] = 0  # Episode starts with player 0
         self.game_state["phase"] = "move"      # Episode starts with move phase
         self.game_state["current_turn"] = 1    # Turns start at 1 at episode beginning
-        self.game_state["episode_step_count"] = 0  # Ensure step count is reset
         self.game_state["units_moved"] = []
         self.game_state["units_charged"] = []
         self.game_state["units_attacked"] = []

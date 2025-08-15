@@ -56,7 +56,6 @@ class GameController:
         
         # Game loop state
         self.is_running = False
-        self.current_step = 0
 
     def _initialize_units(self) -> List[Dict[str, Any]]:
         """
@@ -80,7 +79,6 @@ class GameController:
     def start_game(self) -> None:
         """Start the game loop"""
         self.is_running = True
-        self.current_step = 0
         
         # Log game start (EXACT from TypeScript)
         if self.game_log and "logTurnStart" in self.game_log:
@@ -124,7 +122,6 @@ class GameController:
             self.stop_game()
             return False
         
-        self.current_step += 1
         return True
 
     def _update_state(self) -> None:
@@ -439,7 +436,6 @@ class GameController:
         
         # Reset game state
         self.is_running = False
-        self.current_step = 0
         self.clicked_unit_id = None
 
 
@@ -469,7 +465,6 @@ class TrainingGameController(GameController):
         self.quiet = quiet
         super().__init__(config)
         self.episode_count = 0
-        self.total_steps = 0
         self.episode_rewards = []
         self.training_metrics = {
             "episodes_completed": 0,
@@ -477,18 +472,6 @@ class TrainingGameController(GameController):
             "wins_by_player": {0: 0, 1: 0},
             "average_episode_length": 0.0
         }
-        
-        # Training-specific properties from config - NO HARDCODED VALUES
-        if not hasattr(config, 'training_config_name'):
-            raise ValueError("GameControllerConfig missing required training_config_name for max_steps_per_episode")
-        
-        from config_loader import get_config_loader
-        config_loader = get_config_loader()
-        self.max_steps_per_episode = config_loader.get_max_steps_per_episode(config.training_config_name)
-        
-        # Step count managed by game state - NO SEPARATE TRACKING
-        if not hasattr(self, 'game_state'):
-            raise RuntimeError("TrainingGameController missing required game_state for step tracking")
 
     def _get_gym_eligible_units(self) -> List[Dict]:
         """Delegate to use_game_actions.py for unit eligibility"""
@@ -735,21 +718,6 @@ class TrainingGameController(GameController):
         """Connect gym environment for observation/reward delegation"""
         self.gym_env = gym_env
 
-    def _get_current_step_count(self) -> int:
-        """Get current step count from game state - NO SEPARATE TRACKING"""
-        if 'episode_step_count' not in self.game_state:
-            # Initialize if not present
-            if not hasattr(self, 'state_actions') or 'set_episode_step_count' not in self.state_actions:
-                raise RuntimeError("state_actions missing required set_episode_step_count method")
-            self.state_actions['set_episode_step_count'](0)
-        return self.game_state['episode_step_count']
-
-    def _increment_step_count(self) -> None:
-        """Increment step count in game state - delegates to use_game_state.py"""
-        if not hasattr(self, 'state_actions') or 'increment_episode_step_count' not in self.state_actions:
-            raise RuntimeError("state_actions missing required increment_episode_step_count method")
-        self.state_actions['increment_episode_step_count']()
-
     def execute_gym_action(self, action: int) -> tuple:
         """
         Execute gymnasium action and return (obs, reward, terminated, truncated, info).
@@ -757,7 +725,6 @@ class TrainingGameController(GameController):
         """
         # Get eligible units using mirror architecture
         eligible_units = self._get_gym_eligible_units()
-        current_step = self._get_current_step_count()
         current_player = self.get_current_player()
         
         if not eligible_units:
@@ -802,8 +769,6 @@ class TrainingGameController(GameController):
         # Mark unit as acted if successful
         if success:
             self._mark_gym_unit_as_acted(acting_unit)
-            # CRITICAL FIX: Only increment step count when real action is successfully performed
-            self._increment_step_count()
         
         # Check if game ended
         terminated = self.is_game_over()
@@ -952,7 +917,6 @@ class TrainingGameController(GameController):
             },
             "combat_log": combat_log_entries,
             "game_states": [],
-            "episode_steps": len(combat_log_entries),  # CRITICAL FIX: Use actual combat log length
             "episode_reward": episode_reward
         }
         
@@ -1101,9 +1065,6 @@ class TrainingGameController(GameController):
         
         self.episode_count += 1
         self.episode_start_time = time.time()
-        # Reset step count in game_state, not local variable
-        if hasattr(self, 'state_actions') and 'set_episode_step_count' in self.state_actions:
-            self.state_actions['set_episode_step_count'](0)
         
         # Reset training-specific state
         if hasattr(self.state_manager, 'reset_for_new_episode'):
@@ -1190,9 +1151,7 @@ class TrainingGameController(GameController):
         
         # Update training metrics
         self.training_metrics["episodes_completed"] += 1
-        # CRITICAL FIX: Use actual step count from game_state
-        actual_steps = self._get_current_step_count()
-        self.training_metrics["total_actions"] += actual_steps
+        self.training_metrics["total_actions"] += 1  # Count episodes instead of steps
         
         if winner is not None:
             self.training_metrics["wins_by_player"][winner] += 1
@@ -1205,7 +1164,6 @@ class TrainingGameController(GameController):
         
         episode_metrics = {
             "episode": self.episode_count,
-            "steps": actual_steps,  # Use actual_steps from above
             "duration": episode_duration,
             "winner": winner,
             "final_reward": final_reward,
@@ -1241,8 +1199,6 @@ class TrainingGameController(GameController):
     def step(self) -> bool:
         """Override step to include training metrics"""
         result = super().step()
-        # Use game_state step count, not local variable
-        self.total_steps += 1
         
         # Update phase tracking for training compatibility
         self._current_phase = self.game_state.get("phase", "move")

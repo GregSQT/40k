@@ -37,20 +37,18 @@ from config_loader import get_config_loader
 class EpisodeMetrics:
     """Track metrics for a single episode."""
     episode_num: int
-    step_count: int
     total_reward: float
     replay_data: Dict[str, Any]
     
     def __hash__(self):
         """Make EpisodeMetrics hashable for use in sets - exclude replay_data."""
-        return hash((self.episode_num, self.step_count, float(self.total_reward)))
+        return hash((self.episode_num, float(self.total_reward)))
     
     def __eq__(self, other):
         """Define equality for EpisodeMetrics - exclude replay_data."""
         if not isinstance(other, EpisodeMetrics):
             return False
         return (self.episode_num == other.episode_num and 
-                self.step_count == other.step_count and 
                 abs(self.total_reward - other.total_reward) < 1e-6)
 
 class SelectiveEpisodeTracker:
@@ -68,17 +66,15 @@ class SelectiveEpisodeTracker:
         self.best_reward_episode: Optional[EpisodeMetrics] = None
         self.worst_reward_episode: Optional[EpisodeMetrics] = None
     
-    def update_episode(self, step_count: int, total_reward: float, replay_data: Dict[str, Any]):
+    def update_episode(self, total_reward: float, replay_data: Dict[str, Any]):
         """Update tracking with new training episode data."""
         self.current_episode += 1
-        episode = EpisodeMetrics(self.current_episode, step_count, total_reward, replay_data)
+        episode = EpisodeMetrics(self.current_episode, total_reward, replay_data)
         
         # Add to candidates
         self.episode_candidates.append(episode)
         
         # Update current bests for comparison
-        if self.shortest_episode is None or step_count < self.shortest_episode.step_count:
-            self.shortest_episode = episode
         if self.best_reward_episode is None or total_reward > self.best_reward_episode.total_reward:
             self.best_reward_episode = episode
         if self.worst_reward_episode is None or total_reward < self.worst_reward_episode.total_reward:
@@ -92,7 +88,6 @@ class SelectiveEpisodeTracker:
     def _prune_candidates(self):
         """Keep only the most promising episodes to manage memory."""
         # Sort by different criteria and keep top candidates
-        sorted_by_steps = sorted(self.episode_candidates, key=lambda x: x.step_count)
         sorted_by_reward = sorted(self.episode_candidates, key=lambda x: x.total_reward, reverse=True)
         sorted_by_worst = sorted(self.episode_candidates, key=lambda x: x.total_reward)
         
@@ -103,7 +98,6 @@ class SelectiveEpisodeTracker:
         shared_config = full_config["shared_parameters"]
         keep_count = shared_config["episode_tracker"]["keep_per_category"]
         keep_episodes = set()
-        keep_episodes.update(sorted_by_steps[:keep_count])  # Shortest
         keep_episodes.update(sorted_by_reward[:keep_count])  # Best rewards
         keep_episodes.update(sorted_by_worst[:keep_count])   # Worst rewards
         keep_episodes.update(self.episode_candidates[-keep_count:])  # Recent episodes
@@ -118,7 +112,6 @@ class SelectiveEpisodeTracker:
         enemy_name = self.enemy_key if self.enemy_key in self.agent_key else "Bot"
         
         episodes_to_save = [
-            (self.shortest_episode, "shortest"),
             (self.best_reward_episode, "best"),
             (self.worst_reward_episode, "worst")
         ]
@@ -316,25 +309,21 @@ class MultiAgentTrainer:
         # Load training config
         self.training_config = self.config.load_training_config(training_config_name)
         training_config = self.config.load_training_config(training_config_name)
-        timesteps_per_session = training_config["total_timesteps"]
-        total_timesteps = len(training_rotation) * timesteps_per_session
         
         print(f"🔄 Executing {len(training_rotation)} training matchups...")
         print(f"📊 Episodes per matchup: {episodes_per_pair}")
-        print(f"⏱️ Timesteps per session: {timesteps_per_session:,}")
-        print(f"🔄 Total timesteps: {total_timesteps:,}")
         
         # Progress tracking with slowest agent monitoring
         self.total_sessions = len(training_rotation)
         self.completed_sessions = 0
         self.session_progress = {}
         
-        # Create progress bar showing slowest agent with config values
+        # Create progress bar showing matchup completion
         progress_config = self.shared_config["progress_bar"]
         self.overall_pbar = tqdm(
-            total=timesteps_per_session,
-            desc=progress_config["description"],
-            unit=progress_config["unit"],
+            total=len(training_rotation),
+            desc="Training Matchups",
+            unit="matchups",
             leave=progress_config["leave"],
             ncols=progress_config["ncols"]
         )
@@ -373,15 +362,6 @@ class MultiAgentTrainer:
                 self.active_sessions[session_id] = session
                 self.session_futures[session_id] = future
                 batch_futures.append((session_id, future))
-                
-                # Initialize progress tracking for this session
-                with self.progress_lock:
-                    self.session_progress[session_id] = {
-                        'steps': 0,
-                        'total': timesteps_per_session,
-                        'agent': session.agent_key,
-                        'opponent': session.opponent_agent
-                    }
             
             # Wait for batch completion with proper progress bar updates
             for session_id, future in batch_futures:
@@ -405,10 +385,8 @@ class MultiAgentTrainer:
                     # Update progress tracking
                     self.completed_sessions += 1
                     
-                    # Remove completed session from progress tracking
+                    # Update progress tracking
                     with self.progress_lock:
-                        if session_id in self.session_progress:
-                            del self.session_progress[session_id]
                         self._update_slowest_progress()
                     
                     #print(f"✅ Session {self.completed_sessions}/{self.total_sessions}: {result['agent_key']} vs {result['opponent_agent']} | "
@@ -544,27 +522,7 @@ class MultiAgentTrainer:
             current_training_config = self.config.load_training_config(training_config_name)
             total_timesteps = current_training_config["total_timesteps"]
             
-            # Add progress tracking callback
-            class ProgressTracker(BaseCallback):
-                def __init__(self, trainer, session_id, verbose=0):
-                    super().__init__(verbose)
-                    self.trainer = trainer
-                    self.session_id = session_id
-                    self.last_update = 0
-                
-                def _on_step(self) -> bool:
-                    # Update every 10 steps for more responsive progress tracking
-                    update_interval = self.trainer.training_config["progress_update_interval"]
-                    if self.num_timesteps - self.last_update >= update_interval:
-                        with self.trainer.progress_lock:
-                            if self.session_id in self.trainer.session_progress:
-                                self.trainer.session_progress[self.session_id]['steps'] = self.num_timesteps
-                                self.trainer._update_slowest_progress()
-                        self.last_update = self.num_timesteps
-                    return True
-            
-            progress_tracker = ProgressTracker(self, session.session_id)
-            all_callbacks = callbacks + [progress_tracker] if callbacks else [progress_tracker]
+            all_callbacks = callbacks if callbacks else []
             
             # Execute training with individual progress tracking
             model.learn(
@@ -758,31 +716,10 @@ class MultiAgentTrainer:
             raise RuntimeError(f"_create_agent_model failed for {agent_key}: {create_error}")
 
     def _update_slowest_progress(self):
-        """Update progress bar to show the slowest agent's progress."""
-        if not self.session_progress:
-            return
-        
-        # Find the session with the lowest completion percentage
-        slowest_session = None
-        slowest_progress = 1.0
-        
-        for session_id, progress in self.session_progress.items():
-            if progress['total'] > 0:
-                completion = progress['steps'] / progress['total']
-                if completion < slowest_progress:
-                    slowest_progress = completion
-                    slowest_session = progress
-        
-        if slowest_session:
-            # Update progress bar to show slowest agent
-            self.overall_pbar.n = slowest_session['steps']
-            # Ensure progress bar total matches what we're actually tracking
-            if self.overall_pbar.total != slowest_session['total']:
-                self.overall_pbar.total = slowest_session['total']
-                self.overall_pbar.refresh()
-            self.overall_pbar.set_description(f"🐌 {slowest_session['agent'][:8]} vs {slowest_session['opponent'][:8]}")
-            self.overall_pbar.set_postfix_str(f"{slowest_progress:.1%}")
-            self.overall_pbar.refresh()
+        """Update progress bar to show training progress."""
+        # Simple increment for completed sessions
+        self.overall_pbar.n = self.completed_sessions
+        self.overall_pbar.refresh()
 
     def _setup_session_callbacks(self, session: TrainingSession, model, episode_tracker: SelectiveEpisodeTracker, training_config_name: str = "default") -> List:
         """Setup training callbacks - simplified without evaluation callback."""
@@ -863,7 +800,6 @@ class MultiAgentTrainer:
             obs, info = env.reset()
             episode_reward = 0
             done = False
-            step_count = 0
             
             # CRITICAL FIX: Enable replay logging and clear for each evaluation episode
             if episode_tracker:
@@ -885,17 +821,11 @@ class MultiAgentTrainer:
                     pass  # Silent failure for clearing
             
             # Get training config that was loaded earlier in the method
-            # Use the training_config that was already loaded in the method scope
-            training_config_obj = self.training_config
-            max_steps = training_config_obj["max_steps_per_episode"]
-            while not done and step_count < max_steps:
+            while not done:
                 action, _ = model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(action)
                 episode_reward += reward
                 done = terminated or truncated
-                # Only increment step_count when eligible units actually decreased (real action performed)
-                if info.get('eligible_units', 0) > 0:
-                    step_count += 1
             total_rewards.append(episode_reward)
             
             # Track episode for selective replay saving using direct access to replay logger
@@ -923,7 +853,6 @@ class MultiAgentTrainer:
                         current_turn = getattr(replay_logger, 'current_turn', 0)
                         
                         replay_data = {
-                            "episode_steps": step_count,
                             "episode_reward": episode_reward,
                             "game_states": game_states.copy() if game_states else [],
                             "combat_log": combat_log_entries.copy() if combat_log_entries else [],
@@ -935,7 +864,7 @@ class MultiAgentTrainer:
                             }
                         }
                         
-                        episode_tracker.update_episode(step_count, episode_reward, replay_data)
+                        episode_tracker.update_episode(episode_reward, replay_data)
                     else:
                         raise ValueError(f"No replay logger found in environment for episode {episode+1}")
                         
