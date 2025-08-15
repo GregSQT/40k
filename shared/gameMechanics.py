@@ -405,10 +405,8 @@ def should_transition_from_shoot(units: List[Dict[str, Any]],
         if unit["id"] in units_fled:
             continue
         
-        # Check if unit has shots remaining
-        if "SHOOT_LEFT" not in unit:
-            raise KeyError(f"Unit missing required 'SHOOT_LEFT' field: {unit}")
-        if unit["SHOOT_LEFT"] <= 0:
+        # Check if unit has shots remaining (EXACT from TypeScript: unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0)
+        if "SHOOT_LEFT" not in unit or unit["SHOOT_LEFT"] is None or unit["SHOOT_LEFT"] <= 0:
             continue
         
         # Can't shoot if adjacent to enemy (engaged in combat)

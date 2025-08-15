@@ -158,6 +158,7 @@ class UsePhaseTransition:
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
             self.actions["set_phase"]("shoot")
+            self.actions["initialize_shooting_phase"]()
             self.actions["reset_moved_units"]()
             self.actions["set_selected_unit_id"](None)
             
