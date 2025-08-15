@@ -353,7 +353,7 @@ class W40KEnv(gym.Env):
         # Update environment state from controller
         self.game_over = terminated
         self.winner = info.get('winner')
-        self.step_count += 1
+        # CRITICAL FIX: Remove duplicate step increment - controller handles step counting
         
         return obs, reward, terminated, truncated, info
     

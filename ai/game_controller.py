@@ -802,6 +802,8 @@ class TrainingGameController(GameController):
         # Mark unit as acted if successful
         if success:
             self._mark_gym_unit_as_acted(acting_unit)
+            # CRITICAL FIX: Only increment step count when real action is successfully performed
+            self._increment_step_count()
         
         # Check if game ended
         terminated = self.is_game_over()
@@ -930,6 +932,7 @@ class TrainingGameController(GameController):
             initial_units.append(replay_unit)
         
         # Create replay data structure
+        combat_log_entries = getattr(self.replay_logger, 'combat_log_entries', []) if self.replay_logger else []
         replay_data = {
             "game_info": {
                 "scenario": "training_episode",
@@ -947,9 +950,9 @@ class TrainingGameController(GameController):
                 "units": initial_units,
                 "board_size": self._get_board_size_from_config()
             },
-            "combat_log": getattr(self.replay_logger, 'combat_log_entries', []) if self.replay_logger else [],
+            "combat_log": combat_log_entries,
             "game_states": [],
-            "episode_steps": len(getattr(self.replay_logger, 'combat_log_entries', [])) if self.replay_logger else 0,
+            "episode_steps": len(combat_log_entries),  # CRITICAL FIX: Use actual combat log length
             "episode_reward": episode_reward
         }
         
