@@ -760,10 +760,6 @@ class TrainingGameController(GameController):
         # Check step count for truncation
         current_step = self._get_current_step_count()
         
-        # Check game over conditions
-        if self.is_game_over():
-            return self._get_gym_obs(), 0.0, True, False, self._get_gym_info()
-        
         # Get eligible units using mirror architecture
         eligible_units = self._get_gym_eligible_units()
         current_player = self.get_current_player()
@@ -805,13 +801,12 @@ class TrainingGameController(GameController):
         success = self.execute_action(acting_unit["id"], mirror_action)
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
         
-        # CRITICAL FIX: Only increment step count for successful meaningful actions
-        if success and mirror_action.get("type") != "wait":
-            self._increment_step_count()
-            # Check step limit AFTER successful action
-            current_step = self._get_current_step_count()
-            if current_step >= self.max_steps_per_episode:
-                return self._get_gym_obs(), reward, False, True, self._get_gym_info()  # Truncated
+        # Increment step count for all gym actions, not just successful ones
+        self._increment_step_count()
+        # Check step limit AFTER action
+        current_step = self._get_current_step_count()
+        if current_step >= self.max_steps_per_episode:
+            return self._get_gym_obs(), reward, False, True, self._get_gym_info()  # Truncated
         
         # Log action using unified logging - ALWAYS REQUIRED
         self._log_gym_action(acting_unit, mirror_action, reward)
