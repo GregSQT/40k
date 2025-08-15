@@ -85,18 +85,44 @@ class UsePhaseTransition:
 
     def should_transition_from_shoot(self) -> bool:
         """EXACT mirror of shouldTransitionFromShoot from TypeScript"""
+        from shared.gameRules import are_units_adjacent as areUnitsAdjacent, is_unit_in_range as isUnitInRange
+        
         player_units = [u for u in self.units if u["player"] == self.current_player]
+        enemy_units = [u for u in self.units if u["player"] != self.current_player]
         
         if len(player_units) == 0:
             return True
 
-        # Check if all units have acted in shoot phase (moved or fled)
-        units_that_can_act = [
-            unit for unit in player_units 
-            if unit["id"] not in self.units_moved and unit["id"] not in self.units_fled
-        ]
-        
-        return len(units_that_can_act) == 0
+        # Find units that can still shoot (EXACT from TypeScript)
+        shootable_units = []
+        for unit in player_units:
+            # Check if unit already shot this phase (tracked in units_moved during shoot phase)
+            if unit["id"] in self.units_moved:
+                continue
+            
+            # Units that fled cannot shoot
+            if unit["id"] in self.units_fled:
+                continue
+            
+            # Check if unit has shots remaining
+            if "SHOOT_LEFT" not in unit:
+                raise KeyError(f"Unit missing required 'SHOOT_LEFT' field: {unit}")
+            if unit["SHOOT_LEFT"] <= 0:
+                continue
+            
+            # Can't shoot if adjacent to enemy (engaged in combat)
+            has_adjacent_enemy = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
+            if has_adjacent_enemy:
+                continue
+            
+            # Must have enemy within shooting range
+            if "RNG_RNG" not in unit:
+                raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
+            has_target_in_range = any(isUnitInRange(unit, enemy, unit["RNG_RNG"]) for enemy in enemy_units)
+            if has_target_in_range:
+                shootable_units.append(unit)
+
+        return len(shootable_units) == 0
 
     def should_transition_from_charge(self) -> bool:
         """EXACT mirror of shouldTransitionFromCharge from TypeScript"""
@@ -159,17 +185,7 @@ class UsePhaseTransition:
         """
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
-            
-            # CRITICAL FIX: Never switch state objects - maintain single source of truth
-            set_phase_func = self.actions['set_phase']
-            # Verify we're using the correct object but don't switch references
-            if hasattr(set_phase_func, '__self__') and hasattr(set_phase_func.__self__, 'game_state'):
-                action_state_id = id(set_phase_func.__self__.game_state)
-                current_state_id = id(self.game_state)
-            
             self.actions["set_phase"]("shoot")
-            
-            self.actions["initialize_shooting_phase"]()  # MISSING FEATURE ADDED
             self.actions["reset_moved_units"]()
             self.actions["set_selected_unit_id"](None)
             

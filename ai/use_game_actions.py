@@ -742,7 +742,7 @@ class UseGameActions:
 
         # ADDITIONAL CHECK: Prevent shooting if unit has no shots left
         pre_shooter = self.find_unit(shooter_id)
-        if pre_shooter and pre_shooter.get("SHOOT_LEFT") <= 0:
+        if pre_shooter and "SHOOT_LEFT" in pre_shooter and pre_shooter["SHOOT_LEFT"] <= 0:
             return
 
         shooter = self.find_unit(shooter_id)
