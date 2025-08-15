@@ -461,7 +461,8 @@ class UsePhaseTransition:
         initial_phase = self.phase
         initial_player = self.current_player
         
-        # Process transitions
+        # CRITICAL FIX: Remove loop protection that may be blocking progression
+        # Process transitions once only - let the gym handle multiple calls if needed
         self.process_phase_transitions()
         self.process_alternating_combat_player_switch()
         
@@ -469,7 +470,11 @@ class UsePhaseTransition:
         final_phase = self.game_state.get("phase", self.phase)
         final_player = self.game_state.get("current_player", self.current_player)
         
-        # Return True if state changed
+        # Update local state
+        self.phase = final_phase
+        self.current_player = final_player
+        
+        # Return True if state changed from initial
         return initial_phase != final_phase or initial_player != final_player
 
     def force_phase_advance(self, target_phase: str) -> None:

@@ -502,10 +502,22 @@ class TrainingGameController(GameController):
         """Delegate to use_phase_transition.py for automatic phase advancement"""
         if not hasattr(self, 'phase_transitions') or 'auto_advance_phases' not in self.phase_transitions:
             raise RuntimeError("TrainingGameController missing required phase_transitions.auto_advance_phases")
-        # CRITICAL FIX: Only advance once per call to prevent oscillation
+        
+        # Track phase before advancement to detect changes
+        initial_phase = self.get_current_phase()
+        initial_player = self.get_current_player()
+        
+        # CRITICAL FIX: Single advancement call with loop protection
         advanced = self.phase_transitions['auto_advance_phases']()
-        if not advanced:
-            # Force advance if stuck
+        
+        # Verify advancement occurred to prevent stuck states
+        final_phase = self.get_current_phase()
+        final_player = self.get_current_player()
+        
+        # Only force manual advance if completely stuck (rare edge case)
+        if not advanced and initial_phase == final_phase and initial_player == final_player:
+            if not self.quiet:
+                print(f"⚠️ Force advancing from stuck state: {initial_phase}, player {initial_player}")
             self.phase_transitions['process_phase_transitions']()
 
     def _execute_gym_bot_turn(self) -> None:
@@ -513,8 +525,9 @@ class TrainingGameController(GameController):
         eligible_units = self._get_gym_eligible_units()
         bot_units = [u for u in eligible_units if u["player"] == 0]
         
-        for bot_unit in bot_units:
-            # Create proper action that includes move details for logging
+        # CRITICAL FIX: Execute only ONE bot action per call to reduce step consumption
+        if bot_units:
+            bot_unit = bot_units[0]  # Take first eligible unit only
             current_phase = self.get_current_phase()
             
             # Create realistic action based on current phase
@@ -535,6 +548,20 @@ class TrainingGameController(GameController):
                     mirror_action = {"type": "shoot", "target_id": target_ids[0]}
                 else:
                     mirror_action = {"type": "wait"}
+            elif current_phase == "charge":
+                # Handle charge phase properly for bot
+                target_ids = self.game_actions.get('get_valid_charge_targets', lambda x: [])(bot_unit["id"])
+                if target_ids:
+                    mirror_action = {"type": "charge", "target_id": target_ids[0]}
+                else:
+                    mirror_action = {"type": "wait"}
+            elif current_phase == "combat":
+                # Handle combat phase for bot
+                target_ids = self.game_actions.get('get_valid_combat_targets', lambda x: [])(bot_unit["id"])
+                if target_ids:
+                    mirror_action = {"type": "combat", "target_id": target_ids[0]}
+                else:
+                    mirror_action = {"type": "wait"}
             else:
                 mirror_action = {"type": "wait"}
             
@@ -545,7 +572,7 @@ class TrainingGameController(GameController):
                 self._log_gym_action(bot_unit, mirror_action, 0.0)
             except Exception as e:
                 if not self.quiet:
-                    print(f"❌ Bot action logging failed: {e}")
+                    print(f"⚠️ Bot action logging failed: {e}")
             self._mark_gym_unit_as_acted(bot_unit)
 
     def _mark_gym_unit_as_acted(self, unit: Dict) -> None:
@@ -730,9 +757,8 @@ class TrainingGameController(GameController):
         Execute gymnasium action and return (obs, reward, terminated, truncated, info).
         ARCHITECTURAL COMPLIANCE: All game logic delegated to use_*.py mirror files.
         """
-        # DEBUG: Track step count issue
+        # Check step count for truncation
         current_step = self._get_current_step_count()
-        print(f"DEBUG execute_gym_action: step={current_step}, turn={self.game_state['current_turn']}, phase={self.game_state['phase']}, player={self.game_state['current_player']}")
         
         # Check game over conditions
         if self.is_game_over():
@@ -772,13 +798,13 @@ class TrainingGameController(GameController):
             reward = self._get_gym_penalty_reward()
             return self._get_gym_obs(), reward, False, False, self._get_gym_info()
         
-        # CRITICAL FIX: Only increment step count when executing actual player action
-        self._increment_step_count()
-        
-        # Check step limit AFTER incrementing
+        # CRITICAL FIX: Check step limit BEFORE any processing
         current_step = self._get_current_step_count()
         if current_step >= self.max_steps_per_episode:
             return self._get_gym_obs(), 0.0, False, True, self._get_gym_info()  # Truncated
+        
+        # Only increment step count for meaningful player decisions (not wait actions)
+        # Step increment moved after action execution and success validation
         
         # Execute action through mirror architecture
         acting_unit = controlled_eligible_units[unit_idx]
@@ -786,6 +812,10 @@ class TrainingGameController(GameController):
         
         success = self.execute_action(acting_unit["id"], mirror_action)
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
+        
+        # CRITICAL FIX: Only increment step count for successful meaningful actions
+        if success and mirror_action.get("type") != "wait":
+            self._increment_step_count()
         
         # Log action using unified logging - ALWAYS REQUIRED
         self._log_gym_action(acting_unit, mirror_action, reward)
@@ -1094,7 +1124,6 @@ class TrainingGameController(GameController):
         # Reset training-specific state
         if hasattr(self.state_manager, 'reset_for_new_episode'):
             self.state_manager.reset_for_new_episode(self.game_units)
-            print(f"DEBUG after reset_for_new_episode: episode_step_count={self.game_state.get('episode_step_count', 'MISSING')}")
         if hasattr(self.log_manager, 'reset_for_new_episode'):
             self.log_manager.reset_for_new_episode()
         if hasattr(self.actions_manager, 'reset_for_new_episode'):
