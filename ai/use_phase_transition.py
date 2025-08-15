@@ -84,45 +84,17 @@ class UsePhaseTransition:
         return should_transition_from_move(self.units, self.current_player, self.units_moved)
 
     def should_transition_from_shoot(self) -> bool:
-        """EXACT mirror of shouldTransitionFromShoot from TypeScript"""
-        from shared.gameRules import are_units_adjacent as areUnitsAdjacent, is_unit_in_range as isUnitInRange
-        
-        player_units = [u for u in self.units if u["player"] == self.current_player]
-        enemy_units = [u for u in self.units if u["player"] != self.current_player]
-        
-        if len(player_units) == 0:
-            return True
-
-        # Find units that can still shoot (EXACT from TypeScript)
-        shootable_units = []
-        for unit in player_units:
-            # Check if unit already shot this phase (tracked in units_moved during shoot phase)
-            if unit["id"] in self.units_moved:
-                continue
-            
-            # Units that fled cannot shoot
-            if unit["id"] in self.units_fled:
-                continue
-            
-            # Check if unit has shots remaining
-            if "SHOOT_LEFT" not in unit:
-                raise KeyError(f"Unit missing required 'SHOOT_LEFT' field: {unit}")
-            if unit["SHOOT_LEFT"] <= 0:
-                continue
-            
-            # Can't shoot if adjacent to enemy (engaged in combat)
-            has_adjacent_enemy = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
-            if has_adjacent_enemy:
-                continue
-            
-            # Must have enemy within shooting range
-            if "RNG_RNG" not in unit:
-                raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
-            has_target_in_range = any(isUnitInRange(unit, enemy, unit["RNG_RNG"]) for enemy in enemy_units)
-            if has_target_in_range:
-                shootable_units.append(unit)
-
-        return len(shootable_units) == 0
+        """EXACT mirror of shouldTransitionFromShoot from TypeScript (delegates to shared mechanics)"""
+        from shared.gameMechanics import should_transition_from_shoot as _shoot_check
+        return _shoot_check(
+            self.units,
+            self.current_player,
+            self.phase,
+            self.units_moved,
+            self.units_charged,
+            self.units_attacked,
+            self.units_fled,
+        )
 
     def should_transition_from_charge(self) -> bool:
         """EXACT mirror of shouldTransitionFromCharge from TypeScript"""

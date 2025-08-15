@@ -806,6 +806,26 @@ class TrainingGameController(GameController):
         # Check step limit AFTER action
         current_step = self._get_current_step_count()
         if current_step >= self.max_steps_per_episode:
+            # --- Drain to end-of-turn before truncating ---
+            try:
+                def _at_turn_boundary():
+                    try:
+                        phase = self.get_current_phase()
+                        player = self.get_current_player()
+                        return phase == "move" and player == 0
+                    except Exception:
+                        return False
+
+                safety_iters = 64
+                while safety_iters > 0 and not _at_turn_boundary():
+                    if self.phase_transitions and "auto_advance_phases" in self.phase_transitions:
+                        self.phase_transitions["auto_advance_phases"]()
+                    else:
+                        break
+                    safety_iters -= 1
+            except Exception:
+                pass
+
             return self._get_gym_obs(), reward, False, True, self._get_gym_info()  # Truncated
         
         # Log action using unified logging - ALWAYS REQUIRED

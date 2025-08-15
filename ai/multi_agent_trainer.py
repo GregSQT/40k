@@ -893,8 +893,7 @@ class MultiAgentTrainer:
                 obs, reward, terminated, truncated, info = env.step(action)
                 episode_reward += reward
                 done = terminated or truncated
-                step_count += 1
-            
+                step_count += 1            
             total_rewards.append(episode_reward)
             
             # Track episode for selective replay saving using direct access to replay logger
