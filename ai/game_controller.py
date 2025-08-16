@@ -750,9 +750,9 @@ class TrainingGameController(GameController):
        
         success = self.execute_action(acting_unit["id"], mirror_action)
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
-        # CONDITIONAL LOGGING: Enable during evaluation mode - get replay logger from gym_env
-        if hasattr(self, 'gym_env') and self.gym_env and (getattr(self.gym_env, 'is_evaluation_mode', False) or getattr(self.gym_env, '_force_evaluation_mode', False)):
-            # Get replay logger from gym environment since controller's replay_logger is None
+        # CONDITIONAL LOGGING: Enable during evaluation mode only
+        if hasattr(self, 'gym_env') and self.gym_env and getattr(self.gym_env, 'is_evaluation_mode', False):
+            # Get replay logger from gym environment
             replay_logger = getattr(self.gym_env, 'replay_logger', None)
             if replay_logger:
                 # Temporarily set controller's replay logger for this action

@@ -59,19 +59,12 @@ class GameReplayLogger:
                   phase: str = None, start_hex: str = None, end_hex: str = None, 
                   shoot_details: List = None):
         """Add entry to combat log using shared structure."""
-        # CRITICAL: Only log during evaluation mode - check multiple sources including unwrapped
-        is_eval_mode = (
-            hasattr(self.env, 'is_evaluation_mode') and self.env.is_evaluation_mode or
-            hasattr(self, 'is_evaluation_mode') and self.is_evaluation_mode or
-            hasattr(self.env, '_force_evaluation_mode') and self.env._force_evaluation_mode
-        )
+        # SINGLE evaluation flag check - use only is_evaluation_mode
+        is_eval_mode = getattr(self.env, 'is_evaluation_mode', False)
         
-        # CRITICAL FIX: Check unwrapped environment for evaluation flags
+        # Check unwrapped environment as fallback
         if not is_eval_mode and hasattr(self.env, 'unwrapped'):
-            is_eval_mode = (
-                hasattr(self.env.unwrapped, 'is_evaluation_mode') and self.env.unwrapped.is_evaluation_mode or
-                hasattr(self.env.unwrapped, '_force_evaluation_mode') and self.env.unwrapped._force_evaluation_mode
-            )
+            is_eval_mode = getattr(self.env.unwrapped, 'is_evaluation_mode', False)
         
         if not is_eval_mode:
             return None  # Skip logging during training
@@ -309,11 +302,10 @@ class GameReplayLogger:
                 })
             return shoot_details
         
-        # Legacy fallback if shots data missing
+        # REQUIRE complete shot data - no fallbacks allowed
         summary = shoot_result.get("summary")
         if not summary:
-            print(f"⚠️ WARNING: No shoot_result summary data - cannot create shooting details")
-            return None
+            raise ValueError("Shooting result missing required 'summary' section")
             
         if "totalShots" not in summary:
             raise ValueError("Summary missing required 'totalShots' field")
@@ -330,80 +322,47 @@ class GameReplayLogger:
         failed_saves = summary["failedSaves"]
         
         if total_shots is None:
-            raise ValueError(f"execute_shooting_sequence() returned None for totalShots - Unit: {shooter.get('unit_type', 'unknown') if shooter else 'None'} vs Target: {target.get('unit_type', 'unknown') if target else 'None'}")
+            raise ValueError(f"execute_shooting_sequence() returned None for totalShots")
         
         if any(x is None for x in [hits, wounds, failed_saves]):
-            print(f"⚠️ WARNING: Missing shooting summary data - hits:{hits}, wounds:{wounds}, failedSaves:{failed_saves}")
-            return None
+            raise ValueError(f"Missing shooting summary data - hits:{hits}, wounds:{wounds}, failedSaves:{failed_saves}")
         
-        # Create fallback shot entries with calculated targets
-        shoot_details = []
-        for shot_num in range(total_shots):
-            hit_result = "HIT" if shot_num < hits else "MISS"
-            wound_result = "SUCCESS" if shot_num < wounds and hit_result == "HIT" else "FAILED"
-            save_failed = shot_num < failed_saves and wound_result == "SUCCESS"
-            
-            # Generate realistic dice values that match the results
-            attack_roll = hit_target + 1 if hit_result == "HIT" else hit_target - 1
-            strength_roll = wound_target + 1 if wound_result == "SUCCESS" else wound_target - 1  
-            save_roll = save_target - 1 if save_failed else save_target + 1
-            
-            # Clamp dice rolls to valid range [1-6]
-            attack_roll = max(1, min(6, attack_roll))
-            strength_roll = max(1, min(6, strength_roll))
-            save_roll = max(1, min(6, save_roll))
-            
-            shoot_details.append({
-                "shotNumber": shot_num + 1,
-                "attackRoll": attack_roll,
-                "strengthRoll": strength_roll,
-                "hitResult": hit_result,
-                "strengthResult": wound_result,
-                "hitTarget": hit_target,       # Real calculated target
-                "woundTarget": wound_target,   # Real calculated target
-                "saveTarget": save_target,     # Real calculated target
-                "saveRoll": save_roll,
-                "saveSuccess": not save_failed,
-                "damageDealt": 1 if save_failed else 0
-            })
-        
-        return shoot_details
+        # Use individual shot data if available, otherwise error
+        if "shots" in shoot_result and isinstance(shoot_result["shots"], list):
+            # Use detailed individual shot data - same as before Change #8
+            shoot_details = []
+            for i, shot in enumerate(shoot_result["shots"]):
+                shoot_details.append({
+                    "shotNumber": i + 1,
+                    "attackRoll": shot["hit_roll"],
+                    "strengthRoll": shot["wound_roll"],
+                    "hitResult": "HIT" if shot["hit"] else "MISS",
+                    "strengthResult": "SUCCESS" if shot["wound"] else "FAILED",
+                    "hitTarget": shot["hit_target"],
+                    "woundTarget": wound_target,
+                    "saveTarget": save_target,
+                    "saveRoll": shot["save_roll"],
+                    "saveSuccess": shot["save_success"],
+                    "damageDealt": shot["damage"]
+                })
+            return shoot_details
+        else:
+            raise ValueError("Shooting result missing required individual shot data with dice rolls")
     
     def _get_board_size_from_env(self):
-        """Get board size from environment - NO DEFAULTS ALLOWED."""
-        # First try direct board_size attribute
-        if hasattr(self.env, 'board_size') and self.env.board_size:
-            board_size = self.env.board_size
-            # Validate board_size format
-            if isinstance(board_size, (list, tuple)) and len(board_size) == 2:
-                return list(board_size)
-            elif isinstance(board_size, int):
-                return [board_size, board_size]  # Square board
-            else:
-                raise ValueError(f"Invalid board_size format in environment: {board_size}")
+        """Get board size from environment - REQUIRE explicit config."""
+        # REQUIRE board_size attribute in environment
+        if not hasattr(self.env, 'board_size') or not self.env.board_size:
+            raise ValueError("Environment missing required 'board_size' attribute")
         
-        # Try config loader if environment has it
-        if hasattr(self.env, 'config_loader'):
-            try:
-                board_config = self.env.config_loader.load_board_config("default")
-                if "cols" in board_config and "rows" in board_config:
-                    return [board_config["cols"], board_config["rows"]]
-            except Exception as e:
-                raise ValueError(f"Failed to load board config from environment: {e}")
+        board_size = self.env.board_size
+        if not isinstance(board_size, (list, tuple)) or len(board_size) != 2:
+            raise ValueError(f"Environment board_size must be [cols, rows] format, got: {board_size}")
         
-        # Try to import and use config_loader directly
-        try:
-            from config_loader import get_config_loader
-            config = get_config_loader()
-            board_config = config.load_board_config("default")
-            if "cols" in board_config and "rows" in board_config:
-                return [board_config["cols"], board_config["rows"]]
-            else:
-                raise ValueError("Board config missing required 'cols' and 'rows' properties")
-        except ImportError:
-            raise ValueError("Cannot import config_loader and environment has no board_size")
-        except Exception as e:
-            raise ValueError(f"Failed to load board config: {e}")
+        if not all(isinstance(x, int) and x > 0 for x in board_size):
+            raise ValueError(f"Board size values must be positive integers: {board_size}")
+        
+        return list(board_size)
     
     def capture_initial_state(self):
         """Capture initial game state - compatibility method for GameReplayLogger interface."""

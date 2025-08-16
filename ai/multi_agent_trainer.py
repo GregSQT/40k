@@ -206,9 +206,11 @@ class MultiAgentTrainer:
         self.unit_registry = UnitRegistry()
         self.scenario_manager = ScenarioManager(self.config, self.unit_registry)
         
-        # Get concurrent sessions from config or parameter
+        # Get concurrent sessions from config - no fallbacks allowed
         if max_concurrent_sessions is None:
             training_config = self.config.load_training_config("default")
+            if "max_concurrent_sessions" not in training_config:
+                raise ValueError("Training config missing required 'max_concurrent_sessions'")
             self.max_concurrent_sessions = training_config["max_concurrent_sessions"]
         else:
             if max_concurrent_sessions <= 0:
@@ -577,7 +579,7 @@ class MultiAgentTrainer:
                     output_dir = shared_config["episode_tracker"]["output_dir"]
                     replay_files_saved = episode_tracker.save_selective_replays(output_dir)
             except Exception as replay_error:
-                pass  # Silent failure for replay saving
+                    raise RuntimeError(f"Replay saving failed: {replay_error}")
             
             # Update session status
             session.status = 'completed'
@@ -816,12 +818,12 @@ class MultiAgentTrainer:
         return eval_env
 
     def _test_trained_model(self, model, env, num_episodes: int, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
-        """Test trained model with single shared evaluation progress bar"""
+        """Test trained model with optimized single progress bar"""
         wins = 0
         total_rewards = []
         session_id = getattr(self, '_current_session_id', 'unknown')
         
-        # Simple shared evaluation progress bar - create once for all sessions
+        # Create single clean evaluation progress bar
         with self.progress_lock:
             # Track this session's evaluation progress 
             self.evaluation_progress[session_id] = {
@@ -832,16 +834,14 @@ class MultiAgentTrainer:
                 'total_reward': 0.0
             }
             
-            # Create shared eval bar only once across all sessions
+            # Create single shared eval bar - simplified config
             if not hasattr(self, 'eval_pbar') or self.eval_pbar is None:
-                eval_config = self.shared_config["evaluation"]["progress_bar"]
                 self.eval_pbar = tqdm(
                     total=num_episodes, 
-                    desc=f"{eval_config['prefix']} slowest",
-                    bar_format=eval_config["bar_format"],
-                    leave=eval_config["leave"], 
-                    ncols=eval_config["ncols"], 
-                    position=eval_config["position"]
+                    desc="🧪 Eval slowest",
+                    leave=False, 
+                    ncols=120, 
+                    position=1
                 )
         
         for episode in range(num_episodes):
@@ -854,7 +854,6 @@ class MultiAgentTrainer:
                 try:
                     # Set evaluation mode flags at ALL levels
                     env.is_evaluation_mode = True
-                    env._force_evaluation_mode = True
                     
                     # Find actual environment through wrappers
                     actual_env = env
@@ -879,7 +878,7 @@ class MultiAgentTrainer:
            
             # Add step counter to prevent infinite loops
             step_count = 0
-            max_steps = 1000  # Prevent infinite episodes
+            max_steps = self.config.load_training_config("debug")["max_steps_per_episode"]
             while not done and step_count < max_steps:
                 action, _ = model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(action)
@@ -888,18 +887,19 @@ class MultiAgentTrainer:
                 
                 # CRITICAL FIX: Check game over conditions properly
                 if not done:
-                    current_turn = info.get('current_turn', 0)
-                    eligible_units = info.get('eligible_units', 0)
-                    ai_units_alive = info.get('ai_units_alive', 0)
-                    enemy_units_alive = info.get('enemy_units_alive', 0)
+                    current_turn = info.get('current_turn')
+                    eligible_units = info.get('eligible_units')
+                    ai_units_alive = info.get('ai_units_alive')
+                    enemy_units_alive = info.get('enemy_units_alive')
                     
                     # Check if game should end naturally
                     if ai_units_alive == 0 or enemy_units_alive == 0:
                         print(f"🏁 Episode {episode + 1} ended: AI={ai_units_alive}, Enemy={enemy_units_alive}")
                         done = True
-                    # Force end after 25 turns (reduced from 50)
-                    elif current_turn > 25:
-                        print(f"⚠️ Episode {episode + 1} auto-terminated due to turn limit (turn {current_turn})")
+                    # Use config-based max_turns from game_config.json
+                    elif current_turn > self.config.get_max_turns():
+                        config_max_turns = self.config.get_max_turns()
+                        print(f"⚠️ Episode {episode + 1} auto-terminated due to turn limit (turn {current_turn}, max: {config_max_turns})")
                         done = True
                     elif eligible_units == 0:
                         # Force phase advancement when stuck

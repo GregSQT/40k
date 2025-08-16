@@ -267,15 +267,15 @@ class W40KEnv(gym.Env):
                 "ICON": full_unit_data["ICON"],
                 "ICON_SCALE": full_unit_data["ICON_SCALE"],
                 
-                # Game state properties
+                # Game state properties - REQUIRE all from config
                 "CUR_HP": full_unit_data["HP_MAX"],
                 "HP_LEFT": full_unit_data["HP_MAX"],
-                "alive": True,
-                "has_moved": False,
-                "has_shot": False,
-                "has_charged": False,
-                "has_attacked": False,
-                "has_charged_this_turn": False,
+                "alive": unit_data.get("alive", True),  # Can be set in scenario
+                "has_moved": unit_data.get("has_moved", False),
+                "has_shot": unit_data.get("has_shot", False), 
+                "has_charged": unit_data.get("has_charged", False),
+                "has_attacked": unit_data.get("has_attacked", False),
+                "has_charged_this_turn": unit_data.get("has_charged_this_turn", False),
                 "SHOOT_LEFT": full_unit_data["RNG_NB"],
             }
             
@@ -296,15 +296,15 @@ class W40KEnv(gym.Env):
         # Initialize new episode
         self.controller.start_new_episode()
         
-        # CRITICAL: Only enable replay logging during evaluation, not training
-        self.is_evaluation_mode = getattr(self, '_force_evaluation_mode', False)
+        # SINGLE evaluation mode flag
+        self.is_evaluation_mode = False  # Default to training mode
         if hasattr(self, 'replay_logger') and self.replay_logger:
             # Set evaluation mode on replay logger
             self.replay_logger.is_evaluation_mode = self.is_evaluation_mode
             # Only capture initial state during evaluation
             if self.is_evaluation_mode:
                 self.replay_logger.capture_initial_state()
-                # CRITICAL FIX: Force initial_game_state population
+                # Force initial_game_state population for evaluation
                 units = self.controller.get_units()
                 if units:
                     self.replay_logger.initial_game_state = {"units": [{
