@@ -397,27 +397,39 @@ def should_transition_from_shoot(units: List[Dict[str, Any]],
     player_units = [u for u in units if u["player"] == current_player]
     enemy_units = [u for u in units if u["player"] != current_player]
     
+    print(f"🎯 SHARED should_transition_from_shoot DEBUG:")
+    print(f"  Player {current_player} units: {len(player_units)}")
+    print(f"  units_moved (contains units_shot): {list(units_moved)}")
+    
     if len(player_units) == 0:
+        print(f"  → TRUE: No player units")
         return True
 
     # Find units that can still shoot (EXACT from TypeScript)
     shootable_units = []
     for unit in player_units:
-        # Check if unit already shot this phase (tracked in units_moved during shoot phase)
+        unit_id = unit["id"]
+        print(f"  Checking unit {unit_id}:")
+        
+        # Check if unit already shot this phase (parameter units_moved contains units_shot for shoot phase)
         if unit["id"] in units_moved:
+            print(f"    ❌ Already shot (in units_moved)")
             continue
         
         # Units that fled cannot shoot
         if unit["id"] in units_fled:
+            print(f"    ❌ Unit fled")
             continue
         
         # Check if unit has shots remaining (EXACT from TypeScript: unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0)
         if "SHOOT_LEFT" not in unit or unit["SHOOT_LEFT"] is None or unit["SHOOT_LEFT"] <= 0:
+            print(f"    ❌ No shots left (SHOOT_LEFT: {unit.get('SHOOT_LEFT')})")
             continue
         
         # Can't shoot if adjacent to enemy (engaged in combat)
         has_adjacent_enemy = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
         if has_adjacent_enemy:
+            print(f"    ❌ Adjacent to enemy")
             continue
         
         # Must have enemy within shooting range
@@ -425,9 +437,15 @@ def should_transition_from_shoot(units: List[Dict[str, Any]],
             raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
         has_target_in_range = any(isUnitInRange(unit, enemy, unit["RNG_RNG"]) for enemy in enemy_units)
         if has_target_in_range:
+            print(f"    ✅ Can shoot - adding to shootable_units")
             shootable_units.append(unit)
+        else:
+            print(f"    ❌ No targets in range (RNG_RNG: {unit['RNG_RNG']})")
 
-    return len(shootable_units) == 0
+    print(f"  Total shootable units: {len(shootable_units)}")
+    result = len(shootable_units) == 0
+    print(f"  → {result}")
+    return result
 
 def should_transition_from_charge(units: List[Dict[str, Any]], 
                                  current_player: int, 

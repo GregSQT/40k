@@ -58,8 +58,11 @@ class UsePhaseTransition:
             raise KeyError("game_state missing required 'units_attacked' field")
         if "units_fled" not in game_state:
             raise KeyError("game_state missing required 'units_fled' field")
+        if "units_shot" not in game_state:
+            raise KeyError("game_state missing required 'units_shot' field")
         
         self.units_moved = set(game_state["units_moved"])
+        self.units_shot = set(game_state["units_shot"])
         self.units_charged = set(game_state["units_charged"])
         self.units_attacked = set(game_state["units_attacked"])
         self.units_fled = set(game_state["units_fled"])
@@ -90,15 +93,26 @@ class UsePhaseTransition:
     def should_transition_from_shoot(self) -> bool:
         """EXACT mirror of shouldTransitionFromShoot from TypeScript (delegates to shared mechanics)"""
         from shared.gameMechanics import should_transition_from_shoot as _shoot_check
-        return _shoot_check(
+        
+        # DEBUG: Log state before check
+        player_units = [u for u in self.units if u["player"] == self.current_player]
+        print(f"🔍 SHOOT TRANSITION DEBUG:")
+        print(f"  Player {self.current_player} units: {len(player_units)}")
+        print(f"  units_shot: {list(self.units_shot)}")
+        print(f"  units_moved: {list(self.units_moved)}")
+        print(f"  units_fled: {list(self.units_fled)}")
+        
+        result = _shoot_check(
             self.units,
             self.current_player,
             self.phase,
-            self.units_moved,
+            self.units_shot,  # Use units_shot for shoot phase tracking
             self.units_charged,
             self.units_attacked,
             self.units_fled,
         )
+        print(f"  should_transition_from_shoot result: {result}")
+        return result
 
     def should_transition_from_charge(self) -> bool:
         """EXACT mirror of shouldTransitionFromCharge from TypeScript (delegates to shared mechanics)"""
@@ -358,6 +372,7 @@ class UsePhaseTransition:
             raise KeyError("game_state missing required 'units_fled' field during update")
         
         self.units_moved = set(self.game_state["units_moved"])
+        self.units_shot = set(self.game_state["units_shot"])
         self.units_charged = set(self.game_state["units_charged"])
         self.units_attacked = set(self.game_state["units_attacked"])
         self.units_fled = set(self.game_state["units_fled"])

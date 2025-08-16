@@ -79,6 +79,7 @@ class UseGameState:
             "mode": "select",
             "selected_unit_id": None,
             "units_moved": [],
+            "units_shot": [],
             "units_charged": [],
             "units_attacked": [],
             "units_fled": [],
@@ -152,6 +153,11 @@ class UseGameState:
         if unit_id not in self.game_state["units_fled"]:
             self.game_state["units_fled"].append(unit_id)
 
+    def add_shot_unit(self, unit_id: int) -> None:
+        """Add unit to shot units tracking (logical separation for shoot phase)"""
+        if unit_id not in self.game_state["units_shot"]:
+            self.game_state["units_shot"].append(unit_id)
+
     def reset_moved_units(self) -> None:
         """EXACT mirror of resetMovedUnits from TypeScript"""
         before_count = len(self.game_state["units_moved"])
@@ -168,6 +174,10 @@ class UseGameState:
     def reset_fled_units(self) -> None:
         """EXACT mirror of resetFledUnits from TypeScript"""
         self.game_state["units_fled"] = []
+
+    def reset_shot_units(self) -> None:
+        """Reset shot units tracking (logical separation for shoot phase)"""
+        self.game_state["units_shot"] = []
 
     # === UNIT UPDATE METHODS (EXACT from TypeScript) ===
 
@@ -532,10 +542,12 @@ class UseGameState:
             
             # Unit tracking
             "add_moved_unit": self.add_moved_unit,
+            "add_shot_unit": self.add_shot_unit,
             "add_charged_unit": self.add_charged_unit,
             "add_attacked_unit": self.add_attacked_unit,
             "add_fled_unit": self.add_fled_unit,
             "reset_moved_units": self.reset_moved_units,
+            "reset_shot_units": self.reset_shot_units,
             "reset_charged_units": self.reset_charged_units,
             "reset_attacked_units": self.reset_attacked_units,
             "reset_fled_units": self.reset_fled_units,
@@ -664,6 +676,7 @@ class TrainingGameState(UseGameState):
         self.game_state["phase"] = "move"      # Episode starts with move phase
         self.game_state["current_turn"] = 1    # Turns start at 1 at episode beginning
         self.game_state["units_moved"] = []
+        self.game_state["units_shot"] = []
         self.game_state["units_charged"] = []
         self.game_state["units_attacked"] = []
         self.game_state["units_fled"] = []

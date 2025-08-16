@@ -375,20 +375,6 @@ class W40KEnv(gym.Env):
             info['action_mask'] = self.controller.game_actions["get_action_mask"](self.max_units)
         
         return obs, reward, terminated, truncated, info
-    
-    def _mark_unit_as_acted_for_current_phase(self, unit):
-        """Mark unit as acted for current phase to prevent infinite loops."""
-        current_phase = self.controller.get_current_phase()
-        unit_id = unit["id"]
-        
-        if current_phase == "move":
-            self.controller.state_actions['add_moved_unit'](unit_id)
-        elif current_phase == "shoot":
-            self.controller.state_actions['add_moved_unit'](unit_id)  # Shooting uses moved units tracking
-        elif current_phase == "charge":
-            self.controller.state_actions['add_charged_unit'](unit_id)
-        elif current_phase == "combat":
-            self.controller.state_actions['add_attacked_unit'](unit_id)
 
     def _find_shoot_target(self, unit):
         """Find valid shooting target using controller logic."""
@@ -668,8 +654,8 @@ class W40KEnv(gym.Env):
                 turn_number=current_turn
             )
             
-            # Mark unit as acted to advance phase
-            self._mark_unit_as_acted_for_current_phase(bot_unit)
+            # Mark unit as acted to advance phase using controller's correct method
+            self.controller._mark_gym_unit_as_acted(bot_unit)
 
     def _execute_bot_turn_with_logging(self, eligible_units, pre_action_units):
         """Execute bot turn WITH proper action logging for replay capture."""
@@ -762,7 +748,7 @@ class W40KEnv(gym.Env):
             )
             
             # Mark unit as acted for current phase to prevent infinite loops
-            self._mark_unit_as_acted_for_current_phase(bot_unit)
+            self.controller._mark_gym_unit_as_acted(bot_unit)
 
     def _execute_simple_bot_action(self, bot_unit, current_phase):
         """Execute simple scripted action for bot unit."""
