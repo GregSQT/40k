@@ -607,10 +607,10 @@ class TrainingGameController(GameController):
 
     def _log_gym_action(self, acting_unit: Dict, mirror_action: Dict, reward: float) -> None:
         """Log action using unified logging system"""
-        # Validate replay logger connection
-        if not hasattr(self, 'gym_env') or not self.gym_env:
+        # CRITICAL FIX: Early return if no replay logger to prevent hangs
+        if not hasattr(self, 'replay_logger') or not self.replay_logger:
             return
-        if not hasattr(self.gym_env, 'replay_logger') or not self.gym_env.replay_logger:
+        if not hasattr(self, 'gym_env') or not self.gym_env:
             return
         
         try:
@@ -722,8 +722,9 @@ class TrainingGameController(GameController):
        
         success = self.execute_action(acting_unit["id"], mirror_action)
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
-        # DISABLED: Skip logging to prevent type validation errors during training
-        # self._log_gym_action(acting_unit, mirror_action, reward)
+        # CONDITIONAL LOGGING: Enable during evaluation mode - check controller's direct environment  
+        if hasattr(self, 'replay_logger') and self.replay_logger and hasattr(self, 'gym_env') and (getattr(self.gym_env, 'is_evaluation_mode', False) or getattr(self.gym_env, '_force_evaluation_mode', False)):
+            self._log_gym_action(acting_unit, mirror_action, reward)
         
         # Mark unit as acted (always mark to prevent infinite loops)
         self._mark_gym_unit_as_acted(acting_unit)
@@ -808,6 +809,7 @@ class TrainingGameController(GameController):
 
     def connect_replay_logger(self, replay_logger):
         """Connect replay logger to controller for episode tracking"""
+        print(f"🔍 REPLAY LOGGER CONNECT: Connecting {type(replay_logger)} to controller")
         self.replay_logger = replay_logger
         self.game_logger = replay_logger
         # CRITICAL FIX: Ensure replay logger has proper environment reference
@@ -816,7 +818,8 @@ class TrainingGameController(GameController):
         # Force immediate connection verification
         if hasattr(replay_logger, 'env') and replay_logger.env:
             replay_logger.env.controller = self
-            
+        print(f"🔍 REPLAY LOGGER CONNECT: Connected successfully, self.replay_logger={self.replay_logger is not None}")
+
         print(f"🔗 REPLAY LOGGER: Connected to controller, env={hasattr(replay_logger, 'env')}")
         # Force immediate connection verification
         if hasattr(replay_logger, 'env') and replay_logger.env:

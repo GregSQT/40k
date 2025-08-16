@@ -460,13 +460,6 @@ class MultiAgentTrainer:
                         session.opponent_agent,  # Player 0 (bot)
                         session.agent_key       # Player 1 (AI)
                     )
-                    # DEBUG: Verify scenario generation creates units for both players
-                    if scenario_result[0] and 'units' in scenario_result[0]:
-                        units = scenario_result[0]['units']
-                        p0_units = [u for u in units if u.get('player') == 0]
-                        p1_units = [u for u in units if u.get('player') == 1]
-                        print(f"🔍 SCENARIO DEBUG: Generated {len(p0_units)} P0 units, {len(p1_units)} P1 units")
-                        print(f"🔍 SCENARIO UNITS: {[(u['id'], u['player'], u['unit_type']) for u in units]}")
                 except Exception as e:
                     scenario_error[0] = e
             
@@ -989,13 +982,16 @@ class MultiAgentTrainer:
                     self.evaluation_progress[session_id]['total_reward'] = sum(total_rewards) / len(total_rewards)
                     self._update_slowest_evaluation_progress()
        
-        # Clean up evaluation progress tracking for this session
+        # Clean up evaluation progress tracking for this session with error handling
         with self.progress_lock:
             if session_id in self.evaluation_progress:
                 del self.evaluation_progress[session_id]
-            # Close shared evaluation progress bar when no more evaluations
+            # Close shared evaluation progress bar when no more evaluations - with error handling
             if not self.evaluation_progress and hasattr(self, 'eval_pbar') and self.eval_pbar:
-                self.eval_pbar.close()
+                try:
+                    self.eval_pbar.close()
+                except Exception:
+                    pass  # Ignore rich display errors during cleanup
                 self.eval_pbar = None
        
         win_rate = wins / num_episodes

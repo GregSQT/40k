@@ -84,15 +84,9 @@ class GameReplayLogger:
         if entry_type == "shoot" and shoot_details is None:
             return None
         
-        # CRITICAL DEBUG: Log evaluation mode detection to prove what's happening
-        if len(self.combat_log_entries) == 0:  # Only log once per episode
-            print(f"🔍 REPLAY DEBUG: env.is_evaluation_mode={getattr(self.env, 'is_evaluation_mode', 'MISSING')}")
-            print(f"🔍 REPLAY DEBUG: env._force_evaluation_mode={getattr(self.env, '_force_evaluation_mode', 'MISSING')}")
-            print(f"🔍 REPLAY DEBUG: self.is_evaluation_mode={getattr(self, 'is_evaluation_mode', 'MISSING')}")
-            if hasattr(self.env, 'unwrapped'):
-                print(f"🔍 REPLAY DEBUG: env.unwrapped.is_evaluation_mode={getattr(self.env.unwrapped, 'is_evaluation_mode', 'MISSING')}")
-                print(f"🔍 REPLAY DEBUG: env.unwrapped._force_evaluation_mode={getattr(self.env.unwrapped, '_force_evaluation_mode', 'MISSING')}")
-            print(f"🔍 REPLAY DEBUG: Final is_eval_mode={is_eval_mode}")
+        # REMOVE DEBUG SPAM - evaluation mode working correctly based on traceback output
+        # Debug logs removed to reduce console noise during training
+        pass
             
         # Use shared structure for creating log entry
         log_entry = create_training_log_entry(
