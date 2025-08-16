@@ -82,12 +82,14 @@ class UsePhaseTransition:
     # === PHASE TRANSITION CHECKS (EXACT from TypeScript) ===
 
     def should_transition_from_move(self) -> bool:
-        """FORCE MOVE TRANSITION - EMERGENCY FIX"""
-        player_units = [u for u in self.units if u["player"] == self.current_player]
-        if len(player_units) == 0:
-            return True
-        # Force transition after any unit moves
-        result = len(self.units_moved) > 0
+        """Check if all player units have moved or can't move"""
+        from shared.gameMechanics import should_transition_from_move as _move_check
+        
+        result = _move_check(
+            self.units,
+            self.current_player,
+            self.units_moved
+        )
         return result
 
     def should_transition_from_shoot(self) -> bool:
