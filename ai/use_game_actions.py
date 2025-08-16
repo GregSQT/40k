@@ -1502,6 +1502,10 @@ class UseGameActions:
             "find_valid_charge_targets": self.get_valid_charge_targets,
             "find_valid_shoot_targets": self.get_valid_shooting_targets,
             "find_valid_combat_targets": self.get_valid_combat_targets,
+            
+            # Action validation
+            "validate_gym_action_for_phase": self.validate_gym_action_for_phase,
+            "get_action_mask": self.get_action_mask,
         }
 
     def get_eligible_units(self) -> List[Dict[str, Any]]:
@@ -1641,6 +1645,40 @@ class UseGameActions:
             if distance <= unit["CC_RNG"]:
                 targets.append(enemy["id"])
         return targets
+
+    def validate_gym_action_for_phase(self, action_type: int, current_phase: str) -> bool:
+        """Validate gym action type is allowed for current phase"""
+        valid_actions_per_phase = {
+            "move": [0, 1, 2, 3, 7],  # move directions + wait
+            "shoot": [4, 7],          # shoot + wait
+            "charge": [5, 7],         # charge + wait
+            "combat": [6, 7]          # combat + wait
+        }
+        
+        valid_actions = valid_actions_per_phase.get(current_phase, [])
+        if action_type not in valid_actions:
+            raise RuntimeError(f"Invalid action {action_type} for phase {current_phase}. Valid actions: {valid_actions}")
+        
+        return True
+
+    def get_action_mask(self, max_units: int) -> List[bool]:
+        """Generate action mask for current game state - True = valid action"""
+        current_phase = self.game_state.get("phase", "move")
+        valid_actions_per_phase = {
+            "move": [0, 1, 2, 3, 7],  # move directions + wait
+            "shoot": [4, 7],          # shoot + wait
+            "charge": [5, 7],         # charge + wait
+            "combat": [6, 7]          # combat + wait
+        }
+        
+        valid_action_types = valid_actions_per_phase.get(current_phase, [7])  # fallback to wait
+        action_mask = []
+        
+        for unit_idx in range(max_units):
+            for action_type in range(8):
+                action_mask.append(action_type in valid_action_types)
+        
+        return action_mask
 
 
 # === FACTORY FUNCTION (EXACT Mirror of TypeScript hook usage) ===

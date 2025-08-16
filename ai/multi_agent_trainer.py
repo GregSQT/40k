@@ -160,6 +160,14 @@ class SelectiveEpisodeTracker:
             return obj
 
 # Import training components
+try:
+    from sb3_contrib import MaskableDQN
+    MASKABLE_DQN_AVAILABLE = True
+except ImportError:
+    from stable_baselines3 import DQN
+    MASKABLE_DQN_AVAILABLE = False
+    print("⚠️ sb3-contrib not installed - action masking disabled. Install with: pip install sb3-contrib")
+
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
 from stable_baselines3.common.monitor import Monitor
@@ -740,11 +748,19 @@ class MultiAgentTrainer:
             
             # Create or load model (reduced verbosity)
             if os.path.exists(model_path):
-                model = DQN.load(model_path, env=env)
+                if MASKABLE_DQN_AVAILABLE:
+                    model = MaskableDQN.load(model_path, env=env)
+                else:
+                    model = DQN.load(model_path, env=env)
                 # Update model parameters for continued training
                 model.tensorboard_log = model_params["tensorboard_log"]
             else:
-                model = DQN(env=env, **model_params)
+                if MASKABLE_DQN_AVAILABLE:
+                    print("✅ Using MaskableDQN with action masking")
+                    model = MaskableDQN(env=env, **model_params)
+                else:
+                    print("⚠️ Using regular DQN without action masking")
+                    model = DQN(env=env, **model_params)
             return model, env
             
         except Exception as create_error:

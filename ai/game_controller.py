@@ -193,34 +193,13 @@ class GameController:
         return self.game_actions["handle_unit_selection"](unit_id)
 
     def move_unit(self, unit_id: int, col: int, row: int) -> bool:
-        """Move a unit using validated movement system"""
-        # DEBUG: Log movement attempt
-        unit = self.find_unit(unit_id)
-        if unit:
-            print(f"🎯 MOVE DEBUG: Unit {unit_id} trying to move from ({unit['col']},{unit['row']}) to ({col},{row})")
+        """Move a unit using direct validation for training (bypass UI preview system)"""
+        # For training, use direct validated movement instead of UI preview system
+        if "validated_move" not in self.game_actions:
+            raise RuntimeError("game_actions missing required validated_move method")
         
-        # Use existing validated movement methods instead of direct_move
-        if "start_move_preview" not in self.game_actions:
-            raise RuntimeError("game_actions missing required start_move_preview method")
-        if "confirm_move" not in self.game_actions:
-            raise RuntimeError("game_actions missing required confirm_move method")
-        
-        # Use the validated preview system that checks walls
-        try:
-            self.game_actions["start_move_preview"](unit_id, col, row)
-            result = self.game_actions["confirm_move"]()
-            
-            # DEBUG: Check if unit actually moved
-            unit_after = self.find_unit(unit_id)
-            if unit_after:
-                print(f"🎯 MOVE DEBUG: Unit {unit_id} ended at ({unit_after['col']},{unit_after['row']})")
-                actual_moved = unit_after['col'] != unit['col'] or unit_after['row'] != unit['row']
-                print(f"🎯 MOVE DEBUG: Actually moved: {actual_moved}")
-            
-            return result if result is not None else True
-        except Exception as e:
-            print(f"🎯 MOVE DEBUG: Movement failed with error: {e}")
-            return False
+        # Direct movement with wall validation - no UI preview overhead
+        return self.game_actions["validated_move"](unit_id, col, row)
 
     def shoot_unit(self, shooter_id: int, target_id: int) -> bool:
         """Shoot at target with detailed dice results"""
@@ -355,24 +334,16 @@ class GameController:
         """Execute a game action for specified unit"""
         action_type = action.get("type")
         
-        # DEBUG: Log action execution attempt
-        print(f"🎯 DEBUG: Executing {action_type} for unit {unit_id}")
-        print(f"🎯 DEBUG: Action details: {action}")
-        
         # Find acting unit for logging
         acting_unit = self.find_unit(unit_id)
         if not acting_unit:
-            print(f"🎯 DEBUG: Unit {unit_id} not found!")
             return False
-        
-        print(f"🎯 DEBUG: Unit {unit_id} current position: ({acting_unit['col']}, {acting_unit['row']})")
         
         # Execute the action
         success = False
         if action_type == "move":
             target_col = action.get("col", acting_unit["col"])
             target_row = action.get("row", acting_unit["row"])
-            print(f"🎯 DEBUG: Moving to ({target_col}, {target_row})")
             success = self.move_unit(unit_id, target_col, target_row)
         elif action_type == "shoot":
             success = self.shoot_unit(unit_id, action["target_id"])
@@ -465,13 +436,6 @@ class TrainingGameController(GameController):
             raise RuntimeError("TrainingGameController missing required game_actions.get_eligible_units")
         eligible_units = self.game_actions['get_eligible_units']()
         
-        # DEBUG: Log eligibility details
-        current_player = self.get_current_player()
-        current_phase = self.get_current_phase()
-        print(f"🎯 DEBUG: Found {len(eligible_units)} eligible units for player {current_player} in phase {current_phase}")
-        for unit in eligible_units[:3]:  # Show first 3 units
-            print(f"🎯 DEBUG: Unit {unit['id']} eligible (player {unit['player']})")
-        
         return eligible_units
 
     def _advance_gym_phase_or_turn(self) -> None:
@@ -483,18 +447,17 @@ class TrainingGameController(GameController):
         initial_phase = self.get_current_phase()
         initial_player = self.get_current_player()
         
-        # CRITICAL FIX: Re-enable auto_advance_phases with loop protection
-        try:
-            advanced = self.phase_transitions['auto_advance_phases']()
-        except Exception:
-            advanced = False  # Fallback to manual if auto fails
+        # CRITICAL FIX: Remove fallback and expose phase transition failures
+        advanced = self.phase_transitions['auto_advance_phases']()
+        if not advanced:
+            raise RuntimeError(f"Phase advancement failed: stuck in phase {initial_phase} player {initial_player}")
         
         # Verify advancement occurred to prevent stuck states
         final_phase = self.get_current_phase()
         final_player = self.get_current_player()
         
-        # Natural phase transitions should work now - no forced advancement needed
-        pass
+        if initial_phase == final_phase and initial_player == final_player:
+            raise RuntimeError(f"Phase advancement did not progress: {initial_phase}→{final_phase}, player {initial_player}→{final_player}")
 
     def _execute_gym_bot_turn(self) -> None:
         """Execute bot turn with proper logging through mirror architecture"""
@@ -505,20 +468,23 @@ class TrainingGameController(GameController):
         if bot_units:
             bot_unit = bot_units[0]  # Take first eligible unit only
             current_phase = self.get_current_phase()
-            #current_player = self.get_current_player()
-            #current_turn = self.get_current_turn()
+            
+            # Validate required methods exist
+            if not hasattr(self, 'get_valid_moves'):
+                raise RuntimeError("TrainingGameController missing required get_valid_moves method")
             
             # Create realistic action based on current phase
             if current_phase == "move":
-                # Simple move towards nearest enemy
+                # CRITICAL: Use validated movement - NO FALLBACKS
+                valid_moves = self.get_valid_moves(bot_unit["id"])
+                if not valid_moves:
+                    raise RuntimeError(f"Bot unit {bot_unit['id']} has no valid moves in move phase - game state corruption")
                 enemy_units = [u for u in self.get_units() if u["player"] != bot_unit["player"]]
-                if enemy_units:
-                    target = enemy_units[0]
-                    dx = 1 if target["col"] > bot_unit["col"] else (-1 if target["col"] < bot_unit["col"] else 0)
-                    dy = 1 if target["row"] > bot_unit["row"] else (-1 if target["row"] < bot_unit["row"] else 0)
-                    mirror_action = {"type": "move", "col": bot_unit["col"] + dx, "row": bot_unit["row"] + dy}
-                else:
-                    mirror_action = {"type": "wait"}
+                if not enemy_units:
+                    raise RuntimeError(f"No enemy units found for bot unit {bot_unit['id']} - game state corruption")
+                
+                # Use first valid move - raise error if none exist
+                mirror_action = {"type": "move", "col": valid_moves[0]["col"], "row": valid_moves[0]["row"]}
             elif current_phase == "shoot":
                 # Try to find shoot target
                 target_ids = self.game_actions.get('get_valid_shooting_targets', lambda x: [])(bot_unit["id"])
@@ -543,7 +509,9 @@ class TrainingGameController(GameController):
             else:
                 mirror_action = {"type": "wait"}
             
-            self.execute_action(bot_unit["id"], mirror_action)
+            success = self.execute_action(bot_unit["id"], mirror_action)
+            if not success:
+                raise RuntimeError(f"Bot action execution failed: Unit {bot_unit['id']} action {mirror_action}")
             
             # Enable bot action logging during evaluation
             if hasattr(self, 'gym_env') and (getattr(self.gym_env, 'is_evaluation_mode', False) or getattr(self.gym_env, '_force_evaluation_mode', False)):
@@ -587,33 +555,39 @@ class TrainingGameController(GameController):
             elif action_type == 7:  # wait in move phase
                 return {"type": "wait"}
             else:
-                return {"type": "move", "col": unit["col"], "row": unit["row"]}  # Default: no movement
+                raise RuntimeError(f"Invalid action {action_type} for move phase - no fallbacks allowed")
         elif current_phase == "shoot":
             if action_type == 4:  # shoot
                 target = self._find_gym_shoot_target(unit)
-                return {"type": "shoot", "target_id": target["id"]} if target else {"type": "wait"}
+                if not target:
+                    raise RuntimeError(f"No valid shoot targets for unit {unit['id']} in shoot phase")
+                return {"type": "shoot", "target_id": target["id"]}
             elif action_type == 7:  # wait in shoot phase
                 return {"type": "wait"}
             else:
-                return {"type": "wait"}  # Invalid actions become wait
+                raise RuntimeError(f"Invalid action {action_type} for shoot phase - no fallbacks allowed")
         elif current_phase == "charge":
             if action_type == 5:  # charge
                 target = self._find_gym_charge_target(unit)
-                return {"type": "charge", "target_id": target["id"]} if target else {"type": "wait"}
+                if not target:
+                    raise RuntimeError(f"No valid charge targets for unit {unit['id']} in charge phase")
+                return {"type": "charge", "target_id": target["id"]}
             elif action_type == 7:  # wait in charge phase
                 return {"type": "wait"}
             else:
-                return {"type": "wait"}  # Invalid actions become wait
+                raise RuntimeError(f"Invalid action {action_type} for charge phase - no fallbacks allowed")
         elif current_phase == "combat":
             if action_type == 6:  # attack
                 target = self._find_gym_combat_target(unit)
-                return {"type": "combat", "target_id": target["id"]} if target else {"type": "wait"}
+                if not target:
+                    raise RuntimeError(f"No valid combat targets for unit {unit['id']} in combat phase")
+                return {"type": "combat", "target_id": target["id"]}
             elif action_type == 7:  # wait in combat phase
                 return {"type": "wait"}
             else:
-                return {"type": "wait"}  # Invalid actions become wait
+                raise RuntimeError(f"Invalid action {action_type} for combat phase - no fallbacks allowed")
         else:
-            return {"type": "wait"}  # Unknown phase
+            raise RuntimeError(f"Unknown phase {current_phase} - no fallbacks allowed")
 
     def _find_gym_shoot_target(self, unit: Dict) -> Optional[Dict]:
         """Delegate to use_game_actions.py for target finding"""
@@ -783,21 +757,16 @@ class TrainingGameController(GameController):
         
         # Execute action through mirror architecture
         acting_unit = controlled_eligible_units[unit_idx]
-        mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
         
-        # DEBUG: Log action details
-        print(f"🎯 DEBUG: Unit {acting_unit['id']} attempting action {action_type}")
-        print(f"🎯 DEBUG: Current phase: {self.get_current_phase()}, Player: {self.get_current_player()}")
-        print(f"🎯 DEBUG: Mirror action: {mirror_action}")
-        print(f"🎯 DEBUG: Units moved: {self.game_state.get('units_moved', [])}")
-        print(f"🎯 DEBUG: Unit eligible before: {self.game_actions.get('is_unit_eligible', lambda x: False)(acting_unit)}")
-       
+        # CRITICAL: Validate action before conversion using use_game_actions.py
+        # CRITICAL: Validate action before conversion using use_game_actions.py
+        current_phase = self.get_current_phase()
+        self.game_actions["validate_gym_action_for_phase"](action_type, current_phase)
+        
+        mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)       
         success = self.execute_action(acting_unit["id"], mirror_action)
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
-        
-        # DEBUG: Log action result
-        print(f"🎯 DEBUG: Action success: {success}, Reward: {reward}")
-        print(f"🎯 DEBUG: Units moved after: {self.game_state.get('units_moved', [])}")
+
         # CONDITIONAL LOGGING: Enable during evaluation mode only
         if hasattr(self, 'gym_env') and self.gym_env and getattr(self.gym_env, 'is_evaluation_mode', False):
             # Get replay logger from gym environment

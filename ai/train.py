@@ -21,7 +21,14 @@ sys.path.insert(0, project_root)
 from ai.unit_registry import UnitRegistry
 sys.path.insert(0, project_root)
 
-from stable_baselines3 import DQN
+try:
+    from sb3_contrib.dqn import MaskableDQN
+    MASKABLE_DQN_AVAILABLE = True
+except ImportError:
+    from stable_baselines3 import DQN
+    MASKABLE_DQN_AVAILABLE = False
+    print("⚠️ sb3-contrib not installed - action masking disabled. Install with: pip install sb3-contrib")
+
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
 # Multi-agent orchestration imports
@@ -143,11 +150,19 @@ def create_model(config, training_config_name="default", rewards_config_name="de
     # Determine whether to create new model or load existing
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model on {device.upper()}...")
-        model = DQN(env=env, **model_params)
+        if MASKABLE_DQN_AVAILABLE:
+            print("✅ Using MaskableDQN with action masking")
+            model = MaskableDQN(env=env, **model_params)
+        else:
+            print("⚠️ Using regular DQN without action masking")
+            model = DQN(env=env, **model_params)
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
-            model = DQN.load(model_path, env=env, device=device)
+            if MASKABLE_DQN_AVAILABLE:
+                model = MaskableDQN.load(model_path, env=env, device=device)
+            else:
+                model = DQN.load(model_path, env=env, device=device)
             # Update any model parameters that might have changed
             model.tensorboard_log = model_params["tensorboard_log"]
             model.verbose = model_params["verbose"]

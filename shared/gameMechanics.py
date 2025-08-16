@@ -23,11 +23,17 @@ def get_cube_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
     current_cube = offsetToCube(col, row)
     neighbors = []
     
+    # Handle both tuple and dict formats from offsetToCube
+    if isinstance(current_cube, tuple):
+        current_x, current_y, current_z = current_cube
+    else:
+        current_x, current_y, current_z = current_cube['x'], current_cube['y'], current_cube['z']
+    
     for dx, dy, dz in CUBE_DIRECTIONS:
         neighbor_cube = {
-            'x': current_cube['x'] + dx,
-            'y': current_cube['y'] + dy,
-            'z': current_cube['z'] + dz
+            'x': current_x + dx,
+            'y': current_y + dy,
+            'z': current_z + dz
         }
         
         # Convert back to offset coordinates

@@ -603,7 +603,8 @@ class W40KEnv(gym.Env):
             "enemy_units_alive": len(enemy_units_alive),
             "game_over": self.game_over,
             "winner": self.winner,
-            "eligible_units": len(self._get_eligible_units())
+            "eligible_units": len(self._get_eligible_units()),
+            "action_mask": self.controller.game_actions["get_action_mask"](self.max_units)
         }
 
     def _execute_full_bot_turn(self):
