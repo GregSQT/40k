@@ -200,8 +200,8 @@ class UsePhaseTransition:
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
             self.actions["set_phase"]("charge")
-            # DISABLED: reset_moved_units causes infinite loops by clearing tracking mid-phase
-            # self.actions["reset_moved_units"]()
+            # CRITICAL FIX: Reset tracking lists like frontend TypeScript
+            self.actions["reset_moved_units"]()
             self.actions["reset_charged_units"]()
             self.actions["set_selected_unit_id"](None)
             

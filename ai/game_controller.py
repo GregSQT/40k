@@ -457,8 +457,12 @@ class TrainingGameController(GameController):
         final_player = self.get_current_player()
         
         if initial_phase == final_phase and initial_player == final_player:
-            # More descriptive error with game state info
+            # If 0 eligible units, force phase advance to prevent infinite loops
             eligible_units = self._get_gym_eligible_units()
+            if len(eligible_units) == 0:
+                self.phase_transitions['force_phase_advance']("charge" if initial_phase == "shoot" else "combat")
+                return
+            # Only raise error if there are still eligible units but phase didn't advance
             phase_info = self.phase_transitions.get('get_phase_info', lambda: {})()
             raise RuntimeError(f"Phase advancement failed: stuck in {initial_phase} phase for player {initial_player}. "
                              f"Eligible units: {len(eligible_units)}. Phase info: {phase_info}")
@@ -481,10 +485,7 @@ class TrainingGameController(GameController):
             if current_phase == "move":
                 # CRITICAL: Use validated movement - NO FALLBACKS
                 valid_moves = self.get_valid_moves(bot_unit["id"])
-                print(f"🔍 BOT TURN DEBUG: Unit {bot_unit['id']} has {len(valid_moves)} valid moves")
                 if not valid_moves:
-                    # Instead of failing, mark unit as moved (no move action)
-                    print(f"🔍 BOT TURN DEBUG: No valid moves, marking unit {bot_unit['id']} as moved")
                     self._mark_gym_unit_as_acted(bot_unit)
                     return
                 
@@ -495,10 +496,8 @@ class TrainingGameController(GameController):
                 target_ids = self.game_actions.get('get_valid_shooting_targets', lambda x: [])(bot_unit["id"])
                 if target_ids:
                     mirror_action = {"type": "shoot", "target_id": target_ids[0]}
-                    print(f"🔍 BOT SHOOT DEBUG: Unit {bot_unit['id']} shooting at target {target_ids[0]}")
                 else:
                     mirror_action = {"type": "wait"}
-                    print(f"🔍 BOT SHOOT DEBUG: Unit {bot_unit['id']} no targets, using wait action")
             elif current_phase == "charge":
                 # Handle charge phase properly for bot
                 target_ids = self.game_actions.get('get_valid_charge_targets', lambda x: [])(bot_unit["id"])
@@ -517,7 +516,6 @@ class TrainingGameController(GameController):
                 mirror_action = {"type": "wait"}
             
             success = self.execute_action(bot_unit["id"], mirror_action)
-            print(f"🔍 BOT ACTION DEBUG: execute_action returned {success} for unit {bot_unit['id']}")
             if not success:
                 raise RuntimeError(f"Bot action execution failed: Unit {bot_unit['id']} action {mirror_action}")
             
@@ -528,8 +526,6 @@ class TrainingGameController(GameController):
                     self.replay_logger = replay_logger
                     self._log_gym_action(bot_unit, mirror_action, 0.0)
             
-            # Use same marking system as Player 1 for consistency
-            print(f"🔍 BOT ACTION DEBUG: Marking unit {bot_unit['id']} as acted")
             self._mark_gym_unit_as_acted(bot_unit)
             
             # Update bot_units list after marking
@@ -545,13 +541,13 @@ class TrainingGameController(GameController):
             raise RuntimeError("TrainingGameController missing required state_actions")
         
         # CRITICAL FIX: Each phase uses its own tracking set, not shared moved units
-        if current_phase == "move" and 'add_moved_unit' in self.state_actions:
+        if current_phase == "move":
             self.state_actions['add_moved_unit'](unit_id)
-        elif current_phase == "shoot" and 'add_shot_unit' in self.state_actions:
-            self.state_actions['add_shot_unit'](unit_id)  # Use separate tracking for shooting
-        elif current_phase == "charge" and 'add_charged_unit' in self.state_actions:
+        elif current_phase == "shoot":
+            self.state_actions['add_shot_unit'](unit_id)
+        elif current_phase == "charge":
             self.state_actions['add_charged_unit'](unit_id)
-        elif current_phase == "combat" and 'add_attacked_unit' in self.state_actions:
+        elif current_phase == "combat":
             self.state_actions['add_attacked_unit'](unit_id)
 
     def _convert_gym_action_to_mirror(self, unit: Dict, action_type: int) -> Dict:
@@ -777,6 +773,7 @@ class TrainingGameController(GameController):
         success = self.execute_action(acting_unit["id"], mirror_action)
         if not success:
             print(f"🚨 DEBUG: Unit {acting_unit['id']} action {mirror_action['type']} FAILED!")
+        
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
 
         # CONDITIONAL LOGGING: Enable during evaluation mode only

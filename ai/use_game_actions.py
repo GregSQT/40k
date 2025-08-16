@@ -373,7 +373,8 @@ class UseGameActions:
         
         elif phase == "shoot":
             units_fled = set(self.game_state.get("units_fled"))
-            if unit["id"] in units_moved:
+            units_shot = set(self.game_state.get("units_shot", []))
+            if unit["id"] in units_shot:
                 return False
             # NEW RULE: Units that fled cannot shoot
             if unit["id"] in units_fled:
