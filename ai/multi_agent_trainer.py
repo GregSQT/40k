@@ -276,12 +276,19 @@ class MultiAgentTrainer:
         Supports 3-phase training plan: solo -> cross_faction -> full_composition
         Returns training orchestration summary.
         """
-        print(f"🚀 Starting multi-agent training | Episodes: {total_episodes} | Config: {training_config_name} | Phase: {training_phase or 'balanced'}")
+        # Load training config to get total_episodes if specified
+        training_config = self.config.load_training_config(training_config_name)
+        if "total_episodes" in training_config:
+            config_total_episodes = training_config["total_episodes"]
+            print(f"🚀 Starting multi-agent training | Episodes: {config_total_episodes} (from config) | Config: {training_config_name} | Phase: {training_phase or 'balanced'}")
+            total_episodes = config_total_episodes  # Use config value instead of parameter
+        else:
+            print(f"🚀 Starting multi-agent training | Episodes: {total_episodes} (from parameter) | Config: {training_config_name} | Phase: {training_phase or 'balanced'}")
         
         # Clean up previous session scenarios
         self._cleanup_previous_session_scenarios()
         
-        # Generate phase-specific training rotation
+        # Generate phase-specific training rotation first to get actual matchup count
         if training_phase:
             training_rotation = self.scenario_manager.get_phase_based_training_rotation(
                 total_episodes, training_phase
@@ -292,9 +299,9 @@ class MultiAgentTrainer:
         if not training_rotation:
             raise ValueError("No training rotation generated - need at least 2 agents")
         
-        # Calculate episodes per pair
-        num_agents = len(self.unit_registry.get_all_model_keys())
-        episodes_per_pair = total_episodes // (num_agents * (num_agents - 1))
+        # Calculate episodes per matchup using ACTUAL matchup count
+        episodes_per_pair = total_episodes // len(training_rotation)
+        print(f"📊 Training matchups: {len(training_rotation)} | Episodes per matchup: {episodes_per_pair}")
         
         # Execute training rotation
         orchestration_results = {
@@ -312,6 +319,8 @@ class MultiAgentTrainer:
         self.training_config = self.config.load_training_config(training_config_name)
         training_config = self.config.load_training_config(training_config_name)
         
+        # Recalculate episodes per matchup using actual rotation count
+        episodes_per_pair = total_episodes // len(training_rotation) if len(training_rotation) > 0 else 0
         print(f"🔄 Executing {len(training_rotation)} training matchups...")
         print(f"📊 Episodes per matchup: {episodes_per_pair}")
         
@@ -522,7 +531,14 @@ class MultiAgentTrainer:
             # Execute training
             session_start_time = time.time()
             current_training_config = self.config.load_training_config(training_config_name)
-            total_timesteps = current_training_config["total_timesteps"]
+            
+            # Calculate total_timesteps dynamically for proportional training
+            if "number_of_turns_per_episode" in current_training_config and "total_episodes" in current_training_config:
+                total_timesteps = current_training_config["number_of_turns_per_episode"] * 100 * current_training_config["total_episodes"]
+            elif "total_timesteps" in current_training_config:
+                total_timesteps = current_training_config["total_timesteps"]
+            else:
+                raise ValueError(f"Training config '{training_config_name}' must have either 'total_timesteps' or both 'number_of_turns_per_episode' and 'total_episodes'")
             
             all_callbacks = callbacks if callbacks else []
             
