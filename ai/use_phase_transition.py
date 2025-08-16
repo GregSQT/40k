@@ -105,10 +105,7 @@ class UsePhaseTransition:
         result = _shoot_check(
             self.units,
             self.current_player,
-            self.phase,
-            self.units_shot,  # Use units_shot for shoot phase tracking
-            self.units_charged,
-            self.units_attacked,
+            self.units_shot,
             self.units_fled,
         )
         print(f"  should_transition_from_shoot result: {result}")

@@ -388,10 +388,7 @@ def should_transition_from_move(units: List[Dict[str, Any]],
 
 def should_transition_from_shoot(units: List[Dict[str, Any]], 
                                 current_player: int, 
-                                phase: str,
-                                units_moved: Set[int], 
-                                units_charged: Set[int], 
-                                units_attacked: Set[int], 
+                                units_shot: Set[int], 
                                 units_fled: Set[int]) -> bool:
     """EXACT copy of PvP shouldTransitionFromShoot logic."""
     player_units = [u for u in units if u["player"] == current_player]
@@ -399,7 +396,7 @@ def should_transition_from_shoot(units: List[Dict[str, Any]],
     
     print(f"🎯 SHARED should_transition_from_shoot DEBUG:")
     print(f"  Player {current_player} units: {len(player_units)}")
-    print(f"  units_moved (contains units_shot): {list(units_moved)}")
+    print(f"  units_shot: {list(units_shot)}")
     
     if len(player_units) == 0:
         print(f"  → TRUE: No player units")
@@ -411,9 +408,9 @@ def should_transition_from_shoot(units: List[Dict[str, Any]],
         unit_id = unit["id"]
         print(f"  Checking unit {unit_id}:")
         
-        # Check if unit already shot this phase (parameter units_moved contains units_shot for shoot phase)
-        if unit["id"] in units_moved:
-            print(f"    ❌ Already shot (in units_moved)")
+        # Check if unit already shot this phase
+        if unit["id"] in units_shot:
+            print(f"    ❌ Already shot (in units_shot)")
             continue
         
         # Units that fled cannot shoot

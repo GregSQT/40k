@@ -351,6 +351,8 @@ class GameController:
             success = self.charge_unit(unit_id, action["target_id"])
         elif action_type == "combat":
             success = self.combat_attack(unit_id, action["target_id"])
+        elif action_type == "wait":
+            success = True  # Wait action always succeeds
         else:
             success = False
         
@@ -519,6 +521,8 @@ class TrainingGameController(GameController):
                 if replay_logger:
                     self.replay_logger = replay_logger
                     self._log_gym_action(bot_unit, mirror_action, 0.0)
+            
+            # Use same marking system as Player 1 for consistency
             self._mark_gym_unit_as_acted(bot_unit)
 
     def _mark_gym_unit_as_acted(self, unit: Dict) -> None:
@@ -731,14 +735,10 @@ class TrainingGameController(GameController):
         controlled_player = 1
         controlled_eligible_units = [u for u in eligible_units if u["player"] == controlled_player]
 
-        # Always execute bot turn first when current player is P0 (bot starts episode/turn)
+        # Execute bot actions for Player 0 when current player is P0
         if current_player == 0:
             self._execute_gym_bot_turn()
-            # CRITICAL FIX: Force phase advancement after bot completes all actions
             self._advance_gym_phase_or_turn()
-            # Check if we advanced to AI player, if not force it
-            if self.get_current_player() == 0:
-                self.state_actions['set_current_player'](1)
             return self._get_gym_obs(), 0.0, False, False, self._get_gym_info()
         
         # No controlled units eligible - advance until controlled player can act
@@ -746,7 +746,7 @@ class TrainingGameController(GameController):
             self._advance_gym_phase_or_turn()
             return self._get_gym_obs(), 0.0, False, False, self._get_gym_info()
         
-        # Decode and execute P1 action
+        # Decode and execute P1 action (stable_baselines3 controls P1 only)
         unit_idx = action // 8
         action_type = action % 8
         
@@ -759,12 +759,13 @@ class TrainingGameController(GameController):
         acting_unit = controlled_eligible_units[unit_idx]
         
         # CRITICAL: Validate action before conversion using use_game_actions.py
-        # CRITICAL: Validate action before conversion using use_game_actions.py
         current_phase = self.get_current_phase()
         self.game_actions["validate_gym_action_for_phase"](action_type, current_phase)
         
         mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)       
         success = self.execute_action(acting_unit["id"], mirror_action)
+        if not success:
+            print(f"🚨 DEBUG: Unit {acting_unit['id']} action {mirror_action['type']} FAILED!")
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
 
         # CONDITIONAL LOGGING: Enable during evaluation mode only
