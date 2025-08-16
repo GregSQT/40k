@@ -839,9 +839,6 @@ class GameReplayIntegration:
             env.replay_logger = GameReplayLogger(env)
             env.replay_logger.capture_initial_state()
             
-            if not env.replay_logger.quiet:
-                print("✅ GameReplayLogger (as replay_logger) attached to environment")
-            
             return env
         except Exception as e:
             raise

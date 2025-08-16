@@ -821,7 +821,7 @@ class MultiAgentTrainer:
         total_rewards = []
         session_id = getattr(self, '_current_session_id', 'unknown')
         
-        # Simple shared evaluation progress bar - only create for first session
+        # Simple shared evaluation progress bar - create once for all sessions
         with self.progress_lock:
             # Track this session's evaluation progress 
             self.evaluation_progress[session_id] = {
@@ -832,33 +832,20 @@ class MultiAgentTrainer:
                 'total_reward': 0.0
             }
             
-            # Create shared eval bar only if it doesn't exist
-            if not hasattr(self, 'eval_pbar') or self.eval_pbar is None:
-                self.eval_pbar = tqdm(
-                    total=num_episodes,
-                    desc="🧪 Eval slowest",
-                    bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} episodes",
-                    leave=True,
-                    ncols=100,
-                    position=2
-                )
-            
-            # Initialize eval_pbar only for the first evaluation session
+            # Create shared eval bar only once across all sessions
             if not hasattr(self, 'eval_pbar') or self.eval_pbar is None:
                 eval_config = self.shared_config["evaluation"]["progress_bar"]
-                self.eval_pbar = tqdm(total=num_episodes, desc=f"{eval_config['prefix']} slowest", 
-                                     bar_format=eval_config["bar_format"],
-                                     leave=eval_config["leave"], ncols=eval_config["ncols"], position=eval_config["position"])
+                self.eval_pbar = tqdm(
+                    total=num_episodes, 
+                    desc=f"{eval_config['prefix']} slowest",
+                    bar_format=eval_config["bar_format"],
+                    leave=eval_config["leave"], 
+                    ncols=eval_config["ncols"], 
+                    position=eval_config["position"]
+                )
         
         for episode in range(num_episodes):
             obs, info = env.reset()
-            # DEBUG: Check units in controller after environment reset
-            if hasattr(env, 'controller'):
-                controller_units = env.controller.get_units()
-                p0_units = [u for u in controller_units if u.get('player') == 0]
-                p1_units = [u for u in controller_units if u.get('player') == 1]
-                print(f"🔍 CONTROLLER DEBUG: After reset - {len(p0_units)} P0 units, {len(p1_units)} P1 units")
-                print(f"🔍 CONTROLLER UNITS: {[(u['id'], u['player'], u['unit_type']) for u in controller_units]}")
             episode_reward = 0
             done = False
            

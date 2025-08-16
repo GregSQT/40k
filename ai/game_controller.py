@@ -471,11 +471,8 @@ class TrainingGameController(GameController):
         if bot_units:
             bot_unit = bot_units[0]  # Take first eligible unit only
             current_phase = self.get_current_phase()
-            current_player = self.get_current_player()
-            current_turn = self.get_current_turn()
-            
-            print(f"🤖 BOT ACTION SEQUENCE: Turn {current_turn} | Player {current_player} | Phase {current_phase}")
-            print(f"  → Bot unit {bot_unit['id']} about to act")
+            #current_player = self.get_current_player()
+            #current_turn = self.get_current_turn()
             
             # Create realistic action based on current phase
             if current_phase == "move":
@@ -530,10 +527,11 @@ class TrainingGameController(GameController):
         if not hasattr(self, 'state_actions'):
             raise RuntimeError("TrainingGameController missing required state_actions")
         
+        # CRITICAL FIX: Each phase uses its own tracking set, not shared moved units
         if current_phase == "move" and 'add_moved_unit' in self.state_actions:
             self.state_actions['add_moved_unit'](unit_id)
-        elif current_phase == "shoot" and 'add_moved_unit' in self.state_actions:
-            self.state_actions['add_moved_unit'](unit_id)  # Shooting uses moved units tracking
+        elif current_phase == "shoot" and 'add_shot_unit' in self.state_actions:
+            self.state_actions['add_shot_unit'](unit_id)  # Use separate tracking for shooting
         elif current_phase == "charge" and 'add_charged_unit' in self.state_actions:
             self.state_actions['add_charged_unit'](unit_id)
         elif current_phase == "combat" and 'add_attacked_unit' in self.state_actions:
@@ -764,18 +762,8 @@ class TrainingGameController(GameController):
         # Mark unit as acted (always mark to prevent infinite loops)
         self._mark_gym_unit_as_acted(acting_unit)
         
-        # DEBUG: Track phase advancement
-        pre_advance_phase = self.get_current_phase()
-        pre_advance_player = self.get_current_player()
-        
         # CRITICAL FIX: Always check for phase advancement after P1 action
         self._advance_gym_phase_or_turn()
-        
-        post_advance_phase = self.get_current_phase()
-        post_advance_player = self.get_current_player()
-        
-        if pre_advance_phase != post_advance_phase or pre_advance_player != post_advance_player:
-            print(f"  ⚡ PHASE TRANSITION: {pre_advance_phase}→{post_advance_phase} | Player {pre_advance_player}→{post_advance_player}")
         
         # Check if game ended
         terminated = self.is_game_over()
