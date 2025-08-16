@@ -76,10 +76,6 @@ class GameReplayLogger:
         if not is_eval_mode:
             return None  # Skip logging during training
         
-        # CRITICAL DEBUG: Log what actions are being attempted
-        if len(self.combat_log_entries) < 5:  # Only first 5 actions
-            print(f"🔍 ACTION DEBUG: entry_type={entry_type}, acting_unit={acting_unit.get('id') if acting_unit else None}")
-        
         # CRITICAL FIX: Prevent duplicate entries for same action
         if entry_type == "shoot" and shoot_details is None:
             return None

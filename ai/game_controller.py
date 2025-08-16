@@ -471,6 +471,11 @@ class TrainingGameController(GameController):
         if bot_units:
             bot_unit = bot_units[0]  # Take first eligible unit only
             current_phase = self.get_current_phase()
+            current_player = self.get_current_player()
+            current_turn = self.get_current_turn()
+            
+            print(f"🤖 BOT ACTION SEQUENCE: Turn {current_turn} | Player {current_player} | Phase {current_phase}")
+            print(f"  → Bot unit {bot_unit['id']} about to act")
             
             # Create realistic action based on current phase
             if current_phase == "move":
@@ -509,12 +514,12 @@ class TrainingGameController(GameController):
             
             self.execute_action(bot_unit["id"], mirror_action)
             
-            # DISABLED: Skip bot action logging to prevent type validation errors
-            # try:
-            #     self._log_gym_action(bot_unit, mirror_action, 0.0)
-            # except Exception as e:
-            #     if not self.quiet:
-            #         print(f"⚠️ Bot action logging failed: {e}")
+            # Enable bot action logging during evaluation
+            if hasattr(self, 'gym_env') and (getattr(self.gym_env, 'is_evaluation_mode', False) or getattr(self.gym_env, '_force_evaluation_mode', False)):
+                replay_logger = getattr(self.gym_env, 'replay_logger', None)
+                if replay_logger:
+                    self.replay_logger = replay_logger
+                    self._log_gym_action(bot_unit, mirror_action, 0.0)
             self._mark_gym_unit_as_acted(bot_unit)
 
     def _mark_gym_unit_as_acted(self, unit: Dict) -> None:
@@ -614,7 +619,6 @@ class TrainingGameController(GameController):
             return
         
         try:
-            from shared.gameLogStructure import log_unified_action
             current_turn = self.get_current_turn()
             current_phase = self.get_current_phase()
             
@@ -628,23 +632,49 @@ class TrainingGameController(GameController):
                         target_unit = unit
                         break
             
-            # Map action types to create proper log messages
+            # Direct logging to replay logger instead of unified system
             action_type = mirror_action["type"]
-            if action_type == "wait":
-                action_type = "move"  # Wait actions are logged as moves in the system
             
-            # Use gym environment reference if available
-            env = getattr(self, 'gym_env', self)
-            
-            log_unified_action(
-                env=env,
-                action_type=action_type,
-                acting_unit=acting_unit,
-                target_unit=target_unit,
-                reward=reward,
-                phase=current_phase,
-                turn_number=current_turn
-            )
+            if action_type == "move":
+                start_col = acting_unit["col"]
+                start_row = acting_unit["row"]
+                end_col = mirror_action.get("col", start_col)
+                end_row = mirror_action.get("row", start_row)
+                self.replay_logger.log_move(
+                    acting_unit, start_col, start_row, end_col, end_row, 
+                    current_turn, reward, 0  # action_int for move
+                )
+            elif action_type == "shoot" and target_unit:
+                # Create shoot details from controller's last result
+                shoot_details = getattr(self, '_last_shoot_result', {"summary": {"totalShots": 1, "hits": 1, "wounds": 1, "failedSaves": 1}})
+                self.replay_logger.log_shoot(
+                    acting_unit, target_unit, shoot_details,
+                    current_turn, reward, 4  # action_int for shoot
+                )
+            elif action_type == "charge" and target_unit:
+                start_col = acting_unit["col"]
+                start_row = acting_unit["row"]
+                end_col = target_unit["col"]
+                end_row = target_unit["row"]
+                self.replay_logger.log_charge(
+                    acting_unit, target_unit, start_col, start_row, end_col, end_row,
+                    current_turn, reward, 5  # action_int for charge
+                )
+            elif action_type == "combat" and target_unit:
+                # Create combat details from controller's last result
+                combat_details = getattr(self, '_last_combat_result', {"summary": {"totalAttacks": 1, "hits": 1, "wounds": 1, "failedSaves": 1}})
+                self.replay_logger.log_combat(
+                    acting_unit, target_unit, combat_details,
+                    current_turn, reward, 6  # action_int for combat
+                )
+            elif action_type == "wait":
+                # Log wait as move with no position change
+                self.replay_logger.log_move(
+                    acting_unit, acting_unit["col"], acting_unit["row"],
+                    acting_unit["col"], acting_unit["row"],
+                    current_turn, reward, 7  # action_int for wait
+                )
+                
         except Exception as e:
             if not self.quiet:
                 print(f"⚠️ Gym action logging failed for unit {acting_unit.get('id', 'unknown')} action {mirror_action.get('type', 'unknown')}: {e}")
@@ -722,15 +752,30 @@ class TrainingGameController(GameController):
        
         success = self.execute_action(acting_unit["id"], mirror_action)
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
-        # CONDITIONAL LOGGING: Enable during evaluation mode - check controller's direct environment  
-        if hasattr(self, 'replay_logger') and self.replay_logger and hasattr(self, 'gym_env') and (getattr(self.gym_env, 'is_evaluation_mode', False) or getattr(self.gym_env, '_force_evaluation_mode', False)):
-            self._log_gym_action(acting_unit, mirror_action, reward)
+        # CONDITIONAL LOGGING: Enable during evaluation mode - get replay logger from gym_env
+        if hasattr(self, 'gym_env') and self.gym_env and (getattr(self.gym_env, 'is_evaluation_mode', False) or getattr(self.gym_env, '_force_evaluation_mode', False)):
+            # Get replay logger from gym environment since controller's replay_logger is None
+            replay_logger = getattr(self.gym_env, 'replay_logger', None)
+            if replay_logger:
+                # Temporarily set controller's replay logger for this action
+                self.replay_logger = replay_logger
+                self._log_gym_action(acting_unit, mirror_action, reward)
         
         # Mark unit as acted (always mark to prevent infinite loops)
         self._mark_gym_unit_as_acted(acting_unit)
         
+        # DEBUG: Track phase advancement
+        pre_advance_phase = self.get_current_phase()
+        pre_advance_player = self.get_current_player()
+        
         # CRITICAL FIX: Always check for phase advancement after P1 action
         self._advance_gym_phase_or_turn()
+        
+        post_advance_phase = self.get_current_phase()
+        post_advance_player = self.get_current_player()
+        
+        if pre_advance_phase != post_advance_phase or pre_advance_player != post_advance_player:
+            print(f"  ⚡ PHASE TRANSITION: {pre_advance_phase}→{post_advance_phase} | Player {pre_advance_player}→{post_advance_player}")
         
         # Check if game ended
         terminated = self.is_game_over()
@@ -809,18 +854,11 @@ class TrainingGameController(GameController):
 
     def connect_replay_logger(self, replay_logger):
         """Connect replay logger to controller for episode tracking"""
-        print(f"🔍 REPLAY LOGGER CONNECT: Connecting {type(replay_logger)} to controller")
         self.replay_logger = replay_logger
         self.game_logger = replay_logger
         # CRITICAL FIX: Ensure replay logger has proper environment reference
         if hasattr(replay_logger, 'env') and hasattr(self, 'gym_env'):
             replay_logger.env = self.gym_env
-        # Force immediate connection verification
-        if hasattr(replay_logger, 'env') and replay_logger.env:
-            replay_logger.env.controller = self
-        print(f"🔍 REPLAY LOGGER CONNECT: Connected successfully, self.replay_logger={self.replay_logger is not None}")
-
-        print(f"🔗 REPLAY LOGGER: Connected to controller, env={hasattr(replay_logger, 'env')}")
         # Force immediate connection verification
         if hasattr(replay_logger, 'env') and replay_logger.env:
             replay_logger.env.controller = self

@@ -532,12 +532,21 @@ class MultiAgentTrainer:
                     'session_id': session.session_id
                 }
             
-            # Execute training with progress tracking
+            # Execute training with progress tracking - prevent rich display conflicts
+            show_individual_progress = (
+                self.shared_config["progress_bar"].get("show_progress_bar", True) and 
+                self.max_concurrent_sessions == 1
+            )
+            # Execute training with progress tracking - show only slowest agent
+            show_individual_progress = (
+                self.shared_config["progress_bar"].get("show_progress_bar", True) and 
+                session.session_id == self._get_slowest_session_id()
+            )
             model.learn(
                 total_timesteps=total_timesteps,
                 callback=all_callbacks,
                 log_interval=training_config["log_interval"],
-                progress_bar=self.shared_config["progress_bar"].get("show_progress_bar", True) and (self.completed_sessions == 0)  # Only first session shows progress
+                progress_bar=show_individual_progress
             )
             
             # Record pure training time
@@ -728,6 +737,40 @@ class MultiAgentTrainer:
         # Simple increment for completed sessions
         self.overall_pbar.n = self.completed_sessions
         self.overall_pbar.refresh()
+    
+    def _get_slowest_session_id(self):
+        """Get the session ID of the slowest training session."""
+        if not self.session_progress:
+            return None
+        
+        slowest_session = None
+        slowest_progress = 1.0
+        
+        for session_id, progress in self.session_progress.items():
+            if progress['total_steps'] > 0:
+                completion = progress['current_step'] / progress['total_steps']
+                if completion < slowest_progress:
+                    slowest_progress = completion
+                    slowest_session = session_id
+        
+        return slowest_session
+    
+    def _get_slowest_evaluation_session_id(self):
+        """Get the session ID of the slowest evaluation session."""
+        if not self.evaluation_progress:
+            return None
+        
+        slowest_session = None
+        slowest_progress = 1.0
+        
+        for session_id, progress in self.evaluation_progress.items():
+            if progress['total'] > 0:
+                completion = progress['episodes'] / progress['total']
+                if completion < slowest_progress:
+                    slowest_progress = completion
+                    slowest_session = session_id
+        
+        return slowest_session
 
     def _setup_session_callbacks(self, session: TrainingSession, model, episode_tracker: SelectiveEpisodeTracker, training_config_name: str = "default") -> List:
         """Setup training callbacks - simplified without evaluation callback."""
@@ -773,22 +816,14 @@ class MultiAgentTrainer:
         return eval_env
 
     def _test_trained_model(self, model, env, num_episodes: int, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
-        """Test trained model - episode_tracker should be None to prevent test episode capture"""
+        """Test trained model with single shared evaluation progress bar"""
         wins = 0
         total_rewards = []
-        
-        # Use shared evaluation progress bar instead of individual ones
         session_id = getattr(self, '_current_session_id', 'unknown')
         
-        # Initialize shared evaluation progress bar if not exists
+        # Simple shared evaluation progress bar - only create for first session
         with self.progress_lock:
-            if not hasattr(self, 'eval_pbar') or self.eval_pbar is None:
-                eval_config = self.shared_config["evaluation"]["progress_bar"]
-                self.eval_pbar = tqdm(total=num_episodes, desc=f"{eval_config['prefix']} {session_id[:8]}", 
-                                     bar_format=eval_config["bar_format"],
-                                     leave=eval_config["leave"], ncols=eval_config["ncols"], position=eval_config["position"])
-            
-            # Track this session's evaluation progress
+            # Track this session's evaluation progress 
             self.evaluation_progress[session_id] = {
                 'episodes': 0,
                 'total': num_episodes,
@@ -796,6 +831,24 @@ class MultiAgentTrainer:
                 'wins': 0,
                 'total_reward': 0.0
             }
+            
+            # Create shared eval bar only if it doesn't exist
+            if not hasattr(self, 'eval_pbar') or self.eval_pbar is None:
+                self.eval_pbar = tqdm(
+                    total=num_episodes,
+                    desc="🧪 Eval slowest",
+                    bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} episodes",
+                    leave=True,
+                    ncols=100,
+                    position=2
+                )
+            
+            # Initialize eval_pbar only for the first evaluation session
+            if not hasattr(self, 'eval_pbar') or self.eval_pbar is None:
+                eval_config = self.shared_config["evaluation"]["progress_bar"]
+                self.eval_pbar = tqdm(total=num_episodes, desc=f"{eval_config['prefix']} slowest", 
+                                     bar_format=eval_config["bar_format"],
+                                     leave=eval_config["leave"], ncols=eval_config["ncols"], position=eval_config["position"])
         
         for episode in range(num_episodes):
             obs, info = env.reset()
