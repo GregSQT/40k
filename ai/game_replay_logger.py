@@ -59,22 +59,40 @@ class GameReplayLogger:
                   phase: str = None, start_hex: str = None, end_hex: str = None, 
                   shoot_details: List = None):
         """Add entry to combat log using shared structure."""
-        # CRITICAL: Only log during evaluation mode - check multiple sources
+        # CRITICAL: Only log during evaluation mode - check multiple sources including unwrapped
         is_eval_mode = (
-            getattr(self.env, 'is_evaluation_mode', False) or
-            getattr(self, 'is_evaluation_mode', False) or
-            getattr(self.env, '_force_evaluation_mode', False)
+            hasattr(self.env, 'is_evaluation_mode') and self.env.is_evaluation_mode or
+            hasattr(self, 'is_evaluation_mode') and self.is_evaluation_mode or
+            hasattr(self.env, '_force_evaluation_mode') and self.env._force_evaluation_mode
         )
+        
+        # CRITICAL FIX: Check unwrapped environment for evaluation flags
+        if not is_eval_mode and hasattr(self.env, 'unwrapped'):
+            is_eval_mode = (
+                hasattr(self.env.unwrapped, 'is_evaluation_mode') and self.env.unwrapped.is_evaluation_mode or
+                hasattr(self.env.unwrapped, '_force_evaluation_mode') and self.env.unwrapped._force_evaluation_mode
+            )
+        
         if not is_eval_mode:
             return None  # Skip logging during training
+        
+        # CRITICAL DEBUG: Log what actions are being attempted
+        if len(self.combat_log_entries) < 5:  # Only first 5 actions
+            print(f"🔍 ACTION DEBUG: entry_type={entry_type}, acting_unit={acting_unit.get('id') if acting_unit else None}")
         
         # CRITICAL FIX: Prevent duplicate entries for same action
         if entry_type == "shoot" and shoot_details is None:
             return None
         
-        # Debug logging for first entry only
-        if len(self.combat_log_entries) == 0 and not self.quiet:
-            print(f"✅ GameReplayLogger: Logging enabled for evaluation - entry_type: {entry_type}")
+        # CRITICAL DEBUG: Log evaluation mode detection to prove what's happening
+        if len(self.combat_log_entries) == 0:  # Only log once per episode
+            print(f"🔍 REPLAY DEBUG: env.is_evaluation_mode={getattr(self.env, 'is_evaluation_mode', 'MISSING')}")
+            print(f"🔍 REPLAY DEBUG: env._force_evaluation_mode={getattr(self.env, '_force_evaluation_mode', 'MISSING')}")
+            print(f"🔍 REPLAY DEBUG: self.is_evaluation_mode={getattr(self, 'is_evaluation_mode', 'MISSING')}")
+            if hasattr(self.env, 'unwrapped'):
+                print(f"🔍 REPLAY DEBUG: env.unwrapped.is_evaluation_mode={getattr(self.env.unwrapped, 'is_evaluation_mode', 'MISSING')}")
+                print(f"🔍 REPLAY DEBUG: env.unwrapped._force_evaluation_mode={getattr(self.env.unwrapped, '_force_evaluation_mode', 'MISSING')}")
+            print(f"🔍 REPLAY DEBUG: Final is_eval_mode={is_eval_mode}")
             
         # Use shared structure for creating log entry
         log_entry = create_training_log_entry(

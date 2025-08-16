@@ -322,6 +322,9 @@ class W40KEnv(gym.Env):
         self.controller.game_state["current_turn"] = 1  # Always start at Turn 1 per specification
         self.controller.game_state["current_player"] = 0  # Episode starts with Player 0
         self.controller.game_state["phase"] = "move"
+        
+        # CRITICAL FIX: Ensure units are properly reset for new episode
+        units = self.controller.get_units()
         self._last_acting_unit = None
         self._last_target_unit = None
         

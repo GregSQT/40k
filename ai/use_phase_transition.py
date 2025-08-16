@@ -101,23 +101,17 @@ class UsePhaseTransition:
         )
 
     def should_transition_from_charge(self) -> bool:
-        """EMERGENCY FIX: Always transition from charge phase to prevent infinite loops"""
-        player_units = [u for u in self.units if u["player"] == self.current_player]
-        
-        if len(player_units) == 0:
-            return True
-        
-        # CRITICAL FIX: Check if all units have had a chance to act in charge phase
-        units_that_havent_acted = [
-            unit for unit in player_units 
-            if (unit["id"] not in self.units_moved and 
-                unit["id"] not in self.units_charged and 
-                unit["id"] not in self.units_fled)
-        ]
-        
-        # NUCLEAR FIX: Always transition from charge phase after any call
-        should_transition = True
-        return should_transition
+        """EXACT mirror of shouldTransitionFromCharge from TypeScript (delegates to shared mechanics)"""
+        from shared.gameMechanics import should_transition_from_charge as _charge_check
+        return _charge_check(
+            self.units,
+            self.current_player,
+            self.phase,
+            self.units_moved,
+            self.units_charged,
+            self.units_attacked,
+            self.units_fled
+        )
 
     def should_end_turn(self) -> bool:
         """Check if current player's turn should end (advance to next player)"""

@@ -459,20 +459,8 @@ class TrainingGameController(GameController):
         final_phase = self.get_current_phase()
         final_player = self.get_current_player()
         
-        # CRITICAL FIX: Force immediate phase advance when stuck to break infinite loops
-        if not advanced and initial_phase == final_phase and initial_player == final_player:
-            # Force phase advance by manually updating phase
-            if initial_phase == "move":
-                self.state_actions['set_phase']("shoot")
-            elif initial_phase == "shoot":
-                self.state_actions['set_phase']("charge")
-            elif initial_phase == "charge":
-                self.state_actions['set_phase']("combat")
-            elif initial_phase == "combat":
-                # End turn - switch to next player
-                new_player = 1 if initial_player == 0 else 0
-                self.state_actions['set_current_player'](new_player)
-                self.state_actions['set_phase']("move")
+        # Natural phase transitions should work now - no forced advancement needed
+        pass
 
     def _execute_gym_bot_turn(self) -> None:
         """Execute bot turn with proper logging through mirror architecture"""
@@ -819,12 +807,17 @@ class TrainingGameController(GameController):
         self._current_phase = self.game_state["phase"]
 
     def connect_replay_logger(self, replay_logger):
-        """Connect replay logger for GameReplayIntegration compatibility."""
+        """Connect replay logger to controller for episode tracking"""
         self.replay_logger = replay_logger
         self.game_logger = replay_logger
         # CRITICAL FIX: Ensure replay logger has proper environment reference
         if hasattr(replay_logger, 'env') and hasattr(self, 'gym_env'):
             replay_logger.env = self.gym_env
+        # Force immediate connection verification
+        if hasattr(replay_logger, 'env') and replay_logger.env:
+            replay_logger.env.controller = self
+            
+        print(f"🔗 REPLAY LOGGER: Connected to controller, env={hasattr(replay_logger, 'env')}")
         # Force immediate connection verification
         if hasattr(replay_logger, 'env') and replay_logger.env:
             replay_logger.env.controller = self

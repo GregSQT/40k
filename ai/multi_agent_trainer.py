@@ -557,11 +557,9 @@ class MultiAgentTrainer:
             eval_episodes = training_config.get("eval_episodes")
             
             # Test the trained model using SAME environment as training (has fixes applied)
-            print(f"🔍 DEBUG: Starting evaluation - using training environment to avoid controller differences")
             evaluation_start = time.time()
             test_results = self._test_trained_model(model, env, eval_episodes, episode_tracker)
             evaluation_time = time.time() - evaluation_start
-            print(f"🔍 DEBUG: Evaluation completed")
             
             # Calculate total session duration (training + evaluation + model saving)
             training_duration = time.time() - session_start_time
@@ -855,16 +853,21 @@ class MultiAgentTrainer:
                 done = terminated or truncated
                 step_count += 1
                 
-                # CRITICAL FIX: Auto-advance phases when no units are eligible OR turn limit reached
+                # CRITICAL FIX: Check game over conditions properly
                 if not done:
                     current_turn = info.get('current_turn', 0)
                     eligible_units = info.get('eligible_units', 0)
+                    ai_units_alive = info.get('ai_units_alive', 0)
+                    enemy_units_alive = info.get('enemy_units_alive', 0)
                     
-                    # Force end after 50 turns to prevent infinite games
-                    if current_turn > 50:
+                    # Check if game should end naturally
+                    if ai_units_alive == 0 or enemy_units_alive == 0:
+                        print(f"🏁 Episode {episode + 1} ended: AI={ai_units_alive}, Enemy={enemy_units_alive}")
+                        done = True
+                    # Force end after 25 turns (reduced from 50)
+                    elif current_turn > 25:
                         print(f"⚠️ Episode {episode + 1} auto-terminated due to turn limit (turn {current_turn})")
                         done = True
-                        episode_reward += reward
                     elif eligible_units == 0:
                         # Force phase advancement when stuck
                         if hasattr(env, 'controller') and hasattr(env.controller, '_advance_gym_phase_or_turn'):
@@ -878,14 +881,9 @@ class MultiAgentTrainer:
             
             # Debug infinite loop detection
             if step_count >= max_steps:
-                print(f"⚠️ Episode {episode + 1} terminated due to max steps ({max_steps})")
-                print(f"   Last action: {action}, Last reward: {reward}")
-                print(f"   Info: {info}")
                 # Force game over for stuck episodes
                 done = True
                 episode_reward += reward  # Add final reward
-                episode_reward += reward
-                done = terminated or truncated
             
             total_rewards.append(episode_reward)
             
