@@ -12,7 +12,7 @@
       "1": [[11,6], [5,7]]
     },
     "difficulty": "easy",
-    "training_focus": "solo"
+    "training_focus": "later"
   },
   "Tyranid_Infantry_Elite_MeleeElite": {
     "description": "Solo training for Tyranid_Infantry_Elite_MeleeElite agents (Carnifex focus)",
@@ -27,7 +27,7 @@
       "1": [[11,6], [5,7]]
     },
     "difficulty": "easy",
-    "training_focus": "solo"
+    "training_focus": "later"
   },
   "solo_spacemarine_infantry_troop_rangedswarm": {
     "description": "Solo training for SpaceMarine_Infantry_Troop_RangedSwarm agents (Intercessor focus)",
@@ -57,7 +57,7 @@
       "1": [[11,6], [9,10]]
     },
     "difficulty": "easy",
-    "training_focus": "solo"
+    "training_focus": "later"
   },
   "solo_tyranid_infantry_elite_meleeelite": {
     "description": "Solo training for Tyranid_Infantry_Elite_MeleeElite agents (Carnifex focus)",
@@ -72,7 +72,7 @@
       "1": [[11,6], [5,7]]
     },
     "difficulty": "easy",
-    "training_focus": "solo"
+    "training_focus": "later"
   },
   "cross_spacemarine_vs_tyranid_balanced": {
     "description": "Balanced cross-faction training: Space Marines vs Tyranids",

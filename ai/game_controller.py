@@ -194,6 +194,11 @@ class GameController:
 
     def move_unit(self, unit_id: int, col: int, row: int) -> bool:
         """Move a unit using validated movement system"""
+        # DEBUG: Log movement attempt
+        unit = self.find_unit(unit_id)
+        if unit:
+            print(f"🎯 MOVE DEBUG: Unit {unit_id} trying to move from ({unit['col']},{unit['row']}) to ({col},{row})")
+        
         # Use existing validated movement methods instead of direct_move
         if "start_move_preview" not in self.game_actions:
             raise RuntimeError("game_actions missing required start_move_preview method")
@@ -201,9 +206,21 @@ class GameController:
             raise RuntimeError("game_actions missing required confirm_move method")
         
         # Use the validated preview system that checks walls
-        self.game_actions["start_move_preview"](unit_id, col, row)
-        self.game_actions["confirm_move"]()
-        return True
+        try:
+            self.game_actions["start_move_preview"](unit_id, col, row)
+            result = self.game_actions["confirm_move"]()
+            
+            # DEBUG: Check if unit actually moved
+            unit_after = self.find_unit(unit_id)
+            if unit_after:
+                print(f"🎯 MOVE DEBUG: Unit {unit_id} ended at ({unit_after['col']},{unit_after['row']})")
+                actual_moved = unit_after['col'] != unit['col'] or unit_after['row'] != unit['row']
+                print(f"🎯 MOVE DEBUG: Actually moved: {actual_moved}")
+            
+            return result if result is not None else True
+        except Exception as e:
+            print(f"🎯 MOVE DEBUG: Movement failed with error: {e}")
+            return False
 
     def shoot_unit(self, shooter_id: int, target_id: int) -> bool:
         """Shoot at target with detailed dice results"""
@@ -338,15 +355,25 @@ class GameController:
         """Execute a game action for specified unit"""
         action_type = action.get("type")
         
+        # DEBUG: Log action execution attempt
+        print(f"🎯 DEBUG: Executing {action_type} for unit {unit_id}")
+        print(f"🎯 DEBUG: Action details: {action}")
+        
         # Find acting unit for logging
         acting_unit = self.find_unit(unit_id)
         if not acting_unit:
+            print(f"🎯 DEBUG: Unit {unit_id} not found!")
             return False
+        
+        print(f"🎯 DEBUG: Unit {unit_id} current position: ({acting_unit['col']}, {acting_unit['row']})")
         
         # Execute the action
         success = False
         if action_type == "move":
-            success = self.move_unit(unit_id, action["col"], action["row"])
+            target_col = action.get("col", acting_unit["col"])
+            target_row = action.get("row", acting_unit["row"])
+            print(f"🎯 DEBUG: Moving to ({target_col}, {target_row})")
+            success = self.move_unit(unit_id, target_col, target_row)
         elif action_type == "shoot":
             success = self.shoot_unit(unit_id, action["target_id"])
         elif action_type == "charge":
@@ -437,6 +464,13 @@ class TrainingGameController(GameController):
         if not hasattr(self, 'game_actions') or 'get_eligible_units' not in self.game_actions:
             raise RuntimeError("TrainingGameController missing required game_actions.get_eligible_units")
         eligible_units = self.game_actions['get_eligible_units']()
+        
+        # DEBUG: Log eligibility details
+        current_player = self.get_current_player()
+        current_phase = self.get_current_phase()
+        print(f"🎯 DEBUG: Found {len(eligible_units)} eligible units for player {current_player} in phase {current_phase}")
+        for unit in eligible_units[:3]:  # Show first 3 units
+            print(f"🎯 DEBUG: Unit {unit['id']} eligible (player {unit['player']})")
         
         return eligible_units
 
@@ -726,8 +760,11 @@ class TrainingGameController(GameController):
         # Always execute bot turn first when current player is P0 (bot starts episode/turn)
         if current_player == 0:
             self._execute_gym_bot_turn()
-            # After bot turn, advance to controlled player (P1)
+            # CRITICAL FIX: Force phase advancement after bot completes all actions
             self._advance_gym_phase_or_turn()
+            # Check if we advanced to AI player, if not force it
+            if self.get_current_player() == 0:
+                self.state_actions['set_current_player'](1)
             return self._get_gym_obs(), 0.0, False, False, self._get_gym_info()
         
         # No controlled units eligible - advance until controlled player can act
@@ -747,9 +784,20 @@ class TrainingGameController(GameController):
         # Execute action through mirror architecture
         acting_unit = controlled_eligible_units[unit_idx]
         mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
+        
+        # DEBUG: Log action details
+        print(f"🎯 DEBUG: Unit {acting_unit['id']} attempting action {action_type}")
+        print(f"🎯 DEBUG: Current phase: {self.get_current_phase()}, Player: {self.get_current_player()}")
+        print(f"🎯 DEBUG: Mirror action: {mirror_action}")
+        print(f"🎯 DEBUG: Units moved: {self.game_state.get('units_moved', [])}")
+        print(f"🎯 DEBUG: Unit eligible before: {self.game_actions.get('is_unit_eligible', lambda x: False)(acting_unit)}")
        
         success = self.execute_action(acting_unit["id"], mirror_action)
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
+        
+        # DEBUG: Log action result
+        print(f"🎯 DEBUG: Action success: {success}, Reward: {reward}")
+        print(f"🎯 DEBUG: Units moved after: {self.game_state.get('units_moved', [])}")
         # CONDITIONAL LOGGING: Enable during evaluation mode only
         if hasattr(self, 'gym_env') and self.gym_env and getattr(self.gym_env, 'is_evaluation_mode', False):
             # Get replay logger from gym environment
