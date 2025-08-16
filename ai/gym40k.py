@@ -347,13 +347,32 @@ class W40KEnv(gym.Env):
         return self._get_obs(), self._get_info()
 
     def step(self, action):
-        """Execute action using mirror controller - PURE DELEGATION."""
+        """Execute action using mirror controller with action masking validation."""
+        # CRITICAL: Apply action masking before execution to prevent invalid actions
+        action_mask = self.controller.game_actions["get_action_mask"](self.max_units)
+        
+        if not action_mask[action]:
+            # Convert invalid action to wait action for the same unit
+            unit_idx = action // 8
+            action = unit_idx * 8 + 7  # Convert to wait action
+        
         # ARCHITECTURAL COMPLIANCE: Delegate everything to controller
         obs, reward, terminated, truncated, info = self.controller.execute_gym_action(action)
+        
+        # DEBUG: Check state after action execution
+        eligible_after = len(self.controller._get_gym_eligible_units())
+        ai_eligible_after = len([u for u in self.controller._get_gym_eligible_units() if u["player"] == 1])
+        final_phase = info.get('current_phase', 'unknown')
+        
+        print(f"🎯 RESULT: phase={final_phase}, eligible={eligible_after}, ai_eligible={ai_eligible_after}, reward={reward:.2f}")
         
         # Update environment state from controller
         self.game_over = terminated
         self.winner = info.get('winner')
+        
+        # Ensure action_mask is always in info for debugging
+        if 'action_mask' not in info:
+            info['action_mask'] = self.controller.game_actions["get_action_mask"](self.max_units)
         
         return obs, reward, terminated, truncated, info
     
