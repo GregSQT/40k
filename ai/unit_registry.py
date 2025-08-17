@@ -73,7 +73,7 @@ class UnitRegistry:
             if units:
                 faction_summary.append(f"{faction}({len(units)})")
         
-        print(f"🔍 Units discovered: {unit_count} total | {' | '.join(faction_summary)}")
+        # print(f"🔍 Units discovered: {unit_count} total | {' | '.join(faction_summary)}")
         
         if verbose:
             print(f"🎯 Faction-Role combinations: {sorted(self.faction_role_combinations)}")
