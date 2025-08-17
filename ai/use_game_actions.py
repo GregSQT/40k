@@ -369,7 +369,16 @@ class UseGameActions:
             raise KeyError("Game state missing required 'units_moved' field")
         units_moved = set(self.game_state["units_moved"])
         if phase == "move":
-            return unit["id"] not in units_moved
+            # CRITICAL FIX: Check if unit can actually move, not just if it hasn't moved
+            if unit["id"] in units_moved:
+                return False
+            # Additional validation: ensure unit has valid moves available
+            try:
+                valid_moves = self.get_valid_moves(unit["id"])
+                return len(valid_moves) > 0
+            except Exception:
+                # If move validation fails, unit is not eligible
+                return False
         
         elif phase == "shoot":
             units_fled = set(self.game_state.get("units_fled"))
@@ -382,6 +391,13 @@ class UseGameActions:
             # Check if unit is adjacent to any enemy (engaged in combat)
             has_adjacent_enemy_shoot = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             if has_adjacent_enemy_shoot:
+                return False
+            # CRITICAL FIX: Check if unit has valid shooting targets available
+            try:
+                valid_targets = self.get_valid_shooting_targets(unit["id"])
+                if len(valid_targets) == 0:
+                    return False
+            except Exception:
                 return False
             # Check if unit has enemies in shooting range that are NOT adjacent to friendly units
             friendly_units = [u for u in self.game_state["units"] if u["player"] == unit["player"] and u["id"] != unit["id"]]
@@ -404,22 +420,14 @@ class UseGameActions:
             is_adjacent = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             if is_adjacent:
                 return False
-            # EXACT from TypeScript: Check if any enemies within 12-hex charge range with pathfinding
-            from shared.gameMechanics import get_charge_max_distance
-            has_enemies_within_12_hexes = any(
-                getHexDistance(unit, enemy) <= get_charge_max_distance() and getHexDistance(unit, enemy) > 1
-                for enemy in enemy_units
-            )
-            # CRITICAL FIX: Must check pathfinding around walls like TypeScript
-            if has_enemies_within_12_hexes and self.board_config.get("wall_hexes"):
-                wall_hex_set = set(f"{c},{r}" for c, r in self.board_config["wall_hexes"])
-                has_reachable_enemies = any(
-                    getHexDistance(unit, enemy) <= get_charge_max_distance() and getHexDistance(unit, enemy) > 1 and
-                    self._check_pathfinding_reachable(unit, enemy, wall_hex_set, get_charge_max_distance())
-                    for enemy in enemy_units
-                )
-                return has_reachable_enemies
-            return has_enemies_within_12_hexes
+            # CRITICAL FIX: Check if unit has valid charge targets available
+            try:
+                valid_targets = self.get_valid_charge_targets(unit["id"])
+                if len(valid_targets) == 0:
+                    return False
+            except Exception:
+                return False
+            return True
         
         elif phase == "combat":
             if "units_attacked" not in self.game_state:

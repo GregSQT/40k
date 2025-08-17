@@ -354,38 +354,16 @@ class W40KEnv(gym.Env):
         unit_idx = action // 8
         action_type = action % 8
         
-        if current_player == 1:
-            # Count actions to verify training is happening
-            if not hasattr(self, '_action_count'):
-                self._action_count = 0
-            self._action_count += 1
-            print(f"🎲 DQN ACTION #{self._action_count}: {action} (unit_idx={unit_idx}, type={action_type}, phase={current_phase})")
-            
-        # BASIC TEST: Accept any action without masking
-        if current_player == 1 and action >= 16:  # Invalid action for max_units=2
-            print(f"🚨 INVALID ACTION: {action} >= 16 (max_units=2, action_space=16)")
-            action = 7  # Convert to simple wait
-        
-        # CRITICAL: Apply action masking before execution to prevent invalid actions
+        # Apply action masking before execution to prevent invalid actions
         action_mask = self.controller.game_actions["get_action_mask"](self.max_units)
         
         if not action_mask[action]:
             # Convert invalid action to wait action for the same unit
-            original_action = action
             unit_idx = action // 8
             action = unit_idx * 8 + 7  # Convert to wait action
-            if current_player == 1 and current_phase == "move":
-                print(f"🚨 ACTION MASKED: {original_action} -> {action}")
         
         # ARCHITECTURAL COMPLIANCE: Delegate everything to controller
         obs, reward, terminated, truncated, info = self.controller.execute_gym_action(action)
-        
-        # DEBUG: Check state after action execution
-        eligible_after = len(self.controller._get_gym_eligible_units())
-        ai_eligible_after = len([u for u in self.controller._get_gym_eligible_units() if u["player"] == 1])
-        final_phase = info.get('current_phase', 'unknown')
-        
-        print(f"🎯 RESULT: phase={final_phase}, eligible={eligible_after}, ai_eligible={ai_eligible_after}, reward={reward:.2f}")
         
         # Update environment state from controller
         self.game_over = terminated

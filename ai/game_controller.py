@@ -457,15 +457,33 @@ class TrainingGameController(GameController):
         final_player = self.get_current_player()
         
         if initial_phase == final_phase and initial_player == final_player:
-            # If 0 eligible units, force phase advance to prevent infinite loops
+            # Always try to auto-advance when stuck
             eligible_units = self._get_gym_eligible_units()
-            if len(eligible_units) == 0:
-                self.phase_transitions['force_phase_advance']("charge" if initial_phase == "shoot" else "combat")
+            current_player_eligible = [u for u in eligible_units if u["player"] == self.get_current_player()]
+            
+            # Force phase advance if current player has no eligible units OR if phase should transition
+            phase_should_advance = False
+            if initial_phase == "move":
+                phase_should_advance = self.phase_transitions.get('should_transition_from_move', lambda: False)()
+            elif initial_phase == "shoot":
+                phase_should_advance = self.phase_transitions.get('should_transition_from_shoot', lambda: False)()
+            elif initial_phase == "charge":
+                phase_should_advance = self.phase_transitions.get('should_transition_from_charge', lambda: False)()
+            
+            if len(current_player_eligible) == 0 or phase_should_advance:
+                if initial_phase == "move":
+                    self.phase_transitions['transition_to_shoot']()
+                elif initial_phase == "shoot": 
+                    self.phase_transitions['transition_to_charge']()
+                elif initial_phase == "charge":
+                    self.phase_transitions['transition_to_combat']()
+                elif initial_phase == "combat":
+                    self.phase_transitions['end_turn']()
                 return
-            # Only raise error if there are still eligible units but phase didn't advance
+                
+            # If current player still has eligible units, there's a real deadlock
             phase_info = self.phase_transitions.get('get_phase_info', lambda: {})()
-            raise RuntimeError(f"Phase advancement failed: stuck in {initial_phase} phase for player {initial_player}. "
-                             f"Eligible units: {len(eligible_units)}. Phase info: {phase_info}")
+            raise RuntimeError(f"Real deadlock detected: {initial_phase} phase for player {initial_player} with {len(current_player_eligible)} eligible units. Phase info: {phase_info}")
 
     def _execute_gym_bot_turn(self) -> None:
         """Execute bot turn with proper logging through mirror architecture"""

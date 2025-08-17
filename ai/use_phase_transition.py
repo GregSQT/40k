@@ -83,15 +83,7 @@ class UsePhaseTransition:
 
     def should_transition_from_move(self) -> bool:
         """Check if all player units have moved or can't move - TRAINING OPTIMIZED"""
-        # TRAINING FIX: Check only current player units instead of all players
-        current_player_units = [u for u in self.units if u["player"] == self.current_player]
-        eligible_units = [u for u in current_player_units if self.is_unit_eligible_func(u)]
-        
-        # Phase can transition if current player has no eligible units left
-        if len(eligible_units) == 0:
-            return True
-            
-        # Fallback to original PvP logic for compatibility
+        # CRITICAL FIX: Use shared.gameMechanics logic directly - no training overrides
         from shared.gameMechanics import should_transition_from_move as _move_check
         result = _move_check(
             self.units,
