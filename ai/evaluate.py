@@ -18,6 +18,9 @@ sys.path.insert(0, project_root)
 
 from stable_baselines3 import DQN
 from config_loader import get_config_loader
+from ai.game_replay_logger import GameReplayIntegration
+from ai.scenario_manager import ScenarioManager
+from ai.unit_registry import UnitRegistry
 
 def decode_action(env, obs, action):
     """
@@ -84,11 +87,59 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
     
     # Load model with proper config path handling
     try:
-        env = W40KEnv(rewards_config=rewards_config)
+        # CRITICAL FIX: Generate scenario from template like training does
+        config = get_config_loader()
+        unit_registry = UnitRegistry()
+        scenario_manager = ScenarioManager(config, unit_registry)
+        
+        # Generate scenario based on training phase or specific template
+        if hasattr(evaluate_model, '_current_scenario_template'):
+            template_name = evaluate_model._current_scenario_template
+        else:
+            template_name = "solo_spacemarine_infantry_troop_rangedswarm"  # Default
+        
+        # Extract agent key from model path
+        model_filename = os.path.basename(model_path)
+        agent_key = model_filename.replace("model_", "").replace(".zip", "")
+        
+        # Generate training scenario
+        scenario = scenario_manager.generate_training_scenario(
+            template_name,
+            agent_key,  # Player 0 (opponent) 
+            agent_key   # Player 1 (AI being evaluated)
+        )
+        
+        # Save scenario to temporary file
+        import tempfile
+        import json
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(scenario, f, indent=2)
+            temp_scenario_path = f.name
+        
+        base_env = W40KEnv(
+            rewards_config=rewards_config,
+            training_config_name="default",
+            controlled_agent=agent_key,
+            active_agents=None,
+            scenario_file=temp_scenario_path,
+            unit_registry=unit_registry,
+            quiet=False
+        )
+        # CRITICAL FIX: Enable replay logging for evaluation
+        enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
+        enhanced_env.is_evaluation_mode = True
+        enhanced_env._force_evaluation_mode = True
+        if hasattr(enhanced_env, 'replay_logger') and enhanced_env.replay_logger:
+            enhanced_env.replay_logger.is_evaluation_mode = True
+        env = enhanced_env
         model = DQN.load(model_path, env=env)
         print(f"✅ Model loaded: {model_path}")
         print(f"✅ Using rewards config: {rewards_config}")
+        print(f"✅ Replay logging enabled for evaluation")
     except Exception as e:
+        # Cleanup temporary scenario file on error
+        if 'temp_scenario_path' in locals() and os.path.exists(temp_scenario_path):
+            os.remove(temp_scenario_path)
         print(f"❌ Failed to load model: {e}")
         return None
     
@@ -123,6 +174,10 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
 
     for episode in range(num_episodes):
         obs, info = env.reset()
+        # CRITICAL FIX: Ensure replay logging is active for this episode
+        if hasattr(env, 'replay_logger') and env.replay_logger:
+            env.replay_logger.clear()
+            env.replay_logger.capture_initial_state()
         episode_reward = 0
         game_length = 0
         
@@ -135,7 +190,7 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
         max_steps = 1000
         
         while not done and game_length < max_steps:
-            current_phase = env.training_state.game_state["phase"]
+            current_phase = env.controller.game_state["phase"] if hasattr(env, 'controller') else "move"
             action, _ = model.predict(obs, deterministic=deterministic)
             
             # Track phase action compliance before step
@@ -241,6 +296,25 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
     else:
         print(f"🎉 EXCELLENT: High compliance with AI_GAME.md guidelines")
     
+    # CRITICAL FIX: Save evaluation replay files with proper naming
+    if hasattr(env, 'replay_logger') and env.replay_logger:
+        try:
+            # Extract agent key from model path for filename
+            model_filename = os.path.basename(model_path)
+            agent_key = model_filename.replace("model_", "").replace(".zip", "")
+            replay_filename = f"ai/event_log/replay_{agent_key}_vs_{agent_key}_evaluation.json"
+            
+            # Calculate average episode reward for replay metadata
+            avg_episode_reward = sum(results['total_rewards']) / len(results['total_rewards']) if results['total_rewards'] else 0.0
+            replay_file = env.replay_logger.save_replay(replay_filename, avg_episode_reward)
+            print(f"✅ Evaluation replay saved: {replay_file}")
+        except Exception as replay_error:
+            print(f"⚠️ Failed to save evaluation replay: {replay_error}")
+    
+    # Cleanup temporary scenario file
+    if 'temp_scenario_path' in locals() and os.path.exists(temp_scenario_path):
+        os.remove(temp_scenario_path)
+    
     env.close()
     return results
 
@@ -273,6 +347,10 @@ def main():
                        help="Use deterministic actions")
     parser.add_argument("--analyze-phases", action="store_true",
                        help="Perform detailed phase behavior analysis")
+    parser.add_argument("--training-phase", type=str, choices=["solo", "cross_faction", "full_composition"],
+                       help="Training phase to determine scenario template selection")
+    parser.add_argument("--scenario-template", type=str,
+                       help="Specific scenario template to use for evaluation")
     parser.add_argument("--quiet", action="store_true",
                        help="Reduce output verbosity")
     

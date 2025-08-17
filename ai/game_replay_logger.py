@@ -59,23 +59,15 @@ class GameReplayLogger:
                   phase: str = None, start_hex: str = None, end_hex: str = None, 
                   shoot_details: List = None):
         """Add entry to combat log using shared structure."""
-        # SINGLE evaluation flag check - use only is_evaluation_mode
-        is_eval_mode = getattr(self.env, 'is_evaluation_mode', False)
+        # Enhanced evaluation mode detection
+        env_eval = getattr(self.env, 'is_evaluation_mode', False)
+        env_force = getattr(self.env, '_force_evaluation_mode', False)
+        unwrapped_eval = hasattr(self.env, 'unwrapped') and getattr(self.env.unwrapped, 'is_evaluation_mode', False)
         
-        # Check unwrapped environment as fallback
-        if not is_eval_mode and hasattr(self.env, 'unwrapped'):
-            is_eval_mode = getattr(self.env.unwrapped, 'is_evaluation_mode', False)
+        is_eval_mode = env_eval or env_force or unwrapped_eval
         
         if not is_eval_mode:
-            return None  # Skip logging during training
-        
-        # CRITICAL FIX: Prevent duplicate entries for same action
-        if entry_type == "shoot" and shoot_details is None:
             return None
-        
-        # REMOVE DEBUG SPAM - evaluation mode working correctly based on traceback output
-        # Debug logs removed to reduce console noise during training
-        pass
             
         # Use shared structure for creating log entry
         current_turn = turn_number or self.env.controller.game_state["current_turn"]
@@ -111,7 +103,7 @@ class GameReplayLogger:
         # CRITICAL: Episode always starts at Turn 1, Player 0 movement phase per specification
         start_turn = 1  # Force Turn 1 for episode start consistency
         self.add_entry(
-            entry_type="turn_change",
+            entry_type="turn_change", 
             reward=0.0,
             action_name="game_start",
             turn_number=start_turn
@@ -374,14 +366,14 @@ class GameReplayLogger:
     
     def capture_initial_state(self):
         """Capture initial game state - compatibility method for GameReplayLogger interface."""
-        # CRITICAL: Only capture during evaluation, not training - check multiple sources
-        is_eval_mode = (
-            getattr(self.env, 'is_evaluation_mode', False) or
-            getattr(self, 'is_evaluation_mode', False) or
-            getattr(self.env, '_force_evaluation_mode', False)
-        )
+        # Enhanced evaluation mode detection for initial state capture
+        env_eval = getattr(self.env, 'is_evaluation_mode', False)
+        self_eval = getattr(self, 'is_evaluation_mode', False)
+        env_force = getattr(self.env, '_force_evaluation_mode', False)
+        
+        is_eval_mode = env_eval or self_eval or env_force
         if not is_eval_mode:
-            return  # Skip capture during training
+            return
             
         self.log_game_start()
         
@@ -620,14 +612,14 @@ class GameReplayLogger:
     
     def clear(self):
         """Clear all logged data for new episode."""
-        # CRITICAL: Only clear if we have no logged actions yet
-        # This prevents clearing mid-episode and losing action logs
-        if len(self.combat_log_entries) <= 1:  # Only "game_start" entry
-            self.combat_log_entries = []
-            self.game_states = []
-            self.next_event_id = 1
-        else:
-            pass
+        # Always clear for new episode - prevents stale data
+        self.combat_log_entries = []
+        self.game_states = []
+        self.next_event_id = 1
+        
+        # Clear initial state to force fresh capture
+        if hasattr(self, 'initial_game_state'):
+            delattr(self, 'initial_game_state')
     
     def log_turn_change(self, turn_number: int):
         """Log turn change event."""
