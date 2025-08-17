@@ -204,7 +204,7 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
         action_masking_count = 0
         
         done = False
-        max_steps = 1000
+        max_steps = 100
         
         while not done and game_length < max_steps:
             current_phase = env.controller.game_state["phase"] if hasattr(env, 'controller') else "move"
@@ -234,10 +234,9 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
             game_length += 1
             done = terminated or truncated
             
-            # Debug logging every 100 steps
-            if game_length % 100 == 0 and hasattr(env, 'replay_logger') and env.replay_logger:
-                print(f"🔍 DEBUG: Step {game_length} - Combat log entries: {len(env.replay_logger.combat_log_entries)}")
-                print(f"🔍 DEBUG: Last action: {action}, Reward: {reward:.2f}, Phase: {info.get('current_phase', 'unknown')}")
+            # Essential logging every 200 steps only
+            if game_length % 200 == 0 and hasattr(env, 'replay_logger') and env.replay_logger:
+                print(f"Step {game_length} - Combat log: {len(env.replay_logger.combat_log_entries)} entries")
 
         # Episode results
         results['total_rewards'].append(episode_reward)
