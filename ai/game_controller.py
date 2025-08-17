@@ -581,14 +581,14 @@ class TrainingGameController(GameController):
             bot_units = [u for u in eligible_units if u["player"] == 0]
 
     def _mark_gym_unit_as_acted(self, unit: Dict) -> None:
-        """Delegate to use_game_state.py for unit state tracking"""
+        """Mark unit as acted in current phase - EXACT AI_GAME.md compliance"""
         current_phase = self.get_current_phase()
         unit_id = unit["id"]
         
         if not hasattr(self, 'state_actions'):
             raise RuntimeError("TrainingGameController missing required state_actions")
         
-        # CRITICAL FIX: Each phase uses its own tracking set, not shared moved units
+        # CRITICAL FIX: Each phase uses its own tracking set for sequential activation
         if current_phase == "move":
             self.state_actions['add_moved_unit'](unit_id)
         elif current_phase == "shoot":
@@ -597,6 +597,8 @@ class TrainingGameController(GameController):
             self.state_actions['add_charged_unit'](unit_id)
         elif current_phase == "combat":
             self.state_actions['add_attacked_unit'](unit_id)
+        else:
+            raise ValueError(f"Unknown phase '{current_phase}' - cannot mark unit as acted")
 
     def _convert_gym_action_to_mirror(self, unit: Dict, action_type: int) -> Dict:
         """Convert gym action to mirror action format with phase validation"""
@@ -779,6 +781,10 @@ class TrainingGameController(GameController):
             if self.is_game_over():
                 return self._get_gym_obs(), 0.0, True, False, self._get_gym_info()
             
+            # Check for game over condition
+            if self.is_game_over():
+                return self._get_gym_obs(), 0.0, True, False, self._get_gym_info()
+            
             # No eligible units - advance phase/turn internally (no step consumption)
             if not eligible_units:
                 self._advance_gym_phase_or_turn()
@@ -788,17 +794,21 @@ class TrainingGameController(GameController):
             if current_player == 0:
                 bot_units = [u for u in eligible_units if u["player"] == 0]
                 if bot_units:
-                    # Execute first bot unit action
+                    # CRITICAL FIX: Take FIRST eligible bot unit for sequential activation
                     bot_unit = bot_units[0]
                     bot_action = self._generate_bot_action(bot_unit)
                     success = self.execute_action(bot_unit["id"], bot_action)
+                    
+                    # CRITICAL FIX: Mark bot unit as acted IMMEDIATELY after success
+                    if success:
+                        self._mark_gym_unit_as_acted(bot_unit)
+                    else:
+                        print(f"❌ P0 Unit{bot_unit['id']} {bot_action['type']} FAILED")
+                    
                     reward = self._calculate_gym_reward(bot_unit, bot_action, success)
                     
                     # Log bot action if in evaluation mode
                     self._log_bot_action_if_evaluation(bot_unit, bot_action, reward)
-                    
-                    # Mark bot unit as acted
-                    self._mark_gym_unit_as_acted(bot_unit)
                     
                     # Check if phase should advance only after marking unit as acted
                     self._check_and_advance_phase_if_needed()
@@ -839,13 +849,17 @@ class TrainingGameController(GameController):
                     # Convert and execute action
                     mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
                     success = self.execute_action(acting_unit["id"], mirror_action)
+                    
+                    # CRITICAL FIX: Mark P1 unit as acted IMMEDIATELY after success
+                    if success:
+                        self._mark_gym_unit_as_acted(acting_unit)
+                    else:
+                        print(f"❌ P1 Unit{acting_unit['id']} {mirror_action['type']} FAILED")
+                    
                     reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
                     
                     # Log P1 action if in evaluation mode
                     self._log_p1_action_if_evaluation(acting_unit, mirror_action, reward, action)
-                    
-                    # Mark P1 unit as acted
-                    self._mark_gym_unit_as_acted(acting_unit)
                     
                     # Check if phase should advance only after marking unit as acted
                     self._check_and_advance_phase_if_needed()

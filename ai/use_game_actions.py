@@ -369,10 +369,16 @@ class UseGameActions:
             raise KeyError("Game state missing required 'units_moved' field")
         units_moved = set(self.game_state["units_moved"])
         if phase == "move":
-            # CRITICAL FIX: Check if unit can actually move, not just if it hasn't moved
+            # CRITICAL FIX: Unit is NOT eligible if already moved this phase
             if unit["id"] in units_moved:
                 return False
-            # Skip move validation to prevent circular dependency
+            
+            # CRITICAL FIX: Dead units are NEVER eligible
+            if not unit.get("alive", True):
+                return False
+            
+            # Unit is eligible if alive and hasn't moved this phase
+            # No need for additional validation - the get_valid_moves will handle destinations
             return True
         
         elif phase == "shoot":
@@ -1231,7 +1237,7 @@ class UseGameActions:
 
         # Direct unit update without preview system to avoid complications
         self.actions["update_unit"](unit_id, {"col": col, "row": row})
-        self.actions["add_moved_unit"](unit_id)
+        # CRITICAL FIX: Do NOT call add_moved_unit here - _mark_gym_unit_as_acted will handle it
         return True
 
     def get_charge_destinations(self, unit_id: int) -> List[Dict[str, int]]:

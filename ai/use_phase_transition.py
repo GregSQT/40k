@@ -82,15 +82,21 @@ class UsePhaseTransition:
     # === PHASE TRANSITION CHECKS (EXACT from TypeScript) ===
 
     def should_transition_from_move(self) -> bool:
-        """Check if all player units have moved or can't move - TRAINING OPTIMIZED"""
-        # CRITICAL FIX: Use shared.gameMechanics logic directly - no training overrides
-        from shared.gameMechanics import should_transition_from_move as _move_check
-        result = _move_check(
-            self.units,
-            self.current_player,
-            self.units_moved
-        )
-        return result
+        """Check if all player units have moved or can't move - EXACT from AI_GAME.md"""
+        # Get current player units that are alive
+        current_player_units = [u for u in self.units if u["player"] == self.current_player and u.get("alive", True)]
+        
+        # Phase transitions when ALL current player units have either:
+        # 1. Moved (in units_moved) OR
+        # 2. Died (not alive)
+        units_not_moved = []
+        for unit in current_player_units:
+            if unit["id"] not in self.units_moved:
+                units_not_moved.append(unit["id"])
+        
+        should_transition = len(units_not_moved) == 0
+        
+        return should_transition
 
     def should_transition_from_shoot(self) -> bool:
         """EXACT mirror of shouldTransitionFromShoot from TypeScript (delegates to shared mechanics)"""
@@ -191,9 +197,7 @@ class UsePhaseTransition:
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
             self.actions["set_phase"]("charge")
-            # CRITICAL FIX: Reset tracking lists like frontend TypeScript
-            self.actions["reset_moved_units"]()
-            self.actions["reset_charged_units"]()
+            # CRITICAL FIX: Do NOT reset moved_units between phases - preserves turn tracking
             self.actions["set_selected_unit_id"](None)
             
             # CRITICAL FIX: Re-sync local state after making changes
@@ -217,7 +221,7 @@ class UsePhaseTransition:
             self.actions["set_phase"]("combat")
             self.actions["initialize_combat_phase"]()
             self.actions["set_selected_unit_id"](None)
-            self.actions["reset_attacked_units"]()
+            # CRITICAL FIX: Do NOT reset tracking between phases - only at turn end
             self.actions["set_mode"]("select")
             
             # CRITICAL FIX: Re-sync local state after making changes

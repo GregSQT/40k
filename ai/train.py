@@ -490,7 +490,7 @@ def main():
                        help="Continue training existing model")
     parser.add_argument("--test-only", action="store_true", 
                        help="Only test existing model, don't train")
-    parser.add_argument("--test-episodes", type=int, default=10, 
+    parser.add_argument("--test-episodes", type=int, default=0, 
                        help="Number of episodes for testing")
     parser.add_argument("--multi-agent", action="store_true",
                        help="Use multi-agent training system")
