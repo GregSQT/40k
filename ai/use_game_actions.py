@@ -1667,6 +1667,11 @@ class UseGameActions:
         current_phase = self.game_state.get("phase", "move")
         current_player = self.game_state.get("current_player", 0)
         
+        # DEBUG: Log current game state
+        print(f"🔍 ACTION MASK DEBUG:")
+        print(f"   Current Phase: {current_phase}")
+        print(f"   Current Player: {current_player}")
+        
         valid_actions_per_phase = {
             "move": [0, 1, 2, 3, 7],  # move directions + wait
             "shoot": [4, 7],          # shoot + wait
@@ -1675,14 +1680,23 @@ class UseGameActions:
         }
         
         valid_action_types = valid_actions_per_phase.get(current_phase, [7])
+        print(f"   Valid Action Types for {current_phase}: {valid_action_types}")
         
         # CRITICAL FIX: Match action encoding logic - only controlled player (Player 1) units
         controlled_player = 1
         eligible_units = self.get_eligible_units()
         controlled_eligible_units = [u for u in eligible_units if u["player"] == controlled_player]
         
+        # DEBUG: Log player filtering logic
+        print(f"   Hardcoded Controlled Player: {controlled_player}")
+        print(f"   Total Eligible Units: {len(eligible_units)}")
+        print(f"   Eligible Unit Players: {[u['player'] for u in eligible_units]}")
+        print(f"   Controlled Eligible Units: {len(controlled_eligible_units)}")
+        print(f"   ⚠️  MISMATCH CHECK: Current Player ({current_player}) != Controlled Player ({controlled_player})")
+        
         # Essential info only
         action_mask = []
+        valid_action_count = 0
         
         for unit_idx in range(max_units):
             # Check if this unit_idx corresponds to a controlled eligible unit
@@ -1692,6 +1706,14 @@ class UseGameActions:
                 # Action is valid if: unit is eligible AND action type is valid for phase
                 action_valid = unit_is_eligible and action_type in valid_action_types
                 action_mask.append(action_valid)
+                if action_valid:
+                    valid_action_count += 1
+        
+        # DEBUG: Log final action mask results
+        print(f"   Total Valid Actions: {valid_action_count}/{len(action_mask)}")
+        print(f"   Action Mask Sample (first 16): {action_mask[:16]}")
+        if valid_action_count == 0:
+            print(f"   🚨 CRITICAL: NO VALID ACTIONS - ALL WILL BE CONVERTED TO WAIT!")
         
         return action_mask
 
