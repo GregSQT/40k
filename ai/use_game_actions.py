@@ -1681,14 +1681,7 @@ class UseGameActions:
         eligible_units = self.get_eligible_units()
         controlled_eligible_units = [u for u in eligible_units if u["player"] == controlled_player]
         
-        # DEBUG: Comprehensive action mask debugging
-        all_unit_ids = [u["id"] for u in eligible_units]
-        controlled_unit_ids = [u["id"] for u in controlled_eligible_units]
-        print(f"🔍 MASK DEBUG: current_player={current_player}, controlled_player={controlled_player}")
-        print(f"🔍 All eligible units: {len(eligible_units)}, IDs: {all_unit_ids}")
-        print(f"🔍 Controlled eligible: {len(controlled_eligible_units)}, IDs: {controlled_unit_ids}")
-        print(f"🔍 Phase: {current_phase}, Max units: {max_units}")
-        
+        # Essential info only
         action_mask = []
         
         for unit_idx in range(max_units):
@@ -1699,13 +1692,6 @@ class UseGameActions:
                 # Action is valid if: unit is eligible AND action type is valid for phase
                 action_valid = unit_is_eligible and action_type in valid_action_types
                 action_mask.append(action_valid)
-        
-        # DEBUG: Show actual action mask values
-        if current_player == controlled_player and current_phase == "move":
-            print(f"🔍 ACTION MASK: {action_mask}")
-            for i in range(0, len(action_mask), 8):
-                unit_actions = action_mask[i:i+8]
-                print(f"🔍 Unit {i//8}: {unit_actions}")
         
         return action_mask
 

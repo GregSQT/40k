@@ -82,9 +82,17 @@ class UsePhaseTransition:
     # === PHASE TRANSITION CHECKS (EXACT from TypeScript) ===
 
     def should_transition_from_move(self) -> bool:
-        """Check if all player units have moved or can't move"""
-        from shared.gameMechanics import should_transition_from_move as _move_check
+        """Check if all player units have moved or can't move - TRAINING OPTIMIZED"""
+        # TRAINING FIX: Check only current player units instead of all players
+        current_player_units = [u for u in self.units if u["player"] == self.current_player]
+        eligible_units = [u for u in current_player_units if self.is_unit_eligible_func(u)]
         
+        # Phase can transition if current player has no eligible units left
+        if len(eligible_units) == 0:
+            return True
+            
+        # Fallback to original PvP logic for compatibility
+        from shared.gameMechanics import should_transition_from_move as _move_check
         result = _move_check(
             self.units,
             self.current_player,
@@ -480,8 +488,15 @@ class UsePhaseTransition:
         current_player_units = [u for u in self.units if u["player"] == self.current_player]
         eligible_current_units = [u for u in current_player_units if self.is_unit_eligible_func(u)]
         
-        # If current player has no more eligible units, force phase advancement
-        if len(eligible_current_units) == 0:
+        # TRAINING FIX: For training scenarios, always check phase completion conditions
+        # Force phase advancement when current player is done OR when phase should naturally advance
+        should_advance = (len(eligible_current_units) == 0 or 
+                         (self.phase == "move" and self.should_transition_from_move()) or
+                         (self.phase == "shoot" and self.should_transition_from_shoot()) or
+                         (self.phase == "charge" and self.should_transition_from_charge()) or
+                         (self.phase == "combat" and self.should_end_turn()))
+        
+        if should_advance:
             if self.phase == "move":
                 self.transition_to_shoot()
             elif self.phase == "shoot":
@@ -489,16 +504,6 @@ class UsePhaseTransition:
             elif self.phase == "charge":
                 self.transition_to_combat()
             elif self.phase == "combat":
-                self.end_turn()
-        else:
-            # Original logic - only advance if transition conditions are fully met
-            if self.phase == "move" and self.should_transition_from_move():
-                self.transition_to_shoot()
-            elif self.phase == "shoot" and self.should_transition_from_shoot():
-                self.transition_to_charge()
-            elif self.phase == "charge" and self.should_transition_from_charge():
-                self.transition_to_combat()
-            elif self.phase == "combat" and self.should_end_turn():
                 self.end_turn()
         
         # Process combat sub-phase transitions  

@@ -191,29 +191,29 @@
   "debug": {
     "description": "Proportional training: number_of_turns_per_episode (10) × max_steps_per_episode (100) × total_episodes (100) = 100,000 timesteps",
     "number_of_turns_per_episode": 5,
-    "total_episodes": 1,
+    "total_episodes": 5,
     "eval_episodes": 3,
     "max_steps_per_episode": 50,
     "max_concurrent_sessions": 4,
-    "log_interval": 1000,
+    "log_interval": 100,
     "callback_params": {
-      "eval_deterministic": true,
+      "eval_deterministic": false,
       "eval_render": false,
       "n_eval_episodes": 2,
       "checkpoint_save_freq": 50,
-      "checkpoint_name_prefix": "phase_model_checkpoint"
+      "checkpoint_name_prefix": "debug_model_checkpoint"
     },
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
-      "buffer_size": 100,
+      "buffer_size": 500,
       "learning_rate": 0.001,
-      "learning_starts": 10,
+      "learning_starts": 50,
       "batch_size": 8,
       "train_freq": 1,
-      "target_update_interval": 10,
-      "exploration_fraction": 0.1,
-      "exploration_final_eps": 0.1,
+      "target_update_interval": 25,
+      "exploration_fraction": 0.8,
+      "exploration_final_eps": 0.3,
       "tensorboard_log": "./tensorboard/",
       "device": "cuda"
       },
