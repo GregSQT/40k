@@ -1676,21 +1676,19 @@ class UseGameActions:
         
         valid_action_types = valid_actions_per_phase.get(current_phase, [7])
         
-        # CRITICAL FIX: Match action encoding logic - only controlled player (Player 1) units
-        controlled_player = 1
+        # Get ALL eligible units for current player
         eligible_units = self.get_eligible_units()
-        controlled_eligible_units = [u for u in eligible_units if u["player"] == controlled_player]
+        current_player_eligible = [u for u in eligible_units if u["player"] == current_player]
         
-        # Essential info only
         action_mask = []
         
+        # CRITICAL FIX: Only allow actions for units that actually exist and are eligible
         for unit_idx in range(max_units):
-            # Check if this unit_idx corresponds to a controlled eligible unit
-            unit_is_eligible = unit_idx < len(controlled_eligible_units)
+            unit_exists_and_eligible = unit_idx < len(current_player_eligible)
             
             for action_type in range(8):
-                # Action is valid if: unit is eligible AND action type is valid for phase
-                action_valid = unit_is_eligible and action_type in valid_action_types
+                # Action is valid ONLY if unit exists AND is eligible AND action type is valid for phase
+                action_valid = unit_exists_and_eligible and action_type in valid_action_types
                 action_mask.append(action_valid)
         
         return action_mask

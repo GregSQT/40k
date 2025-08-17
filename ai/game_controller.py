@@ -731,8 +731,6 @@ class TrainingGameController(GameController):
         ARCHITECTURAL COMPLIANCE: All game logic delegated to use_*.py mirror files.
         STEP EFFICIENCY: Internal loop until real action occurs - only real actions consume steps.
         """
-        print(f"\n🔄 GYM ACTION {action} STARTING")
-        
         # Internal loop until a real action is executed
         max_internal_loops = 100  # Prevent infinite loops
         internal_loop_count = 0
@@ -746,54 +744,37 @@ class TrainingGameController(GameController):
             current_phase = self.get_current_phase()
             current_turn = self.game_state.get("current_turn", 0)
             
-            print(f"  🔍 Loop {internal_loop_count}: Turn {current_turn}, Phase {current_phase}, Player {current_player}")
-            print(f"      Eligible units: {[u['id'] for u in eligible_units]} (players: {[u['player'] for u in eligible_units]})")
-            print(f"      Units moved: {self.game_state.get('units_moved', [])}")
-            print(f"      Units shot: {self.game_state.get('units_shot', [])}")
-            print(f"      Units charged: {self.game_state.get('units_charged', [])}")
-            print(f"      Units attacked: {self.game_state.get('units_attacked', [])}")
-            
             # Check for game over condition
             if self.is_game_over():
-                print(f"  ✅ GAME OVER DETECTED")
                 return self._get_gym_obs(), 0.0, True, False, self._get_gym_info()
             
             # No eligible units - advance phase/turn internally (no step consumption)
             if not eligible_units:
-                print(f"  ⏭️ NO ELIGIBLE UNITS - ADVANCING PHASE/TURN")
                 self._advance_gym_phase_or_turn()
                 continue  # Loop again without consuming step
             
             # Execute Player 0 bot actions internally (these count as real actions)
             if current_player == 0:
                 bot_units = [u for u in eligible_units if u["player"] == 0]
-                print(f"  🤖 P0 TURN: Bot units available: {[u['id'] for u in bot_units]}")
                 if bot_units:
                     # Execute first bot unit action
                     bot_unit = bot_units[0]
-                    print(f"  🤖 EXECUTING BOT ACTION for unit {bot_unit['id']} at ({bot_unit['col']}, {bot_unit['row']})")
                     bot_action = self._generate_bot_action(bot_unit)
-                    print(f"      Generated action: {bot_action}")
                     success = self.execute_action(bot_unit["id"], bot_action)
-                    print(f"      Action success: {success}")
                     reward = self._calculate_gym_reward(bot_unit, bot_action, success)
                     
                     # Log bot action if in evaluation mode
                     self._log_bot_action_if_evaluation(bot_unit, bot_action, reward)
                     
                     # Mark bot unit as acted
-                    print(f"      Marking unit {bot_unit['id']} as acted in {current_phase} phase")
                     self._mark_gym_unit_as_acted(bot_unit)
                     
                     # Advance phase internally after bot action
-                    print(f"      Advancing phase after bot action")
                     self._advance_gym_phase_or_turn()
                     
-                    print(f"  ✅ BOT ACTION COMPLETE - RETURNING STEP")
                     # Return - bot action consumed this step
                     return self._get_gym_obs(), reward, self.is_game_over(), False, self._get_gym_info()
                 else:
-                    print(f"  ⏭️ NO BOT UNITS ELIGIBLE - ADVANCING PHASE")
                     # No bot units eligible - advance phase internally
                     self._advance_gym_phase_or_turn()
                     continue
@@ -804,7 +785,6 @@ class TrainingGameController(GameController):
                 
                 # No P1 units eligible - advance phase internally
                 if not controlled_eligible_units:
-                    print(f"  ⭐ NO P1 UNITS ELIGIBLE - ADVANCING PHASE")
                     self._advance_gym_phase_or_turn()
                     continue
                 
@@ -812,17 +792,13 @@ class TrainingGameController(GameController):
                 unit_idx = action // 8
                 action_type = action % 8
                 
-                print(f"  🎯 P1 ACTION: unit_idx={unit_idx}, action_type={action_type}, eligible_count={len(controlled_eligible_units)}")
-                
                 # Invalid unit index - advance phase internally
                 if unit_idx >= len(controlled_eligible_units):
-                    print(f"  ❌ INVALID UNIT INDEX {unit_idx} >= {len(controlled_eligible_units)} - ADVANCING PHASE")
                     self._advance_gym_phase_or_turn()
                     continue
                 
                 # Execute valid P1 action
                 acting_unit = controlled_eligible_units[unit_idx]
-                print(f"  🎯 EXECUTING P1 ACTION for unit {acting_unit['id']} at ({acting_unit['col']}, {acting_unit['row']})")
                 
                 try:
                     # Validate action before conversion
@@ -831,28 +807,22 @@ class TrainingGameController(GameController):
                     
                     # Convert and execute action
                     mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
-                    print(f"      Generated mirror action: {mirror_action}")
                     success = self.execute_action(acting_unit["id"], mirror_action)
-                    print(f"      Action success: {success}")
                     reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
                     
                     # Log P1 action if in evaluation mode
                     self._log_p1_action_if_evaluation(acting_unit, mirror_action, reward, action)
                     
                     # Mark P1 unit as acted
-                    print(f"      Marking unit {acting_unit['id']} as acted in {current_phase} phase")
                     self._mark_gym_unit_as_acted(acting_unit)
                     
                     # Advance phase internally after P1 action
-                    print(f"      Advancing phase after P1 action")
                     self._advance_gym_phase_or_turn()
                     
-                    print(f"  ✅ P1 ACTION COMPLETE - RETURNING STEP")
                     # Return - P1 action consumed this step
                     return self._get_gym_obs(), reward, self.is_game_over(), False, self._get_gym_info()
                     
                 except RuntimeError as e:
-                    print(f"  ❌ P1 ACTION FAILED: {e} - ADVANCING PHASE")
                     # Invalid action - advance phase internally
                     self._advance_gym_phase_or_turn()
                     continue
