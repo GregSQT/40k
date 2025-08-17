@@ -1665,6 +1665,8 @@ class UseGameActions:
     def get_action_mask(self, max_units: int) -> List[bool]:
         """Generate action mask for current game state - True = valid action"""
         current_phase = self.game_state.get("phase", "move")
+        current_player = self.game_state.get("current_player", 0)
+        
         valid_actions_per_phase = {
             "move": [0, 1, 2, 3, 7],  # move directions + wait
             "shoot": [4, 7],          # shoot + wait
@@ -1672,12 +1674,38 @@ class UseGameActions:
             "combat": [6, 7]          # combat + wait
         }
         
-        valid_action_types = valid_actions_per_phase.get(current_phase, [7])  # fallback to wait
+        valid_action_types = valid_actions_per_phase.get(current_phase, [7])
+        
+        # CRITICAL FIX: Match action encoding logic - only controlled player (Player 1) units
+        controlled_player = 1
+        eligible_units = self.get_eligible_units()
+        controlled_eligible_units = [u for u in eligible_units if u["player"] == controlled_player]
+        
+        # DEBUG: Comprehensive action mask debugging
+        all_unit_ids = [u["id"] for u in eligible_units]
+        controlled_unit_ids = [u["id"] for u in controlled_eligible_units]
+        print(f"🔍 MASK DEBUG: current_player={current_player}, controlled_player={controlled_player}")
+        print(f"🔍 All eligible units: {len(eligible_units)}, IDs: {all_unit_ids}")
+        print(f"🔍 Controlled eligible: {len(controlled_eligible_units)}, IDs: {controlled_unit_ids}")
+        print(f"🔍 Phase: {current_phase}, Max units: {max_units}")
+        
         action_mask = []
         
         for unit_idx in range(max_units):
+            # Check if this unit_idx corresponds to a controlled eligible unit
+            unit_is_eligible = unit_idx < len(controlled_eligible_units)
+            
             for action_type in range(8):
-                action_mask.append(action_type in valid_action_types)
+                # Action is valid if: unit is eligible AND action type is valid for phase
+                action_valid = unit_is_eligible and action_type in valid_action_types
+                action_mask.append(action_valid)
+        
+        # DEBUG: Show actual action mask values
+        if current_player == controlled_player and current_phase == "move":
+            print(f"🔍 ACTION MASK: {action_mask}")
+            for i in range(0, len(action_mask), 8):
+                unit_actions = action_mask[i:i+8]
+                print(f"🔍 Unit {i//8}: {unit_actions}")
         
         return action_mask
 

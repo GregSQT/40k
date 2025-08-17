@@ -96,21 +96,12 @@ class UsePhaseTransition:
         """EXACT mirror of shouldTransitionFromShoot from TypeScript (delegates to shared mechanics)"""
         from shared.gameMechanics import should_transition_from_shoot as _shoot_check
         
-        # DEBUG: Log state before check
-        player_units = [u for u in self.units if u["player"] == self.current_player]
-        print(f"🔍 SHOOT TRANSITION DEBUG:")
-        print(f"  Player {self.current_player} units: {len(player_units)}")
-        print(f"  units_shot: {list(self.units_shot)}")
-        print(f"  units_moved: {list(self.units_moved)}")
-        print(f"  units_fled: {list(self.units_fled)}")
-        
         result = _shoot_check(
             self.units,
             self.current_player,
             self.units_shot,
             self.units_fled,
         )
-        print(f"  should_transition_from_shoot result: {result}")
         return result
 
     def should_transition_from_charge(self) -> bool:
@@ -275,6 +266,7 @@ class UsePhaseTransition:
             self.actions["reset_charged_units"]()
             self.actions["reset_attacked_units"]()
             self.actions["reset_fled_units"]()
+            self.actions["reset_shot_units"]()
             
             # Reset hasChargedThisTurn for all units (EXACT from TypeScript)
             updated_units = []
@@ -478,20 +470,36 @@ class UsePhaseTransition:
     def auto_advance_phases(self) -> bool:
         """
         Automatically advance phases until player input is needed.
+        TRAINING FIX: Handle single-unit gym actions properly.
         Returns True if any phase transitions occurred.
         """
         initial_phase = self.phase
         initial_player = self.current_player
         
-        # Process main phase transitions using shared mechanics logic
-        if self.phase == "move" and self.should_transition_from_move():
-            self.transition_to_shoot()
-        elif self.phase == "shoot" and self.should_transition_from_shoot():
-            self.transition_to_charge()
-        elif self.phase == "charge" and self.should_transition_from_charge():
-            self.transition_to_combat()
-        elif self.phase == "combat" and self.should_end_turn():
-            self.end_turn()
+        # TRAINING FIX: Check if current player has any remaining eligible units
+        current_player_units = [u for u in self.units if u["player"] == self.current_player]
+        eligible_current_units = [u for u in current_player_units if self.is_unit_eligible_func(u)]
+        
+        # If current player has no more eligible units, force phase advancement
+        if len(eligible_current_units) == 0:
+            if self.phase == "move":
+                self.transition_to_shoot()
+            elif self.phase == "shoot":
+                self.transition_to_charge()
+            elif self.phase == "charge":
+                self.transition_to_combat()
+            elif self.phase == "combat":
+                self.end_turn()
+        else:
+            # Original logic - only advance if transition conditions are fully met
+            if self.phase == "move" and self.should_transition_from_move():
+                self.transition_to_shoot()
+            elif self.phase == "shoot" and self.should_transition_from_shoot():
+                self.transition_to_charge()
+            elif self.phase == "charge" and self.should_transition_from_charge():
+                self.transition_to_combat()
+            elif self.phase == "combat" and self.should_end_turn():
+                self.end_turn()
         
         # Process combat sub-phase transitions  
         self.process_phase_transitions()
