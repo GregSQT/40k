@@ -66,6 +66,8 @@ class GameReplayLogger:
         
         is_eval_mode = env_eval or env_force or unwrapped_eval
         
+        print(f"🔍 DEBUG: add_entry called - entry_type: {entry_type}, env_eval: {env_eval}, env_force: {env_force}, unwrapped_eval: {unwrapped_eval}, is_eval_mode: {is_eval_mode}")
+        
         if not is_eval_mode:
             return None
             

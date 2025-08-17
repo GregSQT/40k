@@ -645,75 +645,6 @@ class TrainingGameController(GameController):
         target_ids = self.game_actions['find_valid_combat_targets'](unit["id"])
         return self.find_unit(target_ids[0]) if target_ids else None
 
-    def _log_gym_action(self, acting_unit: Dict, mirror_action: Dict, reward: float) -> None:
-        """Log action using unified logging system"""
-        # CRITICAL FIX: Early return if no replay logger to prevent hangs
-        if not hasattr(self, 'replay_logger') or not self.replay_logger:
-            return
-        if not hasattr(self, 'gym_env') or not self.gym_env:
-            return
-        
-        try:
-            current_turn = self.get_current_turn()
-            current_phase = self.get_current_phase()
-            
-            # Find target unit if target_id exists
-            target_unit = None
-            target_id = mirror_action.get("target_id")
-            if target_id:
-                all_units = self.get_units()
-                for unit in all_units:
-                    if unit["id"] == target_id:
-                        target_unit = unit
-                        break
-            
-            # Direct logging to replay logger instead of unified system
-            action_type = mirror_action["type"]
-            
-            if action_type == "move":
-                start_col = acting_unit["col"]
-                start_row = acting_unit["row"]
-                end_col = mirror_action.get("col", start_col)
-                end_row = mirror_action.get("row", start_row)
-                self.replay_logger.log_move(
-                    acting_unit, start_col, start_row, end_col, end_row, 
-                    current_turn, reward, 0  # action_int for move
-                )
-            elif action_type == "shoot" and target_unit:
-                # Create shoot details from controller's last result
-                shoot_details = getattr(self, '_last_shoot_result', {"summary": {"totalShots": 1, "hits": 1, "wounds": 1, "failedSaves": 1}})
-                self.replay_logger.log_shoot(
-                    acting_unit, target_unit, shoot_details,
-                    current_turn, reward, 4  # action_int for shoot
-                )
-            elif action_type == "charge" and target_unit:
-                start_col = acting_unit["col"]
-                start_row = acting_unit["row"]
-                end_col = target_unit["col"]
-                end_row = target_unit["row"]
-                self.replay_logger.log_charge(
-                    acting_unit, target_unit, start_col, start_row, end_col, end_row,
-                    current_turn, reward, 5  # action_int for charge
-                )
-            elif action_type == "combat" and target_unit:
-                # Create combat details from controller's last result
-                combat_details = getattr(self, '_last_combat_result', {"summary": {"totalAttacks": 1, "hits": 1, "wounds": 1, "failedSaves": 1}})
-                self.replay_logger.log_combat(
-                    acting_unit, target_unit, combat_details,
-                    current_turn, reward, 6  # action_int for combat
-                )
-            elif action_type == "wait":
-                # Log wait as move with no position change
-                self.replay_logger.log_move(
-                    acting_unit, acting_unit["col"], acting_unit["row"],
-                    acting_unit["col"], acting_unit["row"],
-                    current_turn, reward, 7  # action_int for wait
-                )
-                
-        except Exception as e:
-            if not self.quiet:
-                print(f"⚠️ Gym action logging failed for unit {acting_unit.get('id', 'unknown')} action {mirror_action.get('type', 'unknown')}: {e}")
-
     def _get_gym_obs(self) -> np.ndarray:
         """Get gymnasium observation - delegates to gym environment"""
         if not hasattr(self, 'gym_env'):
@@ -747,6 +678,7 @@ class TrainingGameController(GameController):
         Execute gymnasium action and return (obs, reward, terminated, truncated, info).
         ARCHITECTURAL COMPLIANCE: All game logic delegated to use_*.py mirror files.
         """
+        print(f"🔍 DEBUG: TrainingGameController.execute_gym_action called with action: {action}")
         # Get eligible units using mirror architecture
         eligible_units = self._get_gym_eligible_units()
         current_player = self.get_current_player()
@@ -795,15 +727,48 @@ class TrainingGameController(GameController):
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
 
         # CONDITIONAL LOGGING: Enable during evaluation mode only
-        if hasattr(self, 'gym_env') and self.gym_env and getattr(self.gym_env, 'is_evaluation_mode', False):
+        print(f"🔍 DEBUG: Controller logging check - hasattr: {hasattr(self, 'gym_env')}, gym_env exists: {getattr(self, 'gym_env', None) is not None}")
+        if hasattr(self, 'gym_env') and self.gym_env:
+            is_eval = getattr(self.gym_env, 'is_evaluation_mode', False)
+            force_eval = getattr(self.gym_env, '_force_evaluation_mode', False)
+            print(f"🔍 DEBUG: Controller eval flags - is_evaluation_mode: {is_eval}, _force_evaluation_mode: {force_eval}")
+        
+        if hasattr(self, 'gym_env') and self.gym_env and (getattr(self.gym_env, 'is_evaluation_mode', False) or getattr(self.gym_env, '_force_evaluation_mode', False)):
+            print(f"🔍 DEBUG: Controller conditional passed - entering logging block")
             # Get replay logger from gym environment
             replay_logger = getattr(self.gym_env, 'replay_logger', None)
+            print(f"🔍 DEBUG: Controller found replay logger: {replay_logger is not None}")
             if replay_logger:
-                # Temporarily set controller's replay logger for this action
-                self.replay_logger = replay_logger
-                self._log_gym_action(acting_unit, mirror_action, reward)
+                print(f"🔍 DEBUG: Controller calling log_action")
+                # Get pre and post action units for complete log_action interface
+                pre_action_units = self.get_units()
+                
+                # Mark unit as acted and advance phase to get post-action state
+                self._mark_gym_unit_as_acted(acting_unit)
+                self._advance_gym_phase_or_turn()
+                
+                # Get post-action units
+                post_action_units = self.get_units()
+                
+                # Find target unit ID if applicable
+                target_unit_id = mirror_action.get("target_id")
+                
+                # Call log_action with complete interface
+                replay_logger.log_action(
+                    action=action,
+                    reward=reward,
+                    pre_action_units=pre_action_units,
+                    post_action_units=post_action_units,
+                    acting_unit_id=acting_unit["id"],
+                    target_unit_id=target_unit_id,
+                    description=f"P1 {mirror_action['type']} action"
+                )
+                
+                # Check if game ended
+                terminated = self.is_game_over()
+                return self._get_gym_obs(), reward, terminated, False, self._get_gym_info()
         
-        # Mark unit as acted (always mark to prevent infinite loops)
+        # Mark unit as acted (always mark to prevent infinite loops) - only if logging didn't handle it
         self._mark_gym_unit_as_acted(acting_unit)
         
         # CRITICAL FIX: Always check for phase advancement after P1 action
