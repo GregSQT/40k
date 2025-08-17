@@ -801,18 +801,18 @@ class TrainingGameController(GameController):
             # Execute Player 1 DQN actions
             elif current_player == 1:
                 controlled_eligible_units = [u for u in eligible_units if u["player"] == 1]
-                print(f"  🎮 P1 TURN: DQN units available: {[u['id'] for u in controlled_eligible_units]}")
                 
                 # No P1 units eligible - advance phase internally
                 if not controlled_eligible_units:
-                    print(f"  ⏭️ NO P1 UNITS ELIGIBLE - ADVANCING PHASE")
+                    print(f"  ⭐ NO P1 UNITS ELIGIBLE - ADVANCING PHASE")
                     self._advance_gym_phase_or_turn()
                     continue
                 
                 # Decode and execute P1 action
                 unit_idx = action // 8
                 action_type = action % 8
-                print(f"  🎮 P1 ACTION: unit_idx={unit_idx}, action_type={action_type}")
+                
+                print(f"  🎯 P1 ACTION: unit_idx={unit_idx}, action_type={action_type}, eligible_count={len(controlled_eligible_units)}")
                 
                 # Invalid unit index - advance phase internally
                 if unit_idx >= len(controlled_eligible_units):
@@ -822,13 +822,12 @@ class TrainingGameController(GameController):
                 
                 # Execute valid P1 action
                 acting_unit = controlled_eligible_units[unit_idx]
-                print(f"  🎮 EXECUTING P1 ACTION for unit {acting_unit['id']} at ({acting_unit['col']}, {acting_unit['row']})")
+                print(f"  🎯 EXECUTING P1 ACTION for unit {acting_unit['id']} at ({acting_unit['col']}, {acting_unit['row']})")
                 
                 try:
                     # Validate action before conversion
                     current_phase = self.get_current_phase()
                     self.game_actions["validate_gym_action_for_phase"](action_type, current_phase)
-                    print(f"      Action validation passed")
                     
                     # Convert and execute action
                     mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
@@ -854,51 +853,6 @@ class TrainingGameController(GameController):
                     
                 except RuntimeError as e:
                     print(f"  ❌ P1 ACTION FAILED: {e} - ADVANCING PHASE")
-                    # Invalid action - advance phase internally
-                    self._advance_gym_phase_or_turn()
-                    continue
-                controlled_eligible_units = [u for u in eligible_units if u["player"] == 1]
-                
-                # No P1 units eligible - advance phase internally
-                if not controlled_eligible_units:
-                    self._advance_gym_phase_or_turn()
-                    continue
-                
-                # Decode and execute P1 action
-                unit_idx = action // 8
-                action_type = action % 8
-                
-                # Invalid unit index - advance phase internally
-                if unit_idx >= len(controlled_eligible_units):
-                    self._advance_gym_phase_or_turn()
-                    continue
-                
-                # Execute valid P1 action
-                acting_unit = controlled_eligible_units[unit_idx]
-                
-                try:
-                    # Validate action before conversion
-                    current_phase = self.get_current_phase()
-                    self.game_actions["validate_gym_action_for_phase"](action_type, current_phase)
-                    
-                    # Convert and execute action
-                    mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)
-                    success = self.execute_action(acting_unit["id"], mirror_action)
-                    reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
-                    
-                    # Log P1 action if in evaluation mode
-                    self._log_p1_action_if_evaluation(acting_unit, mirror_action, reward, action)
-                    
-                    # Mark P1 unit as acted
-                    self._mark_gym_unit_as_acted(acting_unit)
-                    
-                    # Advance phase internally after P1 action
-                    self._advance_gym_phase_or_turn()
-                    
-                    # Return - P1 action consumed this step
-                    return self._get_gym_obs(), reward, self.is_game_over(), False, self._get_gym_info()
-                    
-                except RuntimeError:
                     # Invalid action - advance phase internally
                     self._advance_gym_phase_or_turn()
                     continue

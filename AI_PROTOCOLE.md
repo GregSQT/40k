@@ -179,6 +179,7 @@ When you violate protocols, user will say:
 3. Ask for missing files if you don't have what you need
 4. Request specific line numbers when referencing code sections
 5. Verify dependencies between files and functions
+6. Use debug logs to check and confirm that the proposed update is accurate
 
 ## Clear Communication Requirements:
 - Explain WHAT you are changing and WHY
