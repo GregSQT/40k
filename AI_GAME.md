@@ -6,13 +6,51 @@ Turn-based tactical combat following official Warhammer 40K rules with phase-bas
 
 **Turn Structure:** Move → Shoot → Charge → Combat → Next Player
 
+## 📋 EPISODE / TURN / PHASE / STEP MANAGEMENT
+
+### Episode Lifecycle
+- **Episode Start**: Beginning of first Player 0 turn (movement phase)
+- **Episode End**: A Player has no active units OR max steps reached
+- **Turn Numbering**: Turn 1 = first P0 movement phase, increments at each P0 movement phase start
+
+### Turn Progression
+- **Turn 1**: P0 Move → P0 Shoot → P0 Charge → P0 Combat → P1 Move → P1 Shoot → P1 Charge → P1 Combat
+- **Turn 2**: P0 Move (Turn++ here) → P0 Shoot → P0 Charge → P0 Combat → P1 Move → P1 Shoot → P1 Charge → P1 Combat
+- **Turn 3**: P0 Move (Turn++ here) → ...
+
+### Step Counting Rules
+- **1 step increase**: Real actions (move, shoot, charge, combat, wait)
+- **No step increase**: Unit becomes ineligible without acting (fled, no targets, etc.)
+- **Action logged**: ALL unit state changes must be logged regardless of step consumption
+
+### Critical Timing Rules
+- **Sequential Activations**: Units act one at a time, completely finishing before next unit starts
+- **Dynamic Target Validation**: Available targets/destinations checked at START of each unit's activation
+- **Death Handling**: Dead units immediately removed from game and all tracking lists
+- **Phase Transition**: Phase ends when loop through all player units completes (not when step count reached)
+
 ---
 
 # 🏃 MOVEMENT PHASE
 
+## Phase Rules
+- **Start of Phase**: All and ONLY the CURRENT PLAYER units are eligible
+- **Loop on Each Current Player Unit**: Unit becomes active unit for its action
+- **Phase End**: Once all CURRENT PLAYER units have performed one action, advance to next phase
+
 ## Unit Eligibility
 ✅ **Can Move**: Units that haven't moved this phase `!unitsMoved.includes(unit.id)`
 ✅ **Adjacent Units Can Move**: Units adjacent to enemies can still move (flee mechanic)
+
+## Available Actions Per Unit
+### 1 Move Action
+- **Move to hex within MOVE range** different from starting hex
+- **Destination restrictions**: NOT occupied, NOT adjacent to enemy, NOT wall
+- **Result**: `→ marked as units_moved → Action logged → 1 step increase`
+- **If started adjacent to enemy**: `→ marked as units_moved AND units_fled → Action logged → 1 step increase`
+
+### Wait Action  
+- **Do nothing**: `→ Action logged → 1 step increase`
 
 ## Movement Restrictions
 ❌ **Cannot Move TO Adjacent Enemy Hex**: `forbiddenSet` includes all hexes adjacent to enemies
@@ -40,8 +78,31 @@ Turn-based tactical combat following official Warhammer 40K rules with phase-bas
 
 # 🎯 SHOOTING PHASE
 
-## Unit Eligibility
-❌ **Already Shot**: `if (unitsMoved.includes(unit.id)) return false`
+## Phase Rules
+- **Start of Phase**: All and ONLY the CURRENT PLAYER units are eligible
+- **Loop on Each Current Player Unit**: Unit becomes active unit for its action
+- **Phase End**: Once all CURRENT PLAYER units have performed one action, advance to next phase
+
+## Unit Eligibility Check
+**If ANY of these conditions is true, unit is NOT eligible:**
+- Unit is marked as `units_fled`
+- Unit has NO line of sight on any enemy unit WITHIN `RNG_RNG` distance  
+- Unit is adjacent to an enemy unit
+**Result**: `→ Action logged → No step increase`
+
+## Available Actions Per Unit (If Eligible)
+### 1 Shoot Action
+- **Target Selection**: At START of activation, select from living enemies within RNG_RNG with line of sight
+- **While unit's RNG_NB > 0 AND has line of sight on enemy within RNG_RNG distance**:
+  - Unit shoots at one available target
+  - **If target dies mid-sequence**: Remaining shots can target OTHER living enemies within range
+- **Result**: `→ marked as units_shot → Action logged → 1 step increase for whole shoot action`
+
+### Wait Action
+- **Refuse to shoot**: `→ Action logged → 1 step increase`
+
+## Legacy Eligibility (INCORRECT - DO NOT USE)
+❌ **Already Shot**: `if (unitsMoved.includes(unit.id)) return false` ← WRONG! Should check `units_shot`
 ❌ **Fled Units**: `if (unitsFled.includes(unit.id)) return false`
 ❌ **Adjacent to Enemy**: `hasAdjacentEnemyShoot = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy))`
 ✅ **Has Valid Targets**: Enemies in `RNG_RNG` range NOT adjacent to friendly units
@@ -82,7 +143,28 @@ Turn-based tactical combat following official Warhammer 40K rules with phase-bas
 
 # ⚡ CHARGE PHASE
 
-## Unit Eligibility
+## Phase Rules
+- **Start of Phase**: All and ONLY the CURRENT PLAYER units are eligible
+- **Loop on Each Current Player Unit**: Unit becomes active unit for its action
+- **Phase End**: Once all CURRENT PLAYER units have performed one action, advance to next phase
+
+## Unit Eligibility Check
+**If ANY of these conditions is true, unit is NOT eligible:**
+- Unit is marked as `units_fled`
+- Unit has NO enemy unit WITHIN charge_max_distance range
+- Unit is adjacent to an enemy unit
+**Result**: `→ Action logged → No step increase`
+
+## Available Actions Per Unit (If Eligible)
+- **Charge Roll Timing**: 2d6 calculated once per unit per charge phase at START of activation
+- **Roll Persistence**: Roll persists for unit's entire activation only
+- **Target Validation**: Available charge destinations checked at START of activation from living enemies
+- **If hex adjacent to enemy is within charge roll distance**:
+  - **1 Charge Action**: Move to hex adjacent to enemy within charge distance `→ marked as units_charged → Action logged → 1 step increase`
+  - **Refuse to charge**: At charge distance but doesn't charge `→ roll discarded → Action logged → No step increase`
+- **Else**: No valid charge destinations `→ roll discarded → Action logged → No step increase`
+
+## Legacy Eligibility (STILL VALID)
 ❌ **Already Charged**: `if (unitsCharged.includes(unit.id)) return false`
 ❌ **Fled Units**: `if (unitsFled.includes(unit.id)) return false`
 ❌ **Adjacent to Enemy**: `isAdjacent = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy))`
@@ -108,11 +190,33 @@ Turn-based tactical combat following official Warhammer 40K rules with phase-bas
 
 # ⚔️ COMBAT PHASE
 
-## Two Sub-Phases
+## Phase Rules
+- **Start of Phase**: ALL P0 AND P1 units are eligible
+- **Complex Sub-Phase System**: Charged units first, then alternating combat
+- **Phase End**: All units have performed actions or become ineligible
+
+## Sub-Phase 1: Charged Units Combat
+- **Loop on each unit marked as units_charged**:
+  - Unit becomes active unit
+  - **1 Attack Action**: While CC_NB > 0 AND adjacent to enemy, attack available targets
+  - **Result**: `→ marked as units_attacked → Action logged → 1 step increase for whole attack action`
+
+## Sub-Phase 2: Alternating Combat  
+- **Alternate between P1 and P0** while both have eligible units
+- **Unit Eligibility**: NOT marked as units_attacked AND adjacent to enemy unit
+- **Target Validation**: Available targets checked at START of each unit's activation
+- **For each eligible unit**:
+  - **1 Attack Action**: While CC_NB > 0 AND adjacent to enemy, attack available targets
+  - **If target dies mid-sequence**: Remaining attacks can target OTHER adjacent enemies
+  - **Result**: `→ marked as units_attacked → Action logged → 1 step increase for whole attack action`
+- **Player Switching**: If current player has no eligible units, continue with other player's remaining units
+- **Phase End**: When loop completes and no units from either player are eligible
+
+## Legacy Sub-Phases (STILL VALID)
 1️⃣ **Charged Units Phase**: Only `unit.hasChargedThisTurn === true` can fight
 2️⃣ **Alternating Combat**: Non-charged units, alternating by `combatActivePlayer`
 
-## Unit Eligibility
+## Legacy Eligibility (STILL VALID)
 ❌ **Already Attacked**: `if (unitsAttacked.includes(unit.id)) return false`
 ✅ **Adjacent to Enemy**: Must be exactly `CC_RNG` distance (usually 1 hex)
 ✅ **Correct Sub-Phase**: Charged units in phase 1, others in phase 2
@@ -199,6 +303,26 @@ actions.resetAttackedUnits();
 actions.resetFledUnits();
 // Reset hasChargedThisTurn for all units
 ```
+
+## 🔄 CRITICAL ACTIVATION & TIMING RULES
+
+### Unit Activation Sequence
+1. **Start Activation**: Unit becomes active, all validations performed fresh
+2. **Action Execution**: Unit performs chosen action completely  
+3. **State Updates**: Mark unit as acted, remove dead units, update tracking
+4. **End Activation**: Unit no longer active, next unit starts
+
+### Death and State Management
+- **Immediate Removal**: Dead units removed from game and all tracking lists instantly
+- **Target Validation**: Performed at START of each activation (not action execution time)
+- **Mid-Action Death**: If target dies during multi-shot/attack, remaining can target other valid enemies
+- **Fled Status**: Once marked as `units_fled`, persists until end of current turn regardless of enemy deaths
+
+### Phase Transition Logic
+- **Not Step-Based**: Phases advance when current player unit loop completes, not when step count reached
+- **Loop Completion**: ALL CURRENT PLAYER units have either acted OR been determined ineligible at activation start
+- **Combat Special Case**: Phase ends when ALL P0 AND P1 units have no more eligible actions (combat only)
+- **Standard Phases**: Move/Shoot/Charge phases only involve current player units
 
 ---
 

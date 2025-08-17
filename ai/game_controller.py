@@ -484,6 +484,37 @@ class TrainingGameController(GameController):
             # Allow eligible units to continue acting - not a deadlock if units have valid actions
             return
 
+    def _check_and_advance_phase_if_needed(self) -> None:
+        """
+        Check if phase should advance based on phase transition conditions.
+        Only advance if ALL units of current player have acted or phase conditions are met.
+        """
+        current_phase = self.get_current_phase()
+        current_player = self.get_current_player()
+        
+        # Check phase-specific transition conditions
+        should_advance = False
+        
+        if current_phase == "move":
+            should_advance = self.phase_transitions.get('should_transition_from_move', lambda: False)()
+        elif current_phase == "shoot":
+            should_advance = self.phase_transitions.get('should_transition_from_shoot', lambda: False)()
+        elif current_phase == "charge":
+            should_advance = self.phase_transitions.get('should_transition_from_charge', lambda: False)()
+        elif current_phase == "combat":
+            should_advance = self.phase_transitions.get('should_end_turn', lambda: False)()
+        
+        # Only advance if transition conditions are actually met
+        if should_advance:
+            if current_phase == "move":
+                self.phase_transitions['transition_to_shoot']()
+            elif current_phase == "shoot":
+                self.phase_transitions['transition_to_charge']()
+            elif current_phase == "charge":
+                self.phase_transitions['transition_to_combat']()
+            elif current_phase == "combat":
+                self.phase_transitions['end_turn']()
+
     def _execute_gym_bot_turn(self) -> None:
         """Execute bot turn with proper logging through mirror architecture"""
         eligible_units = self._get_gym_eligible_units()
@@ -769,8 +800,8 @@ class TrainingGameController(GameController):
                     # Mark bot unit as acted
                     self._mark_gym_unit_as_acted(bot_unit)
                     
-                    # Advance phase internally after bot action
-                    self._advance_gym_phase_or_turn()
+                    # Check if phase should advance only after marking unit as acted
+                    self._check_and_advance_phase_if_needed()
                     
                     # Return - bot action consumed this step
                     return self._get_gym_obs(), reward, self.is_game_over(), False, self._get_gym_info()
@@ -816,8 +847,8 @@ class TrainingGameController(GameController):
                     # Mark P1 unit as acted
                     self._mark_gym_unit_as_acted(acting_unit)
                     
-                    # Advance phase internally after P1 action
-                    self._advance_gym_phase_or_turn()
+                    # Check if phase should advance only after marking unit as acted
+                    self._check_and_advance_phase_if_needed()
                     
                     # Return - P1 action consumed this step
                     return self._get_gym_obs(), reward, self.is_game_over(), False, self._get_gym_info()
