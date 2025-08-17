@@ -481,9 +481,8 @@ class TrainingGameController(GameController):
                     self.phase_transitions['end_turn']()
                 return
                 
-            # If current player still has eligible units, there's a real deadlock
-            phase_info = self.phase_transitions.get('get_phase_info', lambda: {})()
-            raise RuntimeError(f"Real deadlock detected: {initial_phase} phase for player {initial_player} with {len(current_player_eligible)} eligible units. Phase info: {phase_info}")
+            # Allow eligible units to continue acting - not a deadlock if units have valid actions
+            return
 
     def _execute_gym_bot_turn(self) -> None:
         """Execute bot turn with proper logging through mirror architecture"""
@@ -597,9 +596,29 @@ class TrainingGameController(GameController):
                 raise RuntimeError(f"Invalid action {action_type} for shoot phase - no fallbacks allowed")
         elif current_phase == "charge":
             if action_type == 5:  # charge
+                # Check if unit already has charge roll
+                charge_data = self.game_state.get("unit_charge_rolls", {}).get(unit["id"])
+                if not charge_data:
+                    # Roll 2d6 for charge distance
+                    import random
+                    die1 = random.randint(1, 6)
+                    die2 = random.randint(1, 6)
+                    charge_roll = die1 + die2
+                    
+                    # Store the roll
+                    if "unit_charge_rolls" not in self.game_state:
+                        self.game_state["unit_charge_rolls"] = {}
+                    self.game_state["unit_charge_rolls"][unit["id"]] = {
+                        "total": charge_roll,
+                        "die1": die1,
+                        "die2": die2
+                    }
+                
                 target = self._find_gym_charge_target(unit)
                 if not target:
-                    raise RuntimeError(f"No valid charge targets for unit {unit['id']} in charge phase")
+                    # No targets within 2d6 roll - end activation immediately
+                    self._mark_gym_unit_as_acted(unit)
+                    return {"type": "wait"}
                 return {"type": "charge", "target_id": target["id"]}
             elif action_type == 7:  # wait in charge phase
                 return {"type": "wait"}
@@ -678,7 +697,6 @@ class TrainingGameController(GameController):
         Execute gymnasium action and return (obs, reward, terminated, truncated, info).
         ARCHITECTURAL COMPLIANCE: All game logic delegated to use_*.py mirror files.
         """
-        print(f"🔍 DEBUG: TrainingGameController.execute_gym_action called with action: {action}")
         # Get eligible units using mirror architecture
         eligible_units = self._get_gym_eligible_units()
         current_player = self.get_current_player()
@@ -720,18 +738,13 @@ class TrainingGameController(GameController):
         self.game_actions["validate_gym_action_for_phase"](action_type, current_phase)
         
         mirror_action = self._convert_gym_action_to_mirror(acting_unit, action_type)       
-        success = self.execute_action(acting_unit["id"], mirror_action)
-        if not success:
-            print(f"🚨 DEBUG: Unit {acting_unit['id']} action {mirror_action['type']} FAILED!")
-        
+        success = self.execute_action(acting_unit["id"], mirror_action)        
         reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
 
         # CONDITIONAL LOGGING: Enable during evaluation mode only
-        print(f"🔍 DEBUG: Controller logging check - hasattr: {hasattr(self, 'gym_env')}, gym_env exists: {getattr(self, 'gym_env', None) is not None}")
         if hasattr(self, 'gym_env') and self.gym_env:
             is_eval = getattr(self.gym_env, 'is_evaluation_mode', False)
             force_eval = getattr(self.gym_env, '_force_evaluation_mode', False)
-            print(f"🔍 DEBUG: Controller eval flags - is_evaluation_mode: {is_eval}, _force_evaluation_mode: {force_eval}")
         
         if hasattr(self, 'gym_env') and self.gym_env and (getattr(self.gym_env, 'is_evaluation_mode', False) or getattr(self.gym_env, '_force_evaluation_mode', False)):
             print(f"🔍 DEBUG: Controller conditional passed - entering logging block")

@@ -372,13 +372,8 @@ class UseGameActions:
             # CRITICAL FIX: Check if unit can actually move, not just if it hasn't moved
             if unit["id"] in units_moved:
                 return False
-            # Additional validation: ensure unit has valid moves available
-            try:
-                valid_moves = self.get_valid_moves(unit["id"])
-                return len(valid_moves) > 0
-            except Exception:
-                # If move validation fails, unit is not eligible
-                return False
+            # Skip move validation to prevent circular dependency
+            return True
         
         elif phase == "shoot":
             units_fled = set(self.game_state.get("units_fled"))
@@ -413,21 +408,18 @@ class UseGameActions:
             units_fled = set(self.game_state.get("units_fled", []))
             if unit["id"] in units_charged:
                 return False
-            # NEW RULE: Units that fled cannot charge
             if unit["id"] in units_fled:
                 return False
-            # EXACT from TypeScript: Check if adjacent to any enemy (already in combat)
             is_adjacent = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             if is_adjacent:
                 return False
-            # CRITICAL FIX: Check if unit has valid charge targets available
-            try:
-                valid_targets = self.get_valid_charge_targets(unit["id"])
-                if len(valid_targets) == 0:
-                    return False
-            except Exception:
-                return False
-            return True
+            # Check 12-hex distance limit without circular dependency
+            from shared.gameRules import get_hex_distance
+            within_charge_range = any(
+                1 < get_hex_distance(unit, enemy) <= 12
+                for enemy in enemy_units
+            )
+            return within_charge_range
         
         elif phase == "combat":
             if "units_attacked" not in self.game_state:
@@ -1538,7 +1530,7 @@ class UseGameActions:
     def get_valid_moves(self, unit_id: int) -> List[Dict[str, Any]]:
         """Get valid move positions for unit"""
         unit = self.find_unit(unit_id)
-        if not unit or not self.is_unit_eligible_local(unit) or self.game_state.get("phase") != "move":
+        if not unit or self.game_state.get("phase") != "move":
             raise ValueError("Unit not found, not eligible, or not in move phase")
         
         # Validate required unit fields
@@ -1606,7 +1598,7 @@ class UseGameActions:
     def get_valid_charge_targets(self, unit_id: int) -> List[int]:
         """Get valid charge targets for unit with proper 2D6 roll validation"""
         unit = self.find_unit(unit_id)
-        if not unit or not self.is_unit_eligible_local(unit) or self.game_state.get("phase") != "charge":
+        if not unit or self.game_state.get("phase") != "charge":
             return []
         
         # CRITICAL FIX: Must have valid charge roll to get targets

@@ -363,9 +363,7 @@ class W40KEnv(gym.Env):
             action = unit_idx * 8 + 7  # Convert to wait action
         
         # ARCHITECTURAL COMPLIANCE: Delegate everything to controller
-        print(f"🔍 DEBUG: gym40k step() delegating action {action} to controller.execute_gym_action")
         obs, reward, terminated, truncated, info = self.controller.execute_gym_action(action)
-        print(f"🔍 DEBUG: gym40k step() returned from controller - reward: {reward}")
         
         # Update environment state from controller
         self.game_over = terminated

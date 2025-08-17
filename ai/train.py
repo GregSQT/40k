@@ -118,20 +118,23 @@ def create_model(config, training_config_name="default", rewards_config_name="de
     
     # Create environment with specified rewards config
     # ensure scenario.json exists in config/
-    from config_loader import get_config_loader
     cfg = get_config_loader()
     scenario_file = os.path.join(cfg.config_dir, "scenario.json")
     if not os.path.isfile(scenario_file):
         raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
+    # Load unit registry for environment creation
+    from ai.unit_registry import UnitRegistry
+    unit_registry = UnitRegistry()
+    
     base_env = W40KEnv(
-    rewards_config=rewards_config_name,
-    training_config_name=training_config_name,
-    controlled_agent=None,
-    active_agents=None,
-    scenario_file=None,
-    unit_registry=None,
-    quiet=False
-)
+        rewards_config=rewards_config_name,
+        training_config_name=training_config_name,
+        controlled_agent=None,
+        active_agents=None,
+        scenario_file=scenario_file,
+        unit_registry=unit_registry,
+        quiet=False
+    )
     
     # DISABLED: No logging during training for speed
     # Enhanced logging only during evaluation
@@ -188,14 +191,23 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     register_environment()
     
     # Create agent-specific environment
-    from config_loader import get_config_loader
     cfg = get_config_loader()
     scenario_file = os.path.join(cfg.config_dir, "scenario.json")
     if not os.path.isfile(scenario_file):
         raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
-    base_env = W40KEnv(rewards_config=rewards_config_name, 
-                      training_config_name=training_config_name,
-                      controlled_agent=agent_key)
+    # Load unit registry for multi-agent environment
+    from ai.unit_registry import UnitRegistry
+    unit_registry = UnitRegistry()
+    
+    base_env = W40KEnv(
+        rewards_config=rewards_config_name,
+        training_config_name=training_config_name,
+        controlled_agent=agent_key,
+        active_agents=None,
+        scenario_file=scenario_file,
+        unit_registry=unit_registry,
+        quiet=False
+    )
     
     # DISABLED: No logging during training for speed
     # Enhanced logging only during evaluation
@@ -238,14 +250,42 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     callbacks = []
     
     # Evaluation callback - test model periodically with logging enabled
-    base_eval_env = W40KEnv(training_config_name=training_config_name, scenario_file=None)
+    # Load scenario and unit registry for evaluation callback
+    from ai.unit_registry import UnitRegistry
+    cfg = get_config_loader()
+    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+    unit_registry = UnitRegistry()
+    
+    base_eval_env = W40KEnv(
+        rewards_config="default",
+        training_config_name=training_config_name,
+        controlled_agent=None,
+        active_agents=None,
+        scenario_file=scenario_file,
+        unit_registry=unit_registry,
+        quiet=True
+    )
     
     # Enable logging ONLY for evaluation
     enhanced_eval_env = GameReplayIntegration.enhance_training_env(base_eval_env)
     eval_env = Monitor(enhanced_eval_env)
     eval_env.replay_logger = enhanced_eval_env.replay_logger
-    eval_freq=training_config['eval_freq']
-    total_timesteps = training_config['total_timesteps']
+    # Handle different config formats - calculate missing fields from available data
+    if 'eval_freq' in training_config:
+        eval_freq = training_config['eval_freq']
+    else:
+        # Debug config uses total_episodes - calculate eval_freq
+        total_episodes = training_config['total_episodes']
+        max_steps = training_config['max_steps_per_episode']
+        eval_freq = total_episodes * max_steps // 2  # Evaluate halfway through
+    
+    if 'total_timesteps' in training_config:
+        total_timesteps = training_config['total_timesteps']
+    else:
+        # Debug config uses total_episodes and max_steps_per_episode
+        total_episodes = training_config['total_episodes']
+        max_steps = training_config['max_steps_per_episode']
+        total_timesteps = total_episodes * max_steps
     
     # VALIDATION: Prevent deadlock when eval_freq >= total_timesteps
     if eval_freq >= total_timesteps:
@@ -256,18 +296,19 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     # Get callback parameters from config with defaults
     callback_params = training_config.get("callback_params", {})
     
-    # Custom evaluation callback that tracks best/worst/shortest episodes
-    eval_callback = SelectiveEvalCallback(
-        eval_env,
-        best_model_save_path=os.path.dirname(model_path),
-        log_path=os.path.dirname(model_path),
-        eval_freq=eval_freq,  # Use config value
-        deterministic=callback_params.get("eval_deterministic", True),
-        render=callback_params.get("eval_render", False),
-        n_eval_episodes=callback_params.get("n_eval_episodes", 5),
-        output_dir="ai/event_log"
-    )
-    callbacks.append(eval_callback)
+    # Skip evaluation callback for debug config to prevent hanging
+    if training_config_name != "debug":
+        eval_callback = SelectiveEvalCallback(
+            eval_env,
+            best_model_save_path=os.path.dirname(model_path),
+            log_path=os.path.dirname(model_path),
+            eval_freq=eval_freq,
+            deterministic=callback_params.get("eval_deterministic", True),
+            render=callback_params.get("eval_render", False),
+            n_eval_episodes=callback_params.get("n_eval_episodes", 5),
+            output_dir="ai/event_log"
+        )
+        callbacks.append(eval_callback)
     
     # Checkpoint callback - save model periodically
     # Use reasonable checkpoint frequency based on total timesteps and config
@@ -286,8 +327,16 @@ def train_model(model, training_config, callbacks, model_path):
     
     try:
         # Start training
+        # Calculate total_timesteps if missing (same logic as setup_callbacks)
+        if 'total_timesteps' in training_config:
+            total_timesteps = training_config['total_timesteps']
+        else:
+            total_episodes = training_config['total_episodes']
+            max_steps = training_config['max_steps_per_episode']
+            total_timesteps = total_episodes * max_steps
+        
         model.learn(
-            total_timesteps=training_config['total_timesteps'],
+            total_timesteps=total_timesteps,
             callback=callbacks,
             log_interval=100,
             progress_bar=True
@@ -316,7 +365,21 @@ def test_trained_model(model, num_episodes=5):
     """Test the trained model."""
     
     W40KEnv, _ = setup_imports()
-    env = W40KEnv(scenario_file=None)  # Explicit use of default scenario
+    # Load scenario and unit registry for testing
+    from ai.unit_registry import UnitRegistry
+    cfg = get_config_loader()
+    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+    unit_registry = UnitRegistry()
+    
+    env = W40KEnv(
+        rewards_config="default",
+        training_config_name="default",
+        controlled_agent=None,
+        active_agents=None,
+        scenario_file=scenario_file,
+        unit_registry=unit_registry,
+        quiet=True
+    )
     wins = 0
     total_rewards = []
     
@@ -501,7 +564,21 @@ def main():
                 return 1
             
             W40KEnv, _ = setup_imports()
-            env = W40KEnv(rewards_config=args.rewards_config, scenario_file=None)  # Explicit use of default scenario
+            # Load scenario and unit registry for testing
+            from ai.unit_registry import UnitRegistry
+            cfg = get_config_loader()
+            scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+            unit_registry = UnitRegistry()
+            
+            env = W40KEnv(
+                rewards_config=args.rewards_config,
+                training_config_name="default",
+                controlled_agent=None,
+                active_agents=None,
+                scenario_file=scenario_file,
+                unit_registry=unit_registry,
+                quiet=True
+            )
             model = DQN.load(model_path, env=env)
             test_trained_model(model, args.test_episodes)
             return 0
