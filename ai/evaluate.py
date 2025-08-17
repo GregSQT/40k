@@ -185,16 +185,6 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
 
     for episode in range(num_episodes):
         obs, info = env.reset()
-        # CRITICAL FIX: Ensure replay logging is active for this episode
-        if hasattr(env, 'replay_logger') and env.replay_logger:
-            print(f"🔍 DEBUG: Replay logger found, clearing and capturing initial state")
-            print(f"🔍 DEBUG: Evaluation mode: {getattr(env, 'is_evaluation_mode', 'NOT_SET')}")
-            print(f"🔍 DEBUG: Force evaluation mode: {getattr(env, '_force_evaluation_mode', 'NOT_SET')}")
-            env.replay_logger.clear()
-            env.replay_logger.capture_initial_state()
-            print(f"🔍 DEBUG: Initial combat log entries: {len(env.replay_logger.combat_log_entries)}")
-        else:
-            print(f"🔍 DEBUG: No replay logger found on env")
         episode_reward = 0
         game_length = 0
         
@@ -328,10 +318,7 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
     
     # CRITICAL FIX: Save evaluation replay files with proper naming
     if hasattr(env, 'replay_logger') and env.replay_logger:
-        try:
-            print(f"🔍 DEBUG: Final combat log entries: {len(env.replay_logger.combat_log_entries)}")
-            print(f"🔍 DEBUG: Replay logger methods: {[method for method in dir(env.replay_logger) if 'log_' in method]}")
-            
+        try:            
             # Extract agent key from model path for filename
             model_filename = os.path.basename(model_path)
             agent_key = model_filename.replace("model_", "").replace(".zip", "")

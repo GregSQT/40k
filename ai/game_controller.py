@@ -692,6 +692,39 @@ class TrainingGameController(GameController):
         """Connect gym environment for observation/reward delegation"""
         self.gym_env = gym_env
 
+    def _log_gym_action(self, acting_unit: Dict, mirror_action: Dict, reward: float) -> None:
+        """Log gym action during evaluation mode through replay logger"""
+        if not hasattr(self, 'gym_env') or not self.gym_env:
+            return
+            
+        replay_logger = getattr(self.gym_env, 'replay_logger', None)
+        if not replay_logger:
+            return
+            
+        # Get current state for logging
+        pre_action_units = self.get_units()
+        post_action_units = self.get_units()
+        
+        # Find target unit ID if applicable
+        target_unit_id = mirror_action.get("target_id")
+        
+        # Convert mirror action type to gym action number
+        action_type_map = {
+            "move": 0, "shoot": 4, "charge": 5, "combat": 6, "wait": 7
+        }
+        action_type = action_type_map.get(mirror_action.get("type", "wait"), 7)
+        
+        # Call replay logger with proper interface
+        replay_logger.log_action(
+            action=action_type,
+            reward=reward,
+            pre_action_units=pre_action_units,
+            post_action_units=post_action_units,
+            acting_unit_id=acting_unit["id"],
+            target_unit_id=target_unit_id,
+            description=f"Bot {mirror_action['type']} action"
+        )
+
     def execute_gym_action(self, action: int) -> tuple:
         """
         Execute gymnasium action and return (obs, reward, terminated, truncated, info).
@@ -747,12 +780,9 @@ class TrainingGameController(GameController):
             force_eval = getattr(self.gym_env, '_force_evaluation_mode', False)
         
         if hasattr(self, 'gym_env') and self.gym_env and (getattr(self.gym_env, 'is_evaluation_mode', False) or getattr(self.gym_env, '_force_evaluation_mode', False)):
-            print(f"🔍 DEBUG: Controller conditional passed - entering logging block")
             # Get replay logger from gym environment
             replay_logger = getattr(self.gym_env, 'replay_logger', None)
-            print(f"🔍 DEBUG: Controller found replay logger: {replay_logger is not None}")
             if replay_logger:
-                print(f"🔍 DEBUG: Controller calling log_action")
                 # Get pre and post action units for complete log_action interface
                 pre_action_units = self.get_units()
                 
@@ -768,7 +798,7 @@ class TrainingGameController(GameController):
                 
                 # Call log_action with complete interface
                 replay_logger.log_action(
-                    action=action,
+                    action=action % 8,
                     reward=reward,
                     pre_action_units=pre_action_units,
                     post_action_units=post_action_units,
