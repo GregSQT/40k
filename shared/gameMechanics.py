@@ -109,9 +109,9 @@ def calculate_available_move_cells(unit: Dict[str, Any],
             continue
         
         # Check if hex is blocked by another unit (EXACT from BoardPvp.tsx)
-        blocked = any(u["col"] == col and u["row"] == row and u["id"] != unit["id"] for u in units)
-        
-        # Add valid cells (EXACT from BoardPvp.tsx)
+        blocked = any(u["col"] == col and u["row"] == row for u in units if u["id"] != unit["id"])
+
+        # Add valid cells only if not occupied and not adjacent to enemy
         if steps > 0 and steps <= unit["MOVE"] and not blocked and key not in forbidden_set:
             available_cells.append({"col": col, "row": row})
         
@@ -180,7 +180,7 @@ def calculate_charge_destinations(unit: Dict[str, Any],
         if isinstance(wall_hex, (list, tuple)) and len(wall_hex) == 2:
             forbidden_set.add(f"{wall_hex[0]},{wall_hex[1]}")
     
-    # Add occupied positions (but NOT enemy adjacent hexes for charging)
+    # Add all occupied positions as forbidden (cannot move into a unit's hex)
     for other_unit in units:
         if other_unit["id"] != unit["id"]:
             forbidden_set.add(f"{other_unit['col']},{other_unit['row']}")
@@ -203,9 +203,9 @@ def calculate_charge_destinations(unit: Dict[str, Any],
         if steps > 0 and steps <= charge_roll and key not in forbidden_set:
             chargeable_enemy_adjacent = any(
                 enemy["player"] != unit["player"] and
-                max(abs(col - enemy["col"]), abs(row - enemy["row"])) == 1 and
+                cubeDistance(offsetToCube(col, row), offsetToCube(enemy["col"], enemy["row"])) == 1 and
                 cubeDistance(offsetToCube(unit["col"], unit["row"]), 
-                           offsetToCube(enemy["col"], enemy["row"])) <= get_charge_max_distance()
+                            offsetToCube(enemy["col"], enemy["row"])) <= get_charge_max_distance()
                 for enemy in units
             )
             
@@ -301,9 +301,11 @@ def is_unit_eligible(unit: Dict[str, Any],
                 return False
             # Rule 2: Cannot shoot enemy units adjacent to friendly units (EXACT from PvP)
             is_enemy_adjacent_to_friendly = any(
-                max(abs(friendly["col"] - enemy["col"]), abs(friendly["row"] - enemy["row"])) == 1
+                cubeDistance(offsetToCube(friendly["col"], friendly["row"]),
+                            offsetToCube(enemy["col"], enemy["row"])) == 1
                 for friendly in friendly_units
             )
+
             return not is_enemy_adjacent_to_friendly
         
         return any(can_shoot_enemy(enemy) for enemy in enemy_units)
@@ -340,7 +342,8 @@ def is_unit_eligible(unit: Dict[str, Any],
         # Only units adjacent to enemies should be eligible for combat
         actual_enemy_units = [u for u in units if u["player"] != unit["player"]]
         has_adjacent_enemy = any(
-            max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"])) == combat_range
+            cubeDistance(offsetToCube(unit["col"], unit["row"]),
+                         offsetToCube(enemy["col"], enemy["row"])) == combat_range
             for enemy in actual_enemy_units
         )
         return has_adjacent_enemy
@@ -362,14 +365,16 @@ def detect_flee_on_move(unit: Dict[str, Any],
     
     # EXACT from PvP: Check adjacency at ORIGINAL position before move
     was_adjacent_to_enemy = any(
-        max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"])) == 1
+        cubeDistance(offsetToCube(unit["col"], unit["row"]),
+                     offsetToCube(enemy["col"], enemy["row"])) == 1
         for enemy in enemy_units
     )
     
     if was_adjacent_to_enemy:
         # Check if unit will still be adjacent after the move
         will_be_adjacent_to_enemy = any(
-            max(abs(dest_col - enemy["col"]), abs(dest_row - enemy["row"])) == 1
+            cubeDistance(offsetToCube(dest_col, dest_row),
+                         offsetToCube(enemy["col"], enemy["row"])) == 1
             for enemy in enemy_units
         )
         
