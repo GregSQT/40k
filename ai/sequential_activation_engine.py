@@ -106,8 +106,6 @@ class SequentialActivationEngine:
         self.debug_units_skipped = []
         self.auto_skipped_units = 0
         
-        print(f"[SequentialEngine] Built queue for {phase_name} phase, player {current_player}: {len(self.activation_queue)} units")
-        
     def _build_combat_queues(self, living_units: List[Dict[str, Any]]) -> None:
         """
         Build combat phase queues following AI_GAME.md combat rules.
@@ -140,8 +138,6 @@ class SequentialActivationEngine:
         self.combat_sub_phase = "charged_units"
         self.activation_queue = copy.deepcopy(self.combat_charged_queue)
         
-        print(f"[SequentialEngine] Combat queues: {len(self.combat_charged_queue)} charged, {len(self.combat_alternating_queue)} alternating")
-        
     def get_next_active_unit(self) -> Optional[Dict[str, Any]]:
         """
         Return next eligible unit following EXACT AI_GAME.md eligibility rules.
@@ -167,7 +163,7 @@ class SequentialActivationEngine:
                 self.combat_sub_phase = "alternating"
                 self.combat_active_player = 1  # Start with P1 (legacy combatActivePlayer)
                 self.activation_queue = copy.deepcopy(self.combat_alternating_queue)
-                print(f"[SequentialEngine] Combat transition to alternating sub-phase")
+                # Combat transition to alternating sub-phase
                 
         # Process queue until eligible unit found or queue empty
         while self.activation_queue:
@@ -176,7 +172,6 @@ class SequentialActivationEngine:
             # Get fresh unit state for validation ("checked at START of each unit's activation")
             fresh_unit = self._find_fresh_unit(candidate_unit["id"])
             if not fresh_unit or fresh_unit.get("CUR_HP", 0) <= 0:
-                print(f"[SequentialEngine] Auto-skipping dead unit {candidate_unit['id']}")
                 self.debug_units_skipped.append({
                     "unit_id": candidate_unit["id"], 
                     "reason": "dead_or_missing",
@@ -195,12 +190,10 @@ class SequentialActivationEngine:
                 if current_phase == "charge" and fresh_unit["id"] not in self.unit_charge_rolls:
                     charge_roll = random.randint(1, 6) + random.randint(1, 6)
                     self.unit_charge_rolls[fresh_unit["id"]] = charge_roll
-                    print(f"[SequentialEngine] Unit {fresh_unit['id']} rolled {charge_roll} for charge")
                 
-                print(f"[SequentialEngine] Next active unit: {fresh_unit['id']} in {current_phase} phase")
+                # Next active unit selected
                 return fresh_unit
             else:
-                print(f"[SequentialEngine] Auto-skipping ineligible unit {fresh_unit['id']}: {eligibility_result['reason']}")
                 self.debug_units_skipped.append({
                     "unit_id": fresh_unit["id"], 
                     "reason": eligibility_result["reason"],
@@ -219,7 +212,6 @@ class SequentialActivationEngine:
         # Phase complete
         self.phase_complete = True
         self.current_active_unit = None
-        print(f"[SequentialEngine] Phase {current_phase} complete - queue empty")
         return None
         
     def _check_unit_eligibility_detailed(self, unit: Dict[str, Any], phase: str) -> Dict[str, Any]:
@@ -413,7 +405,6 @@ class SequentialActivationEngine:
         if eligible_other_units:
             self.combat_active_player = other_player
             self.activation_queue = eligible_other_units
-            print(f"[SequentialEngine] Combat switched to player {other_player}")
             return True
             
         return False
@@ -468,7 +459,6 @@ class SequentialActivationEngine:
         self.current_active_unit = None
         self.steps_taken_this_action = 1 if success else 0
         
-        print(f"[SequentialEngine] Unit {unit['id']} completed action, success: {success}")
         return success
         
     def _execute_movement_action(self, unit: Dict[str, Any], action: Dict[str, Any]) -> bool:
@@ -496,7 +486,6 @@ class SequentialActivationEngine:
             # AI_GAME.md: "If started adjacent to enemy: units_moved AND units_fled"
             if was_adjacent:
                 self.game_controller.state_actions['add_fled_unit'](unit["id"])
-                print(f"[SequentialEngine] Unit {unit['id']} marked as fled (moved from adjacent)")
                 
         return success
         

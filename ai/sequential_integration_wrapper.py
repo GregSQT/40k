@@ -33,17 +33,24 @@ class GameControllerConfig:
 
 class SequentialGameController:
     """
-    Minimal Sequential Game Controller
+    Sequential Game Controller with Sequential Activation Engine
     
-    Simple wrapper that adds sequential activation without complex dependencies.
+    Routes all actions through SequentialActivationEngine for sequential rule enforcement.
     """
     
     def __init__(self, config, quiet=False):
-        """Initialize with config and quiet parameter for compatibility."""
+        """Initialize with config and sequential activation engine."""
         # Import here to avoid circular imports
         from ai.game_controller import TrainingGameController
+        from sequential_activation_engine import SequentialActivationEngine
+        
         self.base_controller = TrainingGameController(config, quiet)
+        self.sequential_engine = SequentialActivationEngine(self.base_controller)
         self.gym_env = None
+        
+        # Phase state tracking
+        self.phase_started = False
+        self.last_phase = None
         
     def __getattr__(self, name):
         """Delegate all attributes to base controller."""
@@ -57,10 +64,7 @@ class SequentialGameController:
         
     def execute_gym_action(self, action: int) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
         """
-        Execute gym action with proper gymnasium return format.
-        
-        For now, delegates to base controller but ensures proper tuple return.
-        Sequential activation logic can be added incrementally.
+        Execute gym action through Sequential Activation Engine.
         
         Args:
             action: Gym action integer
@@ -68,45 +72,178 @@ class SequentialGameController:
         Returns:
             Tuple: (observation, reward, terminated, truncated, info)
         """
-        try:
-            # Try to call base controller's method
-            result = self.base_controller.execute_gym_action(action)
+        # Use Sequential Engine integration that was implemented
+        return self._execute_via_sequential_engine(action)
             
-            # If result is already a tuple, return it
-            if isinstance(result, tuple) and len(result) == 5:
-                return result
+    def _execute_via_sequential_engine(self, action: int) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
+        """Execute action through Sequential Activation Engine with full integration."""
+        current_phase = self.base_controller.get_current_phase()
+        
+        # Check if phase needs to start
+        if not self.phase_started or current_phase != self.last_phase:
+            self.sequential_engine.start_phase(current_phase)
+            self.phase_started = True
+            self.last_phase = current_phase
             
-            # If result is boolean (old format), build proper tuple
-            if isinstance(result, bool):
-                success = result
-                return self._build_gymnasium_response(action, success)
+        # Get next active unit from sequential engine
+        active_unit = self.sequential_engine.get_next_active_unit()
+        
+        if not active_unit:
+            # Phase complete - advance and return
+            self.phase_started = False
+            self._advance_phase()
+            # Mark episode as continuing to allow next phase to start
+            return self._build_gymnasium_response(action, True, terminated=False)
             
-            # Fallback for unexpected return types
-            return self._build_gymnasium_response(action, False)
+        # Convert gym action to mirror action format with validation
+        mirror_action = self._convert_gym_action_to_mirror(active_unit, action, current_phase)
+        if not mirror_action:
+            # Cap invalid actions to valid range (0-7)
+            capped_action = max(0, min(7, action))
+            if capped_action != action:
+                mirror_action = self._convert_gym_action_to_mirror(active_unit, capped_action, current_phase)
+                
+            if not mirror_action:
+                # Fallback to wait action for completely invalid actions
+                mirror_action = {"type": "wait"}
             
-        except Exception as e:
-            print(f"[SequentialController] Error in execute_gym_action: {e}")
-            return self._build_gymnasium_response(action, False)
+        # Execute action through sequential engine
+        success = self.sequential_engine.execute_unit_action(active_unit, mirror_action)
+        
+        return self._build_gymnasium_response(action, success)
             
-    def _build_gymnasium_response(self, action: int, success: bool) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
+    def _convert_gym_action_to_mirror(self, unit: Dict[str, Any], action: Any, phase: str) -> Optional[Dict[str, Any]]:
+        """
+        Convert gym action to mirror action format for Sequential Engine.
+        
+        GYM ACTIONS:
+        0-3: Movement (North, South, East, West)
+        4: Shoot
+        5: Charge  
+        6: Combat
+        7: Wait
+        
+        Args:
+            unit: Active unit performing action
+            action: Gym action integer (will be capped to 0-7 range)
+            phase: Current game phase
+            
+        Returns:
+            Dict: Mirror action format or None if invalid
+        """
+        # Convert numpy array to int and cap to valid range
+        action = int(action) if hasattr(action, 'item') and callable(action.item) else int(action)
+        action = max(0, min(7, action))
+        
+        # Movement actions (0-3)
+        if 0 <= action <= 3:
+            if phase != "move":
+                return None
+                
+            # Calculate destination based on direction
+            movements = {
+                0: (0, -1),  # North
+                1: (0, 1),   # South  
+                2: (1, 0),   # East
+                3: (-1, 0)   # West
+            }
+            
+            col_diff, row_diff = movements[action]
+            return {
+                "type": "move",
+                "col": unit["col"] + col_diff,
+                "row": unit["row"] + row_diff
+            }
+            
+        # Shooting action (4)
+        elif action == 4:
+            if phase != "shoot":
+                return None
+                
+            # Get valid shooting targets from controller
+            valid_targets = self.base_controller.game_actions["get_valid_shooting_targets"](unit["id"])
+            if not valid_targets:
+                return {"type": "wait"}  # No valid targets
+                
+            # Use first valid target (AI will learn to choose better)
+            return {
+                "type": "shoot",
+                "target_id": valid_targets[0]
+            }
+            
+        # Charge action (5)
+        elif action == 5:
+            if phase != "charge":
+                return None
+                
+            # Get valid charge targets from controller
+            valid_targets = self.base_controller.game_actions["get_valid_charge_targets"](unit["id"])
+            if not valid_targets:
+                return {"type": "wait"}  # No valid targets
+                
+            # Use first valid target (AI will learn to choose better)
+            return {
+                "type": "charge",
+                "target_id": valid_targets[0]
+            }
+            
+        # Combat action (6)
+        elif action == 6:
+            if phase != "combat":
+                return None
+                
+            # Get valid combat targets from controller
+            valid_targets = self.base_controller.game_actions["get_valid_combat_targets"](unit["id"])
+            if not valid_targets:
+                return {"type": "wait"}  # No valid targets
+                
+            # Use first valid target (AI will learn to choose better)
+            return {
+                "type": "combat",
+                "target_id": valid_targets[0]
+            }
+            
+        # Wait action (7)
+        elif action == 7:
+            return {"type": "wait"}
+            
+        return None
+        
+    def _advance_phase(self) -> None:
+        """Advance to next phase using controller's phase transition system."""
+        # Call the controller's method that handles phase advancement correctly
+        self.base_controller._advance_gym_phase_or_turn()
+    
+    def _build_gymnasium_response(self, action: int, success: bool, terminated: Optional[bool] = None) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
         """Build complete gymnasium response tuple."""
         try:
             # Get observation
             obs = self._get_observation()
             
-            # Simple reward
+            # Enhanced reward based on sequential engine feedback
             reward = 0.1 if success else -0.1
+            
+            # Add step count bonus for efficient play
+            step_info = self.sequential_engine.get_step_count_info()
+            if step_info["real_actions_taken"] > 0:
+                reward += 0.05  # Bonus for taking real actions
                 
-            # Check game termination
-            terminated = False
-            if hasattr(self.base_controller, 'is_game_over'):
-                terminated = self.base_controller.is_game_over()
+            # Check game termination (allow override for phase transitions)
+            if terminated is None:
+                terminated = False
+                if hasattr(self.base_controller, 'is_game_over'):
+                    terminated = self.base_controller.is_game_over()
             
             truncated = False
             
-            # Build info dictionary
+            # Build info dictionary with sequential engine data
             info = {
-                "action_success": success
+                "action_success": success,
+                "sequential_engine": {
+                    "step_count_info": step_info,
+                    "queue_status": self.sequential_engine.get_queue_status(),
+                    "phase_complete": self.sequential_engine.is_phase_complete()
+                }
             }
             
             # Add standard info fields if available
@@ -125,7 +262,6 @@ class SequentialGameController:
             return obs, reward, terminated, truncated, info
             
         except Exception as e:
-            print(f"[SequentialController] Error building response: {e}")
             # Safe fallback
             safe_obs = np.zeros(26, dtype=np.float32)  # Common observation size
             return safe_obs, -1.0, True, False, {"error": "response_build_failed"}
@@ -150,7 +286,6 @@ class SequentialGameController:
             return np.zeros(26, dtype=np.float32)
             
         except Exception as e:
-            print(f"[SequentialController] Error getting observation: {e}")
             return np.zeros(26, dtype=np.float32)
 
 

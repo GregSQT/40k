@@ -402,16 +402,16 @@ def should_transition_from_shoot(units: List[Dict[str, Any]],
     # Find units that can still shoot (EXACT from TypeScript)
     shootable_units = []
     for unit in player_units:
-        unit_id = unit["id"]
+        # unit_id = unit["id"]
         
         # Check if unit already shot this phase
         if unit["id"] in units_shot:
-            print(f"    ❌ Already shot (in units_shot)")
+            # print(f"    ❌ Already shot (in units_shot)")
             continue
         
         # Units that fled cannot shoot
         if unit["id"] in units_fled:
-            print(f"    ❌ Unit fled")
+            # print(f"    ❌ Unit fled")
             continue
         
         # CRITICAL FIX: Remove SHOOT_LEFT requirement - units can shoot if they haven't shot yet

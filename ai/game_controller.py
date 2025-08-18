@@ -854,7 +854,8 @@ class TrainingGameController(GameController):
                     if success:
                         self._mark_gym_unit_as_acted(acting_unit)
                     else:
-                        print(f"❌ P1 Unit{acting_unit['id']} {mirror_action['type']} FAILED")
+                        pass
+                        # print(f"❌ P1 Unit{acting_unit['id']} {mirror_action['type']} FAILED")
                     
                     reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
                     
