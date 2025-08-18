@@ -555,7 +555,30 @@ def main():
             )
             return 0 if results else 1
 
-        if args.test_only:
+        # Single agent training mode
+        elif args.agent:
+            model, env, training_config, model_path = create_multi_agent_model(
+                config,
+                args.training_config,
+                args.rewards_config,
+                agent_key=args.agent,
+                new_model=args.new,
+                append_training=args.append
+            )
+            
+            # Setup callbacks with agent-specific model path
+            callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
+            
+            # Train model
+            success = train_model(model, training_config, callbacks, model_path)
+            
+            if success:
+                test_trained_model(model, args.test_episodes)
+                return 0
+            else:
+                return 1
+
+        elif args.test_only:
             # Load existing model for testing only
             model_path = config.get_model_path()
             # Ensure model directory exists
@@ -587,8 +610,10 @@ def main():
             test_trained_model(model, args.test_episodes)
             return 0
         
-        # Create/load model
-        model, env, training_config = create_model(
+        else:
+            # Generic training mode
+            # Create/load model
+            model, env, training_config = create_model(
             config, 
             args.training_config,
             args.rewards_config, 

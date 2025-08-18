@@ -393,21 +393,15 @@ class UseGameActions:
             has_adjacent_enemy_shoot = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             if has_adjacent_enemy_shoot:
                 return False
-            # CRITICAL FIX: Check if unit has valid shooting targets available
-            try:
-                valid_targets = self.get_valid_shooting_targets(unit["id"])
-                if len(valid_targets) == 0:
-                    return False
-            except Exception:
+            
+            # CRITICAL FIX: Just check if unit has ranged weapon capability - let action masking handle targets
+            if "RNG_RNG" not in unit:
                 return False
-            # Check if unit has enemies in shooting range that are NOT adjacent to friendly units
-            friendly_units = [u for u in self.game_state["units"] if u["player"] == unit["player"] and u["id"] != unit["id"]]
-            return any(
-                isUnitInRange(unit, enemy, unit["RNG_RNG"]) and
-                not any(max(abs(friendly["col"] - enemy["col"]), abs(friendly["row"] - enemy["row"])) == 1
-                       for friendly in friendly_units)
-                for enemy in enemy_units
-            )
+            if unit.get("RNG_RNG", 0) <= 0:
+                return False
+                
+            # Unit is eligible to attempt shooting - Sequential Engine will handle target validation
+            return True
         
         elif phase == "charge":
             units_charged = set(self.game_state.get("units_charged", []))
@@ -428,39 +422,18 @@ class UseGameActions:
             return within_charge_range
         
         elif phase == "combat":
-            if "units_attacked" not in self.game_state:
-                raise KeyError("Game state missing required 'units_attacked' field")
-            if "combat_sub_phase" not in self.game_state:
-                raise KeyError("Game state missing required 'combat_sub_phase' field")
-            if "combat_active_player" not in self.game_state:
-                raise KeyError("Game state missing required 'combat_active_player' field")
-            units_attacked = set(self.game_state["units_attacked"])
-            combat_sub_phase = self.game_state["combat_sub_phase"]
-            combat_active_player = self.game_state["combat_active_player"]
+            units_attacked = set(self.game_state.get("units_attacked", []))
             
             if unit["id"] in units_attacked:
                 return False
             if "CC_RNG" not in unit:
-                raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
-            combat_range = unit["CC_RNG"]
-            
-            # MISSING FEATURE: Combat sub-phase logic from TypeScript
-            if combat_sub_phase == "charged_units":
-                if "has_charged_this_turn" not in unit:
-                    print(f"❌ Unit {unit.get('id')} missing has_charged_this_turn field - marking ineligible")
-                    return False  # Don't raise error, just mark ineligible
-                return unit["has_charged_this_turn"] and any(
-                    isUnitInRange(unit, enemy, combat_range) for enemy in enemy_units
-                )
-            elif combat_sub_phase == "alternating_combat":
-                if "has_charged_this_turn" not in unit:
-                    raise KeyError(f"Unit missing required 'has_charged_this_turn' field: {unit.get('name')}")
-                return (not unit["has_charged_this_turn"] and 
-                       unit["player"] == combat_active_player and
-                       any(isUnitInRange(unit, enemy, combat_range) for enemy in enemy_units))
-            else:
-                # Default combat eligibility
-                return any(isUnitInRange(unit, enemy, combat_range) for enemy in enemy_units)
+                return False
+            if unit.get("CC_RNG", 0) <= 0:
+                return False
+                
+            # CRITICAL FIX: Simplified combat eligibility - just check if unit can potentially fight
+            # Let Sequential Engine handle complex sub-phase logic and target validation
+            return any(isUnitInRange(unit, enemy, unit["CC_RNG"]) for enemy in enemy_units)
         
         else:
             return False
@@ -1564,41 +1537,42 @@ class UseGameActions:
         )
 
     def get_valid_shooting_targets(self, unit_id: int) -> List[int]:
-        """Get valid shooting targets for unit"""
+        """Get valid shooting targets for unit - AI_GAME.md compliant"""
         unit = self.find_unit(unit_id)
-        if not unit or not self.is_unit_eligible_local(unit) or self.game_state.get("phase") != "shoot":
+        if not unit or self.game_state.get("phase") != "shoot":
             return []
+        
+        # AI_GAME.md: Check RNG_NB > 0 requirement
+        if "RNG_NB" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
+        if unit.get("RNG_NB", 0) <= 0:
+            return []  # No shots remaining
         
         # Validate required unit fields
         if "RNG_RNG" not in unit:
             raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
         
         targets = []
-        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
+        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
         for enemy in enemy_units:
             distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
             if distance <= unit["RNG_RNG"]:
-                # CRITICAL FIX: Add line of sight validation like PvP mode
-                from shared.gameRules import has_line_of_sight
-                wall_hexes = self.board_config.get("wall_hexes", [])
-                
-                line_of_sight = has_line_of_sight(
-                    {"col": unit["col"], "row": unit["row"]},
-                    {"col": enemy["col"], "row": enemy["row"]},
-                    wall_hexes
-                )
-                
-                # Only add target if line of sight is clear (blocked targets cannot be shot at all)
-                if line_of_sight.get("canSee", False):
-                    targets.append(enemy["id"])
+                # AI_GAME.md: "has a line of sight on an enemy unit within RNG_RNG distance"
+                try:
+                    from shared.gameRules import has_line_of_sight
+                    wall_hexes = self.board_config.get("wall_hexes", [])
                     
-                    # Store cover information for this target (for shooting execution)
-                    if not hasattr(self, 'target_cover_info'):
-                        self.target_cover_info = {}
-                    self.target_cover_info[enemy["id"]] = line_of_sight.get("inCover", False)
-                else:
-                    # Unit cannot see target through walls - skip completely
-                    continue
+                    line_of_sight = has_line_of_sight(
+                        {"col": unit["col"], "row": unit["row"]},
+                        {"col": enemy["col"], "row": enemy["row"]},
+                        wall_hexes
+                    )
+                    
+                    if line_of_sight.get("canSee", False):
+                        targets.append(enemy["id"])
+                except ImportError:
+                    # Fallback if shared.gameRules not available
+                    targets.append(enemy["id"])
         return targets
 
     def get_valid_charge_targets(self, unit_id: int) -> List[int]:
@@ -1673,30 +1647,87 @@ class UseGameActions:
         current_phase = self.game_state.get("phase", "move")
         current_player = self.game_state.get("current_player", 0)
         
-        valid_actions_per_phase = {
-            "move": [0, 1, 2, 3, 7],  # move directions + wait
-            "shoot": [4, 7],          # shoot + wait
-            "charge": [5, 7],         # charge + wait
-            "combat": [6, 7]          # combat + wait
-        }
-        
-        valid_action_types = valid_actions_per_phase.get(current_phase, [7])
+        print(f"🎭 ACTION MASK GENERATION: Phase {current_phase}, Player {current_player}, Max units {max_units}")
         
         # Get ALL eligible units for current player
         eligible_units = self.get_eligible_units()
         current_player_eligible = [u for u in eligible_units if u["player"] == current_player]
         
+        print(f"🎭 ELIGIBLE UNITS: {len(current_player_eligible)} units: {[u['id'] for u in current_player_eligible]}")
+        
         action_mask = []
         
         # CRITICAL FIX: Only allow actions for units that actually exist and are eligible
         for unit_idx in range(max_units):
-            unit_exists_and_eligible = unit_idx < len(current_player_eligible)
-            
-            for action_type in range(8):
-                # Action is valid ONLY if unit exists AND is eligible AND action type is valid for phase
-                action_valid = unit_exists_and_eligible and action_type in valid_action_types
-                action_mask.append(action_valid)
+            if unit_idx < len(current_player_eligible):
+                unit = current_player_eligible[unit_idx]
+                print(f"🎭 MASKING UNIT {unit['id']} (idx {unit_idx}):")
+                
+                for action_type in range(8):
+                    # Action is valid ONLY if unit exists AND is eligible AND action type is valid for phase
+                    action_valid = False
+                    
+                    if current_phase == "move" and action_type in [0, 1, 2, 3]:
+                        # Movement actions - check if unit has valid moves
+                        try:
+                            valid_moves = self.get_valid_moves(unit["id"])
+                            action_valid = len(valid_moves) > 0
+                            print(f"🎭   Action {action_type} (move): {action_valid} ({len(valid_moves)} moves)")
+                        except Exception as e:
+                            action_valid = False
+                            print(f"🎭   Action {action_type} (move): ERROR {e}")
+                            
+                    elif current_phase == "shoot" and action_type == 4:
+                        # AI_GAME.md: Shooting action - check RNG_NB > 0 AND valid targets
+                        try:
+                            # Check RNG_NB first (AI_GAME.md requirement)
+                            if "RNG_NB" not in unit:
+                                action_valid = False
+                                print(f"🎭   Action {action_type} (shoot): False (missing RNG_NB)")
+                            elif unit.get("RNG_NB", 0) <= 0:
+                                action_valid = False
+                                print(f"🎭   Action {action_type} (shoot): False (RNG_NB={unit.get('RNG_NB', 0)})")
+                            else:
+                                valid_targets = self.get_valid_shooting_targets(unit["id"])
+                                action_valid = len(valid_targets) > 0
+                                print(f"🎭   Action {action_type} (shoot): {action_valid} (RNG_NB={unit.get('RNG_NB', 0)}, {len(valid_targets)} targets)")
+                        except Exception as e:
+                            action_valid = False
+                            print(f"🎭   Action {action_type} (shoot): ERROR {e}")
+                            
+                    elif current_phase == "charge" and action_type == 5:
+                        # Charge action - check if unit has valid targets
+                        try:
+                            valid_targets = self.get_valid_charge_targets(unit["id"])
+                            action_valid = len(valid_targets) > 0
+                            print(f"🎭   Action {action_type} (charge): {action_valid} ({len(valid_targets)} targets)")
+                        except Exception as e:
+                            action_valid = False
+                            print(f"🎭   Action {action_type} (charge): ERROR {e}")
+                            
+                    elif current_phase == "combat" and action_type == 6:
+                        # Combat action - check if unit has valid targets
+                        try:
+                            valid_targets = self.get_valid_combat_targets(unit["id"])
+                            action_valid = len(valid_targets) > 0
+                            print(f"🎭   Action {action_type} (combat): {action_valid} ({len(valid_targets)} targets)")
+                        except Exception as e:
+                            action_valid = False
+                            print(f"🎭   Action {action_type} (combat): ERROR {e}")
+                            
+                    elif action_type == 7:
+                        # Wait action - always valid for eligible units
+                        action_valid = True
+                        print(f"🎭   Action {action_type} (wait): {action_valid}")
+                    
+                    action_mask.append(action_valid)
+            else:
+                print(f"🎭 NO UNIT at idx {unit_idx} - masking all actions as False")
+                # No unit at this index - all actions invalid
+                for action_type in range(8):
+                    action_mask.append(False)
         
+        print(f"🎭 FINAL MASK: {action_mask}")
         return action_mask
 
 

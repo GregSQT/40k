@@ -60,9 +60,9 @@ class W40KEnv(gym.Env):
         # Calculate max_units for action/observation space
         self.max_units = self._calculate_max_units_from_scenario(scenario_file)
         
-        # Define action space: unit_idx * 8 + action_type
-        # Actions per unit: [move_north, move_south, move_east, move_west, shoot, charge, attack, wait]
-        self.action_space = spaces.Discrete(self.max_units * 8)
+        # AI_GAME.md COMPLIANT: Action space is ONLY action types (0-7)
+        # Sequential Engine determines which unit is active, gym only selects action type
+        self.action_space = spaces.Discrete(8)
         
         # Define observation space: Fixed size based on max_units * 11 + 4
         # AI units (max_units * 7) + Enemy units (max_units * 4) + Phase encoding (4)
@@ -347,23 +347,29 @@ class W40KEnv(gym.Env):
         return self._get_obs(), self._get_info()
 
     def step(self, action):
-        """Execute action using mirror controller with action masking validation."""
-        # SIMPLE DQN TEST: Log every action selection to verify randomness
+        """Execute action using mirror controller with AI_GAME.md compliance."""
+        # AI_GAME.md COMPLIANT: Action is just action type (0-7), no unit selection
+        action_type = int(action) % 8  # Ensure action is in valid range
+        
+        # DEBUG: Log action selection details
         current_phase = self.controller.get_current_phase()
         current_player = self.controller.get_current_player()
-        unit_idx = action // 8
-        action_type = action % 8
+        print(f"🎯 GYM STEP: Action {action_type}, Phase {current_phase}, Player {current_player}")
         
-        # Apply action masking before execution to prevent invalid actions
-        action_mask = self.controller.game_actions["get_action_mask"](self.max_units)
+        # Apply action masking for the active unit only
+        action_mask = self.controller.game_actions["get_action_mask"](1)  # Only need mask for active unit
+        print(f"🎭 ACTION MASK: {action_mask}")
         
-        if not action_mask[action]:
-            # Convert invalid action to wait action for the same unit
-            unit_idx = action // 8
-            action = unit_idx * 8 + 7  # Convert to wait action
+        if action_type < len(action_mask) and not action_mask[action_type]:
+            print(f"❌ INVALID ACTION {action_type} - Converting to wait")
+            # Convert invalid action to wait action
+            action_type = 7  # Wait action
+        else:
+            print(f"✅ VALID ACTION {action_type}")
         
         # ARCHITECTURAL COMPLIANCE: Delegate everything to controller
-        obs, reward, terminated, truncated, info = self.controller.execute_gym_action(action)
+        # Controller will get active unit from Sequential Engine
+        obs, reward, terminated, truncated, info = self.controller.execute_gym_action(action_type)
         
         # Update environment state from controller
         self.game_over = terminated
@@ -608,7 +614,7 @@ class W40KEnv(gym.Env):
             "game_over": self.game_over,
             "winner": self.winner,
             "eligible_units": len(self._get_eligible_units()),
-            "action_mask": self.controller.game_actions["get_action_mask"](self.max_units)
+            "action_mask": self.controller.game_actions["get_action_mask"](1)  # Only active unit needs mask
         }
 
     def _execute_full_bot_turn(self):

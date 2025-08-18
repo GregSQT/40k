@@ -83,29 +83,36 @@ class SequentialGameController:
         """Execute action through Sequential Activation Engine with full integration."""
         current_phase = self.base_controller.get_current_phase()
         
-        # Check if phase needs to start
-        if not self.phase_started or current_phase != self.last_phase:
+        # CRITICAL FIX: Initialize Sequential Engine for phase if not already done
+        if (self.sequential_engine.queue_built_for_phase != current_phase or 
+            self.sequential_engine.queue_built_for_player != self.base_controller.get_current_player()):
+            print(f"🔧 INITIALIZING SEQUENTIAL ENGINE for phase {current_phase}")
             self.sequential_engine.start_phase(current_phase)
-            self.phase_started = True
-            self.last_phase = current_phase
-            
-        # Get next active unit from sequential engine
-        active_unit = self.sequential_engine.get_next_active_unit()
         
+        # CRITICAL FIX: Always get active unit FIRST - no multiple units per phase
+        active_unit = self.sequential_engine.get_next_active_unit()
+        print(f"🤖 SEQUENTIAL ENGINE: Active unit = {active_unit['id'] if active_unit else None}")
+        
+        # If no active unit, phase must be complete - advance immediately
         if not active_unit:
-            # Phase complete - advance and return
+            print(f"🔄 PHASE COMPLETE: {current_phase} -> advancing")
             self.phase_started = False
             
             # CRITICAL FIX: Verify phase advancement actually occurred
             initial_phase = current_phase
             self._advance_phase()
             final_phase = self.base_controller.get_current_phase()
+            print(f"🔄 PHASE ADVANCED: {initial_phase} -> {final_phase}")
             
             # Mark episode as continuing to allow next phase to start
             return self._build_gymnasium_response(action, True, terminated=False)
             
+        print(f"🎯 ACTIVE UNIT {active_unit['id']}: Phase {current_phase}, Action {action}")
+        
         # Convert gym action to mirror action format with validation
         mirror_action = self._convert_gym_action_to_mirror(active_unit, action, current_phase)
+        print(f"🔄 MIRROR ACTION: {mirror_action}")
+        
         if not mirror_action:
             # Cap invalid actions to valid range (0-7)
             capped_action = max(0, min(7, action))
@@ -115,9 +122,11 @@ class SequentialGameController:
             if not mirror_action:
                 # Fallback to wait action for completely invalid actions
                 mirror_action = {"type": "wait"}
+                print(f"⚠️ FALLBACK TO WAIT for unit {active_unit['id']}")
             
         # Execute action through sequential engine
         success = self.sequential_engine.execute_unit_action(active_unit, mirror_action)
+        print(f"🎬 ACTION RESULT: {success} for unit {active_unit['id']}")
         
         # CRITICAL FIX: Log action properly for replay system
         self._log_sequential_action(active_unit, mirror_action, current_phase, success)
@@ -180,6 +189,9 @@ class SequentialGameController:
         """
         Convert gym action to mirror action format for Sequential Engine.
         
+        AI_GAME.md COMPLIANT: Actions are 0-7 only (no unit selection)
+        Sequential Engine determines the active unit, gym only provides action type.
+        
         GYM ACTIONS:
         0-3: Movement (North, South, East, West)
         4: Shoot
@@ -188,16 +200,21 @@ class SequentialGameController:
         7: Wait
         
         Args:
-            unit: Active unit performing action
-            action: Gym action integer (will be capped to 0-7 range)
+            unit: Active unit from Sequential Engine (not selected by gym)
+            action: Gym action integer 0-7 (action type only)
             phase: Current game phase
             
         Returns:
             Dict: Mirror action format or None if invalid
         """
-        # Convert numpy array to int and cap to valid range
-        action = int(action) if hasattr(action, 'item') and callable(action.item) else int(action)
-        action = max(0, min(7, action))
+        # CRITICAL FIX: Extract action type only - no unit selection allowed
+        if hasattr(action, 'item') and callable(action.item):
+            action = int(action.item())
+        else:
+            action = int(action)
+        
+        # AI_GAME.md: Action must be pure action type (0-7), no unit encoding
+        action_type = action % 8  # Ensure we only get action type, ignore any unit encoding
         
         # Movement actions (0-3)
         if 0 <= action <= 3:
