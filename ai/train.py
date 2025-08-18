@@ -401,6 +401,10 @@ def test_trained_model(model, num_episodes=5):
         if info['winner'] == 1:  # AI won
             wins += 1
     
+    if num_episodes == 0:
+        print("\n📊 Test Results: No test episodes specified (--test-episodes 0)")
+        return 0.0, 0.0
+    
     win_rate = wins / num_episodes
     avg_reward = sum(total_rewards) / len(total_rewards)
     

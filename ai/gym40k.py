@@ -19,8 +19,8 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-# Import Python mirror architecture  
-from ai.game_controller import TrainingGameController, GameControllerConfig
+# Import Python mirror architecture with Sequential Activation Engine
+from ai.sequential_integration_wrapper import SequentialGameController, GameControllerConfig
 from ai.use_game_state import TrainingGameState
 from ai.use_game_actions import TrainingGameActions
 from ai.use_phase_transition import TrainingPhaseTransition
@@ -168,8 +168,8 @@ class W40KEnv(gym.Env):
             log_available_height=self.config.get_log_available_height()
         )
         
-        # Initialize TrainingGameController and start it
-        self.controller = TrainingGameController(config, quiet=self.quiet)
+        # Initialize SequentialGameController with sequential activation and start it
+        self.controller = SequentialGameController(config, quiet=self.quiet)
         self.controller.start_game()  # CRITICAL: Start the controller
         
         # CRITICAL FIX: Use controller's game_state directly - no separate training_state
