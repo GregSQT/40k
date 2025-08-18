@@ -1,0 +1,96 @@
+# EPISODE / TURN / PHASE / STEP MANAGEMENT
+## Episode Lifecycle
+- Episode Start: Beginning of first Player 0 turn (movement phase)
+- Episode End: a Player has no active units OR max steps reached
+- Turn Numbering: Turn 1 = first P0 movement phase, increments at each P0 movement phase start
+## Turn Progression :
+Turn 1: P0 Move → P0 Shoot → P0 Charge → P0 Combat → P1 Move → P1 Shoot → P1 Charge → P1 Combat
+Turn 2: P0 Move (Turn++ here) → P0 Shoot → P0 Charge → P0 Combat → P1 Move → P1 Shoot → P1 Charge → P1 Combat
+Turn 3: P0 Move (Turn++ here) → …
+## Phase progression :
+
+P0 Move phase : 
+	- Start of the phase : All and Only the P0 units are eligible
+	- Loop on each P0 unit :
+		- The unit is the active unit.
+		- It can perform :
+			- 1 move action :
+				- move the unit to an hex within MOVE range and different from the hex occupied by the unit at the beginning of the phase
+				- the destination hex must NOT be occupied or adjacent to an hex occupied by enemy
+				- the destination hex must NOT be a wall
+				-> marked as units_moved -> Action logged -> 1 step increase
+				- If this move action started from an hex adjacent to an enemy unit :
+					- mark as units_moved AND units_fled -> Action logged -> 1 step increase
+
+				- Else : 
+					- marked as units_moved -> Action logged -> 1 step increase
+			- Nothing (wait) -> Action logged -> 1 step increase
+		- This unit is no more the active unit, and is NOT eligible until next phase
+	- Once all the P0 units have performed one of the available actions, move to the next phase
+
+P0 Shooting phase :
+	- Start of the phase : All and ONLY the P0 units are eligible
+	- Loop on each P0 unit :
+		- The unit is the active unit.
+		- If the unit is marked as units_fled AND / OR if the unit has NO line of sight on any enemy unit WITHIN RNG_RNG distance AND / OR is adjacent to an enemy unit : 
+			- The unit is NOT eligible until next phase -> Action logged -> No step increase
+		- Else : 
+			- If the unit has a line of sight on an enemy unit withing RNG_RNG distance, it can perform :
+				- 1 shoot action :
+					- While unit's RNG_NB > 0 AND the unit has a line of sight on an enemy unit withing RNG_RNG distance :
+						- The unit shoots at one of the available targets 
+					- -> marked as units_shot -> Action logged -> 1 step increase for the whole shoot action
+				- refuse to shoot (wait) -> Action logged -> 1 step increase
+		- This unit is no more the active unit, and is NOT eligible until next phase
+	- Once all the P0 units have performed one of the available actions, move to the next phase
+
+P0 Charge phase :
+	- Start of the phase : All and ONLY the P0 units are eligible
+	- Loop on each P0 unit :
+		If at least one of these conditions is true : 
+				- The unit is marked as units_fled
+				- The unit has NO enemy unit WITHIN charge_max_distance range
+				- The unit is adjacent to an enemy unit
+			Then : The unit is NOT eligible until next phase -> Action logged -> No step increase
+		Else : 
+			- It is the active unit
+			- Roll the charge distance for this unit : 2d6
+			- If an hex adjacent to an enemy unit is within the charge roll distance from the active unit, the active unit can perform : 
+				- 1 charge action (the active unit is moved to an hex adjacent to an enemy unit is within the charge roll distance from the active unit) -> marked as units_charged -> Action logged -> 1 step increase
+				- refuse to charge (at charge distance but doesn't charge) (pass) -> Action logged -> no step increase
+			- Else :
+				- This unit is no more the active unit, and is NOT eligible until next phase -> Action logged -> no step increase
+	- Once all the P0 units have performed one of the available actions, move to the next phase
+
+
+P0 Combat phase :
+	- Start of the phase : All the P0 AND P1 units are eligible
+	- Loop on each P0 unit marked as units_charged :
+		- The unit is the active unit.
+		- It performs 1 attack action :
+			- While active unit's CC_NB > 0 AND the active unit is adjacent to an enemy unit  :
+				- The unit attacks one of the available targets 
+			- -> marked as units_attacked -> Action logged -> 1 step increase for the whole attack action
+		- This unit is no more the active unit, and is NOT eligible until next phase -> Action logged -> no step increase
+	- Loop Alternatively between the "non active" player (here : P1) and the "active" player (here :P0) while they both have units not marked as units_attacked and being adjacent to an enemy unit:
+		- If a P1 Unit is adjacent to an enemy unit :
+			- The unit is the active unit.
+		 	- It performs 1 attack action :
+				- While active unit's CC_NB > 0 AND the active unit is adjacent to an enemy unit  :
+					- The unit attacks one of the available targets 
+			- -> marked as units_attacked -> Action logged -> 1 step increase for the whole attack action
+		- If a P0 Unit is not marked as units_charged and being adjacent to an enemy unit :
+			- The unit is the active unit.
+		 	- It performs 1 attack action :
+				- While active unit's CC_NB > 0 AND the active unit is adjacent to an enemy unit  :
+					- The unit attacks one of the available targets 
+			- -> marked as units_attacked -> Action logged -> 1 step increase for the whole attack action
+	- … Continue to alternate ...
+	- If P1 or P0 has no more units not marked as units_attacked and being adjacent to an enemy unit :
+		- Loop on the remaining units not marked as units_attacked and being adjacent to an enemy unit :
+			- The unit is the active unit.
+		 	- It performs 1 attack action :
+				- While active unit's CC_NB > 0 AND the active unit is adjacent to an enemy unit  :
+					- The unit attacks one of the available targets 
+			- -> marked as units_attacked -> Action logged -> 1 step increase for the whole attack action
+	- Once all the P0 and P1 units are NOT eligible until next phase, move to the next phase
