@@ -93,7 +93,7 @@ class GameReplayLogger:
         self.next_event_id += 1
         
         # CRITICAL FIX: Capture game state after each significant action
-        if entry_type in ["move", "shoot", "charge", "combat"]:
+        if entry_type in ["move", "shoot", "charge", "combat", "wait"]:
             self._capture_game_state_snapshot()
                 
         return entry_dict
@@ -141,6 +141,19 @@ class GameReplayLogger:
             action_name=self.action_names.get(action_int, f"action_{action_int}"),
             turn_number=turn_number,
             shoot_details=converted_details
+        )
+    
+    def log_wait(self, unit: Dict, turn_number: int, phase: str, reward: float, action_int: int):
+        """Log wait action with correct phase information."""
+        self.add_entry(
+            entry_type="wait",
+            acting_unit=unit,
+            reward=reward,
+            action_name=self.action_names.get(action_int, f"action_{action_int}"),
+            turn_number=turn_number,
+            phase=phase,
+            start_hex=f"({unit['col']}, {unit['row']})",
+            end_hex=f"({unit['col']}, {unit['row']})"
         )
     
     def log_charge(self, charger: Dict, target: Dict, start_col: int, start_row: int,
@@ -752,14 +765,10 @@ class GameReplayLogger:
                         current_turn, reward, action
                     )
                     
-        elif action_type == 6:  # Wait
+        elif action_type == 6:  # Wait action
             current_turn = self.env.controller.game_state["current_turn"]
-            self.log_move(
-                acting_unit,
-                acting_unit["col"], acting_unit["row"],
-                acting_unit["col"], acting_unit["row"],
-                current_turn, reward, action
-            )
+            current_phase = self.env.controller.game_state["phase"]
+            self.log_wait(acting_unit, current_turn, current_phase, reward, action)
                                
         elif action_type == 7:  # Attack adjacent (Combat)
             if target_unit:

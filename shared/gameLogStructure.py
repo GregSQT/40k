@@ -397,7 +397,7 @@ def log_unified_action(env, action_type: str, acting_unit: Dict, target_unit: Op
         "shoot": "shoot", 
         "charge": "charge",
         "combat": "combat",
-        "wait": "move"
+        "wait": "wait"
     }
     
     if action_type not in action_type_mapping:

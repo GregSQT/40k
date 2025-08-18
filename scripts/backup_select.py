@@ -31,6 +31,7 @@ else:
         "AI_ARCHITECTURE.md",
         "AI_GAME.md",
         "AI_PROTOCOLE.md",
+        "AI_TURN.md",
         "config_loader.py",
 
 ######################################################################################################
