@@ -351,15 +351,12 @@ class W40KEnv(gym.Env):
         # AI_GAME.md COMPLIANT: Action is just action type (0-7), no unit selection
         action_type = int(action) % 8  # Ensure action is in valid range
         
-        # Apply action masking for the active unit only
-        action_mask = self.controller.game_actions["get_action_mask"](1)  # Only need mask for active unit
-        
-        if action_type < len(action_mask) and not action_mask[action_type]:
-            # Convert invalid action to wait action
-            action_type = 7  # Wait action
+        # CRITICAL FIX: Remove action masking from gym - Sequential Engine handles all validation
+        # AI_ARCHITECTURE.md: "gym40k.py - MUST NEVER contain: Unit eligibility or validation logic"
+        print(f"🎮 [gym40k.py::step] GYM STEP - action_type={action_type}")
         
         # ARCHITECTURAL COMPLIANCE: Delegate everything to controller
-        # Controller will get active unit from Sequential Engine
+        # Controller will get active unit from Sequential Engine and handle all validation
         obs, reward, terminated, truncated, info = self.controller.execute_gym_action(action_type)
         
         # Update environment state from controller

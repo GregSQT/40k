@@ -371,19 +371,22 @@ class UseGameActions:
         if "units_moved" not in self.game_state:
             raise KeyError("Game state missing required 'units_moved' field")
         units_moved = set(self.game_state["units_moved"])
+        
         if phase == "move":
+            print(f"\n🔍 [use_game_actions.py::is_unit_eligible_local] MOVE ELIGIBILITY CHECK - U{unit['id']} (P{unit['player']})")
+            print(f"📊 [use_game_actions.py::is_unit_eligible_local] CURRENT UNITS_MOVED: {list(units_moved)}")
+            
             # CRITICAL FIX: Unit is NOT eligible if already moved this phase
             if unit["id"] in units_moved:
-                if unit["player"] == 1:  # Only debug AI units
-                    print(f"❌ U{unit['id']}: already_moved")
+                print(f"❌ [use_game_actions.py::is_unit_eligible_local] U{unit['id']}: already_moved (IN units_moved)")
                 return False
             
             # CRITICAL FIX: Dead units are NEVER eligible
             if not unit.get("alive", True):
-                if unit["player"] == 1:  # Only debug AI units
-                    print(f"❌ U{unit['id']}: not_alive")
+                print(f"❌ [use_game_actions.py::is_unit_eligible_local] U{unit['id']}: not_alive")
                 return False
             
+            print(f"✅ [use_game_actions.py::is_unit_eligible_local] U{unit['id']}: ELIGIBLE (alive + not in units_moved)")
             # Unit is eligible if alive and hasn't moved this phase
             # No need for additional validation - the get_valid_moves will handle destinations
             return True
@@ -1219,17 +1222,29 @@ class UseGameActions:
         """
         unit = self.find_unit(unit_id)
         phase = self.game_state["phase"]
-        if not unit or not self.is_unit_eligible_local(unit) or phase != "move":
-            return False
+        
+        print(f"\n🚶 [use_game_actions.py::validated_move] VALIDATED_MOVE - U{unit_id} to ({col}, {row})")
+        print(f"📊 [use_game_actions.py::validated_move] UNITS_MOVED BEFORE MOVE: {list(self.game_state.get('units_moved', []))}")
+        
+        # CRITICAL FIX: Trust Sequential Engine - no redundant eligibility checks during action execution
+        # AI_GAME.md: "Target Validation: Performed at START of each activation (not action execution time)"
+        if not unit or phase != "move":
+            print(f"❌ [use_game_actions.py::validated_move] MOVE REJECTED: unit_found={unit is not None}, phase={phase}")
+            return False    
 
         # CRITICAL: Validate movement using wall-checking system
         valid_moves = self.get_valid_moves(unit_id)
         if not any(move["col"] == col and move["row"] == row for move in valid_moves):
+            print(f"❌ MOVE REJECTED: destination not in valid_moves")
             return False  # Invalid destination - movement blocked by walls
 
+        print(f"✅ MOVE ACCEPTED: U{unit_id} moving from ({unit['col']}, {unit['row']}) to ({col}, {row})")
+        
         # Direct unit update without preview system to avoid complications
         self.actions["update_unit"](unit_id, {"col": col, "row": row})
         # CRITICAL FIX: Do NOT call add_moved_unit here - _mark_gym_unit_as_acted will handle it
+        
+        print(f"📊 UNITS_MOVED AFTER MOVE (before marking): {list(self.game_state.get('units_moved', []))}")
         return True
 
     def get_charge_destinations(self, unit_id: int) -> List[Dict[str, int]]:
@@ -1529,7 +1544,7 @@ class UseGameActions:
         """Get valid move positions for unit"""
         unit = self.find_unit(unit_id)
         if not unit or self.game_state.get("phase") != "move":
-            raise ValueError("Unit not found, not eligible, or not in move phase")
+            raise ValueError("Unit not found or not in move phase")
         
         # Validate required unit fields
         if "MOVE" not in unit:
@@ -1666,33 +1681,43 @@ class UseGameActions:
         current_phase = self.game_state.get("phase", "move")
         current_player = self.game_state.get("current_player", 0)
         
-        # Reduced debug: only essential info
+        # CRITICAL FIX: Trust Sequential Engine - don't duplicate eligibility checks
+        # Sequential Engine determines which units are eligible, gym just needs action types
+        print(f"🎭 [use_game_actions.py::get_action_mask] ACTION_MASK requested for {current_phase} phase")
         
-        # Get ALL eligible units for current player
-        eligible_units = self.get_eligible_units()
-        current_player_eligible = [u for u in eligible_units if u["player"] == current_player]
-        if len(current_player_eligible) == 0 and current_player == 1:
-            print(f"🔍 P{current_player} {current_phase}: NO eligible units")
+        # Get current player units (no eligibility checks - trust Sequential Engine)
+        current_player_units = [u for u in self.game_state["units"] if u["player"] == current_player and u.get("alive", True)]
         
         action_mask = []
         
-        # CRITICAL FIX: Only allow actions for units that actually exist and are eligible
+        # CRITICAL FIX: Trust Sequential Engine for unit eligibility - no redundant checks
         for unit_idx in range(max_units):
-            if unit_idx < len(current_player_eligible):
-                unit = current_player_eligible[unit_idx]
-                # Process unit actions without debug
+            if unit_idx < len(current_player_units):
+                unit = current_player_units[unit_idx]
                 
                 for action_type in range(8):
-                    # Action is valid ONLY if unit exists AND is eligible AND action type is valid for phase
+                    # Trust Sequential Engine - provide generic action mask for valid action types
                     action_valid = False
                     
                     if current_phase == "move" and action_type in [0, 1, 2, 3]:
-                        # Movement actions - check if unit has valid moves
-                        try:
-                            valid_moves = self.get_valid_moves(unit["id"])
-                            action_valid = len(valid_moves) > 0
-                        except Exception as e:
-                            action_valid = False
+                        # Movement actions - valid for move phase
+                        action_valid = True  
+                        
+                    elif current_phase == "shoot" and action_type == 4:
+                        # Shoot action - valid for shoot phase
+                        action_valid = True
+                        
+                    elif current_phase == "charge" and action_type == 5:
+                        # Charge action - valid for charge phase
+                        action_valid = True
+                        
+                    elif current_phase == "combat" and action_type == 6:
+                        # Combat action - valid for combat phase
+                        action_valid = True
+                        
+                    elif action_type == 7:
+                        # Wait action - always valid in any phase
+                        action_valid = True
                             
                     elif current_phase == "shoot" and action_type == 4:
                         # AI_GAME.md: Shooting action - check RNG_NB > 0 AND valid targets

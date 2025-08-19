@@ -83,18 +83,33 @@ class UsePhaseTransition:
 
     def should_transition_from_move(self) -> bool:
         """Check if all player units have moved or can't move - EXACT from AI_GAME.md"""
-        # Get current player units that are alive
-        current_player_units = [u for u in self.units if u["player"] == self.current_player and u.get("alive", True)]
+        # CRITICAL FIX: Always use LIVE game state, not cached values
+        live_units_moved = set(self.game_state["units_moved"])
+        live_current_player = self.game_state["current_player"]
+        live_units = self.game_state["units"]
+        
+        print(f"\n🔍 [use_phase_transition.py::should_transition_from_move] MOVE PHASE TRANSITION CHECK - Player {live_current_player}")
+        print(f"📊 [use_phase_transition.py::should_transition_from_move] UNITS_MOVED STATUS (LIVE): {list(live_units_moved)}")
+        print(f"📊 [use_phase_transition.py::should_transition_from_move] UNITS_MOVED STATUS (CACHED): {list(self.units_moved)}")
+        
+        # Get current player units that are alive from LIVE state
+        current_player_units = [u for u in live_units if u["player"] == live_current_player and u.get("alive", True)]
+        print(f"👥 [use_phase_transition.py::should_transition_from_move] CURRENT PLAYER UNITS: {['U' + str(u['id']) for u in current_player_units]}")
         
         # Phase transitions when ALL current player units have either:
         # 1. Moved (in units_moved) OR
         # 2. Died (not alive)
         units_not_moved = []
         for unit in current_player_units:
-            if unit["id"] not in self.units_moved:
+            if unit["id"] not in live_units_moved:  # Use LIVE units_moved
                 units_not_moved.append(unit["id"])
+                print(f"❌ [use_phase_transition.py::should_transition_from_move] U{unit['id']}: NOT in units_moved")
+            else:
+                print(f"✅ [use_phase_transition.py::should_transition_from_move] U{unit['id']}: IN units_moved")
         
         should_transition = len(units_not_moved) == 0
+        print(f"🎯 [use_phase_transition.py::should_transition_from_move] UNITS NOT MOVED: {['U' + str(uid) for uid in units_not_moved]}")
+        print(f"🔄 [use_phase_transition.py::should_transition_from_move] SHOULD TRANSITION: {should_transition}")
         
         return should_transition
 
@@ -177,11 +192,18 @@ class UsePhaseTransition:
         """
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
+            print(f"\n🎯 [use_phase_transition.py::transition_to_shoot] TRANSITIONING FROM MOVE TO SHOOT PHASE")
+            print(f"📊 [use_phase_transition.py::transition_to_shoot] UNITS_MOVED BEFORE TRANSITION: {list(self.units_moved)}")
+            
             self.actions["set_phase"]("shoot")
             self.actions["initialize_shooting_phase"]()
             # AI_TURN.md: Reset shot tracking at phase start, preserve moved tracking
             self.actions["reset_shot_units"]()
             self.actions["set_selected_unit_id"](None)
+            
+            print(f"📊 [use_phase_transition.py::transition_to_shoot] UNITS_MOVED AFTER TRANSITION: {list(self.game_state.get('units_moved', []))}")
+            print(f"🧹 [use_phase_transition.py::transition_to_shoot] UNITS_SHOT RESET: {list(self.game_state.get('units_shot', []))}")
+            print(f"✅ [use_phase_transition.py::transition_to_shoot] MOVED TO SHOOT PHASE - AI_TURN.md compliant")
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
@@ -201,6 +223,9 @@ class UsePhaseTransition:
             # AI_TURN.md: Reset charge tracking at phase start, preserve other tracking
             self.actions["reset_charged_units"]()
             self.actions["set_selected_unit_id"](None)
+            
+            print(f"🧹 [use_phase_transition.py::transition_to_charge] UNITS_CHARGED RESET: {list(self.game_state.get('units_charged', []))}")
+            print(f"✅ [use_phase_transition.py::transition_to_charge] MOVED TO CHARGE PHASE - AI_TURN.md compliant")
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
@@ -228,6 +253,9 @@ class UsePhaseTransition:
             self.actions["set_selected_unit_id"](None)
             self.actions["set_mode"]("select")
             
+            print(f"🧹 [use_phase_transition.py::transition_to_combat] UNITS_ATTACKED RESET: {list(self.game_state.get('units_attacked', []))}")
+            print(f"✅ [use_phase_transition.py::transition_to_combat] MOVED TO COMBAT PHASE - AI_TURN.md compliant")
+            
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
             self.units_attacked = set()  # AI_TURN.md: Fresh combat tracking for new phase
@@ -247,6 +275,9 @@ class UsePhaseTransition:
             correct_game_state = set_phase_func.__self__.game_state
             self.game_state = correct_game_state
             
+            print(f"\n🔄 ENDING TURN - Player {self.current_player}")
+            print(f"📊 UNITS_MOVED BEFORE TURN END: {list(self.game_state.get('units_moved', []))}")
+            
             # Switch player (EXACT from TypeScript)
             new_player = 1 if self.current_player == 0 else 0
             self.actions["set_current_player"](new_player)
@@ -254,9 +285,15 @@ class UsePhaseTransition:
             # Set phase to move first
             self.actions["set_phase"]("move")
             
+            print(f"🏁 STARTING NEW MOVEMENT PHASE - Player {new_player}")
+            print(f"📊 UNITS_MOVED BEFORE RESET: {list(self.game_state.get('units_moved', []))}")
+            
             # AI_TURN.md CRITICAL: Reset units_moved at START of new movement phase
             self.actions["reset_moved_units"]()
             self.actions["reset_fled_units"]()
+            
+            print(f"🧹 RESET MOVED UNITS CALLED")
+            print(f"📊 UNITS_MOVED AFTER RESET: {list(self.game_state.get('units_moved', []))}")
             
             # CRITICAL FIX: Increment turn ONLY when Player 0 starts movement phase (EXACT from frontend)
             if new_player == 0:  # Player 0 is about to start their turn
@@ -369,6 +406,11 @@ class UsePhaseTransition:
         phase_reading_2 = self.game_state["phase"]
         player_reading_2 = self.game_state["current_player"]
         
+        # CRITICAL FIX: Always sync state BEFORE any transition checks
+        print(f"\n🔄 [use_phase_transition.py::process_phase_transitions] SYNCING PHASE TRANSITION STATE")
+        print(f"📊 [use_phase_transition.py::process_phase_transitions] LIVE UNITS_MOVED: {list(self.game_state.get('units_moved', []))}")
+        print(f"📊 [use_phase_transition.py::process_phase_transitions] CACHED UNITS_MOVED: {list(self.units_moved)}")
+        
         # Update local state references from synchronized game_state
         self.units = self.game_state["units"]
         self.current_player = self.game_state["current_player"]
@@ -383,12 +425,15 @@ class UsePhaseTransition:
             raise KeyError("game_state missing required 'units_fled' field during update")
         
         self.units_moved = set(self.game_state["units_moved"])
+        print(f"✅ [use_phase_transition.py::process_phase_transitions] STATE SYNCED - CACHED UNITS_MOVED NOW: {list(self.units_moved)}")
         self.units_shot = set(self.game_state["units_shot"])
         self.units_charged = set(self.game_state["units_charged"])
         self.units_attacked = set(self.game_state["units_attacked"])
         self.units_fled = set(self.game_state["units_fled"])
         self.combat_sub_phase = self.game_state.get("combat_sub_phase")
         self.combat_active_player = self.game_state.get("combat_active_player")
+        
+        print(f"✅ STATE SYNCED - CACHED UNITS_MOVED NOW: {list(self.units_moved)}")
 
         # CRITICAL DEBUG: Verify final cached values match dictionary values
         dict_phase = self.game_state["phase"]
@@ -396,8 +441,13 @@ class UsePhaseTransition:
 
         # Main phase transition logic (EXACT from TypeScript)
         if self.phase == "move":
+            print(f"\n🔄 PROCESSING MOVE PHASE TRANSITIONS")
+            print(f"📊 CURRENT UNITS_MOVED: {list(self.units_moved)}")
             if self.should_transition_from_move():
+                print(f"✅ TRANSITIONING FROM MOVE PHASE")
                 self.transition_to_shoot()
+            else:
+                print(f"⏳ STAYING IN MOVE PHASE")
                 
         elif self.phase == "shoot":
             if self.should_transition_from_shoot():
