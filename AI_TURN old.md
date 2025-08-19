@@ -10,7 +10,7 @@
 - [Tracking Sets Summary](#-tracking-sets-summary) - State management
 - [Quick Reference Guide](#-quick-reference-guide) - Implementation tables
 
-## 📋 EPISODE LIFECYCLE
+## 🔋 EPISODE LIFECYCLE
 - **Episode Start**: Beginning of first Player 0 turn (movement phase)
 - **Episode End**: A Player has no active units OR max number of turns reached
 - **Turn Numbering**: Turn 1 = first P0 movement phase, increments at each P0 movement phase start
@@ -44,7 +44,6 @@ Turn 3: P0 Move (Turn++ here) → ...
 - **Tracking Set**: `units_moved` (reset at phase start)
 
 ### **Movement Eligibility Decision Tree**
-```
 Unit Movement Eligibility Check:
 ├── unit.CUR_HP > 0?
 │   └── NO → ❌ Dead unit (Skip, no log)
@@ -53,10 +52,8 @@ Unit Movement Eligibility Check:
 ├── units_moved.includes(unit.id)?
 │   └── YES → ❌ Already moved (Skip, no log)
 └── ALL conditions met → ✅ Eligible for Move/Wait actions
-```
 
 ### **Movement Action Decision Tree**
-```
 Available Actions for Eligible Unit:
 ├── Valid destination exists within MOVE range?
 │   ├── YES → Move Action
@@ -65,8 +62,7 @@ Available Actions for Eligible Unit:
 │   │   └── Result: +1 step, action logged
 │   └── NO → Only Wait available
 └── Wait Action → Mark as units_moved
-    └── Result: +1 step, action logged
-```
+└── Result: +1 step, action logged
 
 ## Unit Processing Loop
 For each current player unit:
@@ -123,7 +119,6 @@ For each current player unit:
 - **Tracking Set**: `units_shot` (reset at phase start)
 
 ### **Shooting Eligibility Decision Tree**
-```
 Unit Shooting Eligibility Check:
 ├── unit.CUR_HP > 0?
 │   └── NO → ❌ Dead unit (Skip, no log)
@@ -138,10 +133,8 @@ Unit Shooting Eligibility Check:
 ├── Has LOS to enemies within RNG_RNG?
 │   ├── NO → ❌ No targets (Log ineligible, no step)
 │   └── YES → ✅ Eligible for Shoot/Wait actions
-```
 
 ### **Shooting Action Decision Tree**
-```
 Available Actions for Eligible Unit:
 ├── Choose to shoot?
 │   └── YES → Shoot Action
@@ -149,8 +142,7 @@ Available Actions for Eligible Unit:
 │       │   └── Execute shot at selected target
 │       └── Result: Mark as units_shot, +1 step, action logged
 └── Choose to wait → Wait Action
-    └── Result: Mark as units_shot, +1 step, action logged
-```
+└── Result: Mark as units_shot, +1 step, action logged
 
 ## Unit Processing Loop
 For each current player unit:
@@ -202,7 +194,6 @@ Unit is eligible if ALL of these conditions are true:
 - **Tracking Set**: `units_charged` (reset at phase start)
 
 ### **Charge Eligibility Decision Tree**
-```
 Unit Charge Eligibility Check:
 ├── unit.CUR_HP > 0?
 │   └── NO → ❌ Dead unit (Skip, no log)
@@ -217,10 +208,8 @@ Unit Charge Eligibility Check:
 ├── Enemies within charge_max_distance?
 │   ├── NO → ❌ No targets (Log ineligible, no step)
 │   └── YES → ✅ Eligible → Roll 2d6 for charge distance
-```
 
 ### **Charge Action Decision Tree**
-```
 Available Actions After 2d6 Roll:
 ├── Valid charge destinations within rolled distance?
 │   ├── YES → Charge Action Available
@@ -230,7 +219,6 @@ Available Actions After 2d6 Roll:
 │   │       └── Result: +0 step, action logged
 │   └── NO → Auto-Skip
 │       └── Result: +0 step, action logged
-```
 
 ## Unit Processing Loop
 For each current player unit:
@@ -291,6 +279,7 @@ Unit is eligible if ALL of these conditions are true:
 - **Sub-Phases**: Two distinct sub-phases with different rules
 - **Reference**: See [Step Counting Rules](#-step-counting-rules) for combat step mechanics
 
+
 ### **Combat Phase Overall Decision Tree**
 
 ```mermaid
@@ -308,11 +297,9 @@ graph TD
     G -->|NO| J{One player has eligible units?}
     J -->|YES| K[Cleanup: Process remaining units]
     J -->|NO| L[Combat Phase End]
-    K --> L
-```
+    K --> L```
 
-### **Combat Phase Text Flow (Implementation Reference)**
-```
+Combat Phase Text Flow (Implementation Reference)
 Combat Phase Structure:
 ├── Sub-Phase 1: Charging Units Priority
 │   ├── Process all current_player units in units_charged
@@ -322,12 +309,10 @@ Combat Phase Structure:
     │   ├── Non-active player attacks
     │   └── Active player attacks (non-chargers only)
     └── Cleanup: Process remaining eligible units
-```
 
-## 🥇 SUB-PHASE 1: Charging Units Priority
+🥇 SUB-PHASE 1: Charging Units Priority
 
 ### **Sub-Phase 1 Eligibility Decision Tree**
-```
 Charging Unit Combat Eligibility:
 ├── unit in units_charged?
 │   └── NO → Skip to Sub-Phase 2
@@ -338,10 +323,8 @@ Charging Unit Combat Eligibility:
 ├── units_attacked.includes(unit.id)?
 │   └── YES → ❌ Already attacked (Skip, no log)
 └── ALL conditions met → ✅ Process for attack
-```
 
 ### **Sub-Phase 1 Action Decision Tree**
-```
 Charging Unit Attack Process:
 ├── Adjacent alive enemies exist?
 │   ├── YES → Attack Action (Mandatory)
@@ -350,7 +333,6 @@ Charging Unit Attack Process:
 │   │   └── Result: Mark as units_attacked, +1 step, action logged
 │   └── NO → Pass Action
 │       └── Result: Mark as units_attacked, +0 step, action logged
-```
 
 ### **Eligible Units**: Current player units marked as `units_charged`
 
@@ -386,7 +368,6 @@ For each charging unit:
 ### **Eligible Units**: Units NOT marked as `units_attacked` AND adjacent to enemy unit
 
 ### **Sub-Phase 2 Eligibility Decision Tree**
-```
 Alternating Combat Eligibility:
 ├── unit.CUR_HP > 0?
 │   └── NO → ❌ Dead unit (Skip)
@@ -397,10 +378,8 @@ Alternating Combat Eligibility:
 ├── For active player units: unit in units_charged?
 │   └── YES → ❌ Already processed in Sub-Phase 1 (Skip)
 └── ALL conditions met → ✅ Eligible for alternating combat
-```
 
 ### **Sub-Phase 2 Action Decision Tree**
-```
 Alternating Combat Attack Process:
 ├── Non-Active Player Turn:
 │   ├── Select eligible non-active player unit
@@ -419,7 +398,6 @@ Alternating Combat Attack Process:
 │   │       └── Result: Mark as units_attacked, +0 step, action logged
 │   └── Switch to Non-Active Player
 └── Continue alternating while both players have eligible units
-```
 
 ### Alternating Loop
 While BOTH players have eligible units:
@@ -604,4 +582,3 @@ const eligibleUnits = getCurrentPlayerUnits().filter(u =>
     u.CUR_HP > 0 && !tracking_sets.phase_action.has(u.id)
 );
 if (eligibleUnits.length === 0) advanceToNextPhase();
-```
