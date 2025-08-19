@@ -88,28 +88,12 @@ class UsePhaseTransition:
         live_current_player = self.game_state["current_player"]
         live_units = self.game_state["units"]
         
-        print(f"\n🔍 [use_phase_transition.py::should_transition_from_move] MOVE PHASE TRANSITION CHECK - Player {live_current_player}")
-        print(f"📊 [use_phase_transition.py::should_transition_from_move] UNITS_MOVED STATUS (LIVE): {list(live_units_moved)}")
-        # Removed CACHED status logging - no more cached state
-        
-        # Get current player units that are alive from LIVE state
+        # AI_TURN.md: Check if all player units have moved or can't move
         current_player_units = [u for u in live_units if u["player"] == live_current_player and u.get("alive", True)]
-        print(f"👥 [use_phase_transition.py::should_transition_from_move] CURRENT PLAYER UNITS: {['U' + str(u['id']) for u in current_player_units]}")
         
-        # Phase transitions when ALL current player units have either:
-        # 1. Moved (in units_moved) OR
-        # 2. Died (not alive)
-        units_not_moved = []
-        for unit in current_player_units:
-            if unit["id"] not in live_units_moved:  # Use LIVE units_moved
-                units_not_moved.append(unit["id"])
-                print(f"❌ [use_phase_transition.py::should_transition_from_move] U{unit['id']}: NOT in units_moved")
-            else:
-                print(f"✅ [use_phase_transition.py::should_transition_from_move] U{unit['id']}: IN units_moved")
-        
+        # Phase transitions when ALL current player units have moved
+        units_not_moved = [unit["id"] for unit in current_player_units if unit["id"] not in live_units_moved]
         should_transition = len(units_not_moved) == 0
-        print(f"🎯 [use_phase_transition.py::should_transition_from_move] UNITS NOT MOVED: {['U' + str(uid) for uid in units_not_moved]}")
-        print(f"🔄 [use_phase_transition.py::should_transition_from_move] SHOULD TRANSITION: {should_transition}")
         
         return should_transition
 
@@ -385,18 +369,11 @@ class UsePhaseTransition:
         current_phase = self.game_state["phase"]
         current_player = self.game_state["current_player"]
         
-        print(f"\n🔄 [use_phase_transition.py::process_phase_transitions] AI_TURN.md COMPLIANCE CHECK")
-        print(f"📊 [use_phase_transition.py::process_phase_transitions] PHASE: {current_phase}, PLAYER: {current_player}")
-        print(f"📊 [use_phase_transition.py::process_phase_transitions] LIVE UNITS_MOVED: {list(self.game_state['units_moved'])}")
-        
         # AI_TURN.md: Check "no eligible units remain" condition using live state
         eligible_units = self._get_eligible_units_for_current_phase_direct()
         
         if len(eligible_units) == 0:
-            print(f"🎯 [use_phase_transition.py::process_phase_transitions] NO ELIGIBLE UNITS - ADVANCING PHASE")
             self._advance_to_next_phase(current_phase)
-        else:
-            print(f"⏳ [use_phase_transition.py::process_phase_transitions] {len(eligible_units)} ELIGIBLE UNITS REMAIN")
             
         # CRITICAL DEBUG: Capture atomic phase readings to detect race conditions
         phase_reading_1 = self.game_state["phase"]

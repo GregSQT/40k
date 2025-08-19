@@ -373,45 +373,24 @@ class UseGameActions:
         units_moved = set(self.game_state["units_moved"])
         
         if phase == "move":
-            print(f"\n🔍 [use_game_actions.py::is_unit_eligible_local] MOVE ELIGIBILITY CHECK - U{unit['id']} (P{unit['player']})")
-            print(f"📊 [use_game_actions.py::is_unit_eligible_local] CURRENT UNITS_MOVED: {list(units_moved)}")
-            
-            # CRITICAL FIX: Unit is NOT eligible if already moved this phase
+            # AI_TURN.md: Movement eligibility - unit hasn't moved this phase and is alive
             if unit["id"] in units_moved:
-                print(f"❌ [use_game_actions.py::is_unit_eligible_local] U{unit['id']}: already_moved (IN units_moved)")
                 return False
-            
-            # CRITICAL FIX: Dead units are NEVER eligible
             if not unit.get("alive", True):
-                print(f"❌ [use_game_actions.py::is_unit_eligible_local] U{unit['id']}: not_alive")
                 return False
-            
-            print(f"✅ [use_game_actions.py::is_unit_eligible_local] U{unit['id']}: ELIGIBLE (alive + not in units_moved)")
-            # Unit is eligible if alive and hasn't moved this phase
-            # No need for additional validation - the get_valid_moves will handle destinations
             return True
         
         elif phase == "shoot":
             units_fled = set(self.game_state.get("units_fled"))
             units_shot = set(self.game_state.get("units_shot", []))
-            if unit["player"] == 1:  # Debug AI units phase tracking
-                print(f"🔍 U{unit['id']} SHOOT CHECK: units_shot={list(units_shot)}, units_moved={list(self.game_state.get('units_moved', []))}")
             if unit["id"] in units_shot:
-                if unit["player"] == 1:  # Only debug AI units
-                    print(f"❌ U{unit['id']}: already_shot")
                 return False
-            
             # AI_TURN.md: "Unit is marked as units_fled" - NOT eligible
             if unit["id"] in units_fled:
-                if unit["player"] == 1:  # Only debug AI units
-                    print(f"❌ U{unit['id']}: unit_fled")
                 return False
-            
             # AI_TURN.md: "Unit is adjacent to an enemy unit" - NOT eligible
             has_adjacent_enemy_shoot = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             if has_adjacent_enemy_shoot:
-                if unit["player"] == 1:
-                    print(f"❌ U{unit['id']}: adjacent_to_enemy")
                 return False
             
             # AI_TURN.md: Must have RNG_RNG > 0 for ranged weapon

@@ -131,12 +131,7 @@ class SequentialGameController:
             )
             
         # Execute action through sequential engine with AI_TURN.md step counting
-        print(f"\n⚡ [sequential_integration_wrapper.py::_execute_via_sequential_engine] EXECUTING ACTION - U{active_unit['id']} in {current_phase}")
-        print(f"📊 [sequential_integration_wrapper.py::_execute_via_sequential_engine] UNITS_MOVED BEFORE ACTION: {list(self.base_controller.game_state.get('units_moved', []))}")
-        
-        # AI_TURN.md: "Only significant actions (move, shoot, charge, attack, wait) increment steps"
         steps_before = self.base_controller.game_state.get("episode_steps", 0)
-        
         success = self.sequential_engine.execute_unit_action(active_unit, mirror_action)
         
         # AI_TURN.md COMPLIANCE: Track step increment based on action type (single execution)
@@ -146,13 +141,6 @@ class SequentialGameController:
                 new_steps = steps_before + 1
                 self.base_controller.game_state["episode_steps"] = new_steps
                 self._last_step_logged = (steps_before, mirror_action["type"])
-                print(f"📈 [sequential_integration_wrapper.py::_execute_via_sequential_engine] STEP COUNT: {steps_before} → {new_steps} (ACTION: {mirror_action['type']})")
-        else:
-            print(f"📊 [sequential_integration_wrapper.py::_execute_via_sequential_engine] NO STEP INCREMENT - Auto-skip or failed action")
-        
-        # Single units_moved status log
-        units_moved_state = list(self.base_controller.game_state.get('units_moved', []))
-        print(f"📊 [sequential_integration_wrapper.py::_execute_via_sequential_engine] UNITS_MOVED AFTER ACTION: {units_moved_state}")
         
         # CRITICAL FIX: Ensure unit is marked as acted after successful action
         if success:
