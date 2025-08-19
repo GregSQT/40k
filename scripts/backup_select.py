@@ -51,6 +51,7 @@ else:
         "ai/sequential_integration_wrapper.py",
         #"ai/scenario.json",
         "ai/scenario_manager.py",
+        "ai/step_logging_wrapper.py",
         "ai/train.py",
         "ai/unit_manager.py",
         "ai/unit_registry.py",

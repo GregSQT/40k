@@ -33,6 +33,128 @@ from ai.multi_agent_trainer import MultiAgentTrainer
 from config_loader import get_config_loader
 from ai.game_replay_logger import GameReplayIntegration
 import torch
+import time  # Add time import for StepLogger timestamps
+
+
+class StepLogger:
+    """
+    Step-by-step action logger for training debugging.
+    Captures ALL actions that generate step increments per AI_TURN.md.
+    """
+    
+    def __init__(self, output_file="train_step.log", enabled=False):
+        self.output_file = output_file
+        self.enabled = enabled
+        self.step_count = 0
+        self.action_count = 0
+        
+        if self.enabled:
+            # Clear existing log file
+            with open(self.output_file, 'w') as f:
+                f.write("=== STEP-BY-STEP ACTION LOG ===\n")
+                f.write("AI_TURN.md COMPLIANCE: Only actions that increment episode_steps are logged\n")
+                f.write("STEP INCREMENT ACTIONS: move, shoot, charge, combat, wait\n")
+                f.write("NO STEP INCREMENT: auto-skip ineligible units, phase transitions\n")
+                f.write("=" * 80 + "\n\n")
+            print(f"📝 Step logging enabled: {self.output_file}")
+    
+    def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None):
+        """Log action with step increment information using replay-style one-line format"""
+        if not self.enabled:
+            return
+            
+        self.action_count += 1
+        if step_increment:
+            self.step_count += 1
+            
+        try:
+            with open(self.output_file, 'a') as f:
+                timestamp = time.strftime("%H:%M:%S", time.localtime())
+                
+                # Format message using gameLogUtils.ts style
+                message = self._format_replay_style_message(unit_id, action_type, action_details)
+                
+                # One-line format: [timestamp] STEP #X (P0/P1 phase): Message [SUCCESS/FAILED] [STEP: YES/NO]
+                step_status = "STEP: YES" if step_increment else "STEP: NO"
+                success_status = "SUCCESS" if success else "FAILED"
+                player_phase = f"P{player} {phase}"
+                
+                f.write(f"[{timestamp}] #{self.action_count} ({player_phase}): {message} [{success_status}] [{step_status}]\n")
+                
+        except Exception as e:
+            print(f"⚠️ Step logging error: {e}")
+    
+    def _format_replay_style_message(self, unit_id, action_type, details):
+        """Format messages using gameLogUtils.ts style - EXACT match to replay format"""
+        if action_type == "move" and details:
+            # Extract position info for move message
+            if "start_pos" in details and "end_pos" in details:
+                start_col, start_row = details["start_pos"]
+                end_col, end_row = details["end_pos"]
+                return f"Unit {unit_id} MOVED from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+            else:
+                return f"Unit {unit_id} MOVED"
+                
+        elif action_type == "shoot" and details and "target_id" in details:
+            target_id = details["target_id"]
+            return f"Unit {unit_id} SHOT at unit {target_id}"
+            
+        elif action_type == "charge" and details:
+            if "target_id" in details:
+                target_id = details["target_id"]
+                if "unit_name" in details and "target_name" in details and "start_pos" in details and "end_pos" in details:
+                    unit_name = details["unit_name"]
+                    target_name = details["target_name"]
+                    start_col, start_row = details["start_pos"]
+                    end_col, end_row = details["end_pos"]
+                    return f"Unit {unit_name} {unit_id} CHARGED unit {target_name} {target_id} from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+                else:
+                    return f"Unit {unit_id} CHARGED unit {target_id}"
+            else:
+                return f"Unit {unit_id} CHARGED"
+                
+        elif action_type == "combat" and details and "target_id" in details:
+            target_id = details["target_id"]
+            return f"Unit {unit_id} FOUGHT unit {target_id}"
+            
+        elif action_type == "wait":
+            return f"Unit {unit_id} NO MOVE"
+            
+        else:
+            # Fallback for unknown action types
+            return f"Unit {unit_id} {action_type.upper()}"
+    
+    def log_phase_transition(self, from_phase, to_phase, player):
+        """Log phase transitions (no step increment) using replay-style format"""
+        if not self.enabled:
+            return
+            
+        try:
+            with open(self.output_file, 'a') as f:
+                timestamp = time.strftime("%H:%M:%S", time.localtime())
+                # gameLogUtils.ts style: "Start Player's PHASE phase"
+                player_name = f"Player {player}"
+                message = f"Start {player_name}'s {to_phase.upper()} phase"
+                f.write(f"[{timestamp}] PHASE: {message} [STEP: NO]\n")
+        except Exception as e:
+            print(f"⚠️ Step logging error: {e}")
+    
+    def log_episode_end(self, total_episodes_steps, winner):
+        """Log episode completion summary using replay-style format"""
+        if not self.enabled:
+            return
+            
+        try:
+            with open(self.output_file, 'a') as f:
+                timestamp = time.strftime("%H:%M:%S", time.localtime())
+                f.write(f"[{timestamp}] EPISODE END: Winner={winner}, Actions={self.action_count}, Steps={self.step_count}, Total={total_episodes_steps}\n")
+                f.write("=" * 80 + "\n")
+        except Exception as e:
+            print(f"⚠️ Step logging error: {e}")
+
+
+# Global step logger instance
+step_logger = None
 
 class SelectiveEvalCallback(EvalCallback):
     """Custom evaluation callback that saves best/worst/shortest episode replays."""
@@ -136,6 +258,17 @@ def create_model(config, training_config_name="default", rewards_config_name="de
         quiet=False
     )
     
+    # Connect step logger after environment creation
+    if step_logger:
+        # Import and use step logging integration
+        try:
+            from step_logging_wrapper import enable_step_logging_on_environment
+            enable_step_logging_on_environment(base_env, step_logger)
+        except ImportError as e:
+            print(f"⚠️ Step logging import failed: {e}")
+            # Fallback: attach step logger directly
+            base_env.step_logger = step_logger
+    
     # DISABLED: No logging during training for speed
     # Enhanced logging only during evaluation
     env = Monitor(base_env)
@@ -208,6 +341,17 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         unit_registry=unit_registry,
         quiet=False
     )
+    
+    # Connect step logger after environment creation
+    if step_logger:
+        # Import and use step logging integration
+        try:
+            from step_logging_wrapper import enable_step_logging_on_environment
+            enable_step_logging_on_environment(base_env, step_logger)
+        except ImportError as e:
+            print(f"⚠️ Step logging import failed: {e}")
+            # Fallback: attach step logger directly
+            base_env.step_logger = step_logger
     
     # DISABLED: No logging during training for speed
     # Enhanced logging only during evaluation
@@ -510,6 +654,8 @@ def main():
                        help="Specific training phase for 3-phase training plan")
     parser.add_argument("--test-integration", action="store_true",
                        help="Test scenario manager integration")
+    parser.add_argument("--step", action="store_true",
+                       help="Enable step-by-step action logging to train_step.log")
     
     args = parser.parse_args()
     
@@ -522,9 +668,14 @@ def main():
     print(f"Test only: {args.test_only}")
     print(f"Multi-agent: {args.multi_agent}")
     print(f"Orchestrate: {args.orchestrate}")
+    print(f"Step logging: {args.step}")
     print()
     
     try:
+        # Initialize global step logger based on --step argument
+        global step_logger
+        step_logger = StepLogger("train_step.log", enabled=args.step)
+        
         # Sync configs to frontend automatically
         try:
             subprocess.run(['node', 'scripts/copy-configs.js'], 
@@ -606,6 +757,15 @@ def main():
                 unit_registry=unit_registry,
                 quiet=True
             )
+            
+            # Connect step logger after environment creation
+            if step_logger:
+                try:
+                    from step_logging_wrapper import enable_step_logging_on_environment
+                    enable_step_logging_on_environment(env, step_logger)
+                except ImportError as e:
+                    print(f"⚠️ Step logging import failed: {e}")
+                    env.step_logger = step_logger
             model = DQN.load(model_path, env=env)
             test_trained_model(model, args.test_episodes)
             return 0
