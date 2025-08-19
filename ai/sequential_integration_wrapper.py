@@ -86,47 +86,37 @@ class SequentialGameController:
         # CRITICAL FIX: Initialize Sequential Engine for phase if not already done
         if (self.sequential_engine.queue_built_for_phase != current_phase or 
             self.sequential_engine.queue_built_for_player != self.base_controller.get_current_player()):
-            print(f"🔧 INITIALIZING SEQUENTIAL ENGINE for phase {current_phase}")
             self.sequential_engine.start_phase(current_phase)
         
         # CRITICAL FIX: Always get active unit FIRST - no multiple units per phase
         active_unit = self.sequential_engine.get_next_active_unit()
-        print(f"🤖 SEQUENTIAL ENGINE: Active unit = {active_unit['id'] if active_unit else None}")
+        # Reduced debug: only log phase transitions
         
         # If no active unit, phase must be complete - advance immediately
         if not active_unit:
-            print(f"🔄 PHASE COMPLETE: {current_phase} -> advancing")
             self.phase_started = False
             
             # CRITICAL FIX: Verify phase advancement actually occurred
             initial_phase = current_phase
             self._advance_phase()
             final_phase = self.base_controller.get_current_phase()
-            print(f"🔄 PHASE ADVANCED: {initial_phase} -> {final_phase}")
+            if initial_phase != final_phase:
+                print(f"🔄 PHASE: {initial_phase} -> {final_phase}")
             
             # Mark episode as continuing to allow next phase to start
             return self._build_gymnasium_response(action, True, terminated=False)
             
-        print(f"🎯 ACTIVE UNIT {active_unit['id']}: Phase {current_phase}, Action {action}")
-        
         # Convert gym action to mirror action format with validation
         mirror_action = self._convert_gym_action_to_mirror(active_unit, action, current_phase)
-        print(f"🔄 MIRROR ACTION: {mirror_action}")
         
         if not mirror_action:
-            # Cap invalid actions to valid range (0-7)
-            capped_action = max(0, min(7, action))
-            if capped_action != action:
-                mirror_action = self._convert_gym_action_to_mirror(active_unit, capped_action, current_phase)
-                
-            if not mirror_action:
-                # Fallback to wait action for completely invalid actions
-                mirror_action = {"type": "wait"}
-                print(f"⚠️ FALLBACK TO WAIT for unit {active_unit['id']}")
+            raise ValueError(
+                f"Invalid action {action} for unit {active_unit['id']} in phase {current_phase}. "
+                f"Valid actions for {current_phase}: {self._get_valid_actions_for_phase(current_phase)}"
+            )
             
         # Execute action through sequential engine
         success = self.sequential_engine.execute_unit_action(active_unit, mirror_action)
-        print(f"🎬 ACTION RESULT: {success} for unit {active_unit['id']}")
         
         # CRITICAL FIX: Log action properly for replay system
         self._log_sequential_action(active_unit, mirror_action, current_phase, success)
@@ -219,7 +209,7 @@ class SequentialGameController:
         # Movement actions (0-3)
         if 0 <= action <= 3:
             if phase != "move":
-                return None
+                raise ValueError(f"Movement action {action} invalid in phase '{phase}'. Must be in 'move' phase.")
                 
             # Calculate destination based on direction
             movements = {
@@ -239,12 +229,12 @@ class SequentialGameController:
         # Shooting action (4)
         elif action == 4:
             if phase != "shoot":
-                return None
+                raise ValueError(f"Shooting action {action} invalid in phase '{phase}'. Must be in 'shoot' phase.")
                 
             # Get valid shooting targets from controller
             valid_targets = self.base_controller.game_actions["get_valid_shooting_targets"](unit["id"])
             if not valid_targets:
-                return {"type": "wait"}  # No valid targets
+                raise ValueError(f"Unit {unit['id']} has no valid shooting targets")
                 
             # Use first valid target (AI will learn to choose better)
             return {
@@ -255,12 +245,12 @@ class SequentialGameController:
         # Charge action (5)
         elif action == 5:
             if phase != "charge":
-                return None
+                raise ValueError(f"Charge action {action} invalid in phase '{phase}'. Must be in 'charge' phase.")
                 
             # Get valid charge targets from controller
             valid_targets = self.base_controller.game_actions["get_valid_charge_targets"](unit["id"])
             if not valid_targets:
-                return {"type": "wait"}  # No valid targets
+                raise ValueError(f"Unit {unit['id']} has no valid charge targets")
                 
             # Use first valid target (AI will learn to choose better)
             return {
@@ -271,12 +261,12 @@ class SequentialGameController:
         # Combat action (6)
         elif action == 6:
             if phase != "combat":
-                return None
+                raise ValueError(f"Combat action {action} invalid in phase '{phase}'. Must be in 'combat' phase.")
                 
             # Get valid combat targets from controller
             valid_targets = self.base_controller.game_actions["get_valid_combat_targets"](unit["id"])
             if not valid_targets:
-                return {"type": "wait"}  # No valid targets
+                raise ValueError(f"Unit {unit['id']} has no valid combat targets")
                 
             # Use first valid target (AI will learn to choose better)
             return {
@@ -299,12 +289,21 @@ class SequentialGameController:
         # Force phase transition by directly calling phase transition methods
         if hasattr(self.base_controller, 'phase_transitions'):
             if current_phase == "move":
+                # AI_TURN.md: Reset tracking sets at phase start
+                self.base_controller.state_actions['reset_shot_units']()
                 self.base_controller.phase_transitions['transition_to_shoot']()
             elif current_phase == "shoot":
+                # AI_TURN.md: Reset tracking sets at phase start
+                self.base_controller.state_actions['reset_charged_units']()
                 self.base_controller.phase_transitions['transition_to_charge']()
             elif current_phase == "charge":
+                # AI_TURN.md: Reset tracking sets at phase start
+                self.base_controller.state_actions['reset_attacked_units']()
                 self.base_controller.phase_transitions['transition_to_combat']()
             elif current_phase == "combat":
+                # AI_TURN.md: Reset tracking sets at phase start (new turn)
+                self.base_controller.state_actions['reset_moved_units']()
+                self.base_controller.state_actions['reset_fled_units']()
                 self.base_controller.phase_transitions['end_turn']()
         else:
             # Fallback to base controller method
@@ -383,6 +382,16 @@ class SequentialGameController:
             
         except Exception as e:
             return np.zeros(26, dtype=np.float32)
+
+    def _get_valid_actions_for_phase(self, phase: str) -> List[int]:
+        """Get list of valid action types for current phase."""
+        valid_actions_per_phase = {
+            "move": [0, 1, 2, 3, 7],  # move directions + wait
+            "shoot": [4, 7],          # shoot + wait
+            "charge": [5, 7],         # charge + wait
+            "combat": [6, 7]          # combat + wait
+        }
+        return valid_actions_per_phase.get(phase, [7])  # Default to wait only
 
 
 # For gym40k.py integration, modify the controller initialization:

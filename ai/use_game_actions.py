@@ -348,8 +348,11 @@ class UseGameActions:
         EXACT mirror of isUnitEligible from TypeScript.
         Complete phase-specific eligibility logic with ALL missing features.
         """
+        # Minimal debug for rapid phase cycling issue
         current_player = self.game_state["current_player"]
         if unit["player"] != current_player:
+            if unit["player"] == 1:  # Only debug AI units
+                print(f"❌ U{unit['id']}: wrong_player (P{unit['player']} != P{current_player})")
             return False
 
         # CRITICAL DEBUG: Check SpaceMarine unit field validation
@@ -371,10 +374,14 @@ class UseGameActions:
         if phase == "move":
             # CRITICAL FIX: Unit is NOT eligible if already moved this phase
             if unit["id"] in units_moved:
+                if unit["player"] == 1:  # Only debug AI units
+                    print(f"❌ U{unit['id']}: already_moved")
                 return False
             
             # CRITICAL FIX: Dead units are NEVER eligible
             if not unit.get("alive", True):
+                if unit["player"] == 1:  # Only debug AI units
+                    print(f"❌ U{unit['id']}: not_alive")
                 return False
             
             # Unit is eligible if alive and hasn't moved this phase
@@ -385,9 +392,13 @@ class UseGameActions:
             units_fled = set(self.game_state.get("units_fled"))
             units_shot = set(self.game_state.get("units_shot", []))
             if unit["id"] in units_shot:
+                if unit["player"] == 1:  # Only debug AI units
+                    print(f"❌ U{unit['id']}: already_shot")
                 return False
             # NEW RULE: Units that fled cannot shoot
             if unit["id"] in units_fled:
+                if unit["player"] == 1:  # Only debug AI units
+                    print(f"❌ U{unit['id']}: unit_fled")
                 return False
             # Check if unit is adjacent to any enemy (engaged in combat)
             has_adjacent_enemy_shoot = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
@@ -407,8 +418,12 @@ class UseGameActions:
             units_charged = set(self.game_state.get("units_charged", []))
             units_fled = set(self.game_state.get("units_fled", []))
             if unit["id"] in units_charged:
+                if unit["player"] == 1:  # Only debug AI units
+                    print(f"❌ U{unit['id']}: already_charged")
                 return False
             if unit["id"] in units_fled:
+                if unit["player"] == 1:  # Only debug AI units
+                    print(f"❌ U{unit['id']}: unit_fled")
                 return False
             is_adjacent = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             if is_adjacent:
@@ -425,6 +440,8 @@ class UseGameActions:
             units_attacked = set(self.game_state.get("units_attacked", []))
             
             if unit["id"] in units_attacked:
+                if unit["player"] == 1:  # Only debug AI units
+                    print(f"❌ U{unit['id']}: already_attacked")
                 return False
             if "CC_RNG" not in unit:
                 return False
@@ -1647,13 +1664,13 @@ class UseGameActions:
         current_phase = self.game_state.get("phase", "move")
         current_player = self.game_state.get("current_player", 0)
         
-        print(f"🎭 ACTION MASK GENERATION: Phase {current_phase}, Player {current_player}, Max units {max_units}")
+        # Reduced debug: only essential info
         
         # Get ALL eligible units for current player
         eligible_units = self.get_eligible_units()
         current_player_eligible = [u for u in eligible_units if u["player"] == current_player]
-        
-        print(f"🎭 ELIGIBLE UNITS: {len(current_player_eligible)} units: {[u['id'] for u in current_player_eligible]}")
+        if len(current_player_eligible) == 0 and current_player == 1:
+            print(f"🔍 P{current_player} {current_phase}: NO eligible units")
         
         action_mask = []
         
@@ -1661,7 +1678,7 @@ class UseGameActions:
         for unit_idx in range(max_units):
             if unit_idx < len(current_player_eligible):
                 unit = current_player_eligible[unit_idx]
-                print(f"🎭 MASKING UNIT {unit['id']} (idx {unit_idx}):")
+                # Process unit actions without debug
                 
                 for action_type in range(8):
                     # Action is valid ONLY if unit exists AND is eligible AND action type is valid for phase
@@ -1672,10 +1689,8 @@ class UseGameActions:
                         try:
                             valid_moves = self.get_valid_moves(unit["id"])
                             action_valid = len(valid_moves) > 0
-                            print(f"🎭   Action {action_type} (move): {action_valid} ({len(valid_moves)} moves)")
                         except Exception as e:
                             action_valid = False
-                            print(f"🎭   Action {action_type} (move): ERROR {e}")
                             
                     elif current_phase == "shoot" and action_type == 4:
                         # AI_GAME.md: Shooting action - check RNG_NB > 0 AND valid targets
@@ -1683,51 +1698,40 @@ class UseGameActions:
                             # Check RNG_NB first (AI_GAME.md requirement)
                             if "RNG_NB" not in unit:
                                 action_valid = False
-                                print(f"🎭   Action {action_type} (shoot): False (missing RNG_NB)")
                             elif unit.get("RNG_NB", 0) <= 0:
                                 action_valid = False
-                                print(f"🎭   Action {action_type} (shoot): False (RNG_NB={unit.get('RNG_NB', 0)})")
                             else:
                                 valid_targets = self.get_valid_shooting_targets(unit["id"])
                                 action_valid = len(valid_targets) > 0
-                                print(f"🎭   Action {action_type} (shoot): {action_valid} (RNG_NB={unit.get('RNG_NB', 0)}, {len(valid_targets)} targets)")
                         except Exception as e:
                             action_valid = False
-                            print(f"🎭   Action {action_type} (shoot): ERROR {e}")
                             
                     elif current_phase == "charge" and action_type == 5:
                         # Charge action - check if unit has valid targets
                         try:
                             valid_targets = self.get_valid_charge_targets(unit["id"])
                             action_valid = len(valid_targets) > 0
-                            print(f"🎭   Action {action_type} (charge): {action_valid} ({len(valid_targets)} targets)")
                         except Exception as e:
                             action_valid = False
-                            print(f"🎭   Action {action_type} (charge): ERROR {e}")
                             
                     elif current_phase == "combat" and action_type == 6:
                         # Combat action - check if unit has valid targets
                         try:
                             valid_targets = self.get_valid_combat_targets(unit["id"])
                             action_valid = len(valid_targets) > 0
-                            print(f"🎭   Action {action_type} (combat): {action_valid} ({len(valid_targets)} targets)")
                         except Exception as e:
                             action_valid = False
-                            print(f"🎭   Action {action_type} (combat): ERROR {e}")
                             
                     elif action_type == 7:
                         # Wait action - always valid for eligible units
                         action_valid = True
-                        print(f"🎭   Action {action_type} (wait): {action_valid}")
                     
                     action_mask.append(action_valid)
             else:
-                print(f"🎭 NO UNIT at idx {unit_idx} - masking all actions as False")
                 # No unit at this index - all actions invalid
                 for action_type in range(8):
                     action_mask.append(False)
         
-        print(f"🎭 FINAL MASK: {action_mask}")
         return action_mask
 
 

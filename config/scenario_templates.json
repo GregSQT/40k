@@ -23,8 +23,8 @@
       "Carnifex": 2
     },
     "deployment_zones": {
-      "0": [[13,13], [19,12]],
-      "1": [[11,6], [5,7]]
+      "0": [[12,13], [16,9]],
+      "1": [[12,7], [8,11]]
     },
     "difficulty": "easy",
     "training_focus": "later"

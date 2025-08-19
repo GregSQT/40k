@@ -351,21 +351,12 @@ class W40KEnv(gym.Env):
         # AI_GAME.md COMPLIANT: Action is just action type (0-7), no unit selection
         action_type = int(action) % 8  # Ensure action is in valid range
         
-        # DEBUG: Log action selection details
-        current_phase = self.controller.get_current_phase()
-        current_player = self.controller.get_current_player()
-        print(f"🎯 GYM STEP: Action {action_type}, Phase {current_phase}, Player {current_player}")
-        
         # Apply action masking for the active unit only
         action_mask = self.controller.game_actions["get_action_mask"](1)  # Only need mask for active unit
-        print(f"🎭 ACTION MASK: {action_mask}")
         
         if action_type < len(action_mask) and not action_mask[action_type]:
-            print(f"❌ INVALID ACTION {action_type} - Converting to wait")
             # Convert invalid action to wait action
             action_type = 7  # Wait action
-        else:
-            print(f"✅ VALID ACTION {action_type}")
         
         # ARCHITECTURAL COMPLIANCE: Delegate everything to controller
         # Controller will get active unit from Sequential Engine
