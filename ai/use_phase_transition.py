@@ -89,7 +89,13 @@ class UsePhaseTransition:
         live_units = self.game_state["units"]
         
         # AI_TURN.md: Check if all player units have moved or can't move
-        current_player_units = [u for u in live_units if u["player"] == live_current_player and u.get("alive", True)]
+        current_player_units = []
+        for u in live_units:
+            if u["player"] == live_current_player:
+                if "alive" not in u:
+                    raise KeyError(f"Unit {u.get('id', 'unknown')} missing required 'alive' field")
+                if u["alive"]:
+                    current_player_units.append(u)
         
         # Phase transitions when ALL current player units have moved
         units_not_moved = [unit["id"] for unit in current_player_units if unit["id"] not in live_units_moved]
@@ -176,18 +182,12 @@ class UsePhaseTransition:
         """
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
-            print(f"\n🎯 [use_phase_transition.py::transition_to_shoot] TRANSITIONING FROM MOVE TO SHOOT PHASE")
-            print(f"📊 [use_phase_transition.py::transition_to_shoot] UNITS_MOVED BEFORE TRANSITION: {list(self.units_moved)}")
             
             self.actions["set_phase"]("shoot")
             self.actions["initialize_shooting_phase"]()
             # AI_TURN.md: Reset shot tracking at phase start, preserve moved tracking
             self.actions["reset_shot_units"]()
             self.actions["set_selected_unit_id"](None)
-            
-            print(f"📊 [use_phase_transition.py::transition_to_shoot] UNITS_MOVED AFTER TRANSITION: {list(self.game_state.get('units_moved', []))}")
-            print(f"🧹 [use_phase_transition.py::transition_to_shoot] UNITS_SHOT RESET: {list(self.game_state.get('units_shot', []))}")
-            print(f"✅ [use_phase_transition.py::transition_to_shoot] MOVED TO SHOOT PHASE - AI_TURN.md compliant")
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
@@ -207,9 +207,6 @@ class UsePhaseTransition:
             # AI_TURN.md: Reset charge tracking at phase start, preserve other tracking
             self.actions["reset_charged_units"]()
             self.actions["set_selected_unit_id"](None)
-            
-            print(f"🧹 [use_phase_transition.py::transition_to_charge] UNITS_CHARGED RESET: {list(self.game_state.get('units_charged', []))}")
-            print(f"✅ [use_phase_transition.py::transition_to_charge] MOVED TO CHARGE PHASE - AI_TURN.md compliant")
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
@@ -237,9 +234,6 @@ class UsePhaseTransition:
             self.actions["set_selected_unit_id"](None)
             self.actions["set_mode"]("select")
             
-            print(f"🧹 [use_phase_transition.py::transition_to_combat] UNITS_ATTACKED RESET: {list(self.game_state.get('units_attacked', []))}")
-            print(f"✅ [use_phase_transition.py::transition_to_combat] MOVED TO COMBAT PHASE - AI_TURN.md compliant")
-            
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
             self.units_attacked = set()  # AI_TURN.md: Fresh combat tracking for new phase
@@ -259,9 +253,6 @@ class UsePhaseTransition:
             correct_game_state = set_phase_func.__self__.game_state
             self.game_state = correct_game_state
             
-            print(f"\n🔄 ENDING TURN - Player {self.current_player}")
-            print(f"📊 UNITS_MOVED BEFORE TURN END: {list(self.game_state.get('units_moved', []))}")
-            
             # Switch player (EXACT from TypeScript)
             new_player = 1 if self.current_player == 0 else 0
             self.actions["set_current_player"](new_player)
@@ -269,15 +260,9 @@ class UsePhaseTransition:
             # Set phase to move first
             self.actions["set_phase"]("move")
             
-            print(f"🏁 STARTING NEW MOVEMENT PHASE - Player {new_player}")
-            print(f"📊 UNITS_MOVED BEFORE RESET: {list(self.game_state.get('units_moved', []))}")
-            
             # AI_TURN.md CRITICAL: Reset units_moved at START of new movement phase
             self.actions["reset_moved_units"]()
             self.actions["reset_fled_units"]()
-            
-            print(f"🧹 RESET MOVED UNITS CALLED")
-            print(f"📊 UNITS_MOVED AFTER RESET: {list(self.game_state.get('units_moved', []))}")
             
             # CRITICAL FIX: Increment turn ONLY when Player 0 starts movement phase (EXACT from frontend)
             if new_player == 0:  # Player 0 is about to start their turn
@@ -424,25 +409,28 @@ class UsePhaseTransition:
             if not combat_sub_phase:
                 # Initialize combat phase with charged units sub-phase
                 self.actions["set_combat_sub_phase"]("charged_units")
-                print(f"🥇 [use_phase_transition.py::process_phase_transitions] COMBAT SUB-PHASE 1: Charged units priority")
                 return
                 
             elif combat_sub_phase == "charged_units":
                 # Check if all charged units have been processed
                 all_units = self.game_state["units"]
                 current_player = self.game_state["current_player"]
-                charged_units = [u for u in all_units 
-                               if (u["player"] == current_player and 
-                                   u["id"] in self.game_state["units_charged"] and
-                                   u.get("CUR_HP", 0) > 0 and
-                                   u["id"] not in self.game_state["units_attacked"])]
+                charged_units = []
+                for u in all_units:
+                    if (u["player"] == current_player and 
+                        u["id"] in self.game_state["units_charged"] and
+                        u["id"] not in self.game_state["units_attacked"]):
+                        # AI_PROTOCOLE.md: No default values allowed - CUR_HP must exist
+                        if "CUR_HP" not in u:
+                            raise KeyError(f"Unit {u.get('id', 'unknown')} missing required 'CUR_HP' field")
+                        if u["CUR_HP"] > 0:
+                            charged_units.append(u)
                 
                 if len(charged_units) == 0:
                     # Transition to alternating combat
                     next_combat_player = 1 if current_player == 0 else 0
                     self.actions["set_combat_sub_phase"]("alternating_combat")
                     self.actions["set_combat_active_player"](next_combat_player)
-                    print(f"🔄 [use_phase_transition.py::process_phase_transitions] COMBAT SUB-PHASE 2: Alternating combat")
                     return
                     
             elif combat_sub_phase == "alternating_combat":
@@ -635,7 +623,9 @@ class UsePhaseTransition:
         AI_ARCHITECTURE.md: Single source of truth - use game_state directly.
         """
         # AI_TURN.md: "Check CUR_HP > 0 first (most common failure condition)"
-        if unit.get("CUR_HP", 0) <= 0:
+        if "CUR_HP" not in unit:
+            raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'CUR_HP' field")
+        if unit["CUR_HP"] <= 0:
             return False
             
         # Player validation
@@ -657,7 +647,13 @@ class UsePhaseTransition:
                 return False
             # Additional validation: must have enemies within charge range
             all_units = self.game_state["units"]
-            enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("CUR_HP", 0) > 0]
+            enemy_units = []
+            for u in all_units:
+                if u["player"] != unit["player"]:
+                    if "CUR_HP" not in u:
+                        raise KeyError(f"Enemy unit {u.get('id', 'unknown')} missing required 'CUR_HP' field")
+                    if u["CUR_HP"] > 0:
+                        enemy_units.append(u)
             # AI_PROTOCOLE.md: Use existing config files, never hardcode values
             try:
                 from shared.gameMechanics import get_charge_max_distance
@@ -678,8 +674,16 @@ class UsePhaseTransition:
                 
             # AI_TURN.md: Check if unit has adjacent enemies (must be within CC_RNG, usually 1)
             all_units = self.game_state["units"]
-            enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("CUR_HP", 0) > 0]
-            cc_range = unit.get("CC_RNG", 0)
+            enemy_units = []
+            for u in all_units:
+                if u["player"] != unit["player"]:
+                    if "CUR_HP" not in u:
+                        raise KeyError(f"Enemy unit {u.get('id', 'unknown')} missing required 'CUR_HP' field")
+                    if u["CUR_HP"] > 0:
+                        enemy_units.append(u)
+            if "CC_RNG" not in unit:
+                raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'CC_RNG' field")
+            cc_range = unit["CC_RNG"]
             
             # Must be adjacent to at least one enemy to be eligible for combat
             has_adjacent_enemy = any(

@@ -376,7 +376,9 @@ class UseGameActions:
             # AI_TURN.md: Movement eligibility - unit hasn't moved this phase and is alive
             if unit["id"] in units_moved:
                 return False
-            if not unit.get("alive", True):
+            if "alive" not in unit:
+                raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'alive' field")
+            if not unit["alive"]:
                 return False
             return True
         
@@ -398,7 +400,9 @@ class UseGameActions:
                 if unit["player"] == 1:
                     print(f"❌ U{unit['id']}: no_RNG_RNG_field")
                 return False
-            if unit.get("RNG_RNG", 0) <= 0:
+            if "RNG_RNG" not in unit:
+                raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'RNG_RNG' field")
+            if unit["RNG_RNG"] <= 0:
                 if unit["player"] == 1:
                     print(f"❌ U{unit['id']}: RNG_RNG_zero")
                 return False
@@ -463,8 +467,9 @@ class UseGameActions:
                     print(f"❌ U{unit['id']}: already_attacked")
                 return False
             if "CC_RNG" not in unit:
+                raise KeyError(f"Unit {unit.get('id', 'unknown')} missing required 'CC_RNG' field")
                 return False
-            if unit.get("CC_RNG", 0) <= 0:
+            if unit.get("CC_RNG") <= 0:
                 return False
                 
             # CRITICAL FIX: Simplified combat eligibility - just check if unit can potentially fight
@@ -1070,13 +1075,20 @@ class UseGameActions:
         
         # Get charge roll value (handle both old int format and new dict format)
         if isinstance(charge_data, dict):
-            charge_roll = charge_data.get("total", charge_data.get("charge_roll", 0))
-            die1 = charge_data.get("die1", 0)
-            die2 = charge_data.get("die2", 0)
+            if "total" in charge_data:
+                charge_roll = charge_data["total"]
+            elif "charge_roll" in charge_data:
+                charge_roll = charge_data["charge_roll"]
+            else:
+                raise KeyError("Charge data missing both 'total' and 'charge_roll' fields")
+            
+            if "die1" not in charge_data or "die2" not in charge_data:
+                raise KeyError("Charge data missing required 'die1' or 'die2' fields")
+            die1 = charge_data["die1"]
+            die2 = charge_data["die2"]
         else:
             charge_roll = charge_data  # Legacy int format
-            die1 = 0
-            die2 = 0
+            raise ValueError("Legacy int charge_data format not supported - use dict format")
         
         # Validate charge distance to target with proper 2d6 roll requirements
         from shared.gameRules import get_hex_distance
@@ -1237,28 +1249,20 @@ class UseGameActions:
         unit = self.find_unit(unit_id)
         phase = self.game_state["phase"]
         
-        print(f"\n🚶 [use_game_actions.py::validated_move] VALIDATED_MOVE - U{unit_id} to ({col}, {row})")
-        print(f"📊 [use_game_actions.py::validated_move] UNITS_MOVED BEFORE MOVE: {list(self.game_state.get('units_moved', []))}")
-        
         # CRITICAL FIX: Trust Sequential Engine - no redundant eligibility checks during action execution
         # AI_GAME.md: "Target Validation: Performed at START of each activation (not action execution time)"
         if not unit or phase != "move":
-            print(f"❌ [use_game_actions.py::validated_move] MOVE REJECTED: unit_found={unit is not None}, phase={phase}")
+            pass
             return False    
 
         # CRITICAL: Validate movement using wall-checking system
         valid_moves = self.get_valid_moves(unit_id)
         if not any(move["col"] == col and move["row"] == row for move in valid_moves):
-            print(f"❌ MOVE REJECTED: destination not in valid_moves")
             return False  # Invalid destination - movement blocked by walls
-
-        print(f"✅ MOVE ACCEPTED: U{unit_id} moving from ({unit['col']}, {unit['row']}) to ({col}, {row})")
         
         # Direct unit update without preview system to avoid complications
         self.actions["update_unit"](unit_id, {"col": col, "row": row})
         # CRITICAL FIX: Do NOT call add_moved_unit here - _mark_gym_unit_as_acted will handle it
-        
-        print(f"📊 UNITS_MOVED AFTER MOVE (before marking): {list(self.game_state.get('units_moved', []))}")
         return True
 
     def get_charge_destinations(self, unit_id: int) -> List[Dict[str, int]]:
@@ -1277,9 +1281,14 @@ class UseGameActions:
         
         # Handle both old int format and new dict format (EXACT from TypeScript)
         if isinstance(charge_data, dict):
-            charge_distance = charge_data.get("total", charge_data.get("charge_roll", 0))
+            if "total" in charge_data:
+                charge_distance = charge_data["total"]
+            elif "charge_roll" in charge_data:
+                charge_distance = charge_data["charge_roll"]
+            else:
+                raise KeyError("Charge data missing both 'total' and 'charge_roll' fields")
         else:
-            charge_distance = charge_data  # Legacy int format
+            raise ValueError("Legacy int charge_data format not supported - use dict format")
         
         if charge_distance <= 0:
             return []
@@ -1538,7 +1547,9 @@ class UseGameActions:
 
     def get_eligible_units(self) -> List[Dict[str, Any]]:
         """Get all eligible units for current phase and player"""
-        current_player = self.game_state.get("current_player", 0)
+        if "current_player" not in self.game_state:
+            raise KeyError("game_state missing required 'current_player' field")
+        current_player = self.game_state["current_player"]
         current_phase = self.game_state.get("phase", "move")
         
         eligible_units = []
@@ -1593,7 +1604,7 @@ class UseGameActions:
         # AI_GAME.md: Check RNG_NB > 0 requirement
         if "RNG_NB" not in unit:
             raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
-        if unit.get("RNG_NB", 0) <= 0:
+        if unit["RNG_NB"] <= 0:
             return []  # No shots remaining
         
         # Validate required unit fields
@@ -1636,9 +1647,14 @@ class UseGameActions:
         
         # Get charge roll distance
         if isinstance(charge_data, dict):
-            charge_roll = charge_data.get("total", charge_data.get("charge_roll", 0))
+            if "total" in charge_data:
+                charge_roll = charge_data["total"]
+            elif "charge_roll" in charge_data:
+                charge_roll = charge_data["charge_roll"]
+            else:
+                raise KeyError("Charge data missing both 'total' and 'charge_roll' fields")
         else:
-            charge_roll = charge_data
+            raise ValueError("Legacy int charge_data format not supported - use dict format")
         
         if charge_roll <= 0:
             return []
@@ -1647,7 +1663,9 @@ class UseGameActions:
         enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
         for enemy in enemy_units:
             distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
-            if 1 < distance <= min(charge_roll, 12):  # Must be within rolled distance AND 12-hex limit
+            from shared.gameMechanics import get_charge_max_distance
+            charge_max_distance = get_charge_max_distance()
+            if 1 < distance <= min(charge_roll, charge_max_distance):
                 # Check pathfinding around walls
                 if self.board_config.get("wall_hexes"):
                     wall_hex_set = set(f"{c},{r}" for c, r in self.board_config["wall_hexes"])
@@ -1693,11 +1711,7 @@ class UseGameActions:
     def get_action_mask(self, max_units: int) -> List[bool]:
         """Generate action mask for current game state - True = valid action"""
         current_phase = self.game_state.get("phase", "move")
-        current_player = self.game_state.get("current_player", 0)
-        
-        # CRITICAL FIX: Trust Sequential Engine - don't duplicate eligibility checks
-        # Sequential Engine determines which units are eligible, gym just needs action types
-        print(f"🎭 [use_game_actions.py::get_action_mask] ACTION_MASK requested for {current_phase} phase")
+        current_player = self.game_state.get("current_player")
         
         # Get current player units (no eligibility checks - trust Sequential Engine)
         current_player_units = [u for u in self.game_state["units"] if u["player"] == current_player and u.get("alive", True)]

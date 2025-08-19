@@ -390,7 +390,40 @@ class GameReplayLogger:
             
         self.log_game_start()
         
-        # CRITICAL: Save initial units NOW when capture is called
+        # CRITICAL FIX: Capture TRUE initial positions from scenario config, not current state
+        if hasattr(self.env, 'config') and hasattr(self.env.config, 'initial_units'):
+            # Use scenario config initial_units - the TRUE starting positions
+            config_units = self.env.config.initial_units
+            if config_units:
+                formatted_units = []
+                for unit in config_units:
+                    # Validate ALL required fields - NO DEFAULTS
+                    required_fields = ["id", "unit_type", "player", "col", "row",
+                                 "CUR_HP", "HP_MAX", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
+                    for field in required_fields:
+                        if field not in unit:
+                            raise ValueError(f"Unit missing required field '{field}': {unit}")
+                    
+                    formatted_units.append({
+                        "id": unit["id"],
+                        "unit_type": unit["unit_type"],
+                        "player": unit["player"],
+                        "col": unit["col"],
+                        "row": unit["row"],
+                        "CUR_HP": unit["CUR_HP"],
+                        "HP_MAX": unit["HP_MAX"],
+                        "MOVE": unit["MOVE"],
+                        "RNG_RNG": unit["RNG_RNG"],
+                        "RNG_DMG": unit["RNG_DMG"],
+                        "CC_DMG": unit["CC_DMG"],
+                        "CC_RNG": unit["CC_RNG"]
+                    })
+                
+                # Store TRUE initial state from scenario config
+                self.initial_game_state = {"units": formatted_units}
+                return
+        
+        # FALLBACK: Use controller units only if no config available
         if hasattr(self.env, 'controller'):
             units = self.env.controller.get_units()
             if units:
@@ -409,14 +442,13 @@ class GameReplayLogger:
                         "player": unit["player"],
                         "col": unit["col"],
                         "row": unit["row"],
+                        "CUR_HP": unit["CUR_HP"],
                         "HP_MAX": unit["HP_MAX"],
-                        "move": unit["MOVE"],
-                        "rng_rng": unit["RNG_RNG"],
-                        "rng_dmg": unit["RNG_DMG"],
-                        "cc_dmg": unit["CC_DMG"],
-                        "is_ranged": unit["RNG_RNG"] > 0,
-                        "is_melee": unit["CC_RNG"] > 0,
-                        "alive": True
+                        "MOVE": unit["MOVE"],
+                        "RNG_RNG": unit["RNG_RNG"],
+                        "RNG_DMG": unit["RNG_DMG"],
+                        "CC_DMG": unit["CC_DMG"],
+                        "CC_RNG": unit["CC_RNG"]
                     })
                 
                 # Store for later use in save_replay
@@ -445,10 +477,35 @@ class GameReplayLogger:
         # CRITICAL FIX: Capture final game state before saving
         self._capture_game_state_snapshot()
         
-        # FIRST: Check if we have initial_game_state that was set in start_new_episode
+        # FIRST: Check if we have initial_game_state that was set in capture_initial_state
         if hasattr(self, 'initial_game_state') and self.initial_game_state and 'units' in self.initial_game_state:
             initial_units = self.initial_game_state['units']
-        # SECOND: Try to get from controller if available
+        # SECOND: Try scenario config if initial_game_state missing
+        elif hasattr(self.env, 'config') and hasattr(self.env.config, 'initial_units') and self.env.config.initial_units:
+            config_units = self.env.config.initial_units
+            for unit in config_units:
+                # Validate ALL required fields - NO DEFAULTS
+                required_fields = ["id", "unit_type", "player", "col", "row", 
+                                 "CUR_HP", "HP_MAX", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
+                for field in required_fields:
+                    if field not in unit:
+                        raise ValueError(f"Unit missing required field '{field}': {unit}")
+                
+                initial_units.append({
+                    "id": unit["id"],
+                    "unit_type": unit["unit_type"],
+                    "player": unit["player"],
+                    "col": unit["col"],
+                    "row": unit["row"],
+                    "CUR_HP": unit["CUR_HP"],
+                    "HP_MAX": unit["HP_MAX"],
+                    "MOVE": unit["MOVE"],
+                    "RNG_RNG": unit["RNG_RNG"],
+                    "RNG_DMG": unit["RNG_DMG"],
+                    "CC_DMG": unit["CC_DMG"],
+                    "CC_RNG": unit["CC_RNG"]
+                })
+        # THIRD: Try to get from controller if available
         elif hasattr(self.env, 'controller'):
             # The controller and env share the SAME replay_logger instance
             # So check if controller has units directly

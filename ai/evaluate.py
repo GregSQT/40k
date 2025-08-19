@@ -112,12 +112,14 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
             unit_registry=unit_registry,
             quiet=False
         )
-        # CRITICAL FIX: Enable replay logging for evaluation
+        # CRITICAL FIX: Enable evaluation mode BEFORE enhancing with replay logging
+        base_env.is_evaluation_mode = True
+        base_env._force_evaluation_mode = True
         enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
-        enhanced_env.is_evaluation_mode = True
-        enhanced_env._force_evaluation_mode = True
         if hasattr(enhanced_env, 'replay_logger') and enhanced_env.replay_logger:
             enhanced_env.replay_logger.is_evaluation_mode = True
+            # Force immediate capture of TRUE initial state from config
+            enhanced_env.replay_logger.capture_initial_state()
         env = enhanced_env
         model = DQN.load(model_path, env=env)
         print(f"✅ Model loaded: {model_path}")
