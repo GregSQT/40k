@@ -400,23 +400,58 @@ class UseGameActions:
                 if unit["player"] == 1:  # Only debug AI units
                     print(f"❌ U{unit['id']}: already_shot")
                 return False
-            # NEW RULE: Units that fled cannot shoot
+            
+            # AI_TURN.md: "Unit is marked as units_fled" - NOT eligible
             if unit["id"] in units_fled:
                 if unit["player"] == 1:  # Only debug AI units
                     print(f"❌ U{unit['id']}: unit_fled")
                 return False
-            # Check if unit is adjacent to any enemy (engaged in combat)
+            
+            # AI_TURN.md: "Unit is adjacent to an enemy unit" - NOT eligible
             has_adjacent_enemy_shoot = any(areUnitsAdjacent(unit, enemy) for enemy in enemy_units)
             if has_adjacent_enemy_shoot:
+                if unit["player"] == 1:
+                    print(f"❌ U{unit['id']}: adjacent_to_enemy")
                 return False
             
-            # CRITICAL FIX: Just check if unit has ranged weapon capability - let action masking handle targets
+            # AI_TURN.md: Must have RNG_RNG > 0 for ranged weapon
             if "RNG_RNG" not in unit:
+                if unit["player"] == 1:
+                    print(f"❌ U{unit['id']}: no_RNG_RNG_field")
                 return False
             if unit.get("RNG_RNG", 0) <= 0:
+                if unit["player"] == 1:
+                    print(f"❌ U{unit['id']}: RNG_RNG_zero")
+                return False
+            
+            # AI_TURN.md: "Unit has NO line of sight on any enemy unit WITHIN RNG_RNG distance"
+            # Must have at least one valid target within range with line of sight
+            rng_range = unit["RNG_RNG"]
+            has_valid_target = False
+            for enemy in enemy_units:
+                distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
+                if distance <= rng_range:
+                    # AI_TURN.md requires line of sight check
+                    try:
+                        from shared.gameRules import has_line_of_sight
+                        wall_hexes = self.board_config.get("wall_hexes", [])
+                        los_result = has_line_of_sight(
+                            {"col": unit["col"], "row": unit["row"]},
+                            {"col": enemy["col"], "row": enemy["row"]},
+                            wall_hexes
+                        )
+                        if los_result.get("canSee", False):
+                            has_valid_target = True
+                            break
+                    except ImportError as e:
+                        # AI_PROTOCOLE.md: No fallbacks allowed - raise error for missing dependencies
+                        raise ImportError(f"Required shared.gameRules module not available: {e}")
+            
+            if not has_valid_target:
+                if unit["player"] == 1:
+                    print(f"❌ U{unit['id']}: no_line_of_sight_targets")
                 return False
                 
-            # Unit is eligible to attempt shooting - Sequential Engine will handle target validation
             return True
         
         elif phase == "charge":

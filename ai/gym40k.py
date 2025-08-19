@@ -513,8 +513,8 @@ class W40KEnv(gym.Env):
             if ai_units:
                 unit_rewards = self._get_unit_reward_config(ai_units[0])
                 return unit_rewards.get("base_actions", {}).get("wait", -0.1)
-            # Final fallback
-            return -0.1
+            # AI_PROTOCOLE.md: No fallbacks allowed - raise error for missing config
+            raise RuntimeError("No reward configuration available - check rewards_config.json")
         
         unit_rewards = self._get_unit_reward_config(eligible_units[0])
         if "base_actions" not in unit_rewards:
@@ -786,8 +786,12 @@ class W40KEnv(gym.Env):
         dx = 1 if target["col"] > bot_unit["col"] else (-1 if target["col"] < bot_unit["col"] else 0)
         dy = 1 if target["row"] > bot_unit["row"] else (-1 if target["row"] < bot_unit["row"] else 0)
         
-        new_col = max(0, min(23, bot_unit["col"] + dx))  # Clamp to board bounds
-        new_row = max(0, min(26, bot_unit["row"] + dy))   # Clamp to board bounds
+        # AI_PROTOCOLE.md: Use config values, never hardcode
+        from config_loader import get_config_loader
+        config = get_config_loader()
+        board_cols, board_rows = config.get_board_size()
+        new_col = max(0, min(board_cols - 1, bot_unit["col"] + dx))
+        new_row = max(0, min(board_rows - 1, bot_unit["row"] + dy))
         
         # Execute move through controller
         mirror_action = {"type": "move", "col": new_col, "row": new_row}

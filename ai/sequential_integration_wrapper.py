@@ -130,13 +130,29 @@ class SequentialGameController:
                 f"Valid actions for {current_phase}: {self._get_valid_actions_for_phase(current_phase)}"
             )
             
-        # Execute action through sequential engine
+        # Execute action through sequential engine with AI_TURN.md step counting
         print(f"\n⚡ [sequential_integration_wrapper.py::_execute_via_sequential_engine] EXECUTING ACTION - U{active_unit['id']} in {current_phase}")
         print(f"📊 [sequential_integration_wrapper.py::_execute_via_sequential_engine] UNITS_MOVED BEFORE ACTION: {list(self.base_controller.game_state.get('units_moved', []))}")
         
+        # AI_TURN.md: "Only significant actions (move, shoot, charge, attack, wait) increment steps"
+        steps_before = self.base_controller.game_state.get("episode_steps", 0)
+        
         success = self.sequential_engine.execute_unit_action(active_unit, mirror_action)
         
-        print(f"📊 [sequential_integration_wrapper.py::_execute_via_sequential_engine] UNITS_MOVED AFTER ACTION: {list(self.base_controller.game_state.get('units_moved', []))}")
+        # AI_TURN.md COMPLIANCE: Track step increment based on action type (single execution)
+        if success and mirror_action["type"] in ["move", "shoot", "charge", "combat", "wait"]:
+            # Ensure step counting happens only once per action
+            if not hasattr(self, '_last_step_logged') or self._last_step_logged != (steps_before, mirror_action["type"]):
+                new_steps = steps_before + 1
+                self.base_controller.game_state["episode_steps"] = new_steps
+                self._last_step_logged = (steps_before, mirror_action["type"])
+                print(f"📈 [sequential_integration_wrapper.py::_execute_via_sequential_engine] STEP COUNT: {steps_before} → {new_steps} (ACTION: {mirror_action['type']})")
+        else:
+            print(f"📊 [sequential_integration_wrapper.py::_execute_via_sequential_engine] NO STEP INCREMENT - Auto-skip or failed action")
+        
+        # Single units_moved status log
+        units_moved_state = list(self.base_controller.game_state.get('units_moved', []))
+        print(f"📊 [sequential_integration_wrapper.py::_execute_via_sequential_engine] UNITS_MOVED AFTER ACTION: {units_moved_state}")
         
         # CRITICAL FIX: Ensure unit is marked as acted after successful action
         if success:
@@ -411,9 +427,8 @@ class SequentialGameController:
             return obs, reward, terminated, truncated, info
             
         except Exception as e:
-            # Safe fallback
-            safe_obs = np.zeros(26, dtype=np.float32)  # Common observation size
-            return safe_obs, -1.0, True, False, {"error": "response_build_failed"}
+            # AI_PROTOCOLE.md: No fallbacks allowed - re-raise error with context
+            raise RuntimeError(f"Failed to build gymnasium response: {e}")
             
     def _get_observation(self) -> Any:
         """Get observation with proper size."""
@@ -431,8 +446,8 @@ class SequentialGameController:
                 obs_shape = self.gym_env.observation_space.shape[0]
                 return np.zeros(obs_shape, dtype=np.float32)
             
-            # Common fallback
-            return np.zeros(26, dtype=np.float32)
+            # AI_PROTOCOLE.md: No fallbacks allowed - raise error
+            raise RuntimeError("Failed to get observation - check environment configuration")
             
         except Exception as e:
             return np.zeros(26, dtype=np.float32)
@@ -445,7 +460,9 @@ class SequentialGameController:
             "charge": [5, 7],         # charge + wait
             "combat": [6, 7]          # combat + wait
         }
-        return valid_actions_per_phase.get(phase, [7])  # Default to wait only
+        if phase not in valid_actions_per_phase:
+            raise KeyError(f"Unknown phase '{phase}' for action validation - valid phases: {list(valid_actions_per_phase.keys())}")
+        return valid_actions_per_phase[phase]
 
 
 # For gym40k.py integration, modify the controller initialization:
