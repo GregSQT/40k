@@ -147,9 +147,13 @@ class SequentialActivationEngine:
         """
         Return next eligible unit following EXACT AI_GAME.md eligibility rules.
         """
-        # CRITICAL FIX: Always get fresh phase data
+        # Get current phase from controller
         current_phase = self.game_controller.get_current_phase()
-        print(f"   🔍 Sequential Engine checking eligibility for phase: {current_phase}")
+        # Debug: Verify controller phase matches queue phase
+        if self.queue_built_for_phase and current_phase != self.queue_built_for_phase:
+            print(f"   ⚠️ PHASE MISMATCH: Controller='{current_phase}' Queue='{self.queue_built_for_phase}'")
+        else:
+            print(f"   ✅ Phase sync OK: {current_phase}")
         
         # Handle combat phase transitions
         if current_phase == "combat" and not self.activation_queue:
@@ -175,7 +179,7 @@ class SequentialActivationEngine:
                 self.auto_skipped_units += 1
                 continue
                 
-            # CRITICAL FIX: Use fresh phase data for eligibility check
+            # Use controller's now-fixed get_current_phase() method
             fresh_phase = self.game_controller.get_current_phase()
             eligibility_result = self._check_unit_eligibility_detailed(fresh_unit, fresh_phase)
             
@@ -227,25 +231,24 @@ class SequentialActivationEngine:
         """
         Check unit eligibility following EXACT AI_GAME.md detailed rules.
         
-        Returns eligibility result with reason and step_increase flag.
-        """
+        CRITICAL DEBUG: Verify phase parameter is correct
+        """        
         current_player = self.game_controller.get_current_player()
         all_units = self.game_controller.get_units()
         enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("CUR_HP", 0) > 0]
         friendly_units = [u for u in all_units if u["player"] == unit["player"] and u["id"] != unit["id"] and u.get("CUR_HP", 0) > 0]
         
-        # CRITICAL DEBUG: Check game_state object identity
-        print(f"   🔍 Game state ID: {id(self.game_controller.game_state)}")
+        # Use controller's game_state
+        fresh_game_state = self.game_controller.game_state
         
-        # Get tracking sets
-        units_moved = self.game_controller.game_state.get("units_moved", set())
-        units_shot = self.game_controller.game_state.get("units_shot", set())
+        # Get tracking sets from fresh state
+        units_moved = fresh_game_state.get("units_moved", set())
+        units_shot = fresh_game_state.get("units_shot", set())
         units_charged = self.game_controller.game_state.get("units_charged", set())
         units_attacked = self.game_controller.game_state.get("units_attacked", set())
         units_fled = self.game_controller.game_state.get("units_fled", set())
         
-        print(f"   🔍 Phase: {phase}, Unit {unit['id']} eligibility check")
-        print(f"       Tracking sets: moved={units_moved}, shot={units_shot}")
+        # Check eligibility for correct phase
         
         if phase == "move":
             return self._check_movement_eligibility_detailed(unit, current_player, units_moved, enemy_units)

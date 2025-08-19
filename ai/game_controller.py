@@ -57,6 +57,13 @@ class GameController:
         # Game loop state
         self.is_running = False
 
+    def _ensure_game_state_sync(self) -> None:
+        """Ensure controller's game_state is synchronized with state_manager"""
+        if hasattr(self, 'state_manager') and self.state_manager:
+            # Force controller to use same game_state object as state_manager
+            self.game_state = self.state_manager.game_state
+            self._update_state()
+
     def _initialize_units(self) -> List[Dict[str, Any]]:
         """
         EXACT mirror of unit initialization from TypeScript.
@@ -125,9 +132,13 @@ class GameController:
         return True
 
     def _update_state(self) -> None:
-        """Update cached values - all state references are already consistent"""
-        # All components use the same game_state object, no synchronization needed
-        self._current_phase = self.game_state.get("phase", "move")
+        """Update cached values - ONLY from state_actions source"""
+        if not hasattr(self, 'state_actions') or not self.state_actions:
+            raise RuntimeError("Controller missing state_actions during _update_state")
+        # CRITICAL: ONLY use the exact game_state that state_actions modifies
+        actual_game_state = self.state_actions['set_phase'].__self__.game_state
+        self.game_state = actual_game_state
+        self._current_phase = actual_game_state.get("phase", "move")
 
     def _check_game_over(self) -> bool:
         """Check if game is over"""
@@ -154,25 +165,48 @@ class GameController:
     # === GAME STATE ACCESSORS (EXACT from TypeScript patterns) ===
 
     def get_current_player(self) -> int:
-        """Get current player"""
-        return self.game_state["current_player"]
+        """Get current player from the exact game_state that state_actions modifies"""
+        if not hasattr(self, 'state_actions') or not self.state_actions:
+            raise RuntimeError("Controller missing state_actions - cannot get current player")
+        actual_game_state = self.state_actions['set_current_player'].__self__.game_state
+        self.game_state = actual_game_state
+        return actual_game_state["current_player"]
 
     def get_current_phase(self) -> str:
-        """Get current phase"""
-        phase = self.game_state["phase"]
-        return phase
+        """Get current phase - ONLY from the exact game_state object that state_actions modifies"""
+        if not hasattr(self, 'state_actions') or not self.state_actions:
+            raise RuntimeError("Controller missing state_actions - cannot get current phase")
+        # CRITICAL: ONLY use the game_state object that state_actions actually modifies
+        if not hasattr(self.state_actions.get('set_phase', lambda: None), '__self__'):
+            raise RuntimeError("state_actions set_phase missing __self__ - object identity broken")
+        actual_game_state = self.state_actions['set_phase'].__self__.game_state
+        # CRITICAL: Always update controller reference to prevent drift
+        self.game_state = actual_game_state
+        return actual_game_state.get("phase", "move")
 
     def get_current_turn(self) -> int:
-        """Get current turn"""
-        return self.game_state["current_turn"]
+        """Get current turn from the exact game_state that state_actions modifies"""
+        if not hasattr(self, 'state_actions') or not self.state_actions:
+            raise RuntimeError("Controller missing state_actions - cannot get current turn")
+        actual_game_state = self.state_actions['set_current_turn'].__self__.game_state
+        self.game_state = actual_game_state
+        return actual_game_state["current_turn"]
 
     def get_selected_unit_id(self) -> Optional[int]:
-        """Get selected unit ID"""
-        return self.game_state["selected_unit_id"]
+        """Get selected unit ID from the exact game_state that state_actions modifies"""
+        if not hasattr(self, 'state_actions') or not self.state_actions:
+            raise RuntimeError("Controller missing state_actions - cannot get selected unit ID")
+        actual_game_state = self.state_actions['set_selected_unit_id'].__self__.game_state
+        self.game_state = actual_game_state
+        return actual_game_state["selected_unit_id"]
 
     def get_units(self) -> List[Dict[str, Any]]:
-        """Get all units"""
-        return copy.deepcopy(self.game_state["units"])
+        """Get all units from the exact game_state that state_actions modifies"""
+        if not hasattr(self, 'state_actions') or not self.state_actions:
+            raise RuntimeError("Controller missing state_actions - cannot get units")
+        actual_game_state = self.state_actions['set_units'].__self__.game_state
+        self.game_state = actual_game_state
+        return copy.deepcopy(actual_game_state["units"])
 
     def get_current_player_units(self) -> List[Dict[str, Any]]:
         """Get current player's units"""

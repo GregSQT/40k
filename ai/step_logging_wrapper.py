@@ -190,37 +190,9 @@ class StepLoggingWrapper(SequentialGameController):
         current_phase = self.base_controller.get_current_phase()  # Fresh read each time
         current_player = self.base_controller.get_current_player()
         
-        # DEBUG: Track first few steps to diagnose phase cycling
-        if steps_before <= 10:  # Show first 10 steps to see the problem
-            units = self.base_controller.get_units()
-            living_units = [u for u in units if u.get("CUR_HP", 0) > 0]
-            current_player_units = [u for u in living_units if u.get("player") == current_player]
-            
+        # Minimal debug for critical steps only
+        if steps_before <= 2:  # Only first 2 steps
             print(f"🔍 STEP {steps_before}: Phase={current_phase}, Player={current_player}")
-            print(f"   Total units: {len(units)}, Living: {len(living_units)}, Current player {current_player} units: {len(current_player_units)}")
-            
-            # CRITICAL DEBUG: Show unit distribution by player
-            player_0_units = [u for u in living_units if u.get("player") == 0]
-            player_1_units = [u for u in living_units if u.get("player") == 1]
-            print(f"   Unit distribution: Player 0: {len(player_0_units)}, Player 1: {len(player_1_units)}")
-            print(f"   Player 0 unit IDs: {[u['id'] for u in player_0_units]}")
-            print(f"   Player 1 unit IDs: {[u['id'] for u in player_1_units]}")
-            
-            if hasattr(self.base_controller, 'game_state'):
-                moved = self.base_controller.game_state.get('units_moved', [])
-                shot = self.base_controller.game_state.get('units_shot', [])
-                charged = self.base_controller.game_state.get('units_charged', [])
-                attacked = self.base_controller.game_state.get('units_attacked', [])
-                print(f"   Tracking: moved={moved}, shot={shot}, charged={charged}, attacked={attacked}")
-            
-            # Show what Sequential Engine thinks
-            if hasattr(self.sequential_engine, 'get_next_active_unit'):
-                active_unit = self.sequential_engine.get_next_active_unit()
-                print(f"   Sequential Engine active unit: {active_unit['id'] if active_unit else None}")
-                print(f"   Sequential Engine phase complete: {getattr(self.sequential_engine, 'phase_complete', 'unknown')}")
-                print(f"   Sequential Engine queue length: {len(getattr(self.sequential_engine, 'activation_queue', []))}")
-                print(f"   Sequential Engine queue built for phase: {getattr(self.sequential_engine, 'queue_built_for_phase', 'unknown')}")
-                print(f"   Sequential Engine queue built for player: {getattr(self.sequential_engine, 'queue_built_for_player', 'unknown')}")
         
         # CRITICAL FIX: ALWAYS use controller as single source of truth for phase
         current_player = self.base_controller.get_current_player()
@@ -279,18 +251,14 @@ class StepLoggingWrapper(SequentialGameController):
                 # Skip the controller phase check and go directly to queue building
                 # CRITICAL FIX: Use fresh current player reading
                 fresh_current_player = self.base_controller.get_current_player()
-                print(f"🔧 Building queue for phase '{phase_name}', player {fresh_current_player}")
                 all_units = self.base_controller.get_units()
                 living_units = [u for u in all_units if u.get("CUR_HP", 0) > 0]
                 
                 if phase_name == "combat":
                     self.sequential_engine._build_combat_queues(living_units)
-                    print(f"   Combat queue built with {len(living_units)} living units")
                 else:
                     eligible_units = [u for u in living_units if u["player"] == fresh_current_player]
                     self.sequential_engine.activation_queue = copy.deepcopy(eligible_units)
-                    print(f"   Phase queue built: {len(eligible_units)} units for player {fresh_current_player}")
-                    print(f"   Eligible unit IDs: {[u['id'] for u in eligible_units]}")
                     
                 self.sequential_engine.current_active_unit = None
                 self.sequential_engine.phase_complete = False
@@ -307,19 +275,8 @@ class StepLoggingWrapper(SequentialGameController):
             # Use safe version to avoid race condition
             safe_start_phase(current_phase)
             
-            # CRITICAL DEBUG: Check queue state immediately after sync
-            print(f"🔍 AFTER SYNC: Queue length: {len(self.sequential_engine.activation_queue)}")
-            print(f"   Phase complete: {self.sequential_engine.phase_complete}")
-            print(f"   Queue contents: {[u['id'] for u in self.sequential_engine.activation_queue]}")
-            
-            # Sequential Engine synced successfully
-        
-        # CRITICAL DEBUG: Check queue state right before get_next_active_unit
-        print(f"🔍 BEFORE get_next_active_unit: Queue length: {len(self.sequential_engine.activation_queue)}")
-        
+        # Get active unit for action (outside sync block)
         active_unit = self.sequential_engine.get_next_active_unit()
-        print(f"🔍 AFTER get_next_active_unit: Active unit: {active_unit['id'] if active_unit else None}")
-        print(f"   Queue length now: {len(self.sequential_engine.activation_queue)}")
         
         # CRITICAL DEBUG: Track action execution and queue state
         print(f"🎬 EXECUTING ACTION: {action} for unit {active_unit['id'] if active_unit else None} in phase {current_phase}")
