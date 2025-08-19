@@ -33,6 +33,7 @@ else:
         "AI_PROTOCOLE.md",
         "AI_TURN.md",
         "config_loader.py",
+        "train_step.log", # Output for training steps test
 
 ######################################################################################################
 ##### ai files

@@ -138,23 +138,18 @@ class SequentialActivationEngine:
         self.combat_sub_phase = "charged_units"
         self.activation_queue = copy.deepcopy(self.combat_charged_queue)
         
+        print(f"   Combat sub-phase: {self.combat_sub_phase}")
+        print(f"   Charged queue: {len(self.combat_charged_queue)} units")
+        print(f"   Alternating queue: {len(self.combat_alternating_queue)} units")
+        print(f"   Initial activation queue: {len(self.activation_queue)} units")
+        
     def get_next_active_unit(self) -> Optional[Dict[str, Any]]:
         """
         Return next eligible unit following EXACT AI_GAME.md eligibility rules.
-        
-        ELIGIBILITY VALIDATION (AI_GAME.md):
-        - "Dynamic Target Validation: Available targets/destinations checked at START of each unit's activation"
-        - "Death Handling: Dead units immediately removed from game and all tracking lists"
-        - Phase-specific eligibility rules enforced exactly
-        
-        STEP COUNTING (AI_GAME.md):
-        - Eligible unit found: Will result in "1 step increase"
-        - Auto-skip ineligible: "No step increase" 
-        
-        Returns:
-            Dict: Next unit to activate, or None if phase complete
         """
+        # CRITICAL FIX: Always get fresh phase data
         current_phase = self.game_controller.get_current_phase()
+        print(f"   🔍 Sequential Engine checking eligibility for phase: {current_phase}")
         
         # Handle combat phase transitions
         if current_phase == "combat" and not self.activation_queue:
@@ -167,7 +162,7 @@ class SequentialActivationEngine:
                 
         # Process queue until eligible unit found or queue empty
         while self.activation_queue:
-            candidate_unit = self.activation_queue.pop(0)
+            candidate_unit = self.activation_queue[0]  # Check without removing
             
             # Get fresh unit state for validation ("checked at START of each unit's activation")
             fresh_unit = self._find_fresh_unit(candidate_unit["id"])
@@ -180,8 +175,9 @@ class SequentialActivationEngine:
                 self.auto_skipped_units += 1
                 continue
                 
-            # Check phase-specific eligibility with detailed rules
-            eligibility_result = self._check_unit_eligibility_detailed(fresh_unit, current_phase)
+            # CRITICAL FIX: Use fresh phase data for eligibility check
+            fresh_phase = self.game_controller.get_current_phase()
+            eligibility_result = self._check_unit_eligibility_detailed(fresh_unit, fresh_phase)
             
             if eligibility_result["eligible"]:
                 self.current_active_unit = fresh_unit
@@ -191,9 +187,22 @@ class SequentialActivationEngine:
                     charge_roll = random.randint(1, 6) + random.randint(1, 6)
                     self.unit_charge_rolls[fresh_unit["id"]] = charge_roll
                 
+                # DON'T remove from queue yet - will be removed after action execution
                 # Next active unit selected
                 return fresh_unit
             else:
+                # Remove ineligible unit from queue and continue
+                self.activation_queue.pop(0)
+                print(f"   ❌ Unit {fresh_unit['id']} ineligible: {eligibility_result['reason']}")
+                print(f"      Phase: {current_phase}, Player: {fresh_unit.get('player')}")
+                if current_phase == "move":
+                    units_moved = self.game_controller.game_state.get("units_moved", set())
+                    print(f"      units_moved: {units_moved}")
+                elif current_phase == "shoot":
+                    units_shot = self.game_controller.game_state.get("units_shot", set())
+                    units_fled = self.game_controller.game_state.get("units_fled", set())
+                    print(f"      units_shot: {units_shot}, units_fled: {units_fled}")
+                
                 self.debug_units_skipped.append({
                     "unit_id": fresh_unit["id"], 
                     "reason": eligibility_result["reason"],
@@ -225,12 +234,18 @@ class SequentialActivationEngine:
         enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("CUR_HP", 0) > 0]
         friendly_units = [u for u in all_units if u["player"] == unit["player"] and u["id"] != unit["id"] and u.get("CUR_HP", 0) > 0]
         
+        # CRITICAL DEBUG: Check game_state object identity
+        print(f"   🔍 Game state ID: {id(self.game_controller.game_state)}")
+        
         # Get tracking sets
         units_moved = self.game_controller.game_state.get("units_moved", set())
         units_shot = self.game_controller.game_state.get("units_shot", set())
         units_charged = self.game_controller.game_state.get("units_charged", set())
         units_attacked = self.game_controller.game_state.get("units_attacked", set())
         units_fled = self.game_controller.game_state.get("units_fled", set())
+        
+        print(f"   🔍 Phase: {phase}, Unit {unit['id']} eligibility check")
+        print(f"       Tracking sets: moved={units_moved}, shot={units_shot}")
         
         if phase == "move":
             return self._check_movement_eligibility_detailed(unit, current_player, units_moved, enemy_units)
@@ -454,6 +469,11 @@ class SequentialActivationEngine:
             "phase": current_phase,
             "step_increase": 1 if success else 0
         })
+        
+        # CRITICAL FIX: Remove unit from queue after action execution
+        if self.activation_queue and self.activation_queue[0]["id"] == unit["id"]:
+            self.activation_queue.pop(0)  # Now remove the unit that just acted
+            print(f"   ✅ Unit {unit['id']} removed from queue, {len(self.activation_queue)} remaining")
         
         # End activation
         self.current_active_unit = None

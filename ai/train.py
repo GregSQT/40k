@@ -52,9 +52,10 @@ class StepLogger:
             # Clear existing log file
             with open(self.output_file, 'w') as f:
                 f.write("=== STEP-BY-STEP ACTION LOG ===\n")
-                f.write("AI_TURN.md COMPLIANCE: Only actions that increment episode_steps are logged\n")
-                f.write("STEP INCREMENT ACTIONS: move, shoot, charge, combat, wait\n")
+                f.write("AI_TURN.md COMPLIANCE: Actions that increment episode_steps are logged\n")
+                f.write("STEP INCREMENT ACTIONS: move, shoot, charge, combat, wait (SUCCESS OR FAILURE)\n")
                 f.write("NO STEP INCREMENT: auto-skip ineligible units, phase transitions\n")
+                f.write("FAILED ACTIONS: Still increment steps - unit consumed time/effort\n")
                 f.write("=" * 80 + "\n\n")
             print(f"📝 Step logging enabled: {self.output_file}")
     
@@ -85,7 +86,7 @@ class StepLogger:
             print(f"⚠️ Step logging error: {e}")
     
     def _format_replay_style_message(self, unit_id, action_type, details):
-        """Format messages using gameLogUtils.ts style - EXACT match to replay format"""
+        """Format messages with detailed combat info - enhanced replay format"""
         if action_type == "move" and details:
             # Extract position info for move message
             if "start_pos" in details and "end_pos" in details:
@@ -95,34 +96,105 @@ class StepLogger:
             else:
                 return f"Unit {unit_id} MOVED"
                 
-        elif action_type == "shoot" and details and "target_id" in details:
+        elif action_type == "shoot":
+            if "target_id" not in details:
+                raise KeyError("Shoot action missing required target_id")
+            if "hit_roll" not in details:
+                raise KeyError("Shoot action missing required hit_roll")
+            if "wound_roll" not in details:
+                raise KeyError("Shoot action missing required wound_roll")
+            if "save_roll" not in details:
+                raise KeyError("Shoot action missing required save_roll")
+            if "damage_dealt" not in details:
+                raise KeyError("Shoot action missing required damage_dealt")
+            if "hit_result" not in details:
+                raise KeyError("Shoot action missing required hit_result")
+            if "wound_result" not in details:
+                raise KeyError("Shoot action missing required wound_result")
+            if "save_result" not in details:
+                raise KeyError("Shoot action missing required save_result")
+            if "hit_target" not in details:
+                raise KeyError("Shoot action missing required hit_target")
+            if "wound_target" not in details:
+                raise KeyError("Shoot action missing required wound_target")
+            if "save_target" not in details:
+                raise KeyError("Shoot action missing required save_target")
+            
             target_id = details["target_id"]
-            return f"Unit {unit_id} SHOT at unit {target_id}"
+            hit_roll = details["hit_roll"]
+            wound_roll = details["wound_roll"]
+            save_roll = details["save_roll"]
+            damage = details["damage_dealt"]
+            hit_result = details["hit_result"]
+            wound_result = details["wound_result"]
+            save_result = details["save_result"]
+            
+            hit_target = details["hit_target"]
+            wound_target = details["wound_target"]
+            save_target = details["save_target"]
+            
+            base_msg = f"Unit {unit_id} SHOT at unit {target_id}"
+            detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+            return base_msg + detail_msg
             
         elif action_type == "charge" and details:
             if "target_id" in details:
                 target_id = details["target_id"]
-                if "unit_name" in details and "target_name" in details and "start_pos" in details and "end_pos" in details:
-                    unit_name = details["unit_name"]
-                    target_name = details["target_name"]
+                if "start_pos" in details and "end_pos" in details:
                     start_col, start_row = details["start_pos"]
                     end_col, end_row = details["end_pos"]
-                    return f"Unit {unit_name} {unit_id} CHARGED unit {target_name} {target_id} from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+                    # Remove unit names, keep only IDs per your request
+                    return f"Unit {unit_id} CHARGED unit {target_id} from ({start_col}, {start_row}) to ({end_col}, {end_row})"
                 else:
                     return f"Unit {unit_id} CHARGED unit {target_id}"
             else:
                 return f"Unit {unit_id} CHARGED"
                 
-        elif action_type == "combat" and details and "target_id" in details:
+        elif action_type == "combat":
+            if "target_id" not in details:
+                raise KeyError("Combat action missing required target_id")
+            if "hit_roll" not in details:
+                raise KeyError("Combat action missing required hit_roll")
+            if "wound_roll" not in details:
+                raise KeyError("Combat action missing required wound_roll")
+            if "save_roll" not in details:
+                raise KeyError("Combat action missing required save_roll")
+            if "damage_dealt" not in details:
+                raise KeyError("Combat action missing required damage_dealt")
+            if "hit_result" not in details:
+                raise KeyError("Combat action missing required hit_result")
+            if "wound_result" not in details:
+                raise KeyError("Combat action missing required wound_result")
+            if "save_result" not in details:
+                raise KeyError("Combat action missing required save_result")
+            if "hit_target" not in details:
+                raise KeyError("Combat action missing required hit_target")
+            if "wound_target" not in details:
+                raise KeyError("Combat action missing required wound_target")
+            if "save_target" not in details:
+                raise KeyError("Combat action missing required save_target")
+            
             target_id = details["target_id"]
-            return f"Unit {unit_id} FOUGHT unit {target_id}"
+            hit_roll = details["hit_roll"]
+            wound_roll = details["wound_roll"]
+            save_roll = details["save_roll"]
+            damage = details["damage_dealt"]
+            hit_result = details["hit_result"]
+            wound_result = details["wound_result"]
+            save_result = details["save_result"]
+            hit_target = details["hit_target"]
+            wound_target = details["wound_target"]
+            save_target = details["save_target"]
+            
+            base_msg = f"Unit {unit_id} FOUGHT unit {target_id}"
+            detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+            return base_msg + detail_msg
             
         elif action_type == "wait":
             return f"Unit {unit_id} NO MOVE"
             
         else:
-            # Fallback for unknown action types
-            return f"Unit {unit_id} {action_type.upper()}"
+            raise ValueError(f"Unknown action_type '{action_type}' - no fallback allowed")
     
     def log_phase_transition(self, from_phase, to_phase, player):
         """Log phase transitions (no step increment) using replay-style format"""
@@ -265,9 +337,7 @@ def create_model(config, training_config_name="default", rewards_config_name="de
             from step_logging_wrapper import enable_step_logging_on_environment
             enable_step_logging_on_environment(base_env, step_logger)
         except ImportError as e:
-            print(f"⚠️ Step logging import failed: {e}")
-            # Fallback: attach step logger directly
-            base_env.step_logger = step_logger
+            raise ImportError(f"Step logging import failed - no fallback allowed: {e}")
     
     # DISABLED: No logging during training for speed
     # Enhanced logging only during evaluation
@@ -349,9 +419,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             from step_logging_wrapper import enable_step_logging_on_environment
             enable_step_logging_on_environment(base_env, step_logger)
         except ImportError as e:
-            print(f"⚠️ Step logging import failed: {e}")
-            # Fallback: attach step logger directly
-            base_env.step_logger = step_logger
+            raise ImportError(f"Step logging import failed - no fallback allowed: {e}")
     
     # DISABLED: No logging during training for speed
     # Enhanced logging only during evaluation
@@ -764,8 +832,7 @@ def main():
                     from step_logging_wrapper import enable_step_logging_on_environment
                     enable_step_logging_on_environment(env, step_logger)
                 except ImportError as e:
-                    print(f"⚠️ Step logging import failed: {e}")
-                    env.step_logger = step_logger
+                    raise ImportError(f"Step logging import failed - no fallback allowed: {e}")
             model = DQN.load(model_path, env=env)
             test_trained_model(model, args.test_episodes)
             return 0

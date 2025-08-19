@@ -92,6 +92,7 @@ class SequentialGameController:
         active_unit = self.sequential_engine.get_next_active_unit()        
         # If no active unit, phase must be complete - advance immediately
         if not active_unit:
+            print(f"   🔄 No active unit, phase complete: {self.sequential_engine.phase_complete}")
             self.phase_started = False
             
             # CRITICAL FIX: Call process_phase_transitions FIRST to check and handle transitions
@@ -123,17 +124,16 @@ class SequentialGameController:
         steps_before = self.base_controller.game_state["episode_steps"]
         success = self.sequential_engine.execute_unit_action(active_unit, mirror_action)
         
-        # AI_TURN.md COMPLIANCE: Track step increment based on action type (single execution)
-        if success and mirror_action["type"] in ["move", "shoot", "charge", "combat", "wait"]:
-            # Ensure step counting happens only once per action
-            if not hasattr(self, '_last_step_logged') or self._last_step_logged != (steps_before, mirror_action["type"]):
-                new_steps = steps_before + 1
-                self.base_controller.game_state["episode_steps"] = new_steps
-                self._last_step_logged = (steps_before, mirror_action["type"])
+        # AI_TURN.md COMPLIANCE: Track step increment based on action ATTEMPT (regardless of success/failure)
+        if mirror_action["type"] in ["move", "shoot", "charge", "combat", "wait"]:
+            # Step increment occurs when unit ATTEMPTS action, not just on success
+            # Failed attacks still consume time/effort and increment steps
+            new_steps = steps_before + 1
+            self.base_controller.game_state["episode_steps"] = new_steps
+            print(f"   ✅ Step incremented: {steps_before} → {new_steps} for {mirror_action['type']} action")
         
         # CRITICAL FIX: Ensure unit is marked as acted after successful action
         if success:
-            
             self.base_controller._mark_gym_unit_as_acted(active_unit)
         
         # CRITICAL FIX: Log action properly for replay system

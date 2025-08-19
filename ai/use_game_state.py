@@ -88,6 +88,7 @@ class UseGameState:
             "combat_sub_phase": None,
             "combat_active_player": None,
             "unit_charge_rolls": {},
+            "episode_steps": 0,  # AI_TURN.md compliance: Step counter for training
         }
         
         # Additional state objects (EXACT from TypeScript)
@@ -680,6 +681,7 @@ class TrainingGameState(UseGameState):
         self.game_state["units_charged"] = []
         self.game_state["units_attacked"] = []
         self.game_state["units_fled"] = []
+        self.game_state["episode_steps"] = 0  # AI_TURN.md compliance: Reset step counter
 
     def _get_unit_CUR_HP(self, unit: Dict[str, Any]) -> int:
         """Get unit CUR_HP, validate required fields exist"""
