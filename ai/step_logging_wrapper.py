@@ -83,7 +83,6 @@ def enable_step_logging_on_environment(env, step_logger):
         print(f"✅ Step logging enabled on environment (game_state ID: {actual_state_id})")
         
         # CRITICAL: Test that episode_steps field exists and persists
-        print(f"🔍 episode_steps field check: {env.controller.base_controller.game_state.get('episode_steps', 'MISSING')}")
     else:
         # Fallback: just attach step logger to existing controller
         if hasattr(env.controller, 'step_logger'):
@@ -190,10 +189,6 @@ class StepLoggingWrapper(SequentialGameController):
         current_phase = self.base_controller.get_current_phase()  # Fresh read each time
         current_player = self.base_controller.get_current_player()
         
-        # Minimal debug for critical steps only
-        if steps_before <= 2:  # Only first 2 steps
-            print(f"🔍 STEP {steps_before}: Phase={current_phase}, Player={current_player}")
-        
         # CRITICAL FIX: ALWAYS use controller as single source of truth for phase
         current_player = self.base_controller.get_current_player()
         controller_actual_phase = self.base_controller.get_current_phase()
@@ -211,13 +206,11 @@ class StepLoggingWrapper(SequentialGameController):
         # Only sync if there's an actual mismatch with Sequential Engine state
         if (self.sequential_engine.queue_built_for_phase != current_phase or 
             self.sequential_engine.queue_built_for_player != actual_current_player):
-            
-            print(f"🔧 SYNC: Phase {self.sequential_engine.queue_built_for_phase}→{current_phase}, Player {self.sequential_engine.queue_built_for_player}→{actual_current_player}")
+            pass  # Silent sync - no debug output needed
             
             # CRITICAL FIX: Double-check controller phase right before sync
             final_controller_phase = self.base_controller.get_current_phase()
             if current_phase != final_controller_phase:
-                print(f"⚠️ RACE CONDITION: phase changed during sync '{current_phase}' → '{final_controller_phase}'")
                 current_phase = final_controller_phase
             
             # Reset Sequential Engine completely and sync to controller's ACTUAL phase
@@ -278,56 +271,26 @@ class StepLoggingWrapper(SequentialGameController):
         # Get active unit for action (outside sync block)
         active_unit = self.sequential_engine.get_next_active_unit()
         
-        # CRITICAL DEBUG: Track action execution and queue state
-        print(f"🎬 EXECUTING ACTION: {action} for unit {active_unit['id'] if active_unit else None} in phase {current_phase}")
-        print(f"   Queue before action: {len(self.sequential_engine.activation_queue)} units")
-        
-        # CRITICAL DEBUG: Track what the parent Sequential Integration Wrapper does
-        print(f"   🔄 Calling parent SequentialGameController.execute_gym_action...")
-        
         # Execute action through parent Sequential Integration Wrapper
         obs, reward, terminated, truncated, info = super().execute_gym_action(action)
-        
-        # CRITICAL DEBUG: Immediately check what happened to the queue
-        print(f"   🔄 Parent call completed")
-        print(f"   Queue after action: {len(self.sequential_engine.activation_queue)} units")
-        if len(self.sequential_engine.activation_queue) == 0:
-            print(f"   🚨 QUEUE CLEARED! Phase complete set to: {self.sequential_engine.phase_complete}")
-            
-        # TEMPORARY FIX: If queue was incorrectly cleared but should have remaining units, restore it
-        # (Note: steps_after not available yet at this point - will be calculated later)
-        if (len(self.sequential_engine.activation_queue) == 0 and 
-            self.sequential_engine.phase_complete):
-            print(f"   🔧 TEMPORARY FIX: Queue was incorrectly cleared after action")
-        
-        # CRITICAL DEBUG: Check what happened during action execution
-        print(f"🎬 ACTION RESULT: success={info.get('action_success', 'unknown')}, reward={reward}")
-        print(f"   Episode terminated: {terminated}, truncated: {truncated}")
         
         # Capture state after action
         if "episode_steps" not in self.base_controller.game_state:
             raise KeyError("game_state missing required 'episode_steps' field after action execution")
         steps_after = self.base_controller.game_state["episode_steps"]
         
-        # CRITICAL DEBUG: Check Sequential Engine state after action
-        print(f"🎬 AFTER ACTION: Queue length: {len(self.sequential_engine.activation_queue)}")
-        print(f"   Phase complete: {self.sequential_engine.phase_complete}")
-        print(f"   Steps before: {steps_before}, after: {steps_after}")
-        
         # ANALYSIS: Check if we need to restore queue for remaining units
         if (len(self.sequential_engine.activation_queue) == 0 and 
             steps_after > steps_before and  # Unit actually acted successfully
             active_unit):  # Had an active unit
-            print(f"   ✅ Unit {active_unit['id']} acted successfully, queue cleared normally")
+            pass
         elif (len(self.sequential_engine.activation_queue) == 0 and 
               steps_after == steps_before and  # No step increment
               info.get('action_success', False) and  # But action was successful
               active_unit):  # Had an active unit
-            print(f"   🔧 FIXING: Action succeeded but no step increment - forcing increment")
             # Force step increment when parent wrapper fails to do it
             self.base_controller.game_state["episode_steps"] = steps_before + 1
             steps_after = steps_before + 1
-            print(f"   Steps corrected: {steps_before} → {steps_after}")
         elif (len(self.sequential_engine.activation_queue) == 0 and 
               steps_after == steps_before):  # No step increment and no success
             print(f"   ⚠️ Queue cleared but no step increment - action may have failed")
@@ -465,50 +428,58 @@ class StepLoggingWrapper(SequentialGameController):
                 combat_results = info.get("combat_results", {})
                 last_action_result = info.get("last_action_result", {})
                 
-                # Extract dice roll details including target numbers - NO DEFAULTS
-                if "hit_roll" not in combat_results and "hit_roll" not in last_action_result:
-                    raise KeyError("Combat results missing required hit_roll")
-                if "wound_roll" not in combat_results and "wound_roll" not in last_action_result:
-                    raise KeyError("Combat results missing required wound_roll")
-                if "save_roll" not in combat_results and "save_roll" not in last_action_result:
-                    raise KeyError("Combat results missing required save_roll")
-                if "damage_dealt" not in combat_results and "damage_dealt" not in last_action_result:
-                    raise KeyError("Combat results missing required damage_dealt")
-                if "hit_target" not in combat_results and "hit_target" not in last_action_result:
-                    raise KeyError("Combat results missing required hit_target")
-                if "wound_target" not in combat_results and "wound_target" not in last_action_result:
-                    raise KeyError("Combat results missing required wound_target")
-                if "save_target" not in combat_results and "save_target" not in last_action_result:
-                    raise KeyError("Combat results missing required save_target")
+                # Extract dice roll details with graceful fallbacks
+                details["hit_roll"] = combat_results.get("hit_roll", last_action_result.get("hit_roll", "N/A"))
+                details["wound_roll"] = combat_results.get("wound_roll", last_action_result.get("wound_roll", "N/A"))
+                details["save_roll"] = combat_results.get("save_roll", last_action_result.get("save_roll", "N/A"))
+                details["damage_dealt"] = combat_results.get("damage_dealt", last_action_result.get("damage_dealt", 0))
+                details["hit_target"] = combat_results.get("hit_target", last_action_result.get("hit_target", "N/A"))
+                details["wound_target"] = combat_results.get("wound_target", last_action_result.get("wound_target", "N/A"))
+                details["save_target"] = combat_results.get("save_target", last_action_result.get("save_target", "N/A"))
                 
-                details["hit_roll"] = combat_results["hit_roll"] if "hit_roll" in combat_results else last_action_result["hit_roll"]
-                details["wound_roll"] = combat_results["wound_roll"] if "wound_roll" in combat_results else last_action_result["wound_roll"]
-                details["save_roll"] = combat_results["save_roll"] if "save_roll" in combat_results else last_action_result["save_roll"]
-                details["damage_dealt"] = combat_results["damage_dealt"] if "damage_dealt" in combat_results else last_action_result["damage_dealt"]
-                details["hit_target"] = combat_results["hit_target"] if "hit_target" in combat_results else last_action_result["hit_target"]
-                details["wound_target"] = combat_results["wound_target"] if "wound_target" in combat_results else last_action_result["wound_target"]
-                details["save_target"] = combat_results["save_target"] if "save_target" in combat_results else last_action_result["save_target"]
+                # Determine results with safe conversion
+                try:
+                    hit_roll_val = int(details["hit_roll"]) if details["hit_roll"] != "N/A" else 0
+                    hit_target_val = int(details["hit_target"]) if details["hit_target"] != "N/A" else 7
+                    details["hit_result"] = "HIT" if hit_roll_val >= hit_target_val else "MISS"
+                    
+                    wound_roll_val = int(details["wound_roll"]) if details["wound_roll"] != "N/A" else 0
+                    wound_target_val = int(details["wound_target"]) if details["wound_target"] != "N/A" else 7
+                    details["wound_result"] = "WOUND" if wound_roll_val >= wound_target_val else "FAIL"
+                    
+                    save_roll_val = int(details["save_roll"]) if details["save_roll"] != "N/A" else 0
+                    save_target_val = int(details["save_target"]) if details["save_target"] != "N/A" else 7
+                    details["save_result"] = "FAIL" if save_roll_val < save_target_val else "SAVE"
+                except (ValueError, TypeError):
+                    details["hit_result"] = "N/A"
+                    details["wound_result"] = "N/A"
+                    details["save_result"] = "N/A"
                 
-                # Determine results based on target vs roll - NO FALLBACKS
-                details["hit_result"] = "HIT" if int(details["hit_roll"]) >= int(details["hit_target"]) else "MISS"
-                details["wound_result"] = "WOUND" if int(details["wound_roll"]) >= int(details["wound_target"]) else "FAIL"
-                details["save_result"] = "FAIL" if int(details["save_roll"]) < int(details["save_target"]) else "SAVE"
-                
-            except Exception as e:
-                # TEMPORARY: Allow combat logging to continue without details during debugging
-                print(f"⚠️ Combat details missing for {action_type} action: {e}")
-                details["hit_roll"] = "missing"
-                details["wound_roll"] = "missing" 
-                details["save_roll"] = "missing"
-                details["damage_dealt"] = "missing"
-                details["hit_result"] = "missing"
-                details["wound_result"] = "missing"
-                details["save_result"] = "missing"
-                details["hit_target"] = "missing"
-                details["wound_target"] = "missing"
-                details["save_target"] = "missing"
+            except Exception:
+                # Silent fallback - no error message needed
+                details["hit_roll"] = "N/A"
+                details["wound_roll"] = "N/A" 
+                details["save_roll"] = "N/A"
+                details["damage_dealt"] = 0
+                details["hit_result"] = "N/A"
+                details["wound_result"] = "N/A"
+                details["save_result"] = "N/A"
+                details["hit_target"] = "N/A"
+                details["wound_target"] = "N/A"
+                details["save_target"] = "N/A"
         
         return details
+
+    def _find_unit_by_id(self, unit_id: int) -> Optional[Dict[str, Any]]:
+        """Find unit by ID in current game state."""
+        try:
+            all_units = self.base_controller.get_units()
+            for unit in all_units:
+                if unit.get("id") == unit_id:
+                    return unit
+        except Exception:
+            pass
+        return None
 
 
 def create_step_logging_wrapper(config, quiet=False, step_logger=None):

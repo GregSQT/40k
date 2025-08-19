@@ -222,10 +222,8 @@ class UsePhaseTransition:
         """
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
-            # CRITICAL FIX: Use the SAME game_state object that set_phase modifies
-            set_phase_func = self.actions['set_phase']
-            correct_game_state = set_phase_func.__self__.game_state
-            self.game_state = correct_game_state
+            # CRITICAL FIX: Never replace game_state object - use original initialization object
+            # The actions already point to the correct object, no replacement needed
             
             self.actions["set_phase"]("combat")
             self.actions["initialize_combat_phase"]()
@@ -248,10 +246,8 @@ class UsePhaseTransition:
         """
         def delayed_end_turn():
             """Delayed execution to mirror setTimeout(300) behavior"""
-            # CRITICAL FIX: Use the SAME game_state object that set_phase modifies
-            set_phase_func = self.actions['set_phase']
-            correct_game_state = set_phase_func.__self__.game_state
-            self.game_state = correct_game_state
+            # CRITICAL FIX: Never replace game_state object - use original initialization object
+            # The actions already point to the correct object, no replacement needed
             
             # Switch player (EXACT from TypeScript)
             new_player = 1 if self.current_player == 0 else 0

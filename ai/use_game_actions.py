@@ -256,23 +256,22 @@ class UseGameActions:
             raise ValueError("UseGameActionsParams is required")
         validate_actions_object(params.actions)
         
-        self.game_state = params.game_state
-        self.move_preview = params.move_preview
-        self.attack_preview = params.attack_preview
-        self.shooting_phase_state = params.shooting_phase_state
+        # CRITICAL FIX: Store reference to params object, not individual game_state
+        # This ensures we always access the LIVE game_state through the controller
+        self.params = params
         self.board_config = params.board_config
-        self.actions = params.actions
         self.game_log = params.game_log
         
         # Use live references instead of cached values to prevent stale data
-        # All state access will go through self.game_state directly
+        # All state access will go through self.params.game_state directly
         pass  # Remove all cached state extractions
 
     # === HELPER FUNCTIONS (EXACT from TypeScript) ===
     
     def find_unit(self, unit_id: int) -> Optional[Dict[str, Any]]:
         """Helper function to find unit by ID (EXACT from TypeScript)"""
-        for unit in self.game_state["units"]:
+        # CRITICAL FIX: Always use live game_state from params
+        for unit in self.params.game_state["units"]:
             if unit["id"] == unit_id:
                 return unit
         return None
@@ -349,7 +348,7 @@ class UseGameActions:
         Complete phase-specific eligibility logic with ALL missing features.
         """
         # Minimal debug for rapid phase cycling issue
-        current_player = self.game_state["current_player"]
+        current_player = self.params.game_state["current_player"]
         if unit["player"] != current_player:
             if unit["player"] == 1:  # Only debug AI units
                 print(f"❌ U{unit['id']}: wrong_player (P{unit['player']} != P{current_player})")
@@ -365,12 +364,12 @@ class UseGameActions:
                     raise KeyError(f"Unit missing required field '{field}': {unit}")
 
         # Get enemy units once for efficiency
-        enemy_units = [u for u in self.game_state["units"] if u["player"] != current_player]
+        enemy_units = [u for u in self.params.game_state["units"] if u["player"] != current_player]
 
-        phase = self.game_state["phase"]
-        if "units_moved" not in self.game_state:
+        phase = self.params.game_state["phase"]
+        if "units_moved" not in self.params.game_state:
             raise KeyError("Game state missing required 'units_moved' field")
-        units_moved = set(self.game_state["units_moved"])
+        units_moved = set(self.params.game_state["units_moved"])
         
         if phase == "move":
             # AI_TURN.md: Movement eligibility - unit hasn't moved this phase and is alive
@@ -383,8 +382,8 @@ class UseGameActions:
             return True
         
         elif phase == "shoot":
-            units_fled = set(self.game_state.get("units_fled"))
-            units_shot = set(self.game_state.get("units_shot", []))
+            units_fled = set(self.params.game_state.get("units_fled"))
+            units_shot = set(self.params.game_state.get("units_shot", []))
             if unit["id"] in units_shot:
                 return False
             # AI_TURN.md: "Unit is marked as units_fled" - NOT eligible
@@ -438,8 +437,8 @@ class UseGameActions:
             return True
         
         elif phase == "charge":
-            units_charged = set(self.game_state.get("units_charged", []))
-            units_fled = set(self.game_state.get("units_fled", []))
+            units_charged = set(self.params.game_state.get("units_charged", []))
+            units_fled = set(self.params.game_state.get("units_fled", []))
             if unit["id"] in units_charged:
                 if unit["player"] == 1:  # Only debug AI units
                     print(f"❌ U{unit['id']}: already_charged")
@@ -460,7 +459,7 @@ class UseGameActions:
             return within_charge_range
         
         elif phase == "combat":
-            units_attacked = set(self.game_state.get("units_attacked", []))
+            units_attacked = set(self.params.game_state.get("units_attacked", []))
             
             if unit["id"] in units_attacked:
                 if unit["player"] == 1:  # Only debug AI units
@@ -488,15 +487,15 @@ class UseGameActions:
         NOW WITH ALL MISSING TYPESCRIPT FEATURES.
         """
         # Prevent unit selection during shooting sequence (MISSING from original Python)
-        if self.shooting_phase_state.get("single_shot_state", {}).get("is_active"):
+        if self.params.shooting_phase_state.get("single_shot_state", {}).get("is_active"):
             print("Cannot select units during shooting sequence")
             return
 
         if unit_id is None:
-            self.actions["set_selected_unit_id"](None)
-            self.actions["clear_move_preview"]()
-            self.actions["set_attack_preview"](None)
-            self.actions["set_mode"]("select")
+            self.params.actions["set_selected_unit_id"](None)
+            self.params.actions["clear_move_preview"]()
+            self.params.actions["set_attack_preview"](None)
+            self.params.actions["set_mode"]("select")
             return
 
         unit = self.find_unit(unit_id)
@@ -511,32 +510,32 @@ class UseGameActions:
             return  # Exit immediately - no phase handling
 
         # Special handling for move phase - second click marks as moved (EXACT from TypeScript)
-        if self.game_state["phase"] == "move" and self.game_state["selected_unit_id"] == unit_id:
+        if self.params.game_state["phase"] == "move" and self.params.game_state["selected_unit_id"] == unit_id:
             # Log the "no move" decision (MISSING from original Python)
             if self.game_log:
-                self.game_log.log_no_move_action(unit, self.game_state["current_turn"])
+                self.game_log.log_no_move_action(unit, self.params.game_state["current_turn"])
             
-            self.actions["add_moved_unit"](unit_id)
-            self.actions["set_selected_unit_id"](None)
-            self.actions["clear_move_preview"]()
-            self.actions["set_mode"]("select")
+            self.params.actions["add_moved_unit"](unit_id)
+            self.params.actions["set_selected_unit_id"](None)
+            self.params.actions["clear_move_preview"]()
+            self.params.actions["set_mode"]("select")
             return
 
         # Special handling for shoot phase (EXACT from TypeScript)
-        if self.game_state["phase"] == "shoot":
+        if self.params.game_state["phase"] == "shoot":
             # Always show the attack preview…
-            self.actions["clear_move_preview"]()
-            self.actions["set_attack_preview"]({"unit_id": unit_id, "col": unit["col"], "row": unit["row"]})
-            self.actions["set_mode"]("attack_preview")
+            self.params.actions["clear_move_preview"]()
+            self.params.actions["set_attack_preview"]({"unit_id": unit_id, "col": unit["col"], "row": unit["row"]})
+            self.params.actions["set_mode"]("attack_preview")
 
             # …but only set the active shooter on the first click
-            if self.game_state["selected_unit_id"] is None:
-                self.actions["set_selected_unit_id"](unit_id)
+            if self.params.game_state["selected_unit_id"] is None:
+                self.params.actions["set_selected_unit_id"](unit_id)
             return
 
         # Special handling for charge phase (EXACT from TypeScript)
-        if self.game_state["phase"] == "charge":
-            existing_roll = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
+        if self.params.game_state["phase"] == "charge":
+            existing_roll = self.params.game_state.get("unit_charge_rolls", {}).get(unit_id)
             
             if not existing_roll:
                 # First time selecting this unit - roll 2d6 for charge distance (EXACT from TypeScript)
@@ -545,7 +544,7 @@ class UseGameActions:
                 charge_roll = die1 + die2
                 
                 # Check if any enemies within 12 hexes are also within the rolled charge distance (EXACT from TypeScript)
-                enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
+                enemy_units = [u for u in self.params.game_state["units"] if u["player"] != unit["player"]]
                 
                 enemies_in_range = []
                 for enemy in enemy_units:
@@ -576,7 +575,7 @@ class UseGameActions:
                         "type": "charge",
                         "message": (f"Unit {unit.get('name', unit['unit_type'])} CHARGE ROLL : {charge_roll} : "
                                   f"{'Enemy unit(s) in range' if can_charge else 'No enemy unit(s) in range'}"),
-                        "turnNumber": self.game_state["current_turn"],
+                        "turnNumber": self.params.game_state["current_turn"],
                         "phase": "charge",
                         "player": unit["player"],
                         "unitType": unit.get("unit_type", "unknown"),
@@ -586,13 +585,13 @@ class UseGameActions:
                         self.game_log.events.insert(0, charge_event)
                 
                 # Show popup with exact format required (call action if available)
-                if "show_charge_roll_popup" in self.actions:
-                    self.actions["show_charge_roll_popup"](unit_id, charge_roll, not can_charge)
+                if "show_charge_roll_popup" in self.params.actions:
+                    self.params.actions["show_charge_roll_popup"](unit_id, charge_roll, not can_charge)
                 
                 # CRITICAL FIX: Store the roll as dict with dice details (EXACT from TypeScript)
-                if "unit_charge_rolls" not in self.game_state:
-                    self.game_state["unit_charge_rolls"] = {}
-                self.game_state["unit_charge_rolls"][unit_id] = {
+                if "unit_charge_rolls" not in self.params.game_state:
+                    self.params.game_state["unit_charge_rolls"] = {}
+                self.params.game_state["unit_charge_rolls"][unit_id] = {
                     "total": charge_roll,
                     "charge_roll": charge_roll,  # Legacy compatibility
                     "die1": die1,
@@ -601,19 +600,19 @@ class UseGameActions:
                 
                 # Continue with state management (EXACT from TypeScript)
                 if can_charge:
-                    self.actions["set_selected_unit_id"](unit_id)
-                    self.actions["set_mode"]("charge_preview")
+                    self.params.actions["set_selected_unit_id"](unit_id)
+                    self.params.actions["set_mode"]("charge_preview")
                 else:
-                    self.actions["add_charged_unit"](unit_id)
-                    if "reset_unit_charge_roll" in self.actions:
-                        self.actions["reset_unit_charge_roll"](unit_id)
-                    self.actions["set_selected_unit_id"](None)
-                    self.actions["set_mode"]("select")
+                    self.params.actions["add_charged_unit"](unit_id)
+                    if "reset_unit_charge_roll" in self.params.actions:
+                        self.params.actions["reset_unit_charge_roll"](unit_id)
+                    self.params.actions["set_selected_unit_id"](None)
+                    self.params.actions["set_mode"]("select")
 
                 return
             else:
                 # Unit already has a charge roll (EXACT from TypeScript)
-                if self.game_state["selected_unit_id"] == unit_id:
+                if self.params.game_state["selected_unit_id"] == unit_id:
                     # Second click on same unit - cancel charge and end activation (EXACT from TypeScript)
                     if self.game_log:
                         cancel_event = {
@@ -621,7 +620,7 @@ class UseGameActions:
                             "timestamp": time.time(),
                             "type": "charge_cancel",
                             "message": f"Unit {unit.get('name', unit['unit_type'])} CHARGE CANCELLED",
-                            "turnNumber": self.game_state["current_turn"],
+                            "turnNumber": self.params.game_state["current_turn"],
                             "phase": "charge",
                             "player": unit["player"],
                             "unitType": unit.get("unit_type", "unknown"),
@@ -629,45 +628,45 @@ class UseGameActions:
                         }
                         if hasattr(self.game_log, 'events'):
                             self.game_log.events.insert(0, cancel_event)
-                    if "reset_unit_charge_roll" in self.actions:
-                        self.actions["reset_unit_charge_roll"](unit_id)
-                    self.actions["add_charged_unit"](unit_id)
-                    self.actions["set_selected_unit_id"](None)
-                    self.actions["set_mode"]("select")
+                    if "reset_unit_charge_roll" in self.params.actions:
+                        self.params.actions["reset_unit_charge_roll"](unit_id)
+                    self.params.actions["add_charged_unit"](unit_id)
+                    self.params.actions["set_selected_unit_id"](None)
+                    self.params.actions["set_mode"]("select")
                 else:
                     # Different unit with existing roll - show preview (EXACT from TypeScript)
-                    self.actions["set_selected_unit_id"](unit_id)
-                    self.actions["set_mode"]("charge_preview")
+                    self.params.actions["set_selected_unit_id"](unit_id)
+                    self.params.actions["set_mode"]("charge_preview")
                 return
 
         # Special handling for combat phase (EXACT from TypeScript)
-        if self.game_state["phase"] == "combat":
+        if self.params.game_state["phase"] == "combat":
             # Always show the attack preview for adjacent enemies
-            self.actions["clear_move_preview"]()
-            self.actions["set_attack_preview"]({"unit_id": unit_id, "col": unit["col"], "row": unit["row"]})
-            self.actions["set_mode"]("attack_preview")
-            self.actions["set_selected_unit_id"](unit_id)
+            self.params.actions["clear_move_preview"]()
+            self.params.actions["set_attack_preview"]({"unit_id": unit_id, "col": unit["col"], "row": unit["row"]})
+            self.params.actions["set_mode"]("attack_preview")
+            self.params.actions["set_selected_unit_id"](unit_id)
             return
 
         # Default selection (EXACT from TypeScript)
-        self.actions["set_selected_unit_id"](unit_id)
-        self.actions["clear_move_preview"]()
-        self.actions["set_attack_preview"](None)
-        self.actions["set_mode"]("select")
+        self.params.actions["set_selected_unit_id"](unit_id)
+        self.params.actions["clear_move_preview"]()
+        self.params.actions["set_attack_preview"](None)
+        self.params.actions["set_mode"]("select")
 
     def select_charger(self, unit_id: Optional[int]) -> None:
         """EXACT mirror of selectCharger from TypeScript"""
         if unit_id is None:
-            self.actions["set_selected_unit_id"](None)
-            self.actions["set_mode"]("select")
+            self.params.actions["set_selected_unit_id"](None)
+            self.params.actions["set_mode"]("select")
             return
 
         unit = self.find_unit(unit_id)
         if not unit or not self.is_unit_eligible_local(unit):
             return
 
-        self.actions["set_selected_unit_id"](unit_id)
-        self.actions["set_mode"]("charge_preview")
+        self.params.actions["set_selected_unit_id"](unit_id)
+        self.params.actions["set_mode"]("charge_preview")
 
     def start_move_preview(self, unit_id: int, col: int, row: int) -> None:
         """EXACT mirror of startMovePreview from TypeScript"""
@@ -677,8 +676,8 @@ class UseGameActions:
 
         # Calculate path for move preview (simple straight line for now)
         path = [{"col": col, "row": row}]
-        self.actions["set_move_preview"](unit_id, unit["col"], unit["row"], col, row, path)
-        self.actions["set_mode"]("move_preview")
+        self.params.actions["set_move_preview"](unit_id, unit["col"], unit["row"], col, row, path)
+        self.params.actions["set_mode"]("move_preview")
 
     def start_attack_preview(self, unit_id: int, col: int, row: int) -> None:
         """EXACT mirror of startAttackPreview from TypeScript"""
@@ -686,8 +685,8 @@ class UseGameActions:
         if not unit or not self.is_unit_eligible_local(unit):
             return
 
-        self.actions["set_attack_preview"]({"unit_id": unit_id, "col": col, "row": row})
-        self.actions["set_mode"]("attack_preview")
+        self.params.actions["set_attack_preview"]({"unit_id": unit_id, "col": col, "row": row})
+        self.params.actions["set_mode"]("attack_preview")
 
     def confirm_move(self) -> None:
         """
@@ -696,11 +695,11 @@ class UseGameActions:
         """
         moved_unit_id = None
         
-        if self.game_state["mode"] == "move_preview" and self.move_preview:
-            unit = self.find_unit(self.move_preview["unit_id"])
-            if unit and self.phase == "move":
+        if self.params.game_state["mode"] == "move_preview" and self.params.move_preview:
+            unit = self.find_unit(self.params.move_preview["unit_id"])
+            if unit and self.params.game_state["phase"] == "move":
                 # FLEE DETECTION LOGIC (EXACT from TypeScript)
-                enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
+                enemy_units = [u for u in self.params.game_state["units"] if u["player"] != unit["player"]]
                 
                 # Check if unit was adjacent to any enemy before moving
                 was_adjacent_to_enemy = any(
@@ -710,42 +709,42 @@ class UseGameActions:
                 
                 if was_adjacent_to_enemy:
                     will_be_adjacent_to_enemy = any(
-                        max(abs(self.move_preview["dest_col"] - enemy["col"]), 
-                            abs(self.move_preview["dest_row"] - enemy["row"])) == 1
+                        max(abs(self.params.move_preview["dest_col"] - enemy["col"]), 
+                            abs(self.params.move_preview["dest_row"] - enemy["row"])) == 1
                         for enemy in enemy_units
                     )
                     
                     if not will_be_adjacent_to_enemy:
-                        self.actions["add_fled_unit"](self.move_preview["unit_id"])
+                        self.params.actions["add_fled_unit"](self.params.move_preview["unit_id"])
 
                 # Log the move action (MISSING from original Python)
                 if self.game_log:
                     self.game_log.log_move_action(unit, unit["col"], unit["row"], 
-                                                  self.move_preview["dest_col"], self.move_preview["dest_row"], 
-                                                  self.game_state["current_turn"])
+                                                  self.params.move_preview["dest_col"], self.params.move_preview["dest_row"], 
+                                                  self.params.game_state["current_turn"])
             
-            self.actions["update_unit"](self.move_preview["unit_id"], {
-                "col": self.move_preview["dest_col"],
-                "row": self.move_preview["dest_row"],
+            self.params.actions["update_unit"](self.params.move_preview["unit_id"], {
+                "col": self.params.move_preview["dest_col"],
+                "row": self.params.move_preview["dest_row"],
             })
-            moved_unit_id = self.move_preview["unit_id"]
+            moved_unit_id = self.params.move_preview["unit_id"]
         
-        elif self.game_state["mode"] == "attack_preview" and self.attack_preview:
-            moved_unit_id = self.attack_preview["unit_id"]
+        elif self.params.game_state["mode"] == "attack_preview" and self.params.attack_preview:
+            moved_unit_id = self.params.attack_preview["unit_id"]
 
         if moved_unit_id is not None:
-            self.actions["add_moved_unit"](moved_unit_id)
+            self.params.actions["add_moved_unit"](moved_unit_id)
 
-        self.actions["clear_move_preview"]()
-        self.actions["set_attack_preview"](None)
-        self.actions["set_selected_unit_id"](None)
-        self.actions["set_mode"]("select")
+        self.params.actions["clear_move_preview"]()
+        self.params.actions["set_attack_preview"](None)
+        self.params.actions["set_selected_unit_id"](None)
+        self.params.actions["set_mode"]("select")
 
     def cancel_move(self) -> None:
         """EXACT mirror of cancelMove from TypeScript"""
-        self.actions["clear_move_preview"]()
-        self.actions["set_attack_preview"](None)
-        self.actions["set_mode"]("select")
+        self.params.actions["clear_move_preview"]()
+        self.params.actions["set_attack_preview"](None)
+        self.params.actions["set_mode"]("select")
 
     # === COMPLETE SHOOTING SYSTEM (MISSING from original Python) ===
 
@@ -755,10 +754,10 @@ class UseGameActions:
         Complete shooting system with probability calculations and target preview.
         ALL MISSING FEATURES NOW IMPLEMENTED.
         """
-        if shooter_id in self.game_state.get("units_moved", []):
+        if shooter_id in self.params.game_state.get("units_moved", []):
             return
 
-        if shooter_id in self.game_state.get("units_fled", []):
+        if shooter_id in self.params.game_state.get("units_fled", []):
             return
 
         # ADDITIONAL CHECK: Prevent shooting if unit has no shots left
@@ -773,7 +772,7 @@ class UseGameActions:
             return
 
         # Check if this is a preview (first click) or execute (second click)
-        current_target_preview = self.game_state.get("target_preview")
+        current_target_preview = self.params.game_state.get("target_preview")
         
         if (current_target_preview and 
             current_target_preview["target_id"] == target_id and 
@@ -784,7 +783,7 @@ class UseGameActions:
             if current_target_preview.get("blink_timer"):
                 # In Python, we'd handle timer cleanup differently
                 pass
-            self.actions["set_target_preview"](None)
+            self.params.actions["set_target_preview"](None)
             
             # Simple single shot execution (EXACT from TypeScript logic)
             hit_roll = random.randint(1, 6)
@@ -834,11 +833,11 @@ class UseGameActions:
                         if "CUR_HP" not in target:
                             raise KeyError(f"Target missing required 'CUR_HP' field: {target}")
                         new_hp = max(0, target["CUR_HP"] - damage_dealt)
-                        self.actions["update_unit"](target_id, {"CUR_HP": new_hp})
+                        self.params.actions["update_unit"](target_id, {"CUR_HP": new_hp})
                         
                         # Remove unit if HP reaches 0
                         if new_hp <= 0:
-                            self.actions["remove_unit"](target_id)
+                            self.params.actions["remove_unit"](target_id)
 
             # Log shooting action (MISSING from original Python)
             if self.game_log:
@@ -853,7 +852,7 @@ class UseGameActions:
                     "save_success": save_success if (hit_success and wound_success) else None,
                     "damage_dealt": damage_dealt
                 }]
-                self.game_log.log_shooting_action(shooter, target, shoot_details, self.game_state["current_turn"])
+                self.game_log.log_shooting_action(shooter, target, shoot_details, self.params.game_state["current_turn"])
             
             # Manually decrement shots - get fresh unit state (EXACT from TypeScript)
             current_shooter = self.find_unit(shooter_id)
@@ -864,20 +863,20 @@ class UseGameActions:
             
             current_shots_left = current_shooter["SHOOT_LEFT"]
             new_shots_left = current_shots_left - 1
-            self.actions["update_unit"](shooter_id, {"SHOOT_LEFT": new_shots_left})
+            self.params.actions["update_unit"](shooter_id, {"SHOOT_LEFT": new_shots_left})
             
             # Check if more shots remaining (EXACT from TypeScript)
             if new_shots_left > 0:
                 # Keep unit selected and in attack mode for target reselection
-                self.actions["set_attack_preview"]({"unit_id": shooter_id, "col": shooter["col"], "row": shooter["row"]})
-                self.actions["set_mode"]("attack_preview")
+                self.params.actions["set_attack_preview"]({"unit_id": shooter_id, "col": shooter["col"], "row": shooter["row"]})
+                self.params.actions["set_mode"]("attack_preview")
                 # Don't mark as moved yet - unit still has shots left
             else:
                 # All shots used - mark as moved and end shooting
-                self.actions["add_moved_unit"](shooter_id)
-                self.actions["set_attack_preview"](None)
-                self.actions["set_selected_unit_id"](None)
-                self.actions["set_mode"]("select")
+                self.params.actions["add_moved_unit"](shooter_id)
+                self.params.actions["set_attack_preview"](None)
+                self.params.actions["set_selected_unit_id"](None)
+                self.params.actions["set_mode"]("select")
         
         else:
             # First click - start preview (MISSING from original Python)
@@ -921,7 +920,7 @@ class UseGameActions:
                 "overall_probability": overall_probability
             }
             
-            self.actions["set_target_preview"](preview_dict)
+            self.params.actions["set_target_preview"](preview_dict)
 
     # === COMBAT SYSTEM (EXACT from TypeScript) ===
 
@@ -931,7 +930,7 @@ class UseGameActions:
         Complete combat sequence with multiple attacks and probability calculations.
         Enhanced with detailed dice results for training replay capture.
         """
-        if attacker_id in self.game_state.get("units_attacked", []):
+        if attacker_id in self.params.game_state.get("units_attacked", []):
             return
 
         attacker = self.find_unit(attacker_id)
@@ -946,7 +945,7 @@ class UseGameActions:
             return
 
         # Check if this is a preview (first click) or execute (second click)
-        current_target_preview = self.game_state.get("target_preview")
+        current_target_preview = self.params.game_state.get("target_preview")
         
         if (current_target_preview and 
             current_target_preview["target_id"] == target_id and 
@@ -956,7 +955,7 @@ class UseGameActions:
             # Clear preview
             if current_target_preview.get("blink_timer"):
                 pass  # Handle timer cleanup
-            self.actions["set_target_preview"](None)
+            self.params.actions["set_target_preview"](None)
             
             # Execute detailed combat sequence for training replay capture
             try:
@@ -975,14 +974,14 @@ class UseGameActions:
                 damage_dealt = combat_result["totalDamage"]
                 if damage_dealt > 0:
                     new_hp = max(0, target["CUR_HP"] - damage_dealt)
-                    self.actions["update_unit"](target_id, {"CUR_HP": new_hp})
+                    self.params.actions["update_unit"](target_id, {"CUR_HP": new_hp})
                     
                     if new_hp <= 0:
-                        self.actions["remove_unit"](target_id)
+                        self.params.actions["remove_unit"](target_id)
                 
                 # Log combat action with detailed dice results
                 if self.game_log:
-                    self.game_log.log_combat_action(attacker, target, combat_result, self.game_state["current_turn"])
+                    self.game_log.log_combat_action(attacker, target, combat_result, self.params.game_state["current_turn"])
                 
             except ImportError:
                 # Fallback to simplified combat if shared rules not available
@@ -1013,20 +1012,20 @@ class UseGameActions:
                                 raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker}")
                             damage_dealt = attacker["CC_DMG"]
                             new_hp = max(0, target["CUR_HP"] - damage_dealt)
-                            self.actions["update_unit"](target_id, {"CUR_HP": new_hp})
+                            self.params.actions["update_unit"](target_id, {"CUR_HP": new_hp})
                             
                             if new_hp <= 0:
-                                self.actions["remove_unit"](target_id)
+                                self.params.actions["remove_unit"](target_id)
                 
                 # Log simplified combat action
                 if self.game_log:
-                    self.game_log.log_combat_action(attacker, target, damage_dealt, self.game_state["current_turn"])
+                    self.game_log.log_combat_action(attacker, target, damage_dealt, self.params.game_state["current_turn"])
             
             # Mark attacker as having attacked
-            self.actions["add_attacked_unit"](attacker_id)
-            self.actions["set_attack_preview"](None)
-            self.actions["set_selected_unit_id"](None)
-            self.actions["set_mode"]("select")
+            self.params.actions["add_attacked_unit"](attacker_id)
+            self.params.actions["set_attack_preview"](None)
+            self.params.actions["set_selected_unit_id"](None)
+            self.params.actions["set_mode"]("select")
         
         else:
             # First click - start preview (MISSING from original Python)
@@ -1055,7 +1054,7 @@ class UseGameActions:
                 "overall_probability": overall_probability
             }
             
-            self.actions["set_target_preview"](preview)
+            self.params.actions["set_target_preview"](preview)
 
     # === CHARGE SYSTEM (EXACT from TypeScript) ===
 
@@ -1068,7 +1067,7 @@ class UseGameActions:
             return
 
         # CRITICAL: Validate charge roll and distance
-        charge_data = self.game_state.get("unit_charge_rolls", {}).get(charger_id)
+        charge_data = self.params.game_state.get("unit_charge_rolls", {}).get(charger_id)
         if not charge_data:
             # No charge roll exists - this should not happen
             return
@@ -1123,7 +1122,7 @@ class UseGameActions:
             if adj_distance <= charge_roll:
                 # Check if position is not occupied by any unit
                 occupied = any(u["col"] == adj_col and u["row"] == adj_row and u["id"] != charger_id 
-                             for u in self.game_state["units"])
+                             for u in self.params.game_state["units"])
                 
                 # Check if position is not a wall hex
                 wall_hexes = self.board_config.get('wall_hexes')
@@ -1146,7 +1145,7 @@ class UseGameActions:
         final_col, final_row = best_position
         
         # Move charger to adjacent position (not target hex) and mark as charged
-        self.actions["update_unit"](charger_id, {
+        self.params.actions["update_unit"](charger_id, {
             "col": final_col, 
             "row": final_row,
             "has_charged_this_turn": True
@@ -1165,35 +1164,35 @@ class UseGameActions:
                 "rollResult": "SUCCESS"
             }]
             self.game_log.log_charge_action(charger, target, original_col, original_row, 
-                                          final_col, final_row, self.game_state["current_turn"])
+                                          final_col, final_row, self.params.game_state["current_turn"])
 
-        self.actions["add_charged_unit"](charger_id)
-        self.actions["set_selected_unit_id"](None)
-        self.actions["set_mode"]("select")
+        self.params.actions["add_charged_unit"](charger_id)
+        self.params.actions["set_selected_unit_id"](None)
+        self.params.actions["set_mode"]("select")
         
         # CRITICAL: Clear ALL preview states to reset colored hexes
-        self.actions["clear_move_preview"]()
-        self.actions["set_attack_preview"](None)
+        self.params.actions["clear_move_preview"]()
+        self.params.actions["set_attack_preview"](None)
         
         # CRITICAL: Clear charge preview states - MUST call these actions
-        self.actions["set_selected_unit_id"](None)
-        self.actions["set_mode"]("select")
+        self.params.actions["set_selected_unit_id"](None)
+        self.params.actions["set_mode"]("select")
         
         # CRITICAL FIX: Clear charge roll data to prevent reuse  
-        if "unit_charge_rolls" in self.game_state and charger_id in self.game_state["unit_charge_rolls"]:
-            del self.game_state["unit_charge_rolls"][charger_id]
+        if "unit_charge_rolls" in self.params.game_state and charger_id in self.params.game_state["unit_charge_rolls"]:
+            del self.params.game_state["unit_charge_rolls"][charger_id]
         
         # CRITICAL FIX: Clear ALL charge preview states to reset colored hexes
-        if "reset_unit_charge_roll" in self.actions:
-            self.actions["reset_unit_charge_roll"](charger_id)
+        if "reset_unit_charge_roll" in self.params.actions:
+            self.params.actions["reset_unit_charge_roll"](charger_id)
         
         # CRITICAL FIX: Clear charge preview hexes by resetting mode and previews
-        self.actions["clear_move_preview"]()
-        self.actions["set_attack_preview"](None)
+        self.params.actions["clear_move_preview"]()
+        self.params.actions["set_attack_preview"](None)
         
         # Additional cleanup to ensure orange hexes are cleared
-        if "clear_charge_preview" in self.actions:
-            self.actions["clear_charge_preview"]()
+        if "clear_charge_preview" in self.params.actions:
+            self.params.actions["clear_charge_preview"]()
 
     def move_charger(self, charger_id: int, dest_col: int, dest_row: int) -> None:
         """EXACT mirror of moveCharger from TypeScript"""
@@ -1208,36 +1207,36 @@ class UseGameActions:
                 "timestamp": time.time(),
                 "type": "charge",
                 "message": f"Unit {charger['name']} CHARGED from ({charger['col']}, {charger['row']}) to ({dest_col}, {dest_row})",
-                "turn": self.game_state["current_turn"]
+                "turn": self.params.game_state["current_turn"]
             }
             self.game_log.add_event(charge_event)
         
         # Move the unit to the destination
-        self.actions["update_unit"](charger_id, {"col": dest_col, "row": dest_row})
+        self.params.actions["update_unit"](charger_id, {"col": dest_col, "row": dest_row})
         
         # Mark unit as having charged (end of activability for this phase)
-        self.actions["add_charged_unit"](charger_id)
+        self.params.actions["add_charged_unit"](charger_id)
         
         # Deselect the unit
-        self.actions["set_selected_unit_id"](None)
+        self.params.actions["set_selected_unit_id"](None)
         
         # Return to select mode (cancel colored cells)
-        self.actions["set_mode"]("select")
+        self.params.actions["set_mode"]("select")
 
     def cancel_charge(self) -> None:
         """EXACT mirror of cancelCharge from TypeScript"""
-        if self.game_state["selected_unit_id"] is not None:
-            self.actions["add_charged_unit"](self.selected_unit_id)
-        self.actions["set_selected_unit_id"](None)
-        self.actions["set_mode"]("select")
-        self.actions["clear_move_preview"]()
-        self.actions["set_attack_preview"](None)
+        if self.params.game_state["selected_unit_id"] is not None:
+            self.params.actions["add_charged_unit"](self.selected_unit_id)
+        self.params.actions["set_selected_unit_id"](None)
+        self.params.actions["set_mode"]("select")
+        self.params.actions["clear_move_preview"]()
+        self.params.actions["set_attack_preview"](None)
 
     def validate_charge(self, charger_id: int) -> None:
         """EXACT mirror of validateCharge from TypeScript"""
-        self.actions["add_charged_unit"](charger_id)
-        self.actions["set_selected_unit_id"](None)
-        self.actions["set_mode"]("select")
+        self.params.actions["add_charged_unit"](charger_id)
+        self.params.actions["set_selected_unit_id"](None)
+        self.params.actions["set_mode"]("select")
 
     # === ADDITIONAL METHODS FOR TRAINING & PVP ENHANCEMENT ===
 
@@ -1247,7 +1246,7 @@ class UseGameActions:
         Returns True if move was successful, False if invalid.
         """
         unit = self.find_unit(unit_id)
-        phase = self.game_state["phase"]
+        phase = self.params.game_state["phase"]
         
         # CRITICAL FIX: Trust Sequential Engine - no redundant eligibility checks during action execution
         # AI_GAME.md: "Target Validation: Performed at START of each activation (not action execution time)"
@@ -1261,7 +1260,7 @@ class UseGameActions:
             return False  # Invalid destination - movement blocked by walls
         
         # Direct unit update without preview system to avoid complications
-        self.actions["update_unit"](unit_id, {"col": col, "row": row})
+        self.params.actions["update_unit"](unit_id, {"col": col, "row": row})
         # CRITICAL FIX: Do NOT call add_moved_unit here - _mark_gym_unit_as_acted will handle it
         return True
 
@@ -1275,7 +1274,7 @@ class UseGameActions:
             return []
         
         # CRITICAL FIX: Get proper charge roll value from stored data
-        charge_data = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
+        charge_data = self.params.game_state.get("unit_charge_rolls", {}).get(unit_id)
         if not charge_data:
             return []
         
@@ -1317,7 +1316,7 @@ class UseGameActions:
         forbidden_set.update(wall_hex_set)
         
         # Add occupied unit positions (including dead units) - EXACT from BoardReplay.tsx
-        for u in self.game_state["units"]:
+        for u in self.params.game_state["units"]:
             if u["id"] != unit["id"]:
                 forbidden_set.add(f"{u['col']},{u['row']}")
 
@@ -1340,7 +1339,7 @@ class UseGameActions:
             # Check if this position is adjacent to a chargeable enemy and within charge range (EXACT from TypeScript)
             if steps > 0 and steps <= charge_distance and key not in forbidden_set:
                 chargeable_enemy_adjacent = False
-                for u in self.game_state["units"]:
+                for u in self.params.game_state["units"]:
                     if u["player"] == unit["player"] or not u.get("alive", True):
                         continue
                     
@@ -1413,7 +1412,7 @@ class UseGameActions:
                 "timestamp": time.time(),
                 "type": "charge",
                 "message": f"Unit {charger.get('name', charger['unit_type'])} CHARGED from ({charger['col']}, {charger['row']}) to ({dest_col}, {dest_row})",
-                "turnNumber": self.game_state["current_turn"],
+                "turnNumber": self.params.game_state["current_turn"],
                 "phase": "charge",
                 "player": charger["player"],
                 "unitType": charger.get("unit_type", "unknown"),
@@ -1423,38 +1422,38 @@ class UseGameActions:
                 self.game_log.events.insert(0, charge_event)
         
         # Move unit to destination and mark as charged (EXACT from TypeScript)
-        self.actions["update_unit"](charger_id, {
+        self.params.actions["update_unit"](charger_id, {
             "col": dest_col, 
             "row": dest_row, 
             "has_charged_this_turn": True
         })
         
         # Clean up charge state (EXACT from TypeScript) 
-        if "reset_unit_charge_roll" in self.actions:
-            self.actions["reset_unit_charge_roll"](charger_id)
-        self.actions["add_charged_unit"](charger_id)
+        if "reset_unit_charge_roll" in self.params.actions:
+            self.params.actions["reset_unit_charge_roll"](charger_id)
+        self.params.actions["add_charged_unit"](charger_id)
         
         # Reset UI state (EXACT from TypeScript)
-        self.actions["set_selected_unit_id"](None)
-        self.actions["set_mode"]("select")
+        self.params.actions["set_selected_unit_id"](None)
+        self.params.actions["set_mode"]("select")
         
         # CRITICAL: Clear ALL preview states to reset colored hexes (EXACT from TypeScript)
-        if "clear_move_preview" in self.actions:
-            self.actions["clear_move_preview"]()
-        self.actions["set_attack_preview"](None)
+        if "clear_move_preview" in self.params.actions:
+            self.params.actions["clear_move_preview"]()
+        self.params.actions["set_attack_preview"](None)
         
         # CRITICAL: Force clear any remaining charge preview states
-        if "clear_charge_preview" in self.actions:
-            self.actions["clear_charge_preview"]()
+        if "clear_charge_preview" in self.params.actions:
+            self.params.actions["clear_charge_preview"]()
         
         # Ensure mode is definitely set to select to trigger Board clearing
-        self.actions["set_mode"]("select")
-        self.actions["set_selected_unit_id"](None)
+        self.params.actions["set_mode"]("select")
+        self.params.actions["set_selected_unit_id"](None)
 
     def _calculate_charge_destinations_simple(self, unit: Dict[str, Any], charge_distance: int) -> List[Dict[str, int]]:
         """Simplified charge destinations - ensures ALL are adjacent to enemies"""
         valid_destinations = []
-        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
+        enemy_units = [u for u in self.params.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
         
         # For each enemy, find adjacent hexes within charge distance
         for enemy in enemy_units:
@@ -1480,7 +1479,7 @@ class UseGameActions:
                     continue
                 
                 # Check if position is not occupied
-                occupied = any(u["col"] == adj_col and u["row"] == adj_row for u in self.game_state["units"])
+                occupied = any(u["col"] == adj_col and u["row"] == adj_row for u in self.params.game_state["units"])
                 if occupied:
                     continue
                 
@@ -1547,13 +1546,13 @@ class UseGameActions:
 
     def get_eligible_units(self) -> List[Dict[str, Any]]:
         """Get all eligible units for current phase and player"""
-        if "current_player" not in self.game_state:
+        if "current_player" not in self.params.game_state:
             raise KeyError("game_state missing required 'current_player' field")
-        current_player = self.game_state["current_player"]
-        current_phase = self.game_state.get("phase", "move")
+        current_player = self.params.game_state["current_player"]
+        current_phase = self.params.game_state.get("phase", "move")
         
         eligible_units = []
-        for unit in self.game_state["units"]:
+        for unit in self.params.game_state["units"]:
             if "alive" not in unit:
                 raise KeyError(f"Unit {unit.get('id')} missing required 'alive' property")
             if "player" not in unit:
@@ -1568,7 +1567,7 @@ class UseGameActions:
     def get_valid_moves(self, unit_id: int) -> List[Dict[str, Any]]:
         """Get valid move positions for unit"""
         unit = self.find_unit(unit_id)
-        if not unit or self.game_state.get("phase") != "move":
+        if not unit or self.params.game_state.get("phase") != "move":
             raise ValueError("Unit not found or not in move phase")
         
         # Validate required unit fields
@@ -1589,7 +1588,7 @@ class UseGameActions:
         from shared.gameMechanics import calculate_available_move_cells
         return calculate_available_move_cells(
             unit=unit,
-            units=self.game_state["units"], 
+            units=self.params.game_state["units"], 
             board_config=self.board_config,
             board_cols=self.board_config["cols"],
             board_rows=self.board_config["rows"]
@@ -1598,7 +1597,7 @@ class UseGameActions:
     def get_valid_shooting_targets(self, unit_id: int) -> List[int]:
         """Get valid shooting targets for unit - AI_GAME.md compliant"""
         unit = self.find_unit(unit_id)
-        if not unit or self.game_state.get("phase") != "shoot":
+        if not unit or self.params.game_state.get("phase") != "shoot":
             return []
         
         # AI_GAME.md: Check RNG_NB > 0 requirement
@@ -1612,7 +1611,7 @@ class UseGameActions:
             raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
         
         targets = []
-        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
+        enemy_units = [u for u in self.params.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
         for enemy in enemy_units:
             distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
             if distance <= unit["RNG_RNG"]:
@@ -1637,11 +1636,11 @@ class UseGameActions:
     def get_valid_charge_targets(self, unit_id: int) -> List[int]:
         """Get valid charge targets for unit with proper 2D6 roll validation"""
         unit = self.find_unit(unit_id)
-        if not unit or self.game_state.get("phase") != "charge":
+        if not unit or self.params.game_state.get("phase") != "charge":
             return []
         
         # CRITICAL FIX: Must have valid charge roll to get targets
-        charge_data = self.game_state.get("unit_charge_rolls", {}).get(unit_id)
+        charge_data = self.params.game_state.get("unit_charge_rolls", {}).get(unit_id)
         if not charge_data:
             return []  # No charge roll = no valid targets
         
@@ -1660,7 +1659,7 @@ class UseGameActions:
             return []
         
         targets = []
-        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
+        enemy_units = [u for u in self.params.game_state["units"] if u["player"] != unit["player"] and u.get("alive", True)]
         for enemy in enemy_units:
             distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
             from shared.gameMechanics import get_charge_max_distance
@@ -1678,7 +1677,7 @@ class UseGameActions:
     def get_valid_combat_targets(self, unit_id: int) -> List[int]:
         """Get valid combat targets for unit"""
         unit = self.find_unit(unit_id)
-        if not unit or not self.is_unit_eligible_local(unit) or self.game_state.get("phase") != "combat":
+        if not unit or not self.is_unit_eligible_local(unit) or self.params.game_state.get("phase") != "combat":
             return []
         
         # Validate required unit fields
@@ -1686,7 +1685,7 @@ class UseGameActions:
             raise KeyError(f"Unit missing required 'CC_RNG' field: {unit.get('name')}")
         
         targets = []
-        enemy_units = [u for u in self.game_state["units"] if u["player"] != unit["player"]]
+        enemy_units = [u for u in self.params.game_state["units"] if u["player"] != unit["player"]]
         for enemy in enemy_units:
             distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
             if distance <= unit["CC_RNG"]:
@@ -1710,11 +1709,11 @@ class UseGameActions:
 
     def get_action_mask(self, max_units: int) -> List[bool]:
         """Generate action mask for current game state - True = valid action"""
-        current_phase = self.game_state.get("phase", "move")
-        current_player = self.game_state.get("current_player")
+        current_phase = self.params.game_state.get("phase", "move")
+        current_player = self.params.game_state.get("current_player")
         
         # Get current player units (no eligibility checks - trust Sequential Engine)
-        current_player_units = [u for u in self.game_state["units"] if u["player"] == current_player and u.get("alive", True)]
+        current_player_units = [u for u in self.params.game_state["units"] if u["player"] == current_player and u.get("alive", True)]
         
         action_mask = []
         

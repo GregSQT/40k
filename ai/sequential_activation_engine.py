@@ -138,11 +138,6 @@ class SequentialActivationEngine:
         self.combat_sub_phase = "charged_units"
         self.activation_queue = copy.deepcopy(self.combat_charged_queue)
         
-        print(f"   Combat sub-phase: {self.combat_sub_phase}")
-        print(f"   Charged queue: {len(self.combat_charged_queue)} units")
-        print(f"   Alternating queue: {len(self.combat_alternating_queue)} units")
-        print(f"   Initial activation queue: {len(self.activation_queue)} units")
-        
     def get_next_active_unit(self) -> Optional[Dict[str, Any]]:
         """
         Return next eligible unit following EXACT AI_GAME.md eligibility rules.
@@ -152,8 +147,6 @@ class SequentialActivationEngine:
         # Debug: Verify controller phase matches queue phase
         if self.queue_built_for_phase and current_phase != self.queue_built_for_phase:
             print(f"   ⚠️ PHASE MISMATCH: Controller='{current_phase}' Queue='{self.queue_built_for_phase}'")
-        else:
-            print(f"   ✅ Phase sync OK: {current_phase}")
         
         # Handle combat phase transitions
         if current_phase == "combat" and not self.activation_queue:
@@ -476,7 +469,6 @@ class SequentialActivationEngine:
         # CRITICAL FIX: Remove unit from queue after action execution
         if self.activation_queue and self.activation_queue[0]["id"] == unit["id"]:
             self.activation_queue.pop(0)  # Now remove the unit that just acted
-            print(f"   ✅ Unit {unit['id']} removed from queue, {len(self.activation_queue)} remaining")
         
         # End activation
         self.current_active_unit = None
@@ -544,14 +536,12 @@ class SequentialActivationEngine:
         # Get pre-rolled charge distance
         charge_roll = self.unit_charge_rolls.get(unit["id"], 0)
         if charge_roll == 0:
-            print(f"[SequentialEngine] No charge roll found for unit {unit['id']}")
             return False
             
         # Check if charge destination is within roll distance
         if action.get("type") == "charge":
             charge_distance = self._calculate_charge_distance(unit, action)
             if charge_distance > charge_roll:
-                print(f"[SequentialEngine] Charge failed - distance {charge_distance} > roll {charge_roll}")
                 return False  # No step increase for failed charge per AI_GAME.md
                 
         # Execute charge through controller
@@ -700,5 +690,4 @@ class SequentialActivationEngine:
             return self.game_controller.execute_gym_action(gym_action)
             
         except Exception as e:
-            print(f"[SequentialEngine] Error executing action: {e}")
             return False

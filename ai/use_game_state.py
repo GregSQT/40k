@@ -91,6 +91,33 @@ class UseGameState:
             "episode_steps": 0,  # AI_TURN.md compliance: Step counter for training
         }
         
+        import traceback
+        
+        # Override setattr to catch any replacement of game_state
+        # original_setattr = self.__setattr__
+        # def monitored_setattr(name, value):
+        #     if name == 'game_state' and hasattr(self, 'game_state'):
+        #         old_id = id(self.game_state)
+        #         new_id = id(value) if isinstance(value, dict) else "not_dict"
+        #         if old_id != new_id:
+        #             pass
+        #     return original_setattr(name, value)
+        # self.__setattr__ = monitored_setattr
+        
+        # SAFER MONITORING: Focus on specific methods that might create new game_state objects
+        # Monitor copy operations that might duplicate game_state
+        original_copy_deepcopy = copy.deepcopy
+        def monitored_deepcopy(obj, memo=None):
+            result = original_copy_deepcopy(obj, memo)
+            # Check if we're copying a game_state-like object
+            if (hasattr(obj, '__class__') and obj.__class__.__name__ == 'dict' and
+                'phase' in obj and 'current_player' in obj and 'units' in obj):
+                stack_trace = ''.join(traceback.format_stack()[-3:-1])
+                print(f"🏗️ DEEPCOPY: Copied game_state-like dict (original_id={id(obj)}, copy_id={id(result)}) with phase='{obj.get('phase', 'unknown')}'")
+                print(f"📍 DEEPCOPY STACK:\n{stack_trace}")
+            return result
+        copy.deepcopy = monitored_deepcopy
+        
         # Additional state objects (EXACT from TypeScript)
         self.unit_charge_rolls: Dict[int, int] = {}
         self.charge_roll_popup: Optional[ChargeRollPopup] = None
@@ -347,7 +374,8 @@ class UseGameState:
 
     def get_game_state(self) -> Dict[str, Any]:
         """Get complete game state"""
-        return copy.deepcopy(self.game_state)
+        copied_state = copy.deepcopy(self.game_state)
+        return copied_state
 
     def get_unit_by_id(self, unit_id: int) -> Optional[Dict[str, Any]]:
         """Get unit by ID"""
@@ -528,57 +556,62 @@ class UseGameState:
     def get_actions(self) -> Dict[str, Callable]:
         """
         Return all action functions (mirror of TypeScript useGameState return).
-        This replaces the TypeScript hook's return actions object.
+        CRITICAL FIX: Cache actions dictionary to ensure same object identity on multiple calls.
         """
-        return {
-            # Core state setters
-            "set_units": self.set_units,
-            "set_current_player": self.set_current_player,
-            "set_phase": self.set_phase,
-            "set_mode": self.set_mode,
-            "set_selected_unit_id": self.set_selected_unit_id,
-            "set_current_turn": self.set_current_turn,
-            "set_combat_sub_phase": self.set_combat_sub_phase,
-            "set_combat_active_player": self.set_combat_active_player,
-            
-            # Unit tracking
-            "add_moved_unit": self.add_moved_unit,
-            "add_shot_unit": self.add_shot_unit,
-            "add_charged_unit": self.add_charged_unit,
-            "add_attacked_unit": self.add_attacked_unit,
-            "add_fled_unit": self.add_fled_unit,
-            "reset_moved_units": self.reset_moved_units,
-            "reset_shot_units": self.reset_shot_units,
-            "reset_charged_units": self.reset_charged_units,
-            "reset_attacked_units": self.reset_attacked_units,
-            "reset_fled_units": self.reset_fled_units,
-            
-            # Unit updates
-            "update_unit": self.update_unit,
-            "remove_unit": self.remove_unit,
-            "move_unit": self.move_unit,
-            
-            # Phase initialization
-            "initialize_shooting_phase": self.initialize_shooting_phase,
-            "initialize_combat_phase": self.initialize_combat_phase,
-            
-            # Shooting phase
-            "update_shooting_phase_state": self.update_shooting_phase_state,
-            "decrement_shots_left": self.decrement_shots_left,
-            
-            # Charge rolls
-            "set_unit_charge_roll": self.set_unit_charge_roll,
-            "reset_unit_charge_roll": self.reset_unit_charge_roll,
-            "show_charge_roll_popup": self.show_charge_roll_popup,
-            "reset_charge_rolls": self.reset_charge_rolls,
-            
-            # Previews
-            "set_move_preview": self.set_move_preview,
-            "clear_move_preview": self.clear_move_preview,
-            "set_attack_preview": self.set_attack_preview,
-            "clear_attack_preview": self.clear_attack_preview,
-            "set_target_preview": self.set_target_preview,
-            }
+        # CRITICAL FIX: Cache the actions dictionary to prevent creating new bound method objects
+        if not hasattr(self, '_cached_actions'):
+            self._cached_actions = {
+                # Core state setters
+                "set_units": self.set_units,
+                "set_current_player": self.set_current_player,
+                "set_phase": self.set_phase,
+                "set_mode": self.set_mode,
+                "set_selected_unit_id": self.set_selected_unit_id,
+                "set_current_turn": self.set_current_turn,
+                "set_combat_sub_phase": self.set_combat_sub_phase,
+                "set_combat_active_player": self.set_combat_active_player,
+                
+                # Unit tracking
+                "add_moved_unit": self.add_moved_unit,
+                "add_shot_unit": self.add_shot_unit,
+                "add_charged_unit": self.add_charged_unit,
+                "add_attacked_unit": self.add_attacked_unit,
+                "add_fled_unit": self.add_fled_unit,
+                "reset_moved_units": self.reset_moved_units,
+                "reset_shot_units": self.reset_shot_units,
+                "reset_charged_units": self.reset_charged_units,
+                "reset_attacked_units": self.reset_attacked_units,
+                "reset_fled_units": self.reset_fled_units,
+                
+                # Unit updates
+                "update_unit": self.update_unit,
+                "remove_unit": self.remove_unit,
+                "move_unit": self.move_unit,
+                
+                # Phase initialization
+                "initialize_shooting_phase": self.initialize_shooting_phase,
+                "initialize_combat_phase": self.initialize_combat_phase,
+                
+                # Shooting phase
+                "update_shooting_phase_state": self.update_shooting_phase_state,
+                "decrement_shots_left": self.decrement_shots_left,
+                
+                # Charge rolls
+                "set_unit_charge_roll": self.set_unit_charge_roll,
+                "reset_unit_charge_roll": self.reset_unit_charge_roll,
+                "show_charge_roll_popup": self.show_charge_roll_popup,
+                "reset_charge_rolls": self.reset_charge_rolls,
+                
+                # Previews
+                "set_move_preview": self.set_move_preview,
+                "clear_move_preview": self.clear_move_preview,
+                "set_attack_preview": self.set_attack_preview,
+                "clear_attack_preview": self.clear_attack_preview,
+                "set_target_preview": self.set_target_preview,
+                }
+        
+        # Return the SAME cached dictionary object every time
+        return self._cached_actions
 
 
 # === FACTORY FUNCTION (Mirror of TypeScript hook usage) ===
@@ -662,6 +695,9 @@ class TrainingGameState(UseGameState):
     def reset_for_new_episode(self, initial_units: List[Dict[str, Any]]) -> None:
         """Reset state for new training episode"""
         
+        # CRITICAL DEBUG: Verify we're resetting the SAME object, not creating new one
+        old_object_id = id(self.game_state)
+        
         # DON'T create a new object - just reset the existing game_state
         processed_units = []
         for unit in initial_units:
@@ -682,6 +718,14 @@ class TrainingGameState(UseGameState):
         self.game_state["units_attacked"] = []
         self.game_state["units_fled"] = []
         self.game_state["episode_steps"] = 0  # AI_TURN.md compliance: Reset step counter
+        
+        # CRITICAL DEBUG: Verify object identity preserved
+        new_object_id = id(self.game_state)
+        if old_object_id != new_object_id:
+            import traceback
+            stack_trace = ''.join(traceback.format_stack()[-5:-1])  # Get more context
+            print(f"🚨 CRITICAL: game_state object identity CHANGED during reset! {old_object_id} → {new_object_id}")
+            print(f"📍 RESET STACK:\n{stack_trace}")
 
     def _get_unit_CUR_HP(self, unit: Dict[str, Any]) -> int:
         """Get unit CUR_HP, validate required fields exist"""

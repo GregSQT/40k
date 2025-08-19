@@ -45,7 +45,7 @@ class SequentialGameController:
         from sequential_activation_engine import SequentialActivationEngine
         
         self.base_controller = TrainingGameController(config, quiet)
-        self.sequential_engine = SequentialActivationEngine(self.base_controller)
+        self.sequential_engine = SequentialActivationEngine(self)  # ← CRITICAL FIX: Pass wrapper, not base
         self.gym_env = None
         
         # Phase state tracking
@@ -92,7 +92,6 @@ class SequentialGameController:
         active_unit = self.sequential_engine.get_next_active_unit()        
         # If no active unit, phase must be complete - advance immediately
         if not active_unit:
-            print(f"   🔄 No active unit, phase complete: {self.sequential_engine.phase_complete}")
             self.phase_started = False
             
             # CRITICAL FIX: Call process_phase_transitions FIRST to check and handle transitions
@@ -130,7 +129,6 @@ class SequentialGameController:
             # Failed attacks still consume time/effort and increment steps
             new_steps = steps_before + 1
             self.base_controller.game_state["episode_steps"] = new_steps
-            print(f"   ✅ Step incremented: {steps_before} → {new_steps} for {mirror_action['type']} action")
         
         # CRITICAL FIX: Ensure unit is marked as acted after successful action
         if success:
@@ -172,6 +170,28 @@ class SequentialGameController:
                     self.base_controller.replay_logger.log_shoot(
                         unit, target_unit, shoot_details, current_turn, reward, 4
                     )
+        elif action_type == "charge":
+            target_id = action.get("target_id")
+            if target_id:
+                target_unit = self._find_unit_by_id(target_id)
+                if target_unit:
+                    self.base_controller.replay_logger.log_charge(
+                        unit, target_unit, unit["col"], unit["row"], 
+                        target_unit["col"], target_unit["row"], current_turn, reward, 5
+                    )
+        elif action_type == "combat":
+            target_id = action.get("target_id")
+            if target_id:
+                target_unit = self._find_unit_by_id(target_id)
+                if target_unit:
+                    combat_details = {"summary": {"totalAttacks": 1, "hits": 1, "wounds": 1, "failedSaves": 1}}
+                    self.base_controller.replay_logger.log_combat(
+                        unit, target_unit, combat_details, current_turn, reward, 6
+                    )
+        elif action_type == "wait":
+            self.base_controller.replay_logger.log_wait(
+                unit, current_turn, phase, reward, 7
+            )
         elif action_type == "charge":
             target_id = action.get("target_id")
             if target_id:

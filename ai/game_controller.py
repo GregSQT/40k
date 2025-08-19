@@ -138,7 +138,9 @@ class GameController:
         # CRITICAL: ONLY use the exact game_state that state_actions modifies
         actual_game_state = self.state_actions['set_phase'].__self__.game_state
         self.game_state = actual_game_state
-        self._current_phase = actual_game_state.get("phase", "move")
+        if "phase" not in actual_game_state:
+            raise KeyError("game_state missing required 'phase' field")
+        self._current_phase = actual_game_state["phase"]
 
     def _check_game_over(self) -> bool:
         """Check if game is over"""
@@ -173,16 +175,72 @@ class GameController:
         return actual_game_state["current_player"]
 
     def get_current_phase(self) -> str:
-        """Get current phase - ONLY from the exact game_state object that state_actions modifies"""
+        """Get current phase - PURGE stale object references"""
         if not hasattr(self, 'state_actions') or not self.state_actions:
             raise RuntimeError("Controller missing state_actions - cannot get current phase")
-        # CRITICAL: ONLY use the game_state object that state_actions actually modifies
+        
+        # CRITICAL FIX: Detect and eliminate stale game_state object references
+        live_object_id = None
+        stale_object_ids = set()
+        
+        # Scan all action references to identify live vs stale objects
+        if hasattr(self, 'actions') and 'set_phase' in self.actions:
+            if hasattr(self.actions['set_phase'], '__self__'):
+                candidate_game_state = self.actions['set_phase'].__self__.game_state
+                candidate_id = id(candidate_game_state)
+                
+                # Test if this object has current phase data by checking other actions
+                if hasattr(self, 'state_actions') and 'set_current_player' in self.state_actions:
+                    if hasattr(self.state_actions['set_current_player'], '__self__'):
+                        reference_game_state = self.state_actions['set_current_player'].__self__.game_state
+                        reference_id = id(reference_game_state)
+                        
+                        if candidate_id == reference_id:
+                            # Same object - this is the live one
+                            live_object_id = candidate_id
+                            actual_game_state = candidate_game_state
+                        else:
+                            # Different object - mark the older one as stale
+                            stale_object_ids.add(candidate_id)
+                            live_object_id = reference_id
+                            actual_game_state = reference_game_state
+                            
+                            # CRITICAL FIX: Use state_manager as authoritative source, not state_actions
+                            if hasattr(self, 'state_manager') and self.state_manager:
+                                # Get fresh actions from authoritative state_manager
+                                authoritative_actions = self.state_manager.get_actions()
+                                self.actions['set_phase'] = authoritative_actions['set_phase']
+                            else:
+                                # Fallback to state_actions if state_manager not available
+                                self.actions['set_phase'] = self.state_actions['set_phase']
+                                print(f"⚠️ FALLBACK: Used state_actions reference")
+                    else:
+                        # Use the candidate as fallback
+                        live_object_id = candidate_id
+                        actual_game_state = candidate_game_state
+                else:
+                    # Use the candidate as fallback
+                    live_object_id = candidate_id
+                    actual_game_state = candidate_game_state
+                
+                self.game_state = actual_game_state
+                if "phase" not in actual_game_state:
+                    raise KeyError("game_state missing required 'phase' field")
+                
+                phase_value = actual_game_state["phase"]
+                return phase_value
+        
+        # Fallback to state_actions if actions not available
         if not hasattr(self.state_actions.get('set_phase', lambda: None), '__self__'):
             raise RuntimeError("state_actions set_phase missing __self__ - object identity broken")
         actual_game_state = self.state_actions['set_phase'].__self__.game_state
-        # CRITICAL: Always update controller reference to prevent drift
         self.game_state = actual_game_state
-        return actual_game_state.get("phase", "move")
+        if "phase" not in actual_game_state:
+            raise KeyError("game_state missing required 'phase' field")
+        
+        phase_value = actual_game_state["phase"]
+        game_state_id = id(actual_game_state)
+        return phase_value
 
     def get_current_turn(self) -> int:
         """Get current turn from the exact game_state that state_actions modifies"""
@@ -374,11 +432,10 @@ class GameController:
             return False
         
         # Execute the action
-        success = False
         if action_type == "move":
-            target_col = action.get("col", acting_unit["col"])
-            target_row = action.get("row", acting_unit["row"])
-            success = self.move_unit(unit_id, target_col, target_row)
+            if "col" not in action or "row" not in action:
+                raise KeyError("Move action missing required 'col' or 'row' field")
+            success = self.move_unit(unit_id, action["col"], action["row"])
         elif action_type == "shoot":
             success = self.shoot_unit(unit_id, action["target_id"])
         elif action_type == "charge":
@@ -407,8 +464,8 @@ class GameController:
             "units_moved": copy.copy(self.game_state["units_moved"]),
             "units_charged": copy.copy(self.game_state["units_charged"]),
             "units_attacked": copy.copy(self.game_state["units_attacked"]),
-            "combat_sub_phase": self.game_state.get("combat_sub_phase"),
-            "combat_active_player": self.game_state.get("combat_active_player"),
+            "combat_sub_phase": self.game_state["combat_sub_phase"],
+            "combat_active_player": self.game_state["combat_active_player"],
             "is_game_over": self.is_game_over(),
             "winner": self.get_winner()
         }
@@ -498,11 +555,17 @@ class TrainingGameController(GameController):
             # Force phase advance if current player has no eligible units OR if phase should transition
             phase_should_advance = False
             if initial_phase == "move":
-                phase_should_advance = self.phase_transitions.get('should_transition_from_move', lambda: False)()
+                if 'should_transition_from_move' not in self.phase_transitions:
+                    raise RuntimeError("phase_transitions missing required should_transition_from_move method")
+                phase_should_advance = self.phase_transitions['should_transition_from_move']()
             elif initial_phase == "shoot":
-                phase_should_advance = self.phase_transitions.get('should_transition_from_shoot', lambda: False)()
+                if 'should_transition_from_shoot' not in self.phase_transitions:
+                    raise RuntimeError("phase_transitions missing required should_transition_from_shoot method")
+                phase_should_advance = self.phase_transitions['should_transition_from_shoot']()
             elif initial_phase == "charge":
-                phase_should_advance = self.phase_transitions.get('should_transition_from_charge', lambda: False)()
+                if 'should_transition_from_charge' not in self.phase_transitions:
+                    raise RuntimeError("phase_transitions missing required should_transition_from_charge method")
+                phase_should_advance = self.phase_transitions['should_transition_from_charge']()
             
             if len(current_player_eligible) == 0 or phase_should_advance:
                 if initial_phase == "move":
@@ -530,13 +593,21 @@ class TrainingGameController(GameController):
         should_advance = False
         
         if current_phase == "move":
-            should_advance = self.phase_transitions.get('should_transition_from_move', lambda: False)()
+            if 'should_transition_from_move' not in self.phase_transitions:
+                raise RuntimeError("phase_transitions missing required should_transition_from_move method")
+            should_advance = self.phase_transitions['should_transition_from_move']()
         elif current_phase == "shoot":
-            should_advance = self.phase_transitions.get('should_transition_from_shoot', lambda: False)()
+            if 'should_transition_from_shoot' not in self.phase_transitions:
+                raise RuntimeError("phase_transitions missing required should_transition_from_shoot method")
+            should_advance = self.phase_transitions['should_transition_from_shoot']()
         elif current_phase == "charge":
-            should_advance = self.phase_transitions.get('should_transition_from_charge', lambda: False)()
+            if 'should_transition_from_charge' not in self.phase_transitions:
+                raise RuntimeError("phase_transitions missing required should_transition_from_charge method")
+            should_advance = self.phase_transitions['should_transition_from_charge']()
         elif current_phase == "combat":
-            should_advance = self.phase_transitions.get('should_end_turn', lambda: False)()
+            if 'should_end_turn' not in self.phase_transitions:
+                raise RuntimeError("phase_transitions missing required should_end_turn method")
+            should_advance = self.phase_transitions['should_end_turn']()
         
         # Only advance if transition conditions are actually met
         if should_advance:
@@ -809,7 +880,9 @@ class TrainingGameController(GameController):
             eligible_units = self._get_gym_eligible_units()
             current_player = self.get_current_player()
             current_phase = self.get_current_phase()
-            current_turn = self.game_state.get("current_turn", 0)
+            if "current_turn" not in self.game_state:
+                raise KeyError("game_state missing required 'current_turn' field")
+            current_turn = self.game_state["current_turn"]
             
             # Check for game over condition
             if self.is_game_over():
@@ -889,7 +962,7 @@ class TrainingGameController(GameController):
                         self._mark_gym_unit_as_acted(acting_unit)
                     else:
                         pass
-                        # print(f"❌ P1 Unit{acting_unit['id']} {mirror_action['type']} FAILED")
+                        print(f"❌ P1 Unit{acting_unit['id']} {mirror_action['type']} FAILED")
                     
                     reward = self._calculate_gym_reward(acting_unit, mirror_action, success)
                     
@@ -926,24 +999,30 @@ class TrainingGameController(GameController):
             return {"type": "wait"}
             
         elif current_phase == "shoot":
-            target_ids = self.game_actions.get('get_valid_shooting_targets', lambda x: [])(bot_unit["id"])
-            if target_ids:
-                return {"type": "shoot", "target_id": target_ids[0]}
-            return {"type": "wait"}
+            if 'get_valid_shooting_targets' not in self.game_actions:
+                raise RuntimeError("game_actions missing required get_valid_shooting_targets method")
+            target_ids = self.game_actions['get_valid_shooting_targets'](bot_unit["id"])
+            if not target_ids:
+                raise RuntimeError(f"No valid shooting targets for bot unit {bot_unit['id']}")
+            return {"type": "shoot", "target_id": target_ids[0]}
             
         elif current_phase == "charge":
-            target_ids = self.game_actions.get('get_valid_charge_targets', lambda x: [])(bot_unit["id"])
-            if target_ids:
-                return {"type": "charge", "target_id": target_ids[0]}
-            return {"type": "wait"}
+            if 'get_valid_charge_targets' not in self.game_actions:
+                raise RuntimeError("game_actions missing required get_valid_charge_targets method")
+            target_ids = self.game_actions['get_valid_charge_targets'](bot_unit["id"])
+            if not target_ids:
+                raise RuntimeError(f"No valid charge targets for bot unit {bot_unit['id']}")
+            return {"type": "charge", "target_id": target_ids[0]}
             
         elif current_phase == "combat":
-            target_ids = self.game_actions.get('get_valid_combat_targets', lambda x: [])(bot_unit["id"])
-            if target_ids:
-                return {"type": "combat", "target_id": target_ids[0]}
-            return {"type": "wait"}
+            if 'get_valid_combat_targets' not in self.game_actions:
+                raise RuntimeError("game_actions missing required get_valid_combat_targets method")
+            target_ids = self.game_actions['get_valid_combat_targets'](bot_unit["id"])
+            if not target_ids:
+                raise RuntimeError(f"No valid combat targets for bot unit {bot_unit['id']}")
+            return {"type": "combat", "target_id": target_ids[0]}
             
-        return {"type": "wait"}
+        raise RuntimeError(f"Unknown phase '{current_phase}' - no default action allowed")
 
     def _log_bot_action_if_evaluation(self, bot_unit: Dict, bot_action: Dict, reward: float) -> None:
         """Log bot action during evaluation mode"""
@@ -1000,7 +1079,13 @@ class TrainingGameController(GameController):
         
         # CRITICAL: Store the SINGLE game_state object reference that ALL components will use
         self.game_state = self.state_manager.game_state
+        
         self.state_actions = self.state_manager.get_actions()
+        state_actions_object_id = id(self.state_actions['set_phase'].__self__.game_state)
+        
+        # CRITICAL VALIDATION: Ensure state_actions points to SAME object as controller
+        if id(self.game_state) != state_actions_object_id:
+            print(f"🚨 CRITICAL: Object identity mismatch! Controller={id(self.game_state)} vs state_actions={state_actions_object_id}")
         
         # Store other state references from the SAME manager
         self.move_preview = self.state_manager.move_preview
@@ -1027,12 +1112,15 @@ class TrainingGameController(GameController):
         )
         self.game_actions = self.actions_manager.get_available_actions()
         
-        # Initialize training phase transitions - CRITICAL: Pass controller's game_state directly
+        # CRITICAL FIX: Define self.actions BEFORE creating phase_manager
+        self.actions = self.state_actions
+        
+        # Initialize training phase transitions - CRITICAL: Use the SAME actions object
         self.phase_manager = TrainingPhaseTransition(
             game_state=self.game_state,  # Use controller's stored reference - ensures same object
             board_config=self.board_config,
             is_unit_eligible_func=self.game_actions["is_unit_eligible"],
-            actions=self.state_actions
+            actions=self.actions  # Use self.actions, not self.state_actions
         )
         self.phase_transitions = self.phase_manager.get_transition_functions()
         
@@ -1043,8 +1131,7 @@ class TrainingGameController(GameController):
         if "phase" not in self.game_state:
             raise KeyError("Game state missing required 'phase' field")
         
-        # CRITICAL FIX: Define self.actions to enable combat phase initialization
-        self.actions = self.state_actions
+        # Phase compatibility property
         self._current_phase = self.game_state["phase"]
 
     def connect_replay_logger(self, replay_logger):
@@ -1080,21 +1167,26 @@ class TrainingGameController(GameController):
         units = self.get_units()
         
         for unit in units:
+            # Validate ALL required fields
+            required_fields = ["id", "unit_type", "player", "col", "row", "HP_MAX", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG", "alive", "name"]
+            for field in required_fields:
+                if field not in unit:
+                    raise KeyError(f"Unit missing required field '{field}': {unit}")
             replay_unit = {
-                "id": unit.get("id"),
-                "unit_type": unit.get("unit_type"),
-                "player": unit.get("player"),
-                "col": unit.get("col"),
-                "row": unit.get("row"),
-                "HP_MAX": unit.get("HP_MAX"),
-                "move": unit.get("MOVE"),
-                "rng_rng": unit.get("RNG_RNG"),
-                "rng_dmg": unit.get("RNG_DMG"),
-                "cc_dmg": unit.get("CC_DMG"),
-                "is_ranged": unit.get("RNG_RNG", 0) > 0,
-                "is_melee": unit.get("CC_RNG", 0) > 0,
-                "alive": unit.get("alive", True),
-                "name": unit.get("name", f"{unit.get('unit_type', 'Unit')}_{unit.get('id', 0)}")
+                "id": unit["id"],
+                "unit_type": unit["unit_type"],
+                "player": unit["player"],
+                "col": unit["col"],
+                "row": unit["row"],
+                "HP_MAX": unit["HP_MAX"],
+                "move": unit["MOVE"],
+                "rng_rng": unit["RNG_RNG"],
+                "rng_dmg": unit["RNG_DMG"],
+                "cc_dmg": unit["CC_DMG"],
+                "is_ranged": unit["RNG_RNG"] > 0,
+                "is_melee": unit["CC_RNG"] > 0,
+                "alive": unit["alive"],
+                "name": unit["name"]
             }
             initial_units.append(replay_unit)
         
@@ -1180,12 +1272,16 @@ class TrainingGameController(GameController):
         if not charge_data:
             return False  # No charge roll = cannot charge
         
-        # Get charge roll distance
-        if isinstance(charge_data, dict):
-            charge_roll = charge_data.get("total", charge_data.get("charge_roll", 0))
-        else:
-            charge_roll = charge_data
+        # Get charge roll distance - NO defaults
+        if not isinstance(charge_data, dict):
+            raise ValueError(f"Invalid charge_data format for unit {unit_id}: must be dict")
+        if "total" not in charge_data:
+            raise KeyError(f"charge_data missing required 'total' field for unit {unit_id}")
+        charge_roll = charge_data["total"]
         
+        # Validate distance and pathfinding - NO hardcoded values
+        if not hasattr(self.config, 'distance_calculation_method'):
+            raise ValueError("Config missing required distance_calculation_method")
         # Validate distance and pathfinding
         distance = max(abs(unit["col"] - target["col"]), abs(unit["row"] - target["row"]))
         if distance <= 1 or distance > min(charge_roll, 12):
@@ -1223,19 +1319,27 @@ class TrainingGameController(GameController):
 
     def get_valid_moves(self, unit_id: int) -> List[Dict[str, Any]]:
         """Get valid move positions for unit"""
-        return self.game_actions.get("get_valid_moves", lambda x: [])(unit_id)
+        if "get_valid_moves" not in self.game_actions:
+            raise RuntimeError("game_actions missing required get_valid_moves method")
+        return self.game_actions["get_valid_moves"](unit_id)
 
     def get_valid_shooting_targets(self, unit_id: int) -> List[int]:
         """Get valid shooting targets for unit"""
-        return self.game_actions.get("get_valid_shooting_targets", lambda x: [])(unit_id)
+        if "get_valid_shooting_targets" not in self.game_actions:
+            raise RuntimeError("game_actions missing required get_valid_shooting_targets method")
+        return self.game_actions["get_valid_shooting_targets"](unit_id)
 
     def get_valid_charge_targets(self, unit_id: int) -> List[int]:
         """Get valid charge targets for unit"""
-        return self.game_actions.get("get_valid_charge_targets", lambda x: [])(unit_id)
+        if "get_valid_charge_targets" not in self.game_actions:
+            raise RuntimeError("game_actions missing required get_valid_charge_targets method")
+        return self.game_actions["get_valid_charge_targets"](unit_id)
 
     def get_valid_combat_targets(self, unit_id: int) -> List[int]:
         """Get valid combat targets for unit"""
-        return self.game_actions.get("get_valid_combat_targets", lambda x: [])(unit_id)
+        if "get_valid_combat_targets" not in self.game_actions:
+            raise RuntimeError("game_actions missing required get_valid_combat_targets method")
+        return self.game_actions["get_valid_combat_targets"](unit_id)
 
     def advance_phase(self) -> None:
         """Advance to next phase or turn"""
@@ -1246,17 +1350,12 @@ class TrainingGameController(GameController):
         current_phase = self.get_current_phase()
         current_player = self.get_current_player()
         
-        # Check if phase transition conditions are met
-        if hasattr(self, 'phase_transitions'):
-            try:
-                if "process_phase_transitions" not in self.phase_transitions:
-                    raise KeyError("phase_transitions missing required 'process_phase_transitions' method")
-                self.phase_transitions["process_phase_transitions"]()
-            except Exception as e:
-                pass
-                
-                # Handle transition failure
-                raise RuntimeError(f"Phase transition failed: {e}")
+        # Check if phase transition conditions are met - NO fallbacks
+        if not hasattr(self, 'phase_transitions'):
+            raise RuntimeError("Controller missing required phase_transitions")
+        if "process_phase_transitions" not in self.phase_transitions:
+            raise KeyError("phase_transitions missing required 'process_phase_transitions' method")
+        self.phase_transitions["process_phase_transitions"]()
 
     def start_new_episode(self, scenario_units: Optional[List[Dict[str, Any]]] = None) -> None:
         """Start a new training episode"""
@@ -1353,7 +1452,9 @@ class TrainingGameController(GameController):
         
         # Update training metrics
         self.training_metrics["episodes_completed"] += 1
-        self.training_metrics["total_actions"] += 1  # Count episodes instead of steps
+        if not hasattr(self.config, 'episode_action_increment'):
+            raise ValueError("Config missing required episode_action_increment")
+        self.training_metrics["total_actions"] += self.config.episode_action_increment
         
         if winner is not None:
             self.training_metrics["wins_by_player"][winner] += 1
