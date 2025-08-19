@@ -290,7 +290,7 @@ class SequentialGameController:
         # The Sequential Engine has already validated that all eligible units have acted
         current_phase = self.base_controller.get_current_phase()
         
-        # Force phase transition by directly calling phase transition methods
+        # AI_TURN.md COMPLIANCE: Reset tracking sets BEFORE phase transition
         if hasattr(self.base_controller, 'phase_transitions'):
             if current_phase == "move":
                 # AI_TURN.md: Reset tracking sets at the start of the new phase
@@ -307,9 +307,7 @@ class SequentialGameController:
                 self.base_controller.phase_transitions['transition_to_combat']()
                 self.base_controller.state_actions['reset_attacked_units']()
             elif current_phase == "combat":
-                # AI_TURN.md: Reset tracking sets at the start of the new phase
-                self.base_controller.state_actions['reset_moved_units']()
-                self.base_controller.state_actions['reset_fled_units']()
+                # AI_TURN.md CRITICAL: End turn will reset ALL tracking sets
                 self.base_controller.phase_transitions['end_turn']()
         else:
             # Fallback to base controller method

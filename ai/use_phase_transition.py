@@ -179,12 +179,13 @@ class UsePhaseTransition:
             """Mirror setTimeout behavior from TypeScript"""
             self.actions["set_phase"]("shoot")
             self.actions["initialize_shooting_phase"]()
-            # DISABLED: reset_moved_units causes infinite loops by clearing tracking mid-phase
-            # self.actions["reset_moved_units"]()
+            # AI_TURN.md: Reset shot tracking at phase start, preserve moved tracking
+            self.actions["reset_shot_units"]()
             self.actions["set_selected_unit_id"](None)
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
+            self.units_shot = set()  # AI_TURN.md: Fresh shot tracking for new phase
         
         # Execute with 300ms delay equivalent (can be immediate in training)
         delayed_transition()
@@ -197,11 +198,13 @@ class UsePhaseTransition:
         def delayed_transition():
             """Mirror setTimeout behavior from TypeScript"""
             self.actions["set_phase"]("charge")
-            # CRITICAL FIX: Do NOT reset moved_units between phases - preserves turn tracking
+            # AI_TURN.md: Reset charge tracking at phase start, preserve other tracking
+            self.actions["reset_charged_units"]()
             self.actions["set_selected_unit_id"](None)
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
+            self.units_charged = set()  # AI_TURN.md: Fresh charge tracking for new phase
         
         # Execute with 300ms delay equivalent
         delayed_transition()
@@ -220,12 +223,14 @@ class UsePhaseTransition:
             
             self.actions["set_phase"]("combat")
             self.actions["initialize_combat_phase"]()
+            # AI_TURN.md: Reset combat tracking at phase start, preserve other tracking
+            self.actions["reset_attacked_units"]()
             self.actions["set_selected_unit_id"](None)
-            # CRITICAL FIX: Do NOT reset tracking between phases - only at turn end
             self.actions["set_mode"]("select")
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
+            self.units_attacked = set()  # AI_TURN.md: Fresh combat tracking for new phase
         
         # Execute with 300ms delay equivalent
         delayed_transition()
@@ -249,6 +254,10 @@ class UsePhaseTransition:
             # Set phase to move first
             self.actions["set_phase"]("move")
             
+            # AI_TURN.md CRITICAL: Reset units_moved at START of new movement phase
+            self.actions["reset_moved_units"]()
+            self.actions["reset_fled_units"]()
+            
             # CRITICAL FIX: Increment turn ONLY when Player 0 starts movement phase (EXACT from frontend)
             if new_player == 0:  # Player 0 is about to start their turn
                 current_turn = self.game_state["current_turn"]
@@ -266,10 +275,10 @@ class UsePhaseTransition:
                         pass  # Let normal unit count logic handle this
                 except Exception as e:
                     raise RuntimeError(f"Failed to load max_turns from config: {e}")
-            self.actions["reset_moved_units"]()
+            
+            # AI_TURN.md CRITICAL: Reset ALL other tracking sets at turn end
             self.actions["reset_charged_units"]()
             self.actions["reset_attacked_units"]()
-            self.actions["reset_fled_units"]()
             self.actions["reset_shot_units"]()
             
             # Reset units_charged for all units (EXACT from TypeScript)
@@ -285,6 +294,13 @@ class UsePhaseTransition:
             # Reset combat sub-phase for next turn (EXACT from TypeScript)
             self.actions["set_combat_sub_phase"](None)
             self.actions["set_combat_active_player"](None)
+            
+            # AI_TURN.md CRITICAL: Force re-sync of ALL tracking sets in local state
+            self.units_moved = set()
+            self.units_shot = set()
+            self.units_charged = set()
+            self.units_attacked = set()
+            self.units_fled = set()
             
             # CRITICAL FIX: Re-sync local state after making changes
             self.phase = self.game_state["phase"]
