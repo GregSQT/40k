@@ -103,7 +103,7 @@ When you violate protocols, user will say:
 1. **State current file status** (document + changes OR project knowledge)
 2. **Search project knowledge** if no document provided
 3. **Verify current line content** before changes
-4. **Propose ORIGINAL/UPDATED blocks** with line numbers
+4. **Propose ORIGINAL and UPDATED code in separated blocks** with line numbers
 5. **Document the change** with change number and result
 6. **User tests and provides feedback**
 7. **Iterate based on results**
