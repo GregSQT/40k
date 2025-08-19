@@ -118,6 +118,10 @@ class SequentialGameController:
         # Execute action through sequential engine
         success = self.sequential_engine.execute_unit_action(active_unit, mirror_action)
         
+        # CRITICAL FIX: Ensure unit is marked as acted after successful action
+        if success:
+            self.base_controller._mark_gym_unit_as_acted(active_unit)
+        
         # CRITICAL FIX: Log action properly for replay system
         self._log_sequential_action(active_unit, mirror_action, current_phase, success)
         
@@ -289,19 +293,21 @@ class SequentialGameController:
         # Force phase transition by directly calling phase transition methods
         if hasattr(self.base_controller, 'phase_transitions'):
             if current_phase == "move":
-                # AI_TURN.md: Reset tracking sets at phase start
-                self.base_controller.state_actions['reset_shot_units']()
+                # AI_TURN.md: Reset tracking sets at the start of the new phase
                 self.base_controller.phase_transitions['transition_to_shoot']()
+                print(f"🎯 SHOOT PHASE STARTED: Current phase is now {self.base_controller.get_current_phase()}")
+                self.base_controller.state_actions['reset_shot_units']()
+                print(f"🔧 RESET: Clearing units_shot before shoot phase")
             elif current_phase == "shoot":
-                # AI_TURN.md: Reset tracking sets at phase start
-                self.base_controller.state_actions['reset_charged_units']()
+                # AI_TURN.md: Reset tracking sets at the start of the new phase
                 self.base_controller.phase_transitions['transition_to_charge']()
+                self.base_controller.state_actions['reset_charged_units']()
             elif current_phase == "charge":
-                # AI_TURN.md: Reset tracking sets at phase start
-                self.base_controller.state_actions['reset_attacked_units']()
+                # AI_TURN.md: Reset tracking sets at the start of the new phase
                 self.base_controller.phase_transitions['transition_to_combat']()
+                self.base_controller.state_actions['reset_attacked_units']()
             elif current_phase == "combat":
-                # AI_TURN.md: Reset tracking sets at phase start (new turn)
+                # AI_TURN.md: Reset tracking sets at the start of the new phase
                 self.base_controller.state_actions['reset_moved_units']()
                 self.base_controller.state_actions['reset_fled_units']()
                 self.base_controller.phase_transitions['end_turn']()

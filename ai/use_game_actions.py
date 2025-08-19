@@ -391,6 +391,8 @@ class UseGameActions:
         elif phase == "shoot":
             units_fled = set(self.game_state.get("units_fled"))
             units_shot = set(self.game_state.get("units_shot", []))
+            if unit["player"] == 1:  # Debug AI units phase tracking
+                print(f"🔍 U{unit['id']} SHOOT CHECK: units_shot={list(units_shot)}, units_moved={list(self.game_state.get('units_moved', []))}")
             if unit["id"] in units_shot:
                 if unit["player"] == 1:  # Only debug AI units
                     print(f"❌ U{unit['id']}: already_shot")

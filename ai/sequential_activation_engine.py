@@ -7,8 +7,8 @@ Every detail implemented exactly as specified with perfect phase management.
 FULL COMPLIANCE VERIFIED: Cross-referenced with complete AI_GAME.md project knowledge
 - Movement: units_fled, destination validation, MOVE range, flee mechanics
 - Shooting: units_fled check, line of sight, adjacency exclusion, RNG_NB validation
-- Charge: 2d6 rolls, charge_max_distance, hasChargedThisTurn tracking
-- Combat: hasChargedThisTurn priority, alternating combatActivePlayer, CC_RNG validation
+- Charge: 2d6 rolls, charge_max_distance, units_charged tracking
+- Combat: units_charged priority, alternating combatActivePlayer, CC_RNG validation
 - Step counting: No step for auto-skip, 1 step for real actions
 - Legacy compatibility: Supports both new and legacy rule systems
 
@@ -115,23 +115,23 @@ class SequentialActivationEngine:
         2. "Loop Alternatively between P1 and P0" (alternating sub-phase)
         
         LEGACY SUPPORT:
-        - hasChargedThisTurn === true (legacy charged units)
+        - units_charged === true (legacy charged units)
         - combatActivePlayer alternating system
         """
         units_charged = self.game_controller.game_state.get("units_charged", set())
         
-        # Sub-phase 1: Units marked as units_charged OR hasChargedThisTurn (legacy)
+        # Sub-phase 1: Units marked as units_charged OR units_charged (legacy)
         self.combat_charged_queue = []
         for unit in living_units:
             if (unit["id"] in units_charged or 
-                unit.get("hasChargedThisTurn", False)):
+                unit.get("units_charged", False)):
                 self.combat_charged_queue.append(unit)
         
         # Sub-phase 2: All other units for alternating combat
         self.combat_alternating_queue = []
         for unit in living_units:
             if not (unit["id"] in units_charged or 
-                   unit.get("hasChargedThisTurn", False)):
+                   unit.get("units_charged", False)):
                 self.combat_alternating_queue.append(unit)
         
         # Start with charged units sub-phase
@@ -355,7 +355,7 @@ class SequentialActivationEngine:
         
         "Unit Eligibility: NOT marked as units_attacked AND adjacent to enemy unit"
         
-        LEGACY COMPATIBILITY: Also check unitsAttacked.includes(unit.id)
+        LEGACY COMPATIBILITY: Also check units_attacked.includes(unit.id)
         """
         if unit["id"] in units_attacked:
             return {"eligible": False, "reason": "already_attacked", "step_increase": False}
@@ -535,14 +535,14 @@ class SequentialActivationEngine:
         success = self._execute_action_via_controller(unit, action)
         
         if success:
-            # Mark as charged and set hasChargedThisTurn for legacy compatibility
+            # Mark as charged and set units_charged for legacy compatibility
             self.game_controller.state_actions['add_charged_unit'](unit["id"])
             
-            # Update unit's hasChargedThisTurn flag for combat phase priority
+            # Update unit's units_charged flag for combat phase priority
             all_units = self.game_controller.get_units()
             for u in all_units:
                 if u["id"] == unit["id"]:
-                    u["hasChargedThisTurn"] = True
+                    u["units_charged"] = True
                     break
                     
         return success

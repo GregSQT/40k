@@ -88,34 +88,20 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
     
     # Load model with proper config path handling
     try:
-        # CRITICAL FIX: Generate scenario from template like training does
+        # CRITICAL FIX: Use same scenario as train.py - config/scenario.json
         config = get_config_loader()
         unit_registry = UnitRegistry()
-        scenario_manager = ScenarioManager(config, unit_registry)
         
-        # Generate scenario based on training phase or specific template
-        if hasattr(evaluate_model, '_current_scenario_template'):
-            template_name = evaluate_model._current_scenario_template
-        else:
-            template_name = "solo_spacemarine_infantry_troop_rangedswarm"  # Default
+        # Use same scenario file as train.py
+        temp_scenario_path = os.path.join(config.config_dir, "scenario.json")
+        if not os.path.isfile(temp_scenario_path):
+            raise FileNotFoundError(f"Missing scenario.json in config/: {temp_scenario_path}")
         
-        # Extract agent key from model path
+        # Extract agent key from model path for controlled_agent parameter
         model_filename = os.path.basename(model_path)
         agent_key = model_filename.replace("model_", "").replace(".zip", "")
         
-        # Generate training scenario
-        scenario = scenario_manager.generate_training_scenario(
-            template_name,
-            agent_key,  # Player 0 (opponent) 
-            agent_key   # Player 1 (AI being evaluated)
-        )
-        
-        # Save scenario to temporary file
-        import tempfile
-        import json
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            json.dump(scenario, f, indent=2)
-            temp_scenario_path = f.name
+        print(f"✅ Using same scenario as train.py: {temp_scenario_path}")
         
         base_env = W40KEnv(
             rewards_config=rewards_config,
@@ -330,10 +316,6 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
             print(f"✅ Evaluation replay saved: {replay_file}")
         except Exception as replay_error:
             print(f"⚠️ Failed to save evaluation replay: {replay_error}")
-    
-    # Cleanup temporary scenario file
-    if 'temp_scenario_path' in locals() and os.path.exists(temp_scenario_path):
-        os.remove(temp_scenario_path)
     
     env.close()
     return results

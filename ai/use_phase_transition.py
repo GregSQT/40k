@@ -272,7 +272,7 @@ class UsePhaseTransition:
             self.actions["reset_fled_units"]()
             self.actions["reset_shot_units"]()
             
-            # Reset hasChargedThisTurn for all units (EXACT from TypeScript)
+            # Reset units_charged for all units (EXACT from TypeScript)
             updated_units = []
             for unit in self.game_state["units"]:
                 updated_unit = copy.deepcopy(unit)
@@ -296,7 +296,7 @@ class UsePhaseTransition:
     def ensure_charged_this_turn_defaults(self) -> None:
         """
         EXACT mirror of ensureChargedThisTurnDefaults from TypeScript.
-        Ensure all units have hasChargedThisTurn property set.
+        Ensure all units have units_charged property set.
         """
         units_needing_defaults = any(
             unit.get("has_charged_this_turn") is None for unit in self.units
@@ -453,7 +453,7 @@ class UsePhaseTransition:
             self.combat_sub_phase == "alternating_combat" and 
             self.combat_active_player is not None):
             
-            # Only check for player switching when unitsAttacked changes (EXACT from TypeScript)
+            # Only check for player switching when units_attacked changes (EXACT from TypeScript)
             current_combat_player_units = [
                 u for u in self.units if u["player"] == self.combat_active_player
             ]
