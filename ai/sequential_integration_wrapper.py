@@ -91,7 +91,7 @@ class SequentialGameController:
         # Get next unit from Sequential Engine queue (ONE unit per action)
         active_unit = self.sequential_engine.get_next_active_unit()
         
-        # If no active unit, check if Sequential Engine reports phase complete
+        # If no active unit, resolve phase per AI_TURN via controller transitions
         if not active_unit:
             if self.sequential_engine.is_phase_complete():
                 # Phase is naturally complete - advance normally
@@ -103,19 +103,43 @@ class SequentialGameController:
                     # Check if game is over (no units left)
                     if self.base_controller.is_game_over():
                         return self._build_gymnasium_response(action, True, terminated=True)
-                    else:
-                        raise RuntimeError(f"Phase transition failed - stuck in '{initial_phase}' phase")
+                    # Prevent infinite loop by failing explicitly
+                    raise RuntimeError(
+                        f"Phase transition failed - stuck in '{initial_phase}' phase with no eligible units"
+                    )
                 
-                # Reset phase state tracking
+                # Reset phase state tracking ONLY when phase genuinely advanced
                 self.phase_started = False
-                
-                # Return with episode continuing to next phase
                 return self._build_gymnasium_response(action, True, terminated=False)
             
-            # Reset phase state tracking
+            # Engine had no active unit but did not declare completion:
+            # Ask controller to apply AI_TURN transitions and re-evaluate once.
+            initial_phase = current_phase
+            initial_player = self.base_controller.get_current_player()
+            
+            # Primary: controller's internal AI_TURN advancement
+            if hasattr(self.base_controller, '_advance_gym_phase_or_turn'):
+                self.base_controller._advance_gym_phase_or_turn()
+            elif hasattr(self.base_controller, 'phase_transitions') and \
+                 isinstance(self.base_controller.phase_transitions, dict) and \
+                 'process_phase_transitions' in self.base_controller.phase_transitions:
+                # Fallback path within the controller's transition system
+                self.base_controller.phase_transitions['process_phase_transitions']()
+            else:
+                raise RuntimeError("Controller lacks AI_TURN transition methods (_advance_gym_phase_or_turn / process_phase_transitions)")
+            
+            # Re-check phase/player; if unchanged and not game over, hard error (no silent loop)
+            final_phase = self.base_controller.get_current_phase()
+            final_player = self.base_controller.get_current_player()
+            if initial_phase == final_phase and initial_player == final_player:
+                if self.base_controller.is_game_over():
+                    return self._build_gymnasium_response(action, True, terminated=True)
+                raise RuntimeError(f"No active unit and phase not complete; stuck in '{initial_phase}' without advancement")
+            
+            # Reset phase state tracking after successful advancement
             self.phase_started = False
             
-            # Return with episode continuing to next phase
+            # Return with episode continuing after controller-driven advancement
             return self._build_gymnasium_response(action, True, terminated=False)
             
         # Convert gym action to mirror action format with validation

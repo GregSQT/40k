@@ -84,8 +84,7 @@ When you violate protocols, user will say:
 - **"WHERE'S YOUR PROJECT SEARCH?"** → You worked without files
 
 ## When You Don't Have Files:
-1. **MANDATORY**: Use `project_knowledge_search` FIRST
-2. **NEVER** say "I need to see file X" without searching first
+1. **MANDATORY**: Ask for it
 3. **NEVER** assume file contents exist
 4. **NEVER** work from memory
 

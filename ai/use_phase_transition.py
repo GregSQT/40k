@@ -520,9 +520,9 @@ class UsePhaseTransition:
         initial_phase = self.phase
         initial_player = self.current_player
         
-        # TRAINING FIX: Check if current player has any remaining eligible units
-        current_player_units = [u for u in self.units if u["player"] == self.current_player]
-        eligible_current_units = [u for u in current_player_units if self.is_unit_eligible_func(u)]
+        # TRAINING FIX (AI_TURN): Determine eligibility via strict, direct rules
+        # Use the live-state, AI_TURN-accurate computation to avoid legacy mismatches
+        eligible_current_units = self._get_eligible_units_for_current_phase_direct()
         
         # TRAINING FIX: For training scenarios, always check phase completion conditions
         # Force phase advancement when current player is done OR when phase should naturally advance
