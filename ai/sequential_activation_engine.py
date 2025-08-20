@@ -174,9 +174,12 @@ class SequentialActivationEngine:
                 
             # Use controller's now-fixed get_current_phase() method
             fresh_phase = self.game_controller.get_current_phase()
+            print(f"   🔍 DEBUG: Checking eligibility for Unit {fresh_unit['id']} in phase {fresh_phase}")
             eligibility_result = self._check_unit_eligibility_detailed(fresh_unit, fresh_phase)
+            print(f"   🔍 DEBUG: Unit {fresh_unit['id']} eligibility: {eligibility_result}")
             
             if eligibility_result["eligible"]:
+                print(f"   🔍 DEBUG: Unit {fresh_unit['id']} is ELIGIBLE - setting as active")
                 self.current_active_unit = fresh_unit
                 
                 # Special handling for charge phase: roll 2d6 at START of activation
@@ -423,20 +426,9 @@ class SequentialActivationEngine:
     def execute_unit_action(self, unit: Dict[str, Any], action: Dict[str, Any]) -> bool:
         """
         Execute action following EXACT AI_GAME.md rules.
-        
-        STEP COUNTING (AI_GAME.md):
-        - Real actions: "1 step increase for whole action"
-        - Movement from adjacent: "units_moved AND units_fled"
-        - Charge with roll: Use pre-rolled 2d6, check distance
-        - Combat attacks: "While CC_NB > 0 AND adjacent to enemy"
-        
-        Args:
-            unit: Unit performing action
-            action: Action to execute
-            
-        Returns:
-            bool: True if action successful, False otherwise
         """
+        print(f"   🔍 DEBUG: execute_unit_action called for Unit {unit['id']} with action {action}")
+        
         if not self.current_active_unit:
             raise RuntimeError("No active unit - call get_next_active_unit() first")
             
@@ -444,18 +436,26 @@ class SequentialActivationEngine:
             raise RuntimeError(f"Unit {unit['id']} is not the current active unit {self.current_active_unit['id']}")
         
         current_phase = self.game_controller.get_current_phase()
+        print(f"   🔍 DEBUG: Current phase: {current_phase}")
         
         # Execute phase-specific action
         if current_phase == "move":
+            print(f"   🔍 DEBUG: Calling _execute_movement_action")
             success = self._execute_movement_action(unit, action)
         elif current_phase == "shoot":
+            print(f"   🔍 DEBUG: Calling _execute_shooting_action")
             success = self._execute_shooting_action(unit, action)
         elif current_phase == "charge":
+            print(f"   🔍 DEBUG: Calling _execute_charge_action")
             success = self._execute_charge_action(unit, action)
         elif current_phase == "combat":
+            print(f"   🔍 DEBUG: Calling _execute_combat_action")
             success = self._execute_combat_action(unit, action)
         else:
+            print(f"   🔍 DEBUG: Calling _execute_wait_action")
             success = self._execute_wait_action(unit, action)
+            
+        print(f"   🔍 DEBUG: Phase-specific action returned: {success}")
             
         # Track action for debugging
         self.debug_actions_taken.append({
@@ -466,9 +466,8 @@ class SequentialActivationEngine:
             "step_increase": 1 if success else 0
         })
         
-        # CRITICAL FIX: Remove unit from queue after action execution
-        if self.activation_queue and self.activation_queue[0]["id"] == unit["id"]:
-            self.activation_queue.pop(0)  # Now remove the unit that just acted
+        # CRITICAL FIX: Ensure tracking sets are updated before wrapper removes unit
+        # Sequential Engine must update tracking sets as part of action execution
         
         # End activation
         self.current_active_unit = None
@@ -515,11 +514,15 @@ class SequentialActivationEngine:
             return True
             
         # Execute shooting through controller
+        print(f"   🔍 DEBUG: Before _execute_action_via_controller for shoot")
         success = self._execute_action_via_controller(unit, action)
+        print(f"   🔍 DEBUG: _execute_action_via_controller returned: {success} for shoot")
         
         if success:
             # Mark as shot
+            print(f"   🔍 DEBUG: Calling add_shot_unit for Unit {unit['id']}")
             self.game_controller.state_actions['add_shot_unit'](unit["id"])
+            print(f"   🔍 DEBUG: add_shot_unit completed")
             
         return success
         
@@ -545,11 +548,15 @@ class SequentialActivationEngine:
                 return False  # No step increase for failed charge per AI_GAME.md
                 
         # Execute charge through controller
+        print(f"   🔍 DEBUG: Before _execute_action_via_controller for charge")
         success = self._execute_action_via_controller(unit, action)
+        print(f"   🔍 DEBUG: _execute_action_via_controller returned: {success} for charge")
         
         if success:
             # Mark as charged and set units_charged for legacy compatibility
+            print(f"   🔍 DEBUG: Calling add_charged_unit for Unit {unit['id']}")
             self.game_controller.state_actions['add_charged_unit'](unit["id"])
+            print(f"   🔍 DEBUG: add_charged_unit completed")
             
             # Update unit's units_charged flag for combat phase priority
             all_units = self.game_controller.get_units()
@@ -614,7 +621,68 @@ class SequentialActivationEngine:
             "combat_active_player": self.combat_active_player if self.queue_built_for_phase == "combat" else None,
             "charge_rolls": dict(self.unit_charge_rolls) if self.queue_built_for_phase == "charge" else None
         }
+    def _execute_action_via_controller(self, unit: Dict[str, Any], action: Dict[str, Any]) -> bool:
+        """
+        Execute action through game controller using proper delegation.
         
+        Args:
+            unit: Unit performing action
+            action: Action to execute in mirror format
+            
+        Returns:
+            bool: True if action successful, False otherwise
+        """
+        try:
+            action_type = action.get("type", "wait")
+            unit_id = unit["id"]
+            
+            print(f"   🔍 DEBUG: Executing {action_type} for Unit {unit_id} via controller")
+            
+            # Route to appropriate controller method based on action type
+            if action_type == "move":
+                if "col" not in action or "row" not in action:
+                    print(f"   🔍 DEBUG: Move action missing col/row: {action}")
+                    return False
+                result = self.game_controller.move_unit(unit_id, action["col"], action["row"])
+                print(f"   🔍 DEBUG: move_unit returned: {result}")
+                return result
+            
+            elif action_type == "shoot":
+                if "target_id" not in action:
+                    print(f"   🔍 DEBUG: Shoot action missing target_id: {action}")
+                    return False
+                result = self.game_controller.shoot_unit(unit_id, action["target_id"])
+                print(f"   🔍 DEBUG: shoot_unit returned: {result}")
+                return result
+            
+            elif action_type == "charge":
+                if "target_id" not in action:
+                    print(f"   🔍 DEBUG: Charge action missing target_id: {action}")
+                    return False
+                result = self.game_controller.charge_unit(unit_id, action["target_id"])
+                print(f"   🔍 DEBUG: charge_unit returned: {result}")
+                return result
+            
+            elif action_type == "combat":
+                if "target_id" not in action:
+                    print(f"   🔍 DEBUG: Combat action missing target_id: {action}")
+                    return False
+                result = self.game_controller.combat_attack(unit_id, action["target_id"])
+                print(f"   🔍 DEBUG: combat_attack returned: {result}")
+                return result
+            
+            elif action_type == "wait":
+                print(f"   🔍 DEBUG: Wait action always succeeds")
+                return True  # Wait always succeeds
+            
+            else:
+                print(f"   🔍 DEBUG: Unknown action type: {action_type}")
+                return False
+                
+        except Exception as e:
+            print(f"   🔍 DEBUG: Action execution failed: {e}")
+            return False
+
     # Helper methods for validation
     def _find_fresh_unit(self, unit_id: str) -> Optional[Dict[str, Any]]:
         """Find unit with current state from fresh units list."""

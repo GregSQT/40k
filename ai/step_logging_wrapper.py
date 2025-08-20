@@ -203,10 +203,15 @@ class StepLoggingWrapper(SequentialGameController):
         # CRITICAL FIX: Always ensure Sequential Engine uses correct current player
         actual_current_player = self.base_controller.get_current_player()
         
-        # Only sync if there's an actual mismatch with Sequential Engine state
-        if (self.sequential_engine.queue_built_for_phase != current_phase or 
-            self.sequential_engine.queue_built_for_player != actual_current_player):
-            pass  # Silent sync - no debug output needed
+        # CRITICAL FIX: Only sync if Sequential Engine has NO queue AND phase mismatch
+        # Don't interfere with normal phase transitions where controller advances first
+        sequential_needs_sync = (
+            len(self.sequential_engine.activation_queue) == 0 and 
+            self.sequential_engine.queue_built_for_phase != current_phase and
+            self.sequential_engine.queue_built_for_phase is not None
+        )
+        if sequential_needs_sync:
+            print(f"   🔧 DEBUG: Syncing Sequential Engine - Controller: {current_phase}, Engine: {self.sequential_engine.queue_built_for_phase}")
             
             # CRITICAL FIX: Double-check controller phase right before sync
             final_controller_phase = self.base_controller.get_current_phase()
@@ -228,6 +233,9 @@ class StepLoggingWrapper(SequentialGameController):
                 self.sequential_engine.combat_alternating_queue = []
             elif current_phase == "charge":
                 self.sequential_engine.unit_charge_rolls = {}
+        else:
+            # Sequential Engine state is fine - don't interfere with normal operation
+            pass
             
             # FINAL VERIFICATION: Ensure controller phase hasn't changed again
             verification_phase = self.base_controller.get_current_phase()
@@ -268,37 +276,41 @@ class StepLoggingWrapper(SequentialGameController):
             # Use safe version to avoid race condition
             safe_start_phase(current_phase)
             
-        # Get active unit for action (outside sync block)
-        active_unit = self.sequential_engine.get_next_active_unit()
+        # CRITICAL FIX: Don't call get_next_active_unit here - let parent wrapper handle it
+        # The parent execute_gym_action already calls get_next_active_unit
+        print(f"   🔍 DEBUG: Step wrapper delegating to parent (no get_next_active_unit call)")
         
         # Execute action through parent Sequential Integration Wrapper
         obs, reward, terminated, truncated, info = super().execute_gym_action(action)
+        
+        # Get the active unit that was used by parent wrapper
+        active_unit = self.sequential_engine.current_active_unit
+        print(f"   🔍 DEBUG: Parent wrapper used active unit: {active_unit.get('id', 'None') if active_unit else 'None'}")
         
         # Capture state after action
         if "episode_steps" not in self.base_controller.game_state:
             raise KeyError("game_state missing required 'episode_steps' field after action execution")
         steps_after = self.base_controller.game_state["episode_steps"]
         
-        # ANALYSIS: Check if we need to restore queue for remaining units
+        # AI_TURN.md COMPLIANCE: Only log actions that were attempted by active units
+        # Auto-skip ineligible units should NOT generate step increments or warnings
         if (len(self.sequential_engine.activation_queue) == 0 and 
-            steps_after > steps_before and  # Unit actually acted successfully
+            steps_after == steps_before and  # No step increment
             active_unit):  # Had an active unit
-            pass
-        elif (len(self.sequential_engine.activation_queue) == 0 and 
-              steps_after == steps_before and  # No step increment
-              info.get('action_success', False) and  # But action was successful
-              active_unit):  # Had an active unit
-            # Force step increment when parent wrapper fails to do it
-            self.base_controller.game_state["episode_steps"] = steps_before + 1
-            steps_after = steps_before + 1
-        elif (len(self.sequential_engine.activation_queue) == 0 and 
-              steps_after == steps_before):  # No step increment and no success
-            print(f"   ⚠️ Queue cleared but no step increment - action may have failed")
+            # Check if unit was actually ineligible (auto-skipped) vs attempted action
+            action_attempted = info.get('action_attempted', True)  # Default assume action was attempted
+            if not action_attempted:
+                # Unit was auto-skipped (ineligible) - this is CORRECT per AI_TURN.md
+                pass  # No warning needed - ineligible units don't increment steps
+            else:
+                # Unit attempted action but failed - this may indicate a problem
+                print(f"   ⚠️ Action attempted but no step increment - check action logic")
         step_increment = steps_after > steps_before
         action_success = info.get("action_success", False)
         
-        # Log the action if step logger is enabled
-        if self.step_logger and self.step_logger.enabled and active_unit:
+        # AI_TURN.md COMPLIANCE: Only log actions that were ATTEMPTED (not auto-skipped ineligible units)
+        action_attempted = info.get('action_attempted', steps_after > steps_before)
+        if self.step_logger and self.step_logger.enabled and active_unit and action_attempted:
             action_type = self._decode_action_type(action)
             unit_id = active_unit.get("id", "unknown")
             
@@ -398,12 +410,22 @@ class StepLoggingWrapper(SequentialGameController):
                 try:
                     if action_type == "shoot":
                         valid_targets = self.base_controller.game_actions["get_valid_shooting_targets"](unit["id"])
+                        # CRITICAL FIX: Always ensure target_id exists for shoot actions
+                        if not valid_targets or len(valid_targets) == 0:
+                            details["target_id"] = "none"
+                        else:
+                            details["target_id"] = valid_targets[0]
                     elif action_type == "charge":
                         valid_targets = self.base_controller.game_actions["get_valid_charge_targets"](unit["id"])
                     elif action_type == "combat":
                         valid_targets = self.base_controller.game_actions["get_valid_combat_targets"](unit["id"])
+                        # CRITICAL FIX: Always ensure target_id exists for combat actions
+                        if not valid_targets or len(valid_targets) == 0:
+                            details["target_id"] = "none"
+                        else:
+                            details["target_id"] = valid_targets[0]
                     
-                    if valid_targets:
+                    if valid_targets and len(valid_targets) > 0:
                         details["target_id"] = valid_targets[0]  # First target used by Sequential Engine
                         
                         # Get target unit details for charge messages
@@ -467,6 +489,19 @@ class StepLoggingWrapper(SequentialGameController):
                 details["hit_target"] = "N/A"
                 details["wound_target"] = "N/A"
                 details["save_target"] = "N/A"
+        
+        # CRITICAL FIX: Ensure ALL required fields exist for shoot actions
+        if action_type == "shoot":
+            required_fields = ["target_id", "hit_roll", "wound_roll", "save_roll", "damage_dealt", 
+                             "hit_result", "wound_result", "save_result", "hit_target", "wound_target", "save_target"]
+            for field in required_fields:
+                if field not in details:
+                    details[field] = "none" if field == "target_id" else ("N/A" if field in ["hit_result", "wound_result", "save_result"] else (0 if field == "damage_dealt" else "N/A"))
+        
+        # CRITICAL FIX: Ensure charge and combat actions have required target_id
+        elif action_type in ["charge", "combat"]:
+            if "target_id" not in details:
+                details["target_id"] = "none"
         
         return details
 
