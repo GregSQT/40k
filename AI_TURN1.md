@@ -174,20 +174,18 @@ Unit Movement Eligibility Check:
 ```
 Available Actions for Eligible Unit:
 ├── Valid destination exists within MOVE range?
-│   ├── YES → Move Action available → Choose to move ?
-│   │   ├── YES → wasAdjacentToEnemy?
-│   │   │   ├── YES → Flee action logged, Mark as units_fled
-│   │   │   ├── NO → Move action logged
-│   │   │   └── Result: +1 step, Mark as units_moved
-│   │   ├── NO → Wait Action → Result: +1 step, Wait action logged
-│   │   └── NO → End of activation : Unit is no more Eligible
-│   └── NO → End activation: Unit is no longer eligible
-└── End activation: Unit is no longer eligible
+│   ├── YES → Move Action
+│   │   ├── wasAdjacentToEnemy? → Mark as units_fled + units_moved
+│   │   └── Normal move → Mark as units_moved
+│   │   └── Result: +1 step, action logged
+│   └── NO → Only Wait available
+└── Wait Action → Mark as units_moved
+    └── Result: +1 step, action logged
 ```
 
 ### Movement Restrictions Logic
 
-**Forbidden Destinations (Cannot Move To AND through):**
+**Forbidden Destinations (Cannot Move TO):**
 - **Occupied hexes**: Other units prevent movement
 - **Enemy adjacent hexes**: Adjacent to enemy = entering combat
 - **Wall hexes**: Terrain blocks movement
@@ -199,10 +197,7 @@ Available Actions for Eligible Unit:
 
 ### Flee Mechanics Logic
 
-- **Trigger**: Move action started from hex adjacent to enemy unit
-- **Implementation**: `wasAdjacentToEnemy`
-- **Note**: Unit automatically not adjacent at destination (move restrictions prevent adjacent destinations)
-- **Why This Works**: Movement restrictions forbid destinations adjacent to enemies, so checking only the starting position is sufficient to detect flee
+**Flee Trigger**: Start adjacent to enemy, end not adjacent to any enemy
 
 **Flee Consequences:**
 - **Shooting phase**: Cannot shoot (disorganized from retreat)
@@ -218,9 +213,9 @@ Available Actions for Eligible Unit:
 **Key Example:**
 ```
 Wounded Marine (CUR_HP 1) adjacent to healthy Ork
-Flee option: Survive to act later in the game, but lose turn effectiveness
+Flee option: Survive but lose turn effectiveness
 Stay option: 80% chance of death but maintain capabilities
-Decision factors: Unit value, importance of actions this turn, long term strategy, alternative threats
+Decision factors: Unit value, importance of actions this turn, alternative threats
 ```
 
 ---
@@ -246,43 +241,13 @@ Unit Shooting Eligibility Check:
 │   └── YES → ✅ Eligible for Shoot/Wait actions
 ```
 
-### Shooting Action Decision Tree
-
-```
-Available Actions for Eligible Unit:
-├── Enemies exist within RNG_RNG range?
-│   ├── YES → Build enemy_at_range pool
-│   │   ├── Check LOS for ALL enemies in pool → Build valid_target pool
-│   │   │   ├── Valid targets found in pool?
-│   │   │   │   ├── YES → Shoot Action Available → Choose to shoot?
-│   │   │   │   │   ├── YES → Execute RNG_NB shots
-│   │   │   │   │   │   ├── For each shot: Valid targets still available?
-│   │   │   │   │   │   │   ├── YES → Select target and resolve shot
-│   │   │   │   │   │   │   │   ├── Target dies → Continue to next shot
-│   │   │   │   │   │   │   │   └── Target survives → Continue to next shot
-│   │   │   │   │   │   │   └── NO → End shooting (slaughter handling)
-│   │   │   │   │   │   └── Result: +1 step, Mark as units_shot, ALL Shoot action logged at once
-│   │   │   │   │   └── NO → Wait Action → Result: +1 step, Wait action logged
-│   │   │   │   └── NO → Only Wait Available → Pass
-│   │   │   └── NO LOS to any enemies → Only Wait Available → Pass
-│   │   └── NO enemies after LOS check → Pass
-│   └── NO → Only Wait Available → Pass
-└── End activation: Unit is no longer eligible
-```
-
 ### Target Restrictions Logic
 
-**Valid Target Requirements (ALL must be true):**
-
-1. **Range check**: Enemy within unit's RNG_RNG hexes (varies by weapon)
-2. **Line of sight**: No wall hexes between shooter and target
-3. **Combat exclusion**: Enemy NOT adjacent to shooter (adjacent = melee combat)
-4. **Friendly fire prevention**: Enemy NOT adjacent to any friendly units
-
-**Target becomes invalid when:**
-- Enemy dies during shooting action
-- Enemy moves out of range (rare during shooting phase)
-- Line of sight becomes blocked (rare during shooting phase)
+**Valid Target Requirements:**
+- **In range**: Within unit's RNG_RNG distance
+- **Line of sight**: No walls blocking straight line to target
+- **Not in melee**: Cannot shoot enemies adjacent to shooter
+- **Friendly fire prevention**: Cannot shoot enemies adjacent to friendly units
 
 **Why These Restrictions:**
 - **Weapon limitations**: Ranged weapons have effective range
@@ -297,7 +262,6 @@ Available Actions for Eligible Unit:
 - **Dynamic targeting**: Each shot can target different valid enemies
 - **Sequential resolution**: Resolve each shot completely before next
 - **Target death handling**: If target dies, remaining shots can retarget
-- **Slaughter handling**: If no more "Valid target" is available, the activation ends
 
 **Why Multiple Shots Work This Way:**
 - **Action efficiency**: One activation covers all shots
@@ -305,20 +269,14 @@ Available Actions for Eligible Unit:
 - **Realistic timing**: Rapid fire happens quickly
 - **Dynamic adaptation**: React to changing battlefield
 
-**Example 1:**
+**Example:**
 ```
 Marine (RNG_NB = 2) faces two wounded Orks (both CUR_HP 1)
 Shot 1: Target Ork A, kill it
 Shot 2: Retarget to Ork B, kill it
 Result: Eliminate two threats in one action through dynamic targeting
 ```
-**Example 2:**
-```
-Marine (RNG_NB = 2) faces one wounded Orks (CUR_HP 1) which is the only "Valid target"
-Shot 1: Target the Ork, kill it
-Shot 2: No more "Valid target" available, remaining shots are cancelled
-Result: Avoid a shooting unit to be stuck because it as no more "Valid target" while having remaining shots to perform
-```
+
 ---
 
 ## ⚡ CHARGE PHASE LOGIC
@@ -337,7 +295,7 @@ Unit Charge Eligibility Check:
 │   └── YES → ❌ Fled unit (Log ineligible, no step)
 ├── Adjacent to enemy unit?
 │   └── YES → ❌ Already in combat (Log ineligible, no step)
-├── Enemies within charge_max_distance hexes ?
+├── Enemies within 12 hexes (charge_max_distance)?
 │   ├── NO → ❌ No targets (Log ineligible, no step)
 │   └── YES → ✅ Eligible → Roll 2d6 for charge distance
 ```
@@ -345,24 +303,16 @@ Unit Charge Eligibility Check:
 ### Charge Action Decision Tree
 
 ```
-Available Actions for Eligible Unit (After 2d6 Roll):
-├── Hexes adjacent to enemies reachable within rolled distance ?
-│   ├── YES → Build valid_charge_destinations pool
-│   │   ├── Valid destinations found?
-│   │   │   ├── YES → Charge Action Available → Choose to charge?
-│   │   │   │   ├── YES → Execute charge → Move to hex adjacent to enemy
-│   │   │   │   │   └── Result: +1 step, Mark as units_charged, Charge action logged
-│   │   │   │   └── NO → Refuse charge → Pass (no log, no step)
-│   │   │   └── NO → Auto-skip → Pass (no log, no step)
-│   │   └── No valid destinations after pathfinding → Pass (no log, no step)
-│   └── NO → Auto-skip → Pass (no log, no step)
-└── End activation: Discard charge roll value → Unit is no longer eligible
+Available Actions After 2d6 Roll:
+├── Valid charge destinations within rolled distance?
+│   ├── YES → Charge Action Available
+│   │   ├── Choose to charge → Move to hex adjacent to enemy
+│   │   │   └── Result: Mark as units_charged, +1 step, action logged
+│   │   └── Choose to refuse → Refuse Action
+│   │       └── Result: +0 step, action logged
+│   └── NO → Auto-Skip
+│       └── Result: +0 step, action logged
 ```
-
-### Charge Timing Logic
-
-**When 2d6 is Rolled**: Immediately when unit is selected by its player
-**Charge roll duration**: The charge roll value is discarded at the end of the unit's activation
 
 ### Charge Distance Logic
 
@@ -371,14 +321,6 @@ Available Actions for Eligible Unit (After 2d6 Roll):
 - **Distance determination**: Roll determines how far unit can charge this activation
 - **Variability purpose**: Adds uncertainty and risk to charge decisions
 
-**Charge Distance Mechanics:**
-- **Target Detection**: Enemy units within `charge_max_distance` hexes (*via pathfinding*) are eligible charge targets
-- **Roll Success**: 2D6 roll must equal or exceed distance to closest hex adjacent to target (*via pathfinding*)
-- **Example**: Enemy Ork 8 hexes away, closest adjacent hex is 7 hexes away → need 7+ on 2D6 to charge
-- **Why the Difference**: You charge TO a hex adjacent to the enemy, not TO the enemy itself
-
-**Concrete Example:**
-
 **Why Random Distance:**
 - **Tactical uncertainty**: Cannot guarantee successful charges
 - **Risk/reward decisions**: Longer charges more likely to fail
@@ -386,7 +328,7 @@ Available Actions for Eligible Unit (After 2d6 Roll):
 
 **Example:**
 ```
-Marine 7 hexes from the closest hex adjacent to an Ork (average charge distance)
+Marine 7 hexes from Ork (average charge distance)
 Roll 6 or less: Charge fails (42% chance)
 Roll 7+: Charge succeeds, gains combat priority (58% chance)
 Decision: Weigh 42% failure risk vs combat advantage gained
@@ -400,129 +342,12 @@ Decision: Weigh 42% failure risk vs combat advantage gained
 
 **Why Charging Units Fight First:**
 - **Momentum**: Charge gives initiative in combat
-- **Tactical exposure**: Positioning for a charge often exposes the unit to deadly enemy fire during the opponent's turn
-- **Risk compensation**: First strike in combat compensates for the vulnerability incurred when moving into charge position
+- **Game balance**: Reward for successful charge positioning
+- **Risk compensation**: Balances charge uncertainty with combat advantage
 
 ---
 
 ## ⚔️ COMBAT PHASE LOGIC
-
-### Combat Phase Overview
-
-**Two-Part Structure:**
-1. **Charging Priority** (Sub-phase 1): Current player's charging units attack first
-2. **Alternating Combat** (Sub-phase 2): Remaining units alternate between players
-
-**Key Principles:**
-- **Charge Reward**: Successful charges grant first-strike advantage
-- **Mutual Combat**: Both players' units can act (unique to combat phase)
-- **Sequential Resolution**: Complete one unit's attacks before next unit acts
-- **Target Validation**: Check for adjacent enemies before each attack
-
-### Combat Sub-Phase 1 Decision Tree
-```
-Charging Units Sub-Phase:
-├── Current player has units marked as units_charged?
-│   ├── YES → Process charging units sequentially
-│   │   ├── For each charging unit: Adjacent to enemy units?
-│   │   │   ├── YES → Execute CC_NB attacks
-│   │   │   │   ├── For each attack: Valid targets still available?
-│   │   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
-│   │   │   │   │   │   ├── Target dies → Continue to next attack
-│   │   │   │   │   │   └── Target survives → Continue to next attack
-│   │   │   │   │   └── NO → End attacking (slaughter handling)
-│   │   │   │   └── Result: +1 step, Mark as units_attacked, ALL Attack action logged at once
-│   │   │   └── NO → Pass (no log, no step)
-│   │   └── All charging units processed → Advance to Sub-Phase 2
-│   └── NO → Skip Sub-Phase 1 → Advance to Sub-Phase 2
-```
-
-## Combat Phase 2 Eligibility Logic
-```
-Unit Combat Eligibility Check (Alternating Phase):
-├── unit.CUR_HP > 0?
-│   └── NO → ❌ Dead unit (Skip, no log)
-├── units_attacked.includes(unit.id)?
-│   └── YES → ❌ Already attacked (Skip, no log)
-├── units_charged.includes(unit.id)?
-│   └── YES → ❌ Already acted in charging sub-phase (Skip, no log)
-├── unit.player === combat_active_player?
-│   └── NO → ❌ Wrong player for this alternating turn (Skip, no log)
-├── Adjacent to enemy unit within CC_RNG?
-│   ├── NO → ❌ No combat targets (Skip, no log)
-│   └── YES → ✅ Eligible for Attack/Pass actions
-```
-
-### Combat Sub_Pase 2 Decision Tree
-```
-Alternating Combat Sub-Phase:
-├── Build eligible unit pools for both players (exclude charged units)
-├── Both players have eligible units for alternating combat?
-│   ├── YES → Execute alternating sequence
-│   │   ├── ALTERNATING LOOP: While both players have eligible units
-│   │   │   ├── Non-active player turn → Select eligible unit
-│   │   │   │   ├── Unit adjacent to enemy units?
-│   │   │   │   │   ├── YES → Execute CC_NB attacks
-│   │   │   │   │   │   ├── For each attack: Valid targets still available?
-│   │   │   │   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
-│   │   │   │   │   │   │   │   ├── Target dies → Continue to next attack
-│   │   │   │   │   │   │   │   └── Target survives → Continue to next attack
-│   │   │   │   │   │   │   └── NO → End attacking (slaughter handling)
-│   │   │   │   │   │   └── Result: +1 step, Mark as units_attacked, ALL Attack action logged at once
-│   │   │   │   │   └── NO → Pass (no log, no step)
-│   │   │   │   └── Active player turn → Select eligible unit
-│   │   │   │       ├── Unit adjacent to enemy units?
-│   │   │   │       │   ├── YES → Execute CC_NB attacks
-│   │   │   │       │   │   ├── For each attack: Valid targets still available?
-│   │   │   │       │   │   │   ├── YES → Select adjacent enemy target and resolve attack
-│   │   │   │       │   │   │   │   ├── Target dies → Continue to next attack
-│   │   │   │       │   │   │   │   └── Target survives → Continue to next attack
-│   │   │   │       │   │   │   └── NO → End attacking (slaughter handling)
-│   │   │   │       │   │   └── Result: +1 step, Mark as units_attacked, ALL Attack action logged at once
-│   │   │   │       │   └── NO → Pass (no log, no step)
-│   │   │   │       └── Check: Both players still have eligible units?
-│   │   │   │           ├── YES → Continue ALTERNATING LOOP
-│   │   │   │           └── NO → Exit loop, proceed to cleanup
-│   │   │   └── Alternating sequence completed
-│   │   └── Continue to cleanup phase
-│   └── NO → Skip alternating sequence
-├── Process remaining eligible units from either player
-│   ├── For each remaining unit: Adjacent to enemy units?
-│   │   ├── YES → Execute CC_NB attacks
-│   │   │   ├── For each attack: Valid targets still available?
-│   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
-│   │   │   │   │   ├── Target dies → Continue to next attack
-│   │   │   │   │   └── Target survives → Continue to next attack
-│   │   │   │   └── NO → End attacking (slaughter handling)
-│   │   │   └── Result: +1 step, Mark as units_attacked, ALL Attack action logged at once
-│   │   └── NO → Pass (no log, no step)
-│   └── All remaining units processed
-└── End Combat Phase: Advance to next player's Movement Phase
-```
-
-### Alternating Combat Tactical Considerations
-
-**Target Priority During Alternating Phase:**
-
-**Safe Delay Condition:**
-- If ALL adjacent enemies are marked as `units_attacked` → Unit can delay its attack safely
-- **Why**: No risk of enemy retaliation this phase → Strategic flexibility available
-
-**Activation and target Priority Order:**
-1. **Priority 1**: Units with high melee damage output AND likely to die this phase
-2. **Priority 2**: Units more likely to die (regardless of damage output)  
-3. **Priority 3**: Units with high melee damage output (regardless of vulnerability) AND low chances of being destroyed this phase
-
-**Priority Assessment Logic:**
-- **"Likely to die"**: Enemy CUR_HP ≤ Expected damage from this unit's attacks
-- **"High melee damage"**: Enemy CC_STR and CC_NB pose significant threat
-- **"Safe targets"**: Enemies already marked as `units_attacked` (cannot retaliate)
-
-**Tactical Reasoning:**
-- **Eliminate threats before they act**: Remove dangerous enemies that can still attack
-- **Preserve action economy**: Attack vulnerable high-damage dealers first
-- **Risk mitigation**: Prioritize survival of your own valuable units
-- **Delayed gratification**: When safe, consider delaying to see how battle develops
 
 ### Combat Phase Structure Logic
 
@@ -541,7 +366,7 @@ Alternating Combat Sub-Phase:
 
 **Action Logic:**
 - **Mandatory attacks**: Must attack if adjacent enemies exist
-- **Pass if no targets**: No mark, no step increment
+- **Pass if no targets**: Mark as attacked but no step increment
 - **Complete all attacks**: All CC_NB attacks in one action
 
 **Why Charging Units Go First:**
@@ -599,10 +424,9 @@ Result: Charging grants first strike, then fair alternation
 ### Individual Tracking Sets
 
 **units_moved** (Movement Phase):
-- **Data structure**: Set containing unit IDs
 - **Purpose**: Track units that have moved or waited
 - **Reset timing**: Start of movement phase
-- **Usage**: `units_moved.has(unit.id)` prevents re-movement within same phase
+- **Usage**: Prevent re-movement within same phase
 
 **units_fled** (Movement Phase):
 - **Purpose**: Track units that fled from combat
@@ -631,25 +455,10 @@ Result: Charging grants first strike, then fair alternation
 - **Turn-level effect**: Cleared at start of new turn, not each phase
 - **Penalty application**: Automatic ineligibility in affected phases
 
-**charge_roll_values** (Charge Phase):
-- **Purpose**: Store 2D6 roll results for units attempting charges
-- **Roll timing**: Immediately when unit becomes active for charging
-- **Storage format**: Map of unit.id → roll value (e.g., {unit_123: 8, unit_456: 11})
-- **Usage**: Determine maximum charge distance for pathfinding validation
-- **Cleanup timing**: End of unit's activation (roll discarded whether charge succeeds or fails)
-- **Example**: Marine rolls 9, can charge any target within 9 hexes of adjacent positions (*via pathfinding*)
-
 **Why Cross-Phase Tracking:**
 - **Realistic consequences**: Fleeing affects unit for entire turn
 - **Strategic depth**: Makes fleeing a meaningful choice with costs
 - **State consistency**: Same consequences applied uniformly
-
-**Slaughter Handling Explained:**
-When all valid targets are eliminated during multi-shot action:
-- Remaining shots are cancelled (cannot fire at invalid targets)
-- Unit activation ends immediately
-- Prevents units from being stuck with unusable remaining shots
-- Maintains game flow and prevents infinite loops
 
 ---
 
@@ -679,13 +488,12 @@ Decision principle: Coordination often superior to individual optimization
 ```
 Wounded Scout (CUR_HP 1) adjacent to healthy Ork
 Combat prediction: 80% chance Scout dies if stays
-Flee consequences: Scout survives but cannot shoot critical targets this turn
+Flee consequences: Scout survives but cannot shoot critical targets
 
 Decision factors:
-- Scout's death may "lock" a high value unit in melee, preventing it from attacking a more precious unit
-- Scout's flee would :
-    - let him to act the subsequent turns but will "free" the ork
-    - allow his allied units to shoot at the ork during the shooting phase since it will no more be adjacent to a friendly unit
+- Scout replacement cost vs immediate value
+- Importance of Scout's potential shooting
+- Alternative methods to handle Ork threat
 
 Framework: Weigh certain survival vs uncertain but valuable contribution
 ```
@@ -697,7 +505,7 @@ Unit can kill wounded enemy OR significantly wound healthy enemy
 
 Standard approach: Kill wounded (guaranteed elimination)
 Advanced consideration: What can allies accomplish?
-- If ally can finish wounded in the same turn: Better to wound healthy instead
+- If ally can finish wounded: Better to wound healthy instead
 - If no ally available: Take guaranteed elimination
 
 Principle: Optimize total force effectiveness, not individual actions
@@ -785,23 +593,17 @@ Starting state: P0 Movement phase, Turn 1
 After P0 completes all phases and P1 completes all phases:
 Expected result: P0 Movement phase, Turn 2
 
-**When Turn increments**: Turn increments when P0 starts Movement (turn-based on P0)
+**Why Turn increments**: Turn increments when P0 starts Movement (turn-based on P0)
 
 ### Error Detection Checks
 
 **Can Claude identify common mistakes?**
 
-Scenario: "Unit perform the shoot action, then in same phase performs the same action again"
+Scenario: "Unit shoots, then in same phase shoots again"
 Claude should identify: VIOLATION - units_shot tracking prevents duplicate actions
 
-Scenario: "Unit moves to hex adjacent to enemy, then shoots in same turn"
-Claude should identify: VIOLATION - Movement restrictions prevent moving TO hexes adjacent to enemies
-
-Scenario: "Unit moves from adjacent to enemy to non-adjacent hex, then shoots in same turn"
-Claude should identify: VIOLATION - Fled penalty prevents fled units from shooting in the same turn
-
-Scenario: "Unit charges from adjacent to enemy to a different adjacent hex"
-Claude should identify: VIOLATION - No charge allowed for units adjacent to enemy units
+Scenario: "Unit moves adjacent to enemy, then shoots in same turn"
+Claude should identify: VALID - fled penalty doesn't apply to normal movement
 
 ---
 

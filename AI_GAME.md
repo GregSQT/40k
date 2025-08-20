@@ -63,8 +63,6 @@ This document teaches Claude to **understand the tactical logic** behind Warhamm
 
 ### Combat Range Categories
 
-### Combat Range Categories
-
 **Three Combat Ranges:**
 1. **Ranged Combat** (RNG_RNG hexes): Shooting phase, distance weapons
 2. **Charge Range** (2-12 hexes): Charge phase, movement to contact
