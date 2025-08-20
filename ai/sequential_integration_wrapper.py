@@ -86,18 +86,13 @@ class SequentialGameController:
         # CRITICAL FIX: Initialize Sequential Engine for phase if not already done
         if (self.sequential_engine.queue_built_for_phase != current_phase or 
             self.sequential_engine.queue_built_for_player != self.base_controller.get_current_player()):
-            print(f"🔍 QUEUE DEBUG: Starting new phase '{current_phase}' - was '{self.sequential_engine.queue_built_for_phase}'")
             self.sequential_engine.start_phase(current_phase)
-            print(f"🔍 QUEUE DEBUG: After start_phase - phase_complete: {self.sequential_engine.phase_complete}, queue_length: {len(self.sequential_engine.activation_queue)}")
         
         # Get next unit from Sequential Engine queue (ONE unit per action)
-        print(f"🔍 CALL DEBUG: About to call get_next_active_unit() - current queue: {len(self.sequential_engine.activation_queue)}")
         active_unit = self.sequential_engine.get_next_active_unit()
-        print(f"🔍 CALL DEBUG: get_next_active_unit() returned: {active_unit.get('id', 'None') if active_unit else 'None'}")
         
         # If no active unit, check if Sequential Engine reports phase complete
         if not active_unit:
-            print(f"🔍 PHASE DEBUG: No active unit - Phase: {current_phase}, phase_complete: {self.sequential_engine.is_phase_complete()}")
             if self.sequential_engine.is_phase_complete():
                 # Phase is naturally complete - advance normally
                 initial_phase = current_phase
@@ -144,15 +139,6 @@ class SequentialGameController:
             # Failed attacks still consume time/effort and increment steps
             new_steps = steps_before + 1
             self.base_controller.game_state["episode_steps"] = new_steps
-        
-        # AI_TURN.md CRITICAL: Remove unit from queue AFTER action execution
-        print(f"🔍 REMOVE DEBUG: Before removal - Queue size: {len(self.sequential_engine.activation_queue)}")
-        if (self.sequential_engine.activation_queue and 
-            len(self.sequential_engine.activation_queue) > 0):
-            removed_unit = self.sequential_engine.activation_queue.pop(0)
-            print(f"🔍 REMOVE DEBUG: Removed Unit {removed_unit.get('id', 'unknown')} - Queue now: {len(self.sequential_engine.activation_queue)}")
-        else:
-            print(f"🔍 REMOVE DEBUG: No removal - Queue empty or missing")
         
         # CRITICAL FIX: Log action properly for replay system
         self._log_sequential_action(active_unit, mirror_action, current_phase, success)

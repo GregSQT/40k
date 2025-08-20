@@ -93,11 +93,9 @@ class SequentialActivationEngine:
             self.activation_queue = copy.deepcopy(eligible_units)
             
         self.current_active_unit = None
-        self.phase_complete = False  # CRITICAL: Always reset to False when starting new phase
+        self.phase_complete = False
         self.queue_built_for_phase = phase_name
         self.queue_built_for_player = current_player
-        
-        print(f"🔍 ENGINE DEBUG: start_phase('{phase_name}') - Built queue with {len(self.activation_queue)} units, phase_complete: {self.phase_complete}")
         
         # Reset charge rolls for new charge phase
         if phase_name == "charge":
@@ -160,42 +158,51 @@ class SequentialActivationEngine:
                 # Combat transition to alternating sub-phase
                 
         # Process queue until eligible unit found or queue empty
+        checked_units = set()  # Prevent infinite loops
+        
         while self.activation_queue:
             candidate_unit = self.activation_queue[0]  # Check without removing
+            unit_id = candidate_unit["id"]
+            
+            # Prevent infinite loops by tracking checked units
+            if unit_id in checked_units:
+                # All units checked, phase complete
+                self.phase_complete = True
+                break
+            checked_units.add(unit_id)
             
             # Get fresh unit state for validation ("checked at START of each unit's activation")
-            fresh_unit = self._find_fresh_unit(candidate_unit["id"])
+            fresh_unit = self._find_fresh_unit(unit_id)
             if not fresh_unit or fresh_unit.get("CUR_HP", 0) <= 0:
-                # CRITICAL FIX: Remove dead unit from queue to prevent infinite loop
+                # Dead units removed from queue immediately
                 self.activation_queue.pop(0)
                 self.debug_units_skipped.append({
-                    "unit_id": candidate_unit["id"], 
+                    "unit_id": unit_id, 
                     "reason": "dead_or_missing",
-                    "step_increase": False  # "No step increase" for dead units
+                    "step_increase": False
                 })
                 self.auto_skipped_units += 1
+                checked_units.remove(unit_id)  # Allow re-checking after removal
                 continue
                 
             # Use controller's now-fixed get_current_phase() method
             fresh_phase = self.game_controller.get_current_phase()
-            eligibility_result = self._check_unit_eligibility_detailed(fresh_unit, fresh_phase)
-            print(f"🔍 ELIGIBILITY DEBUG: Unit {fresh_unit['id']} in phase '{fresh_phase}' - Eligible: {eligibility_result['eligible']}, Reason: {eligibility_result.get('reason', 'N/A')}")
             
+            eligibility_result = self._check_unit_eligibility_detailed(fresh_unit, fresh_phase)
             if eligibility_result["eligible"]:
                 self.current_active_unit = fresh_unit
-                print(f"🔍 ELIGIBILITY DEBUG: Selected Unit {fresh_unit['id']} as active")
                 
                 # Special handling for charge phase: roll 2d6 at START of activation
                 if current_phase == "charge" and fresh_unit["id"] not in self.unit_charge_rolls:
                     charge_roll = random.randint(1, 6) + random.randint(1, 6)
                     self.unit_charge_rolls[fresh_unit["id"]] = charge_roll
                 
-                # DON'T remove from queue yet - will be removed after action execution
-                # Next active unit selected
+                # Units remain in queue, tracking sets determine eligibility
                 return fresh_unit
             else:
-                # Remove ineligible unit from queue and continue
-                self.activation_queue.pop(0)
+                # Move ineligible unit to end of queue for round-robin checking
+                ineligible_unit = self.activation_queue.pop(0)
+                self.activation_queue.append(ineligible_unit)
                 
                 self.debug_units_skipped.append({
                     "unit_id": fresh_unit["id"], 
@@ -255,10 +262,15 @@ class SequentialActivationEngine:
     def _check_movement_eligibility_detailed(self, unit: Dict[str, Any], current_player: int, 
                                            units_moved: Set, enemy_units: List[Dict]) -> Dict[str, Any]:
         """
-        Check movement eligibility (AI_GAME.md):
-        - "All and ONLY the CURRENT PLAYER units are eligible"
-        - Units that haven't moved this phase
+        AI_TURN.md Movement Eligibility Decision Tree:
+        ├── unit.CUR_HP > 0? → NO → ❌ Dead unit (Skip, no log)
+        ├── unit.player === current_player? → NO → ❌ Wrong player (Skip, no log)
+        ├── units_moved.includes(unit.id)? → YES → ❌ Already moved (Skip, no log)
+        └── ALL conditions met → ✅ Eligible for Move/Wait actions
         """
+        if unit.get("CUR_HP", 0) <= 0:
+            return {"eligible": False, "reason": "dead_unit", "step_increase": False}
+            
         if unit["player"] != current_player:
             return {"eligible": False, "reason": "wrong_player", "step_increase": False}
             
@@ -630,30 +642,22 @@ class SequentialActivationEngine:
             
             elif action_type == "charge":
                 if "target_id" not in action:
-                    print(f"   🔍 DEBUG: Charge action missing target_id: {action}")
                     return False
                 result = self.game_controller.charge_unit(unit_id, action["target_id"])
-                print(f"   🔍 DEBUG: charge_unit returned: {result}")
-                return result
             
             elif action_type == "combat":
                 if "target_id" not in action:
-                    print(f"   🔍 DEBUG: Combat action missing target_id: {action}")
                     return False
                 result = self.game_controller.combat_attack(unit_id, action["target_id"])
-                print(f"   🔍 DEBUG: combat_attack returned: {result}")
                 return result
             
             elif action_type == "wait":
-                print(f"   🔍 DEBUG: Wait action always succeeds")
                 return True  # Wait always succeeds
             
             else:
-                print(f"   🔍 DEBUG: Unknown action type: {action_type}")
                 return False
                 
         except Exception as e:
-            print(f"   🔍 DEBUG: Action execution failed: {e}")
             return False
 
     # Helper methods for validation

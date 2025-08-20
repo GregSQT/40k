@@ -80,8 +80,6 @@ def enable_step_logging_on_environment(env, step_logger):
         if expected_state_id != actual_state_id:
             raise RuntimeError(f"CRITICAL: game_state object mismatch - Expected ID: {expected_state_id}, Got: {actual_state_id}")
         
-        print(f"✅ Step logging enabled on environment (game_state ID: {actual_state_id})")
-        
         # CRITICAL: Test that episode_steps field exists and persists
     else:
         # Fallback: just attach step logger to existing controller
