@@ -203,89 +203,27 @@ class StepLoggingWrapper(SequentialGameController):
         # CRITICAL FIX: Always ensure Sequential Engine uses correct current player
         actual_current_player = self.base_controller.get_current_player()
         
-        # CRITICAL FIX: Only sync if Sequential Engine has NO queue AND phase mismatch
-        # Don't interfere with normal phase transitions where controller advances first
+        # CRITICAL FIX: NEVER force sync during normal operation - let Sequential Engine handle its own state
+        # Only sync on true desynchronization (first action of episode or after reset)
         sequential_needs_sync = (
-            len(self.sequential_engine.activation_queue) == 0 and 
-            self.sequential_engine.queue_built_for_phase != current_phase and
-            self.sequential_engine.queue_built_for_phase is not None
+            self.sequential_engine.queue_built_for_phase is None and
+            len(self.sequential_engine.activation_queue) == 0
         )
         if sequential_needs_sync:
-            print(f"   🔧 DEBUG: Syncing Sequential Engine - Controller: {current_phase}, Engine: {self.sequential_engine.queue_built_for_phase}")
-            
-            # CRITICAL FIX: Double-check controller phase right before sync
-            final_controller_phase = self.base_controller.get_current_phase()
-            if current_phase != final_controller_phase:
-                current_phase = final_controller_phase
-            
-            # Reset Sequential Engine completely and sync to controller's ACTUAL phase
+            # Simple initial sync - no complex phase checking
             self.sequential_engine.queue_built_for_phase = None
             self.sequential_engine.queue_built_for_player = None
             self.sequential_engine.activation_queue = []
             self.sequential_engine.phase_complete = False
             self.sequential_engine.current_active_unit = None
             
-            # Reset phase-specific state
-            if current_phase == "combat":
-                self.sequential_engine.combat_sub_phase = "charged_units"
-                self.sequential_engine.combat_active_player = 1
-                self.sequential_engine.combat_charged_queue = []
-                self.sequential_engine.combat_alternating_queue = []
-            elif current_phase == "charge":
-                self.sequential_engine.unit_charge_rolls = {}
-        else:
-            # Sequential Engine state is fine - don't interfere with normal operation
-            pass
+            # No complex sync logic needed - let Sequential Integration Wrapper handle phase initialization
             
-            # FINAL VERIFICATION: Ensure controller phase hasn't changed again
-            verification_phase = self.base_controller.get_current_phase()
-            if current_phase != verification_phase:
-                print(f"⚠️ CRITICAL: Controller phase changed during sync! Expected '{current_phase}', got '{verification_phase}'")
-                print("🚫 Skipping Sequential Engine sync to avoid race condition")
-                return super().execute_gym_action(action)
-            
-            # CRITICAL FIX: Override Sequential Engine's internal phase check to prevent race condition
-            # Temporarily disable the phase mismatch check in Sequential Engine
-            original_start_phase = self.sequential_engine.start_phase
-            
-            def safe_start_phase(phase_name):
-                # Skip the controller phase check and go directly to queue building
-                # CRITICAL FIX: Use fresh current player reading
-                fresh_current_player = self.base_controller.get_current_player()
-                all_units = self.base_controller.get_units()
-                living_units = [u for u in all_units if u.get("CUR_HP", 0) > 0]
-                
-                if phase_name == "combat":
-                    self.sequential_engine._build_combat_queues(living_units)
-                else:
-                    eligible_units = [u for u in living_units if u["player"] == fresh_current_player]
-                    self.sequential_engine.activation_queue = copy.deepcopy(eligible_units)
-                    
-                self.sequential_engine.current_active_unit = None
-                self.sequential_engine.phase_complete = False
-                self.sequential_engine.queue_built_for_phase = phase_name
-                self.sequential_engine.queue_built_for_player = current_player
-                
-                if phase_name == "charge":
-                    self.sequential_engine.unit_charge_rolls = {}
-                
-                self.sequential_engine.debug_actions_taken = []
-                self.sequential_engine.debug_units_skipped = []
-                self.sequential_engine.auto_skipped_units = 0
-            
-            # Use safe version to avoid race condition
-            safe_start_phase(current_phase)
-            
-        # CRITICAL FIX: Don't call get_next_active_unit here - let parent wrapper handle it
-        # The parent execute_gym_action already calls get_next_active_unit
-        print(f"   🔍 DEBUG: Step wrapper delegating to parent (no get_next_active_unit call)")
-        
         # Execute action through parent Sequential Integration Wrapper
         obs, reward, terminated, truncated, info = super().execute_gym_action(action)
         
         # Get the active unit that was used by parent wrapper
         active_unit = self.sequential_engine.current_active_unit
-        print(f"   🔍 DEBUG: Parent wrapper used active unit: {active_unit.get('id', 'None') if active_unit else 'None'}")
         
         # Capture state after action
         if "episode_steps" not in self.base_controller.game_state:

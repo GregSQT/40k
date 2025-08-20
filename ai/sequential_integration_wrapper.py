@@ -86,59 +86,45 @@ class SequentialGameController:
         # CRITICAL FIX: Initialize Sequential Engine for phase if not already done
         if (self.sequential_engine.queue_built_for_phase != current_phase or 
             self.sequential_engine.queue_built_for_player != self.base_controller.get_current_player()):
+            print(f"🔍 QUEUE DEBUG: Starting new phase '{current_phase}' - was '{self.sequential_engine.queue_built_for_phase}'")
             self.sequential_engine.start_phase(current_phase)
+            print(f"🔍 QUEUE DEBUG: After start_phase - phase_complete: {self.sequential_engine.phase_complete}, queue_length: {len(self.sequential_engine.activation_queue)}")
         
-        # CRITICAL FIX: Get next unit from Sequential Engine queue (ONE unit per action)
-        print(f"   🔍 DEBUG: Before get_next_active_unit - Queue length: {len(self.sequential_engine.activation_queue)}")
-        print(f"   🔍 DEBUG: Queue contents: {[u.get('id', 'unknown') for u in self.sequential_engine.activation_queue]}")
-        print(f"   🔍 DEBUG: Phase built for: {self.sequential_engine.queue_built_for_phase}, Current phase: {current_phase}")
-        
+        # Get next unit from Sequential Engine queue (ONE unit per action)
+        print(f"🔍 CALL DEBUG: About to call get_next_active_unit() - current queue: {len(self.sequential_engine.activation_queue)}")
         active_unit = self.sequential_engine.get_next_active_unit()
+        print(f"🔍 CALL DEBUG: get_next_active_unit() returned: {active_unit.get('id', 'None') if active_unit else 'None'}")
         
-        print(f"   🔍 DEBUG: After get_next_active_unit - Active unit: {active_unit.get('id', 'None') if active_unit else 'None'}")
-        print(f"   🔍 DEBUG: Queue length after: {len(self.sequential_engine.activation_queue)}")
-        
-        # If no active unit, check if phase is truly complete (especially for combat)
+        # If no active unit, check if Sequential Engine reports phase complete
         if not active_unit:
-            # CRITICAL FIX: For combat phase, check if ALL P0 AND P1 units have no eligible actions
-            if current_phase == "combat":
-                # Check both charged and alternating sub-phases are complete
-                charged_complete = (self.sequential_engine.combat_sub_phase != "charged_units" or 
-                                  len(self.sequential_engine.combat_charged_queue) == 0)
-                alternating_complete = self._check_alternating_combat_complete()
+            print(f"🔍 PHASE DEBUG: No active unit - Phase: {current_phase}, phase_complete: {self.sequential_engine.is_phase_complete()}")
+            if self.sequential_engine.is_phase_complete():
+                # Phase is naturally complete - advance normally
+                initial_phase = current_phase
+                self._advance_phase()
                 
-                print(f"   🔍 DEBUG: Combat sub-phase: {self.sequential_engine.combat_sub_phase}")
-                print(f"   🔍 DEBUG: Charged complete: {charged_complete}, Alternating complete: {alternating_complete}")
-                print(f"   🔍 DEBUG: Charged queue: {len(self.sequential_engine.combat_charged_queue)}, Alternating queue: {len(self.sequential_engine.combat_alternating_queue)}")
+                final_phase = self.base_controller.get_current_phase()
+                if initial_phase == final_phase:
+                    # Check if game is over (no units left)
+                    if self.base_controller.is_game_over():
+                        return self._build_gymnasium_response(action, True, terminated=True)
+                    else:
+                        raise RuntimeError(f"Phase transition failed - stuck in '{initial_phase}' phase")
                 
-                if not (charged_complete and alternating_complete):
-                    # Combat phase not truly complete - continue with next sub-phase
-                    print(f"   🔍 DEBUG: Combat not complete - continuing")
-                    return self._build_gymnasium_response(action, True, terminated=False)
-                else:
-                    print(f"   🔍 DEBUG: Combat phase COMPLETE - advancing")
+                # Reset phase state tracking
+                self.phase_started = False
+                
+                # Return with episode continuing to next phase
+                return self._build_gymnasium_response(action, True, terminated=False)
             
+            # Reset phase state tracking
             self.phase_started = False
             
-            # CRITICAL FIX: Call process_phase_transitions FIRST to check and handle transitions
-            if hasattr(self.base_controller, 'phase_transitions'):
-                self.base_controller.phase_transitions['process_phase_transitions']()
-            
-            # CRITICAL FIX: Verify phase advancement actually occurred
-            initial_phase = current_phase
-            final_phase = self.base_controller.get_current_phase()
-            if initial_phase == final_phase:
-                self._advance_phase()
-                final_phase = self.base_controller.get_current_phase()
-            
-            # Mark episode as continuing to allow next phase to start
+            # Return with episode continuing to next phase
             return self._build_gymnasium_response(action, True, terminated=False)
             
         # Convert gym action to mirror action format with validation
-        print(f"   🔍 DEBUG: Converting gym action {action} for Unit {active_unit['id']} in phase {current_phase}")
-        print(f"   🔍 DEBUG: Action {action} should be {'CHARGE (5)' if current_phase == 'charge' else 'SHOOT (4)' if current_phase == 'shoot' else 'MOVE (0-3)' if current_phase == 'move' else 'COMBAT (6)' if current_phase == 'combat' else 'WAIT (7)'} for {current_phase} phase")
         mirror_action = self._convert_gym_action_to_mirror(active_unit, action, current_phase)
-        print(f"   🔍 DEBUG: Converted to mirror_action: {mirror_action}")
        
         if not mirror_action:
             raise ValueError(
@@ -150,9 +136,7 @@ class SequentialGameController:
         if "episode_steps" not in self.base_controller.game_state:
             raise KeyError("game_state missing required 'episode_steps' field")
         steps_before = self.base_controller.game_state["episode_steps"]
-        print(f"   🔍 DEBUG: Calling sequential_engine.execute_unit_action with mirror_action: {mirror_action}")
         success = self.sequential_engine.execute_unit_action(active_unit, mirror_action)
-        print(f"   🔍 DEBUG: sequential_engine.execute_unit_action returned: {success}")
         
         # AI_TURN.md COMPLIANCE: Track step increment based on action ATTEMPT (regardless of success/failure)
         if mirror_action["type"] in ["move", "shoot", "charge", "combat", "wait"]:
@@ -161,32 +145,14 @@ class SequentialGameController:
             new_steps = steps_before + 1
             self.base_controller.game_state["episode_steps"] = new_steps
         
-        # DEBUG: Check if tracking sets were updated after action
-        if current_phase == "charge":
-            units_charged_after = self.base_controller.game_state.get("units_charged", set())
-            print(f"   🔍 DEBUG: After action execution - units_charged: {list(units_charged_after) if isinstance(units_charged_after, set) else units_charged_after}")
-            print(f"   🔍 DEBUG: Should contain Unit {active_unit['id']} if charge was successful: {success}")
-        
-        # CRITICAL FIX: Ensure Sequential Engine's controller delegation works
-        if not success and mirror_action["type"] in ["move", "shoot", "charge", "combat"]:
-            # Action failed - mark unit as attempted anyway per AI_TURN.md
-            print(f"   🔍 DEBUG: Action {mirror_action['type']} failed but marking unit as acted per AI_TURN.md")
-            if mirror_action["type"] == "charge":
-                self.base_controller.state_actions['add_charged_unit'](active_unit["id"])
-            elif mirror_action["type"] == "move":
-                self.base_controller.state_actions['add_moved_unit'](active_unit["id"])
-            elif mirror_action["type"] == "shoot":
-                self.base_controller.state_actions['add_shot_unit'](active_unit["id"])
-            elif mirror_action["type"] == "combat":
-                self.base_controller.state_actions['add_attacked_unit'](active_unit["id"])
-        
-        # CRITICAL FIX: Remove unit from queue AFTER tracking sets are updated
+        # AI_TURN.md CRITICAL: Remove unit from queue AFTER action execution
+        print(f"🔍 REMOVE DEBUG: Before removal - Queue size: {len(self.sequential_engine.activation_queue)}")
         if (self.sequential_engine.activation_queue and 
-            len(self.sequential_engine.activation_queue) > 0 and
-            self.sequential_engine.activation_queue[0]["id"] == active_unit["id"]):
-            self.sequential_engine.activation_queue.pop(0)
-            print(f"   🔍 DEBUG: Removed Unit {active_unit['id']} from queue after action")
-            self.base_controller.game_state["episode_steps"] = new_steps
+            len(self.sequential_engine.activation_queue) > 0):
+            removed_unit = self.sequential_engine.activation_queue.pop(0)
+            print(f"🔍 REMOVE DEBUG: Removed Unit {removed_unit.get('id', 'unknown')} - Queue now: {len(self.sequential_engine.activation_queue)}")
+        else:
+            print(f"🔍 REMOVE DEBUG: No removal - Queue empty or missing")
         
         # CRITICAL FIX: Log action properly for replay system
         self._log_sequential_action(active_unit, mirror_action, current_phase, success)
@@ -284,21 +250,10 @@ class SequentialGameController:
         # AI_GAME.md: Action must be pure action type (0-7), no unit encoding
         action_type = action % 8  # Ensure we only get action type, ignore any unit encoding
         
-        # CRITICAL DEBUG: Force test charge action in charge phase
-        if phase == "charge" and action_type != 5:
-            print(f"   🔍 DEBUG: ACTION MISMATCH! Received action {action_type} in {phase} phase - should be 5")
-            print(f"   🔍 DEBUG: FORCING action 5 for testing...")
-            action_type = 5  # Force charge action for testing
-        
-        print(f"   🔍 DEBUG: About to process action_type {action_type} in phase {phase}")
-        
         # Movement actions (0-3)
         if 0 <= action_type <= 3:
-            print(f"   🔍 DEBUG: Taking movement branch for action {action_type}")
-            print(f"   🔍 DEBUG: Processing movement action {action} in phase {phase}")
             if phase != "move":
                 # Convert invalid movement action to wait action
-                print(f"   🔍 DEBUG: Movement action {action} not valid in {phase} - converting to wait")
                 return {"type": "wait"}
                 
             # Calculate destination based on direction
@@ -309,7 +264,7 @@ class SequentialGameController:
                 3: (-1, 0)   # West
             }
             
-            col_diff, row_diff = movements[action]
+            col_diff, row_diff = movements[action_type]
             return {
                 "type": "move",
                 "col": unit["col"] + col_diff,
@@ -317,59 +272,43 @@ class SequentialGameController:
             }
             
         # Shooting action (4)
-        elif action == 4:
+        elif action_type == 4:
             if phase != "shoot":
-                print(f"   🔍 DEBUG: Action 4 (shoot) attempted in {phase} phase - converting to wait")
                 return {"type": "wait"}
                 
             # Get valid shooting targets from controller
             try:
-                print(f"   🔍 DEBUG: Finding shoot targets for Unit {unit['id']}")
                 valid_targets = self.base_controller.game_actions["get_valid_shooting_targets"](unit["id"])
-                print(f"   🔍 DEBUG: Found shoot targets: {valid_targets}")
                 if not valid_targets:
-                    print(f"   🔍 DEBUG: No shoot targets found - converting to wait")
                     return {"type": "wait"}
                     
-                # Use first valid target (AI will learn to choose better)
-                print(f"   🔍 DEBUG: Creating shoot action with target_id: {valid_targets[0]}")
                 return {
                     "type": "shoot",
                     "target_id": valid_targets[0]
                 }
-            except Exception as e:
-                print(f"   🔍 DEBUG: Exception finding shoot targets: {e} - converting to wait")
+            except Exception:
                 return {"type": "wait"}
             
         # Charge action (5)
-        elif action == 5:
-            print(f"   🔍 DEBUG: Processing action 5 (charge) in phase {phase}")
+        elif action_type == 5:
             if phase != "charge":
-                print(f"   🔍 DEBUG: Action 5 (charge) attempted in {phase} phase - converting to wait")
                 return {"type": "wait"}
             
-            print(f"   🔍 DEBUG: Phase is charge - proceeding with charge target finding")
             # Get valid charge targets from controller
             try:
-                print(f"   🔍 DEBUG: Finding charge targets for Unit {unit['id']}")
                 valid_targets = self.base_controller.game_actions["get_valid_charge_targets"](unit["id"])
-                print(f"   🔍 DEBUG: Found charge targets: {valid_targets}")
                 if not valid_targets:
-                    print(f"   🔍 DEBUG: No charge targets found - converting to wait")
                     return {"type": "wait"}
                     
-                # Use first valid target (AI will learn to choose better)
-                print(f"   🔍 DEBUG: Creating charge action with target_id: {valid_targets[0]}")
                 return {
                     "type": "charge",
                     "target_id": valid_targets[0]
                 }
-            except Exception as e:
-                print(f"   🔍 DEBUG: Exception finding charge targets: {e} - converting to wait")
+            except Exception:
                 return {"type": "wait"}
             
         # Combat action (6)
-        elif action == 6:
+        elif action_type == 6:
             if phase != "combat":
                 return {"type": "wait"}
                 
@@ -388,37 +327,37 @@ class SequentialGameController:
                 return {"type": "wait"}
             
         # Wait action (7)
-        elif action == 7:
+        elif action_type == 7:
             return {"type": "wait"}
             
         return None
         
     def _advance_phase(self) -> None:
         """Advance to next phase using controller's phase transition system."""
-        # CRITICAL FIX: Force phase advancement when Sequential Engine reports phase complete
-        # The Sequential Engine has already validated that all eligible units have acted
         current_phase = self.base_controller.get_current_phase()
         
-        # AI_TURN.md COMPLIANCE: Reset tracking sets BEFORE phase transition
         if hasattr(self.base_controller, 'phase_transitions'):
-            if current_phase == "move":
-                # AI_TURN.md: Reset tracking sets at the start of the new phase
-                self.base_controller.phase_transitions['transition_to_shoot']()
-                self.base_controller.state_actions['reset_shot_units']()
-            elif current_phase == "shoot":
-                # AI_TURN.md: Reset tracking sets at the start of the new phase
-                self.base_controller.phase_transitions['transition_to_charge']()
-                self.base_controller.state_actions['reset_charged_units']()
-            elif current_phase == "charge":
-                # AI_TURN.md: Reset tracking sets at the start of the new phase
-                self.base_controller.phase_transitions['transition_to_combat']()
-                self.base_controller.state_actions['reset_attacked_units']()
-            elif current_phase == "combat":
-                # AI_TURN.md CRITICAL: End turn will reset ALL tracking sets
-                self.base_controller.phase_transitions['end_turn']()
+            try:
+                if current_phase == "move":
+                    self.base_controller.phase_transitions['transition_to_shoot']()
+                elif current_phase == "shoot":
+                    self.base_controller.phase_transitions['transition_to_charge']()
+                elif current_phase == "charge":
+                    self.base_controller.phase_transitions['transition_to_combat']()
+                elif current_phase == "combat":
+                    self.base_controller.phase_transitions['end_turn']()
+                    
+                # CRITICAL FIX: Reset Sequential Engine after phase change
+                self.sequential_engine.queue_built_for_phase = None
+                self.sequential_engine.queue_built_for_player = None
+                self.sequential_engine.activation_queue = []
+                self.sequential_engine.phase_complete = False
+                self.sequential_engine.current_active_unit = None
+                
+            except Exception as e:
+                raise RuntimeError(f"Phase transition failed from '{current_phase}': {e}")
         else:
-            # Fallback to base controller method
-            self.base_controller._advance_gym_phase_or_turn()
+            raise RuntimeError("Controller missing phase_transitions - check AI_ARCHITECTURE.md compliance")
     
     def _build_gymnasium_response(self, action: int, success: bool, terminated: Optional[bool] = None) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
         """Build complete gymnasium response tuple."""
@@ -493,23 +432,61 @@ class SequentialGameController:
         except Exception as e:
             return np.zeros(26, dtype=np.float32)
 
+    def _check_charged_sub_phase_complete(self) -> bool:
+        """
+        AI_TURN.md: Check if charged units sub-phase is complete.
+        Rule: "All charging units have been processed (attacked or passed)"
+        """
+        if self.sequential_engine.combat_sub_phase != "charged_units":
+            return True  # Not in charged sub-phase
+            
+        # AI_TURN.md: Check if all charged units have been processed (attacked OR passed)
+        units_attacked = self.base_controller.game_state.get("units_attacked", set())
+        
+        # Get all units that should be in charged sub-phase
+        all_units = self.base_controller.get_units()
+        living_units = [u for u in all_units if u.get("CUR_HP", 0) > 0]
+        units_charged = self.base_controller.game_state.get("units_charged", set())
+        
+        # AI_TURN.md: Auto-mark charged units with no adjacent enemies as "passed"
+        for unit in living_units:
+            if (unit["id"] in units_charged and 
+                unit["id"] not in units_attacked and
+                not self._has_adjacent_enemies(unit)):
+                self.base_controller.state_actions['add_attacked_unit'](unit["id"])
+        
+        # Recheck after auto-marking
+        units_attacked = self.base_controller.game_state.get("units_attacked", set())
+        charged_units_needing_processing = [
+            u for u in living_units 
+            if u["id"] in units_charged and u["id"] not in units_attacked
+        ]
+        
+        # AI_TURN.md: Sub-phase complete when no charged units need processing
+        is_complete = len(charged_units_needing_processing) == 0
+        
+        return is_complete
+        
     def _check_alternating_combat_complete(self) -> bool:
         """Check if alternating combat sub-phase is complete for both players."""
         if self.sequential_engine.combat_sub_phase != "alternating":
             return True  # Not in alternating phase
             
-        # Check if both players have no eligible units in alternating combat
+        # AI_TURN.md: Check if both players have no eligible units in alternating combat
         all_units = self.base_controller.get_units()
         living_units = [u for u in all_units if u.get("CUR_HP", 0) > 0]
         units_attacked = self.base_controller.game_state.get("units_attacked", set())
+        units_charged = self.base_controller.game_state.get("units_charged", set())
         
+        # AI_TURN.md: Exclude charged units from alternating combat eligibility
         p0_eligible = any(u for u in living_units if u["player"] == 0 and 
-                         u["id"] not in units_attacked and self._has_adjacent_enemies(u))
+                         u["id"] not in units_attacked and 
+                         u["id"] not in units_charged and 
+                         self._has_adjacent_enemies(u))
         p1_eligible = any(u for u in living_units if u["player"] == 1 and 
-                         u["id"] not in units_attacked and self._has_adjacent_enemies(u))
-        
-        print(f"   🔍 DEBUG: Alternating combat check - P0 eligible: {p0_eligible}, P1 eligible: {p1_eligible}")
-        print(f"   🔍 DEBUG: Units attacked: {list(units_attacked) if isinstance(units_attacked, set) else units_attacked}")
+                         u["id"] not in units_attacked and 
+                         u["id"] not in units_charged and 
+                         self._has_adjacent_enemies(u))
         
         return not (p0_eligible or p1_eligible)
     
