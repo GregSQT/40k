@@ -164,7 +164,7 @@ Unit Movement Eligibility Check:
 │   └── NO → ❌ Dead unit (Skip, no log)
 ├── unit.player === current_player?
 │   └── NO → ❌ Wrong player (Skip, no log)
-├── units_moved.includes(unit.id)?
+├── `units_moved` contains `unit.id`
 │   └── YES → ❌ Already moved (Skip, no log)
 └── ALL conditions met → ✅ Eligible for Move/Wait actions
 ```
@@ -602,7 +602,7 @@ Result: Charging grants first strike, then fair alternation
 - **Data structure**: Set containing unit IDs
 - **Purpose**: Track units that have moved or waited
 - **Reset timing**: Start of movement phase
-- **Usage**: `units_moved.has(unit.id)` prevents re-movement within same phase
+- **Usage**: `units_moved` contains `unit.id` prevents re-movement within same phase
 
 **units_fled** (Movement Phase):
 - **Purpose**: Track units that fled from combat
