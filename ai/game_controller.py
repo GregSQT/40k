@@ -527,6 +527,7 @@ class TrainingGameController(GameController):
         """Delegate to use_game_actions.py for unit eligibility"""
         if not hasattr(self, 'game_actions') or 'get_eligible_units' not in self.game_actions:
             raise RuntimeError("TrainingGameController missing required game_actions.get_eligible_units")
+        
         eligible_units = self.game_actions['get_eligible_units']()
         
         return eligible_units
@@ -539,9 +540,23 @@ class TrainingGameController(GameController):
         # Track phase before advancement to detect changes
         initial_phase = self.get_current_phase()
         initial_player = self.get_current_player()
+        initial_turn = self.get_current_turn()
+        
+        print(f"🔄 PHASE ADVANCE DEBUG: BEFORE - Turn {initial_turn}, Player {initial_player}, Phase {initial_phase}")
         
         # Try to advance phases automatically
         advanced = self.phase_transitions['auto_advance_phases']()
+        
+        # Track phase after advancement
+        final_phase = self.get_current_phase()
+        final_player = self.get_current_player()
+        final_turn = self.get_current_turn()
+        
+        print(f"🔄 PHASE ADVANCE DEBUG: AFTER - Turn {final_turn}, Player {final_player}, Phase {final_phase}")
+        
+        # CRITICAL: Detect unexpected turn increments
+        if final_turn > initial_turn:
+            print(f"🚨 TURN INCREMENT DETECTED: {initial_turn} → {final_turn}")
         
         # Verify advancement occurred to prevent stuck states
         final_phase = self.get_current_phase()
@@ -870,7 +885,7 @@ class TrainingGameController(GameController):
         STEP EFFICIENCY: Internal loop until real action occurs - only real actions consume steps.
         """
         # Internal loop until a real action is executed
-        max_internal_loops = 100  # Prevent infinite loops
+        max_internal_loops = 10  # Prevent infinite loops
         internal_loop_count = 0
         
         while internal_loop_count < max_internal_loops:
@@ -883,6 +898,12 @@ class TrainingGameController(GameController):
             if "current_turn" not in self.game_state:
                 raise KeyError("game_state missing required 'current_turn' field")
             current_turn = self.game_state["current_turn"]
+            
+            # CRITICAL DEBUG: Track episode/turn progression
+            if internal_loop_count == 1:  # Only log once per gym action
+                print(f"🎮 EPISODE/TURN DEBUG: Turn {current_turn}, Player {current_player}, Phase {current_phase}")
+                if hasattr(self, 'episode_count'):
+                    print(f"🎮 EPISODE/TURN DEBUG: Episode {self.episode_count}")
             
             # Check for game over condition
             if self.is_game_over():

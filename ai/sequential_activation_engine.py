@@ -157,52 +157,43 @@ class SequentialActivationEngine:
                 self.activation_queue = copy.deepcopy(self.combat_alternating_queue)
                 # Combat transition to alternating sub-phase
                 
-        # Process queue until eligible unit found or queue empty
-        checked_units = set()  # Prevent infinite loops
-        
+        # AI_TURN.md COMPLIANCE: Single-pass processing - no round-robin
         while self.activation_queue:
-            candidate_unit = self.activation_queue[0]  # Check without removing
+            candidate_unit = self.activation_queue[0]
             unit_id = candidate_unit["id"]
-            
-            # Prevent infinite loops by tracking checked units
-            if unit_id in checked_units:
-                # All units checked, phase complete
-                self.phase_complete = True
-                break
-            checked_units.add(unit_id)
             
             # Get fresh unit state for validation ("checked at START of each unit's activation")
             fresh_unit = self._find_fresh_unit(unit_id)
-            if not fresh_unit or fresh_unit.get("CUR_HP", 0) <= 0:
-                # Dead units removed from queue immediately
+            if not fresh_unit or fresh_unit.get("CUR_HP") <= 0:
+                # Dead units removed from queue immediately - AI_TURN.md compliance
                 self.activation_queue.pop(0)
                 self.debug_units_skipped.append({
-                    "unit_id": unit_id, 
+                    "unit_id": unit_id,
                     "reason": "dead_or_missing",
                     "step_increase": False
                 })
                 self.auto_skipped_units += 1
-                checked_units.remove(unit_id)  # Allow re-checking after removal
+                print(f"💀 DEBUG: Removed dead unit {unit_id} from queue")
                 continue
                 
             # Use controller's now-fixed get_current_phase() method
             fresh_phase = self.game_controller.get_current_phase()
             
             eligibility_result = self._check_unit_eligibility_detailed(fresh_unit, fresh_phase)
+            
             if eligibility_result["eligible"]:
                 self.current_active_unit = fresh_unit
                 
                 # Special handling for charge phase: roll 2d6 at START of activation
-                if current_phase == "charge" and fresh_unit["id"] not in self.unit_charge_rolls:
+                if fresh_phase == "charge" and fresh_unit["id"] not in self.unit_charge_rolls:
                     charge_roll = random.randint(1, 6) + random.randint(1, 6)
                     self.unit_charge_rolls[fresh_unit["id"]] = charge_roll
                 
-                # Units remain in queue, tracking sets determine eligibility
+                # AI_TURN.md: Unit remains in queue - will be removed after action execution
                 return fresh_unit
             else:
-                # Move ineligible unit to end of queue for round-robin checking
-                ineligible_unit = self.activation_queue.pop(0)
-                self.activation_queue.append(ineligible_unit)
+                # AI_TURN.md COMPLIANCE: Remove ineligible unit permanently - no round-robin
+                self.activation_queue.pop(0)
                 
                 self.debug_units_skipped.append({
                     "unit_id": fresh_unit["id"], 
@@ -218,8 +209,7 @@ class SequentialActivationEngine:
             # Try switching to other player in alternating combat
             if self._switch_combat_player():
                 return self.get_next_active_unit()
-                
-        # CRITICAL FIX: Phase complete - queue is empty and no more units to process
+        
         # Phase complete - queue is empty and no more units to process
         self.phase_complete = True
         self.current_active_unit = None
@@ -463,8 +453,9 @@ class SequentialActivationEngine:
             "step_increase": 1 if success else 0
         })
         
-        # CRITICAL FIX: Ensure tracking sets are updated before wrapper removes unit
-        # Sequential Engine must update tracking sets as part of action execution
+        # AI_TURN.md: Remove unit from queue after action ATTEMPT (success or failure)
+        # This prevents infinite loops by ensuring each unit acts exactly once
+        self.activation_queue = [u for u in self.activation_queue if u["id"] != unit["id"]]
         
         # End activation
         self.current_active_unit = None
