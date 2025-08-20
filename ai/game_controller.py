@@ -471,8 +471,26 @@ class GameController:
         }
 
     def is_game_over(self) -> bool:
-        """Check if game is over"""
-        return self._check_game_over()
+        """Check if game is over - AI_TURN episode termination compliance"""
+        # Check standard game over conditions
+        if self._check_game_over():
+            return True
+        
+        # AI_TURN COMPLIANCE: Use training config for episode turn limits
+        current_turn = self.get_current_turn()
+        try:
+            # Use training config number_of_turns_per_episode, not game config max_turns
+            training_config_name = getattr(self.config, 'training_config_name', 'debug')
+            from config_loader import get_config_loader
+            config = get_config_loader()
+            training_config = config.load_training_config(training_config_name)
+            max_turns = training_config.get("number_of_turns_per_episode")
+            if current_turn > max_turns:
+                return True
+        except Exception:
+            pass  # Continue with standard game over check
+        
+        return False
 
     def reset_game(self, new_units: Optional[List[Dict[str, Any]]] = None) -> None:
         """Reset game to initial state"""
@@ -1114,8 +1132,15 @@ class TrainingGameController(GameController):
         self.shooting_phase_state = self.state_manager.shooting_phase_state
         self.charge_roll_popup = self.state_manager.charge_roll_popup
         
-        # Initialize training game log
-        self.log_manager = TrainingGameLog(max_events=500)
+        # Initialize training game log - NO FALLBACKS ALLOWED
+        from config_loader import get_config_loader
+        config = get_config_loader()
+        training_config = config.load_training_config(self.config.training_config_name)
+        if "max_steps_per_episode" not in training_config:
+            raise KeyError(f"Training config '{self.config.training_config_name}' missing required 'max_steps_per_episode'")
+        max_events = training_config["max_steps_per_episode"]
+        
+        self.log_manager = TrainingGameLog(max_events=max_events)
         self.game_log = self.log_manager.get_log_functions()
         
         # Initialize replay logger for training - will be set by gym via connect_replay_logger

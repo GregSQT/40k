@@ -536,13 +536,17 @@ class MultiAgentTrainer:
             session_start_time = time.time()
             current_training_config = self.config.load_training_config(training_config_name)
             
-            # Calculate total_timesteps dynamically for proportional training
-            if "number_of_turns_per_episode" in current_training_config and "total_episodes" in current_training_config:
-                total_timesteps = current_training_config["number_of_turns_per_episode"] * 100 * current_training_config["total_episodes"]
+            # AI_TURN COMPLIANCE: Use episode-based training, not timesteps
+            if "total_episodes" in current_training_config:
+                total_episodes = current_training_config["total_episodes"]
+                # Calculate reasonable timesteps per episode based on max_turns
+                max_turns_per_episode = current_training_config.get("max_turns_per_episode", 10)
+                max_steps_per_turn = current_training_config.get("max_steps_per_turn", 50)
+                total_timesteps = total_episodes * max_turns_per_episode * max_steps_per_turn
             elif "total_timesteps" in current_training_config:
                 total_timesteps = current_training_config["total_timesteps"]
             else:
-                raise ValueError(f"Training config '{training_config_name}' must have either 'total_timesteps' or both 'number_of_turns_per_episode' and 'total_episodes'")
+                raise ValueError(f"Training config '{training_config_name}' must have either 'total_timesteps' or 'total_episodes'")
             
             all_callbacks = callbacks if callbacks else []
             

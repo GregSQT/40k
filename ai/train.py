@@ -25,7 +25,7 @@ sys.path.insert(0, project_root)
 from stable_baselines3 import DQN
 MASKABLE_DQN_AVAILABLE = False
 
-from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
+from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
 from stable_baselines3.common.monitor import Monitor
 # Multi-agent orchestration imports
 from ai.scenario_manager import ScenarioManager
@@ -34,6 +34,76 @@ from config_loader import get_config_loader
 from ai.game_replay_logger import GameReplayIntegration
 import torch
 import time  # Add time import for StepLogger timestamps
+
+
+class EpisodeTerminationCallback(BaseCallback):
+    """Callback to terminate training after exact episode count."""
+    
+    def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0):
+        super().__init__(verbose)
+        if max_episodes <= 0:
+            raise ValueError("max_episodes must be positive - no defaults allowed")
+        if expected_timesteps <= 0:
+            raise ValueError("expected_timesteps must be positive - no defaults allowed")
+        self.max_episodes = max_episodes
+        self.expected_timesteps = expected_timesteps
+        self.episode_count = 0
+        self.step_count = 0
+        
+    def _on_step(self) -> bool:
+        self.step_count += 1
+        
+        # Update progress calculation for proper display
+        if hasattr(self, 'model') and hasattr(self.model, 'num_timesteps'):
+            progress_pct = min(100, (self.model.num_timesteps / self.expected_timesteps) * 100)
+            if self.step_count % 10 == 0:
+                print(f"🔍 Training Progress: {progress_pct:.1f}% ({self.model.num_timesteps}/{self.expected_timesteps})")
+        
+    def _on_step(self) -> bool:
+        self.step_count += 1
+        
+        # Debug: Print every 10 steps to see if callback is working
+        if self.step_count % 10 == 0:
+            print(f"🔍 Callback alive: Step {self.step_count}")
+        
+        # Try multiple ways to detect episode end for DummyVecEnv
+        episode_ended = False
+        
+        # Method 1: Check self.locals for dones
+        if hasattr(self, 'locals') and 'dones' in self.locals:
+            if any(self.locals['dones']):
+                episode_ended = True
+                print(f"🎯 Episode end detected via locals.dones")
+        
+        # Method 2: Check infos for episode termination  
+        if hasattr(self, 'locals') and 'infos' in self.locals:
+            for info in self.locals['infos']:
+                if info.get('episode', False):
+                    episode_ended = True
+                    print(f"🎯 Episode end detected via infos")
+                    break
+        
+        # Method 3: Check training environment directly
+        if hasattr(self, 'training_env') and hasattr(self.training_env, 'get_attr'):
+            try:
+                # Get episode count from environment if available
+                env_episodes = self.training_env.get_attr('episode_count')
+                if env_episodes and env_episodes[0] > self.episode_count:
+                    episode_ended = True
+                    print(f"🎯 Episode end detected via env.episode_count")
+            except:
+                pass
+        
+        if episode_ended:
+            self.episode_count += 1
+            print(f"✅ Episode {self.episode_count}/{self.max_episodes} completed")
+            
+            # Stop training if max episodes reached
+            if self.episode_count >= self.max_episodes:
+                print(f"🛑 TRAINING STOPPED: {self.max_episodes} episodes completed")
+                return False
+                
+        return True
 
 
 class StepLogger:
@@ -461,6 +531,19 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     W40KEnv, _ = setup_imports()
     callbacks = []
     
+    # Add episode termination callback for debug config - NO FALLBACKS
+    if training_config_name == "debug":
+        if "total_episodes" not in training_config:
+            raise KeyError(f"Debug training config missing required 'total_episodes'")
+        if "max_steps_per_episode" not in training_config:
+            raise KeyError(f"Debug training config missing required 'max_steps_per_episode'")
+        
+        max_episodes = training_config["total_episodes"]
+        max_steps_per_episode = training_config["max_steps_per_episode"]
+        expected_timesteps = max_episodes * max_steps_per_episode
+        episode_callback = EpisodeTerminationCallback(max_episodes, expected_timesteps, verbose=1)
+        callbacks.append(episode_callback)
+    
     # Evaluation callback - test model periodically with logging enabled
     # Load scenario and unit registry for evaluation callback
     from ai.unit_registry import UnitRegistry
@@ -539,13 +622,17 @@ def train_model(model, training_config, callbacks, model_path):
     
     try:
         # Start training
-        # Calculate total_timesteps if missing (same logic as setup_callbacks)
+        # AI_TURN COMPLIANCE: Use episode-based training
         if 'total_timesteps' in training_config:
             total_timesteps = training_config['total_timesteps']
-        else:
+        elif 'total_episodes' in training_config:
             total_episodes = training_config['total_episodes']
-            max_steps = training_config['max_steps_per_episode']
-            total_timesteps = total_episodes * max_steps
+            # Calculate reasonable timesteps based on actual game mechanics
+            max_turns_per_episode = training_config.get("max_turns_per_episode", 10)
+            max_steps_per_turn = training_config.get("max_steps_per_turn", 50)
+            total_timesteps = total_episodes * max_turns_per_episode * max_steps_per_turn
+        else:
+            raise ValueError("Training config must have either 'total_timesteps' or 'total_episodes'")
         
         model.learn(
             total_timesteps=total_timesteps,

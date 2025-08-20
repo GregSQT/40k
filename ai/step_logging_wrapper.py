@@ -244,11 +244,15 @@ class StepLoggingWrapper(SequentialGameController):
         step_increment = steps_after > steps_before
         action_success = info.get("action_success", False)
         
-        # AI_TURN.md COMPLIANCE: Only log actions that were ATTEMPTED (not auto-skipped ineligible units)
-        action_attempted = info.get('action_attempted', steps_after > steps_before)
+        # AI_TURN.md COMPLIANCE: Only log actions that were ATTEMPTED - NO FALLBACKS ALLOWED
+        if 'action_attempted' not in info:
+            raise KeyError("Info dict missing required 'action_attempted' field")
+        action_attempted = info['action_attempted']
         if self.step_logger and self.step_logger.enabled and active_unit and action_attempted:
             action_type = self._decode_action_type(action)
-            unit_id = active_unit.get("id", "unknown")
+            if "id" not in active_unit:
+                raise KeyError("Active unit missing required 'id' field")
+            unit_id = active_unit["id"]
             
             # Get replay-style action details for formatting
             action_details = self._get_replay_style_details(action, active_unit, current_phase, info, steps_before, steps_after)

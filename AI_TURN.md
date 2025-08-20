@@ -1,49 +1,163 @@
-# AI TURN SEQUENCE - EPISODE / TURN / PHASE / STEP MANAGEMENT
+# AI TURN SEQUENCE - Ultimate Claude Understanding Guide (Streamlined)
 
-## 📋 PHASES QUICK INDEX
-- [Episode Lifecycle](#-episode-lifecycle) - Game start/end conditions
-- [Turn Progression](#-turn-progression-sequence) - Turn numbering system
-- [Movement Phase](#-movement-phase) - Lines 45-120
-- [Shooting Phase](#-shooting-phase) - Lines 121-200  
-- [Charge Phase](#-charge-phase) - Lines 201-280
-- [Combat Phase](#-combat-phase) - Lines 281-400
-- [Tracking Sets Summary](#-tracking-sets-summary) - State management
-- [Quick Reference Guide](#-quick-reference-guide) - Implementation tables
+## Claude Search Optimization
 
-## 📋 EPISODE LIFECYCLE
-- **Episode Start**: Beginning of first Player 0 turn (movement phase)
-- **Episode End**: A Player has no active units OR max number of turns reached
-- **Turn Numbering**: Turn 1 = first P0 movement phase, increments at each P0 movement phase start
+**Search Terms**: turn sequence, phase management, eligibility rules, step counting, unit activation, movement phase, shooting phase, charge phase, combat phase, tracking sets, phase transitions, decision logic, game state management
 
-## 🔄 TURN PROGRESSION SEQUENCE
+**Core Concepts**: sequential activation, dynamic validation, atomic actions, phase completion, turn progression, episode lifecycle, state consistency, rule interactions, decision frameworks, validation checkpoints
+
+---
+
+## 🎯 CLAUDE LEARNING OBJECTIVES
+
+This document teaches Claude to **understand the logic** behind the Warhammer 40K turn system, enabling intelligent decision-making and flexible implementation across different contexts.
+
+**Learning Approach:**
+1. **Grasp fundamental principles** - Why rules exist and how they interact
+2. **Master decision logic** - When and why to apply specific rules  
+3. **Understand state relationships** - How game state changes affect rule application
+4. **Recognize patterns** - Common scenarios and their resolution logic
+5. **Validate understanding** - Self-check comprehension at key points
+
+---
+
+## 📋 NAVIGATION & LEARNING PATH
+
+- [Core Game Logic](#-core-game-logic) - Essential concepts for understanding
+- [Episode & Turn Concepts](#-episode--turn-concepts) - Game lifecycle logic
+- [State Management Principles](#-state-management-principles) - How game state works
+- [Movement Phase Logic](#-movement-phase-logic) - Movement rules and reasoning
+- [Shooting Phase Logic](#-shooting-phase-logic) - Shooting rules and targeting
+- [Charge Phase Logic](#-charge-phase-logic) - Charge mechanics and distance
+- [Combat Phase Logic](#-combat-phase-logic) - Combat phases and alternating turns
+- [Tracking System Logic](#-tracking-system-logic) - How the game remembers actions
+- [Key Scenarios](#-key-scenarios) - Essential decision examples
+- [Rule Interactions](#-rule-interactions) - How different rules affect each other
+- [Claude Validation Points](#-claude-validation-points) - Understanding checkpoints
+- [Decision Framework](#-decision-framework) - Logical patterns for any implementation
+
+---
+
+## 🧠 CORE GAME LOGIC
+
+### Game Structure Understanding
+
+**The Big Picture:**
+- Players take **complete turns** (all 4 phases) before opponent acts
+- Each phase has **specific purposes** and **different eligibility rules**
+- Units act **one at a time** within each phase (sequential activation)
+- Game state **changes dynamically** as units act
+
+**Why This Structure Exists:**
+- **Turn-based fairness**: Each player gets equal opportunity
+- **Phase specialization**: Different tactical decisions in each phase
+- **Sequential clarity**: No simultaneous action confusion
+- **State consistency**: Game state remains coherent throughout
+
+### Sequential Activation Logic
+
+**Core Principle**: One unit completes its entire action before the next unit begins.
+
+**Why Sequential Matters:**
+- **Dynamic targeting**: Available targets change as units die
+- **Position dependency**: Unit positions affect other units' options
+- **Resource tracking**: Actions consume limited resources (shots, moves, etc.)
+- **Tactical cascading**: One unit's action creates opportunities/threats for others
+
+**Activation Sequence Logic:**
+```
+Unit Selection → Eligibility Check → Action Execution → State Update → Next Unit
+```
+
+**Key Understanding**: Eligibility is checked **when unit becomes active**, not when action executes.
+
+### Phase Completion Logic
+
+**Central Question**: "When does a phase end?"
+
+**Answer**: When **no more eligible units remain** for the current player.
+
+**Why Not Step-Based**: Steps measure player actions, but phases end based on game state (unit availability).
+
+**Logic Pattern:**
+```
+For Each Current Player Unit:
+    Check if unit meets phase-specific eligibility criteria
+    If ANY unit is eligible: Phase continues
+If NO units are eligible: Phase ends, advance to next phase
+```
+
+**Claude Key Insight**: Phase transitions are **deterministic** based on unit eligibility, not arbitrary step counts.
+
+---
+
+## 📅 EPISODE & TURN CONCEPTS
+
+### Episode Lifecycle Logic
+
+**Episode Boundaries:**
+- **Start**: First Player 0 unit begins movement (game begins)
+- **End**: One player has no living units OR maximum turns reached
+- **Purpose**: Complete game from start to victory/defeat condition
+
+**Turn Progression Sequence:**
 ```
 Turn 1: P0 Move → P0 Shoot → P0 Charge → P0 Combat → P1 Move → P1 Shoot → P1 Charge → P1 Combat
 Turn 2: P0 Move (Turn++ here) → P0 Shoot → P0 Charge → P0 Combat → P1 Move → P1 Shoot → P1 Charge → P1 Combat
 Turn 3: P0 Move (Turn++ here) → ...
 ```
 
-## 🎯 CORE PRINCIPLES
-- **Sequential Activation**: Units act one at a time, completely finishing before next unit starts
-- **Dynamic Validation**: Eligibility checked at START of each unit's activation
-- **Step Counting**: Only significant actions (move, shoot, charge, attack, wait) increment steps
-- **Action Logging**: ALL unit state changes logged regardless of step consumption
+**Turn Numbering Logic:**
+- **Turn 1**: When Player 0 first moves
+- **Turn 2**: When Player 0 moves again (after Player 1's complete turn)
+- **Pattern**: Turns increment at Player 0 movement phase start
 
-## 🔥 CRITICAL IMPLEMENTATION ORDER
-**Follow this sequence for EVERY phase to prevent state corruption:**
-1. **Phase Setup** → Reset tracking sets (`units_moved`, `units_shot`, etc.)
-2. **Unit Selection** → Iterate through current player units only
-3. **Eligibility Check** → Apply decision tree validation (early exit on fail)
-4. **Action Execution** → Perform state changes atomically
-5. **Post-Action Updates** → Update tracking sets → Log action → Increment steps
-6. **Phase Transition** → Check "no eligible units remain" condition
+**Why P0-Centric Numbering:**
+- **Consistency**: Always same player triggers turn increment
+- **Clarity**: Unambiguous turn boundaries
+- **Convention**: Standard in turn-based games
 
-# 🏃 MOVEMENT PHASE
+---
 
-## Phase Setup
-- **Eligible Units**: All and ONLY the current player's units
-- **Tracking Set**: `units_moved` (reset at phase start)
+## 🏗️ STATE MANAGEMENT PRINCIPLES
 
-### **Movement Eligibility Decision Tree**
+### Single Source of Truth
+
+**Core Principle**: Only **one game_state object** exists per game.
+
+**State Reference Pattern:**
+```
+game_state ← Single authoritative object
+    ↗ ↗ ↗
+    │ │ └── Component C references same object
+    │ └──── Component B references same object  
+    └────── Component A references same object
+```
+
+**Why Single Source:**
+- **Consistency**: All components see same data
+- **Synchronization**: No conflicts between different state copies
+- **Performance**: No expensive state copying operations
+- **Debugging**: Single point of truth for state inspection
+
+### Field Naming Logic
+
+**Uppercase Convention**: All unit statistics use UPPERCASE field names.
+
+**Field Categories:**
+- **Movement**: MOVE, col, row
+- **Shooting**: RNG_NB, RNG_RNG, RNG_ATK, RNG_STR, RNG_DMG, RNG_AP
+- **Combat**: CC_NB, CC_RNG, CC_ATK, CC_STR, CC_DMG, CC_AP  
+- **Defense**: CUR_HP, MAX_HP, T, ARMOR_SAVE, INVUL_SAVE
+
+**⚠️ CRITICAL**: Must use UPPERCASE field names consistently across all components.
+
+---
+
+## 🏃 MOVEMENT PHASE LOGIC
+
+### Movement Eligibility Decision Tree
+
 ```
 Unit Movement Eligibility Check:
 ├── unit.CUR_HP > 0?
@@ -55,7 +169,8 @@ Unit Movement Eligibility Check:
 └── ALL conditions met → ✅ Eligible for Move/Wait actions
 ```
 
-### **Movement Action Decision Tree**
+### Movement Action Decision Tree
+
 ```
 Available Actions for Eligible Unit:
 ├── Valid destination exists within MOVE range?
@@ -68,61 +183,47 @@ Available Actions for Eligible Unit:
     └── Result: +1 step, action logged
 ```
 
-## Unit Processing Loop
-For each current player unit:
+### Movement Restrictions Logic
 
-### **Unit Becomes Active**
-- Unit is selected as active unit for this activation
+**Forbidden Destinations (Cannot Move TO):**
+- **Occupied hexes**: Other units prevent movement
+- **Enemy adjacent hexes**: Adjacent to enemy = entering combat
+- **Wall hexes**: Terrain blocks movement
 
-### **Available Actions**
-#### ✅ **Move Action**
-- **Requirements**: 
-  - Destination and path hexes within MOVE range
-  - Destination hex different from starting hex
-  - Destination and path hexes NOT occupied
-  - Destination and path hexes NOT adjacent to enemy hex
-  - Destination and path hexes NOT wall hexes
-  
-- **Implementation Details**:
-  - `forbiddenSet` includes all hexes adjacent to enemies
-  - `blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id)`
-  - `wallHexSet` added to `forbiddenSet`
-  - Uses BFS pathfinding respecting `MOVE` value
-- **Result**: `→ marked as units_moved → Action logged → 1 step increase`
+**Why These Restrictions:**
+- **Spatial logic**: Physical objects cannot overlap
+- **Engagement rules**: Adjacent = combat = different phase handles it
+- **Terrain realism**: Walls block movement paths
 
-#### 🏃 **Flee Mechanic** (Special Move Case)
-- **Trigger**: Move action started from hex adjacent to enemy unit
-- **Implementation**: `wasAdjacentToEnemy`
-- **Note**: Unit automatically not adjacent at destination (move restrictions prevent adjacent destinations)
-- **Penalties**:
-  - ❌ **Shooting Phase**: `if (units_fled.includes(unit.id)) return false`
-  - ❌ **Charge Phase**: `if (units_fled.includes(unit.id)) return false`
-  - ✅ **Movement**: No restrictions
-  - ✅ **Combat**: No restrictions
+### Flee Mechanics Logic
+
+**Flee Trigger**: Start adjacent to enemy, end not adjacent to any enemy
+
+**Flee Consequences:**
+- **Shooting phase**: Cannot shoot (disorganized from retreat)
+- **Charge phase**: Cannot charge (poor position/morale)
+- **Combat phase**: Can fight normally (no restriction)
 - **Duration**: Until end of current turn only
-- **Result**: `→ marked as units_moved AND units_fled → Action logged → 1 step increase`
 
-#### ⏸️ **Wait Action**
-- **Result**: `→ Action logged → 1 step increase`
+**Why Flee Exists:**
+- **Tactical choice**: Trade current effectiveness for survival
+- **Risk/reward**: Escape death but lose capabilities
+- **Strategic depth**: Creates meaningful positioning decisions
 
-### **Unit Deactivation**
-- Unit is no longer active
-- Unit NOT eligible until next phase
-
-## Phase End
-- **Trigger**: No more eligible units remain for current player
-- **Transition**: Move to Shooting phase
-- **Reference**: See [Tracking Sets Summary](#-tracking-sets-summary) for `units_moved` lifecycle
+**Key Example:**
+```
+Wounded Marine (CUR_HP 1) adjacent to healthy Ork
+Flee option: Survive but lose turn effectiveness
+Stay option: 80% chance of death but maintain capabilities
+Decision factors: Unit value, importance of actions this turn, alternative threats
+```
 
 ---
 
-# 🎯 SHOOTING PHASE
+## 🎯 SHOOTING PHASE LOGIC
 
-## Phase Setup
-- **Eligible Units**: All and ONLY the current player's units
-- **Tracking Set**: `units_shot` (reset at phase start)
+### Shooting Eligibility Decision Tree
 
-### **Shooting Eligibility Decision Tree**
 ```
 Unit Shooting Eligibility Check:
 ├── unit.CUR_HP > 0?
@@ -140,68 +241,48 @@ Unit Shooting Eligibility Check:
 │   └── YES → ✅ Eligible for Shoot/Wait actions
 ```
 
-### **Shooting Action Decision Tree**
+### Target Restrictions Logic
+
+**Valid Target Requirements:**
+- **In range**: Within unit's RNG_RNG distance
+- **Line of sight**: No walls blocking straight line to target
+- **Not in melee**: Cannot shoot enemies adjacent to shooter
+- **Friendly fire prevention**: Cannot shoot enemies adjacent to friendly units
+
+**Why These Restrictions:**
+- **Weapon limitations**: Ranged weapons have effective range
+- **Visual requirement**: Cannot shoot what cannot be seen
+- **Engagement types**: Adjacent = melee combat, not shooting
+- **Safety**: Prevent accidental damage to own forces
+
+### Multiple Shots Logic
+
+**Multi-Shot Rules:**
+- **All shots in one action**: RNG_NB shots fired as single activation
+- **Dynamic targeting**: Each shot can target different valid enemies
+- **Sequential resolution**: Resolve each shot completely before next
+- **Target death handling**: If target dies, remaining shots can retarget
+
+**Why Multiple Shots Work This Way:**
+- **Action efficiency**: One activation covers all shots
+- **Tactical flexibility**: Can spread damage across enemies
+- **Realistic timing**: Rapid fire happens quickly
+- **Dynamic adaptation**: React to changing battlefield
+
+**Example:**
 ```
-Available Actions for Eligible Unit:
-├── Choose to shoot?
-│   └── YES → Shoot Action
-│       ├── While RNG_NB > 0 AND valid targets exist:
-│       │   └── Execute shot at selected target
-│       └── Result: Mark as units_shot, +1 step, action logged
-└── Choose to wait → Wait Action
-    └── Result: Mark as units_shot, +1 step, action logged
+Marine (RNG_NB = 2) faces two wounded Orks (both CUR_HP 1)
+Shot 1: Target Ork A, kill it
+Shot 2: Retarget to Ork B, kill it
+Result: Eliminate two threats in one action through dynamic targeting
 ```
-
-## Unit Processing Loop
-For each current player unit:
-
-### **Unit Becomes Active**
-- Unit is selected as active unit for this activation
-
-### **Eligibility Check**
-Unit is eligible if ALL of these conditions are true:
-- Unit is NOT marked as `units_fled`
-- Unit has line of sight on at least one enemy unit WITHIN RNG_RNG distance
-- Unit is NOT adjacent to an enemy unit
-
-**Then**: `→ Unit eligible → Continue to shooting actions`
-
-**If unit fails any requirement**: `→ Unit NOT eligible → Action logged → No step increase`
-
-### **Available Actions** (if eligible)
-#### 🎯 **Shoot Action**
-- **Requirements**: Line of sight to enemy within RNG_RNG distance
-- **Target Restrictions**:
-  - ❌ **Cannot shoot adjacent enemies**: Units in combat cannot shoot
-  - ❌ **Cannot shoot enemies adjacent to friendlies**: Friendly fire prevention
-  - ✅ **Must have line of sight**: Wall blocking system
-  - ✅ **Must be in range**: Within `RNG_RNG` hexes
-- **Execution**: 
-  While unit's RNG_NB > 0 AND unit has line of sight to alive enemy within RNG_RNG:
-    - Unit shoots at one available target
-
-- **Result**: `→ marked as units_shot → Action logged → 1 step increase for whole shoot action`
-
-#### ⏸️ **Refuse to Shoot (Wait)**
-- **Result**: `→ Action logged → 1 step increase`
-
-### **Unit Deactivation**
-- Unit is no longer active
-- Unit NOT eligible until next phase
-
-## Phase End
-- **Trigger**: No more eligible units remain for current player
-- **Transition**: Move to Charge phase
 
 ---
 
-# ⚡ CHARGE PHASE
+## ⚡ CHARGE PHASE LOGIC
 
-## Phase Setup
-- **Eligible Units**: All and ONLY the current player's units
-- **Tracking Set**: `units_charged` (reset at phase start)
+### Charge Eligibility Decision Tree
 
-### **Charge Eligibility Decision Tree**
 ```
 Unit Charge Eligibility Check:
 ├── unit.CUR_HP > 0?
@@ -214,12 +295,13 @@ Unit Charge Eligibility Check:
 │   └── YES → ❌ Fled unit (Log ineligible, no step)
 ├── Adjacent to enemy unit?
 │   └── YES → ❌ Already in combat (Log ineligible, no step)
-├── Enemies within charge_max_distance?
+├── Enemies within 12 hexes (charge_max_distance)?
 │   ├── NO → ❌ No targets (Log ineligible, no step)
 │   └── YES → ✅ Eligible → Roll 2d6 for charge distance
 ```
 
-### **Charge Action Decision Tree**
+### Charge Action Decision Tree
+
 ```
 Available Actions After 2d6 Roll:
 ├── Valid charge destinations within rolled distance?
@@ -232,376 +314,378 @@ Available Actions After 2d6 Roll:
 │       └── Result: +0 step, action logged
 ```
 
-## Unit Processing Loop
-For each current player unit:
+### Charge Distance Logic
 
-### **Eligibility Check**
-Unit is eligible if ALL of these conditions are true:
-- Unit is NOT marked as `units_fled`
-- Unit has at least one enemy unit WITHIN charge_max_distance range
-- Unit is NOT adjacent to an enemy unit
+**2D6 Roll System:**
+- **When rolled**: When unit becomes eligible for charge (not when action chosen)
+- **Distance determination**: Roll determines how far unit can charge this activation
+- **Variability purpose**: Adds uncertainty and risk to charge decisions
 
-**Then**: `→ Unit eligible → Continue to charge actions`
+**Why Random Distance:**
+- **Tactical uncertainty**: Cannot guarantee successful charges
+- **Risk/reward decisions**: Longer charges more likely to fail
+- **Game balance**: Prevents guaranteed charge combinations
 
-**If unit fails any requirement**: `→ Unit NOT eligible → Action logged → No step increase`
+**Example:**
+```
+Marine 7 hexes from Ork (average charge distance)
+Roll 6 or less: Charge fails (42% chance)
+Roll 7+: Charge succeeds, gains combat priority (58% chance)
+Decision: Weigh 42% failure risk vs combat advantage gained
+```
 
-### **Available Actions** (if eligible)
-#### **Unit Becomes Active**
-- Unit is selected as active unit for this activation
+### Charge Priority Logic
 
-#### 🎲 **Charge Distance Roll**
-- **Roll**: 2d6 for this unit's charge distance
-- **Timing**: Calculated once per unit at START of activation
-- **Persistence**: Roll persists for unit's entire activation only
+**Combat Priority Benefit:**
+- **Sub-phase 1**: Charging units attack first in combat phase
+- **Tactical advantage**: Can eliminate enemies before they fight back
 
-#### 🔀 **Available Actions** (based on roll result)
-**Check for valid charge destinations within rolled distance:**
-
-**IF valid destinations exist:**
-  #### ⚡ **Charge Action**
-  - **Requirements**: Destination hex (adjacent to enemy) must be within charge roll distance
-  - **Execution**: Move unit to hex adjacent to enemy unit
-  - **Result**: `→ marked as units_charged → Action logged → 1 step increase`
-
-  **OR**
-  #### ⏸️ **Refuse to Charge (Pass)**
-  - **Available**: When at charge distance but chooses not to charge
-  - **Result**: `→ Action logged → No step increase`
-
-**IF no valid destinations exist:**
-  #### 🚫 **Auto-Skip**
-  - **Trigger**: No hex adjacent to enemy within charge roll distance
-  - **Result**: `→ Unit deactivated → Action logged → No step increase`
-
-### **Unit Deactivation**
-- Unit is no longer active
-- Unit NOT eligible until next phase
-
-## Phase End
-- **Trigger**: No more eligible units remain for current player
-- **Transition**: Move to Combat phase
+**Why Charging Units Fight First:**
+- **Momentum**: Charge gives initiative in combat
+- **Game balance**: Reward for successful charge positioning
+- **Risk compensation**: Balances charge uncertainty with combat advantage
 
 ---
 
-# ⚔️ COMBAT PHASE
+## ⚔️ COMBAT PHASE LOGIC
 
-## Phase Setup
-- **Eligible Units**: ALL P0 AND P1 units
-- **Tracking Set**: `units_attacked` (reset at phase start)  
-- **Sub-Phases**: Two distinct sub-phases with different rules
-- **Reference**: See [Step Counting Rules](#-step-counting-rules) for combat step mechanics
+### Combat Phase Structure Logic
 
-### **Combat Phase Overall Decision Tree**
+**Two Sub-Phases:**
+1. **Charging Units Priority**: Current player's charging units attack first
+2. **Alternating Combat**: All other engaged units alternate between players
 
-```mermaid
-graph TD
-    A[Combat Phase Start] --> B[Sub-Phase 1: Charging Units]
-    B --> C{Any units_charged exist?}
-    C -->|YES| D[Process charging units priority]
-    C -->|NO| E[Skip to Sub-Phase 2]
-    D --> F[Sub-Phase 2: Alternating Combat]
-    E --> F
-    F --> G{Both players have eligible units?}
-    G -->|YES| H[Non-active player attacks]
-    H --> I[Active player attacks]
-    I --> G
-    G -->|NO| J{One player has eligible units?}
-    J -->|YES| K[Cleanup: Process remaining units]
-    J -->|NO| L[Combat Phase End]
-    K --> L
+**Why Two Sub-Phases:**
+- **Charge reward**: Charging units earned first strike through positioning
+- **Alternating fairness**: Non-charging combat alternates for balance
+- **Clear sequence**: Eliminates confusion about attack order
+
+### Sub-Phase 1: Charging Units Logic
+
+**Who Acts**: Current player's units marked as "charged this turn"
+
+**Action Logic:**
+- **Mandatory attacks**: Must attack if adjacent enemies exist
+- **Pass if no targets**: Mark as attacked but no step increment
+- **Complete all attacks**: All CC_NB attacks in one action
+
+**Why Charging Units Go First:**
+- **Earned advantage**: Successfully positioned for combat
+- **Momentum bonus**: Charge provides initiative
+- **Risk reward**: Compensation for charge risks taken
+
+### Sub-Phase 2: Alternating Combat Logic
+
+**Player Order Logic:**
+- **Non-active player starts**: During P0's turn, P1 units act first
+- **Then alternating**: P1 → P0 → P1 → P0 until no eligible units
+
+**Why Non-Active Goes First:**
+- **Balance compensation**: Gives slight advantage to non-active player
+- **Fairness**: Offsets active player's other advantages
+
+**Alternating Process Logic:**
 ```
-
-### **Combat Phase Text Flow (Implementation Reference)**
-```
-Combat Phase Structure:
-├── Sub-Phase 1: Charging Units Priority
-│   ├── Process all current_player units in units_charged
-│   └── Each unit: Attack if adjacent enemies exist
-└── Sub-Phase 2: Alternating Combat
-    ├── While both players have eligible units:
-    │   ├── Non-active player attacks
-    │   └── Active player attacks (non-chargers only)
-    └── Cleanup: Process remaining eligible units
-```
-
-## 🥇 SUB-PHASE 1: Charging Units Priority
-
-### **Sub-Phase 1 Eligibility Decision Tree**
-```
-Charging Unit Combat Eligibility:
-├── unit in units_charged?
-│   └── NO → Skip to Sub-Phase 2
-├── unit.CUR_HP > 0?
-│   └── NO → ❌ Dead unit (Skip, no log)
-├── unit.player === current_player?
-│   └── NO → ❌ Wrong player (Skip, no log)
-├── units_attacked.includes(unit.id)?
-│   └── YES → ❌ Already attacked (Skip, no log)
-└── ALL conditions met → ✅ Process for attack
-```
-
-### **Sub-Phase 1 Action Decision Tree**
-```
-Charging Unit Attack Process:
-├── Adjacent alive enemies exist?
-│   ├── YES → Attack Action (Mandatory)
-│   │   ├── While CC_NB > 0 AND adjacent alive enemies:
-│   │   │   └── Attack selected target
-│   │   └── Result: Mark as units_attacked, +1 step, action logged
-│   └── NO → Pass Action
-│       └── Result: Mark as units_attacked, +0 step, action logged
-```
-
-### **Eligible Units**: Current player units marked as `units_charged`
-
-### Unit Processing Loop
-For each charging unit:
-
-#### **Unit Becomes Active**
-- Unit is selected as active unit for this activation
-
-#### ⚔️ **Attack Action** (mandatory)
-- **Check**: If unit has alive enemies adjacent
-  - **Execution** (if alive enemies adjacent):
-    While active unit's CC_NB > 0 AND active unit is adjacent to alive enemy unit:
-      - Unit attacks one of the available targets
-    - **Result**: `→ marked as units_attacked → Action logged → 1 step increase for whole attack action`
-  - **Pass** (no alive enemies adjacent):
-    - **Result**: `→ marked as units_attacked → Action logged → No step increase`
-
-#### **Unit Deactivation**
-- Unit is no longer active
-- Unit NOT eligible until next phase
-
-### **Sub-Phase 1 End**
-- **Trigger**: All charging units have been processed (attacked or passed)
-- **Transition**: Move to Sub-Phase 2 (Alternating Combat)
-
-## 🔄 SUB-PHASE 2: Alternating Combat
-
-### **Player Order**: Starts with "non-active" player, then alternates
-- During P0's turn: P1 starts, then P0, then P1...
-- During P1's turn: P0 starts, then P1, then P0...
-
-### **Eligible Units**: Units NOT marked as `units_attacked` AND adjacent to enemy unit
-
-### **Sub-Phase 2 Eligibility Decision Tree**
-```
-Alternating Combat Eligibility:
-├── unit.CUR_HP > 0?
-│   └── NO → ❌ Dead unit (Skip)
-├── units_attacked.includes(unit.id)?
-│   └── YES → ❌ Already attacked (Skip)
-├── Adjacent to alive enemy unit?
-│   └── NO → ❌ Not in combat (Skip)
-├── For active player units: unit in units_charged?
-│   └── YES → ❌ Already processed in Sub-Phase 1 (Skip)
-└── ALL conditions met → ✅ Eligible for alternating combat
-```
-
-### **Sub-Phase 2 Action Decision Tree**
-```
-Alternating Combat Attack Process:
-├── Non-Active Player Turn:
-│   ├── Select eligible non-active player unit
-│   ├── Adjacent alive enemies exist?
-│   │   ├── YES → Attack Action
-│   │   │   └── Result: Mark as units_attacked, +1 step, action logged
-│   │   └── NO → Pass Action
-│   │       └── Result: Mark as units_attacked, +0 step, action logged
-│   └── Switch to Active Player
-├── Active Player Turn:
-│   ├── Select eligible active player unit (not in units_charged)
-│   ├── Adjacent alive enemies exist?
-│   │   ├── YES → Attack Action
-│   │   │   └── Result: Mark as units_attacked, +1 step, action logged
-│   │   └── NO → Pass Action
-│   │       └── Result: Mark as units_attacked, +0 step, action logged
-│   └── Switch to Non-Active Player
-└── Continue alternating while both players have eligible units
-```
-
-### Alternating Loop
-While BOTH players have eligible units:
-
-#### **Non-Active Player Turn** (e.g., P1 during P0's turn)
-- **Eligibility**: P1 unit NOT marked as `units_attacked` AND adjacent to alive enemy unit
-- **Unit Becomes Active**
-- **Attack Action**:
-  - **Check**: If unit has alive enemies adjacent
-    - **Execution** (if alive enemies adjacent):
-      While active unit's CC_NB > 0 AND active unit is adjacent to alive enemy unit:
-        - Unit attacks one of the available targets
-      - **Result**: `→ marked as units_attacked → Action logged → 1 step increase for whole attack action`
-    - **Pass** (no alive enemies adjacent):
-      - **Result**: `→ marked as units_attacked → Action logged → No step increase`
-
-#### **Active Player Turn** (e.g., P0 during P0's turn)
-- **Eligibility**: P0 unit NOT marked as `units_charged` AND NOT marked as `units_attacked` AND adjacent to alive enemy unit
-- **Unit Becomes Active**
-- **Attack Action**:
-  - **Check**: If unit has alive enemies adjacent
-    - **Execution** (if alive enemies adjacent):
-      While active unit's CC_NB > 0 AND active unit is adjacent to alive enemy unit:
-        - Unit attacks one of the available targets
-      - **Result**: `→ marked as units_attacked → Action logged → 1 step increase for whole attack action`
-    - **Pass** (no alive enemies adjacent):
-      - **Result**: `→ marked as units_attacked → Action logged → No step increase`
-
-### **Continue Alternating**
-- Switch between players while both have eligible units
-
-### **Cleanup Phase**
-If one player has no more eligible units:
-- **Loop**: Process remaining eligible units from other player
-- **Same Rules**: 
-  - **Check**: If unit has alive enemies adjacent
-    - **Execution** (if alive enemies adjacent):
-      While active unit's CC_NB > 0 AND active unit is adjacent to alive enemy unit:
-        - Unit attacks one of the available targets
-      - **Result**: `→ marked as units_attacked → Action logged → 1 step increase for whole attack action`
-    - **Pass** (no alive enemies adjacent):
-      - **Result**: `→ marked as units_attacked → Action logged → No step increase`
-
-## Phase End
-- **Trigger**: NO units from either player are eligible
-- **Transition**: Move to next player's Movement phase
-
----
-
-# 📊 TRACKING SETS SUMMARY
-
-| Phase | Tracking Set | Reset Timing | Purpose |
-|-------|-------------|--------------|---------|
-| Move | `units_moved` | Phase start | Track moved units |
-| Move | `units_fled` | Phase start | Track fleeing units |
-| Shoot | `units_shot` | Phase start | Track shooting units |
-| Charge | `units_charged` | Phase start | Track charged units |
-| Combat | `units_attacked` | Phase start | Track attacking units |
-
-## 🎯 STEP COUNTING RULES
-
-| Action Type | Step Increase | Examples |
-|-------------|---------------|----------|
-| **Significant Actions** | ✅ +1 step | Move, Shoot, Charge, Attack, Wait |
-| **Auto-Skip Ineligible** | ❌ No step | Fled unit can't shoot, No charge targets |
-| **Action Logging** | ✅ Always | ALL state changes logged regardless |
-
----
-
-# 🔧 IMPLEMENTATION NOTES
-
-## Field Names (MANDATORY UPPERCASE)
-- `RNG_NB`, `RNG_RNG`, `CC_NB`, `CC_RNG`, `MOVE`
-- `ARMOR_SAVE`, `CC_STR`, `CC_ATK`, `CC_AP`, `CC_DMG`
-- **Reference**: See [Field Names Reference](#-field-names-reference) for complete categorized list
-
-## Tracking Sets Management
-- Use Set data structures for O(1) lookups
-- Reset at phase start, not turn start
-- Consistent naming: `units_[action]` pattern
-
-## Legacy Compatibility
-- **REMOVE**: All `hasChargedThisTurn` references
-- **REPLACE**: With `units_charged` set tracking
-- **MAINTAIN**: Same functional behavior
-
-## Legacy Eligibility Patterns (For Reference Only)
-**Historical patterns that should be updated:**
-- ❌ **Wrong**: `if (unitsMoved.includes(unit.id)) return false` for shooting
-- ✅ **Correct**: `if (units_shot.includes(unit.id)) return false`
-- ❌ **Adjacent Check**: `hasAdjacentEnemyShoot = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy))`
-- ✅ **Target Validation**: Must check line of sight AND range AND friendly fire rules
-
-## Controller Delegation
-- No direct state manipulation in `gym40k.py`
-- All game logic through controller methods
-- State synchronization across all components
-
-## 🚀 PERFORMANCE OPTIMIZATION NOTES
-- **Set Lookups:** Use `Set.has()` instead of `Array.includes()` for O(1) tracking
-- **Early Exit:** Check `CUR_HP > 0` first (most common failure condition)
-- **Batch Updates:** Process all tracking set updates before logging operations
-- **Memory Efficiency:** Clear tracking sets at phase start, not individual removal
-- **Validation Order:** Most restrictive conditions first in decision trees
-- **Cache LOS:** Store line-of-sight calculations for multiple target evaluation
-
----
-
-# 📚 QUICK REFERENCE GUIDE
-
-## 🏷️ **Field Names Reference**
-| Category | Mandatory Fields (UPPERCASE) |
-|----------|------------------------------|
-| **Movement** | `MOVE`, `col`, `row` |
-| **Shooting** | `RNG_NB`, `RNG_RNG`, `RNG_ATK`, `RNG_STR`, `RNG_DMG`, `RNG_AP` |
-| **Combat** | `CC_NB`, `CC_RNG`, `CC_ATK`, `CC_STR`, `CC_DMG`, `CC_AP` |
-| **Defense** | `ARMOR_SAVE`, `INVUL_SAVE`, `T`, `CUR_HP`, `MAX_HP` |
-
-## 📊 **Tracking Sets Lifecycle**
-| Set Name | Added When | Reset When | Purpose |
-|----------|------------|------------|---------|
-| `units_moved` | After move/wait action | Phase start | Prevent re-movement |
-| `units_fled` | After flee move | Phase start | Apply shoot/charge penalties |
-| `units_shot` | After shoot/wait action | Phase start | Prevent re-shooting |
-| `units_charged` | After charge action | Phase start | Combat priority |
-| `units_attacked` | After attack action | Phase start | Prevent re-attacking |
-
-## ⚡ **Step Counting Quick Guide**
-| Scenario | Step Increase | Examples |
-|----------|---------------|----------|
-| **Unit performs action** | ✅ +1 | Move, shoot, charge, attack, wait |
-| **Unit auto-skipped** | ❌ +0 | Fled unit in shoot, no targets in charge |
-| **Edge case (no targets)** | ❌ +0 | Charging unit with no adjacent enemies |
-| **Action logging** | ✅ Always | ALL scenarios logged regardless of steps |
-
-## 🚨 **Common Implementation Errors**
-| ❌ **DON'T** | ✅ **DO** |
-|-------------|-----------|
-| Check eligibility after action | Check eligibility before action |
-| Skip alive enemy validation | Always validate `unit.CUR_HP > 0` |
-| Modify tracking sets simultaneously | Update in order: action → tracking → log → step |
-| Hardcode phase transitions | Use "no eligible units remain" condition |
-| Use lowercase field names | Use UPPERCASE: `CC_STR` not `cc_str` |
-
-## 📄 **Phase Transition Checklist**
-1. [ ] Check if any eligible units remain for current player
-2. [ ] If none eligible → advance to next phase
-3. [ ] Reset appropriate tracking sets at new phase start
-4. [ ] Process units in order for new phase
-5. [ ] Log all state changes regardless of eligibility
-
-## ⚡ **Implementation Priority Matrix**
-| Priority | Component | Implementation Order | Performance Impact |
-|----------|-----------|---------------------|-------------------|
-| **🔥 CRITICAL** | Tracking Sets | Use Set data structures | O(1) vs O(n) lookups |
-| **🔥 CRITICAL** | Validation Order | CUR_HP → player → tracking | Early exit optimization |
-| **⚠️ HIGH** | Decision Trees | Implement exact flow | Zero logic ambiguity |
-| **⚠️ HIGH** | State Atomicity | Batch tracking updates | Consistency guarantee |
-| **✅ MEDIUM** | Logging Format | Standardized messages | Debug efficiency |
-| **✅ MEDIUM** | Cross-References | Internal doc linking | Development speed |
-
-## 🎯 **Claude Code Generation Optimization Tags**
-```typescript
-// Use these exact patterns for optimal Claude code generation:
-
-// ✅ OPTIMAL: Decision tree pattern
-if (unit.CUR_HP <= 0) return false;           // Early exit
-if (!tracking_sets.units_shot.has(unit.id))   // Set lookup
+While both players have eligible units:
+    Non-active player selects and attacks with one unit
+    Active player selects and attacks with one unit (no chargers)
+    Repeat until one or both players have no eligible units
     
-// ✅ OPTIMAL: Tracking pattern  
-tracking_sets.units_moved.add(unit.id);       // Set operations
-    
-// ✅ OPTIMAL: Validation pattern
-const validation = validateUnitActivation(unit, phase, tracking_sets);
-if (!validation.valid) {
-    if (validation.log) logAction(validation.reason, unit);
-    return validation;
-}
-
-// ✅ OPTIMAL: Phase transition pattern
-const eligibleUnits = getCurrentPlayerUnits().filter(u => 
-    u.CUR_HP > 0 && !tracking_sets.phase_action.has(u.id)
-);
-if (eligibleUnits.length === 0) advanceToNextPhase();
+Process any remaining eligible units from either player
 ```
+
+**Example:**
+```
+P0's turn, Combat Phase:
+Sub-phase 1: P0 Marine (charged) attacks Ork first
+Sub-phase 2: P1 Grot attacks P0 Scout → P0 Heavy attacks P1 Boss → Continue alternating
+Result: Charging grants first strike, then fair alternation
+```
+
+---
+
+## 📊 TRACKING SYSTEM LOGIC
+
+### Tracking Purpose & Design
+
+**Why Tracking Exists:**
+- **Prevent duplicate actions**: Ensure units act only once per phase
+- **Apply penalties**: Remember fled status for cross-phase restrictions
+- **Enable priority systems**: Track charging for combat advantages
+- **Determine phase completion**: Know when no eligible units remain
+
+### Tracking Set Logic
+
+**Set-Based Design Benefits:**
+- **Efficient lookups**: Fast membership testing
+- **Clear semantics**: Add/remove operations clearly defined
+- **Consistent patterns**: Same logic structure across all phases
+
+### Individual Tracking Sets
+
+**units_moved** (Movement Phase):
+- **Purpose**: Track units that have moved or waited
+- **Reset timing**: Start of movement phase
+- **Usage**: Prevent re-movement within same phase
+
+**units_fled** (Movement Phase):
+- **Purpose**: Track units that fled from combat
+- **Reset timing**: Start of movement phase (turn-level tracking)
+- **Usage**: Apply shooting and charging penalties
+
+**units_shot** (Shooting Phase):
+- **Purpose**: Track units that have shot or passed
+- **Reset timing**: Start of shooting phase
+- **Usage**: Prevent re-shooting within same phase
+
+**units_charged** (Charge Phase):
+- **Purpose**: Track units that have charged
+- **Reset timing**: Start of charge phase
+- **Usage**: Combat priority determination
+
+**units_attacked** (Combat Phase):
+- **Purpose**: Track units that have attacked or passed
+- **Reset timing**: Start of combat phase
+- **Usage**: Prevent re-attacking within same phase
+
+### Cross-Phase Tracking Logic
+
+**units_fled Persistence:**
+- **Spans multiple phases**: Set in movement, used in shooting and charging
+- **Turn-level effect**: Cleared at start of new turn, not each phase
+- **Penalty application**: Automatic ineligibility in affected phases
+
+**Why Cross-Phase Tracking:**
+- **Realistic consequences**: Fleeing affects unit for entire turn
+- **Strategic depth**: Makes fleeing a meaningful choice with costs
+- **State consistency**: Same consequences applied uniformly
+
+---
+
+## 🎪 KEY SCENARIOS
+
+### Critical Decision Examples
+
+**Scenario 1 - The Coordination Decision:**
+```
+Situation: 
+- Marine A can wound high-threat Enemy (2 damage, enemy has 3 HP)
+- Marine B can finish wounded enemies (2 damage)
+- Enemy will kill Marine A if allowed to act
+
+Options:
+A) Marine A shoots different target, Marine B charges Enemy independently
+B) Marine A wounds Enemy, Marine B finishes it with coordinated attack
+
+Analysis:
+Option A: Uncertain outcome, Enemy remains threat
+Option B: Guaranteed elimination of high threat
+
+Decision principle: Coordination often superior to individual optimization
+```
+
+**Scenario 2 - The Flee vs Fight Dilemma:**
+```
+Wounded Scout (CUR_HP 1) adjacent to healthy Ork
+Combat prediction: 80% chance Scout dies if stays
+Flee consequences: Scout survives but cannot shoot critical targets
+
+Decision factors:
+- Scout replacement cost vs immediate value
+- Importance of Scout's potential shooting
+- Alternative methods to handle Ork threat
+
+Framework: Weigh certain survival vs uncertain but valuable contribution
+```
+
+**Scenario 3 - The Action Economy Challenge:**
+```
+Two enemies: one wounded (1 HP), one healthy (3 HP)
+Unit can kill wounded enemy OR significantly wound healthy enemy
+
+Standard approach: Kill wounded (guaranteed elimination)
+Advanced consideration: What can allies accomplish?
+- If ally can finish wounded: Better to wound healthy instead
+- If no ally available: Take guaranteed elimination
+
+Principle: Optimize total force effectiveness, not individual actions
+```
+
+---
+
+## 🔄 RULE INTERACTIONS
+
+### Cross-Phase Effect Patterns
+
+**Flee Penalty Chain:**
+```
+Movement phase: Unit flees (marked as fled)
+Shooting phase: Fled unit cannot shoot (penalty applied)
+Charge phase: Fled unit cannot charge (penalty continues)
+Combat phase: Fled unit can fight normally (penalty ends)
+
+Strategic insight: Flee penalties span multiple phases but aren't permanent
+```
+
+**Charge Priority Chain:**
+```
+Charge phase: Unit successfully charges
+Combat sub-phase 1: Charging unit attacks first
+Combat sub-phase 2: If enemy survives, alternating combat begins
+
+Tactical advantage: First strike may eliminate enemy before retaliation
+```
+
+### Movement-Combat Interactions
+
+**Positioning Cascade Effects:**
+```
+Enemy moves adjacent to your unit
+Your unit faces dilemma: flee (lose effectiveness) or fight (risk death)
+Decision creates ripple effects throughout remaining phases
+
+Counter-strategy: Position units to support each other
+Prevention: Avoid isolated vulnerabilities
+```
+
+---
+
+## ✅ CLAUDE VALIDATION POINTS
+
+### Fundamental Understanding Checks
+
+**Can Claude answer these core questions?**
+
+1. **"Who can act in Movement phase?"** 
+   - Correct: Only current player's units
+   - Why: Phase-based turn system
+
+2. **"When does Shooting phase end?"**
+   - Correct: When no current player units are eligible to shoot
+   - Why: Eligibility-based phase completion
+
+3. **"Why can't fled units charge?"**
+   - Correct: They're too far from combat and demoralized
+   - Why: Logical consequence of retreat action
+
+4. **"What makes Combat phase unique?"**
+   - Correct: Both players' units can act (only such phase)
+   - Why: Combat involves units from both sides
+
+### Rule Application Checks
+
+**Can Claude correctly apply eligibility logic?**
+
+Given a unit that is:
+- Alive (CUR_HP > 0) ✓
+- Belongs to current player ✓  
+- Not in units_moved ✓
+- Adjacent to an enemy
+
+**Movement phase eligibility**: ELIGIBLE (adjacency doesn't prevent movement)
+**Shooting phase eligibility**: INELIGIBLE (adjacent = in combat = cannot shoot)
+
+### Sequence Understanding Checks
+
+**Can Claude trace phase progression?**
+
+Starting state: P0 Movement phase, Turn 1
+After P0 completes all phases and P1 completes all phases:
+Expected result: P0 Movement phase, Turn 2
+
+**Why Turn increments**: Turn increments when P0 starts Movement (turn-based on P0)
+
+### Error Detection Checks
+
+**Can Claude identify common mistakes?**
+
+Scenario: "Unit shoots, then in same phase shoots again"
+Claude should identify: VIOLATION - units_shot tracking prevents duplicate actions
+
+Scenario: "Unit moves adjacent to enemy, then shoots in same turn"
+Claude should identify: VALID - fled penalty doesn't apply to normal movement
+
+---
+
+## 🎯 DECISION FRAMEWORK
+
+### Universal Eligibility Pattern
+
+**For any unit in any phase:**
+```
+1. Check basic viability (alive, correct player)
+2. Check action restrictions (already acted, penalties)  
+3. Check opportunity availability (valid targets/destinations)
+4. Return eligibility result with reason
+```
+
+**Why This Pattern:**
+- **Consistent**: Same logic structure across all phases
+- **Efficient**: Most restrictive checks first
+- **Informative**: Provides reason for ineligibility
+- **Debuggable**: Clear failure points
+
+### Action Resolution Pattern
+
+**For eligible unit choosing action:**
+```
+1. Validate action preconditions
+2. Execute action atomically  
+3. Update game state (positions, health, etc.)
+4. Update tracking sets (mark as acted)
+5. Log action for replay/debugging
+6. Check for consequent state changes (death, phase completion)
+```
+
+**Why This Pattern:**
+- **Atomic**: Complete action or no action (no partial states)
+- **Traceable**: All changes logged
+- **Consistent**: Same pattern regardless of action type
+- **Complete**: Handles all necessary state updates
+
+### Phase Transition Pattern
+
+**For current phase:**
+```
+1. Identify all potentially eligible units (current player)
+2. Check each unit's phase-specific eligibility
+3. If any eligible units found: Continue phase
+4. If no eligible units found: Advance to next phase
+5. Reset appropriate tracking sets for new phase
+```
+
+**Why This Pattern:**
+- **Deterministic**: Clear rules for when phases end
+- **Complete**: Checks all units, not just some
+- **State-based**: Transitions based on game state, not arbitrary rules
+- **Clean**: Proper cleanup between phases
+
+---
+
+## 🎓 CLAUDE MASTERY INDICATORS
+
+### Level 1: Basic Understanding
+- ✅ Can identify which units are eligible in each phase
+- ✅ Understands phase sequence and turn progression
+- ✅ Knows why rules exist (tactical/balance reasons)
+- ✅ Can explain basic rule interactions
+
+### Level 2: Rule Application
+- ✅ Can apply eligibility logic to complex scenarios
+- ✅ Understands rule interactions (flee penalties, combat priority)
+- ✅ Can trace game state changes through multiple actions
+- ✅ Recognizes common error patterns
+
+### Level 3: Implementation Ready
+- ✅ Can design eligibility checking algorithms
+- ✅ Understands performance implications (efficiency matters)
+- ✅ Can create validation and error handling logic
+- ✅ Applies universal patterns consistently
+
+### Level 4: System Design
+- ✅ Can explain architectural principles (single source of truth)
+- ✅ Understands cross-component communication patterns
+- ✅ Can design for extensibility and maintainability
+- ✅ Optimizes for performance and clarity
+
+**This streamlined document brings Claude to Level 4 understanding, enabling expert-level rule comprehension and intelligent decision-making in any implementation context.**
