@@ -53,11 +53,13 @@ class EpisodeTerminationCallback(BaseCallback):
     def _on_step(self) -> bool:
         self.step_count += 1
         
-        # Update progress calculation for proper display
-        if hasattr(self, 'model') and hasattr(self.model, 'num_timesteps'):
-            progress_pct = min(100, (self.model.num_timesteps / self.expected_timesteps) * 100)
-            if self.step_count % 10 == 0:
-                print(f"🔍 Training Progress: {progress_pct:.1f}% ({self.model.num_timesteps}/{self.expected_timesteps})")
+        # Episode-based progress display for AI_TURN.md compliance
+        if self.step_count % 10 == 0:
+            episode_progress_pct = min(100, (self.episode_count / self.max_episodes) * 100)
+            print(f"🎮 Episode Progress: {episode_progress_pct:.1f}% ({self.episode_count}/{self.max_episodes} episodes)")
+            if hasattr(self, 'model') and hasattr(self.model, 'num_timesteps'):
+                step_progress_pct = min(100, (self.model.num_timesteps / self.expected_timesteps) * 100)
+                print(f"🔍 Step Progress: {step_progress_pct:.1f}% ({self.model.num_timesteps}/{self.expected_timesteps} steps)")
         
     def _on_step(self) -> bool:
         self.step_count += 1
@@ -96,11 +98,12 @@ class EpisodeTerminationCallback(BaseCallback):
         
         if episode_ended:
             self.episode_count += 1
-            print(f"✅ Episode {self.episode_count}/{self.max_episodes} completed")
+            episode_progress_pct = (self.episode_count / self.max_episodes) * 100
+            print(f"✅ Episode {self.episode_count}/{self.max_episodes} completed ({episode_progress_pct:.1f}%)")
             
             # Stop training if max episodes reached
             if self.episode_count >= self.max_episodes:
-                print(f"🛑 TRAINING STOPPED: {self.max_episodes} episodes completed")
+                print(f"🛑 TRAINING STOPPED: {self.max_episodes} episodes completed (100%)")
                 return False
                 
         return True
@@ -129,8 +132,8 @@ class StepLogger:
                 f.write("=" * 80 + "\n\n")
             print(f"📝 Step logging enabled: {self.output_file}")
     
-    def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None):
-        """Log action with step increment information using replay-style one-line format"""
+    def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None, turn_number=1):
+        """Log action with step increment information using clear format"""
         if not self.enabled:
             return
             
@@ -145,15 +148,49 @@ class StepLogger:
                 # Format message using gameLogUtils.ts style
                 message = self._format_replay_style_message(unit_id, action_type, action_details)
                 
-                # One-line format: [timestamp] STEP #X (P0/P1 phase): Message [SUCCESS/FAILED] [STEP: YES/NO]
+                # Clearer format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
                 step_status = "STEP: YES" if step_increment else "STEP: NO"
                 success_status = "SUCCESS" if success else "FAILED"
-                player_phase = f"P{player} {phase}"
+                phase_upper = phase.upper()
                 
-                f.write(f"[{timestamp}] #{self.action_count} ({player_phase}): {message} [{success_status}] [{step_status}]\n")
+                f.write(f"[{timestamp}] T{turn_number} P{player} {phase_upper} : {message} [{success_status}] [{step_status}]\n")
                 
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
+    
+    def log_episode_start(self, units_data, scenario_info=None):
+        """Log episode start with all unit starting positions"""
+        if not self.enabled:
+            return
+            
+        try:
+            with open(self.output_file, 'a') as f:
+                timestamp = time.strftime("%H:%M:%S", time.localtime())
+                f.write(f"\n[{timestamp}] === EPISODE START ===\n")
+                
+                if scenario_info:
+                    f.write(f"[{timestamp}] Scenario: {scenario_info}\n")
+                
+                # Log all unit starting positions
+                for unit in units_data:
+                    if "id" not in unit:
+                        raise KeyError("Unit missing required 'id' field")
+                    if "col" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'col' field")
+                    if "row" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'row' field")
+                    if "player" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'player' field")
+                    if "name" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'name' field")
+                        
+                    player_name = f"P{unit['player']}"
+                    f.write(f"[{timestamp}] Unit {unit['id']} ({unit['name']}) {player_name}: Starting position ({unit['col']}, {unit['row']})\n")
+                
+                f.write(f"[{timestamp}] === ACTIONS START ===\n")
+                
+        except Exception as e:
+            print(f"⚠️ Episode start logging error: {e}")
     
     def _format_replay_style_message(self, unit_id, action_type, details):
         """Format messages with detailed combat info - enhanced replay format"""
@@ -163,8 +200,11 @@ class StepLogger:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
                 return f"Unit {unit_id} MOVED from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+            elif "col" in details and "row" in details:
+                # Use destination coordinates from mirror_action
+                return f"Unit {unit_id} MOVED to ({details['col']}, {details['row']})"
             else:
-                return f"Unit {unit_id} MOVED"
+                raise KeyError("Charge action missing required target_id")
                 
         elif action_type == "shoot":
             if "target_id" not in details:
@@ -206,6 +246,59 @@ class StepLogger:
             base_msg = f"Unit {unit_id} SHOT at unit {target_id}"
             detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
             return base_msg + detail_msg
+            
+        elif action_type == "shoot_individual":
+            # Individual shot within multi-shot sequence
+            if "target_id" not in details:
+                raise KeyError("Individual shot missing required target_id")
+            if "shot_number" not in details or "total_shots" not in details:
+                raise KeyError("Individual shot missing required shot_number or total_shots")
+                
+            target_id = details["target_id"]
+            shot_num = details["shot_number"]
+            total_shots = details["total_shots"]
+            
+            # Check if this shot actually fired (hit_roll > 0 means it was attempted)
+            if details.get("hit_roll") > 0:
+                hit_roll = details["hit_roll"]
+                wound_roll = details["wound_roll"]
+                save_roll = details["save_roll"]
+                damage = details["damage_dealt"]
+                hit_result = details["hit_result"]
+                wound_result = details["wound_result"]
+                save_result = details["save_result"]
+                hit_target = details["hit_target"]
+                wound_target = details["wound_target"]
+                save_target = details["save_target"]
+                
+                base_msg = f"Unit {unit_id} SHOT at unit {target_id} (Shot {shot_num}/{total_shots})"
+                if hit_result == "MISS":
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}(MISS)"
+                elif wound_result == "FAIL":
+                    # Failed wound - stop progression, don't show save/damage
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}(FAIL)"
+                else:
+                    # Successful wound - show full progression
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+                return base_msg + detail_msg
+            else:
+                return f"Unit {unit_id} SHOT at unit {target_id} (Shot {shot_num}/{total_shots}) - MISS"
+                
+        elif action_type == "shoot_summary":
+            # Summary of multi-shot sequence
+            if "target_id" not in details:
+                raise KeyError("Shoot summary missing required target_id")
+            if "total_shots" not in details or "total_damage" not in details:
+                raise KeyError("Shoot summary missing required total_shots or total_damage")
+                
+            target_id = details["target_id"]
+            total_shots = details["total_shots"]
+            total_damage = details["total_damage"]
+            hits = details.get("hits")
+            wounds = details.get("wounds")
+            failed_saves = details.get("failed_saves")
+            
+            return f"Unit {unit_id} SHOOTING COMPLETE at unit {target_id} - {total_shots} shots, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
             
         elif action_type == "charge" and details:
             if "target_id" in details:
@@ -261,23 +354,22 @@ class StepLogger:
             return base_msg + detail_msg
             
         elif action_type == "wait":
-            return f"Unit {unit_id} NO MOVE"
+            return f"Unit {unit_id} WAIT"
             
         else:
             raise ValueError(f"Unknown action_type '{action_type}' - no fallback allowed")
     
-    def log_phase_transition(self, from_phase, to_phase, player):
-        """Log phase transitions (no step increment) using replay-style format"""
+    def log_phase_transition(self, from_phase, to_phase, player, turn_number=1):
+        """Log phase transitions (no step increment) using simplified format"""
         if not self.enabled:
             return
             
         try:
             with open(self.output_file, 'a') as f:
                 timestamp = time.strftime("%H:%M:%S", time.localtime())
-                # gameLogUtils.ts style: "Start Player's PHASE phase"
-                player_name = f"Player {player}"
-                message = f"Start {player_name}'s {to_phase.upper()} phase"
-                f.write(f"[{timestamp}] PHASE: {message} [STEP: NO]\n")
+                # Clearer format: [timestamp] TX PX PHASE phase Start
+                phase_upper = to_phase.upper()
+                f.write(f"[{timestamp}] T{turn_number} P{player} {phase_upper} phase Start\n")
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
     
@@ -402,12 +494,8 @@ def create_model(config, training_config_name="default", rewards_config_name="de
     
     # Connect step logger after environment creation
     if step_logger:
-        # Import and use step logging integration
-        try:
-            from step_logging_wrapper import enable_step_logging_on_environment
-            enable_step_logging_on_environment(base_env, step_logger)
-        except ImportError as e:
-            raise ImportError(f"Step logging import failed - no fallback allowed: {e}")
+        base_env.controller.connect_step_logger(step_logger)
+        print("✅ StepLogger connected to SequentialGameController")
     
     # DISABLED: No logging during training for speed
     # Enhanced logging only during evaluation
@@ -484,12 +572,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     
     # Connect step logger after environment creation
     if step_logger:
-        # Import and use step logging integration
-        try:
-            from step_logging_wrapper import enable_step_logging_on_environment
-            enable_step_logging_on_environment(base_env, step_logger)
-        except ImportError as e:
-            raise ImportError(f"Step logging import failed - no fallback allowed: {e}")
+        base_env.controller.connect_step_logger(step_logger)
+        print("✅ StepLogger connected to SequentialGameController")
     
     # DISABLED: No logging during training for speed
     # Enhanced logging only during evaluation
@@ -510,7 +594,9 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
             model = DQN.load(model_path, env=env, device=device)
-            model.tensorboard_log = model_params.get("tensorboard_log", "./tensorboard/")
+            if "tensorboard_log" not in model_params:
+                raise KeyError("model_params missing required 'tensorboard_log' field")
+            model.tensorboard_log = model_params["tensorboard_log"]
             model.verbose = model_params["verbose"]
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
@@ -535,11 +621,13 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     if training_config_name == "debug":
         if "total_episodes" not in training_config:
             raise KeyError(f"Debug training config missing required 'total_episodes'")
-        if "max_steps_per_episode" not in training_config:
-            raise KeyError(f"Debug training config missing required 'max_steps_per_episode'")
+        if "max_turns_per_episode" not in training_config:
+            raise KeyError(f"Debug training config missing required 'max_turns_per_episode'")
+        if "max_steps_per_turn" not in training_config:
+            raise KeyError(f"Debug training config missing required 'max_steps_per_turn'")
         
         max_episodes = training_config["total_episodes"]
-        max_steps_per_episode = training_config["max_steps_per_episode"]
+        max_steps_per_episode = training_config["max_turns_per_episode"] * training_config["max_steps_per_turn"]
         expected_timesteps = max_episodes * max_steps_per_episode
         episode_callback = EpisodeTerminationCallback(max_episodes, expected_timesteps, verbose=1)
         callbacks.append(episode_callback)
@@ -571,7 +659,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     else:
         # Debug config uses total_episodes - calculate eval_freq
         total_episodes = training_config['total_episodes']
-        max_steps = training_config['max_steps_per_episode']
+        max_steps = training_config['max_turns_per_episode'] * training_config['max_steps_per_turn']
         eval_freq = total_episodes * max_steps // 2  # Evaluate halfway through
     
     if 'total_timesteps' in training_config:
@@ -579,7 +667,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     else:
         # Debug config uses total_episodes and max_steps_per_episode
         total_episodes = training_config['total_episodes']
-        max_steps = training_config['max_steps_per_episode']
+        max_steps = training_config['max_turns_per_episode'] * training_config['max_steps_per_turn']
         total_timesteps = total_episodes * max_steps
     
     # VALIDATION: Prevent deadlock when eval_freq >= total_timesteps
@@ -589,29 +677,40 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                         f"Either increase total_timesteps or decrease eval_freq to {total_timesteps // 2}.")
     
     # Get callback parameters from config with defaults
-    callback_params = training_config.get("callback_params", {})
+    if "callback_params" not in training_config:
+        raise KeyError("Training config missing required 'callback_params' field")
+    callback_params = training_config["callback_params"]
     
     # Skip evaluation callback for debug config to prevent hanging
     if training_config_name != "debug":
+        required_callback_fields = ["eval_deterministic", "eval_render", "n_eval_episodes"]
+        for field in required_callback_fields:
+            if field not in callback_params:
+                raise KeyError(f"callback_params missing required '{field}' field")
+                
         eval_callback = SelectiveEvalCallback(
             eval_env,
             best_model_save_path=os.path.dirname(model_path),
             log_path=os.path.dirname(model_path),
             eval_freq=eval_freq,
-            deterministic=callback_params.get("eval_deterministic", True),
-            render=callback_params.get("eval_render", False),
-            n_eval_episodes=callback_params.get("n_eval_episodes", 5),
+            deterministic=callback_params["eval_deterministic"],
+            render=callback_params["eval_render"],
+            n_eval_episodes=callback_params["n_eval_episodes"],
             output_dir="ai/event_log"
         )
         callbacks.append(eval_callback)
     
     # Checkpoint callback - save model periodically
     # Use reasonable checkpoint frequency based on total timesteps and config
-    checkpoint_freq = callback_params.get("checkpoint_save_freq", min(total_timesteps // 4, 50000))
+    if "checkpoint_save_freq" not in callback_params:
+        raise KeyError("callback_params missing required 'checkpoint_save_freq' field")
+    if "checkpoint_name_prefix" not in callback_params:
+        raise KeyError("callback_params missing required 'checkpoint_name_prefix' field")
+        
     checkpoint_callback = CheckpointCallback(
-        save_freq=checkpoint_freq,
+        save_freq=callback_params["checkpoint_save_freq"],
         save_path=os.path.dirname(model_path),
-        name_prefix=callback_params.get("checkpoint_name_prefix", "default_model_checkpoint")
+        name_prefix=callback_params["checkpoint_name_prefix"]
     )
     callbacks.append(checkpoint_callback)
     
@@ -625,14 +724,22 @@ def train_model(model, training_config, callbacks, model_path):
         # AI_TURN COMPLIANCE: Use episode-based training
         if 'total_timesteps' in training_config:
             total_timesteps = training_config['total_timesteps']
+            print(f"🎯 Training Mode: Step-based ({total_timesteps:,} steps)")
         elif 'total_episodes' in training_config:
             total_episodes = training_config['total_episodes']
-            # Calculate reasonable timesteps based on actual game mechanics
-            max_turns_per_episode = training_config.get("max_turns_per_episode", 10)
-            max_steps_per_turn = training_config.get("max_steps_per_turn", 50)
+            # Calculate timesteps based on required config values - NO DEFAULTS ALLOWED
+            if "max_turns_per_episode" not in training_config:
+                raise KeyError(f"Training config missing required 'max_turns_per_episode' field")
+            if "max_steps_per_turn" not in training_config:
+                raise KeyError(f"Training config missing required 'max_steps_per_turn' field")
+            max_turns_per_episode = training_config["max_turns_per_episode"]
+            max_steps_per_turn = training_config["max_steps_per_turn"]
             total_timesteps = total_episodes * max_turns_per_episode * max_steps_per_turn
+            print(f"🎮 Training Mode: Episode-based ({total_episodes:,} episodes = {total_timesteps:,} steps)")
         else:
             raise ValueError("Training config must have either 'total_timesteps' or 'total_episodes'")
+        
+        print(f"📊 Progress tracking: Episodes are primary metric (AI_TURN.md compliance)")
         
         model.learn(
             total_timesteps=total_timesteps,
@@ -660,7 +767,7 @@ def train_model(model, training_config, callbacks, model_path):
         traceback.print_exc()
         return False
 
-def test_trained_model(model, num_episodes=5):
+def test_trained_model(model, num_episodes, training_config_name="default"):
     """Test the trained model."""
     
     W40KEnv, _ = setup_imports()
@@ -672,7 +779,7 @@ def test_trained_model(model, num_episodes=5):
     
     env = W40KEnv(
         rewards_config="default",
-        training_config_name="default",
+        training_config_name=training_config_name,
         controlled_agent=None,
         active_agents=None,
         scenario_file=scenario_file,
@@ -700,9 +807,8 @@ def test_trained_model(model, num_episodes=5):
         if info['winner'] == 1:  # AI won
             wins += 1
     
-    if num_episodes == 0:
-        print("\n📊 Test Results: No test episodes specified (--test-episodes 0)")
-        return 0.0, 0.0
+    if num_episodes <= 0:
+            raise ValueError("num_episodes must be positive - no default episodes allowed")
     
     win_rate = wins / num_episodes
     avg_reward = sum(total_rewards) / len(total_rewards)
@@ -783,9 +889,9 @@ def ensure_scenario():
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
     parser = argparse.ArgumentParser(description="Train W40K AI following AI_GAME_OVERVIEW.md specifications")
-    parser.add_argument("--training-config", default="default", 
+    parser.add_argument("--training-config", required=True,
                        help="Training configuration to use from config/training_config.json")
-    parser.add_argument("--rewards-config", default="default", 
+    parser.add_argument("--rewards-config", required=True,
                        help="Rewards configuration to use from config/rewards_config.json")
     parser.add_argument("--new", action="store_true", 
                        help="Force creation of new model")
@@ -801,8 +907,8 @@ def main():
                        help="Train specific agent (e.g., 'SpaceMarine_Ranged')")
     parser.add_argument("--orchestrate", action="store_true",
                        help="Start balanced multi-agent orchestration training")
-    parser.add_argument("--total-episodes", type=int, default=1000,
-                       help="Total episodes for multi-agent orchestration")
+    parser.add_argument("--total-episodes", type=int, default=None,
+                       help="Total episodes for training (overrides config file value)")
     parser.add_argument("--max-concurrent", type=int, default=None,
                        help="Maximum concurrent training sessions")
     parser.add_argument("--training-phase", type=str, choices=["solo", "cross_faction", "full_composition"],
@@ -836,7 +942,7 @@ def main():
             subprocess.run(['node', 'scripts/copy-configs.js'], 
                          cwd=project_root, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            pass  # Continue with training if sync fails
+            raise RuntimeError(f"Config sync failed: {e}")
         
         # Setup environment and configuration
         config = get_config_loader()
@@ -851,9 +957,18 @@ def main():
         
         # Multi-agent orchestration mode
         if args.orchestrate:
+            # Use config fallback for total_episodes if not provided
+            total_episodes = args.total_episodes
+            if total_episodes is None:
+                training_config = config.load_training_config(args.training_config)
+                total_episodes = training_config.get("total_episodes", 500)  # Reasonable default
+                print(f"📊 Using total_episodes from config: {total_episodes}")
+            else:
+                print(f"📊 Using total_episodes from command line: {total_episodes}")
+                
             results = start_multi_agent_orchestration(
                 config=config,
-                total_episodes=args.total_episodes,
+                total_episodes=total_episodes,
                 training_config_name=args.training_config,
                 rewards_config_name=args.rewards_config,
                 max_concurrent=args.max_concurrent,
@@ -879,7 +994,7 @@ def main():
             success = train_model(model, training_config, callbacks, model_path)
             
             if success:
-                test_trained_model(model, args.test_episodes)
+                test_trained_model(model, args.test_episodes, args.training_config)
                 return 0
             else:
                 return 1
@@ -905,7 +1020,7 @@ def main():
             
             env = W40KEnv(
                 rewards_config=args.rewards_config,
-                training_config_name="default",
+                training_config_name=args.training_config,
                 controlled_agent=None,
                 active_agents=None,
                 scenario_file=scenario_file,
@@ -915,13 +1030,12 @@ def main():
             
             # Connect step logger after environment creation
             if step_logger:
-                try:
-                    from step_logging_wrapper import enable_step_logging_on_environment
-                    enable_step_logging_on_environment(env, step_logger)
-                except ImportError as e:
-                    raise ImportError(f"Step logging import failed - no fallback allowed: {e}")
+                env.controller.connect_step_logger(step_logger)
+                print("✅ StepLogger connected to SequentialGameController")
             model = DQN.load(model_path, env=env)
-            test_trained_model(model, args.test_episodes)
+            if args.test_episodes is None:
+                raise ValueError("--test-episodes is required for test-only mode")
+            test_trained_model(model, args.test_episodes, args.training_config)
             return 0
         
         else:
@@ -945,8 +1059,10 @@ def main():
         success = train_model(model, training_config, callbacks, model_path)
         
         if success:
-            # Test the trained model
-            test_trained_model(model, args.test_episodes)
+            # Test the trained model - require explicit episode count
+            if args.test_episodes <= 0:
+                raise ValueError("--test-episodes must be positive - no default test episodes allowed")
+            test_trained_model(model, args.test_episodes, args.training_config)
             
             # Save training replay with our unified system
             if hasattr(env, 'replay_logger'):

@@ -320,8 +320,7 @@ class GameController:
         # Store shooting result for logging
         self._last_shoot_result = shoot_result
         
-        # Still call original action for state management
-        self.game_actions["handle_shoot"](shooter_id, target_id)
+        # No need to call game_actions["handle_shoot"] - all logic already handled above
         return True
 
     def charge_unit(self, charger_id: int, target_id: int) -> bool:
@@ -1136,9 +1135,11 @@ class TrainingGameController(GameController):
         from config_loader import get_config_loader
         config = get_config_loader()
         training_config = config.load_training_config(self.config.training_config_name)
-        if "max_steps_per_episode" not in training_config:
-            raise KeyError(f"Training config '{self.config.training_config_name}' missing required 'max_steps_per_episode'")
-        max_events = training_config["max_steps_per_episode"]
+        if "max_turns_per_episode" not in training_config:
+            raise KeyError(f"Training config '{self.config.training_config_name}' missing required 'max_turns_per_episode'")
+        if "max_steps_per_turn" not in training_config:
+            raise KeyError(f"Training config '{self.config.training_config_name}' missing required 'max_steps_per_turn'")
+        max_events = training_config["max_turns_per_episode"] * training_config["max_steps_per_turn"]
         
         self.log_manager = TrainingGameLog(max_events=max_events)
         self.game_log = self.log_manager.get_log_functions()

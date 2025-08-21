@@ -48,11 +48,10 @@ else:
         "ai/gym40k.py",
         "ai/multi_agent_trainer.py",
         "ai/reward_mapper.py",
+        "ai/sequential_game_controller.py",  # New controller with built-in step counting
         "ai/sequential_activation_engine.py",
-        "ai/sequential_integration_wrapper.py",
         #"ai/scenario.json",
         "ai/scenario_manager.py",
-        "ai/step_logging_wrapper.py",
         "ai/train.py",
         "ai/unit_manager.py",
         "ai/unit_registry.py",

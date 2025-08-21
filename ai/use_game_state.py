@@ -104,19 +104,20 @@ class UseGameState:
         #     return original_setattr(name, value)
         # self.__setattr__ = monitored_setattr
         
-        # SAFER MONITORING: Focus on specific methods that might create new game_state objects
+        # TEMPORARILY DISABLED: SAFER MONITORING: Focus on specific methods that might create new game_state objects
         # Monitor copy operations that might duplicate game_state
-        original_copy_deepcopy = copy.deepcopy
-        def monitored_deepcopy(obj, memo=None):
-            result = original_copy_deepcopy(obj, memo)
-            # Check if we're copying a game_state-like object
-            if (hasattr(obj, '__class__') and obj.__class__.__name__ == 'dict' and
-                'phase' in obj and 'current_player' in obj and 'units' in obj):
-                stack_trace = ''.join(traceback.format_stack()[-3:-1])
-                print(f"🏗️ DEEPCOPY: Copied game_state-like dict (original_id={id(obj)}, copy_id={id(result)}) with phase='{obj.get('phase', 'unknown')}'")
-                print(f"📍 DEEPCOPY STACK:\n{stack_trace}")
-            return result
-        copy.deepcopy = monitored_deepcopy
+        # DISABLED DUE TO INFINITE RECURSION: monitored_deepcopy was calling itself
+        # original_copy_deepcopy = copy.deepcopy
+        # def monitored_deepcopy(obj, memo=None):
+        #     result = original_copy_deepcopy(obj, memo)
+        #     # Check if we're copying a game_state-like object
+        #     if (hasattr(obj, '__class__') and obj.__class__.__name__ == 'dict' and
+        #         'phase' in obj and 'current_player' in obj and 'units' in obj):
+        #         stack_trace = ''.join(traceback.format_stack()[-3:-1])
+        #         print(f"🏗️ DEEPCOPY: Copied game_state-like dict (original_id={id(obj)}, copy_id={id(result)}) with phase='{obj.get('phase', 'unknown')}'")
+        #         print(f"📍 DEEPCOPY STACK:\n{stack_trace}")
+        #     return result
+        # copy.deepcopy = monitored_deepcopy
         
         # Additional state objects (EXACT from TypeScript)
         self.unit_charge_rolls: Dict[int, int] = {}

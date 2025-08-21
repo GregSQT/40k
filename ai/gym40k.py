@@ -19,8 +19,8 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
-# Import Python mirror architecture with Sequential Activation Engine
-from ai.sequential_integration_wrapper import SequentialGameController, GameControllerConfig
+# Import AI_TURN.md compliant Sequential Game Controller
+from ai.sequential_game_controller import SequentialGameController, GameControllerConfig
 from ai.use_game_state import TrainingGameState
 from ai.use_game_actions import TrainingGameActions
 from ai.use_phase_transition import TrainingPhaseTransition
