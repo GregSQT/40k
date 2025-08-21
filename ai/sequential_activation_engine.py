@@ -609,7 +609,7 @@ class SequentialActivationEngine:
         
         Args:
             unit: Unit performing action
-            action: Action to execute in mirror format
+            action: Action to execute
             
         Returns:
             bool: True if action successful, False otherwise

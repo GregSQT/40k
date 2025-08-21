@@ -28,8 +28,14 @@ else:
 ##### root files
 ######################################################################################################
         
+        "ai/turn_validator1.py",
+        "ai/turn_validator2.py",
+        "ai/turn_validator3.py",
+
         "AI_ARCHITECTURE.md",
         "AI_GAME.md",
+        "AI_GUIDE.md",
+        "AI_PROJECT.md",
         "AI_PROTOCOLE.md",
         "AI_TURN.md",
         "config_loader.py",

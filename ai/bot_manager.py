@@ -137,7 +137,7 @@ class BotManager:
         return action_executed
         
     def _create_bot_game_state(self, bot_unit: Dict, target: Optional[Dict], action_id: int, action_type: int, reward: float):
-        """Create game state snapshot for bot action (mirrors AI action logging)."""
+        """Create game state snapshot for bot action"""
         try:
             if not hasattr(self.env.replay_logger, 'game_states'):
                 self.env.replay_logger.game_states = []

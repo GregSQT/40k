@@ -59,7 +59,7 @@
       "ranged_attack": 0.2,
       "melee_attack": 0.5,
       "charge": 0.3,
-      "charge_success": 0.3,
+      "charge_success": 0.6,
       "being_charged": -0.2,
       "wait": -0.3
     },

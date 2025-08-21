@@ -315,29 +315,16 @@ class StepLogger:
                 
         elif action_type == "combat":
             if "target_id" not in details:
-                raise KeyError("Combat action missing required target_id")
-            if "hit_roll" not in details:
-                raise KeyError("Combat action missing required hit_roll")
-            if "wound_roll" not in details:
-                raise KeyError("Combat action missing required wound_roll")
-            if "save_roll" not in details:
-                raise KeyError("Combat action missing required save_roll")
-            if "damage_dealt" not in details:
-                raise KeyError("Combat action missing required damage_dealt")
-            if "hit_result" not in details:
-                raise KeyError("Combat action missing required hit_result")
-            if "wound_result" not in details:
-                raise KeyError("Combat action missing required wound_result")
-            if "save_result" not in details:
-                raise KeyError("Combat action missing required save_result")
-            if "hit_target" not in details:
-                raise KeyError("Combat action missing required hit_target")
-            if "wound_target" not in details:
-                raise KeyError("Combat action missing required wound_target")
-            if "save_target" not in details:
-                raise KeyError("Combat action missing required save_target")
+                return f"Unit {unit_id} FOUGHT (no target data)"
             
             target_id = details["target_id"]
+            
+            # Check if all required dice data is present - if not, return simple message
+            required_fields = ["hit_roll", "wound_roll", "save_roll", "damage_dealt", "hit_result", "wound_result", "save_result", "hit_target", "wound_target", "save_target"]
+            if not all(field in details for field in required_fields):
+                return f"Unit {unit_id} FOUGHT unit {target_id} (dice data incomplete)"
+            
+            # All dice data present - format detailed message
             hit_roll = details["hit_roll"]
             wound_roll = details["wound_roll"]
             save_roll = details["save_roll"]

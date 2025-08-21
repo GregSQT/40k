@@ -89,7 +89,7 @@ class SequentialGameController:
         """Connect step logger for AI_TURN.md compliant action tracking."""
         self.step_logger = step_logger
         if step_logger and step_logger.enabled:
-            print("✅ StepLogger connected to SequentialGameController")
+            pass  # StepLogger connected silently
             
     def execute_gym_action(self, action: int) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
         """
@@ -101,6 +101,7 @@ class SequentialGameController:
         Returns:
             Tuple: (observation, reward, terminated, truncated, info)
         """
+        
         # AI_GUIDE.md: This EXACT flow implemented, NO additional steps or complexity
         
         # 1. Get current active unit (build queue if empty)
@@ -113,7 +114,29 @@ class SequentialGameController:
         # Get the actual unit object for action execution
         active_unit = self._get_unit_by_id(active_unit_id)
         if not active_unit:
-            raise RuntimeError(f"Active unit {active_unit_id} not found in game state")
+            # Unit died - remove from queue and get next unit
+            self._remove_unit_from_queue(active_unit_id)
+            return self.execute_gym_action(action)  # Try again with next unit
+            
+        # AI_TURN.md: CHARGE ROLL TIMING - Roll 2d6 immediately when unit becomes active
+        current_phase = self.base.get_current_phase()
+        if current_phase == "charge":
+            if "unit_charge_rolls" not in self.base.game_state:
+                self.base.game_state["unit_charge_rolls"] = {}
+                
+            # Check if unit already has a charge roll for this activation
+            if active_unit_id not in self.base.game_state["unit_charge_rolls"]:
+                import random
+                die1 = random.randint(1, 6)
+                die2 = random.randint(1, 6)
+                charge_total = die1 + die2
+                
+                # Store charge roll data (AI_TURN.md format)
+                self.base.game_state["unit_charge_rolls"][active_unit_id] = {
+                    "die1": die1,
+                    "die2": die2,
+                    "total": charge_total
+                }
             
         # 3. Execute action for active unit
         success, mirror_action = self._execute_action_for_unit(active_unit, action)
@@ -128,10 +151,14 @@ class SequentialGameController:
             current_player = self.base.get_current_player()
             current_turn = self.base.get_current_turn()
             step_increment = self._is_real_action(mirror_action)
-            
+           
             # Use mirror_action which now contains dice data (if captured successfully)
             action_details = dict(mirror_action)
             action_type = mirror_action.get("type", "wait")
+           
+            # Enhanced unit references with coordinates for ALL action types
+            # Acting unit always includes coordinates
+            action_details["unit_with_coords"] = f"{active_unit['id']}({active_unit['col']}, {active_unit['row']})"
             
             # Add position information for move actions
             if action_type == "move":
@@ -139,6 +166,29 @@ class SequentialGameController:
                 if "col" in mirror_action and "row" in mirror_action:
                     action_details["end_pos"] = (mirror_action["col"], mirror_action["row"])
             
+            # Add position and target information for charge actions
+            elif action_type == "charge":
+                action_details["start_pos"] = (active_unit["col"], active_unit["row"])
+                if "destination_col" in mirror_action and "destination_row" in mirror_action:
+                    action_details["end_pos"] = (mirror_action["destination_col"], mirror_action["destination_row"])
+                if "target_id" in mirror_action:
+                    target_unit = self._get_unit_by_id(mirror_action["target_id"])
+                    if target_unit:
+                        action_details["target_pos"] = (target_unit["col"], target_unit["row"])
+                        # Enhanced target format with coordinates
+                        action_details["target_with_coords"] = f"{target_unit['id']}({target_unit['col']}, {target_unit['row']})"
+                        # Override target_id for step logger
+                        action_details["target_id"] = f"{target_unit['id']}({target_unit['col']}, {target_unit['row']})"
+            
+            # Add target information for shoot and combat actions
+            elif action_type in ["shoot", "combat"]:
+                if "target_id" in mirror_action:
+                    target_unit = self._get_unit_by_id(mirror_action["target_id"])
+                    if target_unit:
+                        action_details["target_with_coords"] = f"{target_unit['id']}({target_unit['col']}, {target_unit['row']})"
+                        # Override target_id for step logger
+                        action_details["target_id"] = f"{target_unit['id']}({target_unit['col']}, {target_unit['row']})"
+           
             # Special handling for shooting actions with multiple shots
             if action_type == "shoot" and hasattr(self.base, '_last_shoot_result') and self.base._last_shoot_result:
                 shoot_result = self.base._last_shoot_result
@@ -216,11 +266,15 @@ class SequentialGameController:
         AI_TURN.md EXACT pattern: Get current active unit (build queue if empty).
         Returns unit ID or None.
         """
-        # If queue is empty, build it for current phase
+        # If queue is empty, try to build it for current phase
         if not self.active_unit_queue:
             self._build_current_phase_queue()
             
-        # Return first unit ID from queue (or None if queue empty)
+            # AI_TURN.md: If still empty after building, phase is complete
+            if not self.active_unit_queue:
+                return None
+            
+        # Return first unit ID from queue
         if self.active_unit_queue:
             return self.active_unit_queue[0]
         else:
@@ -232,7 +286,6 @@ class SequentialGameController:
         current_player = self.base.get_current_player()
         
         all_units = self.base.get_units()
-        
         # Clear existing queue
         self.active_unit_queue = []
         
@@ -251,16 +304,34 @@ class SequentialGameController:
                     raise KeyError(f"Unit {u.get('id', 'unknown')} missing required CUR_HP field")
                 if u["player"] == current_player and u["CUR_HP"] > 0:
                     candidate_units.append(u)
-        
-        # Add eligible units to queue (IDs only)
+        # Add eligible units to queue (IDs only) - debug why ALL units fail
+        eligible_count = 0
         for unit in candidate_units:
             if self._is_unit_eligible_for_current_phase(unit):
                 self.active_unit_queue.append(unit["id"])
+                eligible_count += 1
+            else:
+                print(f"💀 U{unit['id']} P{unit['player']} FAILED {current_phase} eligibility")
+        
+        if eligible_count == 0:
+            print(f"💀 NO UNITS ELIGIBLE for P{current_player} {current_phase} - checking WHY")
                 
     def _remove_unit_from_queue(self, unit_id: str):
         """Remove unit from active queue after it acts."""
         if unit_id in self.active_unit_queue:
             self.active_unit_queue.remove(unit_id)
+            
+        # AI_TURN.md: Discard charge roll at end of activation (regardless of success/failure)
+        self._cleanup_charge_roll(unit_id)
+        
+    def _cleanup_charge_roll(self, unit_id: str):
+        """AI_TURN.md: Clean up charge roll at end of unit activation."""
+        current_phase = self.base.get_current_phase()
+        if current_phase == "charge":
+            if "unit_charge_rolls" in self.base.game_state:
+                if unit_id in self.base.game_state["unit_charge_rolls"]:
+                    discarded_roll = self.base.game_state["unit_charge_rolls"].pop(unit_id)
+                    roll_value = discarded_roll.get("total", discarded_roll) if isinstance(discarded_roll, dict) else discarded_roll
         
     def _get_next_combat_unit(self, all_units: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Handle combat phase unit selection with sub-phases."""
@@ -309,22 +380,61 @@ class SequentialGameController:
             # Check if unit fled (moved while adjacent to enemy)
             if action_type == "move" and self._was_adjacent_before_move(unit):
                 self.base.state_actions['add_fled_unit'](unit["id"])
+                print(f"🏃 U{unit['id']} FLED")
             self.base.state_actions['add_moved_unit'](unit["id"])
+            
+            # Clear stored move start position after flee detection
+            if hasattr(self, '_current_move_start_pos'):
+                delattr(self, '_current_move_start_pos')
             
         elif current_phase == "shoot":
             self.base.state_actions['add_shot_unit'](unit["id"])
+            print(f"🎯 U{unit['id']} added to units_shot set")
             
         elif current_phase == "charge":
             self.base.state_actions['add_charged_unit'](unit["id"])
+            print(f"⚡ U{unit['id']} added to units_charged set")
             
         elif current_phase == "combat":
             self.base.state_actions['add_attacked_unit'](unit["id"])
+            print(f"⚔️ U{unit['id']} added to units_attacked set")
             
     def _was_adjacent_before_move(self, unit: Dict[str, Any]) -> bool:
         """Check if unit was adjacent to enemy before move (for flee detection)."""
-        # This would need to check unit's previous position
-        # For now, simplified implementation
-        return self._is_adjacent_to_enemy(unit)
+        # AI_TURN.md: Unit flees if it STARTS adjacent to enemy and ENDS not adjacent
+        # We need to check the unit's position BEFORE the move action was executed
+        
+        # Get the mirror action that was just executed to find the starting position
+        if not hasattr(self, '_current_move_start_pos'):
+            # No move start position stored - cannot determine flee status
+            return False
+        
+        start_col, start_row = self._current_move_start_pos
+        
+        # Check if unit was adjacent to any enemy at START position
+        all_units = self.base.get_units()
+        enemy_units = [u for u in all_units if u["player"] != unit["player"] and u["CUR_HP"] > 0]
+        
+        if "CC_RNG" not in unit:
+            raise KeyError(f"Unit {unit['id']} missing required CC_RNG field")
+        cc_range = unit["CC_RNG"]
+        
+        # Check adjacency at starting position
+        was_adjacent_at_start = any(
+            max(abs(start_col - enemy["col"]), abs(start_row - enemy["row"])) <= cc_range
+            for enemy in enemy_units
+        )
+        
+        # Check if unit is currently adjacent to any enemy (at END position)
+        is_adjacent_now = self._is_adjacent_to_enemy(unit)
+        
+        # AI_TURN.md: Flee = started adjacent AND ended not adjacent
+        fled = was_adjacent_at_start and not is_adjacent_now
+        
+        if fled:
+            print(f"🏃 U{unit['id']} FLED: was adjacent at ({start_col},{start_row}), now not adjacent at ({unit['col']},{unit['row']})")
+        
+        return fled
             
     def _is_unit_eligible_for_current_phase(self, unit: Dict[str, Any]) -> bool:
         """Check unit eligibility using exact AI_TURN.md rules with UPPERCASE validation."""
@@ -338,40 +448,106 @@ class SequentialGameController:
             return False
             
         # AI_GUIDE.md: Eligibility Rules (EXACT AI_TURN.md)
-        if phase == "move":
+        # COMBAT PHASE: Both players' units can be eligible, skip player check
+        if phase == "combat":
+            # Skip the current_player check for combat phase - will be handled in combat-specific logic below
+            pass
+        elif phase == "move":
             if "units_moved" not in self.base.game_state:
                 raise KeyError("game_state missing required 'units_moved' field")
-            return (unit["player"] == self.base.get_current_player() and
-                    unit["id"] not in self.base.game_state["units_moved"])
+            eligible = (unit["player"] == self.base.get_current_player() and
+                       unit["id"] not in self.base.game_state["units_moved"])
+            return eligible
                     
         elif phase == "shoot":
-            # AI_GUIDE.md: NOT fled, NOT adjacent to enemy, has RNG_NB > 0, has valid targets
+            # AI_TURN.md STRICT COMPLIANCE: Check each requirement individually with debug
+            current_player = self.base.get_current_player()
+            
+            # Requirement 1: Correct player
+            if unit["player"] != current_player:
+                print(f"🔫 U{unit['id']} shoot fail: wrong player P{unit['player']} != P{current_player}")
+                return False
+                
+            # Requirement 2: Has ranged weapons
             if "RNG_NB" not in unit:
                 raise KeyError(f"Unit {unit['id']} missing required RNG_NB field")
+            if unit["RNG_NB"] <= 0:
+                return False
+                
+            # Requirement 3: Not already shot
             if "units_shot" not in self.base.game_state:
                 raise KeyError("game_state missing required 'units_shot' field")
+            shot_set = self.base.game_state["units_shot"]
+            if unit["id"] in shot_set:
+                print(f"🔫 U{unit['id']} shoot fail: already shot (units_shot={shot_set})")
+                return False
+                
+            # Requirement 4: Not fled
+            if "units_fled" not in self.base.game_state:
+                raise KeyError("game_state missing required 'units_fled' field")
+            if unit["id"] in self.base.game_state["units_fled"]:
+                return False
+                
+            # Requirement 5: Not adjacent to enemy (in combat)
+            if self._is_adjacent_to_enemy(unit):
+                return False
+                
+            # Requirement 6: Has valid shooting targets
+            if not self._has_valid_shooting_targets(unit):
+                return False
+                
+            # All AI_TURN.md requirements met
+            return True
+                    
+        elif phase == "charge":
+            # AI_TURN.md: Charge phase validation with proper KeyError handling
+            unit_id = unit["id"]
+            current_player = self.base.get_current_player()
+            
+            # Check 1: Correct player
+            if unit["player"] != current_player:
+                return False
+                
+            # Check 2: Required tracking sets exist
+            if "units_charged" not in self.base.game_state:
+                raise KeyError("game_state missing required 'units_charged' field")
             if "units_fled" not in self.base.game_state:
                 raise KeyError("game_state missing required 'units_fled' field")
                 
-            return (unit["player"] == self.base.get_current_player() and
-                    unit["id"] not in self.base.game_state["units_shot"] and
-                    unit["id"] not in self.base.game_state["units_fled"] and
-                    unit["RNG_NB"] > 0 and
-                    not self._is_adjacent_to_enemy(unit) and
-                    self._has_valid_shooting_targets(unit))
-                    
-        elif phase == "charge":
-            # AI_GUIDE.md: NOT fled, NOT adjacent to enemy, has enemies within charge range
-            return (unit["player"] == self.base.get_current_player() and
-                    unit["id"] not in self.base.game_state.get("units_charged", set()) and
-                    unit["id"] not in self.base.game_state.get("units_fled", set()) and
-                    not self._is_adjacent_to_enemy(unit) and
-                    self._has_enemies_within_charge_range(unit))
+            # Check 3: Already charged
+            charged_set = self.base.game_state["units_charged"]
+            if unit_id in charged_set:
+                print(f"⚡ U{unit_id} charge fail: already charged this phase (units_charged={charged_set})")
+                return False
+                
+            # Check 4: Fled units
+            if unit_id in self.base.game_state["units_fled"]:
+                return False
+                
+            # Check 5: Adjacent to enemy
+            is_adjacent = self._is_adjacent_to_enemy(unit)
+            if is_adjacent:
+                return False
+                
+            # Check 6: Enemies within charge range
+            has_charge_targets = self._has_enemies_within_charge_range(unit)
+            if not has_charge_targets:
+                return False
+            return True
                     
         elif phase == "combat":
-            # AI_GUIDE.md: unit.id NOT in units_attacked AND has adjacent enemies
-            return (unit["id"] not in self.base.game_state.get("units_attacked", set()) and
-                    self._has_adjacent_enemies(unit))
+            # AI_TURN.md: Combat phase allows BOTH players - no current_player check needed
+            # But still need CUR_HP check (done at function start) and tracking validation
+            if "units_attacked" not in self.base.game_state:
+                raise KeyError("game_state missing required 'units_attacked' field")
+            attacked_set = self.base.game_state["units_attacked"]
+            if unit["id"] in attacked_set:
+                print(f"⚔️ U{unit['id']} combat fail: already attacked this phase (units_attacked={attacked_set})")
+                return False
+            if not self._has_adjacent_enemies(unit):
+                print(f"⚔️ U{unit['id']} combat fail: no adjacent enemies")
+                return False
+            return True
                     
         return False
         
@@ -403,14 +579,106 @@ class SequentialGameController:
         return len(valid_targets) > 0
         
     def _has_enemies_within_charge_range(self, unit: Dict[str, Any]) -> bool:
-        """Check if unit has enemies within charge range."""
-        if not hasattr(self.base, 'game_actions'):
-            raise RuntimeError("Base controller missing required game_actions")
-        if "get_valid_charge_targets" not in self.base.game_actions:
-            raise KeyError("game_actions missing required 'get_valid_charge_targets' method")
+        """Check if unit has enemies within charge range with precise distance measurements."""
+        try:
+            from shared.gameMechanics import get_charge_max_distance
+            from shared.gameRules import get_hex_distance
+            charge_max_distance = get_charge_max_distance()
+        except Exception as e:
+            raise RuntimeError(f"Failed to load charge mechanics: {e}")
             
-        valid_targets = self.base.game_actions["get_valid_charge_targets"](unit["id"])
-        return len(valid_targets) > 0
+        all_units = self.base.get_units()
+        enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("CUR_HP") > 0]
+        
+        # Check if unit has a charge roll - determines which distance check to use
+        charge_data = self.base.game_state.get("unit_charge_rolls", {}).get(unit["id"])
+        
+        if not charge_data:
+            # PRE-ROLL ELIGIBILITY: Check if ANY enemies within charge_max_distance (13)
+            # FROM: unit position TO: enemy position (direct hex distance)
+            
+            for enemy in enemy_units:
+                # Use proper hex distance calculation (cube coordinates)
+                direct_distance = get_hex_distance(unit, enemy)
+                
+                # Must not be adjacent already (distance > 1) and within max range
+                if 1 < direct_distance <= charge_max_distance:
+                    return True
+            return False
+            
+        else:
+            # POST-ROLL CAPABILITY: Check if can reach adjacent hex to any enemy
+            # FROM: unit position TO: empty hex adjacent to enemy (pathfinding distance)
+            if isinstance(charge_data, dict):
+                charge_roll = charge_data.get("total", charge_data.get("charge_roll"))
+            else:
+                charge_roll = charge_data
+            
+            for enemy in enemy_units:
+                # First check: enemy must be within max range for eligibility
+                direct_distance = get_hex_distance(unit, enemy)
+                if direct_distance > charge_max_distance:
+                    continue
+                    
+                # Second check: can we reach an adjacent hex to this enemy?
+                # Adjacent hex is at distance (enemy_distance - 1) via pathfinding
+                adjacent_hex_distance = max(1, direct_distance - 1)
+                
+                if adjacent_hex_distance <= charge_roll:
+                    return True
+            return False
+    
+    def _get_valid_charge_destinations(self, unit: Dict[str, Any], charge_roll: int) -> List[Dict[str, int]]:
+        """AI_TURN.md: Build valid_charge_destinations pool using BFS pathfinding."""
+        from shared.gameRules import get_hex_distance
+        
+        valid_destinations = []
+        all_units = self.base.get_units()
+        enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("CUR_HP") > 0]
+        
+        # BFS to find all reachable hexes within charge_roll distance
+        visited = set()
+        queue = [(unit["col"], unit["row"], 0)]
+        
+        while queue:
+            col, row, distance = queue.pop(0)
+            hex_key = f"{col},{row}"
+            
+            if hex_key in visited or distance > charge_roll:
+                continue
+                
+            visited.add(hex_key)
+            
+            # Check if this position is adjacent to any enemy within charge range
+            if distance > 0:  # Don't include starting position
+                for enemy in enemy_units:
+                    # Must be within original charge eligibility range
+                    enemy_distance = get_hex_distance(unit, enemy)
+                    from shared.gameMechanics import get_charge_max_distance
+                    if enemy_distance > get_charge_max_distance():
+                        continue
+                            
+                    # Check if current position is adjacent to this enemy
+                    adj_distance = max(abs(col - enemy["col"]), abs(row - enemy["row"]))
+                    if adj_distance == 1:
+                        # Check if position is not occupied by another unit
+                        occupied = any(u["col"] == col and u["row"] == row and u["id"] != unit["id"] 
+                                     for u in all_units if u.get("CUR_HP") > 0)
+                        if not occupied:
+                            valid_destinations.append({"col": col, "row": row})
+                            break
+            
+            # Add neighbors for further exploration
+            if distance < charge_roll:
+                # Use proper hex neighbor calculation instead of hardcoded offsets
+                from shared.gameMechanics import get_cube_neighbors
+                neighbors = get_cube_neighbors(col, row)
+                for ncol, nrow in neighbors:
+                    nkey = f"{ncol},{nrow}"
+                    if nkey not in visited:
+                        queue.append((ncol, nrow, distance + 1))
+        
+        return valid_destinations
         
     def _get_unit_by_id(self, unit_id: str) -> Optional[Dict[str, Any]]:
         """Get unit by ID from current game state."""
@@ -474,6 +742,31 @@ class SequentialGameController:
                     "save_result": "SAVE" if shot_data["save_success"] else "FAIL"
                 })
             
+            # Capture combat dice results for logging - only when valid data available
+            elif success and mirror_action.get("type") == "combat":
+                if (hasattr(self.base, '_last_combat_result') and self.base._last_combat_result and
+                    isinstance(self.base._last_combat_result, dict) and 
+                    "attacks" in self.base._last_combat_result and 
+                    len(self.base._last_combat_result["attacks"]) > 0):
+                    
+                    attack_data = self.base._last_combat_result["attacks"][0]
+                    # Only add dice data if all required fields are present and valid
+                    required_fields = ["hit_roll", "wound_roll", "save_roll", "damage", "hit_target", "wound_target", "save_target", "hit", "wound", "save_success"]
+                    if all(field in attack_data for field in required_fields):
+                        mirror_action.update({
+                            "hit_roll": attack_data["hit_roll"],
+                            "wound_roll": attack_data["wound_roll"],
+                            "save_roll": attack_data["save_roll"],
+                            "damage_dealt": attack_data["damage"],
+                            "hit_target": attack_data["hit_target"],
+                            "wound_target": attack_data["wound_target"],
+                            "save_target": attack_data["save_target"],
+                            "hit_result": "HIT" if attack_data["hit"] else "MISS",
+                            "wound_result": "WOUND" if attack_data["wound"] else "FAIL",
+                            "save_result": "SAVE" if attack_data["save_success"] else "FAIL"
+                        })
+                # No else clause - let step logger handle missing dice data with its built-in "N/A" system
+            
             return success, mirror_action
         except Exception as e:
             # Action failed - still return the attempted action for logging
@@ -505,6 +798,9 @@ class SequentialGameController:
             new_col = unit["col"] + col_diff
             new_row = unit["row"] + row_diff
             
+            # Store starting position for flee detection
+            self._current_move_start_pos = (unit["col"], unit["row"])
+            
             return {
                 "type": "move",
                 "col": new_col,
@@ -534,17 +830,35 @@ class SequentialGameController:
             if phase != "charge":
                 return {"type": "wait"}
                 
-            if not hasattr(self.base, 'game_actions'):
-                raise RuntimeError("Base controller missing required game_actions")
-            if "get_valid_charge_targets" not in self.base.game_actions:
-                raise KeyError("game_actions missing required 'get_valid_charge_targets' method")
+            # AI_TURN.md: Must validate against unit's specific 2d6 roll
+            charge_data = self.base.game_state.get("unit_charge_rolls", {}).get(unit["id"])
+            if not charge_data:
+                # No charge roll available - should not happen for eligible units
+                return {"type": "wait"}
                 
-            valid_targets = self.base.game_actions["get_valid_charge_targets"](unit["id"])
-            if valid_targets:
-                return {
-                    "type": "charge",
-                    "target_id": valid_targets[0]
-                }
+            charge_roll = charge_data.get("total") if isinstance(charge_data, dict) else charge_data
+            if charge_roll <= 0:
+                return {"type": "wait"}
+                
+            # AI_TURN.md: Build valid_charge_destinations pool using pathfinding with roll distance
+            valid_destinations = self._get_valid_charge_destinations(unit, charge_roll)
+            if valid_destinations:
+                # Find enemy target adjacent to the first valid destination
+                all_units = self.base.get_units()
+                enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("CUR_HP") > 0]
+                
+                destination = valid_destinations[0]
+                for enemy in enemy_units:
+                    # Check if destination is adjacent to this enemy
+                    dest_distance = max(abs(destination["col"] - enemy["col"]), abs(destination["row"] - enemy["row"]))
+                    if dest_distance == 1:  # Adjacent
+                        return {
+                            "type": "charge",
+                            "target_id": enemy["id"],
+                            "destination_col": destination["col"],
+                            "destination_row": destination["row"]
+                        }
+                        
             return {"type": "wait"}
             
         # Combat action (6)
@@ -571,8 +885,16 @@ class SequentialGameController:
             
     def _is_real_action(self, mirror_action: Dict[str, Any]) -> bool:
         """Check if action should increment episode steps per AI_TURN.md."""
-        # AI_TURN.md: Steps increment when unit ATTEMPTS action (move/shoot/charge/combat/wait)
+        # AI_TURN.md: Steps increment when unit ATTEMPTS action, NOT for auto-skip scenarios
         action_type = mirror_action.get("type", "wait")
+        
+        # Auto-skip scenarios (no step increment):
+        if action_type == "auto_skip":
+            return False
+        if action_type == "wait" and mirror_action.get("reason") == "no_targets":
+            return False
+            
+        # Real action attempts (step increment):
         return action_type in ["move", "shoot", "charge", "combat", "wait"]
         
 
@@ -580,9 +902,17 @@ class SequentialGameController:
     def _handle_no_active_unit(self, action: int) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
         """Handle case when no active unit is available."""
         current_phase = self.base.get_current_phase()
+        current_player = self.base.get_current_player()
         
-        # Check if phase is complete
-        if self._is_phase_complete():
+        print(f"🔄 No active unit for P{current_player} {current_phase} - checking phase completion")
+        
+        # AI_TURN.md: Phase is complete when no more eligible units remain
+        is_complete = self._is_phase_complete()
+        print(f"🔄 Phase complete: {is_complete}")
+        
+        if is_complete:            
+            print(f"🔄 ADVANCING from P{current_player} {current_phase}")
+            
             # Log phase transition if step logger connected
             if self.step_logger and self.step_logger.enabled:
                 old_phase = self.base.get_current_phase()
@@ -591,10 +921,12 @@ class SequentialGameController:
             # Advance to next phase
             self._advance_phase()
             
+            new_phase = self.base.get_current_phase()
+            new_player = self.base.get_current_player()
+            print(f"🔄 ADVANCED to P{new_player} {new_phase}")
+            
             # Log the transition (AI_TURN.md compliance - no step increment)
             if self.step_logger and self.step_logger.enabled:
-                new_phase = self.base.get_current_phase()
-                new_player = self.base.get_current_player()
                 current_turn = self.base.get_current_turn()
                 # Enhanced phase logging with turn number
                 self.step_logger.log_phase_transition(old_phase, new_phase, new_player, current_turn)
@@ -605,8 +937,9 @@ class SequentialGameController:
             else:
                 return self._build_gym_response(action, True, None, {"type": "phase_advance"})
         else:
-            # Phase not complete but no active unit - should not happen
-            raise RuntimeError(f"No active unit in phase '{current_phase}' but phase not complete")
+            # AI_TURN.md VIOLATION: This should never happen if eligibility rules are correct
+            print(f"💥 CRITICAL ERROR: No active unit but phase not complete for P{current_player} {current_phase}")
+            raise RuntimeError(f"AI_TURN.md violation: No active unit in phase '{current_phase}' but phase not complete")
             
     def _is_phase_complete(self) -> bool:
         """Check if current phase is complete using AI_TURN.md eligibility rules."""
@@ -628,13 +961,31 @@ class SequentialGameController:
             try:
                 if current_phase == "move":
                     self.base.phase_transitions['transition_to_shoot']()
+                    # AI_TURN.md: Verify units_shot set is reset (base controller should handle this)
+                    if len(self.base.game_state.get("units_shot", [])) > 0:
+                        print(f"🔄 FORCED RESET: units_shot was not properly reset by base controller")
+                        self.base.state_actions['reset_shot_units']()
                 elif current_phase == "shoot":
                     self.base.phase_transitions['transition_to_charge']()
+                    # AI_TURN.md: Verify units_charged set is reset (base controller should handle this)
+                    if len(self.base.game_state.get("units_charged", [])) > 0:
+                        print(f"🔄 FORCED RESET: units_charged was not properly reset by base controller")
+                        self.base.state_actions['reset_charged_units']()
                 elif current_phase == "charge":
                     self.base.phase_transitions['transition_to_combat']()
+                    # AI_TURN.md: Verify units_attacked set is reset (base controller should handle this)
+                    if len(self.base.game_state.get("units_attacked", [])) > 0:
+                        print(f"🔄 FORCED RESET: units_attacked was not properly reset by base controller")
+                        self.base.state_actions['reset_attacked_units']()
                 elif current_phase == "combat":
                     # AI_TURN.md: After combat, always call end_turn for proper progression
                     self.base.phase_transitions['end_turn']()  # Handles P0→P1 and P1→P0(new turn)
+                    # AI_TURN.md: After turn transition, verify units_moved is reset for new player
+                    new_phase = self.base.get_current_phase()
+                    if new_phase == "move":
+                        if len(self.base.game_state.get("units_moved", [])) > 0:
+                            print(f"🔄 FORCED RESET: units_moved was not properly reset by base controller")
+                            self.base.state_actions['reset_moved_units']()
                         
             except Exception as e:
                 raise RuntimeError(f"Phase transition failed from '{current_phase}': {e}")
@@ -653,8 +1004,17 @@ class SequentialGameController:
             else:
                 raise RuntimeError("No observation method available - gym_env or base controller must provide _get_obs()")
                 
-            # Calculate reward
-            reward = 0.1 if success else -0.1
+            # Calculate reward - handle case where acting_unit is None (phase transitions)
+            if acting_unit is None:
+                # Phase transition - MUST get penalty reward from gym_env (no fallbacks)
+                if hasattr(self.gym_env, '_get_small_penalty_reward'):
+                    reward = self.gym_env._get_small_penalty_reward()
+                else:
+                    raise RuntimeError("Cannot calculate phase transition reward - gym_env missing _get_small_penalty_reward method")
+            elif hasattr(self, 'gym_env') and hasattr(self.gym_env, '_calculate_reward'):
+                reward = self.gym_env._calculate_reward(acting_unit, mirror_action, success)
+            else:
+                raise RuntimeError("Cannot access reward calculation - gym_env missing _calculate_reward method")
             
             # Check termination
             if not terminated:
@@ -692,8 +1052,7 @@ class SequentialGameController:
         except Exception as e:
             raise RuntimeError(f"Failed to build gym response: {e}")
 
-
-# Compatibility functions for existing integrations
-def create_sequential_game_controller(config, quiet=False):
-    """Factory function to create sequential game controller."""
-    return SequentialGameController(config, quiet)
+    # Compatibility functions for existing integrations
+    def create_sequential_game_controller(config, quiet=False):
+        """Factory function to create sequential game controller."""
+        return SequentialGameController(config, quiet)

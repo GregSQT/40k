@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-ai/gym40k.py - Complete replacement for gym40k.py using Python mirror architecture
-EXACT Python mirror of PvP frontend game logic with Gymnasium interface preservation
+ai/gym40k.py - Complete replacement for gym40k.py
 """
 
 import gymnasium as gym
@@ -32,11 +31,6 @@ from ai.unit_registry import UnitRegistry
 from config_loader import get_config_loader
 
 class W40KEnv(gym.Env):
-    """
-    Complete replacement for gym40k.py using Python mirror architecture.
-    Maintains EXACT Gymnasium interface while using Python mirrors for ALL game logic.
-    """
-
     def __init__(self, rewards_config, training_config_name, 
                  controlled_agent, active_agents, scenario_file, 
                  unit_registry, quiet):
@@ -85,7 +79,6 @@ class W40KEnv(gym.Env):
         self.game_over = False
         self.winner = None
         
-        # CRITICAL: Initialize mirror controller BEFORE other components try to access controller state
         self._initialize_mirror_controller(scenario_file, training_config_name)
         
         # Explicit unit tracking for compatibility
@@ -287,10 +280,7 @@ class W40KEnv(gym.Env):
         return enhanced_units
 
     def reset(self, seed=None, options=None):
-        """Reset environment using mirror controller."""
         super().reset(seed=seed)
-        
-        # Reset mirror controller - this creates NEW objects!
         self.controller.reset_game()
         
         # Initialize new episode
@@ -347,7 +337,6 @@ class W40KEnv(gym.Env):
         return self._get_obs(), self._get_info()
 
     def step(self, action):
-        """Execute action using mirror controller with AI_GAME.md compliance."""
         # AI_GAME.md COMPLIANT: Action is just action type (0-7), no unit selection
         action_type = int(action) % 8  # Ensure action is in valid range
         
@@ -910,19 +899,19 @@ def register_environment():
             id='W40K-Phases-v0',
             entry_point='ai.gym40k_mirror:W40KEnv',
         )
-        print("✅ W40K Phase-based environment (mirror) registered with gymnasium")
+        print("✅ W40K Phase-based environment registered with gymnasium")
     except Exception as e:
-        print(f"⚠️  Failed to register phase-based mirror environment: {e}")
+        print(f"⚠️  Failed to register phase-based environment: {e}")
 
 if __name__ == "__main__":
     # Test environment creation and basic functionality
-    print("🎮 Testing W40K Phase-Based Mirror Environment")
+    print("🎮 Testing W40K Phase-Based Environment")
     print("=" * 50)
     
     try:
         # Create environment
         env = W40KEnv()
-        print("✅ Phase-based mirror environment created successfully")
+        print("✅ Phase-based environment created successfully")
         
         # Test reset
         obs, info = env.reset()
@@ -932,7 +921,7 @@ if __name__ == "__main__":
         print(f"   Eligible units: {info['eligible_units']}")
         
         # Test a few actions
-        print("\n🎯 Testing mirror-based actions...")
+        print("\n🎯 Testing actions...")
         for action_count in range(5):
             action = env.action_space.sample()
             obs, reward, done, truncated, info = env.step(action)
@@ -943,7 +932,7 @@ if __name__ == "__main__":
                 break
         
         env.close()
-        print("🎉 All mirror-based tests passed!")
+        print("🎉 All tests passed!")
         
     except Exception as e:
         print(f"❌ Test failed: {e}")
