@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-ai/gym40k.py - Complete replacement for gym40k.py
+ai/gym40k.py - W40K Gymnasium Environment
+AI_TURN.md compliant environment with sequential activation
 """
 
 import gymnasium as gym
@@ -63,9 +64,6 @@ class W40KEnv(gym.Env):
         obs_size = self.max_units * 11 + 4
         self.observation_space = spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         
-        # Mirror controller already initialized in __init__ to ensure training_state is available
-        # (moved to prevent NoneType errors in external components)
-        
         # Replay tracking - integrate with existing GameReplayLogger system
         self.replay_data = []
         self.save_replay = True
@@ -79,7 +77,7 @@ class W40KEnv(gym.Env):
         self.game_over = False
         self.winner = None
         
-        self._initialize_mirror_controller(scenario_file, training_config_name)
+        self._initialize_sequential_controller(scenario_file, training_config_name)
         
         # Explicit unit tracking for compatibility
         self._last_acting_unit = None
@@ -143,8 +141,8 @@ class W40KEnv(gym.Env):
             except Exception:
                 pass
 
-    def _initialize_mirror_controller(self, scenario_file, training_config_name):
-        """Initialize TrainingGameController with scenario data."""
+    def _initialize_sequential_controller(self, scenario_file, training_config_name):
+        """Initialize SequentialGameController with scenario data."""
         # Load initial units from scenario
         initial_units = self._load_scenario_units(scenario_file)
         

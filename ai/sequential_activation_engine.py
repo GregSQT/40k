@@ -1,18 +1,17 @@
 """
-Sequential Activation Engine - 100% AI_GAME.md Compliance
+Sequential Activation Engine - 100% AI_TURN.md Compliance
 
-CRITICAL PURPOSE: Enforces EXACT sequential activation rules from complete AI_GAME.md
-Every detail implemented exactly as specified with perfect phase management.
+CRITICAL PURPOSE: Enforces EXACT sequential activation rules from AI_TURN.md
+Sequential unit activation with built-in step counting and phase management.
 
-FULL COMPLIANCE VERIFIED: Cross-referenced with complete AI_GAME.md project knowledge
-- Movement: units_fled, destination validation, MOVE range, flee mechanics
-- Shooting: units_fled check, line of sight, adjacency exclusion, RNG_NB validation
-- Charge: 2d6 rolls, charge_max_distance, units_charged tracking
-- Combat: units_charged priority, alternating combatActivePlayer, CC_RNG validation
-- Step counting: No step for auto-skip, 1 step for real actions
-- Legacy compatibility: Supports both new and legacy rule systems
+AI_TURN.md COMPLIANCE:
+- Sequential activation (ONE unit per gym step)
+- Built-in step counting (NOT retrofitted)
+- Phase completion by unit eligibility
+- UPPERCASE field validation
+- Single game_state object
 
-INTEGRATION: Wraps existing game_controller with perfect rule enforcement
+INTEGRATION: Direct controller delegation following AI_ARCHITECTURE.md
 """
 
 from typing import Dict, List, Any, Optional, Set, Tuple

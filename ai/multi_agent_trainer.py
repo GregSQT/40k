@@ -159,17 +159,13 @@ class SelectiveEpisodeTracker:
         else:
             return obj
 
-# Import training components
-# Import standard DQN - action masking implemented manually in gym environment
+# Import training components  
 from stable_baselines3 import DQN
 MASKABLE_DQN_AVAILABLE = False
 
-from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
 from stable_baselines3.common.monitor import Monitor
 import gymnasium as gym
-
-# Removed - using GameReplayIntegration instead
 
 @dataclass
 class TrainingSession:
