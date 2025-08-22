@@ -64,8 +64,8 @@ class EpisodeTerminationCallback(BaseCallback):
     def _on_step(self) -> bool:
         self.step_count += 1
         
-        # Debug: Print every 10 steps to see if callback is working
-        if self.step_count % 10 == 0:
+        # Debug: Print every 100 steps to see if callback is working
+        if self.step_count % 100 == 0:
             print(f"🔍 Callback alive: Step {self.step_count}")
         
         # Try multiple ways to detect episode end for DummyVecEnv
@@ -194,17 +194,26 @@ class StepLogger:
     
     def _format_replay_style_message(self, unit_id, action_type, details):
         """Format messages with detailed combat info - enhanced replay format"""
+        # Extract unit coordinates from action_details for consistent format
+        unit_coords = ""
+        if details and "unit_with_coords" in details:
+            # Extract coordinates from format "3(12, 7)" -> " (12, 7)"
+            coords_part = details["unit_with_coords"]
+            if "(" in coords_part:
+                coord_start = coords_part.find("(")
+                unit_coords = f" {coords_part[coord_start:]}"
+        
         if action_type == "move" and details:
             # Extract position info for move message
             if "start_pos" in details and "end_pos" in details:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
-                return f"Unit {unit_id} MOVED from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+                return f"Unit {unit_id}{unit_coords} MOVED from ({start_col}, {start_row}) to ({end_col}, {end_row})"
             elif "col" in details and "row" in details:
                 # Use destination coordinates from mirror_action
-                return f"Unit {unit_id} MOVED to ({details['col']}, {details['row']})"
+                return f"Unit {unit_id}{unit_coords} MOVED to ({details['col']}, {details['row']})"
             else:
-                raise KeyError("Charge action missing required target_id")
+                raise KeyError("Move action missing required position data")
                 
         elif action_type == "shoot":
             if "target_id" not in details:
@@ -243,7 +252,7 @@ class StepLogger:
             wound_target = details["wound_target"]
             save_target = details["save_target"]
             
-            base_msg = f"Unit {unit_id} SHOT at unit {target_id}"
+            base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}"
             detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
             return base_msg + detail_msg
             
@@ -981,7 +990,11 @@ def main():
             success = train_model(model, training_config, callbacks, model_path)
             
             if success:
-                test_trained_model(model, args.test_episodes, args.training_config)
+                # Only test if episodes > 0
+                if args.test_episodes > 0:
+                    test_trained_model(model, args.test_episodes, args.training_config)
+                else:
+                    print("📊 Skipping testing (--test-episodes 0)")
                 return 0
             else:
                 return 1
@@ -1046,21 +1059,22 @@ def main():
         success = train_model(model, training_config, callbacks, model_path)
         
         if success:
-            # Test the trained model - require explicit episode count
-            if args.test_episodes <= 0:
-                raise ValueError("--test-episodes must be positive - no default test episodes allowed")
-            test_trained_model(model, args.test_episodes, args.training_config)
-            
-            # Save training replay with our unified system
-            if hasattr(env, 'replay_logger'):
-                from ai.game_replay_logger import GameReplayIntegration
-                final_reward = 0.0  # Average reward from testing
-                replay_file = GameReplayIntegration.save_episode_replay(
-                    env, 
-                    episode_reward=final_reward, 
-                    output_dir="ai/event_log", 
-                    is_best=False
-                )
+            # Only test if episodes > 0
+            if args.test_episodes > 0:
+                test_trained_model(model, args.test_episodes, args.training_config)
+                
+                # Save training replay with our unified system
+                if hasattr(env, 'replay_logger'):
+                    from ai.game_replay_logger import GameReplayIntegration
+                    final_reward = 0.0  # Average reward from testing
+                    replay_file = GameReplayIntegration.save_episode_replay(
+                        env, 
+                        episode_reward=final_reward, 
+                        output_dir="ai/event_log", 
+                        is_best=False
+                    )
+            else:
+                print("📊 Skipping testing (--test-episodes 0)")
             
             return 0
         else:

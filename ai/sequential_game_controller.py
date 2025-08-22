@@ -294,7 +294,6 @@ class SequentialGameController:
             self.base.state_actions['reset_attacked_units']()
             self.base.state_actions['reset_fled_units']()
             self._move_phase_reset_done = True
-            print(f"🔄 AI_TURN.md: ALL tracking sets reset at movement phase start")
         
         all_units = self.base.get_units()
         # Clear existing queue
@@ -363,13 +362,6 @@ class SequentialGameController:
         
         # AI_TURN.md: Charging units first, then alternating
         self.active_unit_queue = charging_units + alternating_units
-        
-        if len(charging_units) > 0:
-            print(f"🔄 COMBAT SUB-PHASE 1: {len(charging_units)} charging units for P{current_player}")
-        if len(alternating_units) > 0:
-            print(f"🔄 COMBAT SUB-PHASE 2: {len(alternating_units)} alternating units")
-        if len(self.active_unit_queue) == 0:
-            print(f"🔄 COMBAT: No eligible units for either sub-phase")
                 
     def _remove_unit_from_queue(self, unit_id: str):
         """Remove unit from active queue after it acts."""
