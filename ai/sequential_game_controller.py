@@ -156,10 +156,23 @@ class SequentialGameController:
             # Use mirror_action which now contains dice data (if captured successfully)
             action_details = dict(mirror_action)
             action_type = mirror_action.get("type", "wait")
+            
+            # DEBUG: Verify step logger receives correct action type
+            print(f"📊 STEP LOGGER: Unit {active_unit['id']} → Action type: {action_type}, Success: {success}")
+            
+            # CRITICAL FIX: Force step logger to log ALL combat actions
+            if action_type == "combat":
+                print(f"🚨 FORCING COMBAT LOG: Unit {active_unit['id']} attacks target {mirror_action.get('target_id')}")
            
             # Enhanced unit references with coordinates for ALL action types
             # Acting unit always includes coordinates
             action_details["unit_with_coords"] = f"{active_unit['id']}({active_unit['col']}, {active_unit['row']})"
+            
+            # CRITICAL: Force log combat actions regardless of dice capture
+            if action_type == "combat":
+                action_details["forced_combat_log"] = True
+                action_details["combat_success"] = success
+                action_details["base_controller_success"] = success
             
             # Add position information for move actions
             if action_type == "move":
@@ -190,11 +203,11 @@ class SequentialGameController:
                         # Override target_id for step logger
                         action_details["target_id"] = f"{target_unit['id']}({target_unit['col']}, {target_unit['row']})"
            
-            # Special handling for shooting actions with multiple shots
+            # Special handling for shooting actions - log individual shots AND summary
             if action_type == "shoot" and hasattr(self.base, '_last_shoot_result') and self.base._last_shoot_result:
                 shoot_result = self.base._last_shoot_result
-                if "shots" in shoot_result and len(shoot_result["shots"]) > 1:
-                    # Log each shot individually
+                if "shots" in shoot_result and len(shoot_result["shots"]) >= 1:
+                    # Log each shot individually (including single shots)
                     for shot_idx, shot_data in enumerate(shoot_result["shots"]):
                         shot_details = dict(action_details)
                         shot_details.update({
@@ -246,6 +259,7 @@ class SequentialGameController:
                 # Don't return early - need to continue to gym response
             else:
                 # Normal single action logging (non-shooting or single shot)
+                print(f"🔥 LOGGING ACTION: {action_type} for Unit {active_unit['id']} with success={success}")
                 self.step_logger.log_action(
                     unit_id=active_unit["id"],
                     action_type=action_type,
@@ -256,6 +270,7 @@ class SequentialGameController:
                     action_details=action_details,
                     turn_number=current_turn  # Add turn number
                 )
+                print(f"✅ LOG COMPLETED: {action_type} for Unit {active_unit['id']}")
         
         # 6. Return gym response (AI_TURN.md: exact step 6)
         return self._build_gym_response(action, success, active_unit, mirror_action)
@@ -671,6 +686,14 @@ class SequentialGameController:
         all_units = self.base.get_units()
         enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("CUR_HP") > 0]
         
+        # CRITICAL: Get wall hexes for pathfinding validation
+        if not hasattr(self.base, 'board_config'):
+            raise RuntimeError("Base controller missing board_config")
+        if "wall_hexes" not in self.base.board_config:
+            raise KeyError("board_config missing required 'wall_hexes' field")
+        
+        wall_hexes = set((tuple(hex_coord) for hex_coord in self.base.board_config["wall_hexes"]))
+        
         # BFS to find all reachable hexes within charge_roll distance
         visited = set()
         queue = [(unit["col"], unit["row"], 0)]
@@ -680,6 +703,10 @@ class SequentialGameController:
             hex_key = f"{col},{row}"
             
             if hex_key in visited or distance > charge_roll:
+                continue
+                
+            # CRITICAL: Skip wall hexes in pathfinding
+            if (col, row) in wall_hexes:
                 continue
                 
             visited.add(hex_key)
@@ -696,10 +723,10 @@ class SequentialGameController:
                     # Check if current position is adjacent to this enemy
                     adj_distance = max(abs(col - enemy["col"]), abs(row - enemy["row"]))
                     if adj_distance == 1:
-                        # Check if position is not occupied by another unit
+                        # Check if position is not occupied by another unit AND not a wall
                         occupied = any(u["col"] == col and u["row"] == row and u["id"] != unit["id"] 
                                      for u in all_units if u.get("CUR_HP") > 0)
-                        if not occupied:
+                        if not occupied and (col, row) not in wall_hexes:
                             valid_destinations.append({"col": col, "row": row})
                             break
             
@@ -710,10 +737,28 @@ class SequentialGameController:
                 neighbors = get_cube_neighbors(col, row)
                 for ncol, nrow in neighbors:
                     nkey = f"{ncol},{nrow}"
-                    if nkey not in visited:
+                    # CRITICAL: Don't explore wall hexes
+                    if nkey not in visited and (ncol, nrow) not in wall_hexes:
                         queue.append((ncol, nrow, distance + 1))
         
         return valid_destinations
+        
+    def _get_adjacent_enemies(self, unit: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Get list of adjacent enemy units within CC_RNG."""
+        all_units = self.base.get_units()
+        adjacent_enemies = []
+        
+        if "CC_RNG" not in unit:
+            raise KeyError(f"Unit {unit['id']} missing required CC_RNG field")
+        cc_range = unit["CC_RNG"]
+        
+        for enemy in all_units:
+            if (enemy["player"] != unit["player"] and 
+                enemy["CUR_HP"] > 0 and
+                max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"])) <= cc_range):
+                adjacent_enemies.append(enemy)
+                
+        return adjacent_enemies
         
     def _get_unit_by_id(self, unit_id: str) -> Optional[Dict[str, Any]]:
         """Get unit by ID from current game state."""
@@ -741,7 +786,10 @@ class SequentialGameController:
             
         # Execute action through base controller
         try:
+            # DEBUG: Log exactly what we're sending to base controller
+            print(f"🔥 SENDING TO BASE: Unit {unit['id']} → {mirror_action}")
             success = self.base.execute_action(unit["id"], mirror_action)
+            print(f"🔥 BASE RETURNED: Success = {success}")
             
             # Capture detailed action results for logging - STRICT VALIDATION ONLY
             if success and mirror_action.get("type") == "shoot":
@@ -817,6 +865,11 @@ class SequentialGameController:
             
         action_type = action % 8  # Ensure valid range
         
+        # DEBUG: Log action selection in combat phase
+        if phase == "combat":
+            has_adjacent = self._has_adjacent_enemies(unit)
+            print(f"🎯 ACTION DEBUG: Unit {unit['id']} in {phase} - Raw action: {action}, Action type: {action_type}, Adjacent enemies: {has_adjacent}")
+        
         # Movement actions (0-3)
         if 0 <= action_type <= 3:
             if phase != "move":
@@ -832,6 +885,16 @@ class SequentialGameController:
             col_diff, row_diff = movements[action_type]
             new_col = unit["col"] + col_diff
             new_row = unit["row"] + row_diff
+            
+            # CRITICAL: Add wall hex validation
+            if not hasattr(self.base, 'board_config'):
+                raise RuntimeError("Base controller missing board_config")
+            if "wall_hexes" not in self.base.board_config:
+                raise KeyError("board_config missing required 'wall_hexes' field")
+            
+            wall_hexes = set((tuple(hex_coord) for hex_coord in self.base.board_config["wall_hexes"]))
+            if (new_col, new_row) in wall_hexes:
+                return {"type": "wait"}  # Cannot move to wall hex
             
             # Store starting position for flee detection
             self._current_move_start_pos = (unit["col"], unit["row"])
@@ -901,17 +964,37 @@ class SequentialGameController:
             if phase != "combat":
                 return {"type": "wait"}
                 
+            # DEBUG: Check our own adjacency logic
+            has_adjacent = self._has_adjacent_enemies(unit)
+            print(f"🔍 COMBAT DEBUG - Unit {unit['id']} at ({unit['col']}, {unit['row']})")
+            print(f"🔍 Our adjacency check: {has_adjacent}")
+            print(f"🔍 CC_RNG: {unit.get('CC_RNG', 'MISSING')}")
+            
             if not hasattr(self.base, 'game_actions'):
                 raise RuntimeError("Base controller missing required game_actions")
             if "get_valid_combat_targets" not in self.base.game_actions:
                 raise KeyError("game_actions missing required 'get_valid_combat_targets' method")
                 
             valid_targets = self.base.game_actions["get_valid_combat_targets"](unit["id"])
+            print(f"🔍 Base controller valid targets: {valid_targets}")
+            
             if valid_targets:
                 return {
                     "type": "combat",
                     "target_id": valid_targets[0]
                 }
+            
+            # FALLBACK: If our logic says adjacent but base controller disagrees, use our logic
+            if has_adjacent:
+                print(f"🔍 FALLBACK: Using our adjacency logic - finding target manually")
+                adjacent_enemies = self._get_adjacent_enemies(unit)
+                if adjacent_enemies:
+                    return {
+                        "type": "combat", 
+                        "target_id": adjacent_enemies[0]["id"]
+                    }
+            
+            print(f"🔍 WARNING: Unit {unit['id']} has no valid combat targets")
             return {"type": "wait"}
             
         # Wait action (7) or any other

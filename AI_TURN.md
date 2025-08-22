@@ -176,7 +176,7 @@ For each unit
 │   │   │   ├── YES → wasAdjacentToEnemy?
 │   │   │   │   ├── YES → Flee action logged, Mark as units_fled
 │   │   │   │   ├── NO → Move action logged
-│   │   │   │   └── Result: +1 step, Mark as units_moved → Unit is removed from the activation queue
+│   │   │   │   └── Result: +1 step, Move action logged, Mark as units_moved → Unit is removed from the activation queue
 │   │   │   ├── NO → Wait Action → Result: +1 step, Wait action logged, no Mark → Unit is removed from the activation queue
 │   │   └── NO → Pass → no log no Mark → Unit is removed from the activation queue
 │   └── No more activable unit  → pass

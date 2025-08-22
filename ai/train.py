@@ -145,10 +145,15 @@ class StepLogger:
             with open(self.output_file, 'a') as f:
                 timestamp = time.strftime("%H:%M:%S", time.localtime())
                 
+                # Enhanced format: [timestamp] TX(col, row) PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
+                step_status = "STEP: YES" if step_increment else "STEP: NO"
+                success_status = "SUCCESS" if success else "FAILED"
+                phase_upper = phase.upper()
+                
                 # Format message using gameLogUtils.ts style
                 message = self._format_replay_style_message(unit_id, action_type, action_details)
                 
-                # Clearer format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
+                # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
                 step_status = "STEP: YES" if step_increment else "STEP: NO"
                 success_status = "SUCCESS" if success else "FAILED"
                 phase_upper = phase.upper()
@@ -197,11 +202,11 @@ class StepLogger:
         # Extract unit coordinates from action_details for consistent format
         unit_coords = ""
         if details and "unit_with_coords" in details:
-            # Extract coordinates from format "3(12, 7)" -> " (12, 7)"
+            # Extract coordinates from format "3(12, 7)" -> "(12, 7)"
             coords_part = details["unit_with_coords"]
             if "(" in coords_part:
                 coord_start = coords_part.find("(")
-                unit_coords = f" {coords_part[coord_start:]}"
+                unit_coords = coords_part[coord_start:]
         
         if action_type == "move" and details:
             # Extract position info for move message
@@ -280,7 +285,7 @@ class StepLogger:
                 wound_target = details["wound_target"]
                 save_target = details["save_target"]
                 
-                base_msg = f"Unit {unit_id} SHOT at unit {target_id} (Shot {shot_num}/{total_shots})"
+                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id} (Shot {shot_num}/{total_shots})"
                 if hit_result == "MISS":
                     detail_msg = f" - Hit:{hit_target}+:{hit_roll}(MISS)"
                 elif wound_result == "FAIL":
@@ -291,7 +296,7 @@ class StepLogger:
                     detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
                 return base_msg + detail_msg
             else:
-                return f"Unit {unit_id} SHOT at unit {target_id} (Shot {shot_num}/{total_shots}) - MISS"
+                return f"Unit {unit_id}{unit_coords} SHOT at unit {target_id} (Shot {shot_num}/{total_shots}) - MISS"
                 
         elif action_type == "shoot_summary":
             # Summary of multi-shot sequence
@@ -307,7 +312,7 @@ class StepLogger:
             wounds = details.get("wounds")
             failed_saves = details.get("failed_saves")
             
-            return f"Unit {unit_id} SHOOTING COMPLETE at unit {target_id} - {total_shots} shots, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
+            return f"Unit {unit_id}{unit_coords} SHOOTING COMPLETE at unit {target_id} - {total_shots} shots, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
             
         elif action_type == "charge" and details:
             if "target_id" in details:
@@ -316,22 +321,22 @@ class StepLogger:
                     start_col, start_row = details["start_pos"]
                     end_col, end_row = details["end_pos"]
                     # Remove unit names, keep only IDs per your request
-                    return f"Unit {unit_id} CHARGED unit {target_id} from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+                    return f"Unit {unit_id}{unit_coords} CHARGED unit {target_id} from ({start_col}, {start_row}) to ({end_col}, {end_row})"
                 else:
-                    return f"Unit {unit_id} CHARGED unit {target_id}"
+                    return f"Unit {unit_id}{unit_coords} CHARGED unit {target_id}"
             else:
-                return f"Unit {unit_id} CHARGED"
+                return f"Unit {unit_id}{unit_coords} CHARGED"
                 
         elif action_type == "combat":
             if "target_id" not in details:
-                return f"Unit {unit_id} FOUGHT (no target data)"
+                return f"Unit {unit_id}{unit_coords} FOUGHT (no target data)"
             
             target_id = details["target_id"]
             
             # Check if all required dice data is present - if not, return simple message
             required_fields = ["hit_roll", "wound_roll", "save_roll", "damage_dealt", "hit_result", "wound_result", "save_result", "hit_target", "wound_target", "save_target"]
             if not all(field in details for field in required_fields):
-                return f"Unit {unit_id} FOUGHT unit {target_id} (dice data incomplete)"
+                return f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (dice data incomplete)"
             
             # All dice data present - format detailed message
             hit_roll = details["hit_roll"]
@@ -345,12 +350,12 @@ class StepLogger:
             wound_target = details["wound_target"]
             save_target = details["save_target"]
             
-            base_msg = f"Unit {unit_id} FOUGHT unit {target_id}"
+            base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id}"
             detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
             return base_msg + detail_msg
             
         elif action_type == "wait":
-            return f"Unit {unit_id} WAIT"
+            return f"Unit {unit_id}{unit_coords} WAIT"
             
         else:
             raise ValueError(f"Unknown action_type '{action_type}' - no fallback allowed")
