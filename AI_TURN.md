@@ -160,6 +160,10 @@ game_state ← Single authoritative object
 ```
 START OF THE PHASE
 For each unit
+├── Remove Mark units_moved
+├── Remove Mark units_shot
+├── Remove Mark units_charged
+├── Remove Mark units_attacked
 ├── ELIGIBILITY CHECK (Queue Building Phase)
 │   ├── unit.CUR_HP > 0?
 │   │   └── NO → ❌ Dead unit (Skip, no log)
@@ -629,17 +633,17 @@ Result: Charging grants first strike, then fair alternation
 
 **units_shot** (Shooting Phase):
 - **Purpose**: Track units that have shot
-- **Reset timing**: Start of shooting phase
+- **Reset timing**: Start of movement phase
 - **Usage**: Used to identify units having shot during this turn
 
 **units_charged** (Charge Phase):
 - **Purpose**: Track units that have charged
-- **Reset timing**: Start of charge phase
+- **Reset timing**: Start of movement phase
 - **Usage**: Combat priority determination
 
 **units_attacked** (Combat Phase):
 - **Purpose**: Track units that have attacked
-- **Reset timing**: Start of combat phase
+- **Reset timing**: Start of movement phase
 - **Usage**: Used to identify units having attacked during this turn
 
 ### Cross-Phase Tracking Logic
