@@ -160,10 +160,10 @@ game_state ← Single authoritative object
 ```
 START OF THE PHASE
 For each unit
-├── Remove Mark units_moved
-├── Remove Mark units_shot
-├── Remove Mark units_charged
-├── Remove Mark units_attacked
+├── ❌ Remove Mark units_moved
+├── ❌ Remove Mark units_shot
+├── ❌ Remove Mark units_charged
+├── ❌ Remove Mark units_attacked
 ├── ELIGIBILITY CHECK (Queue Building Phase)
 │   ├── unit.CUR_HP > 0?
 │   │   └── NO → ❌ Dead unit (Skip, no log)
