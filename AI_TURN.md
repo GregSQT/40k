@@ -169,8 +169,6 @@ For each unit
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
-│   ├── `units_moved` contains `unit.id`
-│   │   └── YES → ❌ Already moved (Skip, no log)
 │   └── ALL conditions met → ✅ Add to activation queue
 ├── Units in activation → pick one
 │   ├── YES → Valid destination exists within MOVE range?
@@ -234,8 +232,6 @@ For each unit
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
-│   ├── units_shot.includes(unit.id)?
-│   │   └── YES → ❌ Already shot (Skip, no log)
 │   ├── units_fled.includes(unit.id)?
 │   │   └── YES → ❌ Fled unit (Skip, no log)
 │   ├── Adjacent to enemy unit within CC_RNG?
@@ -327,8 +323,6 @@ For each unit
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
-│   ├── units_charged.includes(unit.id)?
-│   │   └── YES → ❌ Already charged (Skip, no log)
 │   ├── units_fled.includes(unit.id)?
 │   │   └── YES → ❌ Fled unit (Skip, no log)
 │   ├── Adjacent to enemy unit within CC_RNG?
@@ -424,8 +418,6 @@ Start of the Combat Phase:
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
-│   ├── units_attacked.includes(unit.id)?
-│   │   └── YES → ❌ Already attacked (Skip, no log)
 │   ├── units_charged.includes(unit.id)?
 │   │   └── NO → ❌ Not a charging unit (Skip, no log)
 │   ├── Adjacent to enemy unit within CC_RNG?

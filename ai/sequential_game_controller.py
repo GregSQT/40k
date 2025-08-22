@@ -141,8 +141,9 @@ class SequentialGameController:
         # 3. Execute action for active unit
         success, mirror_action = self._execute_action_for_unit(active_unit, action)
         
-        # 4. Remove unit from queue (AI_TURN.md: exact step 4)
-        self._mark_unit_as_acted(active_unit, mirror_action)
+        # 4. Mark unit as acted for ALL real action attempts (AI_TURN.md: exact step 4)
+        if self._is_real_action(mirror_action):
+            self._mark_unit_as_acted(active_unit, mirror_action)
         self._remove_unit_from_queue(active_unit_id)
         
         # 5. Log action if step logger connected (AI_TURN.md compliance) - AFTER dice capture
@@ -285,18 +286,23 @@ class SequentialGameController:
         current_phase = self.base.get_current_phase()
         current_player = self.base.get_current_player()
         
+        # AI_TURN.md: Reset ALL tracking sets at START of movement phase (ONCE only)  
+        if current_phase == "move" and not hasattr(self, '_move_phase_reset_done'):
+            self.base.state_actions['reset_moved_units']()
+            self.base.state_actions['reset_shot_units']()
+            self.base.state_actions['reset_charged_units']()
+            self.base.state_actions['reset_attacked_units']()
+            self.base.state_actions['reset_fled_units']()
+            self._move_phase_reset_done = True
+            print(f"🔄 AI_TURN.md: ALL tracking sets reset at movement phase start")
+        
         all_units = self.base.get_units()
         # Clear existing queue
         self.active_unit_queue = []
-        
-        # AI_TURN.md: Combat phase includes both players, others current player only
+
+        # AI_TURN.md: Combat phase has TWO SUB-PHASES
         if current_phase == "combat":
-            candidate_units = []
-            for u in all_units:
-                if "CUR_HP" not in u:
-                    raise KeyError(f"Unit {u.get('id', 'unknown')} missing required CUR_HP field")
-                if u["CUR_HP"] > 0:
-                    candidate_units.append(u)
+            self._build_combat_sub_phases()
         else:
             candidate_units = []
             for u in all_units:
@@ -304,19 +310,66 @@ class SequentialGameController:
                     raise KeyError(f"Unit {u.get('id', 'unknown')} missing required CUR_HP field")
                 if u["player"] == current_player and u["CUR_HP"] > 0:
                     candidate_units.append(u)
-        # Add eligible units to queue (IDs only) - debug why ALL units fail
-        eligible_count = 0
-        for unit in candidate_units:
-            print(f"🔍 Checking U{unit['id']} P{unit['player']} for {current_phase} eligibility...")
-            if self._is_unit_eligible_for_current_phase(unit):
-                self.active_unit_queue.append(unit["id"])
-                eligible_count += 1
-                print(f"✅ U{unit['id']} P{unit['player']} ELIGIBLE for {current_phase}")
-            else:
-                print(f"💀 U{unit['id']} P{unit['player']} FAILED {current_phase} eligibility")
+            # Add eligible units to queue (IDs only) - CLEAN
+            eligible_count = 0
+            for unit in candidate_units:
+                # AI_TURN.md: Check eligibility WITHOUT any side effects or marking
+                if self._is_unit_eligible_for_current_phase(unit):
+                    self.active_unit_queue.append(unit["id"])
+                    eligible_count += 1
+
+    def _build_combat_sub_phases(self):
+        """AI_TURN.md: Build combat queue with TWO SUB-PHASES"""
+        all_units = self.base.get_units()
+        living_units = [u for u in all_units if u.get("CUR_HP", 0) > 0]
+        current_player = self.base.get_current_player()
         
-        if eligible_count == 0:
-            print(f"💀 NO UNITS ELIGIBLE for P{current_player} {current_phase} - checking WHY")
+        if "units_attacked" not in self.base.game_state:
+            raise KeyError("game_state missing required 'units_attacked' field")
+        if "units_charged" not in self.base.game_state:
+            raise KeyError("game_state missing required 'units_charged' field")
+            
+        attacked_set = self.base.game_state["units_attacked"]
+        charged_set = self.base.game_state["units_charged"]
+        
+        # SUB-PHASE 1: Current player's charging units attack first
+        charging_units = []
+        for unit in living_units:
+            if (unit["player"] == current_player and 
+                unit["id"] in charged_set and 
+                unit["id"] not in attacked_set and
+                self._has_adjacent_enemies(unit)):
+                charging_units.append(unit["id"])
+        
+        # SUB-PHASE 2: Alternating combat - non-active player first, then active player
+        non_active_player = 1 - current_player
+        alternating_units = []
+        
+        # Non-active player units first
+        for unit in living_units:
+            if (unit["player"] == non_active_player and 
+                unit["id"] not in charged_set and 
+                unit["id"] not in attacked_set and
+                self._has_adjacent_enemies(unit)):
+                alternating_units.append(unit["id"])
+        
+        # Active player non-charging units
+        for unit in living_units:
+            if (unit["player"] == current_player and 
+                unit["id"] not in charged_set and 
+                unit["id"] not in attacked_set and
+                self._has_adjacent_enemies(unit)):
+                alternating_units.append(unit["id"])
+        
+        # AI_TURN.md: Charging units first, then alternating
+        self.active_unit_queue = charging_units + alternating_units
+        
+        if len(charging_units) > 0:
+            print(f"🔄 COMBAT SUB-PHASE 1: {len(charging_units)} charging units for P{current_player}")
+        if len(alternating_units) > 0:
+            print(f"🔄 COMBAT SUB-PHASE 2: {len(alternating_units)} alternating units")
+        if len(self.active_unit_queue) == 0:
+            print(f"🔄 COMBAT: No eligible units for either sub-phase")
                 
     def _remove_unit_from_queue(self, unit_id: str):
         """Remove unit from active queue after it acts."""
@@ -382,7 +435,6 @@ class SequentialGameController:
             # Check if unit fled (moved while adjacent to enemy)
             if action_type == "move" and self._was_adjacent_before_move(unit):
                 self.base.state_actions['add_fled_unit'](unit["id"])
-                print(f"🏃 U{unit['id']} FLED")
             self.base.state_actions['add_moved_unit'](unit["id"])
             
             # Clear stored move start position after flee detection
@@ -391,15 +443,12 @@ class SequentialGameController:
             
         elif current_phase == "shoot":
             self.base.state_actions['add_shot_unit'](unit["id"])
-            print(f"🎯 U{unit['id']} added to units_shot set")
             
         elif current_phase == "charge":
             self.base.state_actions['add_charged_unit'](unit["id"])
-            print(f"⚡ U{unit['id']} added to units_charged set")
             
         elif current_phase == "combat":
             self.base.state_actions['add_attacked_unit'](unit["id"])
-            print(f"⚔️ U{unit['id']} added to units_attacked set")
             
     def _was_adjacent_before_move(self, unit: Dict[str, Any]) -> bool:
         """Check if unit was adjacent to enemy before move (for flee detection)."""
@@ -431,11 +480,7 @@ class SequentialGameController:
         is_adjacent_now = self._is_adjacent_to_enemy(unit)
         
         # AI_TURN.md: Flee = started adjacent AND ended not adjacent
-        fled = was_adjacent_at_start and not is_adjacent_now
-        
-        if fled:
-            print(f"🏃 U{unit['id']} FLED: was adjacent at ({start_col},{start_row}), now not adjacent at ({unit['col']},{unit['row']})")
-        
+        fled = was_adjacent_at_start and not is_adjacent_now        
         return fled
             
     def _is_unit_eligible_for_current_phase(self, unit: Dict[str, Any]) -> bool:
@@ -447,29 +492,19 @@ class SequentialGameController:
             raise KeyError(f"Unit {unit['id']} missing required CUR_HP field")
             
         if unit["CUR_HP"] <= 0:
-            print(f"💀 U{unit['id']} DEAD: CUR_HP={unit['CUR_HP']}")
             return False
-        
-        print(f"🔍 U{unit['id']} P{unit['player']} alive (CUR_HP={unit['CUR_HP']}) checking {phase} rules...")
             
         # AI_GUIDE.md: Eligibility Rules (EXACT AI_TURN.md)
-        # COMBAT PHASE: Both players' units can be eligible, skip player check
-        if phase == "combat":
-            # Skip the current_player check for combat phase - will be handled in combat-specific logic below
-            pass
-        elif phase == "move":
+        if phase == "move":
             if "units_moved" not in self.base.game_state:
                 raise KeyError("game_state missing required 'units_moved' field")
             current_player = self.base.get_current_player()
             units_moved = self.base.game_state["units_moved"]
             
             if unit["player"] != current_player:
-                print(f"🚫 U{unit['id']} move fail: wrong player P{unit['player']} != P{current_player}")
                 return False
             if unit["id"] in units_moved:
-                print(f"🚫 U{unit['id']} move fail: already moved (units_moved={units_moved})")
                 return False
-            print(f"✅ U{unit['id']} move ELIGIBLE: P{unit['player']} not in {units_moved}")
             return True
                     
         elif phase == "shoot":
@@ -478,14 +513,12 @@ class SequentialGameController:
             
             # Requirement 1: Correct player
             if unit["player"] != current_player:
-                print(f"🔫 U{unit['id']} shoot fail: wrong player P{unit['player']} != P{current_player}")
                 return False
                 
             # Requirement 2: Has ranged weapons
             if "RNG_NB" not in unit:
                 raise KeyError(f"Unit {unit['id']} missing required RNG_NB field")
             if unit["RNG_NB"] <= 0:
-                print(f"🔫 U{unit['id']} shoot fail: no ranged weapons (RNG_NB={unit['RNG_NB']})")
                 return False
                 
             # Requirement 3: Not already shot
@@ -493,28 +526,22 @@ class SequentialGameController:
                 raise KeyError("game_state missing required 'units_shot' field")
             shot_set = self.base.game_state["units_shot"]
             if unit["id"] in shot_set:
-                print(f"🔫 U{unit['id']} shoot fail: already shot (units_shot={shot_set})")
                 return False
                 
             # Requirement 4: Not fled
             if "units_fled" not in self.base.game_state:
                 raise KeyError("game_state missing required 'units_fled' field")
             if unit["id"] in self.base.game_state["units_fled"]:
-                print(f"🔫 U{unit['id']} shoot fail: unit fled (units_fled={self.base.game_state['units_fled']})")
                 return False
                 
             # Requirement 5: Not adjacent to enemy (in combat)
             if self._is_adjacent_to_enemy(unit):
-                print(f"🔫 U{unit['id']} shoot fail: adjacent to enemy (in combat)")
                 return False
                 
             # Requirement 6: Has valid shooting targets
             if not self._has_valid_shooting_targets(unit):
-                print(f"🔫 U{unit['id']} shoot fail: no valid targets")
                 return False
                 
-            # All AI_TURN.md requirements met
-            print(f"✅ U{unit['id']} shoot ELIGIBLE: all requirements met")
             return True
                     
         elif phase == "charge":
@@ -535,7 +562,6 @@ class SequentialGameController:
             # Check 3: Already charged
             charged_set = self.base.game_state["units_charged"]
             if unit_id in charged_set:
-                print(f"⚡ U{unit_id} charge fail: already charged this phase (units_charged={charged_set})")
                 return False
                 
             # Check 4: Fled units
@@ -560,12 +586,10 @@ class SequentialGameController:
                 raise KeyError("game_state missing required 'units_attacked' field")
             attacked_set = self.base.game_state["units_attacked"]
             if unit["id"] in attacked_set:
-                print(f"⚔️ U{unit['id']} combat fail: already attacked this phase (units_attacked={attacked_set})")
                 return False
-            if not self._has_adjacent_enemies(unit):
-                print(f"⚔️ U{unit['id']} combat fail: no adjacent enemies")
+            has_adjacent = self._has_adjacent_enemies(unit)
+            if not has_adjacent:
                 return False
-            print(f"⚔️ U{unit['id']} P{unit['player']} ELIGIBLE for combat")
             return True
                     
         return False
@@ -923,14 +947,10 @@ class SequentialGameController:
         current_phase = self.base.get_current_phase()
         current_player = self.base.get_current_player()
         
-        print(f"🔄 No active unit for P{current_player} {current_phase} - checking phase completion")
-        
         # AI_TURN.md: Phase is complete when no more eligible units remain
         is_complete = self._is_phase_complete()
-        print(f"🔄 Phase complete: {is_complete}")
         
-        if is_complete:            
-            print(f"🔄 ADVANCING from P{current_player} {current_phase}")
+        if is_complete:
             
             # Log phase transition if step logger connected
             if self.step_logger and self.step_logger.enabled:
@@ -942,7 +962,6 @@ class SequentialGameController:
             
             new_phase = self.base.get_current_phase()
             new_player = self.base.get_current_player()
-            print(f"🔄 ADVANCED to P{new_player} {new_phase}")
             
             # Log the transition (AI_TURN.md compliance - no step increment)
             if self.step_logger and self.step_logger.enabled:
@@ -979,42 +998,30 @@ class SequentialGameController:
         if hasattr(self.base, 'phase_transitions'):
             try:
                 if current_phase == "move":
+                    if hasattr(self, '_move_phase_reset_done'):
+                        delattr(self, '_move_phase_reset_done')
                     self.base.phase_transitions['transition_to_shoot']()
-                    # AI_TURN.md: Verify units_shot set is reset (base controller should handle this)
-                    if len(self.base.game_state.get("units_shot", [])) > 0:
-                        print(f"🔄 FORCED RESET: units_shot was not properly reset by base controller")
-                        self.base.state_actions['reset_shot_units']()
                 elif current_phase == "shoot":
                     self.base.phase_transitions['transition_to_charge']()
-                    # AI_TURN.md: Verify units_charged set is reset (base controller should handle this)
-                    if len(self.base.game_state.get("units_charged", [])) > 0:
-                        print(f"🔄 FORCED RESET: units_charged was not properly reset by base controller")
-                        self.base.state_actions['reset_charged_units']()
                 elif current_phase == "charge":
                     self.base.phase_transitions['transition_to_combat']()
-                    # AI_TURN.md: Verify units_attacked set is reset (base controller should handle this)
-                    if len(self.base.game_state.get("units_attacked", [])) > 0:
-                        print(f"🔄 FORCED RESET: units_attacked was not properly reset by base controller")
-                        self.base.state_actions['reset_attacked_units']()
                 elif current_phase == "combat":
-                    # AI_TURN.md: After combat, always call end_turn for proper progression
-                    self.base.phase_transitions['end_turn']()  # Handles P0→P1 and P1→P0(new turn)
-                    # AI_TURN.md: After turn transition, verify units_moved is reset for new player
+                    self.base.phase_transitions['end_turn']()
                     new_phase = self.base.get_current_phase()
                     new_player = self.base.get_current_player()
-                    print(f"🔄 Turn transition: {current_player} {current_phase} → {new_player} {new_phase}")
-                    if new_phase == "move":
-                        units_moved = self.base.game_state.get("units_moved", [])
-                        if len(units_moved) > 0:
-                            print(f"🔄 FORCED RESET: units_moved was not properly reset by base controller (was {units_moved})")
-                            self.base.state_actions['reset_moved_units']()
-                        else:
-                            print(f"✅ units_moved properly reset for new movement phase")
                         
             except Exception as e:
                 raise RuntimeError(f"Phase transition failed from '{current_phase}': {e}")
         else:
             raise RuntimeError("Base controller missing phase_transitions")
+            
+    def _reset_all_tracking_sets_for_new_turn(self):
+        """AI_TURN.md: Reset all tracking sets at start of movement phase."""
+        if hasattr(self.base, 'state_actions'):
+            self.base.state_actions.get('reset_moved_units', lambda: None)()
+            self.base.state_actions.get('reset_shot_units', lambda: None)()  
+            self.base.state_actions.get('reset_charged_units', lambda: None)()
+            self.base.state_actions.get('reset_attacked_units', lambda: None)()
             
     def _build_gym_response(self, action: int, success: bool, acting_unit: Optional[Dict[str, Any]], 
                            mirror_action: Dict[str, Any], terminated: bool = False) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
