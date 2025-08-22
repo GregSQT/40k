@@ -156,33 +156,29 @@ game_state ← Single authoritative object
 
 ## 🏃 MOVEMENT PHASE LOGIC
 
-### Movement Eligibility Decision Tree
-
+### Movement Decision Tree
 ```
-Unit Movement Eligibility Check:
-├── unit.CUR_HP > 0?
-│   └── NO → ❌ Dead unit (Skip, no log)
-├── unit.player === current_player?
-│   └── NO → ❌ Wrong player (Skip, no log)
-├── `units_moved` contains `unit.id`
-│   └── YES → ❌ Already moved (Skip, no log)
-└── ALL conditions met → ✅ Eligible for Move/Wait actions
-```
-
-### Movement Action Decision Tree
-
-```
-Available Actions for Eligible Unit:
-├── Valid destination exists within MOVE range?
-│   ├── YES → Move Action available → Choose to move ?
-│   │   ├── YES → wasAdjacentToEnemy?
-│   │   │   ├── YES → Flee action logged, Mark as units_fled
-│   │   │   ├── NO → Move action logged
-│   │   │   └── Result: +1 step, Mark as units_moved
-│   │   ├── NO → Wait Action → Result: +1 step, Wait action logged
-│   │   └── NO → End of activation : Unit is no more Eligible
-│   └── NO → End activation: Unit is no longer eligible
-└── End activation: Unit is no longer eligible
+START OF THE PHASE
+For each unit
+├── ELIGIBILITY CHECK (Queue Building Phase)
+│   ├── unit.CUR_HP > 0?
+│   │   └── NO → ❌ Dead unit (Skip, no log)
+│   ├── unit.player === current_player?
+│   │   └── NO → ❌ Wrong player (Skip, no log)
+│   ├── `units_moved` contains `unit.id`
+│   │   └── YES → ❌ Already moved (Skip, no log)
+│   └── ALL conditions met → ✅ Add to activation queue
+├── Units in activation → pick one
+│   ├── YES → Valid destination exists within MOVE range?
+│   │   ├── YES → Move Action available → Choose to move ?
+│   │   │   ├── YES → wasAdjacentToEnemy?
+│   │   │   │   ├── YES → Flee action logged, Mark as units_fled
+│   │   │   │   ├── NO → Move action logged
+│   │   │   │   └── Result: +1 step, Mark as units_moved → Unit is removed from the activation queue
+│   │   │   ├── NO → Wait Action → Result: +1 step, Wait action logged, no Mark → Unit is removed from the activation queue
+│   │   └── NO → Pass → no log no Mark → Unit is removed from the activation queue
+│   └── No more activable unit  → pass
+└── End of phase → move to shooting phase
 ```
 
 ### Movement Restrictions Logic
@@ -223,51 +219,46 @@ Stay option: 80% chance of death but maintain capabilities
 Decision factors: Unit value, importance of actions this turn, long term strategy, alternative threats
 ```
 
----
-
 ## 🎯 SHOOTING PHASE LOGIC
 
-### Shooting Eligibility Decision Tree
+### Shooting Decision Tree
 
 ```
-Unit Shooting Eligibility Check:
-├── unit.CUR_HP > 0?
-│   └── NO → ❌ Dead unit (Skip, no log)
-├── unit.player === current_player?
-│   └── NO → ❌ Wrong player (Skip, no log)
-├── units_shot.includes(unit.id)?
-│   └── YES → ❌ Already shot (Skip, no log)
-├── units_fled.includes(unit.id)?
-│   └── YES → ❌ Fled unit (Log ineligible, no step)
-├── Adjacent to enemy unit?
-│   └── YES → ❌ In combat (Log ineligible, no step)
-├── Has LOS to enemies within RNG_RNG?
-│   ├── NO → ❌ No targets (Log ineligible, no step)
-│   └── YES → ✅ Eligible for Shoot/Wait actions
-```
-
-### Shooting Action Decision Tree
-
-```
-Available Actions for Eligible Unit:
-├── Enemies exist within RNG_RNG range?
-│   ├── YES → Build enemy_at_range pool
-│   │   ├── Check LOS for ALL enemies in pool → Build valid_target pool
-│   │   │   ├── Valid targets found in pool?
-│   │   │   │   ├── YES → Shoot Action Available → Choose to shoot?
-│   │   │   │   │   ├── YES → Execute RNG_NB shots
-│   │   │   │   │   │   ├── For each shot: Valid targets still available?
-│   │   │   │   │   │   │   ├── YES → Select target and resolve shot
-│   │   │   │   │   │   │   │   ├── Target dies → Continue to next shot
-│   │   │   │   │   │   │   │   └── Target survives → Continue to next shot
-│   │   │   │   │   │   │   └── NO → End shooting (slaughter handling)
-│   │   │   │   │   │   └── Result: +1 step, Mark as units_shot, ALL Shoot action logged at once
-│   │   │   │   │   └── NO → Wait Action → Result: +1 step, Wait action logged
-│   │   │   │   └── NO → Only Wait Available → Pass
-│   │   │   └── NO LOS to any enemies → Only Wait Available → Pass
-│   │   └── NO enemies after LOS check → Pass
-│   └── NO → Only Wait Available → Pass
-└── End activation: Unit is no longer eligible
+For each unit
+├── ELIGIBILITY CHECK (Queue Building Phase)
+│   ├── unit.CUR_HP > 0?
+│   │   └── NO → ❌ Dead unit (Skip, no log)
+│   ├── unit.player === current_player?
+│   │   └── NO → ❌ Wrong player (Skip, no log)
+│   ├── units_shot.includes(unit.id)?
+│   │   └── YES → ❌ Already shot (Skip, no log)
+│   ├── units_fled.includes(unit.id)?
+│   │   └── YES → ❌ Fled unit (Skip, no log)
+│   ├── Adjacent to enemy unit within CC_RNG?
+│   │   └── YES → ❌ In combat (Skip, no log)
+│   ├── unit.RNG_NB > 0?
+│   │   └── NO → ❌ No ranged weapon (Skip, no log)
+│   ├── Has LOS to enemies within RNG_RNG?
+│   │   └── NO → ❌ No valid targets (Skip, no log)
+│   └── ALL conditions met → ✅ Add to activation queue
+├── Units in activation queue → pick one
+│   ├── YES → Build valid targets pool (enemies within RNG_RNG + LOS) → Valid targets in pool?
+│   │   └── Valid targets in pool?
+│   │       ├── YES → Shoot Action available → Choose to shoot?
+│   │       │   ├── YES → Execute shooting sequence
+│   │       │   │   ├── For shot 1 to RNG_NB:
+│   │       │   │   │   ├── Valid targets still available?
+│   │       │   │   │   │   ├── YES → Select target and resolve shot
+│   │       │   │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│   │       │   │   │   │   │   ├── Target dies → Remove from valid pool, continue to next shot
+│   │       │   │   │   │   │   └── Target survives → Continue to next shot
+│   │       │   │   │   │   └── NO → End shooting (slaughter handling)
+│   │       │   │   │   └── All shots resolved
+│   │       │   │   └── Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit is removed from the activation queue
+│   │       │   └── NO → Wait Action → Result: +1 step, Wait action logged, no Mark → Unit is removed from the activation queue
+│   │       └── NO → Force Wait Action → no log, no Mark → Unit is removed from the activation queue
+│   └── NO more activable units → pass
+└── End of shooting phase → move to charge phase
 ```
 
 ### Target Restrictions Logic
@@ -323,40 +314,38 @@ Result: Avoid a shooting unit to be stuck because it as no more "Valid target" w
 
 ## ⚡ CHARGE PHASE LOGIC
 
-### Charge Eligibility Decision Tree
+### Charge Decision Tree
 
 ```
-Unit Charge Eligibility Check:
-├── unit.CUR_HP > 0?
-│   └── NO → ❌ Dead unit (Skip, no log)
-├── unit.player === current_player?
-│   └── NO → ❌ Wrong player (Skip, no log)
-├── units_charged.includes(unit.id)?
-│   └── YES → ❌ Already charged (Skip, no log)
-├── units_fled.includes(unit.id)?
-│   └── YES → ❌ Fled unit (Log ineligible, no step)
-├── Adjacent to enemy unit?
-│   └── YES → ❌ Already in combat (Log ineligible, no step)
-├── Enemies within charge_max_distance hexes ?
-│   ├── NO → ❌ No targets (Log ineligible, no step)
-│   └── YES → ✅ Eligible → Roll 2d6 for charge distance
-```
-
-### Charge Action Decision Tree
-
-```
-Available Actions for Eligible Unit (After 2d6 Roll):
-├── Hexes adjacent to enemies reachable within rolled distance ?
-│   ├── YES → Build valid_charge_destinations pool
-│   │   ├── Valid destinations found?
-│   │   │   ├── YES → Charge Action Available → Choose to charge?
-│   │   │   │   ├── YES → Execute charge → Move to hex adjacent to enemy
-│   │   │   │   │   └── Result: +1 step, Mark as units_charged, Charge action logged
-│   │   │   │   └── NO → Refuse charge → Pass (no log, no step)
-│   │   │   └── NO → Auto-skip → Pass (no log, no step)
-│   │   └── No valid destinations after pathfinding → Pass (no log, no step)
-│   └── NO → Auto-skip → Pass (no log, no step)
-└── End activation: Discard charge roll value → Unit is no longer eligible
+For each unit
+├── ELIGIBILITY CHECK (Queue Building Phase)
+│   ├── unit.CUR_HP > 0?
+│   │   └── NO → ❌ Dead unit (Skip, no log)
+│   ├── unit.player === current_player?
+│   │   └── NO → ❌ Wrong player (Skip, no log)
+│   ├── units_charged.includes(unit.id)?
+│   │   └── YES → ❌ Already charged (Skip, no log)
+│   ├── units_fled.includes(unit.id)?
+│   │   └── YES → ❌ Fled unit (Skip, no log)
+│   ├── Adjacent to enemy unit within CC_RNG?
+│   │   └── YES → ❌ Already in combat (Skip, no log)
+│   ├── Enemies exist within charge_max_distance hexes?
+│   │   └── NO → ❌ No charge targets (Skip, no log)
+│   └── ALL conditions met → ✅ Add to activation queue
+├── Units in activation queue → pick one
+│   ├── YES → Roll 2d6 charge dice at START of activation
+│   │   ├── Build valid charge destinations pool (BFS pathfinding within dice roll distance)
+│   │   │   └── Valid destinations found adjacent to enemies?
+│   │   │       ├── YES → Charge Action available → Choose to charge?
+│   │   │       │   ├── YES → Execute charge
+│   │   │       │   │   ├── Select destination from valid pool
+│   │   │       │   │   ├── Move unit to destination
+│   │   │       │   │   └── Result: +1 step, Charge action logged, Mark as units_charged
+│   │   │       │   └── NO → pass → no log, no Mark
+│   │   │       └── NO → pass → no log, no Mark
+│   │   └── End of activation → Unit removed from activation queue
+│   └── No more activable units → pass
+└── End of charge phase → move to combat phase
 ```
 
 ### Charge Timing Logic
@@ -420,83 +409,112 @@ Decision: Weigh 42% failure risk vs combat advantage gained
 - **Target Validation**: Check for adjacent enemies before each attack
 
 ### Combat Sub-Phase 1 Decision Tree
+
 ```
-Charging Units Sub-Phase:
-├── Current player has units marked as units_charged?
+Start of the Combat Phase:
+│
+│   Sub-Phase 1
+│
+├── For each unit : ELIGIBILITY CHECK (Queue Building Phase)
+│   ├── unit.CUR_HP > 0?
+│   │   └── NO → ❌ Dead unit (Skip, no log)
+│   ├── unit.player === current_player?
+│   │   └── NO → ❌ Wrong player (Skip, no log)
+│   ├── units_attacked.includes(unit.id)?
+│   │   └── YES → ❌ Already attacked (Skip, no log)
+│   ├── units_charged.includes(unit.id)?
+│   │   └── NO → ❌ Not a charging unit (Skip, no log)
+│   ├── Adjacent to enemy unit within CC_RNG?
+│   │   └── NO → ❌ No combat targets (Skip, no log)
+│   └── ALL conditions met → ✅ Add to charging activation queue
+│
+├── Units in activation queue → pick one
 │   ├── YES → Process charging units sequentially
 │   │   ├── For each charging unit: Adjacent to enemy units?
 │   │   │   ├── YES → Execute CC_NB attacks
 │   │   │   │   ├── For each attack: Valid targets still available?
 │   │   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
-│   │   │   │   │   │   ├── Target dies → Continue to next attack
+│   │   │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│   │   │   │   │   │   ├── Target dies → Remove from valid pool, continue to next attack
 │   │   │   │   │   │   └── Target survives → Continue to next attack
 │   │   │   │   │   └── NO → End attacking (slaughter handling)
-│   │   │   │   └── Result: +1 step, Mark as units_attacked, ALL Attack action logged at once
-│   │   │   └── NO → Pass (no log, no step)
-│   │   └── All charging units processed → Advance to Sub-Phase 2
+│   │   │   │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked → Unit removed from activation queue
+│   │   │   └── NO → Pass → no log, no Mark → Unit removed from activation queue
+│   │   └── NO → All charging units processed → Advance to Sub-Phase 2
 │   └── NO → Skip Sub-Phase 1 → Advance to Sub-Phase 2
-```
-
-## Combat Phase 2 Eligibility Logic
-```
-Unit Combat Eligibility Check (Alternating Phase):
-├── unit.CUR_HP > 0?
-│   └── NO → ❌ Dead unit (Skip, no log)
-├── units_attacked.includes(unit.id)?
-│   └── YES → ❌ Already attacked (Skip, no log)
-├── units_charged.includes(unit.id)?
-│   └── YES → ❌ Already acted in charging sub-phase (Skip, no log)
-├── unit.player === combat_active_player?
-│   └── NO → ❌ Wrong player for this alternating turn (Skip, no log)
-├── Adjacent to enemy unit within CC_RNG?
-│   ├── NO → ❌ No combat targets (Skip, no log)
-│   └── YES → ✅ Eligible for Attack/Pass actions
-```
-
-### Combat Sub_Pase 2 Decision Tree
-```
-Alternating Combat Sub-Phase:
-├── Build eligible unit pools for both players (exclude charged units)
+│
+│   Sub-Phase 2
+│
+├── ACTIVE PLAYER ELIGIBILITY CHECK (Queue Building Phase)
+│   ├── unit.CUR_HP > 0?
+│   │   └── NO → ❌ Dead unit (Skip, no log)
+│   ├── unit.player === current_player?
+│   │   └── NO → ❌ Wrong player (Skip, no log)
+│   ├── units_attacked.includes(unit.id)?
+│   │   └── YES → ❌ Already attacked (Skip, no log)
+│   ├── units_charged.includes(unit.id)?
+│   │   └── YES → ❌ Already acted in charging sub-phase (Skip, no log)
+│   ├── Adjacent to enemy unit within CC_RNG?
+│   │   └── NO → ❌ No combat targets (Skip, no log)
+│   └── ALL conditions met → ✅ Add to active_alternating_activation_pool
+│
+├── NON-ACTIVE PLAYER ELIGIBILITY CHECK (Queue Building Phase)
+│   ├── unit.CUR_HP > 0?
+│   │   └── NO → ❌ Dead unit (Skip, no log)
+│   ├── unit.player === current_player?
+│   │   └── YES → ❌ Wrong player (Skip, no log)
+│   ├── units_attacked.includes(unit.id)?
+│   │   └── YES → ❌ Already attacked (Skip, no log)
+│   ├── units_charged.includes(unit.id)?
+│   │   └── YES → ❌ Already acted in charging sub-phase (Skip, no log)
+│   ├── Adjacent to enemy unit within CC_RNG?
+│   │   └── NO → ❌ No combat targets (Skip, no log)
+│   └── ALL conditions met → ✅ Add to non_active_alternating_activation_pool
+│
+├── Units in alternating activation queue → pick one
 ├── Both players have eligible units for alternating combat?
-│   ├── YES → Execute alternating sequence
-│   │   ├── ALTERNATING LOOP: While both players have eligible units
-│   │   │   ├── Non-active player turn → Select eligible unit
-│   │   │   │   ├── Unit adjacent to enemy units?
-│   │   │   │   │   ├── YES → Execute CC_NB attacks
-│   │   │   │   │   │   ├── For each attack: Valid targets still available?
-│   │   │   │   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
-│   │   │   │   │   │   │   │   ├── Target dies → Continue to next attack
-│   │   │   │   │   │   │   │   └── Target survives → Continue to next attack
-│   │   │   │   │   │   │   └── NO → End attacking (slaughter handling)
-│   │   │   │   │   │   └── Result: +1 step, Mark as units_attacked, ALL Attack action logged at once
-│   │   │   │   │   └── NO → Pass (no log, no step)
-│   │   │   │   └── Active player turn → Select eligible unit
-│   │   │   │       ├── Unit adjacent to enemy units?
-│   │   │   │       │   ├── YES → Execute CC_NB attacks
-│   │   │   │       │   │   ├── For each attack: Valid targets still available?
-│   │   │   │       │   │   │   ├── YES → Select adjacent enemy target and resolve attack
-│   │   │   │       │   │   │   │   ├── Target dies → Continue to next attack
-│   │   │   │       │   │   │   │   └── Target survives → Continue to next attack
-│   │   │   │       │   │   │   └── NO → End attacking (slaughter handling)
-│   │   │   │       │   │   └── Result: +1 step, Mark as units_attacked, ALL Attack action logged at once
-│   │   │   │       │   └── NO → Pass (no log, no step)
-│   │   │   │       └── Check: Both players still have eligible units?
-│   │   │   │           ├── YES → Continue ALTERNATING LOOP
-│   │   │   │           └── NO → Exit loop, proceed to cleanup
-│   │   │   └── Alternating sequence completed
-│   │   └── Continue to cleanup phase
-│   └── NO → Skip alternating sequence
-├── Process remaining eligible units from either player
+│   └── YES → Execute alternating sequence
+│       └── ALTERNATING LOOP: active_alternating_activation_pool and non_active_alternating_activation_pool are not empty
+│           ├── Non-active player turn → Select a unit from non_active_alternating_activation_pool
+│           │   ├── Unit adjacent to enemy units?
+│           │   │   ├── YES → Execute CC_NB attacks
+│           │   │   │   ├── For each attack: Valid targets still available?
+│           │   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
+│           │   │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│           │   │   │   │   │   ├── Target dies → Continue to next attack
+│           │   │   │   │   │   └── Target survives → Continue to next attack
+│           │   │   │   │   └── NO → End attacking (slaughter handling)
+│           │   │   │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked
+│           │   │   └── NO → Pass → no log, no Mark
+│           │   └── Unit removed from non_active_alternating_activation_pool
+│           ├── Active player turn → Select a unit from active_alternating_activation_pool
+│           │   ├── Unit adjacent to enemy units?
+│           │   │   ├── YES → Execute CC_NB attacks
+│           │   │   │   ├── For each attack: Valid targets still available?
+│           │   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
+│           │   │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│           │   │   │   │   │   ├── Target dies → Continue to next attack
+│           │   │   │   │   │   └── Target survives → Continue to next attack
+│           │   │   │   │   └── NO → End attacking (slaughter handling)
+│           │   │   │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked
+│           │   │   └── NO → Pass → no log, no Mark
+│           │   └── Unit removed from active_alternating_activation_pool
+│           └── Check: Either pool empty?
+│               ├── YES → Exit loop, proceed to cleanup
+│               └── NO → Continue ALTERNATING LOOP
+│
+├── Process remaining units from any non-empty alternating activation pools
 │   ├── For each remaining unit: Adjacent to enemy units?
 │   │   ├── YES → Execute CC_NB attacks
 │   │   │   ├── For each attack: Valid targets still available?
 │   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
+│   │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
 │   │   │   │   │   ├── Target dies → Continue to next attack
 │   │   │   │   │   └── Target survives → Continue to next attack
 │   │   │   │   └── NO → End attacking (slaughter handling)
-│   │   │   └── Result: +1 step, Mark as units_attacked, ALL Attack action logged at once
-│   │   └── NO → Pass (no log, no step)
-│   └── All remaining units processed
+│   │   │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked
+│   │   └── NO → Pass → no log, no Mark
+│   └── Unit removed from its activation pool
 └── End Combat Phase: Advance to next player's Movement Phase
 ```
 
@@ -602,7 +620,7 @@ Result: Charging grants first strike, then fair alternation
 - **Data structure**: Set containing unit IDs
 - **Purpose**: Track units that have moved or waited
 - **Reset timing**: Start of movement phase
-- **Usage**: `units_moved` contains `unit.id` prevents re-movement within same phase
+- **Usage**: `units_moved` contains `unit.id` Used to identify units having shot during this turn
 
 **units_fled** (Movement Phase):
 - **Purpose**: Track units that fled from combat
@@ -610,9 +628,9 @@ Result: Charging grants first strike, then fair alternation
 - **Usage**: Apply shooting and charging penalties
 
 **units_shot** (Shooting Phase):
-- **Purpose**: Track units that have shot or passed
+- **Purpose**: Track units that have shot
 - **Reset timing**: Start of shooting phase
-- **Usage**: Prevent re-shooting within same phase
+- **Usage**: Used to identify units having shot during this turn
 
 **units_charged** (Charge Phase):
 - **Purpose**: Track units that have charged
@@ -620,9 +638,9 @@ Result: Charging grants first strike, then fair alternation
 - **Usage**: Combat priority determination
 
 **units_attacked** (Combat Phase):
-- **Purpose**: Track units that have attacked or passed
+- **Purpose**: Track units that have attacked
 - **Reset timing**: Start of combat phase
-- **Usage**: Prevent re-attacking within same phase
+- **Usage**: Used to identify units having attacked during this turn
 
 ### Cross-Phase Tracking Logic
 
