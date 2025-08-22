@@ -354,9 +354,8 @@ class GameController:
             else:
                 self.state_actions["update_unit"](target_id, {"CUR_HP": new_hp})
         
-        # Store combat result for logging
-        if hasattr(self, '_last_combat_result'):
-            self._last_combat_result = combat_result
+        # Store combat result for logging (same pattern as shooting)
+        self._last_combat_result = combat_result
         
         # Still call original action for state management
         self.game_actions["handle_combat_attack"](attacker_id, target_id)

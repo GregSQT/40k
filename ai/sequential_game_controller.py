@@ -156,23 +156,10 @@ class SequentialGameController:
             # Use mirror_action which now contains dice data (if captured successfully)
             action_details = dict(mirror_action)
             action_type = mirror_action.get("type", "wait")
-            
-            # DEBUG: Verify step logger receives correct action type
-            print(f"📊 STEP LOGGER: Unit {active_unit['id']} → Action type: {action_type}, Success: {success}")
-            
-            # CRITICAL FIX: Force step logger to log ALL combat actions
-            if action_type == "combat":
-                print(f"🚨 FORCING COMBAT LOG: Unit {active_unit['id']} attacks target {mirror_action.get('target_id')}")
            
             # Enhanced unit references with coordinates for ALL action types
             # Acting unit always includes coordinates
             action_details["unit_with_coords"] = f"{active_unit['id']}({active_unit['col']}, {active_unit['row']})"
-            
-            # CRITICAL: Force log combat actions regardless of dice capture
-            if action_type == "combat":
-                action_details["forced_combat_log"] = True
-                action_details["combat_success"] = success
-                action_details["base_controller_success"] = success
             
             # Add position information for move actions
             if action_type == "move":
@@ -231,10 +218,9 @@ class SequentialGameController:
                             phase=current_phase,
                             player=current_player,
                             success=success,
-                            step_increment=False,  # Don't count individual shots as steps
-                            action_details=shot_details,
-                            turn_number=current_turn
-                    )
+                            step_increment=False,
+                            action_details=shot_details
+                        )
                 
                 # Log shooting summary
                 summary_details = dict(action_details)
@@ -252,14 +238,12 @@ class SequentialGameController:
                     phase=current_phase,
                     player=current_player,
                     success=success,
-                    step_increment=step_increment,  # Only the summary counts as a step
-                    action_details=summary_details,
-                    turn_number=current_turn
+                    step_increment=step_increment,
+                    action_details=summary_details
                 )
                 # Don't return early - need to continue to gym response
             else:
                 # Normal single action logging (non-shooting or single shot)
-                print(f"🔥 LOGGING ACTION: {action_type} for Unit {active_unit['id']} with success={success}")
                 self.step_logger.log_action(
                     unit_id=active_unit["id"],
                     action_type=action_type,
@@ -267,10 +251,8 @@ class SequentialGameController:
                     player=current_player,
                     success=success,
                     step_increment=step_increment,
-                    action_details=action_details,
-                    turn_number=current_turn  # Add turn number
+                    action_details=action_details
                 )
-                print(f"✅ LOG COMPLETED: {action_type} for Unit {active_unit['id']}")
         
         # 6. Return gym response (AI_TURN.md: exact step 6)
         return self._build_gym_response(action, success, active_unit, mirror_action)
@@ -743,23 +725,6 @@ class SequentialGameController:
         
         return valid_destinations
         
-    def _get_adjacent_enemies(self, unit: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Get list of adjacent enemy units within CC_RNG."""
-        all_units = self.base.get_units()
-        adjacent_enemies = []
-        
-        if "CC_RNG" not in unit:
-            raise KeyError(f"Unit {unit['id']} missing required CC_RNG field")
-        cc_range = unit["CC_RNG"]
-        
-        for enemy in all_units:
-            if (enemy["player"] != unit["player"] and 
-                enemy["CUR_HP"] > 0 and
-                max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"])) <= cc_range):
-                adjacent_enemies.append(enemy)
-                
-        return adjacent_enemies
-        
     def _get_unit_by_id(self, unit_id: str) -> Optional[Dict[str, Any]]:
         """Get unit by ID from current game state."""
         all_units = self.base.get_units()
@@ -786,10 +751,7 @@ class SequentialGameController:
             
         # Execute action through base controller
         try:
-            # DEBUG: Log exactly what we're sending to base controller
-            print(f"🔥 SENDING TO BASE: Unit {unit['id']} → {mirror_action}")
             success = self.base.execute_action(unit["id"], mirror_action)
-            print(f"🔥 BASE RETURNED: Success = {success}")
             
             # Capture detailed action results for logging - STRICT VALIDATION ONLY
             if success and mirror_action.get("type") == "shoot":
@@ -848,6 +810,10 @@ class SequentialGameController:
                             "wound_result": "WOUND" if attack_data["wound"] else "FAIL",
                             "save_result": "SAVE" if attack_data["save_success"] else "FAIL"
                         })
+                    else:
+                        print(f"🔍 COMBAT DEBUG: Missing fields in attack_data: {set(required_fields) - set(attack_data.keys())}")
+                else:
+                    print(f"🔍 COMBAT DEBUG: _last_combat_result structure issue - hasattr: {hasattr(self.base, '_last_combat_result')}, exists: {bool(getattr(self.base, '_last_combat_result', None))}")
                 # No else clause - let step logger handle missing dice data with its built-in "N/A" system
             
             return success, mirror_action
@@ -865,10 +831,14 @@ class SequentialGameController:
             
         action_type = action % 8  # Ensure valid range
         
-        # DEBUG: Log action selection in combat phase
-        if phase == "combat":
-            has_adjacent = self._has_adjacent_enemies(unit)
-            print(f"🎯 ACTION DEBUG: Unit {unit['id']} in {phase} - Raw action: {action}, Action type: {action_type}, Adjacent enemies: {has_adjacent}")
+        # DEBUG: Log action selection for ALL phases and ALL units
+        has_adjacent = self._has_adjacent_enemies(unit) if phase == "combat" else False
+        print(f"🎯 ACTION DEBUG: Unit {unit['id']} in {phase} - Raw action: {action}, Action type: {action_type}, Adjacent enemies: {has_adjacent}")
+        
+        # CRITICAL: If Unit 1 chooses WAIT in combat while adjacent, this is an AI AGENT ERROR
+        if phase == "combat" and action_type == 7 and has_adjacent:
+            print(f"🚨 AI AGENT ERROR: Unit {unit['id']} chose WAIT (action 7) but is adjacent to enemies!")
+            print(f"🚨 This is NOT a sequential controller issue - it's an AI training/observation issue!")
         
         # Movement actions (0-3)
         if 0 <= action_type <= 3:
@@ -964,37 +934,18 @@ class SequentialGameController:
             if phase != "combat":
                 return {"type": "wait"}
                 
-            # DEBUG: Check our own adjacency logic
-            has_adjacent = self._has_adjacent_enemies(unit)
-            print(f"🔍 COMBAT DEBUG - Unit {unit['id']} at ({unit['col']}, {unit['row']})")
-            print(f"🔍 Our adjacency check: {has_adjacent}")
-            print(f"🔍 CC_RNG: {unit.get('CC_RNG', 'MISSING')}")
-            
             if not hasattr(self.base, 'game_actions'):
                 raise RuntimeError("Base controller missing required game_actions")
             if "get_valid_combat_targets" not in self.base.game_actions:
                 raise KeyError("game_actions missing required 'get_valid_combat_targets' method")
-                
+               
             valid_targets = self.base.game_actions["get_valid_combat_targets"](unit["id"])
-            print(f"🔍 Base controller valid targets: {valid_targets}")
-            
+           
             if valid_targets:
                 return {
                     "type": "combat",
                     "target_id": valid_targets[0]
-                }
-            
-            # FALLBACK: If our logic says adjacent but base controller disagrees, use our logic
-            if has_adjacent:
-                print(f"🔍 FALLBACK: Using our adjacency logic - finding target manually")
-                adjacent_enemies = self._get_adjacent_enemies(unit)
-                if adjacent_enemies:
-                    return {
-                        "type": "combat", 
-                        "target_id": adjacent_enemies[0]["id"]
-                    }
-            
-            print(f"🔍 WARNING: Unit {unit['id']} has no valid combat targets")
+                }           
             return {"type": "wait"}
             
         # Wait action (7) or any other
