@@ -293,7 +293,6 @@ class SequentialGameController:
             self._move_phase_reset_done = True
         
         all_units = self.base.get_units()
-        # Clear existing queue
         self.active_unit_queue = []
 
         # AI_TURN.md: Combat phase has TWO SUB-PHASES
@@ -306,16 +305,15 @@ class SequentialGameController:
                     raise KeyError(f"Unit {u.get('id', 'unknown')} missing required CUR_HP field")
                 if u["player"] == current_player and u["CUR_HP"] > 0:
                     candidate_units.append(u)
-            # Add eligible units to queue (IDs only) - CLEAN
-            eligible_count = 0
+            
             for unit in candidate_units:
-                # AI_TURN.md: Check eligibility WITHOUT any side effects or marking
                 if self._is_unit_eligible_for_current_phase(unit):
                     self.active_unit_queue.append(unit["id"])
-                    eligible_count += 1
 
     def _build_combat_sub_phases(self):
         """AI_TURN.md: Build combat queue with TWO SUB-PHASES"""
+        
+        # CRITICAL FIX: Get fresh unit data immediately when combat phase starts
         all_units = self.base.get_units()
         living_units = [u for u in all_units if u.get("CUR_HP", 0) > 0]
         current_player = self.base.get_current_player()
@@ -327,35 +325,54 @@ class SequentialGameController:
             
         attacked_set = self.base.game_state["units_attacked"]
         charged_set = self.base.game_state["units_charged"]
+
+        # CRITICAL FIX: Check if ANY units have adjacent enemies before building queues
+        units_with_adjacent_enemies = []
+        for unit in living_units:
+            has_adjacent = self._has_adjacent_enemies(unit)
+            if has_adjacent:
+                units_with_adjacent_enemies.append(unit)
+        
+        # AI_TURN.md: If NO units have adjacent enemies, combat phase should be empty
+        if not units_with_adjacent_enemies:
+            self.active_unit_queue = []
+            return
         
         # SUB-PHASE 1: Current player's charging units attack first
         charging_units = []
-        for unit in living_units:
-            if (unit["player"] == current_player and 
-                unit["id"] in charged_set and 
-                unit["id"] not in attacked_set and
-                self._has_adjacent_enemies(unit)):
-                charging_units.append(unit["id"])
-        
+        for unit in units_with_adjacent_enemies:
+            unit_id = unit["id"]
+            is_current_player = unit["player"] == current_player
+            is_charged = unit_id in charged_set
+            not_attacked = unit_id not in attacked_set
+                        
+            if (is_current_player and is_charged and not_attacked):
+                charging_units.append(unit_id)
         # SUB-PHASE 2: Alternating combat - non-active player first, then active player
         non_active_player = 1 - current_player
         alternating_units = []
         
         # Non-active player units first
         for unit in living_units:
-            if (unit["player"] == non_active_player and 
-                unit["id"] not in charged_set and 
-                unit["id"] not in attacked_set and
-                self._has_adjacent_enemies(unit)):
-                alternating_units.append(unit["id"])
+            unit_id = unit["id"]
+            has_adjacent = self._has_adjacent_enemies(unit)
+            is_non_active = unit["player"] == non_active_player
+            not_charged = unit_id not in charged_set
+            not_attacked = unit_id not in attacked_set
+            
+            if (is_non_active and not_charged and not_attacked and has_adjacent):
+                alternating_units.append(unit_id)
         
         # Active player non-charging units
         for unit in living_units:
-            if (unit["player"] == current_player and 
-                unit["id"] not in charged_set and 
-                unit["id"] not in attacked_set and
-                self._has_adjacent_enemies(unit)):
-                alternating_units.append(unit["id"])
+            unit_id = unit["id"]
+            has_adjacent = self._has_adjacent_enemies(unit)
+            is_current_player = unit["player"] == current_player
+            not_charged = unit_id not in charged_set
+            not_attacked = unit_id not in attacked_set
+            
+            if (is_current_player and not_charged and not_attacked and has_adjacent):
+                alternating_units.append(unit_id)
         
         # AI_TURN.md: Charging units first, then alternating
         self.active_unit_queue = charging_units + alternating_units
@@ -591,10 +608,13 @@ class SequentialGameController:
             raise KeyError(f"Unit {unit['id']} missing required CC_RNG field")
         cc_range = unit["CC_RNG"]
         
-        return any(
-            max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"])) <= cc_range
-            for enemy in enemy_units
-        )
+        for enemy in enemy_units:
+            distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
+            is_adjacent = distance <= cc_range
+            if is_adjacent:
+                return True
+        
+        return False
         
     def _has_adjacent_enemies(self, unit: Dict[str, Any]) -> bool:
         """Check if unit has adjacent enemies within CC_RNG."""
@@ -749,9 +769,32 @@ class SequentialGameController:
                 raise KeyError("game_state missing required 'episode_steps' field")
             self.base.game_state["episode_steps"] += 1
             
+        # CRITICAL FIX: Store unit position before action for debugging
+        old_position = (unit["col"], unit["row"])
+        
         # Execute action through base controller
         try:
             success = self.base.execute_action(unit["id"], mirror_action)
+            
+            # CRITICAL FIX: Verify position update for charge actions
+            if success and mirror_action.get("type") == "charge":
+                # Get updated unit from game state
+                updated_units = self.base.get_units()
+                updated_unit = None
+                for u in updated_units:
+                    if u["id"] == unit["id"]:
+                        updated_unit = u
+                        break
+                
+                if updated_unit:
+                    new_position = (updated_unit["col"], updated_unit["row"])
+                    expected_position = (mirror_action.get("destination_col"), mirror_action.get("destination_row"))
+                    
+                    if expected_position and new_position != expected_position:
+                        print(f"🚨 CHARGE POSITION ERROR: Unit {unit['id']} position not updated correctly!")
+                        print(f"  Expected: {expected_position}, Got: {new_position}")
+                else:
+                    print(f"🚨 CHARGE ERROR: Could not find updated unit {unit['id']} after charge")
             
             # Capture detailed action results for logging - STRICT VALIDATION ONLY
             if success and mirror_action.get("type") == "shoot":
@@ -787,34 +830,101 @@ class SequentialGameController:
                     "save_result": "SAVE" if shot_data["save_success"] else "FAIL"
                 })
             
-            # Capture combat dice results for logging - only when valid data available
+            # Capture combat dice results for logging - enhanced debugging and validation
             elif success and mirror_action.get("type") == "combat":
-                if (hasattr(self.base, '_last_combat_result') and self.base._last_combat_result and
-                    isinstance(self.base._last_combat_result, dict) and 
-                    "attacks" in self.base._last_combat_result and 
-                    len(self.base._last_combat_result["attacks"]) > 0):
+                print(f"🎯 SEQUENTIAL DEBUG: Attempting dice capture for unit {unit['id']}, success={success}, type={mirror_action.get('type')}")
+                # Debug the exact state of _last_combat_result BEFORE checking
+                if not hasattr(self.base, '_last_combat_result'):
+                    print(f"🚨 COMBAT DEBUG: base missing _last_combat_result attribute for unit {unit['id']}")
+                elif not self.base._last_combat_result:
+                    print(f"🚨 COMBAT DEBUG: _last_combat_result is None/empty for unit {unit['id']}")
+                
+                if hasattr(self.base, '_last_combat_result') and self.base._last_combat_result:
+                    combat_result = self.base._last_combat_result
                     
-                    attack_data = self.base._last_combat_result["attacks"][0]
-                    # Only add dice data if all required fields are present and valid
-                    required_fields = ["hit_roll", "wound_roll", "save_roll", "damage", "hit_target", "wound_target", "save_target", "hit", "wound", "save_success"]
-                    if all(field in attack_data for field in required_fields):
-                        mirror_action.update({
-                            "hit_roll": attack_data["hit_roll"],
-                            "wound_roll": attack_data["wound_roll"],
-                            "save_roll": attack_data["save_roll"],
-                            "damage_dealt": attack_data["damage"],
-                            "hit_target": attack_data["hit_target"],
-                            "wound_target": attack_data["wound_target"],
-                            "save_target": attack_data["save_target"],
-                            "hit_result": "HIT" if attack_data["hit"] else "MISS",
-                            "wound_result": "WOUND" if attack_data["wound"] else "FAIL",
-                            "save_result": "SAVE" if attack_data["save_success"] else "FAIL"
-                        })
+                    if isinstance(combat_result, dict) and "attackDetails" in combat_result:
+                        attack_details = combat_result["attackDetails"]
+                        if len(attack_details) > 0:
+                            # Process ALL CC_NB attacks like shooting processes all shots
+                            total_attacks = len(attack_details)
+                            # Use first attack for dice display (like shooting uses first shot)
+                            attack_data = attack_details[0]
+                            
+                            # Calculate target values like shooting phase does
+                            attacker = unit  # This is the attacking unit parameter
+                            target_unit = self._get_unit_by_id(mirror_action.get("target_id"))
+                            
+                            if attacker and target_unit:
+                                # Calculate target values using shared formulas - NO DEFAULTS
+                                if "CC_ATK" not in attacker:
+                                    raise KeyError(f"Unit {attacker['id']} missing required CC_ATK field")
+                                if "CC_STR" not in attacker:
+                                    raise KeyError(f"Unit {attacker['id']} missing required CC_STR field")
+                                if "T" not in target_unit:
+                                    raise KeyError(f"Unit {target_unit['id']} missing required T field")
+                                if "ARMOR_SAVE" not in target_unit:
+                                    raise KeyError(f"Unit {target_unit['id']} missing required ARMOR_SAVE field")
+                                if "CC_AP" not in attacker:
+                                    raise KeyError(f"Unit {attacker['id']} missing required CC_AP field")
+                                
+                                from shared.gameRules import calculate_wound_target, calculate_save_target
+                                hit_target = attacker["CC_ATK"]
+                                wound_target = calculate_wound_target(attacker["CC_STR"], target_unit["T"])
+                                save_target = calculate_save_target(
+                                    target_unit["ARMOR_SAVE"],
+                                    target_unit.get("INVUL_SAVE", 0),  # Only INVUL_SAVE can default to 0
+                                    attacker["CC_AP"]
+                                )
+                            else:
+                                raise RuntimeError("Combat dice capture failed - missing attacker or target unit")
+                            
+                            # Extract actual dice roll values - NO DEFAULTS ALLOWED
+                            hit_roll = attack_data.get("hit_roll")
+                            wound_roll = attack_data.get("wound_roll") 
+                            save_roll = attack_data.get("save_roll")
+                            
+                            if hit_roll is None or wound_roll is None or save_roll is None:
+                                raise RuntimeError(f"Combat result missing required dice rolls: hit={hit_roll}, wound={wound_roll}, save={save_roll}")
+                            
+                            # Apply truncation logic like shooting phase - stop after first failure
+                            hit_success = attack_data.get("hit_success", False)
+                            wound_success = attack_data.get("wound_success", False)
+                            save_success = attack_data.get("save_success", False)
+                            
+                            # Start with hit data (always included)
+                            dice_data = {
+                                "hit_roll": hit_roll,
+                                "hit_target": hit_target,
+                                "hit_result": "HIT" if hit_success else "MISS",
+                                "total_attacks": total_attacks,
+                            }
+                            
+                            # Only add wound data if hit succeeded
+                            if hit_success:
+                                dice_data.update({
+                                    "wound_roll": wound_roll,
+                                    "wound_target": wound_target,
+                                    "wound_result": "WOUND" if wound_success else "FAIL",
+                                })
+                                
+                                # Only add save data if wound succeeded
+                                if wound_success:
+                                    dice_data.update({
+                                        "save_roll": save_roll,
+                                        "save_target": save_target,
+                                        "save_result": "SAVE" if save_success else "FAIL",
+                                    })
+                            
+                            # Always include damage (0 if any step failed)
+                            dice_data["damage_dealt"] = attack_data.get("damage_dealt", 0)
+                            
+                            mirror_action.update(dice_data)
+                        else:
+                            print(f"🔍 COMBAT DICE DEBUG: No attacks array or empty attacks")
                     else:
-                        print(f"🔍 COMBAT DEBUG: Missing fields in attack_data: {set(required_fields) - set(attack_data.keys())}")
+                        print(f"🔍 COMBAT DICE DEBUG: Combat result is not a dictionary: {type(combat_result)}")
                 else:
-                    print(f"🔍 COMBAT DEBUG: _last_combat_result structure issue - hasattr: {hasattr(self.base, '_last_combat_result')}, exists: {bool(getattr(self.base, '_last_combat_result', None))}")
-                # No else clause - let step logger handle missing dice data with its built-in "N/A" system
+                    print(f"🔍 COMBAT DICE DEBUG: No _last_combat_result available")
             
             return success, mirror_action
         except Exception as e:
@@ -833,8 +943,6 @@ class SequentialGameController:
         
         # DEBUG: Log action selection for ALL phases and ALL units
         has_adjacent = self._has_adjacent_enemies(unit) if phase == "combat" else False
-        print(f"🎯 ACTION DEBUG: Unit {unit['id']} in {phase} - Raw action: {action}, Action type: {action_type}, Adjacent enemies: {has_adjacent}")
-        
         # CRITICAL: If Unit 1 chooses WAIT in combat while adjacent, this is an AI AGENT ERROR
         if phase == "combat" and action_type == 7 and has_adjacent:
             print(f"🚨 AI AGENT ERROR: Unit {unit['id']} chose WAIT (action 7) but is adjacent to enemies!")
@@ -907,15 +1015,17 @@ class SequentialGameController:
             charge_roll = charge_data.get("total") if isinstance(charge_data, dict) else charge_data
             if charge_roll <= 0:
                 return {"type": "wait"}
-                
+            
             # AI_TURN.md: Build valid_charge_destinations pool using pathfinding with roll distance
             valid_destinations = self._get_valid_charge_destinations(unit, charge_roll)
+            
             if valid_destinations:
                 # Find enemy target adjacent to the first valid destination
                 all_units = self.base.get_units()
                 enemy_units = [u for u in all_units if u["player"] != unit["player"] and u.get("CUR_HP") > 0]
                 
                 destination = valid_destinations[0]
+                
                 for enemy in enemy_units:
                     # Check if destination is adjacent to this enemy
                     dest_distance = max(abs(destination["col"] - enemy["col"]), abs(destination["row"] - enemy["row"]))
@@ -926,7 +1036,6 @@ class SequentialGameController:
                             "destination_col": destination["col"],
                             "destination_row": destination["row"]
                         }
-                        
             return {"type": "wait"}
             
         # Combat action (6)
@@ -981,11 +1090,13 @@ class SequentialGameController:
             # Log phase transition if step logger connected
             if self.step_logger and self.step_logger.enabled:
                 old_phase = self.base.get_current_phase()
-                old_player = self.base.get_current_player()
+            
+            # CRITICAL FIX: Clear queue before advancing to ensure fresh data in next phase
+            self.active_unit_queue = []
             
             # Advance to next phase
             self._advance_phase()
-            
+
             new_phase = self.base.get_current_phase()
             new_player = self.base.get_current_player()
             
@@ -1002,18 +1113,21 @@ class SequentialGameController:
                 return self._build_gym_response(action, True, None, {"type": "phase_advance"})
         else:
             # AI_TURN.md VIOLATION: This should never happen if eligibility rules are correct
-            print(f"💥 CRITICAL ERROR: No active unit but phase not complete for P{current_player} {current_phase}")
             raise RuntimeError(f"AI_TURN.md violation: No active unit in phase '{current_phase}' but phase not complete")
             
     def _is_phase_complete(self) -> bool:
         """Check if current phase is complete using AI_TURN.md eligibility rules."""
+        current_phase = self.base.get_current_phase()
+        
         # AI_TURN.md: Phase complete when queue is empty and no more eligible units
         if self.active_unit_queue:
             return False
             
         # Try to build queue - if still empty, phase is complete
         self._build_current_phase_queue()
-        return len(self.active_unit_queue) == 0
+        is_complete = len(self.active_unit_queue) == 0
+        
+        return is_complete
         
     def _advance_phase(self):
         """Advance to next phase using AI_TURN.md exact turn progression."""
@@ -1053,6 +1167,12 @@ class SequentialGameController:
                            mirror_action: Dict[str, Any], terminated: bool = False) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
         """Build gymnasium response tuple."""
         try:
+            # CRITICAL DEBUG: Check if this is a phase transition to combat
+            if mirror_action.get("type") == "phase_advance":
+                new_phase = self.base.get_current_phase()
+                if new_phase == "combat":
+                    self.debug_combat_queue()
+            
             # Get observation using gym environment if available
             if hasattr(self, 'gym_env') and hasattr(self.gym_env, '_get_obs'):
                 obs = self.gym_env._get_obs()
@@ -1108,6 +1228,14 @@ class SequentialGameController:
             
         except Exception as e:
             raise RuntimeError(f"Failed to build gym response: {e}")
+
+    def debug_combat_queue(self):
+        """Debug method to test combat queue building manually."""
+        current_phase = self.base.get_current_phase()
+        
+        if current_phase == "combat":
+            self.active_unit_queue = []  # Clear queue
+            self._build_current_phase_queue()
 
     # Compatibility functions for existing integrations
     def create_sequential_game_controller(config, quiet=False):

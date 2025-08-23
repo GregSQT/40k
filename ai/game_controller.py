@@ -323,28 +323,51 @@ class GameController:
         # No need to call game_actions["handle_shoot"] - all logic already handled above
         return True
 
-    def charge_unit(self, charger_id: int, target_id: int) -> bool:
-        """Charge at target"""
-        if "handle_charge" not in self.game_actions:
-            raise RuntimeError("game_actions missing required handle_charge method")
-        self.game_actions["handle_charge"](charger_id, target_id)
+    def charge_unit(self, charger_id: int, target_id: int, destination_col: int = None, destination_row: int = None) -> bool:
+        """Charge at target with specific destination coordinates - ONE SOURCE OF CHARGE MOVEMENT"""
+        # CRITICAL FIX: Use EXACT destination coordinates from sequential controller
+        # This ensures ONE source of charge movement/placing
+        if destination_col is not None and destination_row is not None:
+            # Direct coordinate placement - ONE SOURCE OF CHARGE MOVEMENT
+            self.state_actions["update_unit"](charger_id, {
+                "col": destination_col,
+                "row": destination_row
+            })
+        else:
+            raise ValueError(f"Charge action missing required destination coordinates for unit {charger_id} -> target {target_id}")
+        
         return True
 
     def combat_attack(self, attacker_id: int, target_id: int) -> bool:
         """Attack in combat with detailed dice results"""
+        print(f"🔍 COMBAT_ATTACK DEBUG: Unit {attacker_id} attacking unit {target_id}")
+        
         if "handle_combat_attack" not in self.game_actions:
+            print(f"🚨 COMBAT_ATTACK ERROR: Missing handle_combat_attack method")
             raise RuntimeError("game_actions missing required handle_combat_attack method")
         
         # Get units for detailed combat execution
         attacker = self.find_unit(attacker_id)
         target = self.find_unit(target_id)
-        if not attacker or not target:
+        if not attacker:
+            print(f"🚨 COMBAT_ATTACK ERROR: Attacker unit {attacker_id} not found")
+            return False
+        if not target:
+            print(f"🚨 COMBAT_ATTACK ERROR: Target unit {target_id} not found")
             return False
         
+        print(f"🔍 COMBAT_ATTACK DEBUG: Units found, executing shared gameRules")
+        
         # Execute detailed combat sequence - shared rules must use uppercase
-        from shared.gameRules import execute_combat_sequence
-        combat_result = execute_combat_sequence(attacker, target)
-        self._last_combat_units = (attacker, target)
+        try:
+            from shared.gameRules import execute_combat_sequence
+            combat_result = execute_combat_sequence(attacker, target)
+            print(f"🔍 COMBAT_ATTACK DEBUG: Combat sequence executed successfully")
+            print(f"🔍 COMBAT_ATTACK DEBUG: Combat result keys: {list(combat_result.keys()) if isinstance(combat_result, dict) else 'Not a dict'}")
+            self._last_combat_units = (attacker, target)
+        except Exception as e:
+            print(f"🚨 COMBAT_ATTACK ERROR: execute_combat_sequence failed: {e}")
+            return False
         
         # Apply damage from combat result
         if combat_result["totalDamage"] > 0:
@@ -354,8 +377,9 @@ class GameController:
             else:
                 self.state_actions["update_unit"](target_id, {"CUR_HP": new_hp})
         
-        # Store combat result for logging (same pattern as shooting)
+        # CRITICAL: Store combat result for sequential controller dice logging
         self._last_combat_result = combat_result
+        print(f"🔍 COMBAT_ATTACK DEBUG: Stored _last_combat_result successfully")
         
         # Still call original action for state management
         self.game_actions["handle_combat_attack"](attacker_id, target_id)
@@ -437,7 +461,13 @@ class GameController:
         elif action_type == "shoot":
             success = self.shoot_unit(unit_id, action["target_id"])
         elif action_type == "charge":
-            success = self.charge_unit(unit_id, action["target_id"])
+            target_id = action.get("target_id")
+            destination_col = action.get("destination_col")
+            destination_row = action.get("destination_row")
+            if target_id is not None:
+                success = self.charge_unit(unit_id, target_id, destination_col, destination_row)
+            else:
+                success = False
         elif action_type == "combat":
             success = self.combat_attack(unit_id, action["target_id"])
         elif action_type == "wait":

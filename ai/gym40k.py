@@ -338,7 +338,24 @@ class W40KEnv(gym.Env):
         # AI_GAME.md COMPLIANT: Action is just action type (0-7), no unit selection
         action_type = int(action) % 8  # Ensure action is in valid range
         
-        # ARCHITECTURAL COMPLIANCE: Delegate everything to controller
+        # CRITICAL FIX: Enforce action masking based on current phase and unit adjacency
+        current_phase = self.controller.get_current_phase()
+        valid_actions = self._get_valid_actions_for_phase(current_phase)
+        
+        if action_type not in valid_actions:
+        # AI_TURN.md STRICT: Combat phase units not adjacent → automatic pass
+            if current_phase == "combat" and len(valid_actions) == 0:
+                # AI_TURN.md: "Units adjacent to enemy units? NO → Pass → no log, no Mark"
+                # Let sequential controller handle auto-pass properly
+                pass  # Continue to normal controller delegation
+            else:
+                # Invalid action for other phases - apply penalty
+                reward = self._get_small_penalty_reward()
+                obs = self._get_obs()
+                info = self._get_info()
+                return obs, reward, self.game_over, False, info
+        
+        # ARCHITECTURAL COMPLIANCE: Delegate valid actions to controller
         # Controller will get active unit from Sequential Engine and handle all validation
         obs, reward, terminated, truncated, info = self.controller.execute_gym_action(action_type)
         
@@ -351,6 +368,87 @@ class W40KEnv(gym.Env):
             info['action_mask'] = self.controller.game_actions["get_action_mask"](self.max_units)
         
         return obs, reward, terminated, truncated, info
+
+    def _get_valid_actions_for_phase(self, phase):
+        """Get valid action types for current phase per AI_TURN.md STRICT COMPLIANCE."""
+        if phase == "move":
+            # AI_TURN.md: Movement phase - VALID ACTIONS: [move, wait]
+            return [0, 1, 2, 3, 7]  # Move directions + wait
+        elif phase == "shoot":
+            # AI_TURN.md: Shooting phase - VALID ACTIONS: [shoot, wait]
+            return [4, 7]  # Shoot + wait
+        elif phase == "charge":
+            # AI_TURN.md: Charge phase - VALID ACTIONS: [charge, wait]
+            return [5, 7]  # Charge + wait
+        elif phase == "combat":
+            # AI_TURN.md STRICT: Adjacent units MUST attack, non-adjacent auto-pass
+            active_unit = self._get_current_active_unit_for_combat()
+            if active_unit and self._is_unit_adjacent_to_enemy_ai_turn_compliant(active_unit):
+                return [6]  # ONLY attack action - AI_TURN.md mandates attack for adjacent units
+            else:
+                # AI_TURN.md: Non-adjacent units auto-pass - gym should not crash on empty actions
+                # The sequential controller handles this case properly
+                return []  # Empty actions = auto-pass per AI_TURN.md
+        else:
+            return [7]  # Only wait for unknown phases
+
+    def _get_current_active_unit_for_combat(self):
+        """Get current active unit for combat phase adjacency check per AI_TURN.md."""
+        try:
+            # Try to get active unit from controller's queue system
+            if hasattr(self.controller, 'active_unit_queue') and self.controller.active_unit_queue:
+                unit_id = self.controller.active_unit_queue[0]
+                # CRITICAL FIX: Get actual unit object, not just ID
+                return self.controller._get_unit_by_id(unit_id)
+            
+            # Fallback: Get eligible units for current phase and return first one
+            eligible_units = self._get_eligible_units()
+            ai_units = [u for u in eligible_units if u["player"] == 1]  # AI units
+            return ai_units[0] if ai_units else None
+            
+        except Exception:
+            return None
+
+    def _is_unit_adjacent_to_enemy_ai_turn_compliant(self, unit):
+        """AI_TURN.md STRICT: Check if unit is adjacent to enemy for combat eligibility."""
+        if not unit:
+            return False
+            
+        all_units = self.controller.get_units()
+        enemy_units = [u for u in all_units if u["player"] != unit["player"] and u["alive"] and u["CUR_HP"] > 0]
+        
+        # AI_TURN.md: Adjacent = within CC_RNG (close combat range)
+        unit_cc_rng = unit.get("CC_RNG", 1)  # Default to 1 if not specified
+        
+        for enemy in enemy_units:
+            # Calculate hex distance (max of row/col difference)
+            distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
+            if distance <= unit_cc_rng:  # Within close combat range
+                return True
+        
+        return False
+
+    def _handle_combat_auto_pass(self):
+        """Handle AI_TURN.md combat auto-pass: 'Pass → no log, no Mark'."""
+        # AI_TURN.md STRICT: Unit not adjacent in combat phase automatically passes
+        # No reward penalty, no action logging, no unit marking
+        
+        # Signal to controller that unit completed its turn without action
+        try:
+            # Remove unit from queue without executing action
+            if hasattr(self.controller, '_remove_unit_from_queue'):
+                active_unit = self._get_current_active_unit_for_combat()
+                if active_unit:
+                    self.controller._remove_unit_from_queue(active_unit["id"])
+        except Exception:
+            pass
+        
+        # Return neutral response - no penalty for AI_TURN.md compliant behavior
+        obs = self._get_obs()
+        info = self._get_info()
+        reward = 0.0  # No penalty for compliant auto-pass
+        
+        return obs, reward, self.game_over, False, info
 
     def _find_shoot_target(self, unit):
         """Find valid shooting target using controller logic."""
@@ -912,19 +1010,12 @@ if __name__ == "__main__":
         print("✅ Phase-based environment created successfully")
         
         # Test reset
-        obs, info = env.reset()
-        print(f"✅ Environment reset - observation shape: {obs.shape}")
-        print(f"   Game info: Turn {info['current_turn']}, Phase {info['current_phase']}")
-        print(f"   Units: {info['ai_units_alive']} AI, {info['enemy_units_alive']} enemy")
-        print(f"   Eligible units: {info['eligible_units']}")
-        
+        obs, info = env.reset()        
         # Test a few actions
         print("\n🎯 Testing actions...")
         for action_count in range(5):
             action = env.action_space.sample()
-            obs, reward, done, truncated, info = env.step(action)
-            print(f"   Action {action_count}: Phase {info['current_phase']}, Reward {reward:.2f}, Eligible {info['eligible_units']}")
-            
+            obs, reward, done, truncated, info = env.step(action)            
             if done:
                 print(f"   Game ended! Winner: {info['winner']}")
                 break
