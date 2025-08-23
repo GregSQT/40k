@@ -170,17 +170,25 @@ For each unit
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
 │   └── ALL conditions met → ✅ Add to activation queue
-├── Units in activation → pick one
-│   ├── YES → Valid destination exists within MOVE range?
-│   │   ├── YES → Move Action available → Choose to move ?
-│   │   │   ├── YES → wasAdjacentToEnemy?
-│   │   │   │   ├── YES → Flee action logged, Mark as units_fled
-│   │   │   │   ├── NO → Move action logged
-│   │   │   │   └── Result: +1 step, Move action logged, Mark as units_moved → Unit is removed from the activation queue
-│   │   │   ├── NO → Wait Action → Result: +1 step, Wait action logged, no Mark → Unit is removed from the activation queue
-│   │   └── NO → Pass → no log no Mark → Unit is removed from the activation queue
-│   └── No more activable unit  → pass
-└── End of phase → move to shooting phase
+├── Units in activation queue → pick one
+│   ├── Valid destination exists within MOVE range?
+│   │   ├── YES → MOVEMENT PHASE ACTIONS AVAILABLE
+│   │   │   ├── 🎯 VALID ACTIONS: [move, wait]
+│   │   │   ├── ❌ INVALID ACTIONS: [shoot, charge, attack] → Pass → Error logged → no Mark → Unit is removed from the activation queue
+│   │   │   └── AGENT ACTION SELECTION → Choose move ?
+│   │   │       ├── YES → ✅ VALID → Execute move action
+│   │   │       │   ├── wasAdjacentToEnemy?
+│   │   │       │   │   ├── YES → Flee action logged, Mark as units_fled
+│   │   │       │   │   └── NO → Move action logged
+│   │   │       │   └── Result: +1 step → Mark as units_moved → Unit removed from activation queue
+│   │   │       └── NO → Agent chooses: wait?
+│   │   │           ├── YES → ✅ VALID → Execute wait action
+│   │   │           │   └── Result: +1 step → Wait action logged → o Mark → Unit removed from activation queue
+│   │   │           └── NO → Agent chooses invalid action (shoot/charge/attack)?
+│   │   │               └── ❌ INVALID ACTION ERROR → Pass → Error logged → no Mark → Unit removed from activation queue
+│   │   └── NO → Pass → no log → no Mark → Unit is removed from the activation queue
+│   └── No more activable units → pass
+└── End of movement phase → Advance to shooting phase
 ```
 
 ### Movement Restrictions Logic
@@ -241,24 +249,31 @@ For each unit
 │   ├── Has LOS to enemies within RNG_RNG?
 │   │   └── NO → ❌ No valid targets (Skip, no log)
 │   └── ALL conditions met → ✅ Add to activation queue
-├── Units in activation queue → pick one
-│   ├── YES → Build valid targets pool (enemies within RNG_RNG + LOS) → Valid targets in pool?
-│   │   └── Valid targets in pool?
-│   │       ├── YES → Shoot Action available → Choose to shoot?
-│   │       │   ├── YES → Execute shooting sequence
-│   │       │   │   ├── For shot 1 to RNG_NB:
-│   │       │   │   │   ├── Valid targets still available?
-│   │       │   │   │   │   ├── YES → Select target and resolve shot
-│   │       │   │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│   │       │   │   │   │   │   ├── Target dies → Remove from valid pool, continue to next shot
-│   │       │   │   │   │   │   └── Target survives → Continue to next shot
-│   │       │   │   │   │   └── NO → End shooting (slaughter handling)
-│   │       │   │   │   └── All shots resolved
-│   │       │   │   └── Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit is removed from the activation queue
-│   │       │   └── NO → Wait Action → Result: +1 step, Wait action logged, no Mark → Unit is removed from the activation queue
-│   │       └── NO → Force Wait Action → no log, no Mark → Unit is removed from the activation queue
-│   └── NO more activable units → pass
-└── End of shooting phase → move to charge phase
+├── Units in activation queue?
+│   ├── YES → pick one → Build valid_targets pool (enemies within RNG_RNG + LOS)
+│   │   └── Target units in valid_targets pool?
+│   │       ├── YES → SHOOTING PHASE ACTIONS AVAILABLE
+│   │       │   ├── 🎯 VALID ACTIONS: [shoot, wait]
+│   │       │   ├── ❌ INVALID ACTIONS: [move, charge, attack] → Pass → Error logged → no Mark → Unit is removed from the activation queue
+│   │       │   └── AGENT ACTION SELECTION → Choose shoot?
+│   │       │       ├── YES → ✅ VALID → Execute shooting sequence
+│   │       │       │   ├── For shot 1 to RNG_NB:
+│   │       │       │   │   ├── Valid targets still available?
+│   │       │       │   │   │   ├── YES → Select target and resolve shot
+│   │       │       │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│   │       │       │   │   │   │   ├── Target dies → Remove from valid_targets, continue to next shot
+│   │       │       │   │   │   │   └── Target survives → Continue to next shot
+│   │       │       │   │   │   └── NO → End shooting (slaughter handling)
+│   │       │       │   │   └── All shots resolved
+│   │       │       │   └── Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit removed from activation queue
+│   │       │       └── NO → Agent chooses: wait?
+│   │       │           ├── YES → ✅ VALID → Execute wait action
+│   │       │           │   └── Result: +1 step, Wait action logged, no Mark → Unit removed from activation queue
+│   │       │           └── NO → Agent chooses invalid action (move/charge/attack)?
+│   │       │               └── ❌ INVALID ACTION ERROR → Pass → Error logged → no Mark → Unit is removed from the activation queue
+│   │       └── NO → Pass → no log, no Mark → Unit is removed from the activation queue
+│   └── No more activable units → pass
+└── End of shooting phase → Advance to charge phase
 ```
 
 ### Target Restrictions Logic
@@ -330,20 +345,27 @@ For each unit
 │   ├── Enemies exist within charge_max_distance hexes?
 │   │   └── NO → ❌ No charge targets (Skip, no log)
 │   └── ALL conditions met → ✅ Add to activation queue
-├── Units in activation queue → pick one
-│   ├── YES → Roll 2d6 charge dice at START of activation
+├── Units in activation queue?
+│   ├── YES → pick one → Roll 2d6 charge dice at START of activation
 │   │   ├── Build valid charge destinations pool (BFS pathfinding within dice roll distance)
 │   │   │   └── Valid destinations found adjacent to enemies?
-│   │   │       ├── YES → Charge Action available → Choose to charge?
-│   │   │       │   ├── YES → Execute charge
-│   │   │       │   │   ├── Select destination from valid pool
-│   │   │       │   │   ├── Move unit to destination
-│   │   │       │   │   └── Result: +1 step, Charge action logged, Mark as units_charged
-│   │   │       │   └── NO → pass → no log, no Mark
-│   │   │       └── NO → pass → no log, no Mark
-│   │   └── End of activation → Unit removed from activation queue
+│   │   │       ├── YES → CHARGE PHASE ACTIONS AVAILABLE
+│   │   │       │   ├── 🎯 VALID ACTIONS: [charge, wait]
+│   │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, attack] → Pass → Error logged → no Mark → Unit is removed from the activation queue
+│   │   │       │   └── AGENT ACTION SELECTION → Choose charge?
+│   │   │       │       ├── YES → ✅ VALID → Execute charge
+│   │   │       │       │   ├── Select destination from valid pool
+│   │   │       │       │   ├── Move unit to destination
+│   │   │       │       │   └── Result: +1 step, Charge action logged, Mark as units_charged → Unit removed from activation queue
+│   │   │       │       └── NO → Agent chooses: wait?
+│   │   │       │           ├── YES → ✅ VALID → Execute wait action
+│   │   │       │           │   └── Result: +1 step, Wait action logged, no Mark → Unit removed from activation queue
+│   │   │       │           └── NO → Agent chooses invalid action (move/shoot/attack)?
+│   │   │       │               └── ❌ INVALID ACTION ERROR → Pass → Error logged → no Mark → Unit is removed from the activation queue
+│   │   │       └── NO → Pass → no log, no Mark → Unit is removed from the activation queue
+│   │   └── Discard charge roll (whether used or not)
 │   └── No more activable units → pass
-└── End of charge phase → move to combat phase
+└── End of charge phase → Advance to combat phase
 ```
 
 ### Charge Timing Logic
@@ -422,22 +444,24 @@ Start of the Combat Phase:
 │   │   └── NO → ❌ Not a charging unit (Skip, no log)
 │   ├── Adjacent to enemy unit within CC_RNG?
 │   │   └── NO → ❌ No combat targets (Skip, no log)
-│   └── ALL conditions met → ✅ Add to charging activation queue
+│   └── ALL conditions met → ✅ Add to charging_activation queue
 │
-├── Units in activation queue → pick one
-│   ├── YES → Process charging units sequentially
-│   │   ├── For each charging unit: Adjacent to enemy units?
-│   │   │   ├── YES → Execute CC_NB attacks
-│   │   │   │   ├── For each attack: Valid targets still available?
-│   │   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
-│   │   │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│   │   │   │   │   │   ├── Target dies → Remove from valid pool, continue to next attack
-│   │   │   │   │   │   └── Target survives → Continue to next attack
-│   │   │   │   │   └── NO → End attacking (slaughter handling)
-│   │   │   │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked → Unit removed from activation queue
-│   │   │   └── NO → Pass → no log, no Mark → Unit removed from activation queue
-│   │   └── NO → All charging units processed → Advance to Sub-Phase 2
-│   └── NO → Skip Sub-Phase 1 → Advance to Sub-Phase 2
+├── Units in charging_activation queue?
+│   ├── YES → pick one → COMBAT PHASE SUB-PHASE 1 ACTION AVAILABLE
+│   │   ├── 🎯 VALID ACTION: [attack]
+│   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark → Unit is removed from the activation queue
+│   │   └── AGENT ACTION SELECTION → Choose attack?
+│   │       ├── YES → ✅ VALID → Execute CC_NB attacks
+│   │       │   ├── For each attack: Valid targets still available?
+│   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
+│   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│   │       │   │   │   ├── Target dies → Remove from valid pool, continue to next attack
+│   │       │   │   │   └── Target survives → Continue to next attack
+│   │       │   │   └── NO → End attacking (slaughter handling)
+│   │       │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked → Unit removed from activation queue
+│   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
+│   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark → Unit removed from activation queue
+│   └── NO → All charging units processed → Advance to Sub-Phase 2
 │
 │   Sub-Phase 2
 │
@@ -467,48 +491,64 @@ Start of the Combat Phase:
 │   │   └── NO → ❌ No combat targets (Skip, no log)
 │   └── ALL conditions met → ✅ Add to non_active_alternating_activation_pool
 │
-├── Units in alternating activation queue → pick one
-├── Both players have eligible units for alternating combat?
-│   └── YES → Execute alternating sequence
-│       └── ALTERNATING LOOP: active_alternating_activation_pool and non_active_alternating_activation_pool are not empty
-│           ├── Non-active player turn → Select a unit from non_active_alternating_activation_pool
-│           │   ├── Unit adjacent to enemy units?
-│           │   │   ├── YES → Execute CC_NB attacks
-│           │   │   │   ├── For each attack: Valid targets still available?
-│           │   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
-│           │   │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│           │   │   │   │   │   ├── Target dies → Continue to next attack
-│           │   │   │   │   │   └── Target survives → Continue to next attack
-│           │   │   │   │   └── NO → End attacking (slaughter handling)
-│           │   │   │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked
-│           │   │   └── NO → Pass → no log, no Mark
-│           │   └── Unit removed from non_active_alternating_activation_pool
+├── active_alternating_activation_pool AND non_active_alternating_activation_pool are NOT empty ?
+│   └── YES → ALTERNATING LOOP: while active_alternating_activation_pool AND non_active_alternating_activation_pool are NOT empty
+│       └── Non-active player turn → Select a unit from non_active_alternating_activation_pool
+│           ├── Unit adjacent to enemy units?
+│           │   ├── YES → COMBAT PHASE SUB-PHASE 2 ACTION AVAILABLE
+│           │   │   ├── 🎯 VALID ACTION: [attack]
+│           │   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark
+│           │   │   └── AGENT ACTION SELECTION → Choose attack?
+│           │   │       ├── YES → ✅ VALID → Execute CC_NB attacks
+│           │   │       │   ├── For each attack: Valid targets still available?
+│           │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
+│           │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│           │   │       │   │   │   ├── Target dies → Continue to next attack
+│           │   │       │   │   │   └── Target survives → Continue to next attack
+│           │   │       │   │   └── NO → End attacking (slaughter handling)
+│           │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
+│           │   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
+│           │   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark
+│           │   └── NO → Pass → no log, no Mark
+│           ├── Unit removed from non_active_alternating_activation_pool
 │           ├── Active player turn → Select a unit from active_alternating_activation_pool
 │           │   ├── Unit adjacent to enemy units?
-│           │   │   ├── YES → Execute CC_NB attacks
-│           │   │   │   ├── For each attack: Valid targets still available?
-│           │   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
-│           │   │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│           │   │   │   │   │   ├── Target dies → Continue to next attack
-│           │   │   │   │   │   └── Target survives → Continue to next attack
-│           │   │   │   │   └── NO → End attacking (slaughter handling)
-│           │   │   │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked
-│           │   │   └── NO → Pass → no log, no Mark
-│           │   └── Unit removed from active_alternating_activation_pool
+│           │   ├── YES → COMBAT PHASE SUB-PHASE 2 ACTIONS AVAILABLE
+│           │   │   ├── 🎯 VALID ACTIONS: [attack]
+│           │   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark
+│           │   │   └── AGENT ACTION SELECTION → Choose attack?
+│           │   │       ├── YES → ✅ VALID → Execute CC_NB attacks
+│           │   │       │   ├── For each attack: Valid targets still available?
+│           │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
+│           │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│           │   │       │   │   │   ├── Target dies → Continue to next attack
+│           │   │       │   │   │   └── Target survives → Continue to next attack
+│           │   │       │   │   └── NO → End attacking (slaughter handling)
+│           │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
+│           │   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
+│           │   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark
+│           │   └── Pass → no log, no Mark
+│           ├── Unit removed from active_alternating_activation_pool
 │           └── Check: Either pool empty?
 │               ├── YES → Exit loop, proceed to cleanup
 │               └── NO → Continue ALTERNATING LOOP
 │
-├── Process remaining units from any non-empty alternating activation pools
-│   ├── For each remaining unit: Adjacent to enemy units?
-│   │   ├── YES → Execute CC_NB attacks
-│   │   │   ├── For each attack: Valid targets still available?
-│   │   │   │   ├── YES → Select adjacent enemy target and resolve attack
-│   │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│   │   │   │   │   ├── Target dies → Continue to next attack
-│   │   │   │   │   └── Target survives → Continue to next attack
-│   │   │   │   └── NO → End attacking (slaughter handling)
-│   │   │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked
+├── Select a unit from the non-empty alternating activation pools
+│   ├── Unit adjacent to enemy units?
+│   │   ├── YES → COMBAT PHASE SUB-PHASE 2 ACTIONS AVAILABLE
+│   │   │   ├── 🎯 VALID ACTIONS: [attack]
+│   │   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark
+│   │   │   └── AGENT ACTION SELECTION → Choose attack?
+│   │   │       ├── YES → ✅ VALID → Execute CC_NB attacks
+│   │   │       │   ├── For each attack: Valid targets still available?
+│   │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
+│   │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│   │   │       │   │   │   ├── Target dies → Continue to next attack
+│   │   │       │   │   │   └── Target survives → Continue to next attack
+│   │   │       │   │   └── NO → End attacking (slaughter handling)
+│   │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
+│   │   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
+│   │   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark
 │   │   └── NO → Pass → no log, no Mark
 │   └── Unit removed from its activation pool
 └── End Combat Phase: Advance to next player's Movement Phase
