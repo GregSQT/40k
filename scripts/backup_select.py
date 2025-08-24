@@ -49,7 +49,6 @@ else:
         "ai/game_replay_logger.py",
         "ai/gym40k.py",
         "ai/multi_agent_trainer.py",
-        "ai/replay.py",
         "ai/reward_mapper.py",
         "ai/sequential_game_controller.py",  # New controller with built-in step counting
         "ai/sequential_activation_engine.py",

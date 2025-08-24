@@ -958,6 +958,299 @@ def ensure_scenario():
     if not os.path.exists(scenario_path):
         raise FileNotFoundError(f"Missing required scenario.json file: {scenario_path}. AI_INSTRUCTIONS.md: No fallbacks allowed - scenario file must exist.")
 
+def generate_replay_files(config, args):
+    """Generate replay files using existing training infrastructure - exact format match."""
+    import json
+    from datetime import datetime
+    from ai.game_replay_logger import GameReplayIntegration
+    from ai.unit_registry import UnitRegistry
+    
+    print("🎬 W40K Replay Generator - Integrated Mode")
+    print("=" * 50)
+    
+    try:
+        # Create output directory
+        output_dir = "ai/event_log"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Setup unit registry and scenario
+        unit_registry = UnitRegistry()
+        scenario_file = os.path.join(config.root_path, "config", "scenario.json")
+        
+        if not os.path.exists(scenario_file):
+            raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
+        
+        # Load training config
+        training_config = config.load_training_config(args.training_config)
+        
+        # Determine model file - use existing infrastructure
+        if args.model:
+            # User specified model file - check in ai/models/current
+            models_dir = os.path.join(config.root_path, "ai", "models", "current")
+            model_path = os.path.join(models_dir, args.model)
+            if not os.path.exists(model_path):
+                # Try without .zip extension
+                if not args.model.endswith('.zip'):
+                    model_path = model_path + '.zip'
+                if not os.path.exists(model_path):
+                    # List available models
+                    if os.path.exists(models_dir):
+                        available_models = [f for f in os.listdir(models_dir) if f.endswith('.zip')]
+                        if available_models:
+                            available_list = '\n  - '.join([''] + available_models)
+                            raise FileNotFoundError(f"Model file not found: {model_path}\n\nAvailable models in {models_dir}:{available_list}")
+                    raise FileNotFoundError(f"Model file not found: {model_path}")
+        else:
+            # Auto-detect model from unit registry
+            available_agents = unit_registry.get_required_models()
+            if not available_agents:
+                raise RuntimeError("No agents available from unit registry")
+            
+            agent_key = available_agents[0]  # Use first available agent
+            models_dir = os.path.join(config.root_path, "ai", "models", "current")
+            model_path = os.path.join(models_dir, f"model_{agent_key}.zip")
+            
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Auto-detected model not found: {model_path}\nTry specifying --model explicitly")
+        
+        print(f"🎮 Using model: {os.path.basename(model_path)}")
+        
+        # Setup environment exactly like training infrastructure
+        W40KEnv, register_environment = setup_imports()
+        register_environment()
+        
+        # Create base environment
+        base_env = W40KEnv(
+            rewards_config=args.rewards_config,
+            training_config_name=args.training_config,
+            controlled_agent=None,
+            active_agents=None,
+            scenario_file=scenario_file,
+            unit_registry=unit_registry,
+            quiet=False
+        )
+        
+        # Enable replay logging using existing infrastructure
+        base_env.is_evaluation_mode = True
+        base_env._force_evaluation_mode = True
+        enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
+        if not hasattr(enhanced_env, 'replay_logger') or not enhanced_env.replay_logger:
+            raise RuntimeError("Failed to enable replay logging on environment")
+        
+        # CRITICAL: Set evaluation mode at ALL levels like multi_agent_trainer
+        enhanced_env.is_evaluation_mode = True
+        enhanced_env._force_evaluation_mode = True
+        if hasattr(enhanced_env, 'replay_logger'):
+            enhanced_env.replay_logger.is_evaluation_mode = True
+            print(f"🔍 DEBUG: Set replay_logger.is_evaluation_mode = {enhanced_env.replay_logger.is_evaluation_mode}")
+            if hasattr(enhanced_env.replay_logger, 'env'):
+                enhanced_env.replay_logger.env.is_evaluation_mode = True
+                enhanced_env.replay_logger.env._force_evaluation_mode = True
+                print(f"🔍 DEBUG: Set replay_logger.env.is_evaluation_mode = {enhanced_env.replay_logger.env.is_evaluation_mode}")
+        
+        print(f"🔍 DEBUG: enhanced_env.is_evaluation_mode = {getattr(enhanced_env, 'is_evaluation_mode', 'NOT SET')}")
+        print(f"🔍 DEBUG: enhanced_env._force_evaluation_mode = {getattr(enhanced_env, '_force_evaluation_mode', 'NOT SET')}")
+        
+        # Use enhanced environment directly for replay generation - no Monitor wrapper
+        env = enhanced_env
+        
+        # Load model using existing infrastructure  
+        model = DQN.load(model_path, env=env)
+        print(f"✅ Model loaded successfully")
+        
+        # CRITICAL: Re-set evaluation mode AFTER model loading using multi_agent_trainer pattern
+        print(f"🔍 DEBUG: Re-setting evaluation mode after model loading...")
+        
+        # Use the exact pattern from multi_agent_trainer.py to traverse wrapper hierarchy
+        if hasattr(model, 'env'):
+            current_env = model.env
+            
+            # If it's a VecEnv, access the underlying environments
+            if hasattr(current_env, 'envs'):
+                for i, vec_env in enumerate(current_env.envs):
+                    print(f"🔍 DEBUG: Processing vec env {i}")
+                    vec_env.is_evaluation_mode = True
+                    vec_env._force_evaluation_mode = True
+                    
+                    # Traverse wrapper hierarchy for this vec env
+                    actual_env = vec_env
+                    wrapper_level = 0
+                    while hasattr(actual_env, 'env'):
+                        print(f"🔍 DEBUG: Setting flags at wrapper level {wrapper_level}")
+                        actual_env.is_evaluation_mode = True
+                        actual_env._force_evaluation_mode = True
+                        actual_env = actual_env.env
+                        wrapper_level += 1
+                        
+                        # Prevent infinite loops
+                        if wrapper_level > 10:
+                            break
+                    
+                    # Set on final unwrapped environment
+                    actual_env.is_evaluation_mode = True
+                    actual_env._force_evaluation_mode = True
+                    
+                    # Set on replay logger if it exists
+                    if hasattr(actual_env, 'replay_logger') and actual_env.replay_logger:
+                        actual_env.replay_logger.is_evaluation_mode = True
+                        if hasattr(actual_env.replay_logger, 'env'):
+                            actual_env.replay_logger.env.is_evaluation_mode = True  
+                            actual_env.replay_logger.env._force_evaluation_mode = True
+                        print(f"🔍 DEBUG: Set replay_logger evaluation flags on vec env {i}")
+            else:
+                # Single environment case
+                current_env.is_evaluation_mode = True
+                current_env._force_evaluation_mode = True
+                print(f"🔍 DEBUG: Set flags on single model.env")
+        
+        # Generate replay episodes
+        for episode in range(args.replay_episodes):
+            print(f"🎯 Generating replay episode {episode + 1}/{args.replay_episodes}")
+            
+            # Clear replay logger for fresh episode
+            env.replay_logger.clear()
+            
+            # Use the SAME environment that model.predict uses - get it from model.env
+            if hasattr(model, 'env') and hasattr(model.env, 'envs'):
+                # Use the first vectorized environment (which has our replay logger)
+                actual_env = model.env.envs[0]
+            else:
+                # Fallback to the original env
+                actual_env = env
+                
+            print(f"🔍 DEBUG: Using actual_env with replay_logger: {hasattr(actual_env, 'replay_logger')}")
+            
+            obs, info = actual_env.reset()
+            if obs is None:
+                raise RuntimeError(f"Environment reset failed for episode {episode + 1}")
+            
+            episode_reward = 0.0
+            done = False
+            step_count = 0
+            
+            # Run episode until natural completion (victory or turn limit from game_config)
+            while not done:
+                # Use deterministic actions for consistent preview/replay behavior
+                action, _ = model.predict(obs, deterministic=True)
+                
+                # DEBUG: Check replay logger state before step on the ACTUAL environment
+                if step_count == 0:
+                    if hasattr(actual_env, 'replay_logger'):
+                        print(f"🔍 DEBUG: Before first step - combat_log entries: {len(actual_env.replay_logger.combat_log_entries)}")
+                        print(f"🔍 DEBUG: Actual env replay logger evaluation flags:")
+                        print(f"   - actual_env.is_evaluation_mode: {getattr(actual_env, 'is_evaluation_mode', 'NOT SET')}")
+                        print(f"   - actual_env._force_evaluation_mode: {getattr(actual_env, '_force_evaluation_mode', 'NOT SET')}")
+                        print(f"   - actual_env.replay_logger.is_evaluation_mode: {getattr(actual_env.replay_logger, 'is_evaluation_mode', 'NOT SET')}")
+                    else:
+                        print(f"🔍 DEBUG: actual_env has no replay_logger!")
+                
+                obs, reward, terminated, truncated, info = actual_env.step(action)
+                
+                if obs is None:
+                    raise RuntimeError(f"Environment step failed at step {step_count}")
+                
+                episode_reward += reward
+                step_count += 1
+                done = terminated or truncated
+                
+                # DEBUG: Check if replay logger captured anything after each step
+                if step_count <= 3 and hasattr(actual_env, 'replay_logger'):  # Only first few steps to avoid spam
+                    print(f"🔍 DEBUG: Step {step_count} - action: {action}, reward: {reward}")
+                    print(f"   - combat_log entries: {len(actual_env.replay_logger.combat_log_entries)}")
+                    print(f"   - game_states: {len(actual_env.replay_logger.game_states)}")
+            
+            print(f"   Episode {episode + 1} completed: {step_count} steps, reward {episode_reward:.2f}")
+            if hasattr(actual_env, 'replay_logger'):
+                print(f"🔍 DEBUG: Final replay logger state:")
+                print(f"   - combat_log entries: {len(actual_env.replay_logger.combat_log_entries)}")
+                print(f"   - game_states: {len(actual_env.replay_logger.game_states)}")
+                print(f"   - initial_game_state exists: {hasattr(actual_env.replay_logger, 'initial_game_state')}")
+                if hasattr(actual_env.replay_logger, 'initial_game_state'):
+                    print(f"   - initial_game_state units: {len(actual_env.replay_logger.initial_game_state.get('units', []))}")
+            else:
+                print(f"🔍 DEBUG: actual_env has no replay_logger for final state check!")
+            
+            # Generate replay data in EXACT format from examples
+            # Get current turn from controller if available
+            current_turn = 1
+            winner = None
+            if hasattr(env, 'controller'):
+                current_turn = env.controller.game_state.get("current_turn", 1)
+                if hasattr(env.controller, 'get_winner'):
+                    winner = env.controller.get_winner()
+            
+            # Build initial state from replay logger or fallback to controller
+            initial_state = {"units": [], "board_size": [25, 21]}  # Default board size
+            if hasattr(env.replay_logger, 'initial_game_state') and env.replay_logger.initial_game_state:
+                initial_state = env.replay_logger.initial_game_state
+                # Add board_size if missing
+                if 'board_size' not in initial_state:
+                    initial_state['board_size'] = [25, 21]
+            elif hasattr(env, 'controller'):
+                # Fallback to controller units
+                units = env.controller.get_units()
+                if units:
+                    initial_state = {
+                        "units": [{
+                            "id": unit.get("id"),
+                            "unit_type": unit.get("unit_type"),
+                            "player": unit.get("player"),
+                            "col": unit.get("col"),
+                            "row": unit.get("row"),
+                            "CUR_HP": unit.get("CUR_HP"),
+                            "HP_MAX": unit.get("HP_MAX"),
+                            "MOVE": unit.get("MOVE"),
+                            "RNG_RNG": unit.get("RNG_RNG"),
+                            "RNG_DMG": unit.get("RNG_DMG"),
+                            "CC_DMG": unit.get("CC_DMG"),
+                            "CC_RNG": unit.get("CC_RNG")
+                        } for unit in units],
+                        "board_size": [25, 21]
+                    }
+            
+            replay_data = {
+                "game_info": {
+                    "scenario": "evaluation_episode",
+                    "ai_behavior": "sequential_activation", 
+                    "total_turns": current_turn,
+                    "winner": winner
+                },
+                "metadata": {
+                    "total_combat_log_entries": len(env.replay_logger.combat_log_entries),
+                    "final_turn": current_turn,
+                    "episode_reward": episode_reward,
+                    "format_version": "2.0",
+                    "replay_type": "training_enhanced"
+                },
+                "initial_state": initial_state,
+                "combat_log": env.replay_logger.combat_log_entries,
+                "game_states": getattr(env.replay_logger, 'game_states', []),
+                "episode_steps": step_count,
+                "episode_reward": episode_reward
+            }
+            
+            # Generate output filename matching existing pattern
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            model_name = os.path.splitext(os.path.basename(model_path))[0]
+            output_filename = f"replay_{model_name}_episode_{episode + 1}_{timestamp}.json"
+            output_path = os.path.join(output_dir, output_filename)
+            
+            # Save replay file in exact format
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(replay_data, f, indent=2)
+            
+            print(f"✅ Saved replay: {output_filename}")
+        
+        env.close()
+        print(f"\n🎬 Generated {args.replay_episodes} replay files in {output_dir}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Replay generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
     parser = argparse.ArgumentParser(description="Train W40K AI following AI_GAME_OVERVIEW.md specifications")
@@ -989,6 +1282,12 @@ def main():
                        help="Test scenario manager integration")
     parser.add_argument("--step", action="store_true",
                        help="Enable step-by-step action logging to train_step.log")
+    parser.add_argument("--replay", action="store_true",
+                       help="Generate replay files instead of training (saves to ai/event_log/)")
+    parser.add_argument("--replay-episodes", type=int, default=1,
+                       help="Number of episodes to generate for replay (default: 1)")
+    parser.add_argument("--model", type=str, default=None,
+                       help="Specific model file to use for replay generation")
     
     args = parser.parse_args()
     
@@ -1002,6 +1301,10 @@ def main():
     print(f"Multi-agent: {args.multi_agent}")
     print(f"Orchestrate: {args.orchestrate}")
     print(f"Step logging: {args.step}")
+    print(f"Replay generation: {args.replay}")
+    if args.replay:
+        print(f"Replay episodes: {args.replay_episodes}")
+        print(f"Model file: {args.model or 'auto-detect'}")
     print()
     
     try:
@@ -1025,6 +1328,11 @@ def main():
         # Test integration if requested
         if args.test_integration:
             success = test_scenario_manager_integration()
+            return 0 if success else 1
+        
+        # Replay generation mode
+        if args.replay:
+            success = generate_replay_files(config, args)
             return 0 if success else 1
         
         # Multi-agent orchestration mode
