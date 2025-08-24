@@ -140,7 +140,6 @@ class SequentialGameController:
             
         # 3. Execute action for active unit
         success, mirror_action = self._execute_action_for_unit(active_unit, action)
-        print(f"🔍 DEBUG: Action executed - type={mirror_action.get('type')}, success={success}")
         
         # 4. Mark unit as acted for ALL real action attempts (AI_TURN.md: exact step 4)
         if self._is_real_action(mirror_action):
@@ -156,9 +155,12 @@ class SequentialGameController:
             step_increment = self._is_real_action(mirror_action)
            
             # Use mirror_action which now contains dice data (if captured successfully)
+            # Use mirror_action which now contains dice data (if captured successfully)
             action_details = dict(mirror_action)
             action_type = mirror_action.get("type", "wait")
-            print(f"🔍 DEBUG: Step logging - action_type={action_type}, mirror_action keys={list(mirror_action.keys())}")
+           
+            # CRITICAL FIX: Add current turn to action_details for step logger
+            action_details["current_turn"] = current_turn
            
             # Enhanced unit references with coordinates for ALL action types
             # Acting unit always includes coordinates
@@ -576,7 +578,6 @@ class SequentialGameController:
             if "RNG_NB" not in unit:
                 raise KeyError(f"Unit {unit['id']} missing required RNG_NB field")
             if unit["RNG_NB"] <= 0:
-                print(f"🔍 SHOOT ELIGIBILITY: Unit {unit['id']} has no ranged weapons (RNG_NB={unit.get('RNG_NB', 'missing')})")
                 return False
                 
             # Requirement 3: Not already shot
@@ -584,29 +585,22 @@ class SequentialGameController:
                 raise KeyError("game_state missing required 'units_shot' field")
             shot_set = self.base.game_state["units_shot"]
             if unit["id"] in shot_set:
-                print(f"🔍 SHOOT ELIGIBILITY: Unit {unit['id']} already shot")
                 return False
                 
             # Requirement 4: Not fled
             if "units_fled" not in self.base.game_state:
                 raise KeyError("game_state missing required 'units_fled' field")
             if unit["id"] in self.base.game_state["units_fled"]:
-                print(f"🔍 SHOOT ELIGIBILITY: Unit {unit['id']} has fled")
                 return False
                 
             # Requirement 5: Not adjacent to enemy (in combat)
             if self._is_adjacent_to_enemy(unit):
-                print(f"🔍 SHOOT ELIGIBILITY: Unit {unit['id']} adjacent to enemy (in combat)")
                 return False
                 
             # Requirement 6: Has valid shooting targets
             has_targets = self._has_valid_shooting_targets(unit)
             if not has_targets:
-                print(f"🔍 SHOOT ELIGIBILITY: Unit {unit['id']} has no valid shooting targets")
                 return False
-                
-            print(f"✅ SHOOT ELIGIBILITY: Unit {unit['id']} is eligible for shooting!")
-                
             return True
                     
         elif phase == "charge":
@@ -857,19 +851,9 @@ class SequentialGameController:
             
             # Capture detailed action results for logging - CAPTURE EVEN FOR FAILED SHOTS
             if mirror_action.get("type") == "shoot":  # Remove success requirement
-                print(f"🔍 DEBUG: Attempting to capture shooting dice data, success={success}")
                 if not hasattr(self.base, '_last_shoot_result'):
-                    print(f"🔍 DEBUG: Base controller missing _last_shoot_result attribute")
                     raise RuntimeError("Base controller missing required _last_shoot_result after shoot action")
                 shoot_result = self.base._last_shoot_result
-                print(f"🔍 DEBUG: _last_shoot_result = {shoot_result}")
-                shoot_result = self.base._last_shoot_result
-                print(f"🔍 DEBUG: _last_shoot_result = {shoot_result}")
-                if shoot_result and "shots" in shoot_result:
-                    print(f"🔍 DEBUG: Found {len(shoot_result['shots'])} shots")
-                    for i, shot in enumerate(shoot_result["shots"]):
-                        print(f"🔍 DEBUG: Shot {i} keys: {list(shot.keys())}")
-                        print(f"🔍 DEBUG: Shot {i} data: {shot}")
                 if not shoot_result:
                     raise RuntimeError("Shoot result is None after successful shoot action") 
                 if not isinstance(shoot_result, dict):
@@ -1108,10 +1092,12 @@ class SequentialGameController:
             
             # Log the transition (AI_TURN.md compliance - no step increment)
             if self.step_logger and self.step_logger.enabled:
-                # CRITICAL FIX: Get turn from authoritative game_state, not method
-                current_turn = self.base.game_state["current_turn"]
-                # Enhanced phase logging with turn number
-                self.step_logger.log_phase_transition(old_phase, new_phase, new_player, current_turn)
+                # CRITICAL FIX: Get FRESH turn from game_state after phase advance
+                if "current_turn" not in self.base.game_state:
+                    raise KeyError("game_state missing required 'current_turn' field after phase advance")
+                fresh_turn = self.base.game_state["current_turn"]
+                # Enhanced phase logging with FRESH turn number
+                self.step_logger.log_phase_transition(old_phase, new_phase, new_player, fresh_turn)
             
             # Check if game is over after phase advance
             if self.base.is_game_over():

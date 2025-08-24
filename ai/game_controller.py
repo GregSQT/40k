@@ -287,7 +287,6 @@ class GameController:
 
     def shoot_unit(self, shooter_id: int, target_id: int) -> bool:
         """Shoot at target with detailed dice results"""
-        print(f"🔍 DEBUG: game_controller.shoot_unit called with shooter_id={shooter_id}, target_id={target_id}")
         if "handle_shoot" not in self.game_actions:
             raise RuntimeError("game_actions missing required handle_shoot method")
         
@@ -299,8 +298,6 @@ class GameController:
         
         # Execute detailed shooting sequence - shared rules must use uppercase
         from shared.gameRules import execute_shooting_sequence, calculate_wound_target, calculate_save_target
-        print(f"🔍 DEBUG: About to call execute_shooting_sequence")
-        print(f"🔍 DEBUG: Shooter type: {type(shooter)}, Target type: {type(target)}")
         
         # CRITICAL FIX: Ensure shooter and target are proper unit dictionaries
         if not isinstance(shooter, dict):
@@ -320,14 +317,9 @@ class GameController:
                 raise KeyError(f"Target missing required UPPERCASE field '{field}': {target}")
                 
         try:
-            shoot_result = execute_shooting_sequence(shooter, target)
-            print(f"🔍 DEBUG: execute_shooting_sequence returned: {shoot_result}")
+            # CRITICAL FIX: execute_shooting_sequence expects all_targets as LIST, not single target
+            shoot_result = execute_shooting_sequence(shooter, [target])
         except Exception as e:
-            print(f"🔍 DEBUG: execute_shooting_sequence CRASHED: {e}")
-            print(f"🔍 DEBUG: Shooter data keys: {list(shooter.keys())}")
-            print(f"🔍 DEBUG: Target data keys: {list(target.keys())}")
-            import traceback
-            print(f"🔍 DEBUG: Full traceback: {traceback.format_exc()}")
             return False
         
         # Add target values to each shot like combat phase does

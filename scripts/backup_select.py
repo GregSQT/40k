@@ -27,10 +27,6 @@ else:
 ######################################################################################################
 ##### root files
 ######################################################################################################
-        
-        "ai/turn_validator1.py",
-        "ai/turn_validator2.py",
-        "ai/turn_validator3.py",
 
         "AI_ARCHITECTURE.md",
         "AI_GAME.md",
@@ -53,6 +49,7 @@ else:
         "ai/game_replay_logger.py",
         "ai/gym40k.py",
         "ai/multi_agent_trainer.py",
+        "ai/replay.py",
         "ai/reward_mapper.py",
         "ai/sequential_game_controller.py",  # New controller with built-in step counting
         "ai/sequential_activation_engine.py",
