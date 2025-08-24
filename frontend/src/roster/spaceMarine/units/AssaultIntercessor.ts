@@ -15,18 +15,18 @@ export class AssaultIntercessor extends SpaceMarineInfantryTroopMeleeTroop {
   static VALUE = 20;           // Unit value
   // RANGE WEAPON
   static RNG_RNG = 18;         // Range attack : range - 18
-  static RNG_NB = 2;           // Range attack : number of attacks - 1
+  static RNG_NB = 4;           // Range attack : number of attacks - 1
   static RNG_ATK = 3;          // Range attack : To Hit score
   static RNG_STR = 4;          // Range attack Strength
-  static RNG_AP = 1;           // Range attack Armor penetration
-  static RNG_DMG = 1;          // Range attack : damages
+  static RNG_AP = 3;           // Range attack Armor penetration - 1
+  static RNG_DMG = 2;          // Range attack : damages - 1
   // MELEE WEAPON
-  static CC_NB = 2;            // Melee attack : number of attacks - 4
+  static CC_NB = 4;            // Melee attack : number of attacks - 4
   static CC_RNG = 1;           // Melee attack : range
   static CC_ATK = 3;           // Melee attack : score
-  static CC_STR = 4;           // Melee attack Strength
-  static CC_AP = 1;            // Melee attack Armor penetration
-  static CC_DMG = 1;           // Melee attack : damages
+  static CC_STR = 4;           // Melee attack Strength - 4
+  static CC_AP = 1;            // Melee attack Armor penetration - 1
+  static CC_DMG = 1;           // Melee attack : damages - 1
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Troop";      // Troop: 2 wounds, 3+ save

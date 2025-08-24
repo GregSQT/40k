@@ -140,6 +140,7 @@ class SequentialGameController:
             
         # 3. Execute action for active unit
         success, mirror_action = self._execute_action_for_unit(active_unit, action)
+        print(f"🔍 DEBUG: Action executed - type={mirror_action.get('type')}, success={success}")
         
         # 4. Mark unit as acted for ALL real action attempts (AI_TURN.md: exact step 4)
         if self._is_real_action(mirror_action):
@@ -157,6 +158,7 @@ class SequentialGameController:
             # Use mirror_action which now contains dice data (if captured successfully)
             action_details = dict(mirror_action)
             action_type = mirror_action.get("type", "wait")
+            print(f"🔍 DEBUG: Step logging - action_type={action_type}, mirror_action keys={list(mirror_action.keys())}")
            
             # Enhanced unit references with coordinates for ALL action types
             # Acting unit always includes coordinates
@@ -198,6 +200,14 @@ class SequentialGameController:
                     # Log each shot individually (including single shots)
                     for shot_idx, shot_data in enumerate(shoot_result["shots"]):
                         shot_details = dict(action_details)
+                        
+                        # CRITICAL FIX: Validate shot_data has required fields before logging
+                        required_shot_fields = ["hit_roll", "wound_roll", "save_roll", "damage", "hit_target", "wound_target", "save_target", "hit", "wound", "save_success"]
+                        for field in required_shot_fields:
+                            if field not in shot_data:
+                                print(f"⚠️ WARNING: Shot data missing field '{field}', skipping detailed logging")
+                                continue
+                        
                         shot_details.update({
                             "shot_number": shot_idx + 1,
                             "total_shots": len(shoot_result["shots"]),
@@ -332,17 +342,7 @@ class SequentialGameController:
     def _build_current_phase_queue(self):
         """Build unit queue for current phase using AI_TURN.md eligibility rules."""
         current_phase = self.base.get_current_phase()
-        current_player = self.base.get_current_player()
-        
-        # AI_TURN.md: Reset ALL tracking sets at START of movement phase (ONCE only)  
-        if current_phase == "move" and not hasattr(self, '_move_phase_reset_done'):
-            self.base.state_actions['reset_moved_units']()
-            self.base.state_actions['reset_shot_units']()
-            self.base.state_actions['reset_charged_units']()
-            self.base.state_actions['reset_attacked_units']()
-            self.base.state_actions['reset_fled_units']()
-            self._move_phase_reset_done = True
-        
+        current_player = self.base.get_current_player()        
         all_units = self.base.get_units()
         self.active_unit_queue = []
 
@@ -576,6 +576,7 @@ class SequentialGameController:
             if "RNG_NB" not in unit:
                 raise KeyError(f"Unit {unit['id']} missing required RNG_NB field")
             if unit["RNG_NB"] <= 0:
+                print(f"🔍 SHOOT ELIGIBILITY: Unit {unit['id']} has no ranged weapons (RNG_NB={unit.get('RNG_NB', 'missing')})")
                 return False
                 
             # Requirement 3: Not already shot
@@ -583,21 +584,28 @@ class SequentialGameController:
                 raise KeyError("game_state missing required 'units_shot' field")
             shot_set = self.base.game_state["units_shot"]
             if unit["id"] in shot_set:
+                print(f"🔍 SHOOT ELIGIBILITY: Unit {unit['id']} already shot")
                 return False
                 
             # Requirement 4: Not fled
             if "units_fled" not in self.base.game_state:
                 raise KeyError("game_state missing required 'units_fled' field")
             if unit["id"] in self.base.game_state["units_fled"]:
+                print(f"🔍 SHOOT ELIGIBILITY: Unit {unit['id']} has fled")
                 return False
                 
             # Requirement 5: Not adjacent to enemy (in combat)
             if self._is_adjacent_to_enemy(unit):
+                print(f"🔍 SHOOT ELIGIBILITY: Unit {unit['id']} adjacent to enemy (in combat)")
                 return False
                 
             # Requirement 6: Has valid shooting targets
-            if not self._has_valid_shooting_targets(unit):
+            has_targets = self._has_valid_shooting_targets(unit)
+            if not has_targets:
+                print(f"🔍 SHOOT ELIGIBILITY: Unit {unit['id']} has no valid shooting targets")
                 return False
+                
+            print(f"✅ SHOOT ELIGIBILITY: Unit {unit['id']} is eligible for shooting!")
                 
             return True
                     
@@ -847,11 +855,21 @@ class SequentialGameController:
                 else:
                     print(f"🚨 CHARGE ERROR: Could not find updated unit {unit['id']} after charge")
             
-            # Capture detailed action results for logging - STRICT VALIDATION ONLY
-            if success and mirror_action.get("type") == "shoot":
+            # Capture detailed action results for logging - CAPTURE EVEN FOR FAILED SHOTS
+            if mirror_action.get("type") == "shoot":  # Remove success requirement
+                print(f"🔍 DEBUG: Attempting to capture shooting dice data, success={success}")
                 if not hasattr(self.base, '_last_shoot_result'):
+                    print(f"🔍 DEBUG: Base controller missing _last_shoot_result attribute")
                     raise RuntimeError("Base controller missing required _last_shoot_result after shoot action")
                 shoot_result = self.base._last_shoot_result
+                print(f"🔍 DEBUG: _last_shoot_result = {shoot_result}")
+                shoot_result = self.base._last_shoot_result
+                print(f"🔍 DEBUG: _last_shoot_result = {shoot_result}")
+                if shoot_result and "shots" in shoot_result:
+                    print(f"🔍 DEBUG: Found {len(shoot_result['shots'])} shots")
+                    for i, shot in enumerate(shoot_result["shots"]):
+                        print(f"🔍 DEBUG: Shot {i} keys: {list(shot.keys())}")
+                        print(f"🔍 DEBUG: Shot {i} data: {shot}")
                 if not shoot_result:
                     raise RuntimeError("Shoot result is None after successful shoot action") 
                 if not isinstance(shoot_result, dict):
@@ -882,7 +900,7 @@ class SequentialGameController:
                 })
             
             # Capture combat dice results for logging - EXACT COPY of working shooting logic
-            elif success and mirror_action.get("type") == "combat":
+            elif mirror_action.get("type") == "combat":  # Remove success requirement
                 if hasattr(self.base, '_last_combat_result') and self.base._last_combat_result:
                     combat_result = self.base._last_combat_result
                     if not combat_result:
@@ -1138,6 +1156,10 @@ class SequentialGameController:
                     self.base.phase_transitions['end_turn']()
                     new_phase = self.base.get_current_phase()
                     new_player = self.base.get_current_player()
+                    
+                    # AI_TURN.md: Reset tracking sets when Player 0 starts movement (turn boundary)
+                    if new_phase == "move" and new_player == 0:
+                        self._reset_all_tracking_sets_for_new_turn()
                         
             except Exception as e:
                 raise RuntimeError(f"Phase transition failed from '{current_phase}': {e}")
@@ -1203,7 +1225,7 @@ class SequentialGameController:
             info = {
                 "action_success": success,
                 "action_attempted": True,  # Always true for sequential controller
-                "current_turn": self.base.get_current_turn(),
+                "current_turn": self.base.game_state["current_turn"],
                 "current_phase": self.base.get_current_phase(),
                 "current_player": self.base.get_current_player(),
                 "game_over": terminated,

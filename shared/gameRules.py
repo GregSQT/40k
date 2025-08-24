@@ -192,8 +192,8 @@ def has_line_of_sight(from_unit: Dict[str, Any], to_unit: Dict[str, Any],
 
 # === SHOOTING SYSTEM (EXACT from frontend implementation) ===
 
-def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], target_in_cover: bool = False) -> Dict[str, Any]:
-    """Execute complete shooting sequence with individual shot tracking."""
+def execute_shooting_sequence(shooter: Dict[str, Any], all_targets: List[Dict[str, Any]], target_in_cover: bool = False) -> Dict[str, Any]:
+    """Execute complete shooting sequence with dynamic retargeting and slaughter handling."""
     
     # Validate required shooter stats
     if "RNG_NB" not in shooter:
@@ -207,14 +207,6 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
     if "RNG_DMG" not in shooter:
         raise ValueError("shooter.RNG_DMG is required")
     
-    # Validate required target stats
-    if "T" not in target:
-        raise ValueError("target.T is required")
-    if "ARMOR_SAVE" not in target:
-        raise ValueError("target.ARMOR_SAVE is required")
-    if "INVUL_SAVE" not in target:
-        raise ValueError("target.INVUL_SAVE is required")
-    
     number_of_shots = shooter["RNG_NB"]
     total_damage = 0
     hits = 0
@@ -222,14 +214,38 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
     failed_saves = 0
     shot_details = []
     
-    # Process each shot
+    # AI_TURN.md: Build valid targets pool (all living enemies)
+    valid_targets = []
+    for target in all_targets:
+        if (target["player"] != shooter["player"] and 
+            target.get("CUR_HP", 0) > 0 and 
+            target.get("alive", True)):
+            # Validate required target stats
+            if "T" not in target:
+                raise ValueError(f"target.T is required for unit {target.get('id', 'unknown')}")
+            if "ARMOR_SAVE" not in target:
+                raise ValueError(f"target.ARMOR_SAVE is required for unit {target.get('id', 'unknown')}")
+            if "INVUL_SAVE" not in target:
+                raise ValueError(f"target.INVUL_SAVE is required for unit {target.get('id', 'unknown')}")
+            valid_targets.append(target)
+    
+    # Process each shot with dynamic retargeting
     for shot in range(1, number_of_shots + 1):
+        # AI_TURN.md: Check if valid targets still available (slaughter handling)
+        valid_targets = [t for t in valid_targets if t.get("CUR_HP", 0) > 0 and t.get("alive", True)]
+        
+        if not valid_targets:
+            break  # No more valid targets - implement slaughter handling (cancel remaining shots)
+        
+        # Select target from available pool (use first available for now)
+        current_target = valid_targets[0]
+        
         # Hit roll
         hit_roll = roll_d6()
         hit_target = shooter["RNG_ATK"]
         did_hit = hit_roll >= hit_target
         
-        # Initialize shot record
+        # Initialize shot record with target info
         shot_record = {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
@@ -240,7 +256,8 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
             "save_roll": 0,
             "save_target": 0,
             "save_success": False,
-            "damage": 0
+            "damage": 0,
+            "target_id": current_target.get("id", "unknown")
         }
         
         if not did_hit:
@@ -250,7 +267,7 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
         
         # Wound roll
         wound_roll = roll_d6()
-        wound_target = calculate_wound_target(shooter["RNG_STR"], target["T"])
+        wound_target = calculate_wound_target(shooter["RNG_STR"], current_target["T"])
         did_wound = wound_roll >= wound_target
         
         shot_record.update({
@@ -266,7 +283,7 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
         
         # Save roll
         save_roll = roll_d6()
-        save_target = calculate_save_target(target["ARMOR_SAVE"], target["INVUL_SAVE"], shooter["RNG_AP"])
+        save_target = calculate_save_target(current_target["ARMOR_SAVE"], current_target["INVUL_SAVE"], shooter["RNG_AP"])
         saved_wound = save_roll >= save_target
         
         shot_record.update({
@@ -285,19 +302,25 @@ def execute_shooting_sequence(shooter: Dict[str, Any], target: Dict[str, Any], t
         total_damage += damage_dealt
         shot_record["damage"] = damage_dealt
         
+        # AI_TURN.md: Update target HP immediately after damage for next iteration
+        new_hp = max(0, current_target.get("CUR_HP") - damage_dealt)
+        current_target["CUR_HP"] = new_hp
+        if new_hp <= 0:
+            current_target["alive"] = False
+            # Target will be removed from valid_targets in next iteration
+        
         shot_details.append(shot_record)
     
     return {
         "totalDamage": total_damage,
         "summary": {
-            "totalShots": number_of_shots,
+            "totalShots": len(shot_details),  # Actual shots fired (may be less than RNG_NB due to slaughter)
             "hits": hits,
             "wounds": wounds,
             "failedSaves": failed_saves
         },
         "shots": shot_details  # Individual shot details for logging
     }
-    # REMOVED - This was duplicate code that overwrote the correct function above
 
 # === COMBAT SYSTEM (EXACT from frontend implementation) ===
 
@@ -363,7 +386,7 @@ def execute_combat_sequence(attacker: Dict[str, Any], target: Dict[str, Any]) ->
         save_roll = roll_d6()
         attack_result["save_roll"] = save_roll
         base_ARMOR_SAVE = target["ARMOR_SAVE"]
-        invul_save = target.get("INVUL_SAVE", 0)
+        invul_save = target.get("INVUL_SAVE")
         armor_penetration = attacker["CC_AP"]
         
         save_target = calculate_save_target(base_ARMOR_SAVE, invul_save, armor_penetration)

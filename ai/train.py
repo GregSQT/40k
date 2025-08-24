@@ -132,7 +132,7 @@ class StepLogger:
                 f.write("=" * 80 + "\n\n")
             print(f"📝 Step logging enabled: {self.output_file}")
     
-    def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None, turn_number=1):
+    def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None):
         """Log action with step increment information using clear format"""
         if not self.enabled:
             return
@@ -158,6 +158,8 @@ class StepLogger:
                 success_status = "SUCCESS" if success else "FAILED"
                 phase_upper = phase.upper()
                 
+                # Get turn from SINGLE SOURCE OF TRUTH
+                turn_number = action_details.get('current_turn', 1) if action_details else 1
                 f.write(f"[{timestamp}] T{turn_number} P{player} {phase_upper} : {message} [{success_status}] [{step_status}]\n")
                 
         except Exception as e:

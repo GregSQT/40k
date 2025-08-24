@@ -2,31 +2,31 @@
   "units": [
     {
       "id": 1,
-      "unit_type": "AssaultIntercessor",
+      "unit_type": "Intercessor",
       "player": 0,
-      "col": 12,
+      "col": 8,
       "row": 13
     },
     {
       "id": 2,
-      "unit_type": "AssaultIntercessor",
+      "unit_type": "Intercessor",
       "player": 0,
-      "col": 16,
-      "row": 9
+      "col": 15,
+      "row": 2
     },
     {
       "id": 3,
-      "unit_type": "AssaultIntercessor",
+      "unit_type": "Intercessor",
       "player": 1,
-      "col": 12,
-      "row": 7
+      "col": 9,
+      "row": 6
     },
     {
       "id": 4,
-      "unit_type": "AssaultIntercessor",
+      "unit_type": "Intercessor",
       "player": 1,
-      "col": 8,
-      "row": 11
+      "col": 17,
+      "row": 5
     }
   ]
 }

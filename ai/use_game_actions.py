@@ -619,182 +619,6 @@ class UseGameActions:
         self.params.actions["set_attack_preview"](None)
         self.params.actions["set_mode"]("select")
 
-    # === COMPLETE SHOOTING SYSTEM (MISSING from original Python) ===
-
-    def handle_shoot(self, shooter_id: int, target_id: int) -> None:
-        """
-        EXACT mirror of handleShoot from TypeScript.
-        Complete shooting system with probability calculations and target preview.
-        ALL MISSING FEATURES NOW IMPLEMENTED.
-        """
-        if shooter_id in self.params.game_state.get("units_moved", []):
-            return
-
-        if shooter_id in self.params.game_state.get("units_fled", []):
-            return
-
-        # ADDITIONAL CHECK: Prevent shooting if unit has no shots left
-        pre_shooter = self.find_unit(shooter_id)
-        if pre_shooter and "SHOOT_LEFT" in pre_shooter and pre_shooter["SHOOT_LEFT"] <= 0:
-            return
-
-        shooter = self.find_unit(shooter_id)
-        target = self.find_unit(target_id)
-        
-        if not shooter or not target:
-            return
-
-        # Check if this is a preview (first click) or execute (second click)
-        current_target_preview = self.params.game_state.get("target_preview")
-        
-        if (current_target_preview and 
-            current_target_preview["target_id"] == target_id and 
-            current_target_preview["shooter_id"] == shooter_id):
-            
-            # Second click - execute shooting (EXACT from TypeScript)
-            # Clear preview (MISSING from original Python)
-            if current_target_preview.get("blink_timer"):
-                # In Python, we'd handle timer cleanup differently
-                pass
-            self.params.actions["set_target_preview"](None)
-            
-            # Simple single shot execution (EXACT from TypeScript logic)
-            hit_roll = random.randint(1, 6)
-            if "RNG_ATK" not in shooter:
-                raise ValueError(f"shooter.RNG_ATK is required but was undefined for unit {shooter['id']}")
-            hit_success = hit_roll >= shooter["RNG_ATK"]
-            
-            damage_dealt = 0
-            wound_roll = 0
-            wound_success = False
-            save_roll = 0
-            save_success = False
-            
-            # Get required stats with error checking (EXACT from TypeScript)
-            if "RNG_STR" not in shooter:
-                raise ValueError(f"shooter.RNG_STR is required but was undefined for unit {shooter['id']}")
-            shooter_str = shooter["RNG_STR"]
-            
-            if "T" not in target:
-                raise ValueError(f"target.T is required but was undefined for unit {target['id']}")
-            target_t = target["T"]
-            
-            if "ARMOR_SAVE" not in target:
-                raise ValueError(f"target.ARMOR_SAVE is required but was undefined for unit {target['id']}")
-            target_ARMOR_SAVE = target["ARMOR_SAVE"]
-            
-            if "RNG_AP" not in shooter:
-                raise ValueError(f"shooter.RNG_AP is required but was undefined for unit {shooter['id']}")
-            shooter_ap = shooter["RNG_AP"]
-            
-            if hit_success:
-                wound_roll = random.randint(1, 6)
-                wound_target = calculateWoundTarget(shooter_str, target_t)
-                wound_success = wound_roll >= wound_target
-                
-                if wound_success:
-                    save_roll = random.randint(1, 6)
-                    if "INVUL_SAVE" not in target:
-                        raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target}")
-                    save_target = calculateSaveTarget(target_ARMOR_SAVE, target["INVUL_SAVE"], shooter_ap)
-                    save_success = save_roll >= save_target
-                    
-                    if not save_success:
-                        if "RNG_DMG" not in shooter:
-                            raise KeyError(f"Shooter missing required 'RNG_DMG' field: {shooter}")
-                        damage_dealt = shooter["RNG_DMG"]
-                        if "CUR_HP" not in target:
-                            raise KeyError(f"Target missing required 'CUR_HP' field: {target}")
-                        new_hp = max(0, target["CUR_HP"] - damage_dealt)
-                        self.params.actions["update_unit"](target_id, {"CUR_HP": new_hp})
-                        
-                        # Remove unit if HP reaches 0
-                        if new_hp <= 0:
-                            self.params.actions["remove_unit"](target_id)
-
-            # Log shooting action (MISSING from original Python)
-            if self.game_log:
-                shoot_details = [{
-                    "hit_roll": hit_roll,
-                    "hit_result": "HIT" if hit_success else "MISS",
-                    "strength_result": "SUCCESS" if (hit_success and wound_success) else "FAILED",
-                    "hit_target": shooter["RNG_ATK"],
-                    "wound_target": wound_target if hit_success else None,
-                    "save_target": save_target if (hit_success and wound_success) else None,
-                    "save_roll": save_roll if (hit_success and wound_success) else None,
-                    "save_success": save_success if (hit_success and wound_success) else None,
-                    "damage_dealt": damage_dealt
-                }]
-                self.game_log.log_shooting_action(shooter, target, shoot_details, self.params.game_state["current_turn"])
-            
-            # Manually decrement shots - get fresh unit state (EXACT from TypeScript)
-            current_shooter = self.find_unit(shooter_id)
-            if not current_shooter:
-                raise ValueError(f"Cannot find shooter unit {shooter_id}")
-            if "SHOOT_LEFT" not in current_shooter:
-                raise ValueError(f"currentShooter.SHOOT_LEFT is required but was undefined for unit {current_shooter['id']}")
-            
-            current_shots_left = current_shooter["SHOOT_LEFT"]
-            new_shots_left = current_shots_left - 1
-            self.params.actions["update_unit"](shooter_id, {"SHOOT_LEFT": new_shots_left})
-            
-            # Check if more shots remaining (EXACT from TypeScript)
-            if new_shots_left > 0:
-                # Keep unit selected and in attack mode for target reselection
-                self.params.actions["set_attack_preview"]({"unit_id": shooter_id, "col": shooter["col"], "row": shooter["row"]})
-                self.params.actions["set_mode"]("attack_preview")
-                # Don't mark as moved yet - unit still has shots left
-            else:
-                # All shots used - mark as moved and end shooting
-                self.params.actions["add_moved_unit"](shooter_id)
-                self.params.actions["set_attack_preview"](None)
-                self.params.actions["set_selected_unit_id"](None)
-                self.params.actions["set_mode"]("select")
-        
-        else:
-            # First click - start preview (MISSING from original Python)
-            # Clear any existing preview
-            if current_target_preview and current_target_preview.get("blink_timer"):
-                # Handle timer cleanup in Python way
-                pass
-            
-            # Calculate probabilities (MISSING from original Python)
-            hit_probability = calculate_hit_probability(shooter)
-            wound_probability = calculate_wound_probability(shooter, target)
-            save_probability = calculate_save_probability(shooter, target)
-            overall_probability = calculate_overall_probability(shooter, target)
-            
-            # Start preview with blink timer - SINGLE SHOT ONLY (MISSING from original Python)
-            total_blink_steps = 2  # Only show: current HP (step 0) -> after next shot (step 1)
-            
-            preview = TargetPreview(
-                target_id=target_id,
-                shooter_id=shooter_id,
-                current_blink_step=0,
-                total_blink_steps=total_blink_steps,
-                blink_timer=None,
-                hit_probability=hit_probability,
-                wound_probability=wound_probability,
-                save_probability=save_probability,
-                overall_probability=overall_probability
-            )
-            
-            # Start blink cycle for single shot preview (simplified for Python)
-            # In a real implementation, this would use threading or asyncio
-            preview_dict = {
-                "target_id": target_id,
-                "shooter_id": shooter_id,
-                "current_blink_step": 0,
-                "total_blink_steps": total_blink_steps,
-                "blink_timer": None,
-                "hit_probability": hit_probability,
-                "wound_probability": wound_probability,
-                "save_probability": save_probability,
-                "overall_probability": overall_probability
-            }
-            
-            self.params.actions["set_target_preview"](preview_dict)
-
     # === COMBAT SYSTEM (EXACT from TypeScript) ===
 
     def handle_combat_attack(self, attacker_id: int, target_id: Optional[int]) -> None:
@@ -1386,7 +1210,7 @@ class UseGameActions:
             "confirm_move": self.confirm_move,
             "cancel_move": self.cancel_move,
             "handle_move": self.validated_move,
-            "handle_shoot": self.handle_shoot,
+            "handle_shoot": lambda shooter_id, target_id: None,  # Deprecated - use game_controller.shoot_unit
             "handle_combat_attack": self.handle_combat_attack,
             "handle_charge": self.handle_charge,
             "move_charger": self.move_charger,
@@ -1733,7 +1557,7 @@ class TrainingGameActions(UseGameActions):
             "handle_unit_selection": self.select_unit,
             "confirm_move": self.confirm_move,
             "direct_move": self.validated_move,
-            "handle_shoot": self.handle_shoot,
+            "handle_shoot": lambda shooter_id, target_id: None,  # Deprecated - use game_controller.shoot_unit
             "handle_charge": self.handle_charge,
             "handle_combat_attack": self.handle_combat_attack,
             "is_unit_eligible": self.is_unit_eligible_local

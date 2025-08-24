@@ -242,14 +242,6 @@ class GameController:
         game_state_id = id(actual_game_state)
         return phase_value
 
-    def get_current_turn(self) -> int:
-        """Get current turn from the exact game_state that state_actions modifies"""
-        if not hasattr(self, 'state_actions') or not self.state_actions:
-            raise RuntimeError("Controller missing state_actions - cannot get current turn")
-        actual_game_state = self.state_actions['set_current_turn'].__self__.game_state
-        self.game_state = actual_game_state
-        return actual_game_state["current_turn"]
-
     def get_selected_unit_id(self) -> Optional[int]:
         """Get selected unit ID from the exact game_state that state_actions modifies"""
         if not hasattr(self, 'state_actions') or not self.state_actions:
@@ -295,6 +287,7 @@ class GameController:
 
     def shoot_unit(self, shooter_id: int, target_id: int) -> bool:
         """Shoot at target with detailed dice results"""
+        print(f"🔍 DEBUG: game_controller.shoot_unit called with shooter_id={shooter_id}, target_id={target_id}")
         if "handle_shoot" not in self.game_actions:
             raise RuntimeError("game_actions missing required handle_shoot method")
         
@@ -305,8 +298,53 @@ class GameController:
             return False
         
         # Execute detailed shooting sequence - shared rules must use uppercase
-        from shared.gameRules import execute_shooting_sequence
-        shoot_result = execute_shooting_sequence(shooter, target)
+        from shared.gameRules import execute_shooting_sequence, calculate_wound_target, calculate_save_target
+        print(f"🔍 DEBUG: About to call execute_shooting_sequence")
+        print(f"🔍 DEBUG: Shooter type: {type(shooter)}, Target type: {type(target)}")
+        
+        # CRITICAL FIX: Ensure shooter and target are proper unit dictionaries
+        if not isinstance(shooter, dict):
+            raise TypeError(f"Shooter must be dict, got {type(shooter)}: {shooter}")
+        if not isinstance(target, dict):
+            raise TypeError(f"Target must be dict, got {type(target)}: {target}")
+            
+        # CRITICAL FIX: Validate required UPPERCASE fields before calling shared function
+        shooter_required = ["RNG_ATK", "RNG_STR", "RNG_AP", "RNG_DMG", "player"]
+        for field in shooter_required:
+            if field not in shooter:
+                raise KeyError(f"Shooter missing required UPPERCASE field '{field}': {shooter}")
+        
+        target_required = ["T", "ARMOR_SAVE", "player", "CUR_HP"]
+        for field in target_required:
+            if field not in target:
+                raise KeyError(f"Target missing required UPPERCASE field '{field}': {target}")
+                
+        try:
+            shoot_result = execute_shooting_sequence(shooter, target)
+            print(f"🔍 DEBUG: execute_shooting_sequence returned: {shoot_result}")
+        except Exception as e:
+            print(f"🔍 DEBUG: execute_shooting_sequence CRASHED: {e}")
+            print(f"🔍 DEBUG: Shooter data keys: {list(shooter.keys())}")
+            print(f"🔍 DEBUG: Target data keys: {list(target.keys())}")
+            import traceback
+            print(f"🔍 DEBUG: Full traceback: {traceback.format_exc()}")
+            return False
+        
+        # Add target values to each shot like combat phase does
+        if "shots" in shoot_result:
+            hit_target = shooter["RNG_ATK"]
+            wound_target = calculate_wound_target(shooter["RNG_STR"], target["T"])
+            save_target = calculate_save_target(
+                target["ARMOR_SAVE"],
+                target.get("INVUL_SAVE"),
+                shooter["RNG_AP"]
+            )
+            
+            for shot in shoot_result["shots"]:
+                shot["hit_target"] = hit_target
+                shot["wound_target"] = wound_target
+                shot["save_target"] = save_target
+        
         self._last_shoot_units = (shooter, target)
         
         # Apply damage from shooting result
@@ -358,6 +396,18 @@ class GameController:
         # Execute detailed combat sequence - shared rules must use uppercase
         try:
             from shared.gameRules import execute_combat_sequence, calculate_wound_target, calculate_save_target
+            
+            # CRITICAL FIX: Validate required UPPERCASE fields before calling shared function
+            attacker_required = ["CC_ATK", "CC_STR", "CC_AP", "CC_DMG", "player"]
+            for field in attacker_required:
+                if field not in attacker:
+                    raise KeyError(f"Attacker missing required UPPERCASE field '{field}': {attacker}")
+            
+            target_required = ["T", "ARMOR_SAVE", "player", "CUR_HP"] 
+            for field in target_required:
+                if field not in target:
+                    raise KeyError(f"Target missing required UPPERCASE field '{field}': {target}")
+            
             combat_result = execute_combat_sequence(attacker, target)
             
             # Add target values to each attack like shooting phase does
@@ -496,7 +546,7 @@ class GameController:
             "units": self.get_units(),
             "current_player": self.get_current_player(),
             "phase": self.get_current_phase(),
-            "turn": self.get_current_turn(),
+            "turn": self.game_state["current_turn"],
             "selected_unit_id": self.get_selected_unit_id(),
             "units_moved": copy.copy(self.game_state["units_moved"]),
             "units_charged": copy.copy(self.game_state["units_charged"]),
@@ -514,7 +564,7 @@ class GameController:
             return True
         
         # AI_TURN COMPLIANCE: Use training config for episode turn limits
-        current_turn = self.get_current_turn()
+        current_turn = self.game_state["current_turn"]
         try:
             # Use training config number_of_turns_per_episode, not game config max_turns
             training_config_name = getattr(self.config, 'training_config_name', 'debug')

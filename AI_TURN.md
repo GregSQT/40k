@@ -261,7 +261,7 @@ For each unit
 │   │       │       │   │   ├── Valid targets still available?
 │   │       │       │   │   │   ├── YES → Select target and resolve shot
 │   │       │       │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│   │       │       │   │   │   │   ├── Target dies → Remove from valid_targets, continue to next shot
+│   │       │       │   │   │   │   ├── Target dies → Remove from valid_targets, continue to next target
 │   │       │       │   │   │   │   └── Target survives → Continue to next shot
 │   │       │       │   │   │   └── NO → End shooting (slaughter handling)
 │   │       │       │   │   └── All shots resolved
@@ -274,6 +274,31 @@ For each unit
 │   │       └── NO → Pass → no log, no Mark → Unit is removed from the activation queue
 │   └── No more activable units → pass
 └── End of shooting phase → Advance to charge phase
+
+Execute shooting sequence:
+├── Build valid_targets pool from all_targets (enemies within range + LOS)
+├── For shot 1 to RNG_NB:
+│   ├── Filter valid_targets: [t for t in valid_targets if t.CUR_HP > 0 and t.alive]
+│   ├── valid_targets empty?
+│   │   ├── YES → ✅ SLAUGHTER HANDLING → break (cancel remaining shots)
+│   │   └── NO → Select current_target = valid_targets[0]
+│   ├── Hit roll → hit_roll >= shooter.RNG_ATK
+│   │   ├── MISS → Append shot_record → continue to next shot
+│   │   └── HIT → hits++ → Continue to wound roll
+│   ├── Wound roll → wound_roll >= calculate_wound_target()
+│   │   ├── FAIL → Append shot_record → continue to next shot
+│   │   └── WOUND → wounds++ → Continue to save roll
+│   ├── Save roll → save_roll >= calculate_save_target()
+│   │   ├── SAVE → Append shot_record → continue to next shot
+│   │   └── FAIL → failed_saves++ → Continue to damage
+│   ├── Damage application:
+│   │   ├── damage_dealt = shooter.RNG_DMG
+│   │   ├── total_damage += damage_dealt
+│   │   ├── ⚡ IMMEDIATE UPDATE: current_target.CUR_HP -= damage_dealt
+│   │   ├── current_target.CUR_HP <= 0 ? → current_target.alive = False
+│   │   └── Append shot_record with target_id
+│   └── INCREMENT shot counter → Next shot iteration
+└── Return: totalDamage, summary{hits, wounds, failedSaves}, shots[records]
 ```
 
 ### Target Restrictions Logic
@@ -455,7 +480,7 @@ Start of the Combat Phase:
 │   │       │   ├── For each attack: Valid targets still available?
 │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
 │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│   │       │   │   │   ├── Target dies → Remove from valid pool, continue to next attack
+│   │       │   │   │   ├── Target dies → Remove from valid pool, continue to next Valid target 
 │   │       │   │   │   └── Target survives → Continue to next attack
 │   │       │   │   └── NO → End attacking (slaughter handling)
 │   │       │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked → Unit removed from activation queue
@@ -503,7 +528,7 @@ Start of the Combat Phase:
 │           │   │       │   ├── For each attack: Valid targets still available?
 │           │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
 │           │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│           │   │       │   │   │   ├── Target dies → Continue to next attack
+│           │   │       │   │   │   ├── Target dies → Continue to next Valid target
 │           │   │       │   │   │   └── Target survives → Continue to next attack
 │           │   │       │   │   └── NO → End attacking (slaughter handling)
 │           │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
@@ -521,7 +546,7 @@ Start of the Combat Phase:
 │           │   │       │   ├── For each attack: Valid targets still available?
 │           │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
 │           │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│           │   │       │   │   │   ├── Target dies → Continue to next attack
+│           │   │       │   │   │   ├── Target dies → Continue to next Valid target
 │           │   │       │   │   │   └── Target survives → Continue to next attack
 │           │   │       │   │   └── NO → End attacking (slaughter handling)
 │           │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
@@ -543,7 +568,7 @@ Start of the Combat Phase:
 │   │   │       │   ├── For each attack: Valid targets still available?
 │   │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
 │   │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│   │   │       │   │   │   ├── Target dies → Continue to next attack
+│   │   │       │   │   │   ├── Target dies → Continue to next Valid target
 │   │   │       │   │   │   └── Target survives → Continue to next attack
 │   │   │       │   │   └── NO → End attacking (slaughter handling)
 │   │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
