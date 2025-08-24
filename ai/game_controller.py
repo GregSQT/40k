@@ -340,7 +340,6 @@ class GameController:
 
     def combat_attack(self, attacker_id: int, target_id: int) -> bool:
         """Attack in combat with detailed dice results"""
-        print(f"🔍 COMBAT_ATTACK DEBUG: Unit {attacker_id} attacking unit {target_id}")
         
         if "handle_combat_attack" not in self.game_actions:
             print(f"🚨 COMBAT_ATTACK ERROR: Missing handle_combat_attack method")
@@ -356,14 +355,26 @@ class GameController:
             print(f"🚨 COMBAT_ATTACK ERROR: Target unit {target_id} not found")
             return False
         
-        print(f"🔍 COMBAT_ATTACK DEBUG: Units found, executing shared gameRules")
-        
         # Execute detailed combat sequence - shared rules must use uppercase
         try:
-            from shared.gameRules import execute_combat_sequence
+            from shared.gameRules import execute_combat_sequence, calculate_wound_target, calculate_save_target
             combat_result = execute_combat_sequence(attacker, target)
-            print(f"🔍 COMBAT_ATTACK DEBUG: Combat sequence executed successfully")
-            print(f"🔍 COMBAT_ATTACK DEBUG: Combat result keys: {list(combat_result.keys()) if isinstance(combat_result, dict) else 'Not a dict'}")
+            
+            # Add target values to each attack like shooting phase does
+            if "attackDetails" in combat_result:
+                hit_target = attacker["CC_ATK"]
+                wound_target = calculate_wound_target(attacker["CC_STR"], target["T"])
+                save_target = calculate_save_target(
+                    target["ARMOR_SAVE"],
+                    target.get("INVUL_SAVE", 0),
+                    attacker["CC_AP"]
+                )
+                
+                for attack in combat_result["attackDetails"]:
+                    attack["hit_target"] = hit_target
+                    attack["wound_target"] = wound_target
+                    attack["save_target"] = save_target
+            
             self._last_combat_units = (attacker, target)
         except Exception as e:
             print(f"🚨 COMBAT_ATTACK ERROR: execute_combat_sequence failed: {e}")
@@ -379,8 +390,6 @@ class GameController:
         
         # CRITICAL: Store combat result for sequential controller dice logging
         self._last_combat_result = combat_result
-        print(f"🔍 COMBAT_ATTACK DEBUG: Stored _last_combat_result successfully")
-        
         # Still call original action for state management
         self.game_actions["handle_combat_attack"](attacker_id, target_id)
         return True

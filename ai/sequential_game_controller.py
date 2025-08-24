@@ -150,7 +150,8 @@ class SequentialGameController:
         if self.step_logger and self.step_logger.enabled:
             current_phase = self.base.get_current_phase()
             current_player = self.base.get_current_player()
-            current_turn = self.base.get_current_turn()
+            # CRITICAL FIX: Get turn from authoritative game_state object, not cached value
+            current_turn = self.base.game_state["current_turn"]
             step_increment = self._is_real_action(mirror_action)
            
             # Use mirror_action which now contains dice data (if captured successfully)
@@ -242,8 +243,58 @@ class SequentialGameController:
                     action_details=summary_details
                 )
                 # Don't return early - need to continue to gym response
+            elif action_type == "combat" and hasattr(self.base, '_last_combat_result') and self.base._last_combat_result:
+                combat_result = self.base._last_combat_result
+                if "attackDetails" in combat_result and len(combat_result["attackDetails"]) >= 1:
+                    # Log each attack individually (including single attacks)
+                    for attack_idx, attack_data in enumerate(combat_result["attackDetails"]):
+                        attack_details_copy = dict(action_details)
+                        attack_details_copy.update({
+                            "attack_number": attack_idx + 1,
+                            "total_attacks": len(combat_result["attackDetails"]),
+                            "hit_roll": attack_data["hit_roll"],
+                            "wound_roll": attack_data["wound_roll"],
+                            "save_roll": attack_data["save_roll"],
+                            "damage_dealt": attack_data["damage_dealt"],
+                            "hit_target": attack_data["hit_target"],
+                            "wound_target": attack_data["wound_target"],
+                            "save_target": attack_data["save_target"],
+                            "hit_result": "HIT" if attack_data["hit_success"] else "MISS",
+                            "wound_result": "WOUND" if attack_data["wound_success"] else "FAIL",
+                            "save_result": "SAVE" if attack_data["save_success"] else "FAIL"
+                        })
+                        
+                        self.step_logger.log_action(
+                            unit_id=active_unit["id"],
+                            action_type="combat_individual",
+                            phase=current_phase,
+                            player=current_player,
+                            success=success,
+                            step_increment=False,
+                            action_details=attack_details_copy
+                        )
+                
+                # Log combat summary
+                summary_details = dict(action_details)
+                summary_details.update({
+                    "total_attacks": len(combat_result["attackDetails"]),
+                    "total_damage": combat_result["totalDamage"],
+                    "hits": combat_result["summary"]["hits"],
+                    "wounds": combat_result["summary"]["wounds"],
+                    "failed_saves": combat_result["summary"]["failedSaves"]
+                })
+                
+                self.step_logger.log_action(
+                    unit_id=active_unit["id"],
+                    action_type="combat_summary",
+                    phase=current_phase,
+                    player=current_player,
+                    success=success,
+                    step_increment=step_increment,
+                    action_details=summary_details
+                )
             else:
-                # Normal single action logging (non-shooting or single shot)
+                # Normal single action logging (non-shooting, non-combat)
                 self.step_logger.log_action(
                     unit_id=active_unit["id"],
                     action_type=action_type,
@@ -830,101 +881,38 @@ class SequentialGameController:
                     "save_result": "SAVE" if shot_data["save_success"] else "FAIL"
                 })
             
-            # Capture combat dice results for logging - enhanced debugging and validation
+            # Capture combat dice results for logging - EXACT COPY of working shooting logic
             elif success and mirror_action.get("type") == "combat":
-                print(f"🎯 SEQUENTIAL DEBUG: Attempting dice capture for unit {unit['id']}, success={success}, type={mirror_action.get('type')}")
-                # Debug the exact state of _last_combat_result BEFORE checking
-                if not hasattr(self.base, '_last_combat_result'):
-                    print(f"🚨 COMBAT DEBUG: base missing _last_combat_result attribute for unit {unit['id']}")
-                elif not self.base._last_combat_result:
-                    print(f"🚨 COMBAT DEBUG: _last_combat_result is None/empty for unit {unit['id']}")
-                
                 if hasattr(self.base, '_last_combat_result') and self.base._last_combat_result:
                     combat_result = self.base._last_combat_result
+                    if not combat_result:
+                        raise RuntimeError("Combat result is None after successful combat action") 
+                    if not isinstance(combat_result, dict):
+                        raise RuntimeError("Combat result is not a dictionary")
                     
-                    if isinstance(combat_result, dict) and "attackDetails" in combat_result:
-                        attack_details = combat_result["attackDetails"]
-                        if len(attack_details) > 0:
-                            # Process ALL CC_NB attacks like shooting processes all shots
-                            total_attacks = len(attack_details)
-                            # Use first attack for dice display (like shooting uses first shot)
-                            attack_data = attack_details[0]
+                    if "attackDetails" not in combat_result:
+                        raise KeyError("Combat result missing required 'attackDetails' field")
+                    if len(combat_result["attackDetails"]) == 0:
+                        raise RuntimeError("Combat result contains no attack data")
+                        
+                    attack_data = combat_result["attackDetails"][0]
+                    required_fields = ["hit_roll", "wound_roll", "save_roll", "damage_dealt", "hit_success", "wound_success", "save_success", "hit_target", "wound_target", "save_target"]
+                    for field in required_fields:
+                        if field not in attack_data:
+                            raise KeyError(f"Attack data missing required '{field}' field")
                             
-                            # Calculate target values like shooting phase does
-                            attacker = unit  # This is the attacking unit parameter
-                            target_unit = self._get_unit_by_id(mirror_action.get("target_id"))
-                            
-                            if attacker and target_unit:
-                                # Calculate target values using shared formulas - NO DEFAULTS
-                                if "CC_ATK" not in attacker:
-                                    raise KeyError(f"Unit {attacker['id']} missing required CC_ATK field")
-                                if "CC_STR" not in attacker:
-                                    raise KeyError(f"Unit {attacker['id']} missing required CC_STR field")
-                                if "T" not in target_unit:
-                                    raise KeyError(f"Unit {target_unit['id']} missing required T field")
-                                if "ARMOR_SAVE" not in target_unit:
-                                    raise KeyError(f"Unit {target_unit['id']} missing required ARMOR_SAVE field")
-                                if "CC_AP" not in attacker:
-                                    raise KeyError(f"Unit {attacker['id']} missing required CC_AP field")
-                                
-                                from shared.gameRules import calculate_wound_target, calculate_save_target
-                                hit_target = attacker["CC_ATK"]
-                                wound_target = calculate_wound_target(attacker["CC_STR"], target_unit["T"])
-                                save_target = calculate_save_target(
-                                    target_unit["ARMOR_SAVE"],
-                                    target_unit.get("INVUL_SAVE", 0),  # Only INVUL_SAVE can default to 0
-                                    attacker["CC_AP"]
-                                )
-                            else:
-                                raise RuntimeError("Combat dice capture failed - missing attacker or target unit")
-                            
-                            # Extract actual dice roll values - NO DEFAULTS ALLOWED
-                            hit_roll = attack_data.get("hit_roll")
-                            wound_roll = attack_data.get("wound_roll") 
-                            save_roll = attack_data.get("save_roll")
-                            
-                            if hit_roll is None or wound_roll is None or save_roll is None:
-                                raise RuntimeError(f"Combat result missing required dice rolls: hit={hit_roll}, wound={wound_roll}, save={save_roll}")
-                            
-                            # Apply truncation logic like shooting phase - stop after first failure
-                            hit_success = attack_data.get("hit_success", False)
-                            wound_success = attack_data.get("wound_success", False)
-                            save_success = attack_data.get("save_success", False)
-                            
-                            # Start with hit data (always included)
-                            dice_data = {
-                                "hit_roll": hit_roll,
-                                "hit_target": hit_target,
-                                "hit_result": "HIT" if hit_success else "MISS",
-                                "total_attacks": total_attacks,
-                            }
-                            
-                            # Only add wound data if hit succeeded
-                            if hit_success:
-                                dice_data.update({
-                                    "wound_roll": wound_roll,
-                                    "wound_target": wound_target,
-                                    "wound_result": "WOUND" if wound_success else "FAIL",
-                                })
-                                
-                                # Only add save data if wound succeeded
-                                if wound_success:
-                                    dice_data.update({
-                                        "save_roll": save_roll,
-                                        "save_target": save_target,
-                                        "save_result": "SAVE" if save_success else "FAIL",
-                                    })
-                            
-                            # Always include damage (0 if any step failed)
-                            dice_data["damage_dealt"] = attack_data.get("damage_dealt", 0)
-                            
-                            mirror_action.update(dice_data)
-                        else:
-                            print(f"🔍 COMBAT DICE DEBUG: No attacks array or empty attacks")
-                    else:
-                        print(f"🔍 COMBAT DICE DEBUG: Combat result is not a dictionary: {type(combat_result)}")
-                else:
-                    print(f"🔍 COMBAT DICE DEBUG: No _last_combat_result available")
+                    mirror_action.update({
+                        "hit_roll": attack_data["hit_roll"],
+                        "wound_roll": attack_data["wound_roll"],
+                        "save_roll": attack_data["save_roll"],
+                        "damage_dealt": attack_data["damage_dealt"],
+                        "hit_target": attack_data["hit_target"],
+                        "wound_target": attack_data["wound_target"],
+                        "save_target": attack_data["save_target"],
+                        "hit_result": "HIT" if attack_data["hit_success"] else "MISS",
+                        "wound_result": "WOUND" if attack_data["wound_success"] else "FAIL", 
+                        "save_result": "SAVE" if attack_data["save_success"] else "FAIL"
+                    })
             
             return success, mirror_action
         except Exception as e:
@@ -1102,7 +1090,8 @@ class SequentialGameController:
             
             # Log the transition (AI_TURN.md compliance - no step increment)
             if self.step_logger and self.step_logger.enabled:
-                current_turn = self.base.get_current_turn()
+                # CRITICAL FIX: Get turn from authoritative game_state, not method
+                current_turn = self.base.game_state["current_turn"]
                 # Enhanced phase logging with turn number
                 self.step_logger.log_phase_transition(old_phase, new_phase, new_player, current_turn)
             

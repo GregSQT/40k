@@ -351,11 +351,80 @@ class StepLogger:
             save_target = details["save_target"]
             
             base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id}"
-            detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+            
+            # Apply truncation logic like shooting phase - stop after first failure
+            detail_parts = [f"Hit:{hit_target}+:{hit_roll}({hit_result})"]
+            
+            # Only show wound if hit succeeded
+            if hit_result == "HIT":
+                detail_parts.append(f"Wound:{wound_target}+:{wound_roll}({wound_result})")
+                
+                # Only show save if wound succeeded  
+                if wound_result == "WOUND":
+                    detail_parts.append(f"Save:{save_target}+:{save_roll}({save_result})")
+                    
+                    # Only show damage if save failed (damage > 0)
+                    if damage > 0:
+                        detail_parts.append(f"Dmg:{damage}HP")
+            
+            detail_msg = f" - {' '.join(detail_parts)}"
             return base_msg + detail_msg
             
         elif action_type == "wait":
             return f"Unit {unit_id}{unit_coords} WAIT"
+            
+        elif action_type == "combat_individual":
+            # Individual attack within multi-attack sequence
+            if "target_id" not in details:
+                raise KeyError("Individual attack missing required target_id")
+            if "attack_number" not in details or "total_attacks" not in details:
+                raise KeyError("Individual attack missing required attack_number or total_attacks")
+                
+            target_id = details["target_id"]
+            attack_num = details["attack_number"]
+            total_attacks = details["total_attacks"]
+            
+            # Check if this attack actually happened (hit_roll > 0 means it was attempted)
+            if details.get("hit_roll") > 0:
+                hit_roll = details["hit_roll"]
+                wound_roll = details["wound_roll"]
+                save_roll = details["save_roll"]
+                damage = details["damage_dealt"]
+                hit_result = details["hit_result"]
+                wound_result = details["wound_result"]
+                save_result = details["save_result"]
+                hit_target = details["hit_target"]
+                wound_target = details["wound_target"]
+                save_target = details["save_target"]
+                
+                base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks})"
+                if hit_result == "MISS":
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}(MISS)"
+                elif wound_result == "FAIL":
+                    # Failed wound - stop progression, don't show save/damage
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}(FAIL)"
+                else:
+                    # Successful wound - show full progression
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+                return base_msg + detail_msg
+            else:
+                return f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks}) - MISS"
+                
+        elif action_type == "combat_summary":
+            # Summary of multi-attack sequence
+            if "target_id" not in details:
+                raise KeyError("Combat summary missing required target_id")
+            if "total_attacks" not in details or "total_damage" not in details:
+                raise KeyError("Combat summary missing required total_attacks or total_damage")
+                
+            target_id = details["target_id"]
+            total_attacks = details["total_attacks"]
+            total_damage = details["total_damage"]
+            hits = details.get("hits")
+            wounds = details.get("wounds")
+            failed_saves = details.get("failed_saves")
+            
+            return f"Unit {unit_id}{unit_coords} COMBAT COMPLETE at unit {target_id} - {total_attacks} attacks, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
             
         else:
             raise ValueError(f"Unknown action_type '{action_type}' - no fallback allowed")
