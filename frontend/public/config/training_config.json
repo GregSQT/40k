@@ -67,11 +67,12 @@
   },
   
   "default": {
-    "description": "Balanced training for active AI learning",
-    "total_timesteps": 100000,
+    "description": "Episode-based training for AI_TURN.md compliance - 400 episodes × 10 turns × 25 steps = 100,000 timesteps",
+    "total_episodes": 400,
+    "max_turns_per_episode": 10,
+    "max_steps_per_turn": 25,
     "eval_episodes": 20,
-    "max_steps_per_episode": 1000,
-    "eval_freq": 5000,
+    "eval_freq": 10000,
     "max_concurrent_sessions": 4,
     "progress_update_interval": 10,
     "scenario_generation_timeout": 10,
@@ -80,7 +81,7 @@
       "eval_deterministic": true,
       "eval_render": false,
       "n_eval_episodes": 10,
-      "checkpoint_save_freq": 25000,
+      "checkpoint_save_freq": 5000,
       "checkpoint_name_prefix": "default_model_checkpoint"
     },
     "model_params": {

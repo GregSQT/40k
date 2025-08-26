@@ -58,7 +58,7 @@ def setup_imports():
         print("AI_INSTRUCTIONS.md: Please ensure gym40k.py exists in ai/ directory and is properly configured")
         sys.exit(1)
 
-def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verbose):
+def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verbose, args=None):
     """
     Evaluate trained model with comprehensive AI_GAME.md compliance testing.
     AI_INSTRUCTIONS.md: "Use evaluation.py as the main evaluation script"
@@ -92,16 +92,51 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
         config = get_config_loader()
         unit_registry = UnitRegistry()
         
-        # Use same scenario file as train.py
-        temp_scenario_path = os.path.join(config.config_dir, "scenario.json")
-        if not os.path.isfile(temp_scenario_path):
-            raise FileNotFoundError(f"Missing scenario.json in config/: {temp_scenario_path}")
-        
-        # Extract agent key from model path for controlled_agent parameter
+        # Extract agent key from model path for scenario generation
         model_filename = os.path.basename(model_path)
         agent_key = model_filename.replace("model_", "").replace(".zip", "")
         
-        print(f"✅ Using same scenario as train.py: {temp_scenario_path}")
+        # Use ScenarioManager pattern like multi_agent_trainer.py
+        scenario_manager = ScenarioManager(config, unit_registry)
+        
+        # Get available templates
+        available_templates = scenario_manager.get_available_templates()
+        if not available_templates:
+            raise RuntimeError("No scenario templates available")
+        
+        # Filter templates by training phase if specified (like multi_agent_trainer.py)
+        if hasattr(args, 'training_phase') and args.training_phase:
+            filtered_templates = [name for name, template in scenario_manager.scenario_templates.items() 
+                                if template.training_focus == args.training_phase]
+            if not filtered_templates:
+                raise ValueError(f"No templates found for training_phase '{args.training_phase}'")
+            available_templates = filtered_templates
+            print(f"✅ Filtered to {args.training_phase} templates: {available_templates}")
+        
+        # Use specified template or auto-select from filtered templates
+        if hasattr(args, 'scenario_template') and args.scenario_template:
+            template_name = args.scenario_template
+            if template_name not in available_templates:
+                raise ValueError(f"Specified template '{template_name}' not found. Available: {available_templates}")
+            print(f"✅ Using specified template: {template_name}")
+        else:
+            # Use first available template from filtered list
+            template_name = available_templates[0]
+            print(f"✅ Using first available template: {template_name}")
+        
+        # Generate training scenario with agent vs agent
+        scenario = scenario_manager.generate_training_scenario(
+            template_name, agent_key, agent_key
+        )
+        
+        # Save temporary scenario file
+        import tempfile
+        import json
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(scenario, f, indent=2)
+            temp_scenario_path = f.name
+        
+        print(f"✅ Generated scenario using ScenarioManager: {template_name}")
         
         base_env = W40KEnv(
             rewards_config=rewards_config,
@@ -112,6 +147,12 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
             unit_registry=unit_registry,
             quiet=False
         )
+        
+        # Add StepLogger integration like train.py --step
+        from ai.train import StepLogger
+        step_logger = StepLogger("evaluation_step.log", enabled=True)
+        base_env.controller.connect_step_logger(step_logger)
+        print("✅ StepLogger connected for evaluation action capture")
         # CRITICAL FIX: Enable evaluation mode BEFORE enhancing with replay logging
         base_env.is_evaluation_mode = True
         base_env._force_evaluation_mode = True
@@ -131,6 +172,10 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
             os.remove(temp_scenario_path)
         print(f"❌ Failed to load model: {e}")
         return None
+    finally:
+        # Always cleanup temporary scenario file
+        if 'temp_scenario_path' in locals() and os.path.exists(temp_scenario_path):
+            os.remove(temp_scenario_path)
     
     # AI_GAME.md compliance tracking - Enhanced
     results = {
@@ -190,7 +235,7 @@ def evaluate_model(model_path, rewards_config, num_episodes, deterministic, verb
             
             # Track phase action compliance before step
             original_action_type = action % 8
-            expected_actions = env._get_valid_actions_for_phase(None, current_phase) if hasattr(env, '_get_valid_actions_for_phase') else []
+            expected_actions = env._get_valid_actions_for_phase(current_phase) if hasattr(env, '_get_valid_actions_for_phase') else []
             if expected_actions and original_action_type not in expected_actions:
                 phase_action_violations += 1
             
@@ -374,7 +419,8 @@ def main():
             args.rewards_config,
             args.episodes, 
             args.deterministic, 
-            not args.quiet
+            not args.quiet,
+            args  # Pass args so evaluate_model can access training_phase and scenario_template
         )
         
         if results and args.analyze_phases:
