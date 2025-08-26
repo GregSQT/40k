@@ -1454,21 +1454,12 @@ def convert_to_replay_format(steplog_data):
             raise ValueError(f"Failed to get unit data for '{scenario_unit['unit_type']}': {e}")
         
         # Build complete unit data with UPPERCASE field names - copy all available fields
-        # Use final position from steplog if available, otherwise use initial scenario position
-        if unit_id in steplog_data['units_positions']:
-            final_pos = steplog_data['units_positions'][unit_id]
-            unit_col = final_pos['col']
-            unit_row = final_pos['row']
-        else:
-            unit_col = scenario_unit['col']
-            unit_row = scenario_unit['row']
-        
         unit_data = {
             'id': unit_id,
             'unit_type': scenario_unit['unit_type'],
             'player': scenario_unit.get('player', 0),
-            'col': unit_col,  # Use final position if available
-            'row': unit_row   # Use final position if available
+            'col': scenario_unit['col'],  # Use INITIAL position from scenario
+            'row': scenario_unit['row']   # Use INITIAL position from scenario
         }
         
         # Copy all unit statistics from registry (preserves UPPERCASE field names)
