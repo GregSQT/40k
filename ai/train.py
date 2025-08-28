@@ -528,7 +528,7 @@ def setup_imports():
     except ImportError as e:
         raise ImportError(f"AI_INSTRUCTIONS.md: gym40k.py import failed: {e}")
 
-def create_model(config, training_config_name="default", rewards_config_name="default", new_model=False, append_training=False):
+def create_model(config, training_config_name, rewards_config_name, new_model, append_training, args):
     """Create or load DQN model with configuration following AI_INSTRUCTIONS.md."""
     
     # Check GPU availability
@@ -569,9 +569,19 @@ def create_model(config, training_config_name="default", rewards_config_name="de
         base_env.controller.connect_step_logger(step_logger)
         print("✅ StepLogger connected to SequentialGameController")
     
-    # DISABLED: No logging during training for speed
-    # Enhanced logging only during evaluation
-    env = Monitor(base_env)
+    # Enable replay logging for replay generation modes only
+    if args.replay or args.convert_steplog:
+        # Use same pattern as evaluate.py for working icon movement
+        base_env.is_evaluation_mode = True
+        base_env._force_evaluation_mode = True
+        enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
+        if hasattr(enhanced_env, 'replay_logger') and enhanced_env.replay_logger:
+            enhanced_env.replay_logger.is_evaluation_mode = True
+            enhanced_env.replay_logger.capture_initial_state()
+        env = Monitor(enhanced_env)
+    else:
+        # DISABLED: No logging during training for speed
+        env = Monitor(base_env)
     
     model_path = config.get_model_path()
     
@@ -1120,15 +1130,28 @@ def generate_steplog_and_replay(config, args):
         with open(temp_scenario_file, 'w') as f:
             json.dump(scenario_data, f, indent=2)
         
-        env = W40KEnv(
-            rewards_config=args.rewards_config,
-            training_config_name=args.training_config,
-            controlled_agent=None,
-            active_agents=None,
-            scenario_file=temp_scenario_file,
-            unit_registry=unit_registry,
-            quiet=True
-        )
+        # Load training config to override max_turns for this environment
+        training_config = config.load_training_config(args.training_config)
+        max_turns_override = training_config.get("max_turns_per_episode", 5)
+        print(f"🎯 Using max_turns_per_episode: {max_turns_override} from config '{args.training_config}'")
+        
+        # Temporarily override game_config max_turns for this environment
+        original_max_turns = config.get_max_turns()
+        config._cache['game_config']['game_rules']['max_turns'] = max_turns_override
+        
+        try:
+            env = W40KEnv(
+                rewards_config=args.rewards_config,
+                training_config_name=args.training_config,
+                controlled_agent=None,
+                active_agents=None,
+                scenario_file=temp_scenario_file,
+                unit_registry=unit_registry,
+                quiet=True
+            )
+        finally:
+            # Restore original max_turns after environment creation
+            config._cache['game_config']['game_rules']['max_turns'] = original_max_turns
         
         # Connect step logger
         env.controller.connect_step_logger(temp_step_logger)
@@ -1245,11 +1268,14 @@ def parse_steplog_file(steplog_path):
                     position_extracted = False
                     
                     if action_data['type'] == 'move' and 'startHex' in action_data and 'endHex' in action_data:
-                        end_pos = action_data['endHex'].split(',')
-                        if len(end_pos) == 2:
+                        # Parse coordinates from "(col, row)" format
+                        import re
+                        end_match = re.match(r'\((\d+),\s*(\d+)\)', action_data['endHex'])
+                        if end_match:
+                            end_col, end_row = end_match.groups()
                             units_positions[unit_id] = {
-                                'col': int(end_pos[0]),
-                                'row': int(end_pos[1]),
+                                'col': int(end_col),
+                                'row': int(end_row),
                                 'last_seen_turn': int(turn)
                             }
                             position_extracted = True
@@ -1310,14 +1336,14 @@ def parse_action_message(message, context):
         # Unit X(col, row) MOVED from (start_col, start_row) to (end_col, end_row)
         move_match = re.match(r'Unit (\d+)\((\d+), (\d+)\) MOVED from \((\d+), (\d+)\) to \((\d+), (\d+)\)', message)
         if move_match:
-            unit_id, cur_col, cur_row, start_col, start_row, end_col, end_row = move_match.groups()
+            unit_id, _, _, start_col, start_row, end_col, end_row = move_match.groups()
             action_type = 'move'
             details.update({
                 'type': action_type,
                 'message': message,
                 'unitId': int(unit_id),
-                'startHex': f"{start_col},{start_row}",
-                'endHex': f"{end_col},{end_row}"
+                'startHex': f"({start_col}, {start_row})",
+                'endHex': f"({end_col}, {end_row})"
             })
     
     elif "SHOT at" in message:
@@ -1453,13 +1479,21 @@ def convert_to_replay_format(steplog_data):
         except ValueError as e:
             raise ValueError(f"Failed to get unit data for '{scenario_unit['unit_type']}': {e}")
         
-        # Build complete unit data with UPPERCASE field names - copy all available fields
+        # Get final position from steplog tracking or use initial position
+        if unit_id in steplog_data['units_positions']:
+            final_col = steplog_data['units_positions'][unit_id]['col']
+            final_row = steplog_data['units_positions'][unit_id]['row']
+        else:
+            final_col = scenario_unit['col']
+            final_row = scenario_unit['row']
+        
+        # Build complete unit data with FINAL positions from steplog tracking
         unit_data = {
             'id': unit_id,
             'unit_type': scenario_unit['unit_type'],
             'player': scenario_unit.get('player', 0),
-            'col': scenario_unit['col'],  # Use INITIAL position from scenario
-            'row': scenario_unit['row']   # Use INITIAL position from scenario
+            'col': final_col,  # Use FINAL position from steplog tracking
+            'row': final_row   # Use FINAL position from steplog tracking
         }
         
         # Copy all unit statistics from registry (preserves UPPERCASE field names)
@@ -1702,7 +1736,8 @@ def main():
             args.training_config,
             args.rewards_config, 
             args.new, 
-            args.append
+            args.append,
+            args
         )
 
         # Get model path for callbacks and training
