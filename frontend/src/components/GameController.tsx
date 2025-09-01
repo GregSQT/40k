@@ -10,7 +10,7 @@ import { GameLog } from "./GameLog";
 import { useGameState } from "../hooks/useGameState";
 import { useGameActions } from "../hooks/useGameActions";
 import { useGameConfig } from "../hooks/useGameConfig";
-import { useAIPlayer } from "../hooks/useAIPlayer";
+import { useAITurn } from "../hooks/useAITurn";
 import { usePhaseTransition } from "../hooks/usePhaseTransition";
 import { useGameLog } from "../hooks/useGameLog";
 import { Unit } from "../types/game";
@@ -34,6 +34,7 @@ export const GameController: React.FC<GameControllerProps> = ({
   const location = useLocation();
   const gameMode = location.pathname.includes('/pve') ? 'pve' : 
                    location.pathname.includes('/replay') ? 'training' : 'pvp';
+  const isPvE = gameMode === 'pve';
                    
   // Track UnitStatusTable collapse states
   const [player0Collapsed, setPlayer0Collapsed] = useState(false);
@@ -64,29 +65,35 @@ export const GameController: React.FC<GameControllerProps> = ({
             row: 12,
             color: 0xff3333,
           }),
-          createUnit({
-            id: 2,
-            name: "A-T",
-            type: availableTypes.includes('Termagant') ? 'Termagant' : availableTypes[2] || availableTypes[0],
-            player: 1,
-            col: 0,
-            row: 5,
-            color: 0x882222,
-          }),
-          createUnit({
-            id: 3,
-            name: "A-H",
-            type: availableTypes.includes('Hormagaunt') ? 'Hormagaunt' : availableTypes[3] || availableTypes[1],
-            player: 1,
-            col: 22,
-            row: 3,
-            color: 0x6633cc,
-          }),
+          {
+            ...createUnit({
+              id: 2,
+              name: isPvE ? "AI-T" : "A-T",
+              type: availableTypes.includes('Termagant') ? 'Termagant' : availableTypes[2] || availableTypes[0],
+              player: 1,
+              col: 0,
+              row: 5,
+              color: 0x882222,
+            }),
+            isAIControlled: isPvE,
+          } as Unit & { isAIControlled: boolean },
+          {
+            ...createUnit({
+              id: 3,
+              name: isPvE ? "AI-H" : "A-H",
+              type: availableTypes.includes('Hormagaunt') ? 'Hormagaunt' : availableTypes[3] || availableTypes[1],
+              player: 1,
+              col: 22,
+              row: 3,
+              color: 0x6633cc,
+            }),
+            isAIControlled: isPvE,
+          } as Unit & { isAIControlled: boolean },
         ];
         setGameUnits(dynamicUnits);
       }
     }
-  }, [initialUnits]);
+  }, [initialUnits, isPvE]);
 
   // Initialize game state with custom hook
   const { gameState, movePreview, attackPreview, shootingPhaseState, chargeRollPopup, actions } = useGameState(gameUnits);
@@ -170,20 +177,37 @@ export const GameController: React.FC<GameControllerProps> = ({
     }).map(unit => unit.id);
   }, [gameState.units, boardConfig, originalGameActions.isUnitEligible, gameState.phase, gameState.currentPlayer, gameState.unitsMoved, gameState.unitsCharged, gameState.unitsAttacked, gameState.unitsFled]);
 
-  // Handle AI player behavior
-  useAIPlayer({
+  // Initialize AI turn processing for PvE mode
+  const { isAIProcessing, processAITurn, aiError, clearAIError } = useAITurn({
     gameState,
     gameActions: {
-      ...gameActions,
+      ...originalGameActions,
       addMovedUnit: actions.addMovedUnit,
       addChargedUnit: actions.addChargedUnit,
       addAttackedUnit: actions.addAttackedUnit,
-      updateUnit: actions.updateUnit,
     },
-    enabled: false,  // Disable AI - player controls all units
+    currentPlayer: gameState.currentPlayer,
+    phase: gameState.phase,
+    units: gameState.units
   });
 
-  // Manage phase transitions
+  // AI Turn Processing Effect - Trigger AI when it's AI player's turn
+  React.useEffect(() => {
+    // Check if game is over by examining unit health
+    const player0Alive = gameState.units.some(u => u.player === 0 && (u.CUR_HP ?? u.HP_MAX) > 0);
+    const player1Alive = gameState.units.some(u => u.player === 1 && (u.CUR_HP ?? u.HP_MAX) > 0);
+    const gameNotOver = player0Alive && player1Alive;
+    
+    if (isPvE && gameState.currentPlayer === 1 && !isAIProcessing && gameNotOver) {
+      // Small delay to ensure UI updates are complete
+      const timer = setTimeout(() => {
+        processAITurn();
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isPvE, gameState.currentPlayer, gameState.phase, isAIProcessing, gameState.units, processAITurn]);
+
   // Manage phase transitions
   usePhaseTransition({
     gameState,
@@ -278,6 +302,44 @@ export const GameController: React.FC<GameControllerProps> = ({
         currentPhase={gameState.phase}
         className="turn-phase-tracker-right"
       />
+      {/* AI Status Display */}
+      {isPvE && (
+        <div className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
+          gameState.currentPlayer === 1 
+            ? isAIProcessing 
+              ? 'bg-purple-900 border border-purple-700' 
+              : 'bg-purple-800 border border-purple-600'
+            : 'bg-gray-800 border border-gray-600'
+        }`}>
+          <span className="text-sm font-medium text-white">
+            {gameState.currentPlayer === 1 ? '🤖 AI Turn' : '👤 Your Turn'}
+          </span>
+          {gameState.currentPlayer === 1 && isAIProcessing && (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-300"></div>
+              <span className="text-purple-200 text-sm">AI thinking...</span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* AI Error Display */}
+      {aiError && (
+        <div className="bg-red-900 border border-red-700 rounded p-3 mb-2">
+          <div className="flex items-center justify-between">
+            <div className="text-red-100 text-sm">
+              <strong>🤖 AI Error:</strong> {aiError}
+            </div>
+            <button
+              onClick={clearAIError}
+              className="text-red-300 hover:text-red-100 ml-2"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
         <UnitStatusTable
           units={gameState.units}

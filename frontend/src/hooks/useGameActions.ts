@@ -17,7 +17,7 @@ interface UseGameActionsParams {
     setMode: (mode: GameState['mode']) => void;
     setSelectedUnitId: (id: UnitId | null) => void;
     setMovePreview: (preview: MovePreview | null) => void;
-    setAttackPreview: (preview: AttackPreview | null) => void;
+    setAttackPreview: (preview: AttackPreview | null) => void;      
     addMovedUnit: (unitId: UnitId) => void;
     addChargedUnit: (unitId: UnitId) => void;
     addAttackedUnit: (unitId: UnitId) => void;
@@ -1006,32 +1006,27 @@ interface ShootingResult {
     
     actions.updateUnit(attackerId, { ATTACK_LEFT: newAttacksLeft });
 
-    if (newAttacksLeft <= 0) {
-      actions.addAttackedUnit(attackerId);
-      actions.setSelectedUnitId(null);
-      actions.setMode("select");
-    } else {
-      // Check if any valid targets remain after this attack
-      const currentAttackerAfterAttack = findUnit(attackerId);
-      if (currentAttackerAfterAttack) {
-        const enemiesAfterAttack = units.filter(u => u.player !== currentAttackerAfterAttack.player);
-        if (currentAttackerAfterAttack.CC_RNG === undefined) {
-          throw new Error(`currentAttackerAfterAttack.CC_RNG is required but was undefined for unit ${currentAttackerAfterAttack.id}`);
-        }
-        const combatRange = currentAttackerAfterAttack.CC_RNG;
-        const hasValidTargetsAfterAttack = enemiesAfterAttack.some(enemy => {
-          const distance = Math.max(Math.abs(currentAttackerAfterAttack.col - enemy.col), Math.abs(currentAttackerAfterAttack.row - enemy.row));
-          return distance === combatRange;
-        });
-        
-        if (!hasValidTargetsAfterAttack) {
-          // No more valid targets - end activation immediately
-          actions.addAttackedUnit(attackerId);
-          actions.setSelectedUnitId(null);
-          actions.setMode("select");
-        }
-      }
-    }
+    // Check if any valid targets remain after this attack (slaughter handling)
+const currentAttackerAfterAttack = findUnit(attackerId);
+if (currentAttackerAfterAttack) {
+  const enemiesAfterAttack = units.filter(u => u.player !== currentAttackerAfterAttack.player);
+  if (currentAttackerAfterAttack.CC_RNG === undefined) {
+    throw new Error(`currentAttackerAfterAttack.CC_RNG is required but was undefined for unit ${currentAttackerAfterAttack.id}`);
+  }
+  const combatRange = currentAttackerAfterAttack.CC_RNG;
+  const hasValidTargetsAfterAttack = enemiesAfterAttack.some(enemy => {
+    const distance = Math.max(Math.abs(currentAttackerAfterAttack.col - enemy.col), Math.abs(currentAttackerAfterAttack.row - enemy.row));
+    return distance === combatRange;
+  });
+  
+  if (!hasValidTargetsAfterAttack || newAttacksLeft <= 0) {
+    // AI_TURN.md: End attacking - either no valid targets (slaughter handling) OR all attacks used
+    actions.addAttackedUnit(attackerId);
+    actions.setSelectedUnitId(null);
+    actions.setMode("select");
+  }
+  // If valid targets remain AND attacks remaining, unit stays active for next attack
+}
   }, 100);
 } else {
       

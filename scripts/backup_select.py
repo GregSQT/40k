@@ -64,6 +64,9 @@ else:
         "ai/use_game_state.py",
         "ai/use_phase_transition.py",
 
+    ### ai/api
+        "ai/api/get_ai_action.py",
+
 ######################################################################################################
 ##### config files
 ######################################################################################################
@@ -123,6 +126,7 @@ else:
 
         # Frontend/src/hooks
         "frontend/src/hooks/useAIPlayer.ts",
+        "frontend/src/hooks/useAITurn.ts",
         "frontend/src/hooks/useGameActions.ts",
         "frontend/src/hooks/useGameConfig.ts",
         "frontend/src/hooks/useGameLog.ts",
@@ -130,10 +134,11 @@ else:
         "frontend/src/hooks/usePhaseTransition.ts",
 
         # Frontend/src/pages
-        "frontend/src/pages/HomePage.tsx",
         "frontend/src/pages/GamePage.tsx",
+        "frontend/src/pages/HomePage.tsx",
+        "frontend/src/pages/PlayerVsAIPage.tsx",
         "frontend/src/pages/ReplayPage.tsx",
-
+        
         # frontend/src/services
         "frontend/src/services/aiService.ts",
 
