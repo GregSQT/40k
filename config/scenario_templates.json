@@ -12,7 +12,7 @@
       "1": [[11,6], [5,7]]
     },
     "difficulty": "easy",
-    "training_focus": "later"
+    "training_focus": "solo"
   },
   "solo_spacemarine_infantry_troop_rangedswarm": {
     "description": "Solo training for SpaceMarine_Infantry_Troop_RangedSwarm agents (Intercessor focus)",
@@ -44,37 +44,6 @@
     "difficulty": "easy",
     "training_focus": "later"
   },
-  "Tyranid_Infantry_Elite_MeleeElite": {
-    "description": "Solo training for Tyranid_Infantry_Elite_MeleeElite agents (Carnifex focus)",
-    "agent_compositions": {
-      "Tyranid_Infantry_Elite_MeleeElite": ["Carnifex"]
-    },
-    "unit_counts": {
-      "Carnifex": 2
-    },
-    "deployment_zones": {
-      "0": [[13,13], [19,12]],
-      "1": [[11,6], [5,7]]
-    },
-    "difficulty": "easy",
-    "training_focus": "later"
-  },
-  
-  "solo_tyranid_infantry_swarm_meleeswarm": {
-    "description": "Solo training for Tyranid_Infantry_Swarm_MeleeSwarm agents (Hormagaunt focus)",
-    "agent_compositions": {
-      "Tyranid_Infantry_Swarm_MeleeSwarm": ["Hormagaunt"]
-    },
-    "unit_counts": {
-      "Hormagaunt": 2
-    },
-    "deployment_zones": {
-      "0": [[13,13], [19,12]],
-      "1": [[11,6], [5,7]]
-    },
-    "difficulty": "easy",
-    "training_focus": "later"
-  },
   "solo_tyranid_infantry_elite_meleeelite": {
     "description": "Solo training for Tyranid_Infantry_Elite_MeleeElite agents (Carnifex focus)",
     "agent_compositions": {
@@ -88,7 +57,22 @@
       "1": [[11,6], [5,7]]
     },
     "difficulty": "easy",
-    "training_focus": "later"
+    "training_focus": "solo"
+  },
+  "solo_tyranid_infantry_swarm_meleeswarm": {
+    "description": "Solo training for Tyranid_Infantry_Swarm_MeleeSwarm agents (Hormagaunt focus)",
+    "agent_compositions": {
+      "Tyranid_Infantry_Swarm_MeleeSwarm": ["Hormagaunt"]
+    },
+    "unit_counts": {
+      "Hormagaunt": 2
+    },
+    "deployment_zones": {
+      "0": [[13,13], [19,12]],
+      "1": [[11,6], [5,7]]
+    },
+    "difficulty": "easy",
+    "training_focus": "solo"
   },
   "cross_spacemarine_vs_tyranid_balanced": {
     "description": "Balanced cross-faction training: Space Marines vs Tyranids",
@@ -102,7 +86,7 @@
     },
     "deployment_zones": {
       "0": [[13,13], [19,12]],
-      "1": [[11,6], [5,7], [17,6], [15,4]]
+      "1": [[11,6], [5,7], [17,6], [15,4], [7,5], [3,9]]
     },
     "difficulty": "medium",
     "training_focus": "cross_faction"
@@ -115,11 +99,11 @@
     },
     "unit_counts": {
       "CaptainGravis": 2,
-      "Intercessor": 2
+      "Intercessor": 6  
     },
     "deployment_zones": {
       "0": [[13,13], [19,12]],
-      "1": [[11,6], [5,7]]
+      "1": [[11,6], [5,7], [17,6], [15,4], [7,5], [3,9]]
     },
     "difficulty": "medium",
     "training_focus": "cross_faction"
@@ -152,12 +136,12 @@
     "unit_counts": {
       "Intercessor": 2,
       "CaptainGravis": 1,
-      "Hormagaunt": 6,
+      "Hormagaunt": 8,
       "Carnifex": 1
     },
     "deployment_zones": {
       "0": [[13,13], [19,12], [7,14]],
-      "1": [[11,6], [5,7], [17,6], [15,4], [15,9], [16,5], [5,8]]
+      "1": [[11,6], [5,7], [17,6], [15,4], [15,9], [16,5], [5,8], [9,4], [19,7]]
     },
     "difficulty": "hard",
     "training_focus": "balanced"
@@ -173,14 +157,14 @@
     "unit_counts": {
       "Intercessor": 2,
       "CaptainGravis": 1,
-      "Hormagaunt": 6,
+      "Hormagaunt": 8,
       "Carnifex": 1
     },
     "deployment_zones": {
-      "0": [[13,13], [19,12], [7,14]],
-      "1": [[11,6], [5,7], [17,6], [15,4], [15,9], [16,5], [5,8]]
+      "0": [[16,19], [12,19], [14,19]],
+      "1": [[4,3], [6,2], [8,1], [10,1], [12,1], [14,1], [16,1], [18,2], [20,3]]
     },
     "difficulty": "hard",
     "training_focus": "balanced"
   }
-}
+} 

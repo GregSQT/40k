@@ -66,10 +66,12 @@ export const MODES = {
 // API Configuration
 export const API_CONFIG = {
   BASE_URL: (() => {
-    if (process.env.REACT_APP_API_URL === undefined) {
-      throw new Error('REACT_APP_API_URL environment variable is required but was not set');
+    const apiUrl = process.env.REACT_APP_API_URL;
+    if (!apiUrl) {
+      console.warn('REACT_APP_API_URL not set, defaulting to http://localhost:5000');
+      return 'http://localhost:5000';
     }
-    return process.env.REACT_APP_API_URL;
+    return apiUrl;
   })(),
   ENDPOINTS: {
     AI_ACTION: '/ai/action',

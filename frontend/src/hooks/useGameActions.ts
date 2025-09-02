@@ -783,7 +783,6 @@ interface ShootingResult {
   }, [findUnit, actions, shootingPhaseState, gameState.targetPreview]);
 
   const handleCombatAttack = useCallback((attackerId: UnitId, targetId: UnitId | null) => {
-    
     if (targetId === null) {
       // Skip attack but mark as attacked
       actions.addAttackedUnit(attackerId);
@@ -793,21 +792,21 @@ interface ShootingResult {
     }
 
     const attacker = findUnit(attackerId);
-    const target = findUnit(targetId);
+    const initialTarget = findUnit(targetId);
     
-    if (!attacker || !target) {
+    if (!attacker || !initialTarget) {
       return;
     }
 
     // PREVENT FRIENDLY FIRE: Cannot attack friendly units
-    if (target.player === attacker.player) {
+    if (initialTarget.player === attacker.player) {
       return;
     }
 
     // Check if units are within combat range
     const distance = Math.max(
-      Math.abs(attacker.col - target.col),
-      Math.abs(attacker.row - target.row)
+      Math.abs(attacker.col - initialTarget.col),
+      Math.abs(attacker.row - initialTarget.row)
     );
     if (attacker.CC_RNG === undefined) {
       throw new Error(`attacker.CC_RNG is required but was undefined for unit ${attacker.id}`);
@@ -823,7 +822,6 @@ interface ShootingResult {
       return; // Return to let state update, then continue
     }
 
-    if (attacker.ATTACK_LEFT === undefined) throw new Error(`attacker.ATTACK_LEFT is undefined for unit ${attacker.name}`);
     if (attacker.ATTACK_LEFT <= 0) {
       actions.addAttackedUnit(attackerId);
       actions.setSelectedUnitId(null);
@@ -831,240 +829,143 @@ interface ShootingResult {
       return;
     }
 
-    // ✅ NEW: Combat Preview System (similar to shooting preview)
-    const currentTargetPreview = gameState.targetPreview;
-    const isConfirmingAttack = currentTargetPreview?.targetId === targetId && currentTargetPreview?.shooterId === attackerId;
-
-    if (isConfirmingAttack) {
-      if (currentTargetPreview?.blinkTimer) {
-        clearInterval(currentTargetPreview.blinkTimer);
-      }
-      actions.setTargetPreview(null);
+    // AI_TURN.md: Execute ALL CC_NB attacks in one activation
+    let currentAttacksLeft = attacker.ATTACK_LEFT;
+    let attackNumber = 1;
+    
+    // ATTACK LOOP: Execute all remaining attacks until exhausted or no valid targets
+    while (currentAttacksLeft > 0) {
+      // Get fresh attacker state
+      const currentAttacker = findUnit(attackerId);
+      if (!currentAttacker) break;
       
-      setTimeout(() => {
+      // Find valid targets (enemies within combat range)
+      const validTargets = units.filter(enemy => {
+        if (enemy.player === currentAttacker.player) return false;
+        const dist = Math.max(Math.abs(currentAttacker.col - enemy.col), Math.abs(currentAttacker.row - enemy.row));
+        return dist === combatRange;
+      });
+      
+      if (validTargets.length === 0) {
+        // AI_TURN.md: Slaughter handling - no valid targets remain
+        break;
+      }
+      
+      // Select target (prefer original target if still alive, otherwise first available target)
+      let currentTarget = validTargets.find(t => t.id === targetId) || validTargets[0];
+      
+      // If no valid targets found, break (slaughter handling)
+      if (!currentTarget) {
+        break;
+      }
+      
+      // AI_TURN.md: Execute single attack (Hit → Wound → Save → Damage)
+      const hitRoll = Math.floor(Math.random() * 6) + 1;
+      if (currentAttacker.CC_ATK === undefined) {
+        throw new Error(`currentAttacker.CC_ATK is required but was undefined for unit ${currentAttacker.id}`);
+      }
+      const hitSuccess = hitRoll >= currentAttacker.CC_ATK;
 
-        // Hit Roll
-        const hitRoll = Math.floor(Math.random() * 6) + 1;
-        if (attacker.CC_ATK === undefined) {
-          throw new Error(`attacker.CC_ATK is required but was undefined for unit ${attacker.id}`);
+      let damageDealt = 0;
+      let woundRoll = 0;
+      let woundSuccess = false;
+      let saveRoll = 0;
+      let saveSuccess = false;
+      let woundTarget = 0;
+      let saveTarget = 0;
+
+      if (hitSuccess) {
+        // Hit - proceed to wound roll
+        woundRoll = Math.floor(Math.random() * 6) + 1;
+        if (currentAttacker.CC_STR === undefined) {
+          throw new Error(`currentAttacker.CC_STR is required but was undefined for unit ${currentAttacker.id}`);
         }
-        const hitSuccess = hitRoll >= attacker.CC_ATK;
+        if (currentTarget.T === undefined) {
+          throw new Error(`currentTarget.T is required but was undefined for unit ${currentTarget.id}`);
+        }
+        
+        const attackerStr = currentAttacker.CC_STR;
+        const targetT = currentTarget.T;
+        woundTarget = attackerStr >= targetT * 2 ? 2 : 
+                     attackerStr > targetT ? 3 : 
+                     attackerStr === targetT ? 4 : 
+                     attackerStr < targetT ? 5 : 6;
+        woundSuccess = woundRoll >= woundTarget;
 
-        if (!hitSuccess) {
+        if (woundSuccess) {
+          // Wound successful - proceed to save roll
+          saveRoll = Math.floor(Math.random() * 6) + 1;
+          if (currentTarget.ARMOR_SAVE === undefined) {
+            throw new Error(`currentTarget.ARMOR_SAVE is required but was undefined for unit ${currentTarget.id}`);
+          }
+          if (currentAttacker.CC_AP === undefined) {
+            throw new Error(`currentAttacker.CC_AP is required but was undefined for unit ${currentAttacker.id}`);
+          }
+          
+          const modifiedArmor = currentTarget.ARMOR_SAVE + currentAttacker.CC_AP;
+          if (currentTarget.INVUL_SAVE === undefined) {
+            throw new Error(`currentTarget.INVUL_SAVE is required but was undefined for unit ${currentTarget.id}`);
+          }
+          const invulSave = currentTarget.INVUL_SAVE;
+          saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
+          saveSuccess = saveRoll >= saveTarget;
+
+          if (!saveSuccess) {
+            damageDealt = currentAttacker.CC_DMG || 1;
+          }
+        }
+      }
+
+      // Log the combat action
       if (gameLog) {
         const combatDetails = [{
-          shotNumber: 1,
+          shotNumber: attackNumber,
           attackRoll: hitRoll,
-          strengthRoll: 0,
-          hitResult: 'MISS' as 'HIT' | 'MISS',
-          strengthResult: 'FAILED' as 'SUCCESS' | 'FAILED',
-          hitTarget: attacker.CC_ATK,
-          woundTarget: undefined,
-          saveTarget: undefined,
-          saveRoll: undefined,
-          saveSuccess: undefined,
-          damageDealt: 0
+          strengthRoll: woundRoll,
+          hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
+          strengthResult: (hitSuccess && woundSuccess) ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
+          hitTarget: currentAttacker.CC_ATK,
+          woundTarget: hitSuccess ? woundTarget : undefined,
+          saveTarget: (hitSuccess && woundSuccess) ? saveTarget : undefined,
+          saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
+          saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
+          damageDealt: damageDealt
         }];
-        gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
-      } else {
+        gameLog.logCombatAction(currentAttacker, currentTarget, combatDetails, gameState.currentTurn);
       }
 
-      // Miss - get fresh unit state and decrease attacks
-      const currentAttacker = findUnit(attackerId);
-      if (!currentAttacker) throw new Error(`Cannot find attacker unit ${attackerId}`);
-      if (currentAttacker.ATTACK_LEFT === undefined) {
-        throw new Error(`currentAttacker.ATTACK_LEFT is required but was undefined for unit ${currentAttacker.id}`);
-      }
-      const currentAttacksLeft = currentAttacker.ATTACK_LEFT;
-      const newAttacksLeft = currentAttacksLeft - 1;
-      actions.updateUnit(attackerId, { ATTACK_LEFT: newAttacksLeft });
-      
-      if (newAttacksLeft <= 0) {
-        actions.addAttackedUnit(attackerId);
-        actions.setSelectedUnitId(null);
-        actions.setMode("select");
-      }
-      return;
+      // Apply damage
+      if (damageDealt > 0) {
+        if (currentTarget.CUR_HP === undefined) {
+          throw new Error('currentTarget.CUR_HP is required');
         }
+        const newHP = currentTarget.CUR_HP - damageDealt;
 
-        // Wound Roll
-        const woundRoll = Math.floor(Math.random() * 6) + 1;
-        if (attacker.CC_STR === undefined) {
-          throw new Error(`attacker.CC_STR is required but was undefined for unit ${attacker.id}`);
-        }
-        if (target.T === undefined) {
-          throw new Error(`target.T is required but was undefined for unit ${target.id}`);
-        }
-        
-        const attackerStr = attacker.CC_STR;
-        const targetT = target.T;
-        const woundTarget = attackerStr >= targetT * 2 ? 2 : 
-                          attackerStr > targetT ? 3 : 
-                          attackerStr === targetT ? 4 : 
-                          attackerStr < targetT ? 5 : 6;
-        const woundSuccess = woundRoll >= woundTarget;
-
-        if (!woundSuccess) {
+        if (newHP <= 0) {
+          // Log unit death AFTER the attack that killed it
           if (gameLog) {
-            const combatDetails = [{
-              shotNumber: 1,
-              attackRoll: hitRoll,
-              strengthRoll: woundRoll,
-              hitResult: 'HIT' as 'HIT' | 'MISS',
-              strengthResult: 'FAILED' as 'SUCCESS' | 'FAILED',
-              hitTarget: attacker.CC_ATK,
-              woundTarget: woundTarget,
-              saveTarget: undefined,
-              saveRoll: undefined,
-              saveSuccess: undefined,
-              damageDealt: 0
-            }];
-            gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
+            gameLog.logUnitDeath(currentTarget, gameState.currentTurn);
           }
-
-          // No wound - get fresh unit state and decrease attacks
-          const currentAttacker = findUnit(attackerId);
-          if (!currentAttacker) throw new Error(`Cannot find attacker unit ${attackerId}`);
-          if (currentAttacker.ATTACK_LEFT === undefined) {
-            throw new Error(`currentAttacker.ATTACK_LEFT is required but was undefined for unit ${currentAttacker.id}`);
-          }
-          const currentAttacksLeft = currentAttacker.ATTACK_LEFT;
-          const newAttacksLeft = currentAttacksLeft - 1;
-          actions.updateUnit(attackerId, { ATTACK_LEFT: newAttacksLeft });
-          
-          if (newAttacksLeft <= 0) {
-            actions.addAttackedUnit(attackerId);
-            actions.setSelectedUnitId(null);
-            actions.setMode("select");
-          }
-          return;
+          actions.removeUnit(currentTarget.id);
+          // Target is dead - continue to next attack with fresh target selection
+        } else {
+          actions.updateUnit(currentTarget.id, { CUR_HP: newHP });
         }
-
-        const saveRoll = Math.floor(Math.random() * 6) + 1;
-        if (target.ARMOR_SAVE === undefined) {
-          throw new Error(`target.ARMOR_SAVE is required but was undefined for unit ${target.id}`);
-        }
-        if (attacker.CC_AP === undefined) {
-          throw new Error(`attacker.CC_AP is required but was undefined for unit ${attacker.id}`);
-        }
-        
-        const modifiedArmor = target.ARMOR_SAVE + attacker.CC_AP;
-        if (target.INVUL_SAVE === undefined) {
-          throw new Error(`target.INVUL_SAVE is required but was undefined for unit ${target.id}`);
-        }
-        const invulSave = target.INVUL_SAVE;
-        const saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
-        const saveSuccess = saveRoll >= saveTarget;
-
-        const damageDealt = saveSuccess ? 0 : (attacker.CC_DMG);
-
-        if (attacker.ATTACK_LEFT === undefined) throw new Error(`attacker.ATTACK_LEFT is undefined for unit ${attacker.name}`);
-
-        // Log the combat action FIRST (regardless of damage)
-        if (gameLog) {
-          const combatDetails = [{
-            shotNumber: 1,
-            attackRoll: hitRoll,
-            strengthRoll: woundRoll,
-            hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
-            strengthResult: woundSuccess ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
-            hitTarget: attacker.CC_ATK,
-            woundTarget: hitSuccess ? woundTarget : undefined,
-            saveTarget: (hitSuccess && woundSuccess) ? saveTarget : undefined,
-            saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
-            saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
-            damageDealt: damageDealt
-          }];
-          gameLog.logCombatAction(attacker, target, combatDetails, gameState.currentTurn);
-        }
-
-    if (damageDealt > 0) {
-      if (target.CUR_HP === undefined) {
-        throw new Error('target.CUR_HP is required');
       }
-      const newHP = target.CUR_HP - damageDealt;
 
-      if (newHP <= 0) {
-        // Log unit death AFTER the attack that killed it
-        if (gameLog) {
-          gameLog.logUnitDeath(target, gameState.currentTurn);
-        }
-        actions.removeUnit(targetId);
-      } else {
-        actions.updateUnit(targetId, { CUR_HP: newHP });
-      }
+      // Decrement attacks and update attacker
+      currentAttacksLeft -= 1;
+      attackNumber += 1;
     }
 
-    // Get fresh unit state and decrement attacks
-    const currentAttacker = findUnit(attackerId);
-    if (!currentAttacker) throw new Error(`Cannot find attacker unit ${attackerId}`);
-    if (currentAttacker.ATTACK_LEFT === undefined) {
-      throw new Error(`currentAttacker.ATTACK_LEFT is required but was undefined for unit ${currentAttacker.id}`);
-    }
-    const currentAttacksLeft = currentAttacker.ATTACK_LEFT;
-    const newAttacksLeft = currentAttacksLeft - 1;
-    
-    actions.updateUnit(attackerId, { ATTACK_LEFT: newAttacksLeft });
+    // Update final ATTACK_LEFT state
+    actions.updateUnit(attackerId, { ATTACK_LEFT: currentAttacksLeft });
 
-    // Check if any valid targets remain after this attack (slaughter handling)
-const currentAttackerAfterAttack = findUnit(attackerId);
-if (currentAttackerAfterAttack) {
-  const enemiesAfterAttack = units.filter(u => u.player !== currentAttackerAfterAttack.player);
-  if (currentAttackerAfterAttack.CC_RNG === undefined) {
-    throw new Error(`currentAttackerAfterAttack.CC_RNG is required but was undefined for unit ${currentAttackerAfterAttack.id}`);
-  }
-  const combatRange = currentAttackerAfterAttack.CC_RNG;
-  const hasValidTargetsAfterAttack = enemiesAfterAttack.some(enemy => {
-    const distance = Math.max(Math.abs(currentAttackerAfterAttack.col - enemy.col), Math.abs(currentAttackerAfterAttack.row - enemy.row));
-    return distance === combatRange;
-  });
-  
-  if (!hasValidTargetsAfterAttack || newAttacksLeft <= 0) {
-    // AI_TURN.md: End attacking - either no valid targets (slaughter handling) OR all attacks used
+    // AI_TURN.md: End attacking - mark as attacked and end activation
     actions.addAttackedUnit(attackerId);
     actions.setSelectedUnitId(null);
     actions.setMode("select");
-  }
-  // If valid targets remain AND attacks remaining, unit stays active for next attack
-}
-  }, 100);
-} else {
-      
-      // Clear any existing preview
-      if (currentTargetPreview?.blinkTimer) {
-        clearInterval(currentTargetPreview.blinkTimer);
-      }
-      
-      // Calculate combat probabilities
-      const hitProbability = calculateCombatHitProbability(attacker);
-      const woundProbability = calculateCombatWoundProbability(attacker, target);
-      const saveProbability = calculateCombatSaveProbability(attacker, target);
-      const overallProbability = calculateCombatOverallProbability(attacker, target);
-      
-      // Start preview with blink timer - SINGLE ATTACK ONLY
-      const totalBlinkSteps = 2; // Only show: current HP (step 0) -> after next attack (step 1)
-      
-      const preview: TargetPreview = {
-        targetId,
-        shooterId: attackerId, // Reuse shooterId field for attacker
-        currentBlinkStep: 0,
-        totalBlinkSteps,
-        blinkTimer: null,
-        hitProbability,
-        woundProbability,
-        saveProbability,
-        overallProbability
-      };
-      
-      // Start blink cycle for single attack preview
-      preview.blinkTimer = setInterval(() => {
-        preview.currentBlinkStep = (preview.currentBlinkStep + 1) % totalBlinkSteps;
-        actions.setTargetPreview({ ...preview });
-      }, 500);
-      
-      actions.setTargetPreview(preview);
-    }
-  }, [findUnit, actions, gameState.targetPreview, gameState.currentTurn, gameLog]);
+  }, [findUnit, actions, gameState.currentTurn, gameLog, units]);
 
   const handleCharge = useCallback((chargerId: UnitId, targetId: UnitId) => {
     const charger = findUnit(chargerId);

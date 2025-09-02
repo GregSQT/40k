@@ -579,6 +579,8 @@ class MultiAgentTrainer:
             
             # Get number of evaluation episodes from config
             eval_episodes = training_config.get("eval_episodes")
+            if eval_episodes is None or eval_episodes <= 0:
+                raise ValueError(f"Training config '{training_config_name}' missing or invalid 'eval_episodes': {eval_episodes}")
             
             # Test the trained model using SAME environment as training (has fixes applied)
             evaluation_start = time.time()
@@ -724,6 +726,20 @@ class MultiAgentTrainer:
                     unit_registry=self.unit_registry,
                     quiet=True
                 )
+                
+                # Connect agent-specific step logger to session environment  
+                try:
+                    import sys
+                    train_module = sys.modules.get('ai.train') or sys.modules.get('__main__')
+                    if train_module and hasattr(train_module, 'step_logger') and train_module.step_logger and train_module.step_logger.enabled:
+                        agent_log_file = f"train_step_{agent_key}.log"
+                        from ai.train import StepLogger
+                        agent_step_logger = StepLogger(agent_log_file, enabled=True)
+                        base_env.controller.connect_step_logger(agent_step_logger)
+                        print(f"✅ StepLogger connected for agent {agent_key}: {agent_log_file}")
+                except Exception as log_error:
+                    print(f"⚠️ Failed to connect step logger for {agent_key}: {log_error}")
+                    
             except Exception as env_error:
                 print(f"❌ W40KEnv creation failed for {agent_key}: {env_error}")
                 raise RuntimeError(f"Failed to create W40KEnv for agent {agent_key}: {env_error}")
@@ -840,6 +856,10 @@ class MultiAgentTrainer:
 
     def _test_trained_model(self, model, env, num_episodes: int, episode_tracker: SelectiveEpisodeTracker = None) -> Dict[str, float]:
         """Test trained model with optimized single progress bar"""
+        # AI_TURN.md COMPLIANCE: No default values - validate input
+        if num_episodes <= 0:
+            raise ValueError(f"num_episodes must be positive, got {num_episodes}")
+            
         wins = 0
         total_rewards = []
         session_id = getattr(self, '_current_session_id', 'unknown')
@@ -899,7 +919,8 @@ class MultiAgentTrainer:
            
             # Add step counter to prevent infinite loops
             step_count = 0
-            max_steps = self.config.load_training_config("debug")["max_steps_per_episode"]
+            debug_config = self.config.load_training_config("debug")
+            max_steps = debug_config["max_turns_per_episode"] * debug_config["max_steps_per_turn"]
             while not done and step_count < max_steps:
                 action, _ = model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(action)

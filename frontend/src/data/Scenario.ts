@@ -6,16 +6,7 @@ const initialUnits: Unit[] = [
   // Player 0 units
   createUnit({
     id: 0,
-    name: "P-I",
-    type: "Intercessor",
-    player: 0,
-    col: 1,
-    row: 5,
-    color: 0x244488,
-  }),
-  createUnit({
-    id: 1,
-    name: "P-I",
+    name: "P-C",
     type: "CaptainGravis",
     player: 0,
     col: 23,
@@ -23,19 +14,20 @@ const initialUnits: Unit[] = [
     color: 0x244488,
   }),
   createUnit({
-    id: 2,
-    name: "P-A",
-    type: "AssaultIntercessor",
+    id: 1,
+    name: "P-I",
+    type: "Intercessor",
     player: 0,
-    col: 14,
-    row: 2,
-    color: 0xff3333,
+    col: 1,
+    row: 5,
+    color: 0x244488,
   }),
+
   // Player 1 units (AI)
   createUnit({
     id: 3,
-    name: "A-T",
-    type: "Termagant",
+    name: "A-H",
+    type: "Hormagaunt",
     player: 1,
     col: 17,
     row: 0,
@@ -44,7 +36,7 @@ const initialUnits: Unit[] = [
   createUnit({
     id: 4,
     name: "A-T",
-    type: "Termagant",
+    type: "Hormagaunt",
     player: 1,
     col: 18,
     row: 1,
@@ -79,8 +71,8 @@ const initialUnits: Unit[] = [
   }),
   createUnit({
     id: 8,
-    name: "A-T",
-    type: "Termagant",
+    name: "A-H",
+    type: "Hormagaunt",
     player: 1,
     col: 2,
     row: 2,
@@ -88,8 +80,8 @@ const initialUnits: Unit[] = [
   }),
   createUnit({
     id: 9,
-    name: "A-T",
-    type: "Termagant",
+    name: "A-H",
+    type: "Hormagaunt",
     player: 1,
     col: 4,
     row: 2,

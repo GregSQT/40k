@@ -35,7 +35,8 @@ else:
         "AI_PROTOCOLE.md",
         "AI_TURN.md",
         "config_loader.py",
-        "train_step.log", # Output for training steps test
+        "train_step.log",
+        "train_step_SpaceMarine_Infantry_LeaderElite_MeleeElite.log",
 
 ######################################################################################################
 ##### ai files
@@ -60,7 +61,6 @@ else:
         "ai/use_game_actions.py",
         "ai/use_game_config.py",
         "ai/use_game_log.py",
-        "ai/use_game_state.py",
         "ai/use_game_state.py",
         "ai/use_phase_transition.py",
 
