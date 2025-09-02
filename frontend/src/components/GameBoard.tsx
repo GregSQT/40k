@@ -1,6 +1,8 @@
 // src/components/GameBoard.tsx
 import React from 'react';
-import Board from './Board_save';
+import { useLocation } from 'react-router-dom';
+import BoardPvp from './BoardPvp';
+import { BoardReplay } from './BoardReplay';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
 import { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState, TargetPreview, CombatSubPhase, PlayerId } from '../types/game';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
@@ -19,8 +21,8 @@ interface GameBoardProps {
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
   unitsFled: UnitId[];
-  combatSubPhase?: CombatSubPhase; // NEW
-  combatActivePlayer?: PlayerId; // NEW
+  combatSubPhase?: CombatSubPhase;
+  combatActivePlayer?: PlayerId;
   currentTurn: number;
   gameState: GameState;
   maxTurns?: number;
@@ -44,6 +46,11 @@ interface GameBoardProps {
 }
 
 export const GameBoard: React.FC<GameBoardProps> = (props) => {
+  // Detect game mode from URL
+  const location = useLocation();
+  const gameMode = location.pathname.includes('/pve') ? 'pve' : 
+                   location.pathname.includes('/replay') ? 'training' : 'pvp';
+
   // Type-safe wrapper for Board component
   // Convert string/number IDs to proper number type for Board component
   
@@ -108,10 +115,12 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
       props.onDirectMove(numUnitId, numCol, numRow);
     }
   };
+
+  const BoardComponent = gameMode === 'training' ? BoardReplay : BoardPvp;
   
   return (
     <div className="game-board w-full flex flex-col">
-      <Board
+      <BoardComponent
         units={props.units}
         selectedUnitId={props.selectedUnitId}
         eligibleUnitIds={props.eligibleUnitIds}

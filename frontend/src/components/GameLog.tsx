@@ -31,7 +31,6 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
       const maxRows = Math.floor(availableHeight / actualRowHeight);
       const finalRowCount = Math.max(1, maxRows); // Show at least 1 row
       
-      console.log(`GameLog DEBUG: availableHeight=${availableHeight}px, actualRowHeight=${actualRowHeight}px, maxRows=${maxRows}, finalRowCount=${finalRowCount}`);
       setVisibleRowCount(finalRowCount);
     }, 100);
     

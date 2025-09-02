@@ -788,7 +788,8 @@ export default function Board({
         renderUnit({
           unit, centerX, centerY, app,
           isPreview: false,
-          isEligible: eligibleUnitIds.includes(unit.id), // Add eligibility from GameController
+          isEligible: eligibleUnitIds.includes(unit.id),
+          isShootable: phase === "shoot" ? !blockedTargets.has(`${unit.col},${unit.row}`) : true,
           boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,

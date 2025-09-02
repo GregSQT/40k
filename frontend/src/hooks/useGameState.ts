@@ -46,11 +46,13 @@ interface UseGameStateReturn {
     resetUnitChargeRoll: (unitId: UnitId) => void;
     showChargeRollPopup: (unitId: UnitId, roll: number, tooLow: boolean) => void;
     resetChargeRolls: () => void;
+    incrementEpisodeSteps: () => void; // AI_TURN.md: Built-in step counting
   };
 }
 
 export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   const [gameState, setGameState] = useState<GameState>({
+    episode_steps: 0, // AI_TURN.md: Built-in step counting
     units: initialUnits.map(unit => {
       if (unit.RNG_NB === undefined) {
         throw new Error('unit.RNG_NB is required');
@@ -268,6 +270,10 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     setChargeRollPopup(null);
   }, []);
 
+  const incrementEpisodeSteps = useCallback(() => {
+    setGameState(prev => ({ ...prev, episode_steps: prev.episode_steps + 1 }));
+  }, []);
+
   return {
     gameState,
     movePreview,
@@ -304,6 +310,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       resetUnitChargeRoll,
       showChargeRollPopup,
       resetChargeRolls,
+      incrementEpisodeSteps, // AI_TURN.md: Built-in step counting
     },
   };
 };

@@ -11,6 +11,7 @@ interface UnitRendererProps {
   isPreview?: boolean;
   previewType?: 'move' | 'attack';
   isEligible?: boolean; // Add eligibility as a prop instead of calculating it
+  isShootable?: boolean; // Add shootability based on LoS validation
   
   // Board configuration
   boardConfig: any;
@@ -171,20 +172,29 @@ export class UnitRenderer {
         }
       }
       if (addClickHandler) {
-        unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-          if (e.button === 0) {
-            // Prevent event bubbling and multiple dispatches
-            e.stopPropagation();
-            window.dispatchEvent(new CustomEvent('boardUnitClick', {
-              detail: {
-                unitId: unit.id,
-                phase: phase,
-                mode: mode,
-                selectedUnitId: selectedUnitId
-              }
-            }));
-          }
-        });
+        // Check if unit is shootable during shooting phase
+        const isShootableUnit = this.props.isShootable !== false;
+        
+        if (phase === "shoot" && unit.player !== currentPlayer && !isShootableUnit) {
+          // Unit is blocked by LoS - no click handler, no hand cursor
+          unitCircle.eventMode = 'none';
+          unitCircle.cursor = "default";
+        } else {
+          unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+            if (e.button === 0) {
+              // Prevent event bubbling and multiple dispatches
+              e.stopPropagation();
+              window.dispatchEvent(new CustomEvent('boardUnitClick', {
+                detail: {
+                  unitId: unit.id,
+                  phase: phase,
+                  mode: mode,
+                  selectedUnitId: selectedUnitId
+                }
+              }));
+            }
+          });
+        }
       } else {
         unitCircle.eventMode = 'none';
         unitCircle.cursor = "default";

@@ -127,17 +127,16 @@ export const GameController: React.FC<GameControllerProps> = ({
   React.useEffect(() => {
     // Wait for DOM to be fully rendered before measuring
     const timer = setTimeout(() => {
-      // Dynamically measure actual DOM element heights - NO FALLBACKS!
       const turnPhaseTracker = document.querySelector('.turn-phase-tracker-right');
-      const player0Table = document.querySelector('.unit-status-table-container:nth-of-type(1)');
-      const player1Table = document.querySelector('.unit-status-table-container:nth-of-type(2)');
-      const gameLogHeader = document.querySelector('.game-log__header');
+      const allTables = document.querySelectorAll('.unit-status-table-container');
+      const gameLogHeader = document.querySelector('.game-log__header') || document.querySelector('[class*="game-log"]');
       
-      // Throw errors if elements not found - NO DEFAULT VALUES!
       if (!turnPhaseTracker) throw new Error('TurnPhaseTracker element not found');
-      if (!player0Table) throw new Error('Player 0 table element not found');
-      if (!player1Table) throw new Error('Player 1 table element not found');
+      if (allTables.length < 2) throw new Error(`Expected 2 unit status tables, found ${allTables.length}`);
       if (!gameLogHeader) throw new Error('GameLog header element not found');
+      
+      const player0Table = allTables[0];
+      const player1Table = allTables[1];
       
       // Get actual heights from DOM measurements
       const turnPhaseHeight = turnPhaseTracker.getBoundingClientRect().height;
@@ -152,20 +151,12 @@ export const GameController: React.FC<GameControllerProps> = ({
       const usedSpace = turnPhaseHeight + player0Height + player1Height + gameLogHeaderHeight;
       const availableForLogEntries = viewportHeight - usedSpace - appMargins;
     
-    console.log(`Height calculation DEBUG:`);
-    console.log(`- Player0: collapsed=${player0Collapsed}, height=${player0Height}px`);
-    console.log(`- Player1: collapsed=${player1Collapsed}, height=${player1Height}px`);
-    // Dynamically measure log entry height - NO FALLBACKS!
-      const sampleLogEntry = document.querySelector('.game-log-entry');
+    const sampleLogEntry = document.querySelector('.game-log-entry');
       if (!sampleLogEntry) throw new Error('No log entry found to measure height');
       const logEntryHeight = sampleLogEntry.getBoundingClientRect().height;
-      
-      console.log(`- Measured heights: Turn=${turnPhaseHeight}px, P0=${player0Height}px, P1=${player1Height}px, LogHeader=${gameLogHeaderHeight}px`);
-      console.log(`- App margins=${appMargins}px, viewport=${viewportHeight}px, used=${usedSpace}px, available=${availableForLogEntries}px`);
-      console.log(`- Log entry height=${logEntryHeight}px, calculated rows: ${Math.floor(availableForLogEntries / logEntryHeight)}`);
       setLogAvailableHeight(availableForLogEntries);
     }, 100); // Wait 100ms for DOM to render
-  }, [player0Collapsed, player1Collapsed, gameState.units]);
+  }, [player0Collapsed, player1Collapsed, gameState.units, gameState.phase]);
 
   // Calculate eligible units by calling the useGameActions.isUnitEligible function (no duplicate logic)
   const eligibleUnitIds = React.useMemo(() => {

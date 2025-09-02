@@ -132,33 +132,33 @@ export const useGameActions = ({
         return !unitsMoved.includes(unit.id);
       case "shoot":
         if (unitsMoved.includes(unit.id)) return false;
-        // NEW RULE: Units that fled cannot shoot
         if (unitsFled.includes(unit.id)) return false;
-        // CRITICAL: Check if unit has shots remaining
         if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) return false;
-        // Check if unit is adjacent to any enemy (engaged in combat)
         const hasAdjacentEnemyShoot = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         if (hasAdjacentEnemyShoot) return false;
-        // Check if unit has enemies in shooting range that are NOT adjacent to friendly units
         const friendlyUnits = units.filter(u => u.player === unit.player && u.id !== unit.id);
         return enemyUnits.some(enemy => {
+          if (enemy.player === unit.player) return false;
           if (!isUnitInRange(unit, enemy, unit.RNG_RNG)) return false;
-          // Rule 2: Cannot shoot enemy units adjacent to friendly units
-          const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => 
+          const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly =>
             Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
           );
           if (isEnemyAdjacentToFriendly) return false;
-          
-          // Check line of sight using boardConfig
-          if (boardConfig && boardConfig.wall_hexes) {
-            const lineOfSight = hasLineOfSight(
-              { col: unit.col, row: unit.row },
-              { col: enemy.col, row: enemy.row },
-              boardConfig.wall_hexes
-            );
-            if (!lineOfSight.canSee) return false;
+         
+          if (!boardConfig) {
+            throw new Error('boardConfig is required for shooting phase eligibility check but was not provided');
+          }
+          if (!boardConfig.wall_hexes) {
+            throw new Error('boardConfig.wall_hexes is required for shooting phase eligibility check but was undefined');
           }
           
+          const lineOfSight = hasLineOfSight(
+            { col: unit.col, row: unit.row },
+            { col: enemy.col, row: enemy.row },
+            boardConfig.wall_hexes
+          );
+          if (!lineOfSight.canSee) return false;
+         
           return true;
         });
       case "charge":
@@ -258,6 +258,8 @@ export const useGameActions = ({
       if (gameLog) {
         gameLog.logNoMoveAction(unit, gameState.currentTurn);
       }
+      // AI_TURN.md: Built-in step counting (+1 step for wait)
+      gameState.episode_steps = (gameState.episode_steps || 0) + 1;
       
       actions.addMovedUnit(unitId);
       actions.setSelectedUnitId(null);
@@ -477,6 +479,8 @@ export const useGameActions = ({
         if (gameLog) {
           gameLog.logMoveAction(unit, unit.col, unit.row, movePreview.destCol, movePreview.destRow, gameState.currentTurn);
         }
+        // AI_TURN.md: Built-in step counting (+1 step)
+        gameState.episode_steps = (gameState.episode_steps || 0) + 1;
       }
       
       actions.updateUnit(movePreview.unitId, {
@@ -558,8 +562,21 @@ interface ShootingResult {
       return;
     }
 
-    // TODO: Add line of sight check when boardConfig is available
-    // For now, all shots have line of sight (existing behavior)
+    if (!boardConfig) {
+      throw new Error('boardConfig is required for shooting validation but was not provided');
+    }
+    if (!boardConfig.wall_hexes) {
+      throw new Error('boardConfig.wall_hexes is required for shooting validation but was undefined');
+    }
+
+    const lineOfSight = hasLineOfSight(
+      { col: shooter.col, row: shooter.row },
+      { col: target.col, row: target.row },
+      boardConfig.wall_hexes
+    );
+    if (!lineOfSight.canSee) {
+      return;
+    }
 
     if (shooter.SHOOT_LEFT === undefined) {
       throw new Error('shooter.SHOOT_LEFT is required');
@@ -719,16 +736,101 @@ interface ShootingResult {
         const currentShotsLeft = currentShooter.SHOOT_LEFT;
         const newShotsLeft = currentShotsLeft - 1;
         actions.updateUnit(shooterId, { SHOOT_LEFT: newShotsLeft });
-        // Unit shots decremented
-        
-        // Check if more shots remaining
-        if (newShotsLeft > 0) {
-          // Keep unit selected and in attack mode for target reselection
-          actions.setAttackPreview({ unitId: shooterId, col: shooter.col, row: shooter.row });
+
+        // AI_TURN.md: SLAUGHTER HANDLING - Check if valid targets still exist after damage
+        const enemyUnits = units.filter(u => u.player !== currentShooter.player && u.CUR_HP !== undefined && u.CUR_HP > 0);
+        const friendlyUnits = units.filter(u => u.player === currentShooter.player && u.id !== currentShooter.id);
+        const validTargets = enemyUnits.filter(enemy => {
+          if (!isUnitInRange(currentShooter, enemy, currentShooter.RNG_RNG)) return false;
+          const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => 
+            Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
+          );
+          if (isEnemyAdjacentToFriendly) return false;
+          
+          if (boardConfig && boardConfig.wall_hexes) {
+            const lineOfSight = hasLineOfSight(
+              { col: currentShooter.col, row: currentShooter.row },
+              { col: enemy.col, row: enemy.row },
+              boardConfig.wall_hexes
+            );
+            if (!lineOfSight.canSee) return false;
+          }
+          
+          return true;
+        });
+
+        // AI_TURN.md: End activation if no valid targets OR no shots left
+        if (newShotsLeft > 0 && validTargets.length > 0) {
+          // Keep unit selected and in attack mode for next shot target selection
+          actions.setAttackPreview({ unitId: shooterId, col: currentShooter.col, row: currentShooter.row });
           actions.setMode("attackPreview");
-          // Don't mark as moved yet - unit still has shots left
         } else {
-          // All shots used - mark as moved and end shooting
+          // Either no shots left OR no valid targets - end activation
+          // AI_TURN.md: +1 step per complete shooting sequence (not per shot)
+          gameState.episode_steps = (gameState.episode_steps || 0) + 1;
+          
+          actions.addMovedUnit(shooterId);
+          actions.setAttackPreview(null);
+          actions.setSelectedUnitId(null);
+          actions.setMode("select");
+        }
+
+        const updatedShooter = findUnit(shooterId);
+        if (!updatedShooter) throw new Error(`Cannot find shooter unit ${shooterId}`);
+        if (updatedShooter.SHOOT_LEFT === undefined) {
+          throw new Error(`updatedShooter.SHOOT_LEFT is required but was undefined for unit ${updatedShooter.id}`);
+        }
+        const shotsRemaining = updatedShooter.SHOOT_LEFT;
+        const newShotsRemaining = shotsRemaining - 1;
+        actions.updateUnit(shooterId, { SHOOT_LEFT: newShotsRemaining });
+
+        if (gameLog) {
+          const shootDetails = [{
+            shotNumber: 1,
+            attackRoll: hitRoll,
+            strengthRoll: woundRoll,
+            hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
+            strengthResult: (hitSuccess && woundSuccess) ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
+            hitTarget: shooter.RNG_ATK,
+            saveTarget: (hitSuccess && woundSuccess) ? (targetArmorSave + shooterAP) : undefined,
+            saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
+            saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
+            damageDealt: damageDealt
+          }];
+          gameLog.logShootingAction(shooter, target, shootDetails, gameState.currentTurn);
+        }
+        
+        const remainingEnemies = units.filter(u => u.player !== updatedShooter.player && u.CUR_HP !== undefined && u.CUR_HP > 0);
+        const nearbyFriendlies = units.filter(u => u.player === updatedShooter.player && u.id !== updatedShooter.id);
+        const availableTargets = remainingEnemies.filter(enemy => {
+          if (!isUnitInRange(updatedShooter, enemy, updatedShooter.RNG_RNG)) return false;
+          const isEnemyAdjacentToFriendly = nearbyFriendlies.some(friendly => 
+            Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
+          );
+          if (isEnemyAdjacentToFriendly) return false;
+          
+          if (!boardConfig) {
+            throw new Error('boardConfig is required for slaughter handling but was not provided');
+          }
+          if (!boardConfig.wall_hexes) {
+            throw new Error('boardConfig.wall_hexes is required for slaughter handling but was undefined');
+          }
+          
+          const lineOfSight = hasLineOfSight(
+            { col: updatedShooter.col, row: updatedShooter.row },
+            { col: enemy.col, row: enemy.row },
+            boardConfig.wall_hexes
+          );
+          if (!lineOfSight.canSee) return false;
+          
+          return true;
+        });
+
+        if (newShotsRemaining > 0 && availableTargets.length > 0) {
+          actions.setAttackPreview({ unitId: shooterId, col: updatedShooter.col, row: updatedShooter.row });
+          actions.setMode("attackPreview");
+        } else {
+          gameState.episode_steps = (gameState.episode_steps || 0) + 1;
           actions.addMovedUnit(shooterId);
           actions.setAttackPreview(null);
           actions.setSelectedUnitId(null);
@@ -839,9 +941,10 @@ interface ShootingResult {
       const currentAttacker = findUnit(attackerId);
       if (!currentAttacker) break;
       
-      // Find valid targets (enemies within combat range)
+      // AI_TURN.md: Build valid_targets pool FRESH each attack iteration
       const validTargets = units.filter(enemy => {
         if (enemy.player === currentAttacker.player) return false;
+        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false; // CRITICAL: Exclude dead units
         const dist = Math.max(Math.abs(currentAttacker.col - enemy.col), Math.abs(currentAttacker.row - enemy.row));
         return dist === combatRange;
       });
@@ -851,8 +954,8 @@ interface ShootingResult {
         break;
       }
       
-      // Select target (prefer original target if still alive, otherwise first available target)
-      let currentTarget = validTargets.find(t => t.id === targetId) || validTargets[0];
+      // AI_TURN.md: Select first available living target (dynamic targeting)
+      let currentTarget = validTargets[0];
       
       // If no valid targets found, break (slaughter handling)
       if (!currentTarget) {
@@ -958,11 +1061,31 @@ interface ShootingResult {
       attackNumber += 1;
     }
 
+    // AI_TURN.md: Built-in step counting (+1 step for combat)
+    gameState.episode_steps = (gameState.episode_steps || 0) + 1;
+
     // Update final ATTACK_LEFT state
     actions.updateUnit(attackerId, { ATTACK_LEFT: currentAttacksLeft });
 
-    // AI_TURN.md: End attacking - mark as attacked and end activation
-    actions.addAttackedUnit(attackerId);
+    // AI_TURN.md: Only mark as attacked if NO adjacent enemies remain (slaughter handling)
+    const finalAttacker = findUnit(attackerId);
+    if (finalAttacker) {
+      // Get FRESH unit state after the combat loop completed
+      const currentUnits = gameState.units;
+      const remainingEnemies = currentUnits.filter(enemy => {
+        if (enemy.player === finalAttacker.player) return false;
+        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+        const dist = Math.max(Math.abs(finalAttacker.col - enemy.col), Math.abs(finalAttacker.row - enemy.row));
+        return dist === combatRange;
+      });
+      
+      if (remainingEnemies.length === 0) {
+        // No adjacent enemies - mark as attacked (slaughter handling)
+        actions.addAttackedUnit(attackerId);
+      }
+      // If adjacent enemies exist, unit remains eligible for future activations
+    }
+
     actions.setSelectedUnitId(null);
     actions.setMode("select");
   }, [findUnit, actions, gameState.currentTurn, gameLog, units]);
@@ -1009,6 +1132,9 @@ interface ShootingResult {
       gameLog.events.unshift(chargeEvent);
     }
     
+    // AI_TURN.md: Built-in step counting (+1 step for charge)
+    gameState.episode_steps = (gameState.episode_steps || 0) + 1;
+
     // Move unit to destination
     actions.updateUnit(chargerId, { col: destCol, row: destRow, hasChargedThisTurn: true });
     

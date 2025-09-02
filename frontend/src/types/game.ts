@@ -110,6 +110,7 @@ export interface TargetPreview {
 }
 
 export interface GameState {
+  episode_steps: number; // AI_TURN.md: Built-in step counting
   units: Unit[];
   currentPlayer: PlayerId;
   phase: GamePhase;
