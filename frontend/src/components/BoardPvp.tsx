@@ -8,7 +8,7 @@ import { setupBoardClickHandler } from '../utils/boardClickHandler';
 import { renderUnit } from './UnitRenderer';
 import { drawBoard } from './BoardDisplay';
 import { setupBoardInteractions, cleanupBoardInteractions } from './BoardInteractions';
-import { isMovementBlocked, hasLineOfSight, isChargeBlocked, offsetToCube, cubeDistance, getHexLine } from '../utils/gameHelpers';
+import { isMovementBlocked, hasLineOfSight, isChargeBlocked, offsetToCube, cubeDistance, getHexLine, isUnitInRange } from '../utils/gameHelpers';
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
@@ -319,7 +319,6 @@ export default function Board({
     containerRef.current.innerHTML = '';
     containerRef.current.appendChild(canvas);
 
-    // Set up board click handler to prevent event conflicts
     // Set up board click handler to prevent event conflicts
     setupBoardClickHandler({
       onSelectUnit: stableCallbacks.current.onSelectUnit,
@@ -808,11 +807,45 @@ export default function Board({
         if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;
         if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
 
+        // Calculate if this unit is shootable for UnitRenderer (works regardless of phase prop issues)
+        let isShootable = true;
+        if (unit.player !== currentPlayer && selectedUnit && selectedUnit.RNG_RNG !== undefined) {
+          // Check range first
+          const distance = Math.max(Math.abs(selectedUnit.col - unit.col), Math.abs(selectedUnit.row - unit.row));
+          if (distance > selectedUnit.RNG_RNG) {
+            isShootable = false;
+          } else {
+            // Check for adjacent friendly units blocking
+            const friendlyUnits = units.filter(u => u.player === currentPlayer && u.id !== selectedUnit.id);
+            const isAdjacentToFriendly = friendlyUnits.some(friendly =>
+              Math.max(Math.abs(friendly.col - unit.col), Math.abs(friendly.row - unit.row)) === 1
+            );
+            if (isAdjacentToFriendly) {
+              isShootable = false;
+            } else {
+              // Check line of sight
+              const lineOfSight = hasLineOfSight(
+                { col: selectedUnit.col, row: selectedUnit.row },
+                { col: unit.col, row: unit.row },
+                boardConfig.wall_hexes || []
+              );
+              if (!lineOfSight.canSee) {
+                isShootable = false;
+              }
+            }
+          }
+        }
+        
+        // Debug only for key units - EXACT UnitRenderer.tsx logic check
+        if (unit.id === 8 || unit.id === 9) {
+          const distance = selectedUnit ? Math.max(Math.abs(selectedUnit.col - unit.col), Math.abs(selectedUnit.row - unit.row)) : 0;
+          const inRangeResult = selectedUnit ? isUnitInRange(selectedUnit, unit, selectedUnit.RNG_RNG || 0) : false;
+        }
         renderUnit({
           unit, centerX, centerY, app,
           isPreview: false,
           isEligible: eligibleUnitIds.includes(unit.id),
-          isShootable: phase === "shoot" ? !blockedTargets.has(`${unit.col},${unit.row}`) : true,
+          isShootable,
           boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
@@ -929,7 +962,8 @@ export default function Board({
         units.map(u => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}-${u.ATTACK_LEFT}-${u.SHOOT_LEFT}`).join(','), // Only essential unit changes
         selectedUnitId,
         mode,
-        phase,
+        phase, // CRITICAL: Phase changes must trigger re-render for isShootable recalculation
+        `${phase}-${selectedUnitId}`, // CRITICAL: Phase+selectedUnit combination must trigger re-render
         combatSubPhase, // NEW: Trigger re-render when combat sub-phase changes
         combatActivePlayer, // NEW: Trigger re-render when combat active player changes
         boardConfig?.cols, // Only re-render if board structure changes

@@ -167,7 +167,7 @@ export class UnitRenderer {
       let addClickHandler = true;
       if (phase === "shoot" && mode === "attackPreview" && unit.player !== currentPlayer && selectedUnitId !== null) {
         const selectedUnit = units.find(u => u.id === selectedUnitId);
-        if (selectedUnit && !isUnitInRange(selectedUnit, unit, selectedUnit.RNG_RNG)) {
+        if (selectedUnit && !this.props.isShootable) {
           addClickHandler = false;
         }
       }

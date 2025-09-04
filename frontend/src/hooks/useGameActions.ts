@@ -1,5 +1,5 @@
 // src/hooks/useGameActions.ts
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState, TargetPreview, CombatSubPhase, PlayerId } from '../types/game';
 import { calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability, calculateCombatHitProbability, calculateCombatWoundProbability, calculateCombatSaveProbability, calculateCombatOverallProbability } from '../utils/probabilityCalculator';
 import { areUnitsAdjacent, isUnitInRange, hasLineOfSight, offsetToCube, cubeDistance, getHexLine } from '../utils/gameHelpers';
@@ -59,6 +59,15 @@ export const useGameActions = ({
     combatActivePlayer
   } = gameState;
 
+  // AI_TURN.md: State machine variables for shooting phase
+  const [shootingActivationQueue, setShootingActivationQueue] = useState<Unit[]>([]);
+  const [activeShootingUnit, setActiveShootingUnit] = useState<Unit | null>(null);
+  const [selectedShootingTarget, setSelectedShootingTarget] = useState<Unit | null>(null);
+  const [shootLeft, setShootLeft] = useState<number | undefined>(undefined);
+  const [activationShotLog, setActivationShotLog] = useState<any[]>([]);
+  const [validTargetsPool, setValidTargetsPool] = useState<Unit[]>([]);
+  const [shootingState, setShootingState] = useState<'WAITING_FOR_ACTIVATION' | 'WAITING_FOR_ACTION' | 'TARGET_PREVIEWING'>('WAITING_FOR_ACTIVATION');
+
   // Helper function to find unit by ID
   const findUnit = useCallback((unitId: UnitId) => {
     return units.find(u => u.id === unitId);
@@ -66,7 +75,10 @@ export const useGameActions = ({
 
   // Helper function to check if enemy is reachable via pathfinding around walls
   const checkPathfindingReachable = useCallback((unit: Unit, enemy: Unit, wallHexSet: Set<string>, maxDistance: number): boolean => {
-    if (!boardConfig?.cols || !boardConfig?.rows) {
+    if (!boardConfig) {
+    throw new Error('boardConfig is required for pathfinding but was not provided');
+  }
+  if (!boardConfig.cols || !boardConfig.rows) {
       throw new Error('boardConfig.cols and boardConfig.rows are required for pathfinding');
     }
     
@@ -178,7 +190,7 @@ export const useGameActions = ({
           if (hexDistance > 12) return false;
           
           // Check pathfinding around walls/obstacles (same as move phase)
-          if (boardConfig?.wall_hexes) {
+          if (boardConfig && boardConfig.wall_hexes) {
             const wallHexSet = new Set((boardConfig.wall_hexes as [number, number][]).map(([c, r]) => `${c},${r}`));
             const isReachable = checkPathfindingReachable(unit, enemy, wallHexSet, 12);
             return isReachable;
@@ -224,7 +236,834 @@ export const useGameActions = ({
     }
   }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer, boardConfig, gameState]);
 
+  const selectCharger = useCallback((unitId: UnitId | null) => {
+    if (unitId === null) {
+      actions.setSelectedUnitId(null);
+      actions.setMode("select");
+      return;
+    }
+
+    const unit = findUnit(unitId);
+    if (!unit || !isUnitEligible(unit)) return;
+
+    actions.setSelectedUnitId(unitId);
+    actions.setMode("chargePreview");
+  }, [findUnit, isUnitEligible, actions]);
+
+  const startMovePreview = useCallback((unitId: UnitId, col: number, row: number) => {
+    const unit = findUnit(unitId);
+    if (!unit || !isUnitEligible(unit)) return;
+
+    actions.setMovePreview({ unitId, destCol: col, destRow: row });
+    actions.setMode("movePreview");
+    actions.setAttackPreview(null);
+  }, [findUnit, isUnitEligible, actions]);
+
+  const startAttackPreview = useCallback((unitId: UnitId, col: number, row: number) => {
+    actions.setAttackPreview({ unitId, col, row });
+    actions.setMode("attackPreview");
+    actions.setMovePreview(null);
+  }, [actions]);
+
+  const confirmMove = useCallback(() => {
+    let movedUnitId: UnitId | null = null;
+
+    if (gameState.mode === "movePreview" && movePreview) {
+      const unit = findUnit(movePreview.unitId);
+      if (unit && phase === "move") {
+        // Check if unit is fleeing (was adjacent to enemy at start of move, ends move not adjacent)
+        const enemyUnits = units.filter(u => u.player !== unit.player);
+        
+        // FIXED: Check adjacency at ORIGINAL position before move
+        const wasAdjacentToEnemy = enemyUnits.some(enemy => 
+          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
+        );
+        
+        if (wasAdjacentToEnemy) {
+          const willBeAdjacentToEnemy = enemyUnits.some(enemy => 
+            Math.max(Math.abs(movePreview.destCol - enemy.col), Math.abs(movePreview.destRow - enemy.row)) === 1
+          );
+          
+          if (!willBeAdjacentToEnemy) {
+            actions.addFledUnit(movePreview.unitId);
+          }
+        }
+
+        // Log the move action
+        if (gameLog) {
+          gameLog.logMoveAction(unit, unit.col, unit.row, movePreview.destCol, movePreview.destRow, gameState.currentTurn);
+        }
+        // AI_TURN.md: Built-in step counting (+1 step)
+        if (gameState.episode_steps === undefined) {
+          throw new Error('gameState.episode_steps is required but was undefined');
+        }
+        gameState.episode_steps = gameState.episode_steps + 1;
+      }
+      
+      actions.updateUnit(movePreview.unitId, {
+        col: movePreview.destCol,
+        row: movePreview.destRow,
+      });
+      movedUnitId = movePreview.unitId;
+    } else if (gameState.mode === "attackPreview" && attackPreview) {
+      movedUnitId = attackPreview.unitId;
+    }
+
+    if (movedUnitId !== null) {
+      actions.addMovedUnit(movedUnitId);
+    }
+
+    actions.setMovePreview(null);
+    actions.setAttackPreview(null);
+    actions.setSelectedUnitId(null);
+    actions.setMode("select");
+  }, [gameState.mode, movePreview, attackPreview, actions, findUnit, phase, units]);
+
+  const cancelMove = useCallback(() => {
+    actions.setMovePreview(null);
+    actions.setAttackPreview(null);
+    actions.setMode("select");
+  }, [actions]);
+
+  // === DICE-BASED SHOOTING SYSTEM ===
+
+interface ShootingResult {
+  totalDamage: number;
+  summary: {
+    totalShots: number;
+    hits: number;
+    wounds: number;
+    failedSaves: number;
+  };
+}
+
+  // AI_TURN.md: Component 7 - Target Preview Cleanup
+  const clearTargetPreview = useCallback(() => {
+    const currentPreview = gameState.targetPreview;
+    if (currentPreview && currentPreview.blinkTimer) {
+      clearInterval(currentPreview.blinkTimer);
+    }
+    actions.setTargetPreview(null);
+  }, [gameState.targetPreview, actions]);
+
+  // AI_TURN.md: Component 6 - State Machine Lifecycle Management
+  const initializeShootingPhase = useCallback(() => {
+    // Clear all state variables on entry
+    setActivationShotLog([]);
+    setActiveShootingUnit(null);
+    setSelectedShootingTarget(null);
+    setShootLeft(undefined);
+    setValidTargetsPool([]);
+    clearTargetPreview();
+    
+    // Build eligibility queue
+    const eligibleUnits: Unit[] = [];
+    
+    units.forEach(unit => {
+      // AI_TURN.md: ELIGIBILITY CHECK (Queue Building Phase)
+      if (unit.CUR_HP === undefined || unit.CUR_HP <= 0) return; // Dead unit (Skip, no log)
+      if (unit.player !== currentPlayer) return; // Wrong player (Skip, no log)
+      if (unitsFled.includes(unit.id)) return; // Fled unit (Skip, no log)
+      
+      // Adjacent to enemy unit within CC_RNG?
+      const enemyUnits = units.filter(u => u.player !== unit.player);
+      const hasAdjacentEnemyShoot = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
+      if (hasAdjacentEnemyShoot) return; // In combat (Skip, no log)
+      
+      // unit.RNG_NB > 0?
+      if (unit.RNG_NB === undefined || unit.RNG_NB <= 0) return; // No ranged weapon (Skip, no log)
+      
+      // Has LOS to enemies within RNG_RNG?
+      const friendlyUnits = units.filter(u => u.player === unit.player && u.id !== unit.id);
+      const hasValidTargets = enemyUnits.some(enemy => {
+        if (enemy.player === unit.player) return false;
+        if (!isUnitInRange(unit, enemy, unit.RNG_RNG)) return false;
+        const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly =>
+          Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
+        );
+        if (isEnemyAdjacentToFriendly) return false;
+       
+        if (!boardConfig) {
+          throw new Error('boardConfig is required for shooting phase eligibility check but was not provided');
+        }
+        if (!boardConfig.wall_hexes) {
+          throw new Error('boardConfig.wall_hexes is required for shooting phase eligibility check but was undefined');
+        }
+        
+        const lineOfSight = hasLineOfSight(
+          { col: unit.col, row: unit.row },
+          { col: enemy.col, row: enemy.row },
+          boardConfig.wall_hexes
+        );
+        if (!lineOfSight.canSee) return false;
+       
+        return true;
+      });
+      
+      if (!hasValidTargets) return; // No valid targets (Skip, no log)
+      
+      // ALL conditions met → Add to activation queue → Highlight the unit with a green circle around its icon
+      eligibleUnits.push(unit);
+    });
+    
+    setShootingActivationQueue(eligibleUnits);
+    setShootingState('WAITING_FOR_ACTIVATION');
+    return eligibleUnits.length > 0;
+  }, [units, currentPlayer, unitsFled, areUnitsAdjacent, isUnitInRange, hasLineOfSight, boardConfig, clearTargetPreview]);
+
+  const cleanupShootingPhase = useCallback(() => {
+    // ATOMIC: Clear preview first to prevent timer leaks
+    clearTargetPreview();
+    
+    // ATOMIC: Reset all shooting state variables together
+    setShootingActivationQueue([]);
+    setActivationShotLog([]);
+    setActiveShootingUnit(null);
+    setSelectedShootingTarget(null);
+    setShootLeft(undefined);
+    setValidTargetsPool([]);
+    setShootingState('WAITING_FOR_ACTIVATION');
+    
+    // ATOMIC: Synchronize UI state in single batch to prevent race conditions
+    requestAnimationFrame(() => {
+      actions.setAttackPreview(null);
+      actions.setSelectedUnitId(null);
+      actions.setMode("select");
+    });
+  }, [clearTargetPreview, actions]);
+
+  // AI_TURN.md: Component 2 - Active Unit Click Handler
+  const handleActiveUnitClick = useCallback((unitId: UnitId) => {
+    if (!activeShootingUnit || unitId !== activeShootingUnit.id) return;
+    
+    if (shootingState === 'WAITING_FOR_ACTION') {
+      // leftClick(activeUnit) → No effect
+      return;
+    } else if (shootingState === 'TARGET_PREVIEWING') {
+      // leftClick(activeUnit) → Clear target preview and return to WAITING_FOR_ACTION
+      clearTargetPreview();
+      setSelectedShootingTarget(null);
+      setShootingState('WAITING_FOR_ACTION');
+    }
+  }, [activeShootingUnit, shootingState, clearTargetPreview]);
+
+  // AI_TURN.md: Component 3 - Empty Board Click Handler
+  const handleEmptyBoardClick = useCallback(() => {
+    if (shootingState === 'WAITING_FOR_ACTION') {
+      // left OR Right click anywhere else on the board → STAY
+      return;
+    } else if (shootingState === 'TARGET_PREVIEWING') {
+      // otherClick() → Clear target preview and return to WAITING_FOR_ACTION
+      clearTargetPreview();
+      setSelectedShootingTarget(null);
+      setShootingState('WAITING_FOR_ACTION');
+    }
+  }, [shootingState, clearTargetPreview]);
+
+  // AI_TURN.md: Component 5 - Postponement Validation Feedback
+  const handlePostponementAttempt = useCallback((unitId: UnitId) => {
+    if (!activeShootingUnit || shootLeft === undefined) return false;
+    
+    if (shootLeft !== activeShootingUnit.RNG_NB) {
+      // Postponement forbidden - provide user feedback
+      console.warn(`Unit ${activeShootingUnit.name || activeShootingUnit.id} must complete its activation - cannot postpone after shooting has started`);
+      // Could also trigger a UI notification here
+      return false;
+    }
+    return true;
+  }, [activeShootingUnit, shootLeft]);
+
+  // AI_TURN.md: Enhanced handleShootingUnitClick with proper postponement
+  const handleShootingUnitClick = useCallback((unitId: UnitId) => {
+    if (shootingState === 'WAITING_FOR_ACTIVATION') {
+      // leftClick(unitInActivationQueue) - handle async queue state
+      let clickedUnit = shootingActivationQueue.find(u => u.id === unitId);
+      if (!clickedUnit) {
+        // CRITICAL FIX: Use fresh unit lookup when queue is still updating
+        clickedUnit = units.find(u => u.id === unitId);
+        if (!clickedUnit || !isUnitEligible(clickedUnit)) return;
+      }
+      
+      setActiveShootingUnit(clickedUnit);
+      if (clickedUnit.RNG_NB === undefined) {
+        throw new Error(`clickedUnit.RNG_NB is required but was undefined for unit ${clickedUnit.id}`);
+      }
+      setShootLeft(clickedUnit.RNG_NB);
+      
+      // Build valid_targets pool
+      const enemyUnits = units.filter(u => u.player !== clickedUnit.player);
+      const friendlyUnits = units.filter(u => u.player === clickedUnit.player && u.id !== clickedUnit.id);
+      
+      const validTargets = enemyUnits.filter(enemy => {
+        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+        if (!isUnitInRange(clickedUnit, enemy, clickedUnit.RNG_RNG)) return false;
+        
+        const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => 
+          Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
+        );
+        if (isEnemyAdjacentToFriendly) return false;
+        
+        if (!boardConfig) {
+          throw new Error('boardConfig is required for valid targets pool but was not provided');
+        }
+        if (!boardConfig.wall_hexes) {
+          throw new Error('boardConfig.wall_hexes is required for valid targets pool but was undefined');
+        }
+        
+        const lineOfSight = hasLineOfSight(
+          { col: clickedUnit.col, row: clickedUnit.row },
+          { col: enemy.col, row: enemy.row },
+          boardConfig.wall_hexes
+        );
+        if (!lineOfSight.canSee) return false;
+        
+        return true;
+      });
+      
+      setValidTargetsPool(validTargets);
+      setShootingState('WAITING_FOR_ACTION');
+      
+      // Show shooting preview
+      actions.setAttackPreview({ unitId, col: clickedUnit.col, row: clickedUnit.row });
+      actions.setSelectedUnitId(unitId);
+      actions.setMode("attackPreview");
+      
+    } else if (shootingState === 'WAITING_FOR_ACTION' || shootingState === 'TARGET_PREVIEWING') {
+      // leftClick(otherUnitInActivationQueue) - postponement logic
+      if (activeShootingUnit && shootLeft !== undefined && shootLeft === activeShootingUnit.RNG_NB) {
+        // Clear any existing target preview
+        clearTargetPreview();
+        
+        // Postpone current unit activation
+        setActivationShotLog([]); // Clear stale data
+        const clickedUnit = shootingActivationQueue.find(u => u.id === unitId);
+        if (!clickedUnit) return;
+        
+        setActiveShootingUnit(clickedUnit);
+        if (clickedUnit.RNG_NB === undefined) {
+          throw new Error(`clickedUnit.RNG_NB is required but was undefined for unit ${clickedUnit.id}`);
+        }
+        setShootLeft(clickedUnit.RNG_NB);
+        
+        // Build fresh valid_targets pool
+        const enemyUnits = units.filter(u => u.player !== clickedUnit.player);
+        const friendlyUnits = units.filter(u => u.player === clickedUnit.player && u.id !== clickedUnit.id);
+        
+        const validTargets = enemyUnits.filter(enemy => {
+          if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+          if (!isUnitInRange(clickedUnit, enemy, clickedUnit.RNG_RNG)) return false;
+          
+          const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => 
+            Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
+          );
+          if (isEnemyAdjacentToFriendly) return false;
+          
+          if (!boardConfig) {
+            throw new Error('boardConfig is required for postponed valid targets pool but was not provided');
+          }
+          if (!boardConfig.wall_hexes) {
+            throw new Error('boardConfig.wall_hexes is required for postponed valid targets pool but was undefined');
+          }
+          
+          const lineOfSight = hasLineOfSight(
+            { col: clickedUnit.col, row: clickedUnit.row },
+            { col: enemy.col, row: enemy.row },
+            boardConfig.wall_hexes
+          );
+          if (!lineOfSight.canSee) return false;
+          
+          return true;
+        });
+        
+        setValidTargetsPool(validTargets);
+        setSelectedShootingTarget(null);
+        setShootingState('WAITING_FOR_ACTION');
+        
+        // Update UI
+        actions.setAttackPreview({ unitId, col: clickedUnit.col, row: clickedUnit.row });
+        actions.setSelectedUnitId(unitId);
+      }
+      // else: Unit must complete its activation when started (cannot postpone)
+    }
+  }, [shootingState, shootingActivationQueue, activeShootingUnit, shootLeft, units, isUnitInRange, hasLineOfSight, boardConfig, actions, clearTargetPreview]);
+
+  // AI_TURN.md: Enhanced handleShootingTargetClick with proper cleanup
+  const handleShootingTargetClick = useCallback((targetId: UnitId) => {
+    if (shootingState === 'WAITING_FOR_ACTION') {
+      if (!activeShootingUnit) {
+        setShootingState('WAITING_FOR_ACTIVATION');
+        return;
+      }
+      
+      // Check for slaughter handling
+      if (validTargetsPool.length === 0) {
+        // SLAUGHTER HANDLING
+        if (shootLeft === undefined) {
+          throw new Error('shootLeft is required but was undefined');
+        }
+        if (shootLeft === activeShootingUnit.RNG_NB) {
+          // Result: +1 step, Wait action logged, no Mark → Unit removed from activation queue
+          if (gameState.episode_steps === undefined) {
+            throw new Error('gameState.episode_steps is required but was undefined');
+          }
+          gameState.episode_steps = gameState.episode_steps + 1;
+          if (gameLog) {
+            gameLog.logNoMoveAction(activeShootingUnit, gameState.currentTurn);
+          }
+        } else {
+          // Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit removed from activation queue
+          if (gameState.episode_steps === undefined) {
+            throw new Error('gameState.episode_steps is required but was undefined');
+          }
+          gameState.episode_steps = gameState.episode_steps + 1;
+          actions.addMovedUnit(activeShootingUnit.id);
+        }
+        
+        // Clear activation state and remove green circle
+        setShootingActivationQueue(prev => prev.filter(u => u.id !== activeShootingUnit.id));
+        setActivationShotLog([]);
+        setActiveShootingUnit(null);
+        setSelectedShootingTarget(null);
+        setShootLeft(undefined);
+        setValidTargetsPool([]);
+        setShootingState('WAITING_FOR_ACTIVATION');
+        
+        // Clear UI state
+        clearTargetPreview();
+        actions.setAttackPreview(null);
+        actions.setSelectedUnitId(null);
+        actions.setMode("select");
+        return;
+      }
+      
+      // leftClick(validTarget)
+      const clickedTarget = validTargetsPool.find(u => u.id === targetId);
+      if (!clickedTarget) return;
+      
+      setSelectedShootingTarget(clickedTarget);
+      setShootingState('TARGET_PREVIEWING');
+      
+      // Show target preview with blinking
+      const hitProbability = calculateHitProbability(activeShootingUnit);
+      const woundProbability = calculateWoundProbability(activeShootingUnit, clickedTarget);
+      if (!boardConfig) {
+        throw new Error('boardConfig is required for target preview but was not provided');
+      }
+      if (!boardConfig.wall_hexes) {
+        throw new Error('boardConfig.wall_hexes is required for target preview but was undefined');
+      }
+      const lineOfSight = hasLineOfSight(
+        { col: activeShootingUnit.col, row: activeShootingUnit.row },
+        { col: clickedTarget.col, row: clickedTarget.row },
+        boardConfig.wall_hexes
+      );
+      const targetInCover = lineOfSight.canSee && lineOfSight.inCover;
+      const saveProbability = calculateSaveProbability(activeShootingUnit, clickedTarget, targetInCover);
+      const overallProbability = calculateOverallProbability(activeShootingUnit, clickedTarget, targetInCover);
+      
+      const preview: TargetPreview = {
+        targetId,
+        shooterId: activeShootingUnit.id,
+        currentBlinkStep: 0,
+        totalBlinkSteps: 2,
+        blinkTimer: null,
+        hitProbability,
+        woundProbability,
+        saveProbability,
+        overallProbability
+      };
+      
+      preview.blinkTimer = setInterval(() => {
+        preview.currentBlinkStep = (preview.currentBlinkStep + 1) % 2;
+        actions.setTargetPreview({ ...preview });
+      }, 500);
+      
+      actions.setTargetPreview(preview);
+    } else if (shootingState === 'TARGET_PREVIEWING') {
+      if (!activeShootingUnit || !selectedShootingTarget) {
+        setShootingState('WAITING_FOR_ACTION');
+        return;
+      }
+      
+      // leftClick(sameTarget) - Execute shot
+      if (targetId === selectedShootingTarget.id) {
+        // Clear preview with proper cleanup
+        clearTargetPreview();
+        
+        // Execute shot with hit/wound/save/damage sequence
+        const hitRoll = Math.floor(Math.random() * 6) + 1;
+        if (activeShootingUnit.RNG_ATK === undefined) {
+          throw new Error(`activeShootingUnit.RNG_ATK is required but was undefined for unit ${activeShootingUnit.id}`);
+        }
+        const hitSuccess = hitRoll >= activeShootingUnit.RNG_ATK;
+        
+        let damageDealt = 0;
+        let woundRoll = 0;
+        let woundSuccess = false;
+        let saveRoll = 0;
+        let saveSuccess = false;
+        let woundTarget = 0;
+        let saveTarget = 0;
+        
+        if (hitSuccess) {
+          woundRoll = Math.floor(Math.random() * 6) + 1;
+          if (activeShootingUnit.RNG_STR === undefined) {
+            throw new Error(`activeShootingUnit.RNG_STR is required but was undefined for unit ${activeShootingUnit.id}`);
+          }
+          if (selectedShootingTarget.T === undefined) {
+            throw new Error(`selectedShootingTarget.T is required but was undefined for unit ${selectedShootingTarget.id}`);
+          }
+          
+          const shooterStr = activeShootingUnit.RNG_STR;
+          const targetT = selectedShootingTarget.T;
+          woundTarget = shooterStr >= targetT * 2 ? 2 : 
+                       shooterStr > targetT ? 3 : 
+                       shooterStr === targetT ? 4 : 
+                       shooterStr < targetT ? 5 : 6;
+          woundSuccess = woundRoll >= woundTarget;
+          
+          if (woundSuccess) {
+            saveRoll = Math.floor(Math.random() * 6) + 1;
+            if (selectedShootingTarget.ARMOR_SAVE === undefined) {
+              throw new Error(`selectedShootingTarget.ARMOR_SAVE is required but was undefined for unit ${selectedShootingTarget.id}`);
+            }
+            if (activeShootingUnit.RNG_AP === undefined) {
+              throw new Error(`activeShootingUnit.RNG_AP is required but was undefined for unit ${activeShootingUnit.id}`);
+            }
+            
+            const modifiedArmor = selectedShootingTarget.ARMOR_SAVE + activeShootingUnit.RNG_AP;
+            if (selectedShootingTarget.INVUL_SAVE === undefined) {
+              throw new Error(`selectedShootingTarget.INVUL_SAVE is required but was undefined for unit ${selectedShootingTarget.id}`);
+            }
+            const invulSave = selectedShootingTarget.INVUL_SAVE;
+            saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
+            saveSuccess = saveRoll >= saveTarget;
+            
+            if (!saveSuccess) {
+              if (activeShootingUnit.RNG_DMG === undefined) {
+                throw new Error(`activeShootingUnit.RNG_DMG is required but was undefined for unit ${activeShootingUnit.id}`);
+              }
+              damageDealt = activeShootingUnit.RNG_DMG;
+            }
+          }
+        }
+        
+        // Apply damage and track killed units
+        let killedUnitIds: number[] = [];
+        if (damageDealt > 0) {
+          if (selectedShootingTarget.CUR_HP === undefined) {
+            throw new Error('selectedShootingTarget.CUR_HP is required');
+          }
+          const newHP = selectedShootingTarget.CUR_HP - damageDealt;
+          
+          if (newHP <= 0) {
+            killedUnitIds.push(selectedShootingTarget.id);
+            if (gameLog) {
+              gameLog.logUnitDeath(selectedShootingTarget, gameState.currentTurn);
+            }
+            actions.removeUnit(selectedShootingTarget.id);
+          } else {
+            actions.updateUnit(selectedShootingTarget.id, { CUR_HP: newHP });
+          }
+        }
+        
+        // Log individual shot immediately (AI_TURN.md requirement)
+        if (gameLog) {
+          const shotDetails = [{
+            shotNumber: activationShotLog.length + 1,
+            attackRoll: hitRoll,
+            strengthRoll: woundRoll,
+            hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
+            strengthResult: (hitSuccess && woundSuccess) ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
+            hitTarget: activeShootingUnit.RNG_ATK,
+            woundTarget: hitSuccess ? woundTarget : undefined,
+            saveTarget: (hitSuccess && woundSuccess) ? saveTarget : undefined,
+            saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
+            saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
+            damageDealt: damageDealt
+          }];
+          gameLog.logShootingAction(activeShootingUnit, selectedShootingTarget, shotDetails, gameState.currentTurn);
+        }
+        
+        // Store shot result
+        const shotResult = {
+          targetId: selectedShootingTarget.id,
+          hitRoll,
+          woundRoll,
+          saveRoll,
+          hitSuccess,
+          woundSuccess,
+          saveSuccess,
+          damageDealt
+        };
+        setActivationShotLog(prev => [...prev, shotResult]);
+        
+        // SHOOT_LEFT -= 1
+        if (shootLeft === undefined) {
+          throw new Error('shootLeft is required but was undefined');
+        }
+        const newShotsLeft = shootLeft - 1;
+        setShootLeft(newShotsLeft);
+        actions.updateUnit(activeShootingUnit.id, { SHOOT_LEFT: newShotsLeft });
+        
+        // selectedTarget = null
+        setSelectedShootingTarget(null);
+        
+        // updateValidTargets() - SLAUGHTER HANDLING after shot
+        // CRITICAL FIX: Exclude units killed in this shot from valid targets
+        const currentUnits = gameState.units;
+        const updatedEnemyUnits = currentUnits.filter(u => 
+          u.player !== activeShootingUnit.player && 
+          !killedUnitIds.includes(u.id)
+        );
+        const updatedFriendlyUnits = currentUnits.filter(u => u.player === activeShootingUnit.player && u.id !== activeShootingUnit.id);
+        
+        const updatedValidTargets = updatedEnemyUnits.filter(enemy => {
+          if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+          if (!isUnitInRange(activeShootingUnit, enemy, activeShootingUnit.RNG_RNG)) return false;
+          
+          const isEnemyAdjacentToFriendly = updatedFriendlyUnits.some(friendly => 
+            Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
+          );
+          if (isEnemyAdjacentToFriendly) return false;
+          
+          if (!boardConfig) {
+            throw new Error('boardConfig is required for slaughter check but was not provided');
+          }
+          if (!boardConfig.wall_hexes) {
+            throw new Error('boardConfig.wall_hexes is required for slaughter check but was undefined');
+          }
+          
+          const lineOfSight = hasLineOfSight(
+            { col: activeShootingUnit.col, row: activeShootingUnit.row },
+            { col: enemy.col, row: enemy.row },
+            boardConfig.wall_hexes
+          );
+          if (!lineOfSight.canSee) return false;
+          
+          return true;
+        });
+        
+        setValidTargetsPool(updatedValidTargets);
+        
+        // if (shootLeft > 0 AND validTargets.length > 0): GOTO: WAITING_FOR_ACTION
+        if (newShotsLeft > 0 && updatedValidTargets.length > 0) {
+          setShootingState('WAITING_FOR_ACTION');
+        } else {
+          // SLAUGHTER HANDLING: No shots left OR no valid targets remain
+          // removeFromQueue(activeUnit) + endActivation("shot")
+          if (gameState.episode_steps === undefined) {
+            throw new Error('gameState.episode_steps is required but was undefined');
+          }
+          gameState.episode_steps = gameState.episode_steps + 1;
+          actions.addMovedUnit(activeShootingUnit.id);
+          
+          // Clear activation state and remove green circle
+          setShootingActivationQueue(prev => prev.filter(u => u.id !== activeShootingUnit.id));
+          setActivationShotLog([]);
+          setActiveShootingUnit(null);
+          setSelectedShootingTarget(null);
+          setShootLeft(undefined);
+          setValidTargetsPool([]);
+          setShootingState('WAITING_FOR_ACTIVATION');
+          
+          // Clear UI state
+          actions.setAttackPreview(null);
+          actions.setSelectedUnitId(null);
+          actions.setMode("select");
+        }
+      }
+    }
+  }, [shootingState, activeShootingUnit, selectedShootingTarget, shootLeft, validTargetsPool, activationShotLog, units, isUnitInRange, hasLineOfSight, boardConfig, gameState, gameLog, actions, calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability, clearTargetPreview]);
+
+  // AI_TURN.md: Enhanced handleShootingRightClick with proper cleanup
+  const handleShootingRightClick = useCallback((unitId: UnitId) => {
+    if ((shootingState === 'WAITING_FOR_ACTION' || shootingState === 'TARGET_PREVIEWING') && 
+        activeShootingUnit && unitId === activeShootingUnit.id) {
+      // rightClick(activeUnit)
+      clearTargetPreview();
+      setSelectedShootingTarget(null);
+      
+      if (shootLeft === undefined) {
+        throw new Error('shootLeft is required but was undefined');
+      }
+      if (shootLeft === activeShootingUnit.RNG_NB) {
+        // Result: +1 step, Wait action logged, no Mark → Unit removed from activation queue
+        if (gameState.episode_steps === undefined) {
+          throw new Error('gameState.episode_steps is required but was undefined');
+        }
+        gameState.episode_steps = gameState.episode_steps + 1;
+        if (gameLog) {
+          gameLog.logNoMoveAction(activeShootingUnit, gameState.currentTurn);
+        }
+      } else {
+        // Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit removed from activation queue
+        if (gameState.episode_steps === undefined) {
+          throw new Error('gameState.episode_steps is required but was undefined');
+        }
+        gameState.episode_steps = gameState.episode_steps + 1;
+        actions.addMovedUnit(activeShootingUnit.id);
+      }
+      
+      // Clear activation state and remove green circle
+      setShootingActivationQueue(prev => prev.filter(u => u.id !== activeShootingUnit.id));
+      setActivationShotLog([]);
+      setActiveShootingUnit(null);
+      setSelectedShootingTarget(null);
+      setShootLeft(undefined);
+      setValidTargetsPool([]);
+      setShootingState('WAITING_FOR_ACTIVATION');
+      
+      // Clear UI state
+      actions.setAttackPreview(null);
+      actions.setSelectedUnitId(null);
+      actions.setMode("select");
+    }
+  }, [shootingState, activeShootingUnit, shootLeft, gameState, gameLog, actions, clearTargetPreview]);
+
+  // AI_TURN.md: State Validation and Recovery
+  const validateShootingState = useCallback(() => {
+    try {
+      // Validate critical state consistency
+      if (shootingState === 'WAITING_FOR_ACTION' && !activeShootingUnit) {
+        console.warn('Shooting state machine corrupted: WAITING_FOR_ACTION without active unit');
+        setShootingState('WAITING_FOR_ACTIVATION');
+        setActiveShootingUnit(null);
+        return false;
+      }
+      
+      if (shootingState === 'TARGET_PREVIEWING' && (!activeShootingUnit || !selectedShootingTarget)) {
+        console.warn('Shooting state machine corrupted: TARGET_PREVIEWING without required units');
+        clearTargetPreview();
+        setSelectedShootingTarget(null);
+        setShootingState('WAITING_FOR_ACTION');
+        return false;
+      }
+      
+      if (activeShootingUnit && shootLeft === undefined) {
+        console.warn('Shooting state machine corrupted: active unit without shootLeft');
+        if (activeShootingUnit.RNG_NB === undefined) {
+          throw new Error(`activeShootingUnit.RNG_NB is required but was undefined for unit ${activeShootingUnit.id}`);
+        }
+        setShootLeft(activeShootingUnit.RNG_NB);
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Critical shooting state validation error:', error);
+      cleanupShootingPhase();
+      return false;
+    }
+  }, [shootingState, activeShootingUnit, selectedShootingTarget, shootLeft, clearTargetPreview, cleanupShootingPhase]);
+
+  // AI_TURN.md: Component 1 - Universal Event Router
+  const handleShootingEvent = useCallback((eventType: 'left_click' | 'right_click', targetType: 'unit' | 'target' | 'board', targetId?: UnitId) => {
+    // Handle edge case: empty activation queue mid-phase
+    if (shootingActivationQueue.length === 0) {
+      cleanupShootingPhase();
+      return;
+    }
+    
+    if (eventType === 'right_click') {
+      if (targetType === 'unit' && targetId && activeShootingUnit && targetId === activeShootingUnit.id) {
+        handleShootingRightClick(targetId);
+      }
+      return;
+    }
+    
+    // Handle left clicks
+    if (eventType === 'left_click') {
+      if (targetType === 'unit' && targetId) {
+        // Determine if this is an activation queue unit or active unit
+        if (shootingActivationQueue.some(u => u.id === targetId)) {
+          if (activeShootingUnit && targetId === activeShootingUnit.id) {
+            // Click on current active unit
+            handleActiveUnitClick(targetId);
+          } else {
+            // Click on different unit in activation queue - check postponement
+            if (activeShootingUnit && !handlePostponementAttempt(targetId)) {
+              return; // Postponement forbidden
+            }
+            handleShootingUnitClick(targetId);
+          }
+        }
+      } else if (targetType === 'target' && targetId) {
+        // Click on valid target
+        if (validTargetsPool.some(u => u.id === targetId)) {
+          handleShootingTargetClick(targetId);
+        }
+      } else if (targetType === 'board') {
+        // Click on empty board
+        handleEmptyBoardClick();
+      }
+    }
+  }, [shootingActivationQueue, activeShootingUnit, validTargetsPool, cleanupShootingPhase, handleShootingRightClick, handleActiveUnitClick, handlePostponementAttempt, handleShootingUnitClick, handleShootingTargetClick, handleEmptyBoardClick]);
+
+  // AI_TURN.md: Phase Lifecycle Management
+  const enterShootingPhase = useCallback(() => {
+    const hasEligibleUnits = initializeShootingPhase();
+    if (!hasEligibleUnits) {
+      cleanupShootingPhase();
+      return false;
+    }
+    return true;
+  }, [initializeShootingPhase, cleanupShootingPhase]);
+
+  const exitShootingPhase = useCallback(() => {
+    cleanupShootingPhase();
+  }, [cleanupShootingPhase]);
+
+  // AI_TURN.md: Complete UI Integration Layer
+  const handleShootingPhaseEvent = useCallback((eventType: 'left_click' | 'right_click', targetType: 'unit' | 'target' | 'board', targetId?: UnitId) => {
+    // State validation before processing any event
+    if (!validateShootingState()) {
+      return;
+    }
+    
+    // Route to universal event handler
+    handleShootingEvent(eventType, targetType, targetId);
+  }, [validateShootingState, handleShootingEvent]);
+
+  // AI_TURN.md: Override selectUnit during shooting phase
   const selectUnit = useCallback((unitId: UnitId | null) => {
+    
+    // CRITICAL: Auto-initialize shooting phase on first interaction
+    if (phase === "shoot") {
+      // Auto-trigger phase entry if not initialized
+      if (shootingActivationQueue.length === 0 && shootingState === 'WAITING_FOR_ACTIVATION') {
+        const hasEligibleUnits = enterShootingPhase();
+        if (!hasEligibleUnits) {
+          return; // Phase will auto-advance
+        }
+      }
+      
+      if (unitId === null) {
+        handleShootingPhaseEvent('left_click', 'board');
+        return;
+      }
+      
+      // CRITICAL FIX: Direct target click during shooting phase
+      if (activeShootingUnit && shootingState === 'WAITING_FOR_ACTION') {
+        const clickedUnit = units.find(u => u.id === unitId);
+        if (clickedUnit && clickedUnit.player !== activeShootingUnit.player) {
+          handleShootingTargetClick(unitId);
+          return;
+        }
+      }
+      
+      // CRITICAL FIX: Use fresh state from enterShootingPhase result instead of stale queue state
+      const clickedUnit = units.find(u => u.id === unitId);
+      if (clickedUnit && isUnitEligible(clickedUnit) && shootingState === 'WAITING_FOR_ACTIVATION') {
+        handleShootingUnitClick(unitId);
+        return;
+      }
+      
+      // Route other clicks through shooting state machine
+      handleShootingPhaseEvent('left_click', 'unit', unitId);
+      return;
+    }
+
     // Prevent unit selection during shooting sequence
     if (shootingPhaseState.singleShotState?.isActive) {
       return;
@@ -262,7 +1101,10 @@ export const useGameActions = ({
         gameLog.logNoMoveAction(unit, gameState.currentTurn);
       }
       // AI_TURN.md: Built-in step counting (+1 step for wait)
-      gameState.episode_steps = (gameState.episode_steps || 0) + 1;
+      if (gameState.episode_steps === undefined) {
+        throw new Error('gameState.episode_steps is required but was undefined');
+      }
+      gameState.episode_steps = gameState.episode_steps + 1;
       
       actions.addMovedUnit(unitId);
       actions.setSelectedUnitId(null);
@@ -271,24 +1113,12 @@ export const useGameActions = ({
       return;
     }
 
-    // Special handling for shoot phase
-    if (phase === "shoot") {
-      // Selecting unit for shooting - not adding to unitsMoved yet
-      // Always show the attack preview…
-      actions.setMovePreview(null);
-      actions.setAttackPreview({ unitId, col: unit.col, row: unit.row });
-      actions.setMode("attackPreview");
-
-      // …but only set the active shooter on the first click
-      if (selectedUnitId === null) {
-        actions.setSelectedUnitId(unitId);
-      }
-      return;
-    }
-
     // Special handling for charge phase
     if (phase === "charge") {
-      const existingRoll = gameState.unitChargeRolls?.[unitId];
+      if (!gameState.unitChargeRolls) {
+        throw new Error('gameState.unitChargeRolls is required but was undefined');
+      }
+      const existingRoll = gameState.unitChargeRolls[unitId];
       
       if (!existingRoll) {
         // First time selecting this unit - roll 2d6 for charge distance
@@ -310,7 +1140,7 @@ export const useGameActions = ({
           if (hexDistance > 12) return false;
           
           // Use same pathfinding logic as eligibility check
-          if (boardConfig?.wall_hexes) {
+          if (boardConfig && boardConfig.wall_hexes) {
             const wallHexSet = new Set((boardConfig.wall_hexes as [number, number][]).map(([c, r]) => `${c},${r}`));
             const isReachable = checkPathfindingReachable(unit, enemy, wallHexSet, chargeRoll);
             if (!isReachable) return false;
@@ -423,469 +1253,43 @@ export const useGameActions = ({
     actions.setMovePreview(null);
     actions.setAttackPreview(null);
     actions.setMode("select");
-  }, [findUnit, isUnitEligible, phase, selectedUnitId, actions, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer]);
+  }, [phase, findUnit, isUnitEligible, selectedUnitId, actions, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer, handleShootingPhaseEvent, shootingPhaseState, gameLog, gameState, units, checkPathfindingReachable, boardConfig]);
 
-  const selectCharger = useCallback((unitId: UnitId | null) => {
-    if (unitId === null) {
-      actions.setSelectedUnitId(null);
-      actions.setMode("select");
-      return;
+  // AI_TURN.md: Right-click handler for UI integration
+  const handleRightClick = useCallback((unitId: UnitId) => {
+    if (phase === "shoot") {
+      handleShootingPhaseEvent('right_click', 'unit', unitId);
     }
+  }, [phase, handleShootingPhaseEvent]);
 
-    const unit = findUnit(unitId);
-    if (!unit || !isUnitEligible(unit)) return;
-
-    actions.setSelectedUnitId(unitId);
-    actions.setMode("chargePreview");
-  }, [findUnit, isUnitEligible, actions]);
-
-  const startMovePreview = useCallback((unitId: UnitId, col: number, row: number) => {
-    const unit = findUnit(unitId);
-    if (!unit || !isUnitEligible(unit)) return;
-
-    actions.setMovePreview({ unitId, destCol: col, destRow: row });
-    actions.setMode("movePreview");
-    actions.setAttackPreview(null);
-  }, [findUnit, isUnitEligible, actions]);
-
-  const startAttackPreview = useCallback((unitId: UnitId, col: number, row: number) => {
-    actions.setAttackPreview({ unitId, col, row });
-    actions.setMode("attackPreview");
-    actions.setMovePreview(null);
-  }, [actions]);
-
-  const confirmMove = useCallback(() => {
-    let movedUnitId: UnitId | null = null;
-
-    if (gameState.mode === "movePreview" && movePreview) {
-      const unit = findUnit(movePreview.unitId);
-      if (unit && phase === "move") {
-        // Check if unit is fleeing (was adjacent to enemy at start of move, ends move not adjacent)
-        const enemyUnits = units.filter(u => u.player !== unit.player);
-        
-        // FIXED: Check adjacency at ORIGINAL position before move
-        const wasAdjacentToEnemy = enemyUnits.some(enemy => 
-          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
-        );
-        
-        if (wasAdjacentToEnemy) {
-          const willBeAdjacentToEnemy = enemyUnits.some(enemy => 
-            Math.max(Math.abs(movePreview.destCol - enemy.col), Math.abs(movePreview.destRow - enemy.row)) === 1
-          );
-          
-          if (!willBeAdjacentToEnemy) {
-            actions.addFledUnit(movePreview.unitId);
-          }
-        }
-
-        // Log the move action
-        if (gameLog) {
-          gameLog.logMoveAction(unit, unit.col, unit.row, movePreview.destCol, movePreview.destRow, gameState.currentTurn);
-        }
-        // AI_TURN.md: Built-in step counting (+1 step)
-        gameState.episode_steps = (gameState.episode_steps || 0) + 1;
-      }
-      
-      actions.updateUnit(movePreview.unitId, {
-        col: movePreview.destCol,
-        row: movePreview.destRow,
-      });
-      movedUnitId = movePreview.unitId;
-    } else if (gameState.mode === "attackPreview" && attackPreview) {
-      movedUnitId = attackPreview.unitId;
+  // AI_TURN.md: Board click handler for UI integration  
+  const handleBoardClick = useCallback(() => {
+    if (phase === "shoot") {
+      handleShootingPhaseEvent('left_click', 'board');
     }
+  }, [phase, handleShootingPhaseEvent]);
 
-    if (movedUnitId !== null) {
-      actions.addMovedUnit(movedUnitId);
-    }
-
-    actions.setMovePreview(null);
-    actions.setAttackPreview(null);
-    actions.setSelectedUnitId(null);
-    actions.setMode("select");
-  }, [gameState.mode, movePreview, attackPreview, actions, findUnit, phase, units]);
-
-  const cancelMove = useCallback(() => {
-    actions.setMovePreview(null);
-    actions.setAttackPreview(null);
-    actions.setMode("select");
-  }, [actions]);
-
-  // === DICE-BASED SHOOTING SYSTEM ===
-
-interface ShootingResult {
-  totalDamage: number;
-  summary: {
-    totalShots: number;
-    hits: number;
-    wounds: number;
-    failedSaves: number;
-  };
-}
-
-// Local duplicate functions removed - now using shared gameRules imports
-
-// executeShootingSequence removed - now using shared gameRules if needed
-  //
+  // AI_TURN.md: Complete UI integration - handleShoot with auto-initialization
   const handleShoot = useCallback((shooterId: UnitId, targetId: UnitId) => {
-    if (unitsMoved.includes(shooterId)) {
-      return;
-    }
-
-    if (unitsFled.includes(shooterId)) {
-      return;
-    }
-
-    // ADDITIONAL CHECK: Prevent shooting if unit has no shots left
-    const preShooter = findUnit(shooterId);
-    if (preShooter && preShooter.SHOOT_LEFT !== undefined && preShooter.SHOOT_LEFT <= 0) {
-      return;
-    }
-
-    const shooter = findUnit(shooterId);
-    const target = findUnit(targetId);
-    if (!shooter || !target) {
-      return;
-    }
-
-    if (target.player === shooter.player) {
-      return;
-    }
-
-    const friendlyUnits = units.filter(u => u.player === shooter.player && u.id !== shooter.id);
-    const isTargetAdjacentToFriendly = friendlyUnits.some(friendly => 
-      Math.max(Math.abs(friendly.col - target.col), Math.abs(friendly.row - target.row)) === 1
-    );
-    if (isTargetAdjacentToFriendly) {
-      return;
-    }
-
-    // Add range check
-    if (!isUnitInRange(shooter, target, shooter.RNG_RNG)) {
-      return;
-    }
-
-    if (!boardConfig) {
-      throw new Error('boardConfig is required for shooting validation but was not provided');
-    }
-    if (!boardConfig.wall_hexes) {
-      throw new Error('boardConfig.wall_hexes is required for shooting validation but was undefined');
-    }
-
-    const lineOfSight = hasLineOfSight(
-      { col: shooter.col, row: shooter.row },
-      { col: target.col, row: target.row },
-      boardConfig.wall_hexes
-    );
-    if (!lineOfSight.canSee) {
-      return;
-    }
-
-    if (shooter.SHOOT_LEFT === undefined) {
-      throw new Error('shooter.SHOOT_LEFT is required');
-    }
-
-    const shotsLeft = shooter.SHOOT_LEFT;
     
-    if (shotsLeft <= 0) {
-      return;
-    }
-
-    // Check if we're in single shot mode
-    if (shootingPhaseState.singleShotState?.isActive) {
-      // Handle target selection for current shot
-      if (shootingPhaseState.singleShotState.currentStep === 'target_selection') {
-        singleShotSequenceManager.selectTarget(targetId);
-        
-        // Auto-process hit roll
-        setTimeout(() => {
-          singleShotSequenceManager.processHitRoll(shooter);
-          
-          // Auto-process wound roll if hit succeeded
-          setTimeout(() => {
-            const currentState = singleShotSequenceManager.getState();
-            if (currentState?.stepResults.hitSuccess && target) {
-              singleShotSequenceManager.processWoundRoll(shooter, target);
-              
-              // Auto-process save roll if wound succeeded
-              setTimeout(() => {
-                const updatedState = singleShotSequenceManager.getState();
-                if (updatedState?.stepResults.woundSuccess && target) {
-                  singleShotSequenceManager.processSaveRoll(shooter, target);
-                }
-              }, 50);
-            }
-          }, 50);
-        }, 50);
-        
-        return;
+    // Auto-initialize shooting phase if needed
+    if (shootingActivationQueue.length === 0 && shootingState === 'WAITING_FOR_ACTIVATION') {
+      const hasEligibleUnits = enterShootingPhase();
+      if (!hasEligibleUnits) {
+        return; // No eligible units, phase will advance
       }
+    }
+    
+    // Determine event type and route appropriately
+    if (validTargetsPool.some(u => u.id === targetId)) {
+      handleShootingPhaseEvent('left_click', 'target', targetId);
+    } else if (shootingActivationQueue.some(u => u.id === shooterId)) {
+      handleShootingPhaseEvent('left_click', 'unit', shooterId);
+      handleShootingPhaseEvent('left_click', 'target', targetId);
     } else {
-      // Check if this is a preview (first click) or execute (second click)
-      const currentTargetPreview = gameState.targetPreview;
-      
-      if (currentTargetPreview && 
-          currentTargetPreview.targetId === targetId && 
-          currentTargetPreview.shooterId === shooterId) {
-        // Second click - execute shooting
-        // Clear preview first
-        if (currentTargetPreview.blinkTimer) {
-          clearInterval(currentTargetPreview.blinkTimer);
-        }
-        actions.setTargetPreview(null);
-
-        // Simple single shot execution - no complex sequence manager
-        // Roll dice directly
-        const hitRoll = Math.floor(Math.random() * 6) + 1;
-        if (shooter.RNG_ATK === undefined) {
-          throw new Error(`shooter.RNG_ATK is required but was undefined for unit ${shooter.id}`);
-        }
-        const hitSuccess = hitRoll >= shooter.RNG_ATK;
-        
-        let damageDealt = 0;
-        let woundRoll = 0;
-        let woundSuccess = false;
-        let saveRoll = 0;
-        let saveSuccess = false;
-        
-        // Declare these at the top level for logging
-        if (shooter.RNG_STR === undefined) {
-          throw new Error(`shooter.RNG_STR is required but was undefined for unit ${shooter.id}`);
-        }
-        const shooterStr = shooter.RNG_STR;
-        if (target.T === undefined) {
-          throw new Error(`target.T is required but was undefined for unit ${target.id}`);
-        }
-        const targetT = target.T;
-        if (target.ARMOR_SAVE === undefined) {
-          throw new Error(`target.ARMOR_SAVE is required but was undefined for unit ${target.id}`);
-        }
-        const targetArmorSave = target.ARMOR_SAVE;
-        if (shooter.RNG_AP === undefined) {
-          throw new Error(`shooter.RNG_AP is required but was undefined for unit ${shooter.id}`);
-        }
-        const shooterAP = shooter.RNG_AP;
-        
-        if (hitSuccess) {
-          woundRoll = Math.floor(Math.random() * 6) + 1;
-          if (!shooter.RNG_STR) throw new Error(`shooter.RNG_STR is undefined for unit ${shooter.name}`);
-          if (!target.T) throw new Error(`target.T is undefined for unit ${target.name}`);
-          const woundTarget = shooterStr === targetT ? 4 : (shooterStr > target.T ? 3 : 5);
-          woundSuccess = woundRoll >= woundTarget;
-          
-          if (woundSuccess) {
-            saveRoll = Math.floor(Math.random() * 6) + 1;
-            if (target.ARMOR_SAVE === undefined) {
-              throw new Error(`target.ARMOR_SAVE is required but was undefined for unit ${target.id}`);
-            }
-            if (shooter.RNG_AP === undefined) {
-              throw new Error(`shooter.RNG_AP is required but was undefined for unit ${shooter.id}`);
-            }
-            const saveTarget = target.ARMOR_SAVE + shooter.RNG_AP;
-            saveSuccess = saveRoll >= saveTarget;
-            
-            if (!saveSuccess) {
-              if (shooter.RNG_DMG === undefined) {
-                throw new Error(`shooter.RNG_DMG is required but was undefined for unit ${shooter.id}`);
-              }
-              damageDealt = shooter.RNG_DMG;
-            }
-          }
-        }
-        
-        // Apply damage
-        if (damageDealt > 0) {
-          if (target.CUR_HP === undefined) {
-            throw new Error('target.CUR_HP is required');
-          }
-          const currentHP = target.CUR_HP;
-          const newHP = Math.max(0, currentHP - damageDealt);
-          
-          if (newHP <= 0) {
-            // Log unit death before removing it
-            if (gameLog) {
-              gameLog.logUnitDeath(target, gameState.currentTurn);
-            }
-            actions.removeUnit(targetId);
-          } else {
-            actions.updateUnit(targetId, { CUR_HP: newHP });
-          }
-        }
-
-        // Log the shooting action
-        if (gameLog) {
-          const shootDetails = [{
-            shotNumber: 1,
-            attackRoll: hitRoll,
-            strengthRoll: woundRoll,
-            hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
-            strengthResult: (hitSuccess && woundSuccess) ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
-            hitTarget: shooter.RNG_ATK,
-            woundTarget: hitSuccess ? (shooterStr === targetT ? 4 : (shooterStr > targetT ? 3 : 5)) : undefined,
-            saveTarget: (hitSuccess && woundSuccess) ? (targetArmorSave + shooterAP) : undefined,
-            saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
-            saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
-            damageDealt: damageDealt
-          }];
-          gameLog.logShootingAction(shooter, target, shootDetails, gameState.currentTurn);
-        }
-        
-        // Manually decrement shots - get fresh unit state
-        const currentShooter = findUnit(shooterId);
-        if (!currentShooter) throw new Error(`Cannot find shooter unit ${shooterId}`);
-        if (currentShooter.SHOOT_LEFT === undefined) {
-          throw new Error(`currentShooter.SHOOT_LEFT is required but was undefined for unit ${currentShooter.id}`);
-        }
-        const currentShotsLeft = currentShooter.SHOOT_LEFT;
-        const newShotsLeft = currentShotsLeft - 1;
-        actions.updateUnit(shooterId, { SHOOT_LEFT: newShotsLeft });
-
-        // AI_TURN.md: SLAUGHTER HANDLING - Check if valid targets still exist after damage
-        const enemyUnits = units.filter(u => u.player !== currentShooter.player && u.CUR_HP !== undefined && u.CUR_HP > 0);
-        const friendlyUnits = units.filter(u => u.player === currentShooter.player && u.id !== currentShooter.id);
-        const validTargets = enemyUnits.filter(enemy => {
-          if (!isUnitInRange(currentShooter, enemy, currentShooter.RNG_RNG)) return false;
-          const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => 
-            Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
-          );
-          if (isEnemyAdjacentToFriendly) return false;
-          
-          if (boardConfig && boardConfig.wall_hexes) {
-            const lineOfSight = hasLineOfSight(
-              { col: currentShooter.col, row: currentShooter.row },
-              { col: enemy.col, row: enemy.row },
-              boardConfig.wall_hexes
-            );
-            if (!lineOfSight.canSee) return false;
-          }
-          
-          return true;
-        });
-
-        // AI_TURN.md: Check conditions for continuing or ending shooting activation
-        if (newShotsLeft > 0 && validTargets.length > 0) {
-          // AI_TURN.md: "Valid targets still available? → YES → Select target and resolve shot" (continue sequence)
-          actions.setAttackPreview({ unitId: shooterId, col: currentShooter.col, row: currentShooter.row });
-          actions.setMode("attackPreview");
-        } else {
-          // AI_TURN.md: "Valid targets still available? → NO → End shooting (slaughter handling)" OR all shots used
-          // AI_TURN.md: "Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit removed from activation queue"
-          gameState.episode_steps = (gameState.episode_steps || 0) + 1;
-          
-          actions.addMovedUnit(shooterId);
-          actions.setAttackPreview(null);
-          actions.setSelectedUnitId(null);
-          actions.setMode("select");
-        }
-
-        const updatedShooter = findUnit(shooterId);
-        if (!updatedShooter) throw new Error(`Cannot find shooter unit ${shooterId}`);
-        if (updatedShooter.SHOOT_LEFT === undefined) {
-          throw new Error(`updatedShooter.SHOOT_LEFT is required but was undefined for unit ${updatedShooter.id}`);
-        }
-        const shotsRemaining = updatedShooter.SHOOT_LEFT;
-        const newShotsRemaining = shotsRemaining - 1;
-        actions.updateUnit(shooterId, { SHOOT_LEFT: newShotsRemaining });
-
-        if (gameLog) {
-          const shootDetails = [{
-            shotNumber: 1,
-            attackRoll: hitRoll,
-            strengthRoll: woundRoll,
-            hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
-            strengthResult: (hitSuccess && woundSuccess) ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
-            hitTarget: shooter.RNG_ATK,
-            saveTarget: (hitSuccess && woundSuccess) ? (targetArmorSave + shooterAP) : undefined,
-            saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
-            saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
-            damageDealt: damageDealt
-          }];
-          gameLog.logShootingAction(shooter, target, shootDetails, gameState.currentTurn);
-        }
-        
-        const remainingEnemies = units.filter(u => u.player !== updatedShooter.player && u.CUR_HP !== undefined && u.CUR_HP > 0);
-        const nearbyFriendlies = units.filter(u => u.player === updatedShooter.player && u.id !== updatedShooter.id);
-        const availableTargets = remainingEnemies.filter(enemy => {
-          if (!isUnitInRange(updatedShooter, enemy, updatedShooter.RNG_RNG)) return false;
-          const isEnemyAdjacentToFriendly = nearbyFriendlies.some(friendly => 
-            Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
-          );
-          if (isEnemyAdjacentToFriendly) return false;
-          
-          if (!boardConfig) {
-            throw new Error('boardConfig is required for slaughter handling but was not provided');
-          }
-          if (!boardConfig.wall_hexes) {
-            throw new Error('boardConfig.wall_hexes is required for slaughter handling but was undefined');
-          }
-          
-          const lineOfSight = hasLineOfSight(
-            { col: updatedShooter.col, row: updatedShooter.row },
-            { col: enemy.col, row: enemy.row },
-            boardConfig.wall_hexes
-          );
-          if (!lineOfSight.canSee) return false;
-          
-          return true;
-        });
-
-        if (newShotsRemaining > 0 && availableTargets.length > 0) {
-          actions.setAttackPreview({ unitId: shooterId, col: updatedShooter.col, row: updatedShooter.row });
-          actions.setMode("attackPreview");
-        } else {
-          gameState.episode_steps = (gameState.episode_steps || 0) + 1;
-          actions.addMovedUnit(shooterId);
-          actions.setAttackPreview(null);
-          actions.setSelectedUnitId(null);
-          actions.setMode("select");
-        }
-      } else {
-        // First click - start preview
-        // Clear any existing preview
-        if (currentTargetPreview?.blinkTimer) {
-          clearInterval(currentTargetPreview.blinkTimer);
-        }
-        
-        // Calculate probabilities
-        const hitProbability = calculateHitProbability(shooter);
-        const woundProbability = calculateWoundProbability(shooter, target);
-        
-        // Check if target is in cover using line of sight
-        const lineOfSight = hasLineOfSight(
-          { col: shooter.col, row: shooter.row },
-          { col: target.col, row: target.row },
-          boardConfig.wall_hexes || []
-        );
-        const targetInCover = lineOfSight.canSee && lineOfSight.inCover;
-        
-        const saveProbability = calculateSaveProbability(shooter, target, targetInCover);
-        const overallProbability = calculateOverallProbability(shooter, target, targetInCover); 
-        
-        // Start preview with blink timer - SINGLE SHOT ONLY
-        const totalBlinkSteps = 2; // Only show: current HP (step 0) -> after next shot (step 1)
-        
-        const preview: TargetPreview = {
-          targetId,
-          shooterId,
-          currentBlinkStep: 0,
-          totalBlinkSteps,
-          blinkTimer: null,
-          hitProbability,
-          woundProbability,
-          saveProbability,
-          overallProbability
-        };
-        
-        // Start blink cycle for single shot preview
-        preview.blinkTimer = setInterval(() => {
-          preview.currentBlinkStep = (preview.currentBlinkStep + 1) % totalBlinkSteps;
-          actions.setTargetPreview({ ...preview });
-        }, 500);
-        
-        actions.setTargetPreview(preview);
-      }
+      handleShootingPhaseEvent('left_click', 'board');
     }
-  }, [findUnit, actions, shootingPhaseState, gameState.targetPreview]);
+  }, [shootingActivationQueue, validTargetsPool, handleShootingPhaseEvent, shootingState, enterShootingPhase]);
 
   const handleCombatAttack = useCallback((attackerId: UnitId, targetId: UnitId | null) => {
     if (targetId === null) {
@@ -1017,7 +1421,10 @@ interface ShootingResult {
           saveSuccess = saveRoll >= saveTarget;
 
           if (!saveSuccess) {
-            damageDealt = currentAttacker.CC_DMG || 1;
+            if (currentAttacker.CC_DMG === undefined) {
+              throw new Error(`currentAttacker.CC_DMG is required but was undefined for unit ${currentAttacker.id}`);
+            }
+            damageDealt = currentAttacker.CC_DMG;
           }
         }
       }
@@ -1065,7 +1472,10 @@ interface ShootingResult {
     }
 
     // AI_TURN.md: Built-in step counting (+1 step for combat)
-    gameState.episode_steps = (gameState.episode_steps || 0) + 1;
+    if (gameState.episode_steps === undefined) {
+      throw new Error('gameState.episode_steps is required but was undefined');
+    }
+    gameState.episode_steps = gameState.episode_steps + 1;
 
     // Update final ATTACK_LEFT state
     actions.updateUnit(attackerId, { ATTACK_LEFT: currentAttacksLeft });
@@ -1136,7 +1546,10 @@ interface ShootingResult {
     }
     
     // AI_TURN.md: Built-in step counting (+1 step for charge)
-    gameState.episode_steps = (gameState.episode_steps || 0) + 1;
+    if (gameState.episode_steps === undefined) {
+      throw new Error('gameState.episode_steps is required but was undefined');
+    }
+    gameState.episode_steps = gameState.episode_steps + 1;
 
     // Move unit to destination
     actions.updateUnit(chargerId, { col: destCol, row: destRow, hasChargedThisTurn: true });
@@ -1241,7 +1654,12 @@ interface ShootingResult {
     const chargeDistance = gameState.unitChargeRolls?.[unitId];
     if (!chargeDistance) return [];
     
-    if (!boardConfig?.cols || !boardConfig?.rows) return [];
+    if (!boardConfig) {
+      throw new Error('boardConfig is required for charge destinations but was not provided');
+    }
+    if (!boardConfig.cols || !boardConfig.rows) {
+      throw new Error('boardConfig.cols and boardConfig.rows are required for charge destinations but were undefined');
+    }
     
     const BOARD_COLS = boardConfig.cols;
     const BOARD_ROWS = boardConfig.rows;
@@ -1261,7 +1679,7 @@ interface ShootingResult {
     
     // Add wall hexes
     const wallHexSet = new Set<string>(
-      (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+      (boardConfig.wall_hexes as [number, number][]).map(([c, r]: [number, number]) => `${c},${r}`)
     );
     wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
     
@@ -1363,6 +1781,13 @@ interface ShootingResult {
     isUnitEligible, // Expose the eligibility function
     getChargeDestinations, // Expose the charge destinations function
     directMove, // Expose the direct move function
+    // AI_TURN.md: New integration functions for UI layer
+    handleRightClick,
+    handleBoardClick,
+    enterShootingPhase,
+    exitShootingPhase,
+    validateShootingState,
+    handleShootingPhaseEvent,
     // rollD6 removed - now using shared gameRules import
   };
 };

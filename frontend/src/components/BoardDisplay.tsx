@@ -305,7 +305,6 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
       app.stage.addChild(wallsContainer);
     }
 
-    console.log(`✅ Board drawn (visual only): ${BOARD_ROWS}x${BOARD_COLS} hexes with all features`);
   } catch (error) {
     console.error('❌ Error drawing board:', error);
     throw error;

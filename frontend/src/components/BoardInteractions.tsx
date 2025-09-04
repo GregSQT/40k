@@ -195,7 +195,6 @@ export const setupBoardInteractions = (
       (canvas as any)._boardContextMenuHandler = contextMenuHandler;
     }
 
-    console.log(`✅ Board interactions setup: ${phase} phase, ${mode} mode`);
   } catch (error) {
     console.error('❌ Error setting up board interactions:', error);
     throw error;
@@ -217,7 +216,6 @@ export const cleanupBoardInteractions = (app: PIXI.Application): void => {
       delete (canvas as any)._boardContextMenuHandler;
     }
     
-    console.log('✅ Board interactions cleaned up');
   } catch (error) {
     console.error('❌ Error cleaning up board interactions:', error);
   }
