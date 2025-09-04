@@ -431,9 +431,11 @@ export default function Board({
             if (u.player === selectedUnit.player) return false;
             
             // Check if any valid charge destination is adjacent to this enemy
-            return chargeCells.some(dest =>
-              Math.max(Math.abs(dest.col - u.col), Math.abs(dest.row - u.row)) === 1
-            );
+            return chargeCells.some(dest => {
+              const cube1 = offsetToCube(dest.col, dest.row);
+              const cube2 = offsetToCube(u.col, u.row);
+              return cubeDistance(cube1, cube2) === 1;
+            });
           });
           
       }
@@ -811,15 +813,19 @@ export default function Board({
         let isShootable = true;
         if (unit.player !== currentPlayer && selectedUnit && selectedUnit.RNG_RNG !== undefined) {
           // Check range first
-          const distance = Math.max(Math.abs(selectedUnit.col - unit.col), Math.abs(selectedUnit.row - unit.row));
+          const cube1 = offsetToCube(selectedUnit.col, selectedUnit.row);
+          const cube2 = offsetToCube(unit.col, unit.row);
+          const distance = cubeDistance(cube1, cube2);
           if (distance > selectedUnit.RNG_RNG) {
             isShootable = false;
           } else {
             // Check for adjacent friendly units blocking
             const friendlyUnits = units.filter(u => u.player === currentPlayer && u.id !== selectedUnit.id);
-            const isAdjacentToFriendly = friendlyUnits.some(friendly =>
-              Math.max(Math.abs(friendly.col - unit.col), Math.abs(friendly.row - unit.row)) === 1
-            );
+            const isAdjacentToFriendly = friendlyUnits.some(friendly => {
+              const cube1 = offsetToCube(friendly.col, friendly.row);
+              const cube2 = offsetToCube(unit.col, unit.row);
+              return cubeDistance(cube1, cube2) === 1;
+            });
             if (isAdjacentToFriendly) {
               isShootable = false;
             } else {
@@ -838,8 +844,15 @@ export default function Board({
         
         // Debug only for key units - EXACT UnitRenderer.tsx logic check
         if (unit.id === 8 || unit.id === 9) {
-          const distance = selectedUnit ? Math.max(Math.abs(selectedUnit.col - unit.col), Math.abs(selectedUnit.row - unit.row)) : 0;
-          const inRangeResult = selectedUnit ? isUnitInRange(selectedUnit, unit, selectedUnit.RNG_RNG || 0) : false;
+          let distance = 0;
+          if (selectedUnit) {
+            const cube1 = offsetToCube(selectedUnit.col, selectedUnit.row);
+            const cube2 = offsetToCube(unit.col, unit.row);
+            distance = cubeDistance(cube1, cube2);
+          }
+          const inRangeResult = selectedUnit && selectedUnit.RNG_RNG 
+            ? isUnitInRange(selectedUnit, unit, selectedUnit.RNG_RNG) 
+            : false;
         }
         renderUnit({
           unit, centerX, centerY, app,

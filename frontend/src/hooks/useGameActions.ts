@@ -68,6 +68,18 @@ export const useGameActions = ({
   const [validTargetsPool, setValidTargetsPool] = useState<Unit[]>([]);
   const [shootingState, setShootingState] = useState<'WAITING_FOR_ACTIVATION' | 'WAITING_FOR_ACTION' | 'TARGET_PREVIEWING'>('WAITING_FOR_ACTIVATION');
 
+  // AI_TURN.md: Combat phase state machine variables (additive integration)
+  const [combatState, setCombatState] = useState<'CHARGING_PHASE_WAITING_FOR_ACTIVATION' | 'CHARGING_WAITING_FOR_ACTION' | 'CHARGING_TARGET_PREVIEWING' | 'SUB_PHASE_2_INIT' | 'ALTERNATING_NON_ACTIVE_TURN' | 'ALTERNATING_ACTIVE_TURN' | 'ALTERNATING_WAITING_FOR_ACTION' | 'ALTERNATING_TARGET_PREVIEWING' | 'ALTERNATING_CHECK_POOLS' | 'CLEANUP_REMAINING_UNITS'>('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
+  const [chargingActivationQueue, setChargingActivationQueue] = useState<Unit[]>([]);
+  const [activeAlternatingPool, setActiveAlternatingPool] = useState<Unit[]>([]);
+  const [nonActiveAlternatingPool, setNonActiveAlternatingPool] = useState<Unit[]>([]);
+  const [activeCombatUnit, setActiveCombatUnit] = useState<Unit | null>(null);
+  const [selectedCombatTarget, setSelectedCombatTarget] = useState<Unit | null>(null);
+  const [attacksLeft, setAttacksLeft] = useState<number | undefined>(undefined);
+  const [combatActionLog, setCombatActionLog] = useState<any[]>([]);
+  const [validCombatTargetsPool, setValidCombatTargetsPool] = useState<Unit[]>([]);
+  const [currentAlternatingTurn, setCurrentAlternatingTurn] = useState<'NON_ACTIVE' | 'ACTIVE'>('NON_ACTIVE');
+
   // Helper function to find unit by ID
   const findUnit = useCallback((unitId: UnitId) => {
     return units.find(u => u.id === unitId);
@@ -155,9 +167,11 @@ export const useGameActions = ({
         return enemyUnits.some(enemy => {
           if (enemy.player === unit.player) return false;
           if (!isUnitInRange(unit, enemy, unit.RNG_RNG)) return false;
-          const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly =>
-            Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
-          );
+          const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => {
+            const cube1 = offsetToCube(friendly.col, friendly.row);
+            const cube2 = offsetToCube(enemy.col, enemy.row);
+            return cubeDistance(cube1, cube2) === 1;
+          });
           if (isEnemyAdjacentToFriendly) return false;
          
           if (!boardConfig) {
@@ -227,8 +241,10 @@ export const useGameActions = ({
         // CRITICAL FIX: Only units adjacent to enemies should be eligible for combat
         // For CC_RNG = 1, units must be exactly distance 1 (adjacent) to enemies
         const hasAdjacentEnemy = actualEnemyUnits.some(enemy => {
-          const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
-          return distance === combatRange; // Must be exactly at combat range (adjacent for CC_RNG=1)
+          const cube1 = offsetToCube(unit.col, unit.row);
+          const cube2 = offsetToCube(enemy.col, enemy.row);
+          const hexDistance = cubeDistance(cube1, cube2);
+          return hexDistance === combatRange; // Correct hex distance calculation
         });
         return hasAdjacentEnemy;
       default:
@@ -275,14 +291,18 @@ export const useGameActions = ({
         const enemyUnits = units.filter(u => u.player !== unit.player);
         
         // FIXED: Check adjacency at ORIGINAL position before move
-        const wasAdjacentToEnemy = enemyUnits.some(enemy => 
-          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
-        );
+        const wasAdjacentToEnemy = enemyUnits.some(enemy => {
+          const cube1 = offsetToCube(unit.col, unit.row);
+          const cube2 = offsetToCube(enemy.col, enemy.row);
+          return cubeDistance(cube1, cube2) === 1;
+        });
         
         if (wasAdjacentToEnemy) {
-          const willBeAdjacentToEnemy = enemyUnits.some(enemy => 
-            Math.max(Math.abs(movePreview.destCol - enemy.col), Math.abs(movePreview.destRow - enemy.row)) === 1
-          );
+          const willBeAdjacentToEnemy = enemyUnits.some(enemy => {
+            const cube1 = offsetToCube(movePreview.destCol, movePreview.destRow);
+            const cube2 = offsetToCube(enemy.col, enemy.row);
+            return cubeDistance(cube1, cube2) === 1;
+          });
           
           if (!willBeAdjacentToEnemy) {
             actions.addFledUnit(movePreview.unitId);
@@ -378,9 +398,11 @@ interface ShootingResult {
       const hasValidTargets = enemyUnits.some(enemy => {
         if (enemy.player === unit.player) return false;
         if (!isUnitInRange(unit, enemy, unit.RNG_RNG)) return false;
-        const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly =>
-          Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
-        );
+        const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => {
+          const cube1 = offsetToCube(friendly.col, friendly.row);
+          const cube2 = offsetToCube(enemy.col, enemy.row);
+          return cubeDistance(cube1, cube2) === 1;
+        });
         if (isEnemyAdjacentToFriendly) return false;
        
         if (!boardConfig) {
@@ -431,6 +453,647 @@ interface ShootingResult {
       actions.setMode("select");
     });
   }, [clearTargetPreview, actions]);
+
+  // AI_TURN.md: Combat Phase State Machine Functions (additive integration)
+  const initializeCombatPhase = useCallback(() => {
+    setCombatActionLog([]);
+    setActiveCombatUnit(null);
+    setSelectedCombatTarget(null);
+    setAttacksLeft(undefined);
+    setValidCombatTargetsPool([]);
+    clearTargetPreview();
+    
+    const chargingEligibleUnits: Unit[] = [];
+    
+    units.forEach(unit => {
+      if (unit.CUR_HP === undefined || unit.CUR_HP <= 0) return;
+      if (unit.player !== currentPlayer) return;
+      if (!unitsCharged.includes(unit.id)) return;
+      if (unitsAttacked.includes(unit.id)) return;
+      
+      const enemyUnits = units.filter(u => u.player !== unit.player);
+      if (unit.CC_RNG === undefined) {
+        throw new Error(`unit.CC_RNG is required but was undefined for unit ${unit.id}`);
+      }
+      const combatRange = unit.CC_RNG;
+      const hasAdjacentEnemy = enemyUnits.some(enemy => {
+        const cube1 = offsetToCube(unit.col, unit.row);
+        const cube2 = offsetToCube(enemy.col, enemy.row);
+        const hexDistance = cubeDistance(cube1, cube2);
+        return hexDistance === combatRange;
+      });
+      if (!hasAdjacentEnemy) return;
+      
+      chargingEligibleUnits.push(unit);
+    });
+    
+    setChargingActivationQueue(chargingEligibleUnits);
+    setCombatState('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
+    return chargingEligibleUnits.length > 0;
+  }, [units, currentPlayer, unitsCharged, unitsAttacked, clearTargetPreview]);
+
+  const buildAlternatingPools = useCallback(() => {
+    const activePool: Unit[] = [];
+    const nonActivePool: Unit[] = [];
+    
+    units.forEach(unit => {
+      if (unit.CUR_HP !== undefined && unit.CUR_HP > 0 && 
+          unit.player === currentPlayer && 
+          !unitsAttacked.includes(unit.id) && 
+          !unitsCharged.includes(unit.id)) {
+        
+        const enemyUnits = units.filter(u => u.player !== unit.player);
+        if (unit.CC_RNG === undefined) {
+          throw new Error(`unit.CC_RNG is required but was undefined for unit ${unit.id}`);
+        }
+        const combatRange = unit.CC_RNG;
+        const hasAdjacentEnemy = enemyUnits.some(enemy => {
+          const cube1 = offsetToCube(unit.col, unit.row);
+          const cube2 = offsetToCube(enemy.col, enemy.row);
+          const hexDistance = cubeDistance(cube1, cube2);
+          return hexDistance === combatRange;
+        });
+        
+        if (hasAdjacentEnemy) {
+          activePool.push(unit);
+        }
+      }
+      
+      if (unit.CUR_HP !== undefined && unit.CUR_HP > 0 && 
+          unit.player !== currentPlayer && 
+          !unitsAttacked.includes(unit.id) && 
+          !unitsCharged.includes(unit.id)) {
+        
+        const enemyUnits = units.filter(u => u.player !== unit.player);
+        if (unit.CC_RNG === undefined) {
+          throw new Error(`unit.CC_RNG is required but was undefined for unit ${unit.id}`);
+        }
+        const combatRange = unit.CC_RNG;
+        const hasAdjacentEnemy = enemyUnits.some(enemy => {
+          const cube1 = offsetToCube(unit.col, unit.row);
+          const cube2 = offsetToCube(enemy.col, enemy.row);
+          const hexDistance = cubeDistance(cube1, cube2);
+          return hexDistance === combatRange;
+        });
+        
+        if (hasAdjacentEnemy) {
+          nonActivePool.push(unit);
+        }
+      }
+    });
+    
+    setActiveAlternatingPool(activePool);
+    setNonActiveAlternatingPool(nonActivePool);
+    setCurrentAlternatingTurn('NON_ACTIVE');
+    
+    return { activePool, nonActivePool };
+  }, [units, currentPlayer, unitsAttacked, unitsCharged]);
+
+  const cleanupCombatPhase = useCallback(() => {
+    clearTargetPreview();
+    setChargingActivationQueue([]);
+    setActiveAlternatingPool([]);
+    setNonActiveAlternatingPool([]);
+    setCombatActionLog([]);
+    setActiveCombatUnit(null);
+    setSelectedCombatTarget(null);
+    setAttacksLeft(undefined);
+    setValidCombatTargetsPool([]);
+    setCombatState('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
+    setCurrentAlternatingTurn('NON_ACTIVE');
+    
+    requestAnimationFrame(() => {
+      actions.setAttackPreview(null);
+      actions.setSelectedUnitId(null);
+      actions.setMode("select");
+    });
+  }, [clearTargetPreview, actions]);
+
+  // AI_TURN.md: Combat State Validation and Recovery
+  const validateCombatState = useCallback(() => {
+    try {
+      if ((combatState === 'CHARGING_WAITING_FOR_ACTION' || combatState === 'ALTERNATING_WAITING_FOR_ACTION') && !activeCombatUnit) {
+        console.warn('Combat state machine corrupted: WAITING_FOR_ACTION without active unit');
+        setCombatState('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
+        setActiveCombatUnit(null);
+        return false;
+      }
+      
+      if ((combatState === 'CHARGING_TARGET_PREVIEWING' || combatState === 'ALTERNATING_TARGET_PREVIEWING') && 
+          (!activeCombatUnit || !selectedCombatTarget)) {
+        console.warn('Combat state machine corrupted: TARGET_PREVIEWING without required units');
+        clearTargetPreview();
+        setSelectedCombatTarget(null);
+        setCombatState(combatState === 'CHARGING_TARGET_PREVIEWING' ? 'CHARGING_WAITING_FOR_ACTION' : 'ALTERNATING_WAITING_FOR_ACTION');
+        return false;
+      }
+      
+      if (activeCombatUnit && attacksLeft === undefined) {
+        console.warn('Combat state machine corrupted: active unit without attacksLeft');
+        if (activeCombatUnit.CC_NB === undefined) {
+          throw new Error(`activeCombatUnit.CC_NB is required but was undefined for unit ${activeCombatUnit.id}`);
+        }
+        setAttacksLeft(activeCombatUnit.CC_NB);
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Critical combat state validation error:', error);
+      cleanupCombatPhase();
+      return false;
+    }
+  }, [combatState, activeCombatUnit, selectedCombatTarget, attacksLeft, clearTargetPreview, cleanupCombatPhase]);
+
+  // AI_TURN.md: Combat Unit Click Handler
+  const handleCombatUnitClick = useCallback((unitId: UnitId) => {
+    if (combatState === 'CHARGING_PHASE_WAITING_FOR_ACTIVATION') {
+      let clickedUnit = chargingActivationQueue.find(u => u.id === unitId);
+      if (!clickedUnit) {
+        clickedUnit = units.find(u => u.id === unitId);
+        if (!clickedUnit || !isUnitEligible(clickedUnit)) return;
+      }
+      
+      setActiveCombatUnit(clickedUnit);
+      if (clickedUnit.CC_NB === undefined) {
+        throw new Error(`clickedUnit.CC_NB is required but was undefined for unit ${clickedUnit.id}`);
+      }
+      setAttacksLeft(clickedUnit.CC_NB);
+      
+      const enemyUnits = units.filter(u => u.player !== clickedUnit.player);
+      
+      const validTargets = enemyUnits.filter(enemy => {
+        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+        if (clickedUnit.CC_RNG === undefined) {
+          throw new Error(`clickedUnit.CC_RNG is required but was undefined for unit ${clickedUnit.id}`);
+        }
+        const combatRange = clickedUnit.CC_RNG;
+        const cube1 = offsetToCube(clickedUnit.col, clickedUnit.row);
+        const cube2 = offsetToCube(enemy.col, enemy.row);
+        const hexDistance = cubeDistance(cube1, cube2);
+        return hexDistance === combatRange;
+      });
+      
+      setValidCombatTargetsPool(validTargets);
+      setCombatState('CHARGING_WAITING_FOR_ACTION');
+      
+      actions.setAttackPreview({ unitId, col: clickedUnit.col, row: clickedUnit.row });
+      actions.setSelectedUnitId(unitId);
+      actions.setMode("attackPreview");
+      
+    } else if (combatState === 'ALTERNATING_NON_ACTIVE_TURN') {
+      const clickedUnit = nonActiveAlternatingPool.find(u => u.id === unitId);
+      if (!clickedUnit) return;
+      
+      setActiveCombatUnit(clickedUnit);
+      if (clickedUnit.CC_NB === undefined) {
+        throw new Error(`clickedUnit.CC_NB is required but was undefined for unit ${clickedUnit.id}`);
+      }
+      setAttacksLeft(clickedUnit.CC_NB);
+      
+      const enemyUnits = units.filter(u => u.player !== clickedUnit.player);
+      
+      const validTargets = enemyUnits.filter(enemy => {
+        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+        if (clickedUnit.CC_RNG === undefined) {
+          throw new Error(`clickedUnit.CC_RNG is required but was undefined for unit ${clickedUnit.id}`);
+        }
+        const combatRange = clickedUnit.CC_RNG;
+        const cube1 = offsetToCube(clickedUnit.col, clickedUnit.row);
+        const cube2 = offsetToCube(enemy.col, enemy.row);
+        const hexDistance = cubeDistance(cube1, cube2);
+        return hexDistance === combatRange;
+      });
+      
+      setValidCombatTargetsPool(validTargets);
+      setCombatState('ALTERNATING_WAITING_FOR_ACTION');
+      
+      actions.setAttackPreview({ unitId, col: clickedUnit.col, row: clickedUnit.row });
+      actions.setSelectedUnitId(unitId);
+      actions.setMode("attackPreview");
+      
+    } else if (combatState === 'ALTERNATING_ACTIVE_TURN') {
+      const clickedUnit = activeAlternatingPool.find(u => u.id === unitId);
+      if (!clickedUnit) return;
+      
+      setActiveCombatUnit(clickedUnit);
+      if (clickedUnit.CC_NB === undefined) {
+        throw new Error(`clickedUnit.CC_NB is required but was undefined for unit ${clickedUnit.id}`);
+      }
+      setAttacksLeft(clickedUnit.CC_NB);
+      
+      const enemyUnits = units.filter(u => u.player !== clickedUnit.player);
+      
+      const validTargets = enemyUnits.filter(enemy => {
+        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+        if (clickedUnit.CC_RNG === undefined) {
+          throw new Error(`clickedUnit.CC_RNG is required but was undefined for unit ${clickedUnit.id}`);
+        }
+        const combatRange = clickedUnit.CC_RNG;
+        const cube1 = offsetToCube(clickedUnit.col, clickedUnit.row);
+        const cube2 = offsetToCube(enemy.col, enemy.row);
+        const hexDistance = cubeDistance(cube1, cube2);
+        return hexDistance === combatRange;
+      });
+      
+      setValidCombatTargetsPool(validTargets);
+      setCombatState('ALTERNATING_WAITING_FOR_ACTION');
+      
+      actions.setAttackPreview({ unitId, col: clickedUnit.col, row: clickedUnit.row });
+      actions.setSelectedUnitId(unitId);
+      actions.setMode("attackPreview");
+    }
+  }, [combatState, chargingActivationQueue, nonActiveAlternatingPool, activeAlternatingPool, units, isUnitEligible, actions]);
+
+  // AI_TURN.md: Combat Target Click Handler
+  const handleCombatTargetClick = useCallback((targetId: UnitId) => {
+    if (combatState === 'CHARGING_WAITING_FOR_ACTION' || combatState === 'ALTERNATING_WAITING_FOR_ACTION') {
+      if (!activeCombatUnit) {
+        setCombatState('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
+        return;
+      }
+      
+      // AI_TURN.md Enhanced Slaughter Handling
+      if (validCombatTargetsPool.length === 0) {
+        if (attacksLeft === undefined) {
+          throw new Error('attacksLeft is required but was undefined');
+        }
+        
+        // Check if this is a fresh activation (no attacks made yet)
+        if (attacksLeft === activeCombatUnit.CC_NB) {
+          // Fresh activation with no targets: +1 step, Wait action logged, no Mark
+          if (gameState.episode_steps === undefined) {
+            throw new Error('gameState.episode_steps is required but was undefined');
+          }
+          gameState.episode_steps = gameState.episode_steps + 1;
+          if (gameLog) {
+            gameLog.logNoMoveAction(activeCombatUnit, gameState.currentTurn);
+          }
+        } else {
+          // Partial activation completed: +1 step, Combat sequence logged, Mark as units_attacked
+          if (gameState.episode_steps === undefined) {
+            throw new Error('gameState.episode_steps is required but was undefined');
+          }
+          gameState.episode_steps = gameState.episode_steps + 1;
+          actions.addAttackedUnit(activeCombatUnit.id);
+        }
+        
+        // AI_TURN.md: Force immediate state progression check
+        const wasChargingUnit = chargingActivationQueue.some(u => u.id === activeCombatUnit.id);
+        const wasNonActiveUnit = nonActiveAlternatingPool.some(u => u.id === activeCombatUnit.id);
+        const wasActiveUnit = activeAlternatingPool.some(u => u.id === activeCombatUnit.id);
+        
+        setChargingActivationQueue(prev => prev.filter(u => u.id !== activeCombatUnit.id));
+        setActiveAlternatingPool(prev => prev.filter(u => u.id !== activeCombatUnit.id));
+        setNonActiveAlternatingPool(prev => prev.filter(u => u.id !== activeCombatUnit.id));
+        setCombatActionLog([]);
+        setActiveCombatUnit(null);
+        setSelectedCombatTarget(null);
+        setAttacksLeft(undefined);
+        setValidCombatTargetsPool([]);
+        setCombatState('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
+        
+        clearTargetPreview();
+        actions.setAttackPreview(null);
+        actions.setSelectedUnitId(null);
+        actions.setMode("select");
+        return;
+      }
+      
+      const clickedTarget = validCombatTargetsPool.find(u => u.id === targetId);
+      if (!clickedTarget) return;
+      
+      setSelectedCombatTarget(clickedTarget);
+      setCombatState(combatState === 'CHARGING_WAITING_FOR_ACTION' ? 'CHARGING_TARGET_PREVIEWING' : 'ALTERNATING_TARGET_PREVIEWING');
+      
+      const hitProbability = calculateCombatHitProbability(activeCombatUnit);
+      const woundProbability = calculateCombatWoundProbability(activeCombatUnit, clickedTarget);
+      const saveProbability = calculateCombatSaveProbability(activeCombatUnit, clickedTarget);
+      const overallProbability = calculateCombatOverallProbability(activeCombatUnit, clickedTarget);
+      
+      const preview: TargetPreview = {
+        targetId,
+        shooterId: activeCombatUnit.id,
+        currentBlinkStep: 0,
+        totalBlinkSteps: 2,
+        blinkTimer: null,
+        hitProbability,
+        woundProbability,
+        saveProbability,
+        overallProbability
+      };
+      
+      preview.blinkTimer = setInterval(() => {
+        preview.currentBlinkStep = (preview.currentBlinkStep + 1) % 2;
+        actions.setTargetPreview({ ...preview });
+      }, 500);
+      
+      actions.setTargetPreview(preview);
+      
+    } else if (combatState === 'CHARGING_TARGET_PREVIEWING' || combatState === 'ALTERNATING_TARGET_PREVIEWING') {
+      if (!activeCombatUnit || !selectedCombatTarget) {
+        setCombatState(combatState === 'CHARGING_TARGET_PREVIEWING' ? 'CHARGING_WAITING_FOR_ACTION' : 'ALTERNATING_WAITING_FOR_ACTION');
+        return;
+      }
+      
+      if (targetId === selectedCombatTarget.id) {
+        clearTargetPreview();
+        
+        const hitRoll = Math.floor(Math.random() * 6) + 1;
+        if (activeCombatUnit.CC_ATK === undefined) {
+          throw new Error(`activeCombatUnit.CC_ATK is required but was undefined for unit ${activeCombatUnit.id}`);
+        }
+        const hitSuccess = hitRoll >= activeCombatUnit.CC_ATK;
+        
+        let damageDealt = 0;
+        let woundRoll = 0;
+        let woundSuccess = false;
+        let saveRoll = 0;
+        let saveSuccess = false;
+        let woundTarget = 0;
+        let saveTarget = 0;
+        
+        if (hitSuccess) {
+          woundRoll = Math.floor(Math.random() * 6) + 1;
+          if (activeCombatUnit.CC_STR === undefined) {
+            throw new Error(`activeCombatUnit.CC_STR is required but was undefined for unit ${activeCombatUnit.id}`);
+          }
+          if (selectedCombatTarget.T === undefined) {
+            throw new Error(`selectedCombatTarget.T is required but was undefined for unit ${selectedCombatTarget.id}`);
+          }
+          
+          const attackerStr = activeCombatUnit.CC_STR;
+          const targetT = selectedCombatTarget.T;
+          woundTarget = attackerStr >= targetT * 2 ? 2 : 
+                       attackerStr > targetT ? 3 : 
+                       attackerStr === targetT ? 4 : 
+                       attackerStr < targetT ? 5 : 6;
+          woundSuccess = woundRoll >= woundTarget;
+          
+          if (woundSuccess) {
+            saveRoll = Math.floor(Math.random() * 6) + 1;
+            if (selectedCombatTarget.ARMOR_SAVE === undefined) {
+              throw new Error(`selectedCombatTarget.ARMOR_SAVE is required but was undefined for unit ${selectedCombatTarget.id}`);
+            }
+            if (activeCombatUnit.CC_AP === undefined) {
+              throw new Error(`activeCombatUnit.CC_AP is required but was undefined for unit ${activeCombatUnit.id}`);
+            }
+            
+            const modifiedArmor = selectedCombatTarget.ARMOR_SAVE + activeCombatUnit.CC_AP;
+            if (selectedCombatTarget.INVUL_SAVE === undefined) {
+              throw new Error(`selectedCombatTarget.INVUL_SAVE is required but was undefined for unit ${selectedCombatTarget.id}`);
+            }
+            const invulSave = selectedCombatTarget.INVUL_SAVE;
+            saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;
+            saveSuccess = saveRoll >= saveTarget;
+            
+            if (!saveSuccess) {
+              if (activeCombatUnit.CC_DMG === undefined) {
+                throw new Error(`activeCombatUnit.CC_DMG is required but was undefined for unit ${activeCombatUnit.id}`);
+              }
+              damageDealt = activeCombatUnit.CC_DMG;
+            }
+          }
+        }
+        
+        let killedUnitIds: number[] = [];
+        if (damageDealt > 0) {
+          if (selectedCombatTarget.CUR_HP === undefined) {
+            throw new Error('selectedCombatTarget.CUR_HP is required');
+          }
+          const newHP = selectedCombatTarget.CUR_HP - damageDealt;
+          
+          if (newHP <= 0) {
+            killedUnitIds.push(selectedCombatTarget.id);
+            if (gameLog) {
+              gameLog.logUnitDeath(selectedCombatTarget, gameState.currentTurn);
+            }
+            actions.removeUnit(selectedCombatTarget.id);
+          } else {
+            actions.updateUnit(selectedCombatTarget.id, { CUR_HP: newHP });
+          }
+        }
+        
+        if (gameLog) {
+          const attackDetails = [{
+            shotNumber: combatActionLog.length + 1,
+            attackRoll: hitRoll,
+            strengthRoll: woundRoll,
+            hitResult: hitSuccess ? 'HIT' : 'MISS' as 'HIT' | 'MISS',
+            strengthResult: (hitSuccess && woundSuccess) ? 'SUCCESS' : 'FAILED' as 'SUCCESS' | 'FAILED',
+            hitTarget: activeCombatUnit.CC_ATK,
+            woundTarget: hitSuccess ? woundTarget : undefined,
+            saveTarget: (hitSuccess && woundSuccess) ? saveTarget : undefined,
+            saveRoll: (hitSuccess && woundSuccess) ? saveRoll : undefined,
+            saveSuccess: (hitSuccess && woundSuccess) ? saveSuccess : undefined,
+            damageDealt: damageDealt
+          }];
+          gameLog.logCombatAction(activeCombatUnit, selectedCombatTarget, attackDetails, gameState.currentTurn);
+        }
+        
+        const attackResult = {
+          targetId: selectedCombatTarget.id,
+          hitRoll,
+          woundRoll,
+          saveRoll,
+          hitSuccess,
+          woundSuccess,
+          saveSuccess,
+          damageDealt
+        };
+        setCombatActionLog(prev => [...prev, attackResult]);
+        
+        if (attacksLeft === undefined) {
+          throw new Error('attacksLeft is required but was undefined');
+        }
+        const newAttacksLeft = attacksLeft - 1;
+        setAttacksLeft(newAttacksLeft);
+        
+        setSelectedCombatTarget(null);
+        
+        const currentUnits = gameState.units;
+        const updatedEnemyUnits = currentUnits.filter(u => 
+          u.player !== activeCombatUnit.player && 
+          !killedUnitIds.includes(u.id)
+        );
+        
+        const updatedValidTargets = updatedEnemyUnits.filter(enemy => {
+          if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+          if (activeCombatUnit.CC_RNG === undefined) {
+            throw new Error(`activeCombatUnit.CC_RNG is required but was undefined for unit ${activeCombatUnit.id}`);
+          }
+          const combatRange = activeCombatUnit.CC_RNG;
+          const cube1 = offsetToCube(activeCombatUnit.col, activeCombatUnit.row);
+          const cube2 = offsetToCube(enemy.col, enemy.row);
+          const hexDistance = cubeDistance(cube1, cube2);
+          return hexDistance === combatRange;
+        });
+        
+        setValidCombatTargetsPool(updatedValidTargets);
+        
+        if (newAttacksLeft > 0 && updatedValidTargets.length > 0) {
+          setCombatState(combatState === 'CHARGING_TARGET_PREVIEWING' ? 'CHARGING_WAITING_FOR_ACTION' : 'ALTERNATING_WAITING_FOR_ACTION');
+        } else {
+          if (gameState.episode_steps === undefined) {
+            throw new Error('gameState.episode_steps is required but was undefined');
+          }
+          gameState.episode_steps = gameState.episode_steps + 1;
+          actions.addAttackedUnit(activeCombatUnit.id);
+          
+          if (combatState === 'CHARGING_TARGET_PREVIEWING') {
+            const remainingChargingUnits = chargingActivationQueue.filter(u => u.id !== activeCombatUnit.id);
+            setChargingActivationQueue(remainingChargingUnits);
+            if (remainingChargingUnits.length === 0) {
+              setCombatState('SUB_PHASE_2_INIT');
+            } else {
+              setCombatState('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
+            }
+          } else {
+            if (currentAlternatingTurn === 'NON_ACTIVE') {
+              const remainingNonActiveUnits = nonActiveAlternatingPool.filter(u => u.id !== activeCombatUnit.id);
+              setNonActiveAlternatingPool(remainingNonActiveUnits);
+              if (remainingNonActiveUnits.length === 0) {
+                if (activeAlternatingPool.length === 0) {
+                  cleanupCombatPhase();
+                } else {
+                  setCombatState('CLEANUP_REMAINING_UNITS');
+                }
+              } else {
+                setCombatState('ALTERNATING_ACTIVE_TURN');
+                setCurrentAlternatingTurn('ACTIVE');
+              }
+            } else {
+              const remainingActiveUnits = activeAlternatingPool.filter(u => u.id !== activeCombatUnit.id);
+              setActiveAlternatingPool(remainingActiveUnits);
+              if (remainingActiveUnits.length === 0) {
+                if (nonActiveAlternatingPool.length === 0) {
+                  cleanupCombatPhase();
+                } else {
+                  setCombatState('CLEANUP_REMAINING_UNITS');
+                }
+              } else {
+                setCombatState('ALTERNATING_CHECK_POOLS');
+              }
+            }
+          }
+          
+          setCombatActionLog([]);
+          setActiveCombatUnit(null);
+          setSelectedCombatTarget(null);
+          setAttacksLeft(undefined);
+          setValidCombatTargetsPool([]);
+          
+          actions.setAttackPreview(null);
+          actions.setSelectedUnitId(null);
+          actions.setMode("select");
+        }
+      }
+    }
+  }, [combatState, activeCombatUnit, selectedCombatTarget, attacksLeft, validCombatTargetsPool, combatActionLog, chargingActivationQueue, currentAlternatingTurn, units, gameState, gameLog, actions, calculateCombatHitProbability, calculateCombatWoundProbability, calculateCombatSaveProbability, calculateCombatOverallProbability, clearTargetPreview]);
+
+  // AI_TURN.md: Combat Right-Click Handler
+  const handleCombatRightClick = useCallback((unitId: UnitId) => {
+    if ((combatState === 'CHARGING_WAITING_FOR_ACTION' || 
+         combatState === 'CHARGING_TARGET_PREVIEWING' ||
+         combatState === 'ALTERNATING_WAITING_FOR_ACTION' ||
+         combatState === 'ALTERNATING_TARGET_PREVIEWING') && 
+        activeCombatUnit && unitId === activeCombatUnit.id) {
+      
+      clearTargetPreview();
+      setSelectedCombatTarget(null);
+      
+      if (attacksLeft === undefined) {
+        throw new Error('attacksLeft is required but was undefined');
+      }
+      if (attacksLeft === activeCombatUnit.CC_NB) {
+        if (gameState.episode_steps === undefined) {
+          throw new Error('gameState.episode_steps is required but was undefined');
+        }
+        gameState.episode_steps = gameState.episode_steps + 1;
+        if (gameLog) {
+          gameLog.logNoMoveAction(activeCombatUnit, gameState.currentTurn);
+        }
+      } else {
+        if (gameState.episode_steps === undefined) {
+          throw new Error('gameState.episode_steps is required but was undefined');
+        }
+        gameState.episode_steps = gameState.episode_steps + 1;
+        actions.addAttackedUnit(activeCombatUnit.id);
+      }
+      
+      setChargingActivationQueue(prev => prev.filter(u => u.id !== activeCombatUnit.id));
+      setActiveAlternatingPool(prev => prev.filter(u => u.id !== activeCombatUnit.id));
+      setNonActiveAlternatingPool(prev => prev.filter(u => u.id !== activeCombatUnit.id));
+      setCombatActionLog([]);
+      setActiveCombatUnit(null);
+      setSelectedCombatTarget(null);
+      setAttacksLeft(undefined);
+      setValidCombatTargetsPool([]);
+      setCombatState('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
+      
+      actions.setAttackPreview(null);
+      actions.setSelectedUnitId(null);
+      actions.setMode("select");
+    }
+  }, [combatState, activeCombatUnit, attacksLeft, gameState, gameLog, actions, clearTargetPreview]);
+
+  // AI_TURN.md: Combat Board Click Handler
+  const handleCombatBoardClick = useCallback(() => {
+    if (combatState === 'CHARGING_WAITING_FOR_ACTION' || 
+        combatState === 'ALTERNATING_WAITING_FOR_ACTION') {
+      // Board clicks don't change state in combat
+      return;
+    } else if (combatState === 'CHARGING_TARGET_PREVIEWING' || 
+               combatState === 'ALTERNATING_TARGET_PREVIEWING') {
+      clearTargetPreview();
+      setSelectedCombatTarget(null);
+      setCombatState(combatState === 'CHARGING_TARGET_PREVIEWING' ? 'CHARGING_WAITING_FOR_ACTION' : 'ALTERNATING_WAITING_FOR_ACTION');
+    }
+  }, [combatState, clearTargetPreview]);
+
+  // AI_TURN.md: Combat State Machine Event Router
+  const handleCombatPhaseEvent = useCallback((eventType: 'left_click' | 'right_click', targetType: 'unit' | 'target' | 'board', targetId?: UnitId) => {
+    if (eventType === 'right_click') {
+      if (targetType === 'unit' && targetId && activeCombatUnit && targetId === activeCombatUnit.id) {
+        handleCombatRightClick(targetId);
+      }
+      return;
+    }
+    
+    if (eventType === 'left_click') {
+      if (targetType === 'unit' && targetId) {
+        if (chargingActivationQueue.some(u => u.id === targetId) ||
+            activeAlternatingPool.some(u => u.id === targetId) ||
+            nonActiveAlternatingPool.some(u => u.id === targetId)) {
+          handleCombatUnitClick(targetId);
+        }
+      } else if (targetType === 'target' && targetId) {
+        if (validCombatTargetsPool.some(u => u.id === targetId)) {
+          handleCombatTargetClick(targetId);
+        }
+      } else if (targetType === 'board') {
+        handleCombatBoardClick();
+      }
+    }
+  }, [chargingActivationQueue, activeAlternatingPool, nonActiveAlternatingPool, validCombatTargetsPool, activeCombatUnit, handleCombatRightClick, handleCombatUnitClick, handleCombatTargetClick, handleCombatBoardClick]);
+
+  // AI_TURN.md: Combat Phase Lifecycle Management
+  const enterCombatPhase = useCallback(() => {
+    const hasEligibleUnits = initializeCombatPhase();
+    if (!hasEligibleUnits) {
+      setCombatState('SUB_PHASE_2_INIT');
+      const { activePool, nonActivePool } = buildAlternatingPools();
+      if (activePool.length === 0 && nonActivePool.length === 0) {
+        cleanupCombatPhase();
+        return false;
+      }
+    }
+    return true;
+  }, [initializeCombatPhase, buildAlternatingPools, cleanupCombatPhase]);
+
+  const exitCombatPhase = useCallback(() => {
+    cleanupCombatPhase();
+  }, [cleanupCombatPhase]);
 
   // AI_TURN.md: Component 2 - Active Unit Click Handler
   const handleActiveUnitClick = useCallback((unitId: UnitId) => {
@@ -498,9 +1161,11 @@ interface ShootingResult {
         if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
         if (!isUnitInRange(clickedUnit, enemy, clickedUnit.RNG_RNG)) return false;
         
-        const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => 
-          Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
-        );
+        const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => {
+          const cube1 = offsetToCube(friendly.col, friendly.row);
+          const cube2 = offsetToCube(enemy.col, enemy.row);
+          return cubeDistance(cube1, cube2) === 1;
+        });
         if (isEnemyAdjacentToFriendly) return false;
         
         if (!boardConfig) {
@@ -553,9 +1218,11 @@ interface ShootingResult {
           if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
           if (!isUnitInRange(clickedUnit, enemy, clickedUnit.RNG_RNG)) return false;
           
-          const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => 
-            Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
-          );
+          const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => {
+            const cube1 = offsetToCube(friendly.col, friendly.row);
+            const cube2 = offsetToCube(enemy.col, enemy.row);
+            return cubeDistance(cube1, cube2) === 1;
+          });
           if (isEnemyAdjacentToFriendly) return false;
           
           if (!boardConfig) {
@@ -822,9 +1489,11 @@ interface ShootingResult {
           if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
           if (!isUnitInRange(activeShootingUnit, enemy, activeShootingUnit.RNG_RNG)) return false;
           
-          const isEnemyAdjacentToFriendly = updatedFriendlyUnits.some(friendly => 
-            Math.max(Math.abs(friendly.col - enemy.col), Math.abs(friendly.row - enemy.row)) === 1
-          );
+          const isEnemyAdjacentToFriendly = updatedFriendlyUnits.some(friendly => {
+            const cube1 = offsetToCube(friendly.col, friendly.row);
+            const cube2 = offsetToCube(enemy.col, enemy.row);
+            return cubeDistance(cube1, cube2) === 1;
+          });
           if (isEnemyAdjacentToFriendly) return false;
           
           if (!boardConfig) {
@@ -1221,26 +1890,127 @@ interface ShootingResult {
 
     // Special handling for combat phase
     if (phase === "combat") {
-      // Check if unit has valid targets in combat range
+      // AI_TURN.md: Auto-initialize combat phase on first interaction
+      if (chargingActivationQueue.length === 0 && combatState === 'CHARGING_PHASE_WAITING_FOR_ACTIVATION') {
+        const hasEligibleUnits = initializeCombatPhase();
+        if (!hasEligibleUnits) {
+          // No charging units, proceed to alternating phase
+          setCombatState('SUB_PHASE_2_INIT');
+          const { activePool, nonActivePool } = buildAlternatingPools();
+          if (activePool.length === 0 && nonActivePool.length === 0) {
+            cleanupCombatPhase();
+            return;
+          }
+        }
+      }
+      
+      // Handle state machine progression for SUB_PHASE_2_INIT
+      if (combatState === 'SUB_PHASE_2_INIT') {
+        const { activePool, nonActivePool } = buildAlternatingPools();
+        
+        // AI_TURN.md Decision Tree: "No units in both pools?"
+        if (activePool.length === 0 && nonActivePool.length === 0) {
+          cleanupCombatPhase();
+          return;
+        }
+        
+        // AI_TURN.md Decision Tree: "Only active pool has units OR only non-active pool has units?"
+        if (activePool.length === 0 && nonActivePool.length > 0) {
+          setCombatState('CLEANUP_REMAINING_UNITS');
+          setCurrentAlternatingTurn('NON_ACTIVE');
+          return;
+        }
+        
+        if (nonActivePool.length === 0 && activePool.length > 0) {
+          setCombatState('CLEANUP_REMAINING_UNITS');
+          setCurrentAlternatingTurn('ACTIVE');
+          return;
+        }
+        
+        // AI_TURN.md Decision Tree: "Both pools have units → Start alternating combat"
+        setCombatState('ALTERNATING_NON_ACTIVE_TURN');
+        setCurrentAlternatingTurn('NON_ACTIVE');
+        return;
+      }
+      
+      // Handle state machine progression for ALTERNATING_CHECK_POOLS
+      if (combatState === 'ALTERNATING_CHECK_POOLS') {
+        // AI_TURN.md Decision Tree: "Both pools empty?"
+        if (activeAlternatingPool.length === 0 && nonActiveAlternatingPool.length === 0) {
+          cleanupCombatPhase();
+          return;
+        }
+        
+        // AI_TURN.md Decision Tree: "Only one pool has units?"
+        if (activeAlternatingPool.length === 0 && nonActiveAlternatingPool.length > 0) {
+          setCombatState('CLEANUP_REMAINING_UNITS');
+          setCurrentAlternatingTurn('NON_ACTIVE');
+          return;
+        }
+        
+        if (nonActiveAlternatingPool.length === 0 && activeAlternatingPool.length > 0) {
+          setCombatState('CLEANUP_REMAINING_UNITS');
+          setCurrentAlternatingTurn('ACTIVE');
+          return;
+        }
+        
+        // AI_TURN.md Decision Tree: "Both pools have units → Continue alternating"
+        if (currentAlternatingTurn === 'ACTIVE') {
+          setCombatState('ALTERNATING_NON_ACTIVE_TURN');
+          setCurrentAlternatingTurn('NON_ACTIVE');
+        } else {
+          setCombatState('ALTERNATING_ACTIVE_TURN');
+          setCurrentAlternatingTurn('ACTIVE');
+        }
+        return;
+      }
+      
+      // Handle CLEANUP_REMAINING_UNITS state
+      if (combatState === 'CLEANUP_REMAINING_UNITS') {
+        const remainingPool = activeAlternatingPool.length > 0 ? activeAlternatingPool : nonActiveAlternatingPool;
+        if (remainingPool.length === 0) {
+          cleanupCombatPhase();
+          return;
+        }
+        
+        if (unitId !== null && remainingPool.some(u => u.id === unitId)) {
+          handleCombatUnitClick(unitId);
+          return;
+        }
+      }
+      
+      if (unitId === null) {
+        return;
+      }
+      
+      // Route combat unit clicks through state machine
+      if (chargingActivationQueue.some(u => u.id === unitId) || 
+          activeAlternatingPool.some(u => u.id === unitId) || 
+          nonActiveAlternatingPool.some(u => u.id === unitId)) {
+        handleCombatUnitClick(unitId);
+        return;
+      }
+      
+      // Fallback to original combat logic for non-state-machine units
       const enemies = units.filter(u => u.player !== unit.player);
       if (unit.CC_RNG === undefined) {
         throw new Error(`unit.CC_RNG is required but was undefined for unit ${unit.id}`);
       }
       const combatRange = unit.CC_RNG;
       const hasValidTargets = enemies.some(enemy => {
-        const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
+        const cube1 = offsetToCube(unit.col, unit.row);
+        const cube2 = offsetToCube(enemy.col, enemy.row);
+        const distance = cubeDistance(cube1, cube2);
         return distance === combatRange;
       });
       
       if (!hasValidTargets) {
-        // No targets in range - end activation immediately
         actions.addAttackedUnit(unitId);
         actions.setSelectedUnitId(null);
         actions.setMode("select");
         return;
       }
       
-      // Has valid targets - show attack preview for adjacent enemies
       actions.setMovePreview(null);
       actions.setAttackPreview({ unitId, col: unit.col, row: unit.row });
       actions.setMode("attackPreview");
@@ -1259,15 +2029,19 @@ interface ShootingResult {
   const handleRightClick = useCallback((unitId: UnitId) => {
     if (phase === "shoot") {
       handleShootingPhaseEvent('right_click', 'unit', unitId);
+    } else if (phase === "combat") {
+      handleCombatPhaseEvent('right_click', 'unit', unitId);
     }
-  }, [phase, handleShootingPhaseEvent]);
+  }, [phase, handleShootingPhaseEvent, handleCombatPhaseEvent]);
 
   // AI_TURN.md: Board click handler for UI integration  
   const handleBoardClick = useCallback(() => {
     if (phase === "shoot") {
       handleShootingPhaseEvent('left_click', 'board');
+    } else if (phase === "combat") {
+      handleCombatPhaseEvent('left_click', 'board');
     }
-  }, [phase, handleShootingPhaseEvent]);
+  }, [phase, handleShootingPhaseEvent, handleCombatPhaseEvent]);
 
   // AI_TURN.md: Complete UI integration - handleShoot with auto-initialization
   const handleShoot = useCallback((shooterId: UnitId, targetId: UnitId) => {
@@ -1292,14 +2066,96 @@ interface ShootingResult {
   }, [shootingActivationQueue, validTargetsPool, handleShootingPhaseEvent, shootingState, enterShootingPhase]);
 
   const handleCombatAttack = useCallback((attackerId: UnitId, targetId: UnitId | null) => {
+    // AI_TURN.md: Auto-initialize combat phase if needed
+    if (chargingActivationQueue.length === 0 && combatState === 'CHARGING_PHASE_WAITING_FOR_ACTIVATION') {
+      const hasEligibleUnits = initializeCombatPhase();
+      if (!hasEligibleUnits) {
+        setCombatState('SUB_PHASE_2_INIT');
+        const { activePool, nonActivePool } = buildAlternatingPools();
+        if (activePool.length === 0 && nonActivePool.length === 0) {
+          cleanupCombatPhase();
+          return;
+        }
+      }
+    }
+    
+    // Handle state machine progression for SUB_PHASE_2_INIT
+    if (combatState === 'SUB_PHASE_2_INIT') {
+      const { activePool, nonActivePool } = buildAlternatingPools();
+      if (activePool.length === 0 && nonActivePool.length === 0) {
+        cleanupCombatPhase();
+        return;
+      } else if (activePool.length === 0 || nonActivePool.length === 0) {
+        setCombatState('CLEANUP_REMAINING_UNITS');
+      } else {
+        setCombatState('ALTERNATING_NON_ACTIVE_TURN');
+        setCurrentAlternatingTurn('NON_ACTIVE');
+      }
+      return;
+    }
+    
+    // Handle state machine progression for ALTERNATING_CHECK_POOLS
+    if (combatState === 'ALTERNATING_CHECK_POOLS') {
+      if (activeAlternatingPool.length === 0 && nonActiveAlternatingPool.length === 0) {
+        cleanupCombatPhase();
+        return;
+      } else if (activeAlternatingPool.length === 0 || nonActiveAlternatingPool.length === 0) {
+        setCombatState('CLEANUP_REMAINING_UNITS');
+      } else {
+        if (currentAlternatingTurn === 'ACTIVE') {
+          setCombatState('ALTERNATING_NON_ACTIVE_TURN');
+          setCurrentAlternatingTurn('NON_ACTIVE');
+        } else {
+          setCombatState('ALTERNATING_ACTIVE_TURN');
+          setCurrentAlternatingTurn('ACTIVE');
+        }
+      }
+      return;
+    }
+    
+    // Handle CLEANUP_REMAINING_UNITS state
+    if (combatState === 'CLEANUP_REMAINING_UNITS') {
+      const remainingPool = activeAlternatingPool.length > 0 ? activeAlternatingPool : nonActiveAlternatingPool;
+      if (remainingPool.length === 0) {
+        cleanupCombatPhase();
+        return;
+      }
+      
+      if (targetId !== null && remainingPool.some(u => u.id === attackerId)) {
+        if (validCombatTargetsPool.some(u => u.id === targetId)) {
+          handleCombatTargetClick(targetId);
+        } else {
+          handleCombatUnitClick(attackerId);
+          if (validCombatTargetsPool.some(u => u.id === targetId)) {
+            handleCombatTargetClick(targetId);
+          }
+        }
+      }
+      return;
+    }
+    
     if (targetId === null) {
-      // Skip attack but mark as attacked
       actions.addAttackedUnit(attackerId);
       actions.setSelectedUnitId(null);
       actions.setMode("select");
       return;
     }
 
+    // Determine event type and route appropriately through state machine
+    if (validCombatTargetsPool.some(u => u.id === targetId)) {
+      handleCombatTargetClick(targetId);
+      return;
+    } else if (chargingActivationQueue.some(u => u.id === attackerId) || 
+               activeAlternatingPool.some(u => u.id === attackerId) || 
+               nonActiveAlternatingPool.some(u => u.id === attackerId)) {
+      handleCombatUnitClick(attackerId);
+      if (validCombatTargetsPool.some(u => u.id === targetId)) {
+        handleCombatTargetClick(targetId);
+      }
+      return;
+    }
+
+    // Fallback to original combat logic for non-state-machine scenarios
     const attacker = findUnit(attackerId);
     const initialTarget = findUnit(targetId);
     
@@ -1307,16 +2163,14 @@ interface ShootingResult {
       return;
     }
 
-    // PREVENT FRIENDLY FIRE: Cannot attack friendly units
     if (initialTarget.player === attacker.player) {
       return;
     }
 
     // Check if units are within combat range
-    const distance = Math.max(
-      Math.abs(attacker.col - initialTarget.col),
-      Math.abs(attacker.row - initialTarget.row)
-    );
+    const cube1 = offsetToCube(attacker.col, attacker.row);
+    const cube2 = offsetToCube(initialTarget.col, initialTarget.row);
+    const distance = cubeDistance(cube1, cube2);
     if (attacker.CC_RNG === undefined) {
       throw new Error(`attacker.CC_RNG is required but was undefined for unit ${attacker.id}`);
     }
@@ -1352,8 +2206,10 @@ interface ShootingResult {
       const validTargets = units.filter(enemy => {
         if (enemy.player === currentAttacker.player) return false;
         if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false; // CRITICAL: Exclude dead units
-        const dist = Math.max(Math.abs(currentAttacker.col - enemy.col), Math.abs(currentAttacker.row - enemy.row));
-        return dist === combatRange;
+        const cube1 = offsetToCube(currentAttacker.col, currentAttacker.row);
+        const cube2 = offsetToCube(enemy.col, enemy.row);
+        const hexDistance = cubeDistance(cube1, cube2);
+        return hexDistance === combatRange;
       });
       
       if (validTargets.length === 0) {
@@ -1488,8 +2344,10 @@ interface ShootingResult {
       const remainingEnemies = currentUnits.filter(enemy => {
         if (enemy.player === finalAttacker.player) return false;
         if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
-        const dist = Math.max(Math.abs(finalAttacker.col - enemy.col), Math.abs(finalAttacker.row - enemy.row));
-        return dist === combatRange;
+        const cube1 = offsetToCube(finalAttacker.col, finalAttacker.row);
+        const cube2 = offsetToCube(enemy.col, enemy.row);
+        const hexDistance = cubeDistance(cube1, cube2);
+        return hexDistance === combatRange;
       });
       
       if (remainingEnemies.length === 0) {
@@ -1600,9 +2458,11 @@ interface ShootingResult {
 
     if (gameLog) {
       const enemyUnits = units.filter(u => u.player !== charger.player);
-      const target = enemyUnits.find(enemy => 
-        Math.max(Math.abs(charger.col - enemy.col), Math.abs(charger.row - enemy.row)) <= 1
-      );
+      const target = enemyUnits.find(enemy => {
+        const cube1 = offsetToCube(charger.col, charger.row);
+        const cube2 = offsetToCube(enemy.col, enemy.row);
+        return cubeDistance(cube1, cube2) <= 1;
+      });
       if (target) {
         gameLog.logChargeAction(charger, target, charger.col, charger.row, charger.col, charger.row, gameState.currentTurn);
       }
@@ -1620,14 +2480,18 @@ interface ShootingResult {
 
     // Check if unit is fleeing (was adjacent to enemy at start of move, ends move not adjacent)
     const enemyUnits = units.filter(u => u.player !== unit.player);
-    const wasAdjacentToEnemy = enemyUnits.some(enemy => 
-      Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
-    );
+    const wasAdjacentToEnemy = enemyUnits.some(enemy => {
+      const cube1 = offsetToCube(unit.col, unit.row);
+      const cube2 = offsetToCube(enemy.col, enemy.row);
+      return cubeDistance(cube1, cube2) === 1;
+    });
     
     if (wasAdjacentToEnemy) {
-      const willBeAdjacentToEnemy = enemyUnits.some(enemy => 
-        Math.max(Math.abs(col - enemy.col), Math.abs(row - enemy.row)) === 1
-      );
+      const willBeAdjacentToEnemy = enemyUnits.some(enemy => {
+        const cube1 = offsetToCube(col, row);
+        const cube2 = offsetToCube(enemy.col, enemy.row);
+        return cubeDistance(cube1, cube2) === 1;
+      });
       
       if (!willBeAdjacentToEnemy) {
         actions.addFledUnit(unitId);
@@ -1788,6 +2652,17 @@ interface ShootingResult {
     exitShootingPhase,
     validateShootingState,
     handleShootingPhaseEvent,
+    // AI_TURN.md: Combat phase integration functions
+    initializeCombatPhase,
+    buildAlternatingPools,
+    cleanupCombatPhase,
+    handleCombatUnitClick,
+    handleCombatTargetClick,
+    handleCombatRightClick,
+    handleCombatPhaseEvent,
+    enterCombatPhase,
+    exitCombatPhase,
+    validateCombatState,
     // rollD6 removed - now using shared gameRules import
   };
 };

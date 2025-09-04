@@ -1,7 +1,7 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview, CombatSubPhase, PlayerId } from "../types/game";
-import { areUnitsAdjacent, isUnitInRange, hasLineOfSight } from '../utils/gameHelpers';
+import { areUnitsAdjacent, isUnitInRange, hasLineOfSight, offsetToCube, cubeDistance } from '../utils/gameHelpers';
 
 interface UnitRendererProps {
   unit: Unit;
@@ -436,7 +436,9 @@ export class UnitRenderer {
     const enemies = units.filter(u => u.player !== unit.player);
     const combatRange = unit.CC_RNG || 1;
     const hasEnemiesInMeleeRange = enemies.some(enemy => {
-      const distance = Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row));
+      const cube1 = offsetToCube(unit.col, unit.row);
+      const cube2 = offsetToCube(enemy.col, enemy.row);
+      const distance = cubeDistance(cube1, cube2);
       return distance <= combatRange;
     });
     

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { GameState, AIGameState, UnitId } from '../types/game';
 import { aiService, AIServiceError } from '../services/aiService';
+import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
 
 interface UseAIPlayerParams {
   gameState: GameState;
@@ -77,7 +78,9 @@ export const useAIPlayer = ({
           }
           const combatRange = u.CC_RNG;
           const canAttack = enemyUnits.some(enemy => {
-            const distance = Math.max(Math.abs(u.col - enemy.col), Math.abs(u.row - enemy.row));
+            const cube1 = offsetToCube(u.col, u.row);
+            const cube2 = offsetToCube(enemy.col, enemy.row);
+            const distance = cubeDistance(cube1, cube2);
             return distance <= combatRange;
           });
           return canAttack;
