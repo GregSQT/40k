@@ -589,6 +589,29 @@ export default function Board({
       let attackFromCol: number | null = null;
       let attackFromRow: number | null = null;
 
+      // Calculate blockedTargets for ALL enemies during shooting phase (not just preview)
+      if (phase === "shoot" && selectedUnit) {
+        const enemyUnits = units.filter(u => u.player !== selectedUnit.player);
+        const centerCube = offsetToCube(selectedUnit.col, selectedUnit.row);
+        
+        for (const enemy of enemyUnits) {
+          const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
+          if (distance <= (selectedUnit.RNG_RNG || 0)) {
+            const lineOfSight = hasLineOfSight(
+              { col: selectedUnit.col, row: selectedUnit.row },
+              { col: enemy.col, row: enemy.row },
+              boardConfig.wall_hexes || []
+            );
+            
+            if (!lineOfSight.canSee) {
+              blockedTargets.add(`${enemy.col},${enemy.row}`);
+            } else if (lineOfSight.inCover) {
+              coverTargets.add(`${enemy.col},${enemy.row}`);
+            }
+          }
+        }
+      }
+
       if (mode === "movePreview" && movePreview) {
         previewUnit = units.find(u => u.id === movePreview.unitId);
         attackFromCol = movePreview.destCol;

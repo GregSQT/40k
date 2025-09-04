@@ -131,11 +131,14 @@ export const useGameActions = ({
       case "move":
         return !unitsMoved.includes(unit.id);
       case "shoot":
-        if (unitsMoved.includes(unit.id)) return false;
+        // AI_TURN.md: "units_fled.includes(unit.id)? → YES → ❌ Fled unit (Skip, no log)"
         if (unitsFled.includes(unit.id)) return false;
-        if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) return false;
+        // AI_TURN.md: "Adjacent to enemy unit within CC_RNG? → YES → ❌ In combat (Skip, no log)"
         const hasAdjacentEnemyShoot = enemyUnits.some(enemy => areUnitsAdjacent(unit, enemy));
         if (hasAdjacentEnemyShoot) return false;
+        // AI_TURN.md: "unit.RNG_NB > 0? → NO → ❌ No ranged weapon (Skip, no log)"
+        if (unit.RNG_NB === undefined || unit.RNG_NB <= 0) return false;
+        // AI_TURN.md: "Has LOS to enemies within RNG_RNG? → NO → ❌ No valid targets (Skip, no log)"
         const friendlyUnits = units.filter(u => u.player === unit.player && u.id !== unit.id);
         return enemyUnits.some(enemy => {
           if (enemy.player === unit.player) return false;
@@ -759,14 +762,14 @@ interface ShootingResult {
           return true;
         });
 
-        // AI_TURN.md: End activation if no valid targets OR no shots left
+        // AI_TURN.md: Check conditions for continuing or ending shooting activation
         if (newShotsLeft > 0 && validTargets.length > 0) {
-          // Keep unit selected and in attack mode for next shot target selection
+          // AI_TURN.md: "Valid targets still available? → YES → Select target and resolve shot" (continue sequence)
           actions.setAttackPreview({ unitId: shooterId, col: currentShooter.col, row: currentShooter.row });
           actions.setMode("attackPreview");
         } else {
-          // Either no shots left OR no valid targets - end activation
-          // AI_TURN.md: +1 step per complete shooting sequence (not per shot)
+          // AI_TURN.md: "Valid targets still available? → NO → End shooting (slaughter handling)" OR all shots used
+          // AI_TURN.md: "Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit removed from activation queue"
           gameState.episode_steps = (gameState.episode_steps || 0) + 1;
           
           actions.addMovedUnit(shooterId);

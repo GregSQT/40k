@@ -68,7 +68,7 @@
   
   "default": {
     "description": "Episode-based training for AI_TURN.md compliance - 400 episodes × 10 turns × 25 steps = 100,000 timesteps",
-    "total_episodes": 10,
+    "total_episodes": 500,
     "max_turns_per_episode": 8,
     "max_steps_per_turn": 80,
     "eval_episodes": 1,

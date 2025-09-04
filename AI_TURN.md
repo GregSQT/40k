@@ -231,10 +231,234 @@ Decision factors: Unit value, importance of actions this turn, long term strateg
 
 ## 🎯 SHOOTING PHASE LOGIC
 
-### Shooting Decision Tree
+### PLAYER Shooting Decision Tree
 
 ```
-For each unit
+For each PLAYER unit
+├── ELIGIBILITY CHECK (Queue Building Phase)
+│   ├── unit.CUR_HP > 0?
+│   │   └── NO → ❌ Dead unit (Skip, no log)
+│   ├── unit.player === current_player?
+│   │   └── NO → ❌ Wrong player (Skip, no log)
+│   ├── units_fled.includes(unit.id)?
+│   │   └── YES → ❌ Fled unit (Skip, no log)
+│   ├── Adjacent to enemy unit within CC_RNG?
+│   │   └── YES → ❌ In combat (Skip, no log)
+│   ├── unit.RNG_NB > 0?
+│   │   └── NO → ❌ No ranged weapon (Skip, no log)
+│   ├── Has LOS to enemies within RNG_RNG?
+│   │   └── NO → ❌ No valid targets (Skip, no log)
+│   └── ALL conditions met → ✅ Add to activation queue → Highlight the unit with a green circle around its icon
+├── STEP : UNIT_ACTIVABLE_CHECK : Units in activation queue?
+│   ├── STEP : UNIT_ACTIVATION → player activate one by left clicking on it → Build valid_targets pool (enemies within RNG_RNG + LOS) for the active unit → Display the Shooting preview
+│   │   ├── SHOOT_LEFT = RNG_NB
+│   │   ├── While SHOOT_LEFT > 0
+│   │   │   └── Target units in valid_targets pool?
+│   │   │       ├── YES → SHOOTING PHASE ACTIONS AVAILABLE
+│   │   │       │   └── STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       ├── Left click on a target in valid_targets → Display the HP bar blinking animation
+│   │   │       │       │   ├── Left click a second time on the same target → Execute shooting sequence
+│   │   │       │       │   │   ├── Hit roll → hit_roll >= shooter.RNG_ATK
+│   │   │       │       │   │   │   ├── MISS → Append shot_record → continue to next shot
+│   │   │       │       │   │   │   └── HIT → hits++ → Continue to wound roll
+│   │   │       │       │   │   ├── Wound roll → wound_roll >= calculate_wound_target()
+│   │   │       │       │   │   │   ├── FAIL → Append shot_record → continue to next shot
+│   │   │       │       │   │   │   └── WOUND → wounds++ → Continue to save roll
+│   │   │       │       │   │   ├── Save roll → save_roll >= calculate_save_target()
+│   │   │       │       │   │   │   ├── SAVE → Append shot_record → continue to next shot
+│   │   │       │       │   │   │   └── FAIL → failed_saves++ → Continue to damage
+│   │   │       │       │   │   ├── Damage application:
+│   │   │       │       │   │   │   ├── damage_dealt = shooter.RNG_DMG
+│   │   │       │       │   │   │   ├── total_damage += damage_dealt
+│   │   │       │       │   │   │   ├── ⚡ IMMEDIATE UPDATE: current_target.CUR_HP -= damage_dealt
+│   │   │       │       │   │   │   ├── current_target.CUR_HP <= 0 ? → current_target.alive = False
+│   │   │       │       │   │   │   └── Append shot_record with target_id
+│   │   │       │       │   │   ├── Target dies → Remove from valid_targets, continue
+│   │   │       │       │   │   ├──  Target survives → Continue
+│   │   │       │       │   │   ├── SHOOT_LEFT -= 1
+│   │   │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       │   ├── Left click on another target in valid_targets → Change target
+│   │   │       │       │   │   └── GO TO STEP : STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       │   ├── Left click on another unit in activation queue ?
+│   │   │       │       │   │   └── SHOOT_LEFT = RNG_NB ?
+│   │   │       │       │   │       ├── YES → Postpone the shooting phase for this unit
+│   │   │       │       │   │           └──  GO TO STEP : STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │   │       └── NO → The unit must end its activation when started
+│   │   │       │       │   │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       │   ├── Left click on the active unit
+│   │   │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       │   ├── Right click on the active unit
+│   │   │       │       │   │   └── SHOOT_LEFT = RNG_NB ?
+│   │   │       │       │   │       ├── NO → End unit's activation → Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit removed from activation queue → Remove its green circle
+│   │   │       │       │   │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │   │       └── YES → Cancel unit's activation → Result: +1 step, Wait action logged, no Mark → Unit removed from activation queue → Remove its green circle
+│   │   │       │       │   │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │   └── Left OR Right click anywhere else on the board
+│   │   │       │       │       └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       ├── Left click on another unit in activation queue ?
+│   │   │       │       │   └── SHOOT_LEFT = RNG_NB ?
+│   │   │       │       │       ├── YES → Postpone the shooting phase for this unit
+│   │   │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │       └── NO → The unit must end its activation when started
+│   │   │       │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       ├── Left click on the active unit → No effect
+│   │   │       │       ├── Right click on the active unit
+│   │   │       │       │    └── SHOOT_LEFT = RNG_NB ?
+│   │   │       │       │       ├── NO → Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit removed from activation queue → Remove its green circle
+│   │   │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │       └── YES → Result: +1 step, Wait action logged, no Mark → Unit removed from activation queue → Remove its green circle
+│   │   │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       └── left OR Right click anywhere on the board
+│   │   │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       └── NO → SHOOT_LEFT = RNG_NB ?
+│   │   │           ├── NO → Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit removed from activation queue → Remove its green circle
+│   │   │           └── YES → Result: +1 step, Wait action logged, no Mark → Unit removed from activation queue → Remove its green circle
+│   │   └── End of shooting → Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit removed from activation queue → Remove its green circle
+│   └── No more activable units → pass
+└── End of shooting phase → Advance to charge phase
+
+CLAUDE VERSION :
+
+SHOOTING PHASE STATE MACHINE
+
+// INITIALIZATION
+activationQueue: Unit[] = []
+buildEligibilityQueue() {
+  activationQueue = []
+  for each unit: 
+    if checkEligibility(unit): 
+      activationQueue.push(unit)
+      addGreenCircle(unit)
+}
+
+// STATE MANAGEMENT
+activeUnit: Unit | null = null
+selectedTarget: Unit | null = null  
+shootLeft: number = 0
+
+// MAIN STATE FLOW
+STATE: WAITING_FOR_ACTIVATION
+├── activationQueue.empty() → END_PHASE
+├── leftClick(unitInActivationQueue)
+│   ├── activeUnit = clickedUnit
+│   ├── shootLeft = activeUnit.RNG_NB
+│   ├── buildValidTargetsPool(activeUnit)
+│   ├── showShootingPreview()
+│   └── GOTO: WAITING_FOR_ACTION
+└── otherClick() → STAY
+
+STATE: WAITING_FOR_ACTION
+├── validTargets.length = 0 → // SLAUGHTER HANDLING
+│   ├── if (shootLeft === activeUnit.RNG_NB):
+│   │   └── endActivation("wait")
+│   ├── else:
+│   │   └── endActivation("shot")
+│   └── GOTO: WAITING_FOR_ACTIVATION
+├── leftClick(validTarget)
+│   ├── selectedTarget = target
+│   ├── showTargetPreview(target)
+│   └── GOTO: TARGET_PREVIEWING
+├── leftClick(otherUnitInActivationQueue) AND canPostpone()
+│   ├── activationShotLog = [] // Clear stale data
+│   ├── activeUnit = clickedUnit
+│   ├── shootLeft = activeUnit.RNG_NB
+│   ├── buildValidTargetsPool(activeUnit)
+│   └── STAY
+├── leftClick(otherUnitInActivationQueue) AND !canPostpone()
+│   └── STAY // Unit must complete its activation
+├── leftClick(activeUnit) → STAY // No effect
+├── rightClick(activeUnit)
+│   ├── removeFromQueue(activeUnit)
+│   ├── if (shootLeft === activeUnit.RNG_NB):
+│   │   └── endActivation("wait") // Never fired
+│   ├── else:
+│   │   └── endActivation("shot") // Already fired, complete sequence
+│   └── GOTO: WAITING_FOR_ACTIVATION
+└── otherClick() → STAY
+
+STATE: TARGET_PREVIEWING
+├── leftClick(sameTarget)
+│   ├── executeShot(activeUnit, selectedTarget)
+│   │   ├── // Hit roll → Wound roll → Save roll → Damage
+│   │   └── logIndividualShot(activeUnit, selectedTarget, shotResult) // LOG EACH SHOT
+│   ├── shootLeft -= 1
+│   ├── selectedTarget = null
+│   ├── updateValidTargets()
+│   ├── if (shootLeft > 0 AND validTargets.length > 0):
+│   │   └── GOTO: WAITING_FOR_ACTION
+│   ├── else:
+│   │   ├── removeFromQueue(activeUnit)
+│   │   ├── endActivation("shot") // This will call logShootingSequenceComplete()
+│   │   └── GOTO: WAITING_FOR_ACTIVATION
+├── leftClick(differentValidTarget)
+│   ├── selectedTarget = newTarget
+│   ├── showTargetPreview(newTarget)
+│   └── STAY
+├── leftClick(otherUnitInActivationQueue) AND canPostpone()
+│   ├── selectedTarget = null
+│   ├── clearTargetPreview()
+│   ├── activeUnit = clickedUnit
+│   ├── shootLeft = activeUnit.RNG_NB
+│   ├── buildValidTargetsPool(activeUnit)
+│   └── GOTO: WAITING_FOR_ACTION
+├── leftClick(otherUnitInActivationQueue) AND !canPostpone()
+│   └── STAY // Unit must complete its activation
+├── leftClick(activeUnit)
+│   ├── selectedTarget = null
+│   ├── clearTargetPreview()
+│   └── GOTO: WAITING_FOR_ACTION
+├── rightClick(activeUnit)
+│   ├── selectedTarget = null
+│   ├── removeFromQueue(activeUnit)
+│   ├── if (shootLeft === activeUnit.RNG_NB):
+│   │   └── endActivation("wait")
+│   ├── else:
+│   │   └── endActivation("shot")
+│   └── GOTO: WAITING_FOR_ACTIVATION
+└── otherClick()
+│   ├── selectedTarget = null
+│   ├── clearTargetPreview()
+│   └── GOTO: WAITING_FOR_ACTION
+
+// HELPER FUNCTIONS
+canPostpone() { return shootLeft === activeUnit.RNG_NB }
+
+// Store shots during activation
+activationShotLog: ShotRecord[] = []
+
+executeShot(shooter, target) {
+  // Execute hit/wound/save/damage sequence
+  const shotResult = performHitWoundSaveDamage(shooter, target)
+  
+  // Log individual shot immediately
+  logIndividualShot(shooter, target, shotResult)
+  
+  // Store for sequence completion
+  activationShotLog.push(shotResult)
+}
+
+endActivation(type) {
+  removeGreenCircle(activeUnit)
+  incrementEpisodeSteps()
+  if (type === "shot") {
+    logShootingSequenceComplete(activeUnit, activationShotLog) // Complete sequence
+    markAsShot(activeUnit)
+  }
+  if (type === "wait") {
+    logWaitAction(activeUnit)
+  }
+  activationShotLog = [] // Clear for next unit
+  resetActiveUnit()
+}
+
+resetActiveUnit() { activeUnit = null; selectedTarget = null; shootLeft = 0 }
+```
+
+
+### AI Shooting Decision Tree
+
+```
+For each AI unit
 ├── ELIGIBILITY CHECK (Queue Building Phase)
 │   ├── unit.CUR_HP > 0?
 │   │   └── NO → ❌ Dead unit (Skip, no log)
