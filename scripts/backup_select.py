@@ -99,7 +99,6 @@ else:
         "frontend/src/Routes.tsx",
 
         # Frontend/src/components
-        "frontend/src/components/Board_save.tsx",
         "frontend/src/components/BoardDisplay.tsx",
         "frontend/src/components/BoardInteractions.tsx",
         "frontend/src/components/BoardPvp.tsx",

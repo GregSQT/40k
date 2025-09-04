@@ -75,7 +75,7 @@ Unit Selection → Eligibility Check → Action Execution → State Update → N
 
 **Central Question**: "When does a phase end?"
 
-**Answer**: When **no more eligible units remain** for the current player.
+**Answer**: When **no more eligible units remain** for any player.
 
 **Why Not Step-Based**: Steps measure player actions, but phases end based on game state (unit availability).
 
@@ -250,7 +250,7 @@ For each PLAYER unit
 │   │   └── NO → ❌ No valid targets (Skip, no log)
 │   └── ALL conditions met → ✅ Add to activation queue → Highlight the unit with a green circle around its icon
 ├── STEP : UNIT_ACTIVABLE_CHECK : Units in activation queue?
-│   ├── STEP : UNIT_ACTIVATION → player activate one by left clicking on it → Build valid_targets pool (enemies within RNG_RNG + LOS) for the active unit → Display the Shooting preview
+│   ├── STEP : UNIT_ACTIVATION → player activate one unit by left clicking on it → Build valid_targets pool (enemies within RNG_RNG + LOS) for the active unit → Display the Shooting preview
 │   │   ├── SHOOT_LEFT = RNG_NB
 │   │   ├── While SHOOT_LEFT > 0
 │   │   │   └── Target units in valid_targets pool?
@@ -487,7 +487,7 @@ For each AI unit
 │   │       │       │   │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
 │   │       │       │   │   │   │   ├── Target dies → Remove from valid_targets, continue to next target
 │   │       │       │   │   │   │   └── Target survives → Continue to next shot
-│   │       │       │   │   │   └── NO → End shooting (slaughter handling)
+│   │       │       │   │   │   └── NO → End shooting (slaughter handling) → Exit the For loop
 │   │       │       │   │   └── All shots resolved
 │   │       │       │   └── Result: +1 step, Shooting sequence logged, Mark as units_shot → Unit removed from activation queue
 │   │       │       └── NO → Agent chooses: wait?
@@ -682,7 +682,7 @@ Decision: Weigh 42% failure risk vs combat advantage gained
 ```
 Start of the Combat Phase:
 │
-│   Sub-Phase 1
+│   ##### Sub-Phase 1 : Charging units attack first
 │
 ├── For each unit : ELIGIBILITY CHECK (Queue Building Phase)
 │   ├── unit.CUR_HP > 0?
@@ -693,26 +693,86 @@ Start of the Combat Phase:
 │   │   └── NO → ❌ Not a charging unit (Skip, no log)
 │   ├── Adjacent to enemy unit within CC_RNG?
 │   │   └── NO → ❌ No combat targets (Skip, no log)
-│   └── ALL conditions met → ✅ Add to charging_activation queue
+│   └── ALL conditions met → ✅ Add to charging_activation pool
 │
-├── Units in charging_activation queue?
-│   ├── YES → pick one → COMBAT PHASE SUB-PHASE 1 ACTION AVAILABLE
-│   │   ├── 🎯 VALID ACTION: [attack]
-│   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark → Unit is removed from the activation queue
-│   │   └── AGENT ACTION SELECTION → Choose attack?
-│   │       ├── YES → ✅ VALID → Execute CC_NB attacks
-│   │       │   ├── For each attack: Valid targets still available?
-│   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
-│   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│   │       │   │   │   ├── Target dies → Remove from valid pool, continue to next Valid target 
-│   │       │   │   │   └── Target survives → Continue to next attack
-│   │       │   │   └── NO → End attacking (slaughter handling)
-│   │       │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked → Unit removed from activation queue
-│   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
-│   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark → Unit removed from activation queue
+├── Units in charging_activation pool?
+│   ├── YES → Current player is an AI player ?
+│   │   ├── YES → pick one → COMBAT PHASE SUB-PHASE 1 ACTION AVAILABLE
+│   │   │   ├── 🎯 VALID ACTION: [attack]
+│   │   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark → Unit is removed from the activation pool
+│   │   │   └── AGENT ACTION SELECTION → Choose attack?
+│   │   │       ├── YES → ✅ VALID → Execute CC_NB attacks
+│   │   │       │   ├── For each attack: Valid targets still available?
+│   │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
+│   │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│   │   │       │   │   │   ├── Target dies → Remove from valid pool, continue to next Valid target 
+│   │   │       │   │   │   └── Target survives → Continue to next attack
+│   │   │       │   │   └── NO → All adjacent targets eliminated → End attacking naturally (slaughter handling) → Exit the For loop
+│   │   │       │   └── Result: +1 step, Attack sequence logged, Mark as units_attacked → Unit removed from activation pool
+│   │   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
+│   │   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark → Unit removed from activation pool
+│   │   └── NO → STEP : UNIT_ACTIVATION → player activate one unit by left clicking on it → Build valid_targets pool (enemies adjacents) for the active unit → Display the combat preview
+│   │       ├── ATTACK_LEFT = CC_NB
+│   │       ├── While ATTACK_LEFT > 0
+│   │       │   └── Target units in valid_targets pool?
+│   │       │       ├── YES → COMBAT PHASE ACTIONS AVAILABLE
+│   │       │       │   └── STEP : PLAYER_ACTION_SELECTION
+│   │       │       │       ├── Left click on a target in valid_targets → Display target confirmation (HP bar blinking + attack preview)
+│   │       │       │       │   ├── Left click SAME target again → Confirm attack → Execute Combat sequence
+│   │       │       │       │   │   ├── Hit roll → hit_roll >= shooter.CC_ATK
+│   │       │       │       │   │   │   ├── MISS → Append shot_record → continue to next shot
+│   │       │       │       │   │   │   └── HIT → hits++ → Continue to wound roll
+│   │       │       │       │   │   ├── Wound roll → wound_roll >= calculate_wound_target()
+│   │       │       │       │   │   │   ├── FAIL → Append shot_record → continue to next shot
+│   │       │       │       │   │   │   └── WOUND → wounds++ → Continue to save roll
+│   │       │       │       │   │   ├── Save roll → save_roll >= calculate_save_target()
+│   │       │       │       │   │   │   ├── SAVE → Append shot_record → continue to next shot
+│   │       │       │       │   │   │   └── FAIL → failed_saves++ → Continue to damage
+│   │       │       │       │   │   ├── Damage application:
+│   │       │       │       │   │   │   ├── damage_dealt = shooter.CC_DMG
+│   │       │       │       │   │   │   ├── total_damage += damage_dealt
+│   │       │       │       │   │   │   ├── ⚡ IMMEDIATE UPDATE: current_target.CUR_HP -= damage_dealt
+│   │       │       │       │   │   │   ├── current_target.CUR_HP <= 0 ? → current_target.alive = False
+│   │       │       │       │   │   │   └── Append shot_record with target_id
+│   │       │       │       │   │   ├── Target dies → Remove from valid_targets, continue
+│   │       │       │       │   │   ├──  Target survives → Continue
+│   │       │       │       │   │   ├── ATTACK_LEFT -= 1
+│   │       │       │       │   │   ├── Build valid_targets pool (enemies adjacents) for the active unit
+│   │       │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │       │       │       │   ├── Left click DIFFERENT target in valid_targets → Switch target confirmation
+│   │       │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION (with new target highlighted)
+│   │       │       │       │   ├── Left click on another unit in activation pool ?
+│   │       │       │       │   │   └── ATTACK_LEFT = CC_NB ?
+│   │       │       │       │   │       ├── YES → Postpone the combat phase for this unit
+│   │       │       │       │   │           └──  GO TO STEP : STEP : UNIT_ACTIVABLE_CHECK
+│   │       │       │       │   │       └── NO → The unit must end its activation when started
+│   │       │       │       │   │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │       │       │       │   ├── Left click on the active unit
+│   │       │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │       │       │       │   ├── Right click on the active unit
+│   │       │       │       │   │   └── Nothing happends : the unit must attack as long as it can and it has available targets
+│   │       │       │       │   └── Left OR Right click anywhere else on the board → Cancel target selection → Return to target selection
+│   │       │       │       │       └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │       │       │       ├── Left click on another unit in activation pool ?
+│   │       │       │       │   └── ATTACK_LEFT = CC_NB ?
+│   │       │       │       │       ├── YES → Postpone the combat phase for this unit
+│   │       │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │       │       │       │       └── NO → The unit must end its activation when started
+│   │       │       │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │       │       │       ├── Left click on the active unit → No effect
+│   │       │       │       ├── Right click on the active unit
+│   │       │       │       │    └── ATTACK_LEFT = CC_NB ?
+│   │       │       │       │       ├── NO → Result: +1 step, combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle
+│   │       │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │       │       │       │       └── YES → Result: +1 step, Wait action logged, no Mark → Unit removed from activation pool → Remove its green circle
+│   │       │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │       │       │       └── left OR Right click anywhere on the board
+│   │       │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │       │       └── NO → Result: +1 step, Combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle
+│   │       └── End of Combat → Result: +1 step, Combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle  
 │   └── NO → All charging units processed → Advance to Sub-Phase 2
 │
-│   Sub-Phase 2
+│   ##### Sub-Phase 2 : Alternate activation
 │
 ├── ACTIVE PLAYER ELIGIBILITY CHECK (Queue Building Phase)
 │   ├── unit.CUR_HP > 0?
@@ -741,67 +801,746 @@ Start of the Combat Phase:
 │   └── ALL conditions met → ✅ Add to non_active_alternating_activation_pool
 │
 ├── active_alternating_activation_pool AND non_active_alternating_activation_pool are NOT empty ?
-│   └── YES → ALTERNATING LOOP: while active_alternating_activation_pool AND non_active_alternating_activation_pool are NOT empty
-│       └── Non-active player turn → Select a unit from non_active_alternating_activation_pool
-│           ├── Unit adjacent to enemy units?
-│           │   ├── YES → COMBAT PHASE SUB-PHASE 2 ACTION AVAILABLE
-│           │   │   ├── 🎯 VALID ACTION: [attack]
-│           │   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark
-│           │   │   └── AGENT ACTION SELECTION → Choose attack?
-│           │   │       ├── YES → ✅ VALID → Execute CC_NB attacks
-│           │   │       │   ├── For each attack: Valid targets still available?
-│           │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
-│           │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│           │   │       │   │   │   ├── Target dies → Continue to next Valid target
-│           │   │       │   │   │   └── Target survives → Continue to next attack
-│           │   │       │   │   └── NO → End attacking (slaughter handling)
-│           │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
-│           │   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
-│           │   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark
-│           │   └── NO → Pass → no log, no Mark
-│           ├── Unit removed from non_active_alternating_activation_pool
-│           ├── Active player turn → Select a unit from active_alternating_activation_pool
+│   ├── YES → ALTERNATING LOOP: while active_alternating_activation_pool AND non_active_alternating_activation_pool are NOT empty
+│   │   ├── Non-active player turn → Non-active player is an AI player ?
+│   │   │    ├── YES → Select a unit from non_active_alternating_activation_pool
+│   │   │    │   ├── Unit adjacent to enemy units?
+│   │   │    │   │   ├── YES → COMBAT PHASE SUB-PHASE 2 ACTION AVAILABLE
+│   │   │    │   │   │   ├── 🎯 VALID ACTION: [attack]
+│   │   │    │   │   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark
+│   │   │    │   │   │   └── AGENT ACTION SELECTION → Choose attack?
+│   │   │    │   │   │       ├── YES → ✅ VALID → Execute CC_NB attacks
+│   │   │    │   │   │       │   ├── For each attack: Valid targets still available?
+│   │   │    │   │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
+│   │   │    │   │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│   │   │    │   │   │       │   │   │   ├── Target dies → Continue to next Valid target
+│   │   │    │   │   │       │   │   │   └── Target survives → Continue to next attack
+│   │   │    │   │   │       │   │   └── NO → All adjacent targets eliminated → End attacking naturally (slaughter handling) → Exit the For loop
+│   │   │    │   │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
+│   │   │    │   │   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
+│   │   │    │   │   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark
+│   │   │    │   │   └── NO → Pass → no log, no Mark
+│   │   │    │   ├── NO → Unit removed from non_active_alternating_activation_pool
+│   │   │    │   └── Check: Either pool empty?
+│   │   │    │       ├── YES → Exit loop, proceed to cleanup
+│   │   │    │       └── NO → Continue ALTERNATING LOOP
+│   │   │    └── NO → STEP : UNIT_ACTIVATION → player activate one unit by left clicking on it → Build valid_targets pool (enemies adjacents) for the active unit → Display the combat preview
+│   │   │       ├── ATTACK_LEFT = CC_NB
+│   │   │       ├── While ATTACK_LEFT > 0
+│   │   │       │   └── Target units in valid_targets pool?
+│   │   │       │       ├── YES → COMBAT PHASE ACTIONS AVAILABLE
+│   │   │       │       │   └── STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       │       ├── Left click on a target in valid_targets → Display target confirmation (HP bar blinking + attack preview)
+│   │   │       │       │       │   ├── Left click SAME target again → Confirm attack → Execute Combat sequence
+│   │   │       │       │       │   │   ├── Hit roll → hit_roll >= shooter.CC_ATK
+│   │   │       │       │       │   │   │   ├── MISS → Append shot_record → continue to next shot
+│   │   │       │       │       │   │   │   └── HIT → hits++ → Continue to wound roll
+│   │   │       │       │       │   │   ├── Wound roll → wound_roll >= calculate_wound_target()
+│   │   │       │       │       │   │   │   ├── FAIL → Append shot_record → continue to next shot
+│   │   │       │       │       │   │   │   └── WOUND → wounds++ → Continue to save roll
+│   │   │       │       │       │   │   ├── Save roll → save_roll >= calculate_save_target()
+│   │   │       │       │       │   │   │   ├── SAVE → Append shot_record → continue to next shot
+│   │   │       │       │       │   │   │   └── FAIL → failed_saves++ → Continue to damage
+│   │   │       │       │       │   │   ├── Damage application:
+│   │   │       │       │       │   │   │   ├── damage_dealt = shooter.CC_DMG
+│   │   │       │       │       │   │   │   ├── total_damage += damage_dealt
+│   │   │       │       │       │   │   │   ├── ⚡ IMMEDIATE UPDATE: current_target.CUR_HP -= damage_dealt
+│   │   │       │       │       │   │   │   ├── current_target.CUR_HP <= 0 ? → current_target.alive = False
+│   │   │       │       │       │   │   │   └── Append shot_record with target_id
+│   │   │       │       │       │   │   ├── Target dies → Remove from valid_targets, continue
+│   │   │       │       │       │   │   ├──  Target survives → Continue
+│   │   │       │       │       │   │   ├── ATTACK_LEFT -= 1
+│   │   │       │       │       │   │   ├── Build valid_targets pool (enemies adjacents) for the active unit
+│   │   │       │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       │       │   ├── Left click DIFFERENT target in valid_targets → Switch target confirmation
+│   │   │       │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION (with new target highlighted)
+│   │   │       │       │       │   ├── Left click on another unit in activation pool ?
+│   │   │       │       │       │   │   └── ATTACK_LEFT = CC_NB ?
+│   │   │       │       │       │   │       ├── YES → Postpone the combat phase for this unit
+│   │   │       │       │       │   │           └──  GO TO STEP : STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │       │   │       └── NO → The unit must end its activation when started
+│   │   │       │       │       │   │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       │       │   ├── Left click on the active unit
+│   │   │       │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       │       │   ├── Right click on the active unit
+│   │   │       │       │       │   │   └── Nothing happends : the unit must attack as long as it can and it has available targets
+│   │   │       │       │       │   └── Left OR Right click anywhere else on the board → Cancel target selection → Return to target selection
+│   │   │       │       │       │       └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       │       ├── Left click on another unit in activation pool ?
+│   │   │       │       │       │   └── ATTACK_LEFT = CC_NB ?
+│   │   │       │       │       │       ├── YES → Postpone the combat phase for this unit
+│   │   │       │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │       │       └── NO → The unit must end its activation when started
+│   │   │       │       │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       │       ├── Left click on the active unit → No effect
+│   │   │       │       │       ├── Right click on the active unit
+│   │   │       │       │       │    └── ATTACK_LEFT = CC_NB ?
+│   │   │       │       │       │       ├── NO → Result: +1 step, combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle
+│   │   │       │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │       │       └── YES → Result: +1 step, Wait action logged, no Mark → Unit removed from activation pool → Remove its green circle
+│   │   │       │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │       └── left OR Right click anywhere on the board
+│   │   │       │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │       │       └── NO → Result: +1 step, Combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle
+│   │   │       ├── End of Combat → Result: +1 step, Combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle
+│   │   │       └── Check: Either pool empty?
+│   │   │           ├── YES → Exit loop, proceed to cleanup
+│   │   │           └── NO → Continue ALTERNATING LOOP
+│   │   └── Active player turn → Active player is an AI player ?
+│   │        ├── YES → Select a unit from active_alternating_activation_pool
+│   │        │   ├── Unit adjacent to enemy units?
+│   │        │   │   ├── YES → COMBAT PHASE SUB-PHASE 2 ACTION AVAILABLE
+│   │        │   │   │   ├── 🎯 VALID ACTION: [attack]
+│   │        │   │   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark
+│   │        │   │   │   └── AGENT ACTION SELECTION → Choose attack?
+│   │        │   │   │       ├── YES → ✅ VALID → Execute CC_NB attacks
+│   │        │   │   │       │   ├── For each attack: Valid targets still available?
+│   │        │   │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
+│   │        │   │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│   │        │   │   │       │   │   │   ├── Target dies → Continue to next Valid target
+│   │        │   │   │       │   │   │   └── Target survives → Continue to next attack
+│   │        │   │   │       │   │   └── NO → All adjacent targets eliminated → End attacking naturally (slaughter handling) → Exit the For loop
+│   │        │   │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
+│   │        │   │   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
+│   │        │   │   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark
+│   │        │   │   └── NO → Pass → no log, no Mark
+│   │        │   ├── NO → Unit removed from active_alternating_activation_pool
+│   │        │   └── Check: Either pool empty?
+│   │        │       ├── YES → Exit loop, proceed to cleanup
+│   │        │       └── NO → Continue ALTERNATING LOOP
+│   │        └── NO → STEP : UNIT_ACTIVATION → player activate one unit by left clicking on it → Build valid_targets pool (enemies adjacents) for the active unit → Display the combat preview
+│   │           ├── ATTACK_LEFT = CC_NB
+│   │           ├── While ATTACK_LEFT > 0
+│   │           │   └── Target units in valid_targets pool?
+│   │           │       ├── YES → COMBAT PHASE ACTIONS AVAILABLE
+│   │           │       │   └── STEP : PLAYER_ACTION_SELECTION
+│   │           │       │       ├── Left click on a target in valid_targets → Display target confirmation (HP bar blinking + attack preview)
+│   │           │       │       │   ├── Left click SAME target again → Confirm attack → Execute Combat sequence
+│   │           │       │       │   │   ├── Hit roll → hit_roll >= shooter.CC_ATK
+│   │           │       │       │   │   │   ├── MISS → Append shot_record → continue to next shot
+│   │           │       │       │   │   │   └── HIT → hits++ → Continue to wound roll
+│   │           │       │       │   │   ├── Wound roll → wound_roll >= calculate_wound_target()
+│   │           │       │       │   │   │   ├── FAIL → Append shot_record → continue to next shot
+│   │           │       │       │   │   │   └── WOUND → wounds++ → Continue to save roll
+│   │           │       │       │   │   ├── Save roll → save_roll >= calculate_save_target()
+│   │           │       │       │   │   │   ├── SAVE → Append shot_record → continue to next shot
+│   │           │       │       │   │   │   └── FAIL → failed_saves++ → Continue to damage
+│   │           │       │       │   │   ├── Damage application:
+│   │           │       │       │   │   │   ├── damage_dealt = shooter.CC_DMG
+│   │           │       │       │   │   │   ├── total_damage += damage_dealt
+│   │           │       │       │   │   │   ├── ⚡ IMMEDIATE UPDATE: current_target.CUR_HP -= damage_dealt
+│   │           │       │       │   │   │   ├── current_target.CUR_HP <= 0 ? → current_target.alive = False
+│   │           │       │       │   │   │   └── Append shot_record with target_id
+│   │           │       │       │   │   ├── Target dies → Remove from valid_targets, continue
+│   │           │       │       │   │   ├──  Target survives → Continue
+│   │           │       │       │   │   ├── ATTACK_LEFT -= 1
+│   │           │       │       │   │   ├── Build valid_targets pool (enemies adjacents) for the active unit
+│   │           │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │           │       │       │   ├── Left click DIFFERENT target in valid_targets → Switch target confirmation
+│   │           │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION (with new target highlighted)
+│   │           │       │       │   ├── Left click on another unit in activation pool ?
+│   │           │       │       │   │   └── ATTACK_LEFT = CC_NB ?
+│   │           │       │       │   │       ├── YES → Postpone the combat phase for this unit
+│   │           │       │       │   │           └──  GO TO STEP : STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       │   │       └── NO → The unit must end its activation when started
+│   │           │       │       │   │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │           │       │       │   ├── Left click on the active unit
+│   │           │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │           │       │       │   ├── Right click on the active unit
+│   │           │       │       │   │   └── Nothing happends : the unit must attack as long as it can and it has available targets
+│   │           │       │       │   └── Left OR Right click anywhere else on the board → Cancel target selection → Return to target selection
+│   │           │       │       │       └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │           │       │       ├── Left click on another unit in activation pool ?
+│   │           │       │       │   └── ATTACK_LEFT = CC_NB ?
+│   │           │       │       │       ├── YES → Postpone the combat phase for this unit
+│   │           │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       │       └── NO → The unit must end its activation when started
+│   │           │       │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │           │       │       ├── Left click on the active unit → No effect
+│   │           │       │       ├── Right click on the active unit
+│   │           │       │       │    └── ATTACK_LEFT = CC_NB ?
+│   │           │       │       │       ├── NO → Result: +1 step, combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle
+│   │           │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       │       └── YES → Result: +1 step, Wait action logged, no Mark → Unit removed from activation pool → Remove its green circle
+│   │           │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       └── left OR Right click anywhere on the board
+│   │           │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │           │       └── NO → Result: +1 step, Combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle
+│   │           ├── End of Combat → Result: +1 step, Combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle
+│   │           └── Check: Either pool empty?
+│   │               ├── YES → Exit loop, proceed to cleanup
+│   │               └── NO → Continue ALTERNATING LOOP
+│   │
+│   │   ##### Sub-Phase 3 : only 1 player has eligible units left #####
+│   │
+│   └── NO → Only ONE player has activable units left → Select a unit from the non-empty alternating activation pools
+│       └── Remaining player turn → Remaining player is an AI player ?
+│           ├── YES → Select a unit from non-empty alternating activation pools
 │           │   ├── Unit adjacent to enemy units?
-│           │   ├── YES → COMBAT PHASE SUB-PHASE 2 ACTIONS AVAILABLE
-│           │   │   ├── 🎯 VALID ACTIONS: [attack]
-│           │   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark
-│           │   │   └── AGENT ACTION SELECTION → Choose attack?
-│           │   │       ├── YES → ✅ VALID → Execute CC_NB attacks
-│           │   │       │   ├── For each attack: Valid targets still available?
-│           │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
-│           │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│           │   │       │   │   │   ├── Target dies → Continue to next Valid target
-│           │   │       │   │   │   └── Target survives → Continue to next attack
-│           │   │       │   │   └── NO → End attacking (slaughter handling)
-│           │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
-│           │   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
-│           │   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark
-│           │   └── Pass → no log, no Mark
-│           ├── Unit removed from active_alternating_activation_pool
-│           └── Check: Either pool empty?
-│               ├── YES → Exit loop, proceed to cleanup
-│               └── NO → Continue ALTERNATING LOOP
-│
-├── Select a unit from the non-empty alternating activation pools
-│   ├── Unit adjacent to enemy units?
-│   │   ├── YES → COMBAT PHASE SUB-PHASE 2 ACTIONS AVAILABLE
-│   │   │   ├── 🎯 VALID ACTIONS: [attack]
-│   │   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark
-│   │   │   └── AGENT ACTION SELECTION → Choose attack?
-│   │   │       ├── YES → ✅ VALID → Execute CC_NB attacks
-│   │   │       │   ├── For each attack: Valid targets still available?
-│   │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
-│   │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
-│   │   │       │   │   │   ├── Target dies → Continue to next Valid target
-│   │   │       │   │   │   └── Target survives → Continue to next attack
-│   │   │       │   │   └── NO → End attacking (slaughter handling)
-│   │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
-│   │   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
-│   │   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark
-│   │   └── NO → Pass → no log, no Mark
-│   └── Unit removed from its activation pool
+│           │   │   ├── YES → COMBAT PHASE SUB-PHASE 2 ACTION AVAILABLE
+│           │   │   │   ├── 🎯 VALID ACTION: [attack]
+│           │   │   │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → Pass → Error logged → no Mark
+│           │   │   │   └── AGENT ACTION SELECTION → Choose attack?
+│           │   │   │       ├── YES → ✅ VALID → Execute CC_NB attacks
+│           │   │   │       │   ├── For each attack: Valid targets still available?
+│           │   │   │       │   │   ├── YES → Select adjacent enemy target and resolve attack
+│           │   │   │       │   │   │   ├── Hit roll → Wound roll → Save roll → Damage
+│           │   │   │       │   │   │   ├── Target dies → Continue to next Valid target
+│           │   │   │       │   │   │   └── Target survives → Continue to next attack
+│           │   │   │       │   │   └── NO → All adjacent targets eliminated → End attacking naturally (slaughter handling) → Exit the For loop
+│           │   │   │       │   └── Result: +1 step → Attack sequence logged → Mark as units_attacked
+│           │   │   │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
+│           │   │   │           └── ❌ INVALID ACTION ERROR → Pass → no log, no Mark
+│           │   │   └── NO → Pass → no log, no Mark
+│           │   ├── NO → Unit removed from non-empty alternating activation pools
+│           │   └── Check: Either pool empty?
+│           │       ├── YES → Exit loop, proceed to cleanup
+│           │       └── NO → Continue ALTERNATING LOOP
+│           └── NO → STEP : UNIT_ACTIVATION → player activate one unit by left clicking on it → Build valid_targets pool (enemies adjacents) for the active unit → Display the combat preview
+│              ├── ATTACK_LEFT = CC_NB
+│              ├── While ATTACK_LEFT > 0
+│              │   └── Target units in valid_targets pool?
+│              │       ├── YES → COMBAT PHASE ACTIONS AVAILABLE
+│              │       │   └── STEP : PLAYER_ACTION_SELECTION
+│              │       │       ├── Left click on a target in valid_targets → Display target confirmation (HP bar blinking + attack preview)
+│              │       │       │   ├── Left click SAME target again → Confirm attack → Execute Combat sequence
+│              │       │       │   │   ├── Hit roll → hit_roll >= shooter.CC_ATK
+│              │       │       │   │   │   ├── MISS → Append shot_record → continue to next shot
+│              │       │       │   │   │   └── HIT → hits++ → Continue to wound roll
+│              │       │       │   │   ├── Wound roll → wound_roll >= calculate_wound_target()
+│              │       │       │   │   │   ├── FAIL → Append shot_record → continue to next shot
+│              │       │       │   │   │   └── WOUND → wounds++ → Continue to save roll
+│              │       │       │   │   ├── Save roll → save_roll >= calculate_save_target()
+│              │       │       │   │   │   ├── SAVE → Append shot_record → continue to next shot
+│              │       │       │   │   │   └── FAIL → failed_saves++ → Continue to damage
+│              │       │       │   │   ├── Damage application:
+│              │       │       │   │   │   ├── damage_dealt = shooter.CC_DMG
+│              │       │       │   │   │   ├── total_damage += damage_dealt
+│              │       │       │   │   │   ├── ⚡ IMMEDIATE UPDATE: current_target.CUR_HP -= damage_dealt
+│              │       │       │   │   │   ├── current_target.CUR_HP <= 0 ? → current_target.alive = False
+│              │       │       │   │   │   └── Append shot_record with target_id
+│              │       │       │   │   ├── Target dies → Remove from valid_targets, continue
+│              │       │       │   │   ├──  Target survives → Continue
+│              │       │       │   │   ├── ATTACK_LEFT -= 1
+│              │       │       │   │   ├── Build valid_targets pool (enemies adjacents) for the active unit
+│              │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION
+│              │       │       │   ├── Left click DIFFERENT target in valid_targets → Switch target confirmation
+│              │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION (with new target highlighted)
+│              │       │       │   ├── Left click on another unit in activation pool ?
+│              │       │       │   │   └── ATTACK_LEFT = CC_NB ?
+│              │       │       │   │       ├── YES → Postpone the combat phase for this unit
+│              │       │       │   │           └──  GO TO STEP : STEP : UNIT_ACTIVABLE_CHECK
+│              │       │       │   │       └── NO → The unit must end its activation when started
+│              │       │       │   │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│              │       │       │   ├── Left click on the active unit
+│              │       │       │   │   └── GO TO STEP : PLAYER_ACTION_SELECTION
+│              │       │       │   ├── Right click on the active unit
+│              │       │       │   │   └── Nothing happends : the unit must attack as long as it can and it has available targets
+│              │       │       │   └── Left OR Right click anywhere else on the board → Cancel target selection → Return to target selection
+│              │       │       │       └── GO TO STEP : PLAYER_ACTION_SELECTION
+│              │       │       ├── Left click on another unit in activation pool ?
+│              │       │       │   └── ATTACK_LEFT = CC_NB ?
+│              │       │       │       ├── YES → Postpone the combat phase for this unit
+│              │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│              │       │       │       └── NO → The unit must end its activation when started
+│              │       │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│              │       │       ├── Left click on the active unit → No effect
+│              │       │       ├── Right click on the active unit
+│              │       │       │    └── ATTACK_LEFT = CC_NB ?
+│              │       │       │       ├── NO → Result: +1 step, combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle
+│              │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│              │       │       │       └── YES → Result: +1 step, Wait action logged, no Mark → Unit removed from activation pool → Remove its green circle
+│              │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│              │       │       └── left OR Right click anywhere on the board
+│              │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│              │       └── NO → Result: +1 step, Combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle
+│              └── End of Combat → Result: +1 step, Combat sequence logged, Mark as units_attacked → Unit removed from activation pool → Remove its green circle
 └── End Combat Phase: Advance to next player's Movement Phase
 ```
+
+```javascript
+CLAUDE VERSION :// COMBAT PHASE - DIRECT TRANSLATION FROM DECISION TREE
+// EXACT MAPPING TO YOUR REFERENCE TREE WITH CURRENT SCRIPT NAMING
+
+// ===== POOLS - MATCHING CURRENT SCRIPT NAMES =====
+let chargingActivationPool = []              // MATCHES: Current script uses chargingActivationPool
+let activeAlternatingActivationPool = []     // MATCHES: Current script uses activeAlternatingActivationPool  
+let nonActiveAlternatingActivationPool = []  // MATCHES: Current script uses nonActiveAlternatingActivationPool
+
+// ===== ACTIVE UNIT STATE - MATCHING CURRENT SCRIPT =====
+let activeUnit = null                        // MATCHES: Current script uses activeUnit
+let selectedTarget = null                    // MATCHES: Current script uses selectedTarget
+let attacksLeft = 0                          // MATCHES: Current script uses ATTACK_LEFT field on units
+let combatActionLog = []                     // MATCHES: Current script logging pattern
+
+// ===== SUB-PHASE 1: CHARGING UNITS =====
+
+// Pool Building (REF: Lines 4-12) - USING CURRENT SCRIPT PATTERNS
+function buildChargingActivationPool() {
+ chargingActivationPool = []
+ 
+ for (const unit of units) {                // MATCHES: Current script uses 'units' array
+   // REF: Line 5 "unit.CUR_HP > 0?"
+   if (unit.CUR_HP <= 0) continue           // MATCHES: Current script checks CUR_HP
+   
+   // REF: Line 7 "unit.player === currentPlayer?"  
+   if (unit.player !== currentPlayer) continue // MATCHES: Current script uses currentPlayer
+   
+   // REF: Line 9 "units_charged.includes(unit.id)?"
+   if (!unitsCharged.includes(unit.id)) continue // MATCHES: Current script uses unitsCharged
+   
+   // REF: Line 11 "Adjacent to enemy unit within CC_RNG?"
+   if (!isAdjacentToEnemyWithinCCRNG(unit)) continue // MATCHES: Current script adjacency checks
+   
+   // REF: Line 12 "ALL conditions met → ✅ Add to charging_activation pool"
+   chargingActivationPool.push(unit)
+ }
+}
+
+// Main Charging Logic (REF: Lines 13-89) - USING CURRENT SCRIPT FUNCTIONS
+function processChargingPhase() {
+ buildChargingActivationPool()
+ 
+ // REF: Line 13 "Units in charging_activation pool?"
+ while (chargingActivationPool.length > 0) {
+   
+   // REF: Line 15 "Current player is an AI player ?"
+   if (isAI(currentPlayer)) {              // MATCHES: Current script pattern
+     processChargingAI()
+   } else {
+     processChargingHuman()
+   }
+ }
+ 
+ // REF: Line 90 "All charging units processed → Advance to Sub-Phase 2"
+ startAlternatingPhase()                   // MATCHES: Current script function naming
+}
+
+function processChargingAI() {
+ // REF: Line 16 "pick one → COMBAT PHASE SUB-PHASE 1 ACTION AVAILABLE"
+ const selectedUnit = chargingActivationPool[0]
+ 
+ // REF: Line 20 "Choose attack?"
+ // REF: Line 21 "YES → ✅ VALID → Execute CC_NB attacks"
+ if (hasAdjacentEnemies(selectedUnit)) {    // MATCHES: Current script helper functions
+   executeAIAttackSequence(selectedUnit)
+   // REF: Line 25 "Result: +1 step, Attack sequence logged, Mark as units_attacked"
+   gameState.episode_steps += 1            // MATCHES: Current script step counting
+   logAttackSequence(selectedUnit, combatActionLog)
+   actions.addAttackedUnit(selectedUnit.id) // MATCHES: Current script actions pattern
+ }
+ 
+ // REF: Line 25 "Unit removed from activation pool"
+ removeFromPool(selectedUnit, chargingActivationPool)
+}
+
+function executeAIAttackSequence(unit) {
+ // REF: Line 22 "For each attack: Valid targets still available?"
+ for (let attackNum = 1; attackNum <= unit.CC_NB; attackNum++) {
+   const validTargets = getAdjacentEnemies(unit)  // MATCHES: Current script helper
+   
+   // REF: Line 24 "NO → All adjacent targets eliminated → End attacking naturally (slaughter handling)"
+   if (validTargets.length === 0) break
+   
+   // REF: Line 23 "YES → Select adjacent enemy target and resolve attack"
+   const target = validTargets[0] // AI picks first available
+   executeAttack(unit, target)    // MATCHES: Current script function name
+ }
+}
+
+// Human Charging Interface (REF: Lines 27-89) - USING CURRENT SCRIPT PATTERNS
+function processChargingHuman() {
+ // REF: Line 27 "STEP : UNIT_ACTIVATION → player activate one by left clicking"
+ waitForUnitActivation()
+}
+
+function onChargingUnitClick(clickedUnit) {
+ activeUnit = clickedUnit
+ 
+ // REF: Line 29 "ATTACK_LEFT = CC_NB"
+ attacksLeft = activeUnit.CC_NB
+ 
+ // REF: Line 28 "Build valid_targets pool (enemies adjacents) for the active unit"
+ const validTargets = buildValidTargetsPool(activeUnit)
+ 
+ // REF: Line 28 "Display the combat preview"
+ actions.setAttackPreview({ unitId: activeUnit.id, col: activeUnit.col, row: activeUnit.row })
+ actions.setMode("attackPreview")         // MATCHES: Current script UI state management
+ 
+ enterChargingWaitingForAction()
+}
+
+function chargingWaitingForAction(clickType, target) {
+ // REF: Line 32 "Target units in valid_targets pool?"
+ const validTargets = getValidTargets(activeUnit)
+ 
+ if (validTargets.length === 0) {
+   // REF: Line 67 "NO → Result: +1 step, Combat sequence logged, Mark as units_attacked"
+   chargingEndActivation("attacked")
+   return
+ }
+ 
+ // REF: Line 35 "YES → COMBAT PHASE ACTIONS AVAILABLE"
+ if (clickType === "leftClick" && isValidTarget(target)) {
+   // REF: Line 37 "Left click on a target in valid_targets → Display target confirmation"
+   selectedTarget = target
+   showTargetPreview(target) // HP bar blinking + attack preview
+   enterChargingTargetPreviewing()
+   
+ } else if (clickType === "leftClick" && isUnitInChargingPool(target)) {
+   // REF: Line 47 "Left click on another unit in activation queue ?"
+   // REF: Line 49 "ATTACK_LEFT = CC_NB ?"
+   if (attacksLeft === activeUnit.CC_NB) {
+     // REF: Line 50 "YES → Postpone the combat phase for this unit"
+     postponeUnit(target)
+   } else {
+     // REF: Line 52 "NO → The unit must end its activation when started"
+     // Stay in current state - unit must complete
+   }
+   
+ } else if (clickType === "rightClick" && target === activeUnit) {
+   // REF: Line 58 "Right click on the active unit"
+   // REF: Line 59 "ATTACK_LEFT = CC_NB ?"
+   if (attacksLeft === activeUnit.CC_NB) {
+     // REF: Line 62 "YES → Result: +1 step, Wait action logged, no Mark"
+     chargingEndActivation("wait")
+   } else {
+     // REF: Line 60 "NO → Result: +1 step, combat sequence logged, Mark as units_attacked"
+     chargingEndActivation("attacked")
+   }
+ }
+ // REF: Line 57 "Left click on the active unit → No effect"
+ // REF: Line 64 "left OR Right click anywhere on the board" → Stay
+}
+
+function chargingTargetPreviewing(clickType, target) {
+ if (clickType === "leftClick" && target === selectedTarget) {
+   // REF: Line 38 "Left click SAME target again → Confirm attack → Execute Combat sequence"
+   executeAttack(activeUnit, selectedTarget)
+   
+   // REF: Line 42 "ATTACK_LEFT -= 1"
+   attacksLeft -= 1
+   selectedTarget = null
+   
+   // REF: Line 43 "Build valid_targets pool (enemies adjacents) for the active unit"
+   updateValidTargets(activeUnit)
+   
+   // REF: Line 44 "GO TO STEP : PLAYER_ACTION_SELECTION"
+   if (attacksLeft > 0 && hasValidTargets(activeUnit)) {
+     enterChargingWaitingForAction()
+   } else {
+     chargingEndActivation("attacked")
+   }
+   
+ } else if (clickType === "leftClick" && isValidTarget(target)) {
+   // REF: Line 45 "Left click DIFFERENT target in valid_targets → Switch target confirmation"
+   selectedTarget = target
+   showTargetPreview(target)
+   
+ } else if (clickType === "leftClick" && isUnitInChargingPool(target)) {
+   // REF: Line 47 "Left click on another unit in activation queue ?"
+   if (attacksLeft === activeUnit.CC_NB) {
+     postponeUnit(target)
+   }
+   // Else: unit must complete activation
+   
+ } else if (clickType === "leftClick" && target === activeUnit) {
+   // REF: Line 54 "Left click on the active unit"
+   clearTargetPreview()
+   enterChargingWaitingForAction()
+   
+ } else if (clickType === "rightClick" && target === activeUnit) {
+   // REF: Line 55 "Right click on the active unit"
+   // REF: Line 56 "Nothing happens : the unit must attack as long as it can and it has available targets"
+   // Stay in current state - cannot cancel
+ }
+ // REF: Line 56 "Left OR Right click anywhere else on the board → Cancel target selection"
+ else {
+   clearTargetPreview()
+   enterChargingWaitingForAction()
+ }
+}
+
+function chargingEndActivation(type) {
+ // REF: Line 60,62,67 "Result: +1 step, [action] logged, Mark as units_attacked"
+ gameState.episode_steps += 1            // MATCHES: Current script step counting
+ 
+ if (type === "attacked") {
+   if (gameLog) {                         // MATCHES: Current script logging pattern
+     gameLog.logCombatSequenceComplete(activeUnit, combatActionLog, gameState.currentTurn)
+   }
+   actions.addAttackedUnit(activeUnit.id) // MATCHES: Current script actions
+ } else if (type === "wait") {
+   if (gameLog) {
+     gameLog.logWaitAction(activeUnit, gameState.currentTurn)
+   }
+ }
+ 
+ removeFromPool(activeUnit, chargingActivationPool)
+ resetActiveUnit()                        // MATCHES: Current script helper function
+}
+
+// ===== SUB-PHASE 2: ALTERNATING COMBAT =====
+
+// Pool Building (REF: Lines 92-142) - USING CURRENT SCRIPT PATTERNS
+function buildAlternatingPools() {
+ activeAlternatingActivationPool = []     // MATCHES: Current script naming
+ nonActiveAlternatingActivationPool = []  // MATCHES: Current script naming
+ 
+ // REF: Line 94 "ACTIVE PLAYER ELIGIBILITY CHECK"
+ for (const unit of units) {              // MATCHES: Current script units array
+   // REF: Lines 95-104 exact conditions
+   if (unit.CUR_HP > 0 &&
+       unit.player === currentPlayer &&
+       !unitsAttacked.includes(unit.id) && // MATCHES: Current script unitsAttacked
+       !unitsCharged.includes(unit.id) &&  // MATCHES: Current script unitsCharged
+       isAdjacentToEnemyWithinCCRNG(unit)) {
+     // REF: Line 105 "Add to active_alternating_activation_pool"
+     activeAlternatingActivationPool.push(unit)
+   }
+ }
+ 
+ // REF: Line 107 "NON-ACTIVE PLAYER ELIGIBILITY CHECK" 
+ for (const unit of units) {
+   // REF: Lines 108-117 exact conditions
+   if (unit.CUR_HP > 0 &&
+       unit.player !== currentPlayer &&
+       !unitsAttacked.includes(unit.id) &&
+       !unitsCharged.includes(unit.id) &&
+       isAdjacentToEnemyWithinCCRNG(unit)) {
+     // REF: Line 118 "Add to non_active_alternating_activation_pool"
+     nonActiveAlternatingActivationPool.push(unit)
+   }
+ }
+}
+
+// Alternating Loop (REF: Lines 144-198) - USING CURRENT SCRIPT PATTERNS
+function processAlternatingPhase() {
+ buildAlternatingPools()
+ 
+ // REF: Line 144 condition checks
+ if (activeAlternatingActivationPool.length === 0 && 
+     nonActiveAlternatingActivationPool.length === 0) {
+   // Both pools empty → End combat
+   endCombatPhase()
+   return
+ }
+ 
+ if (activeAlternatingActivationPool.length === 0 || 
+     nonActiveAlternatingActivationPool.length === 0) {
+   // One pool empty → Cleanup phase
+   processCleanupPhase()
+   return
+ }
+ 
+ // REF: Line 145 "ALTERNATING LOOP: while active_alternating_activation_pool AND non_active_alternating_activation_pool are NOT empty"
+ while (activeAlternatingActivationPool.length > 0 && 
+        nonActiveAlternatingActivationPool.length > 0) {
+   
+   // REF: Line 146 "Non-active player turn"
+   processNonActivePlayerTurn()
+   
+   if (shouldExitAlternatingLoop()) break
+   
+   // REF: Line 171 "Active player turn"  
+   processActivePlayerTurn()
+   
+   if (shouldExitAlternatingLoop()) break
+ }
+ 
+ // REF: Line 196 "Exit loop, proceed to cleanup"
+ processCleanupPhase()
+}
+
+function processNonActivePlayerTurn() {
+ // REF: Line 146 "Non-active player is an AI player ?"
+ if (isAI(nonActivePlayer)) {             // MATCHES: Current script pattern
+   // REF: Line 147 "Select a unit from non_active_alternating_activation_pool"
+   const selectedUnit = nonActiveAlternatingActivationPool[0]
+   executeAlternatingAI(selectedUnit, nonActiveAlternatingActivationPool)
+ } else {
+   // REF: Line 159 "STEP : UNIT_ACTIVATION → player activate one by left clicking"
+   processAlternatingHuman(nonActiveAlternatingActivationPool)
+ }
+}
+
+function processActivePlayerTurn() {
+ // REF: Line 171 "Active player is an AI player ?"
+ if (isAI(currentPlayer)) {               // MATCHES: Current script pattern
+   // REF: Line 172 "Select a unit from active_alternating_activation_pool"
+   const selectedUnit = activeAlternatingActivationPool[0]
+   executeAlternatingAI(selectedUnit, activeAlternatingActivationPool)
+ } else {
+   // REF: Line 184 "STEP : UNIT_ACTIVATION → player activate one by left clicking"
+   processAlternatingHuman(activeAlternatingActivationPool)
+ }
+}
+
+function executeAlternatingAI(unit, pool) {
+ // REF: Line 148 "Unit adjacent to enemy units?"
+ if (hasAdjacentEnemies(unit)) {
+   // REF: Line 152 "Execute CC_NB attacks"
+   executeAIAttackSequence(unit)
+   // REF: Line 158 "Result: +1 step → Attack sequence logged → Mark as units_attacked"
+   gameState.episode_steps += 1          // MATCHES: Current script step counting
+   logAttackSequence(unit, combatActionLog)
+   actions.addAttackedUnit(unit.id)      // MATCHES: Current script actions
+ }
+ // No else clause needed - REF: Line 161 shows pass/no log/no mark is automatic
+ 
+ removeFromPool(unit, pool)
+ 
+ // REF: Line 162 "Check: Either pool empty?"
+ // This check happens in main alternating loop
+}
+
+// ===== SUB-PHASE 3: CLEANUP =====
+
+// Cleanup Logic (REF: Lines 199-259) - USING CURRENT SCRIPT PATTERNS
+function processCleanupPhase() {
+ // REF: Line 200 "Only ONE player has activable units left"
+ const remainingPool = activeAlternatingActivationPool.length > 0 ? 
+                      activeAlternatingActivationPool : 
+                      nonActiveAlternatingActivationPool
+ 
+ if (remainingPool.length === 0) {
+   endCombatPhase()
+   return
+ }
+ 
+ // REF: Line 201 "Remaining player is an AI player ?"
+ while (remainingPool.length > 0) {
+   const unit = remainingPool[0]
+   
+   if (isAI(unit.player)) {               // MATCHES: Current script pattern
+     // REF: Line 202 "Select a unit from non-empty alternating activation pools"
+     executeAlternatingAI(unit, remainingPool)
+   } else {
+     // REF: Line 217 "STEP : UNIT_ACTIVATION → player activate one by left clicking"
+     processAlternatingHuman(remainingPool)
+     break // Wait for human interaction
+   }
+ }
+}
+
+// ===== CORE FUNCTIONS - USING CURRENT SCRIPT PATTERNS =====
+
+// Attack Execution (REF: Lines 39-41)
+function executeAttack(attacker, target) {
+ // REF: Line 39 "Hit roll → hit_roll >= shooter.CC_ATK"
+ const hitRoll = rollD6()                 // MATCHES: Current script uses rollD6()
+ const hitSuccess = hitRoll >= attacker.CC_ATK
+ 
+ let damageDealt = 0
+ let woundRoll = 0
+ let woundSuccess = false
+ let saveRoll = 0
+ let saveSuccess = false
+ 
+ if (hitSuccess) {
+   // REF: Line 40 "Wound roll → wound_roll >= calculate_wound_target()"
+   woundRoll = rollD6()
+   const woundTarget = calculateWoundTarget(attacker, target) // MATCHES: Current script
+   woundSuccess = woundRoll >= woundTarget
+   
+   if (woundSuccess) {
+     // REF: Line 41 "Save roll → save_roll >= calculate_save_target()"
+     saveRoll = rollD6()
+     const saveTarget = calculateSaveTarget(attacker, target) // MATCHES: Current script
+     const saveSuccess = saveRoll >= saveTarget
+     
+     if (!saveSuccess) {
+       // REF: Line 42 "Damage application: damage_dealt = shooter.CC_DMG"
+       damageDealt = attacker.CC_DMG
+     }
+   }
+ }
+ 
+ // Apply damage using current script pattern
+ if (damageDealt > 0) {
+   // REF: Line 42 "⚡ IMMEDIATE UPDATE: current_target.CUR_HP -= damage_dealt"
+   const newHP = target.CUR_HP - damageDealt
+   
+   // REF: Line 42 "current_target.CUR_HP <= 0 ? → current_target.alive = False"
+   if (newHP <= 0) {
+     actions.removeUnit(target.id)        // MATCHES: Current script actions
+   } else {
+     actions.updateUnit(target.id, { CUR_HP: newHP }) // MATCHES: Current script
+   }
+ }
+ 
+ combatActionLog.push({attacker: attacker.id, target: target.id, damage: damageDealt})
+}
+
+// REF: Line 49 "ATTACK_LEFT = CC_NB ?"
+function canPostpone() {
+ return attacksLeft === activeUnit.CC_NB
+}
+
+// MATCHES: Current script helper function
+function resetActiveUnit() { 
+ activeUnit = null
+ selectedTarget = null
+ attacksLeft = 0 
+}
+
+// MATCHES: Current script step counting
+function incrementEpisodeSteps() {
+ gameState.episode_steps += 1
+}
+
+// MATCHES: Current script actions pattern
+function markAsAttacked(unit) {
+ actions.addAttackedUnit(unit.id)
+}
+
+// ===== HELPER FUNCTIONS - MATCHING CURRENT SCRIPT =====
+
+function removeFromPool(unit, pool) {
+ const index = pool.findIndex(u => u.id === unit.id)
+ if (index !== -1) {
+   pool.splice(index, 1)
+ }
+}
+
+function shouldExitAlternatingLoop() {
+ return activeAlternatingActivationPool.length === 0 || 
+        nonActiveAlternatingActivationPool.length === 0
+}
+
+function endCombatPhase() {
+ // Reset all combat state
+ chargingActivationPool = []
+ activeAlternatingActivationPool = []
+ nonActiveAlternatingActivationPool = []
+ resetActiveUnit()
+ 
+ // REF: Line 260 "End Combat Phase: Advance to next player's Movement Phase"
+ advanceToNextPlayerMovementPhase()       // MATCHES: Current script function naming
+}
+
+// ===== INTEGRATION FUNCTIONS FOR CURRENT SCRIPT =====
+
+// Main entry point for combat phase
+function startCombatPhase() {
+ // Initialize combat sub-phase tracking
+ actions.setCombatSubPhase("charged_units") // MATCHES: Current script sub-phase management
+ 
+ // Start with charging units
+ processChargingPhase()
+}
+
+// Function to handle combat clicks from UI
+function handleCombatClick(clickType, target) {
+ if (combatSubPhase === "charged_units") {
+   chargingWaitingForAction(clickType, target)
+ } else if (combatSubPhase === "alternating_combat") {
+   alternatingWaitingForAction(clickType, target)
+ }
+ // Add other sub-phase handlers as needed
+}
+```
+
 
 ### Alternating Combat Tactical Considerations
 
