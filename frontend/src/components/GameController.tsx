@@ -1,4 +1,5 @@
 // src/components/GameController.tsx
+
 import React from "react";
 import { useLocation } from 'react-router-dom';
 import { SharedLayout } from "./SharedLayout";
@@ -203,7 +204,7 @@ export const GameController: React.FC<GameControllerProps> = ({
   usePhaseTransition({
     gameState,
     boardConfig,
-    isUnitEligible: originalGameActions.isUnitEligible, // Pass the authoritative eligibility function
+    isUnitEligible: (unit: Unit) => Boolean(originalGameActions.isUnitEligible(unit)), // Pass the authoritative eligibility function
     actions: {
       setPhase: actions.setPhase,
       setCurrentPlayer: actions.setCurrentPlayer,
@@ -303,7 +304,7 @@ export const GameController: React.FC<GameControllerProps> = ({
             : 'bg-gray-800 border border-gray-600'
         }`}>
           <span className="text-sm font-medium text-white">
-            {gameState.currentPlayer === 1 ? '🤖 AI Turn' : '👤 Your Turn'}
+            {gameState.currentPlayer === 1 ? 'ðŸ¤– AI Turn' : 'ðŸ‘¤ Your Turn'}
           </span>
           {gameState.currentPlayer === 1 && isAIProcessing && (
             <>
@@ -319,13 +320,12 @@ export const GameController: React.FC<GameControllerProps> = ({
         <div className="bg-red-900 border border-red-700 rounded p-3 mb-2">
           <div className="flex items-center justify-between">
             <div className="text-red-100 text-sm">
-              <strong>🤖 AI Error:</strong> {aiError}
+              <strong>ðŸ¤– AI Error:</strong> {aiError}
             </div>
             <button
               onClick={clearAIError}
               className="text-red-300 hover:text-red-100 ml-2"
             >
-              ✕
             </button>
           </div>
         </div>

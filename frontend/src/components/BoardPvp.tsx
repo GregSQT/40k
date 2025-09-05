@@ -18,6 +18,8 @@ type BoardProps = {
   units: Unit[];
   selectedUnitId: number | null;
   eligibleUnitIds: number[];
+  shootingActivationQueue?: Unit[];
+  activeShootingUnit?: Unit | null;
   mode: Mode;
   movePreview: { unitId: number; destCol: number; destRow: number } | null;
   attackPreview: { unitId: number; col: number; row: number } | null;
@@ -54,6 +56,8 @@ export default function Board({
   units,
   selectedUnitId,
   eligibleUnitIds,
+  shootingActivationQueue,
+  activeShootingUnit,
   mode,
   movePreview,
   attackPreview,
@@ -854,10 +858,34 @@ export default function Board({
             ? isUnitInRange(selectedUnit, unit, selectedUnit.RNG_RNG) 
             : false;
         }
+        // AI_TURN.md: Calculate queue-based eligibility during shooting phase
+        const isEligibleForRendering = (() => {
+          if (phase === "shoot" && shootingActivationQueue && shootingActivationQueue.length > 0) {
+            // During active shooting: unit is eligible if in queue OR is active unit
+            const inQueue = shootingActivationQueue.some((u: Unit) => u.id === unit.id);
+            const isActive = activeShootingUnit && activeShootingUnit.id === unit.id;
+            const result = inQueue || isActive;
+            
+            if (unit.id === 8 || unit.id === 9) { // Debug key units
+              console.log(`🟢 ELIGIBILITY DEBUG Unit ${unit.id}: inQueue=${inQueue}, isActive=${isActive}, result=${result}`);
+              console.log(`🟢 Queue IDs:`, shootingActivationQueue.map(u => u.id));
+              console.log(`🟢 Active unit:`, activeShootingUnit?.id || 'none');
+            }
+            
+            return result;
+          }
+          // All other phases: use standard eligibility
+          const standardResult = eligibleUnitIds.includes(unit.id);
+          if (unit.id === 8 || unit.id === 9) {
+            console.log(`🟢 STANDARD ELIGIBILITY Unit ${unit.id}: ${standardResult}`);
+          }
+          return standardResult;
+        })();
+        
         renderUnit({
           unit, centerX, centerY, app,
           isPreview: false,
-          isEligible: eligibleUnitIds.includes(unit.id),
+          isEligible: isEligibleForRendering || false,
           isShootable,
           boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,

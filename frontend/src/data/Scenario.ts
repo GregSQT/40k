@@ -9,8 +9,8 @@ const initialUnits: Unit[] = [
     name: "P-C",
     type: "CaptainGravis",
     player: 0,
-    col: 23,
-    row: 5, 
+    col: 21,
+    row: 3, 
     color: 0x244488,
   }),
   createUnit({
@@ -18,19 +18,28 @@ const initialUnits: Unit[] = [
     name: "P-I",
     type: "Intercessor",
     player: 0,
-    col: 1,
-    row: 5,
+    col: 3,
+    row: 3,
     color: 0x244488,
   }),
 
   // Player 1 units (AI)
   createUnit({
-    id: 3,
+    id: 2,
     name: "A-H",
     type: "Hormagaunt",
     player: 1,
     col: 17,
     row: 0,
+    color: 0x882222,
+  }),
+   createUnit({
+    id: 3,
+    name: "A-T",
+    type: "Hormagaunt",
+    player: 1,
+    col: 6,
+    row: 1,
     color: 0x882222,
   }),
   createUnit({

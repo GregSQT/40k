@@ -12,6 +12,8 @@ interface GameBoardProps {
   units: Unit[];
   selectedUnitId: UnitId | null;
   eligibleUnitIds: number[];
+  shootingActivationQueue?: Unit[];
+  activeShootingUnit?: Unit | null;
   phase: GameState['phase'];
   mode: GameState['mode'];
   movePreview: MovePreview | null;
@@ -124,6 +126,8 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         units={props.units}
         selectedUnitId={props.selectedUnitId}
         eligibleUnitIds={props.eligibleUnitIds}
+        shootingActivationQueue={props.shootingActivationQueue}
+        activeShootingUnit={props.activeShootingUnit}
         phase={props.phase}
         mode={props.mode}
         movePreview={props.movePreview}

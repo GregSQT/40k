@@ -155,6 +155,13 @@ export const useGameActions = ({
       case "move":
         return !unitsMoved.includes(unit.id);
       case "shoot":
+        // AI_TURN.md: If shooting phase is active and queue is built, check queue membership OR active unit
+        if (shootingActivationQueue.length > 0) {
+          return shootingActivationQueue.some(u => u.id === unit.id) || 
+                 (activeShootingUnit && activeShootingUnit.id === unit.id);
+        }
+        
+        // Otherwise use raw eligibility for initial queue building
         // AI_TURN.md: "units_fled.includes(unit.id)? → YES → ❌ Fled unit (Skip, no log)"
         if (unitsFled.includes(unit.id)) return false;
         // AI_TURN.md: "Adjacent to enemy unit within CC_RNG? → YES → ❌ In combat (Skip, no log)"
@@ -250,7 +257,7 @@ export const useGameActions = ({
       default:
         return false;
     }
-  }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer, boardConfig, gameState]);
+  }, [units, currentPlayer, phase, unitsMoved, unitsCharged, unitsAttacked, unitsFled, combatSubPhase, combatActivePlayer, boardConfig, gameState, shootingActivationQueue, activeShootingUnit]);
 
   const selectCharger = useCallback((unitId: UnitId | null) => {
     if (unitId === null) {
@@ -381,9 +388,15 @@ interface ShootingResult {
     
     units.forEach(unit => {
       // AI_TURN.md: ELIGIBILITY CHECK (Queue Building Phase)
-      if (unit.CUR_HP === undefined || unit.CUR_HP <= 0) return; // Dead unit (Skip, no log)
-      if (unit.player !== currentPlayer) return; // Wrong player (Skip, no log)
-      if (unitsFled.includes(unit.id)) return; // Fled unit (Skip, no log)
+      if (unit.CUR_HP === undefined || unit.CUR_HP <= 0) {
+        return; // Dead unit (Skip, no log)
+      }
+      if (unit.player !== currentPlayer) {
+        return; // Wrong player (Skip, no log)
+      }
+      if (unitsFled.includes(unit.id)) {
+        return; // Fled unit (Skip, no log)
+      }
       
       // Adjacent to enemy unit within CC_RNG?
       const enemyUnits = units.filter(u => u.player !== unit.player);
@@ -430,7 +443,7 @@ interface ShootingResult {
     
     setShootingActivationQueue(eligibleUnits);
     setShootingState('WAITING_FOR_ACTIVATION');
-    return eligibleUnits.length > 0;
+    return eligibleUnits;
   }, [units, currentPlayer, unitsFled, areUnitsAdjacent, isUnitInRange, hasLineOfSight, boardConfig, clearTargetPreview]);
 
   const cleanupShootingPhase = useCallback(() => {
@@ -1137,16 +1150,30 @@ interface ShootingResult {
   }, [activeShootingUnit, shootLeft]);
 
   // AI_TURN.md: Enhanced handleShootingUnitClick with proper postponement
-  const handleShootingUnitClick = useCallback((unitId: UnitId) => {
+  const handleShootingUnitClick = useCallback((unitId: UnitId, freshEligibleUnits?: Unit[]) => {
+    console.log(`🎯 SHOOTING CLICK DEBUG: unitId=${unitId}, state=${shootingState}`);
+    console.log(`🎯 Queue before click:`, shootingActivationQueue.map(u => u.id));
+    console.log(`🎯 Active unit before click:`, activeShootingUnit?.id || 'none');
+    
     if (shootingState === 'WAITING_FOR_ACTIVATION') {
-      // leftClick(unitInActivationQueue) - handle async queue state
-      let clickedUnit = shootingActivationQueue.find(u => u.id === unitId);
-      if (!clickedUnit) {
-        // CRITICAL FIX: Use fresh unit lookup when queue is still updating
-        clickedUnit = units.find(u => u.id === unitId);
-        if (!clickedUnit || !isUnitEligible(clickedUnit)) return;
+      // AI_TURN.md: Use existing queue - should be built at phase start
+      const queueToCheck = freshEligibleUnits || shootingActivationQueue;
+      const clickedUnit = queueToCheck.find(u => u.id === unitId);
+      
+      if (queueToCheck.length === 0) {
+        console.log(`🎯 ERROR: Queue empty - phase initialization failed`);
+        return;
       }
       
+      console.log(`🎯 Clicked unit found:`, clickedUnit?.id || 'not found');
+      console.log(`🎯 Unit eligible check:`, clickedUnit ? isUnitEligible(clickedUnit) : 'N/A');
+      
+      if (!clickedUnit || !isUnitEligible(clickedUnit)) {
+        console.log(`🎯 EARLY RETURN: Unit not clickable`);
+        return;
+      }
+      
+      console.log(`🎯 Setting active unit to:`, clickedUnit.id);
       setActiveShootingUnit(clickedUnit);
       if (clickedUnit.RNG_NB === undefined) {
         throw new Error(`clickedUnit.RNG_NB is required but was undefined for unit ${clickedUnit.id}`);
@@ -1525,10 +1552,10 @@ interface ShootingResult {
             throw new Error('gameState.episode_steps is required but was undefined');
           }
           gameState.episode_steps = gameState.episode_steps + 1;
-          actions.addMovedUnit(activeShootingUnit.id);
           
-          // Clear activation state and remove green circle
+          // CRITICAL FIX: Remove unit from queue BEFORE marking as moved
           setShootingActivationQueue(prev => prev.filter(u => u.id !== activeShootingUnit.id));
+          actions.addMovedUnit(activeShootingUnit.id);
           setActivationShotLog([]);
           setActiveShootingUnit(null);
           setSelectedShootingTarget(null);
@@ -1556,6 +1583,9 @@ interface ShootingResult {
       if (shootLeft === undefined) {
         throw new Error('shootLeft is required but was undefined');
       }
+      // CRITICAL FIX: Remove from queue FIRST to prevent re-activation
+      setShootingActivationQueue(prev => prev.filter(u => u.id !== activeShootingUnit.id));
+      
       if (shootLeft === activeShootingUnit.RNG_NB) {
         // Result: +1 step, Wait action logged, no Mark → Unit removed from activation queue
         if (gameState.episode_steps === undefined) {
@@ -1573,9 +1603,6 @@ interface ShootingResult {
         gameState.episode_steps = gameState.episode_steps + 1;
         actions.addMovedUnit(activeShootingUnit.id);
       }
-      
-      // Clear activation state and remove green circle
-      setShootingActivationQueue(prev => prev.filter(u => u.id !== activeShootingUnit.id));
       setActivationShotLog([]);
       setActiveShootingUnit(null);
       setSelectedShootingTarget(null);
@@ -1651,8 +1678,13 @@ interface ShootingResult {
             handleActiveUnitClick(targetId);
           } else {
             // Click on different unit in activation queue - check postponement
-            if (activeShootingUnit && !handlePostponementAttempt(targetId)) {
-              return; // Postponement forbidden
+            if (activeShootingUnit) {
+              // AI_TURN.md: Only allow postponement if unit hasn't started shooting
+              if (shootLeft !== undefined && shootLeft < (activeShootingUnit.RNG_NB || 0)) {
+                // Unit has already shot - cannot postpone
+                console.warn(`Unit ${activeShootingUnit.name || activeShootingUnit.id} must complete its activation - cannot postpone after shooting has started`);
+                return;
+              }
             }
             handleShootingUnitClick(targetId);
           }
@@ -1670,14 +1702,14 @@ interface ShootingResult {
   }, [shootingActivationQueue, activeShootingUnit, validTargetsPool, cleanupShootingPhase, handleShootingRightClick, handleActiveUnitClick, handlePostponementAttempt, handleShootingUnitClick, handleShootingTargetClick, handleEmptyBoardClick]);
 
   // AI_TURN.md: Phase Lifecycle Management
-  const enterShootingPhase = useCallback(() => {
-    const hasEligibleUnits = initializeShootingPhase();
-    if (!hasEligibleUnits) {
+  const enterShootingPhase = useCallback(() => {    
+    const eligibleUnits = initializeShootingPhase();
+    if (eligibleUnits.length === 0) {
       cleanupShootingPhase();
-      return false;
+      return [];
     }
-    return true;
-  }, [initializeShootingPhase, cleanupShootingPhase]);
+    return eligibleUnits;
+  }, [initializeShootingPhase, cleanupShootingPhase, shootingActivationQueue]);
 
   const exitShootingPhase = useCallback(() => {
     cleanupShootingPhase();
@@ -1697,39 +1729,13 @@ interface ShootingResult {
   // AI_TURN.md: Override selectUnit during shooting phase
   const selectUnit = useCallback((unitId: UnitId | null) => {
     
-    // CRITICAL: Auto-initialize shooting phase on first interaction
+    // AI_TURN.md: Route shooting phase to proper handler
     if (phase === "shoot") {
-      // Auto-trigger phase entry if not initialized
-      if (shootingActivationQueue.length === 0 && shootingState === 'WAITING_FOR_ACTIVATION') {
-        const hasEligibleUnits = enterShootingPhase();
-        if (!hasEligibleUnits) {
-          return; // Phase will auto-advance
-        }
-      }
-      
-      if (unitId === null) {
+      if (unitId !== null) {
+        handleShootingPhaseEvent('left_click', 'unit', unitId);
+      } else {
         handleShootingPhaseEvent('left_click', 'board');
-        return;
       }
-      
-      // CRITICAL FIX: Direct target click during shooting phase
-      if (activeShootingUnit && shootingState === 'WAITING_FOR_ACTION') {
-        const clickedUnit = units.find(u => u.id === unitId);
-        if (clickedUnit && clickedUnit.player !== activeShootingUnit.player) {
-          handleShootingTargetClick(unitId);
-          return;
-        }
-      }
-      
-      // CRITICAL FIX: Use fresh state from enterShootingPhase result instead of stale queue state
-      const clickedUnit = units.find(u => u.id === unitId);
-      if (clickedUnit && isUnitEligible(clickedUnit) && shootingState === 'WAITING_FOR_ACTIVATION') {
-        handleShootingUnitClick(unitId);
-        return;
-      }
-      
-      // Route other clicks through shooting state machine
-      handleShootingPhaseEvent('left_click', 'unit', unitId);
       return;
     }
 
@@ -2663,6 +2669,13 @@ interface ShootingResult {
     enterCombatPhase,
     exitCombatPhase,
     validateCombatState,
+    // AI_TURN.md: Direct state exposure for UI integration (no stale closure issues)
+    shootingPhaseState: {
+      activationQueue: shootingActivationQueue,
+      activeUnit: activeShootingUnit,
+      state: shootingState,
+      validTargets: validTargetsPool
+    },
     // rollD6 removed - now using shared gameRules import
   };
 };

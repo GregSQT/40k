@@ -77,8 +77,8 @@ export class UnitRenderer {
     const scaleRange = maxIconScale - minIconScale;
     const iconZIndex = minZIndex + Math.round((maxIconScale - unitIconScale) / scaleRange * unitZIndexRange);
     
-    // ===== ELIGIBILITY FROM PROPS =====
-    const isEligible = this.props.isEligible || false;
+    // ===== AI_TURN.md COMPLIANT ELIGIBILITY =====
+    const isEligible = this.calculateEligibilityCompliant();
     
     // ===== RENDER COMPONENTS =====
     this.renderUnitCircle(iconZIndex);
@@ -89,11 +89,33 @@ export class UnitRenderer {
     this.renderAttackCounter(unitIconScale);
   }
   
-  private calculateEligibility(): boolean {
-    // UnitRenderer should not calculate eligibility - this should be passed as a prop
-    // For now, return false and rely on parent components to determine eligibility
-    // TODO: Refactor to receive eligibility as a prop instead of calculating it
-    return false;
+  private calculateEligibilityCompliant(): boolean {
+    const { unit, phase, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled } = this.props;
+    
+    // AI_TURN.md: Basic eligibility checks
+    if (unit.CUR_HP === undefined || unit.CUR_HP <= 0) return false;
+    if (phase !== "combat" && unit.player !== currentPlayer) return false;
+    
+    switch (phase) {
+      case "move":
+        return !unitsMoved.includes(unit.id);
+      case "shoot":
+        // AI_TURN.md: Queue-based eligibility during active shooting phase
+        // Type-safe checks with proper fallbacks
+        if (unitsFled && unitsFled.includes(unit.id)) return false;
+        if (unit.RNG_NB === undefined || unit.RNG_NB <= 0) return false;
+        // Simplified check - parent should provide queue membership
+        return this.props.isEligible || false;
+      case "charge":
+        if (unitsCharged && unitsCharged.includes(unit.id)) return false;
+        if (unitsFled && unitsFled.includes(unit.id)) return false;
+        return true; // Simplified for charge phase
+      case "combat":
+        if (unitsAttacked && unitsAttacked.includes(unit.id)) return false;
+        return true; // Simplified for combat phase
+      default:
+        return false;
+    }
   }
   
   private renderUnitCircle(iconZIndex: number): void {
@@ -401,13 +423,9 @@ export class UnitRenderer {
       return;
     }
     
-    // TEMPORARY: Show counter if unit has shots, regardless of isEligible prop
+    // AI_TURN.md: Show counter only for eligible units with shots remaining
     if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) return;
-    // TODO: Fix the isEligible prop synchronization issue
-    // if (!this.props.isEligible) {
-    //   console.log(`🎯 ${unit.name} counter hidden: isEligible=false (but SHOOT_LEFT=${unit.SHOOT_LEFT})`);
-    //   return;
-    // }
+    if (!isEligible) return;
     
     const shotsLeft = unit.SHOOT_LEFT !== undefined ? unit.SHOOT_LEFT : unit.RNG_NB || 0;
     const totalShots = unit.RNG_NB || 0;
