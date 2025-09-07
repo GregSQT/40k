@@ -11,7 +11,7 @@
     }
   },
   "required_properties": [
-    "HP_MAX",
+    "MAX_HP",
     "MOVE",
     "RNG_RNG",
     "RNG_DMG",

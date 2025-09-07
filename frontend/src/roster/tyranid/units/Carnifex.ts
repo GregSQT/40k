@@ -9,7 +9,7 @@ export class Carnifex extends TyranidInfantryEliteMeleeElite {
   static T = 9;                // Toughness score
   static ARMOR_SAVE = 2;       // Armor save score
   static INVUL_SAVE = 0;       // Armor invulnerable save score
-  static HP_MAX = 8;           // Max hit points
+  static MAX_HP = 8;           // Max hit points
   static LD = 8;               // Leadership score
   static OC = 3;               // Operative Control
   static VALUE = 100;          // Unit value
@@ -37,7 +37,7 @@ export class Carnifex extends TyranidInfantryEliteMeleeElite {
   static ICON_SCALE = 2.5;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, Carnifex.HP_MAX, startPos);
+    super(name, Carnifex.MAX_HP, startPos);
   }
 }
 

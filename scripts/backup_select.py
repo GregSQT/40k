@@ -33,6 +33,7 @@ else:
         "AI_TRAINING.md",
         "AI_TURN.md",
         "config_loader.py",
+        "main.py",
 
 ######################################################################################################
 ##### ai files
@@ -44,7 +45,7 @@ else:
 ##### config files
 ######################################################################################################
         "config/board_config.json",    # Board Layout & Visualization
-        "config/config.json",        # Master Configuration & Paths
+        #"config/config.json",        # Master Configuration & Paths
         "config/game_config.json",   # Game Rules & Mechanics
         "config/rewards_config.json",  # Reward System Definitions
         "config/scenario.json",        # Game Scenarios
@@ -52,56 +53,63 @@ else:
         "config/training_config.json", # AI Training Parameters
         "config/unit_definitions.json", # Unit Stats & Abilities
         "config/unit_registry.json", # 
+        
+######################################################################################################
+##### Engine files
+######################################################################################################
+        "engine/__init__.py",
+        "engine/w40k_engine.py",
 
 ######################################################################################################
 ##### Frontend files
 ######################################################################################################
 
     ### frontend
-        "frontend/vite.config.ts",
         "frontend/tsconfig.json",
+        "frontend/vite.config.ts",        
 
     ### frontend/public/config
 
         # Frontend/src
-        "frontend/src/App.tsx",
         "frontend/src/App.css",
+        "frontend/src/App.tsx",        
         "frontend/src/main.tsx",
-        "frontend/src/Routes.tsx",
+        #"frontend/src/Routes.tsx",
 
         # Frontend/src/components
-        "frontend/src/components/BoardDisplay.tsx",
-        "frontend/src/components/BoardInteractions.tsx",
-        "frontend/src/components/BoardPvp.tsx",
-        "frontend/src/components/BoardReplay.tsx",
-        "frontend/src/components/CombatLogComponent.tsx",
-        "frontend/src/components/DiceRollComponent.tsx",
-        "frontend/src/components/ErrorBoundary.tsx",
-        "frontend/src/components/GameBoard.tsx",
-        "frontend/src/components/GameLog.tsx",
-        "frontend/src/components/GameRightColumn.tsx",
-        "frontend/src/components/TurnPhaseTracker.tsx",
-        "frontend/src/components/UnitStatusTable.tsx",
+        #"frontend/src/components/BoardDisplay.tsx",
+        #"frontend/src/components/BoardInteractions.tsx",
+        #"frontend/src/components/BoardPvp.tsx",
+        #"frontend/src/components/BoardReplay.tsx",
+        #"frontend/src/components/CombatLogComponent.tsx",
+        #"frontend/src/components/DiceRollComponent.tsx",
+        #"frontend/src/components/ErrorBoundary.tsx",
+        #"frontend/src/components/GameBoard.tsx",
+        "frontend/src/components/GameController.tsx",
+        #"frontend/src/components/GameLog.tsx",
+        #"frontend/src/components/GameRightColumn.tsx",
+        #"frontend/src/components/TurnPhaseTracker.tsx",
+        #"frontend/src/components/UnitStatusTable.tsx",
 
         # Frontend/src/constants
-        "frontend/src/constants/gameConfig.ts",
+        #"frontend/src/constants/gameConfig.ts",
 
         # Frontend/src/data
-        "frontend/src/data/Scenario.ts",
-        "frontend/src/data/Units.ts",
-        "frontend/src/data/UnitFactory.ts",
-        "frontend/src/data/UnitRegistry.ts",
+        #"frontend/src/data/Scenario.ts",
+        #"frontend/src/data/Units.ts",
+        #"frontend/src/data/UnitFactory.ts",
+        #"frontend/src/data/UnitRegistry.ts",
         
 
         # Frontend/src/hooks
         "frontend/src/hooks/useGameConfig.ts",
-        "frontend/src/hooks/useGameLog.ts",
+        "frontend/src/hooks/useGameLogs.ts",
 
         # Frontend/src/pages
-        "frontend/src/pages/GamePage.tsx",
-        "frontend/src/pages/HomePage.tsx",
-        "frontend/src/pages/PlayerVsAIPage.tsx",
-        "frontend/src/pages/ReplayPage.tsx",
+        #"frontend/src/pages/GamePage.tsx",
+        #"frontend/src/pages/HomePage.tsx",
+        #"frontend/src/pages/PlayerVsAIPage.tsx",
+        #"frontend/src/pages/ReplayPage.tsx",
 
 
         # Frontend/src/roster/spaceMarine
@@ -123,15 +131,15 @@ else:
         # frontend/src/services
 
         # frontend/src/types
-        "frontend/src/types/api.ts",
-        "frontend/src/types/game.ts",
-        "frontend/src/types/index.ts",
-        "frontend/src/types/replay.ts",
+        #"frontend/src/types/api.ts",
+        #"frontend/src/types/game.ts",
+        #"frontend/src/types/index.ts",
+        #"frontend/src/types/replay.ts",
 
         # frontend/src/utils
-        "frontend/src/utils/boardClickHandler.ts",
+        #"frontend/src/utils/boardClickHandler.ts",
         "frontend/src/utils/gameHelpers.ts",
-        "frontend/src/utils/probabilityCalculator.ts",
+        #"frontend/src/utils/probabilityCalculator.ts",
 
 ######################################################################################################
 ##### scripts files

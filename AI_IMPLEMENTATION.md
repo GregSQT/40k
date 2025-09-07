@@ -380,17 +380,33 @@ if time.time() - self.phase_start > 30:
 
 ```
 project_root/
-├── w40k_engine.py                  # ONLY engine file - no wrappers
-├── phase_handlers/                 # Pure function modules
-│   ├── movement_handlers.py        # Stateless movement functions
-│   ├── shooting_handlers.py        # Stateless shooting functions  
-│   ├── charge_handlers.py          # Stateless charge functions
-│   └── combat_handlers.py          # Stateless combat functions
-├── config/                         # Configuration files
-├── frontend/                       # Frontend with direct API calls
+├── engine/                       # Main game engine package
+│   ├── __init__.py               # Package initialization
+│   ├── w40k_engine.py            # Core engine class
+│   ├── phase_handlers/           # AI_TURN.md phase implementations
+│   │   ├── __init__.py
+│   │   ├── movement_handlers.py  # Movement phase logic
+│   │   ├── shooting_handlers.py  # Shooting phase logic (future)
+│   │   ├── charge_handlers.py    # Charge phase logic (future)
+│   │   └── combat_handlers.py    # Combat phase logic (future)
+│   └── utils/                    # Engine utilities
+│       ├── __init__.py
+│       └── validators.py         # Field validation utilities
+├── config/                       # Configuration files
+│   ├── board_config.json
+│   ├── unit_definitions.json
+│   └── scenario.json
+├── docs/                          # Documentation
+├── frontend/                      # Frontend with direct API calls
 │   └── services/
-│       └── engineApi.ts            # Pure functions, no classes
-└── tests/                          # Test files
+│       └── engineApi.ts           # Pure functions, no classes
+├── scripts/                       # Utility scripts
+├── tests/                         # Compliance validation tests
+│   ├── __init__.py
+│   ├── test_compliance.py
+│   └── test_movement.py
+├── main.py                        # Entry point script
+└── .venv/                         # Virtual environment
 
 # DELETED ENTIRELY:
 # wrappers/ directory - architectural violation

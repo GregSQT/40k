@@ -10,7 +10,7 @@ export class CaptainGravis extends SpaceMarineInfantryLeaderEliteMeleeElite {
   static T = 6;                // Toughness score
   static ARMOR_SAVE = 3;       // Armor save score
   static INVUL_SAVE = 4;       // Armor invulnerable save score
-  static HP_MAX = 6;           // Max hit points
+  static MAX_HP = 6;           // Max hit points
   static LD = 6;               // Leadership score
   static OC = 1;               // Operative Control
   static VALUE = 100;          // Unit value
@@ -38,7 +38,7 @@ export class CaptainGravis extends SpaceMarineInfantryLeaderEliteMeleeElite {
   static ICON_SCALE = 1.8;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, CaptainGravis.HP_MAX, startPos);
+    super(name, CaptainGravis.MAX_HP, startPos);
   }
 }
 
