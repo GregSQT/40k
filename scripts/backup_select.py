@@ -152,6 +152,7 @@ else:
         "frontend/src/roster/tyranid/units/Carnifex.ts",
                 
         # frontend/src/services
+        "frontend/src/services/aiService.ts",
 
         # frontend/src/types
         #"frontend/src/types/api.ts",

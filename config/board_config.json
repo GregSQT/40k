@@ -1,7 +1,7 @@
 ﻿{
   "default": {
-    "cols": 25,
-    "rows": 21,
+    "width": 25,
+    "height": 21,
     "hex_radius": 25,
     "margin": 4,
     "colors": {

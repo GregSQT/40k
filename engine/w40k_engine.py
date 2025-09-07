@@ -63,9 +63,9 @@ class W40KEngine:
             "charge_range_rolls": {},
             
             # Board state
-            "board_width": config.get("board", {}).get("width", 10),
-            "board_height": config.get("board", {}).get("height", 10),
-            "wall_hexes": set(map(tuple, config.get("board", {}).get("wall_hexes", [])))
+            "board_width": config["board"]["width"],
+            "board_height": config["board"]["height"],
+            "wall_hexes": set(map(tuple, config["board"]["wall_hexes"]))
         }
         
         # Initialize units from config
@@ -92,36 +92,36 @@ class W40KEngine:
             "col": config["col"],
             "row": config["row"],
             
-            # UPPERCASE STATS (AI_TURN.md requirement)
+            # UPPERCASE STATS (AI_TURN.md requirement) - NO DEFAULTS
             "CUR_HP": config["CUR_HP"],
             "MAX_HP": config["MAX_HP"],
             "MOVE": config["MOVE"],
             "T": config["T"],
             "ARMOR_SAVE": config["ARMOR_SAVE"],
-            "INVUL_SAVE": config.get("INVUL_SAVE", 7),
+            "INVUL_SAVE": config["INVUL_SAVE"],
             
-            # Ranged combat stats
-            "RNG_NB": config.get("RNG_NB", 0),
-            "RNG_RNG": config.get("RNG_RNG", 0),
-            "RNG_ATK": config.get("RNG_ATK", 4),
-            "RNG_STR": config.get("RNG_STR", 4),
-            "RNG_DMG": config.get("RNG_DMG", 1),
-            "RNG_AP": config.get("RNG_AP", 0),
+            # Ranged combat stats - NO DEFAULTS
+            "RNG_NB": config["RNG_NB"],
+            "RNG_RNG": config["RNG_RNG"],
+            "RNG_ATK": config["RNG_ATK"],
+            "RNG_STR": config["RNG_STR"],
+            "RNG_DMG": config["RNG_DMG"],
+            "RNG_AP": config["RNG_AP"],
             
-            # Close combat stats
-            "CC_NB": config.get("CC_NB", 1),
-            "CC_RNG": config.get("CC_RNG", 1),
-            "CC_ATK": config.get("CC_ATK", 4),
-            "CC_STR": config.get("CC_STR", 4),
-            "CC_DMG": config.get("CC_DMG", 1),
-            "CC_AP": config.get("CC_AP", 0),
+            # Close combat stats - NO DEFAULTS
+            "CC_NB": config["CC_NB"],
+            "CC_RNG": config["CC_RNG"],
+            "CC_ATK": config["CC_ATK"],
+            "CC_STR": config["CC_STR"],
+            "CC_DMG": config["CC_DMG"],
+            "CC_AP": config["CC_AP"],
             
-            # Optional stats
-            "LD": config.get("LD", 7),
-            "OC": config.get("OC", 1),
-            "VALUE": config.get("VALUE", 100),
-            "ICON": config.get("ICON", "default"),
-            "ICON_SCALE": config.get("ICON_SCALE", 1.0)
+            # Required stats - NO DEFAULTS
+            "LD": config["LD"],
+            "OC": config["OC"],
+            "VALUE": config["VALUE"],
+            "ICON": config["ICON"],
+            "ICON_SCALE": config["ICON_SCALE"]
         }
     
     def _validate_uppercase_fields(self, unit: Dict[str, Any]):
@@ -139,29 +139,22 @@ class W40KEngine:
     
     # ===== CORE ENGINE METHODS (Gym Interface) =====
     
-    def step(self, action: int) -> Tuple[List[float], float, bool, bool, Dict]:
+    def step(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """
-        Execute gym action with built-in step counting.
+        Execute semantic action with built-in step counting.
         
         AI_TURN.md COMPLIANCE:
         - ONLY step counting location in entire codebase
         - Sequential activation: ONE unit per step
-        - Returns standard gym interface
+        - Accepts semantic actions: {'action': 'move', 'unitId': 1, 'destCol': 5, 'destRow': 3}
         """
         # BUILT-IN STEP COUNTING - Only location in entire system
         self.game_state["episode_steps"] += 1
         
-        # Process action with AI_TURN.md compliance
-        success, result = self._process_action(action)
+        # Process semantic action with AI_TURN.md compliance
+        success, result = self._process_semantic_action(action)
         
-        # Build gym-compliant response
-        observation = self._build_observation()
-        reward = self._calculate_reward(success, result)
-        terminated = self.game_state["game_over"]
-        truncated = False
-        info = {"success": success, "result": result, "phase": self.game_state["phase"]}
-        
-        return observation, reward, terminated, truncated, info
+        return success, result
     
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[List[float], Dict]:
         """Reset game state for new episode."""
@@ -190,16 +183,20 @@ class W40KEngine:
         for unit in self.game_state["units"]:
             unit["CUR_HP"] = unit["MAX_HP"]
         
+        # Build initial activation pool for starting player
+        self._build_move_activation_pool()
+        
         observation = self._build_observation()
         info = {"phase": self.game_state["phase"]}
         
         return observation, info
     
-    def _process_action(self, action: int) -> Tuple[bool, Dict[str, Any]]:
+    def _process_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """
-        Process action using AI_TURN.md state machine.
+        Process semantic action using AI_TURN.md state machine.
         
         Phase sequence: move -> shoot -> charge -> combat -> next player
+        Actions: {'action': 'move', 'unitId': 1, 'destCol': 5, 'destRow': 3}
         """
         current_phase = self.game_state["phase"]
         
@@ -219,14 +216,17 @@ class W40KEngine:
     def _process_movement_phase(self, action: int) -> Tuple[bool, Dict[str, Any]]:
         """Process movement phase with AI_TURN.md decision tree logic."""
         
-        # Build activation pool if empty
-        if not self.game_state["move_activation_pool"]:
+        # VERY BEGINNING of movement phase - clean tracking and build pool
+        if not hasattr(self, '_phase_initialized') or not self._phase_initialized:
+            self._tracking_cleanup()
             self._build_move_activation_pool()
+            self._phase_initialized = True
         
-        # Check if phase should complete
+        # Check if phase should complete (empty pool means phase is done)
         if not self.game_state["move_activation_pool"]:
+            self._phase_initialized = False  # Reset for next phase
             self._advance_to_shooting_phase()
-            return self._process_shooting_phase(action)
+            return True, {"type": "phase_complete", "next_player": self.game_state["current_player"]}
         
         # Get active unit (sequential activation - ONE unit per gym step)
         active_unit = self._get_unit_by_id(self.game_state["move_activation_pool"][0])
@@ -248,31 +248,70 @@ class W40KEngine:
         self.game_state["move_activation_pool"] = []
         current_player = self.game_state["current_player"]
         
+        print(f"DEBUG: Building pool for player {current_player}")
+        
         for unit in self.game_state["units"]:
-            # AI_TURN.md eligibility decision tree
+            print(f"DEBUG: Checking unit {unit['id']}: Player={unit['player']}, HP={unit['CUR_HP']}")
+            # AI_TURN.md eligibility: alive + current_player only
             if (unit["CUR_HP"] > 0 and 
-                unit["player"] == current_player and
-                unit["id"] not in self.game_state["units_moved"]):
+                unit["player"] == current_player):
                 
                 self.game_state["move_activation_pool"].append(unit["id"])
-    
-    def _execute_movement_action(self, unit: Dict[str, Any], action: int) -> Tuple[bool, Dict[str, Any]]:
-        """Execute movement action with AI_TURN.md restrictions."""
+                print(f"DEBUG: Added {unit['id']} to activation pool")
         
-        # Action mapping
-        if action == 0:  # Move North
-            return self._attempt_movement(unit, 0, -1)
-        elif action == 1:  # Move South
-            return self._attempt_movement(unit, 0, 1)
-        elif action == 2:  # Move East
-            return self._attempt_movement(unit, 1, 0)
-        elif action == 3:  # Move West
-            return self._attempt_movement(unit, -1, 0)
-        elif action == 7:  # Wait
+        print(f"DEBUG: Final activation pool: {self.game_state['move_activation_pool']}")
+    
+    def _execute_movement_action(self, unit: Dict[str, Any], action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Execute semantic movement action with AI_TURN.md restrictions."""
+        
+        action_type = action.get("action")
+        
+        if action_type == "move":
+            dest_col = action.get("destCol")
+            dest_row = action.get("destRow")
+            
+            if dest_col is None or dest_row is None:
+                return False, {"error": "missing_destination", "action": action}
+            
+            return self._attempt_movement_to_destination(unit, dest_col, dest_row)
+            
+        elif action_type == "skip":
             self.game_state["units_moved"].add(unit["id"])
-            return True, {"type": "wait", "unit_id": unit["id"]}
+            return True, {"action": "skip", "unitId": unit["id"]}
+            
         else:
-            return False, {"error": "invalid_action_for_phase", "action": action, "phase": "move"}
+            return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "move"}
+    
+    def _attempt_movement_to_destination(self, unit: Dict[str, Any], dest_col: int, dest_row: int) -> Tuple[bool, Dict[str, Any]]:
+        """Attempt unit movement to specific destination with AI_TURN.md validation."""
+        
+        # Validate destination
+        if not self._is_valid_destination(dest_col, dest_row, unit):
+            return False, {"error": "invalid_destination", "target": (dest_col, dest_row)}
+        
+        # Check for flee (was adjacent to enemy before move)
+        was_adjacent = self._is_adjacent_to_enemy(unit)
+        
+        # Store original position
+        orig_col, orig_row = unit["col"], unit["row"]
+        
+        # Execute movement
+        unit["col"] = dest_col
+        unit["row"] = dest_row
+        
+        # Apply AI_TURN.md tracking
+        self.game_state["units_moved"].add(unit["id"])
+        if was_adjacent:
+            self.game_state["units_fled"].add(unit["id"])
+        
+        return True, {
+            "action": "flee" if was_adjacent else "move",
+            "unitId": unit["id"],
+            "fromCol": orig_col,
+            "fromRow": orig_row,
+            "toCol": dest_col,
+            "toRow": dest_row
+        }
     
     def _attempt_movement(self, unit: Dict[str, Any], col_diff: int, row_diff: int) -> Tuple[bool, Dict[str, Any]]:
         """Attempt unit movement with AI_TURN.md validation."""
@@ -331,7 +370,7 @@ class W40KEngine:
     
     def _is_adjacent_to_enemy(self, unit: Dict[str, Any]) -> bool:
         """Check if unit is adjacent to enemy (AI_TURN.md flee detection)."""
-        cc_range = unit.get("CC_RNG", 1)
+        cc_range = unit["CC_RNG"]
         
         for enemy in self.game_state["units"]:
             if (enemy["player"] != unit["player"] and enemy["CUR_HP"] > 0):
@@ -353,9 +392,8 @@ class W40KEngine:
     # ===== PHASE TRANSITION LOGIC =====
     
     def _advance_to_shooting_phase(self):
-        """Advance to shooting phase per AI_TURN.md progression."""
-        self.game_state["phase"] = "shoot"
-        self.game_state["shoot_activation_pool"] = []
+        """Skip other phases for movement-only testing - advance directly to next player."""
+        self._advance_to_next_player()
     
     def _process_shooting_phase(self, action: int) -> Tuple[bool, Dict[str, Any]]:
         """Placeholder for shooting phase - implements AI_TURN.md decision tree."""
@@ -390,18 +428,18 @@ class W40KEngine:
         self.game_state["current_player"] = 1 - self.game_state["current_player"]
         
         if self.game_state["current_player"] == 0:
-            # Turn increments when Player 0 starts movement (AI_TURN.md specification)
             self.game_state["turn"] += 1
         
-        # Reset to movement phase
         self.game_state["phase"] = "move"
-        
-        # Clear tracking sets for new turn
+    
+    def _tracking_cleanup(self):
+        """Clear tracking sets at the VERY BEGINNING of movement phase."""
         self.game_state["units_moved"] = set()
         self.game_state["units_fled"] = set()
         self.game_state["units_shot"] = set()
         self.game_state["units_charged"] = set()
         self.game_state["units_attacked"] = set()
+        self.game_state["move_activation_pool"] = []
     
     # ===== UTILITY METHODS =====
     

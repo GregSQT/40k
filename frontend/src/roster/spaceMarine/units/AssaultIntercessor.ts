@@ -1,6 +1,6 @@
 // frontend/src/roster/spaceMarine/units/AssaultIntercessor.ts
 
-import { SpaceMarineInfantryTroopMeleeTroop } from "../classes/SpaceMarineInfantryTroopMeleeTroop";
+import { SpaceMarineInfantryTroopMeleeTroop } from "../Classes/SpaceMarineInfantryTroopMeleeTroop";
 
 export class AssaultIntercessor extends SpaceMarineInfantryTroopMeleeTroop {
   static NAME = "Assault Intercessor";

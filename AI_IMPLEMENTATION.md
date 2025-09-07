@@ -398,6 +398,9 @@ project_root/
 │   └── services/
 │       └── engineApi.ts           # Pure functions, no classes
 ├── scripts/                       # Utility scripts
+├── services/              # Backend services
+│   ├── api_server.py     # Game engine API
+│   └── requirements.txt   # Service deps
 ├── tests/                         # Compliance validation tests
 │   ├── __init__.py
 │   ├── test_compliance.py
@@ -464,20 +467,20 @@ project_root/
 │   │   │
 │   │   ├── roster/                 # PRESERVED FROM LEGACY (complete unit definitions)
 │   │   │   ├── SpaceMarine/
-│   │   │   │   ├── classes/
+│   │   │   │   ├── Classes/
 │   │   │   │   │   ├── SpaceMarineInfantryLeaderMeleeElite.ts
 │   │   │   │   │   ├── SpaceMarineInfantryTroopMeleeTroop.ts
 │   │   │   │   │   └── SpaceMarineInfantryTroopRangedSwarm.ts
-│   │   │   │   └── units/
+│   │   │   │   └── Units/
 │   │   │   │       ├── Intercessor.ts
 │   │   │   │       ├── AssaultIntercessor.ts
 │   │   │   │       └── CaptainGravis.ts
 │   │   │   └── Tyranid/
-│   │   │       ├── classes/
+│   │   │       ├── Classes/
 │   │   │       │   ├── TyranidInfantryEliteMeleeElite.ts
 │   │   │       │   ├── TyranidInfantrySwarmMeleeSwarm.ts
 │   │   │       │   └── TyranidInfantrySwarmRangedSwarm.ts
-│   │   │        └── units/
+│   │   │        └── Units/
 │   │   │           ├── Termagant.ts
 │   │   │           ├── Hormagaunt.ts
 │   │   │           └── Carnifex.ts
