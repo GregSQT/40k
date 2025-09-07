@@ -1,0 +1,25 @@
+{
+  "game_rules": {
+    "max_turns": 8,
+    "turn_limit_penalty": -1,
+    "charge_max_distance": 13
+  },
+  "gameplay": {
+    "phase_order": ["move", "shoot", "charge", "combat"],
+    "simultaneous_actions": false,
+    "auto_end_turn": true
+  },
+  "ai_behavior": {
+    "timeout_ms": 3000,
+    "retries": 3,
+    "fallback_action": "wait"
+  },
+  "api": {
+    "prefix": "/ai",
+    "action_endpoint": "/action",
+    "actions_endpoint": "/actions"
+  },
+  "ui": {
+    "log_available_height": 220
+  }
+}
