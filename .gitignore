@@ -1,0 +1,205 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# .gitignore pour WH40K Tactics RL - Projet d'IA et Gaming
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ╔═════════════════════════════════════════════════════════════════════════════╗
+# ║                                SYSTÈME                                      ║
+# ╚═════════════════════════════════════════════════════════════════════════════╝
+
+# Fichiers système Windows/Mac/Linux
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+$RECYCLE.BIN/
+Desktop.ini
+
+# Environnements virtuels Python
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.Python
+
+# ╔═════════════════════════════════════════════════════════════════════════════╗
+# ║                              FRONTEND / NODE.JS                            ║
+# ╚═════════════════════════════════════════════════════════════════════════════╝
+
+# Dépendances Node.js (TRÈS VOLUMINEUX - des centaines de MB)
+node_modules/
+*.pnp
+.pnp.js
+
+# Build outputs Frontend
+dist/
+build/
+
+# TypeScript build cache (peut devenir volumineux)
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Logs NPM/Yarn
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# ╔═════════════════════════════════════════════════════════════════════════════╗
+# ║                              PYTHON / DÉVELOPPEMENT                        ║
+# ╚═════════════════════════════════════════════════════════════════════════════╝
+
+# Cache Python (généré automatiquement)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Tests Python
+.pytest_cache/
+.coverage
+htmlcov/
+.nyc_output
+
+# ╔═════════════════════════════════════════════════════════════════════════════╗
+# ║                           INTELLIGENCE ARTIFICIELLE                        ║
+# ║                              ⚠️  FICHIERS TRÈS VOLUMINEUX                 ║
+# ╚═════════════════════════════════════════════════════════════════════════════╝
+
+# Modèles d'IA entraînés (plusieurs MB chacun - CRITIQUE)
+ai/model.zip
+ai/models/
+ai/models/current/
+ai/models/backups/
+model_backup_*.zip
+*.pkl
+*.h5
+*.hdf5
+models/
+checkpoints/
+
+# Logs d'entraînement TensorBoard (centaines de MB - CRITIQUE)
+tensorboard/
+.tensorboard/
+*.tfevents.*
+
+# Event logs et replays (peuvent être volumineux)
+ai/event_log/
+public/ai/event_log/
+frontend/public/ai/event_log/
+*_replay.json
+*_summary.json
+*_web_replay.json
+
+# Fichiers temporaires d'entraînement
+ai/cache/
+ai/temp/
+
+# ╔═════════════════════════════════════════════════════════════════════════════╗
+# ║                              CONFIGURATION                                  ║
+# ╚═════════════════════════════════════════════════════════════════════════════╝
+
+# Variables d'environnement
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Configurations locales (peuvent contenir des données sensibles)
+config.local.json
+config/local/
+ai/scenario_local.json
+ai/session_scenarios/
+
+# ╔═════════════════════════════════════════════════════════════════════════════╗
+# ║                           FICHIERS TEMPORAIRES                             ║
+# ╚═════════════════════════════════════════════════════════════════════════════╝
+
+# Logs généraux
+logs/
+*.log
+backup.log
+
+# Fichiers temporaires
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Fichiers de sauvegarde
+backup_*/
+versions/
+*.bak
+*.backup
+backup/
+
+# Scripts PowerShell temporaires
+ps.ps1
+*.ps1.bak
+
+# ╔═════════════════════════════════════════════════════════════════════════════╗
+# ║                            OUTILS DE DÉVELOPPEMENT                         ║
+# ╚═════════════════════════════════════════════════════════════════════════════╝
+
+# IDEs
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json  
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+*.suo
+*.user
+*.sln.docstates
+
+# Coverage et tests
+coverage/
+*.lcov
+
+# Documentation builds
+docs/_build/
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# ╔═════════════════════════════════════════════════════════════════════════════╗
+# ║                              DONNÉES / ARCHIVES                            ║
+# ╚═════════════════════════════════════════════════════════════════════════════╝
+
+# Archives (sauf package.json nécessaire)
+*.zip
+*.tar.gz
+*.rar
+*.7z
+!package.json
+
+# Gros fichiers de données
+*.csv
+*.xlsx
+*.json.bak
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# ╔═════════════════════════════════════════════════════════════════════════════╗
+# ║                              EXCEPTIONS IMPORTANTES                        ║
+# ╚═════════════════════════════════════════════════════════════════════════════╝
+
+# Garder ces fichiers même s'ils matchent les patterns ci-dessus
+!config/*.json
+!frontend/package.json
+!package.json
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FIN du .gitignore - Dernière mise à jour: Juin 2025
+# ═══════════════════════════════════════════════════════════════════════════════

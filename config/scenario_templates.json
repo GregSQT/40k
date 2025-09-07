@@ -1,0 +1,170 @@
+{
+  "solo_spacemarine_infantry_leaderelite_meleeelite": {
+    "description": "Solo training for SpaceMarine_Infantry_LeaderElite_MeleeElite agents (CaptainGravis focus)",
+    "agent_compositions": {
+      "SpaceMarine_Infantry_LeaderElite_MeleeElite": ["CaptainGravis"]
+    },
+    "unit_counts": {
+      "CaptainGravis": 2
+    },
+    "deployment_zones": {
+      "0": [[13,13], [19,12]],
+      "1": [[11,6], [5,7]]
+    },
+    "difficulty": "easy",
+    "training_focus": "solo"
+  },
+  "solo_spacemarine_infantry_troop_rangedswarm": {
+    "description": "Solo training for SpaceMarine_Infantry_Troop_RangedSwarm agents (Intercessor focus)",
+    "agent_compositions": {
+      "SpaceMarine_Infantry_Troop_RangedSwarm": ["Intercessor"]
+    },
+    "unit_counts": {
+      "Intercessor": 2
+    },
+    "deployment_zones": {
+      "0": [[13,13], [19,12]],
+      "1": [[11,6], [5,7]]
+    },
+    "difficulty": "easy",
+    "training_focus": "solo"
+  },
+  "solo_spacemarine_infantry_troop_meleetroop": {
+    "description": "Solo training for SpaceMarine_Infantry_Troop_MeleeTroop agents (Assault Intercessor focus)",
+    "agent_compositions": {
+      "SpaceMarine_Infantry_Troop_MeleeTroop": ["AssaultIntercessor"]
+    },
+    "unit_counts": {
+      "Intercessor": 2
+    },
+    "deployment_zones": {
+      "0": [[13,13], [19,12]],
+      "1": [[11,6], [5,7]]
+    },
+    "difficulty": "easy",
+    "training_focus": "later"
+  },
+  "solo_tyranid_infantry_elite_meleeelite": {
+    "description": "Solo training for Tyranid_Infantry_Elite_MeleeElite agents (Carnifex focus)",
+    "agent_compositions": {
+      "Tyranid_Infantry_Elite_MeleeElite": ["Carnifex"]
+    },
+    "unit_counts": {
+      "Carnifex": 2
+    },
+    "deployment_zones": {
+      "0": [[13,13], [19,12]],
+      "1": [[11,6], [5,7]]
+    },
+    "difficulty": "easy",
+    "training_focus": "solo"
+  },
+  "solo_tyranid_infantry_swarm_meleeswarm": {
+    "description": "Solo training for Tyranid_Infantry_Swarm_MeleeSwarm agents (Hormagaunt focus)",
+    "agent_compositions": {
+      "Tyranid_Infantry_Swarm_MeleeSwarm": ["Hormagaunt"]
+    },
+    "unit_counts": {
+      "Hormagaunt": 2
+    },
+    "deployment_zones": {
+      "0": [[13,13], [19,12]],
+      "1": [[11,6], [5,7]]
+    },
+    "difficulty": "easy",
+    "training_focus": "solo"
+  },
+  "cross_spacemarine_vs_tyranid_balanced": {
+    "description": "Balanced cross-faction training: Space Marines vs Tyranids",
+    "agent_compositions": {
+      "SpaceMarine_Infantry_Troop_RangedSwarm": ["Intercessor"],
+      "Tyranid_Infantry_Swarm_MeleeSwarm": ["Hormagaunt"]
+    },
+    "unit_counts": {
+      "Intercessor": 2,
+      "Hormagaunt": 4
+    },
+    "deployment_zones": {
+      "0": [[13,13], [19,12]],
+      "1": [[11,6], [5,7], [17,6], [15,4], [7,5], [3,9]]
+    },
+    "difficulty": "medium",
+    "training_focus": "cross_faction"
+  },
+  "cross_melee_ranged_training": {
+    "description": "Cross-role training: Melee units vs Ranged units",
+    "agent_compositions": {
+      "SpaceMarine_Infantry_LeaderElite_MeleeElite": ["CaptainGravis"],
+      "SpaceMarine_Infantry_Troop_RangedSwarm": ["Intercessor"]
+    },
+    "unit_counts": {
+      "CaptainGravis": 2,
+      "Intercessor": 6  
+    },
+    "deployment_zones": {
+      "0": [[13,13], [19,12]],
+      "1": [[11,6], [5,7], [17,6], [15,4], [7,5], [3,9]]
+    },
+    "difficulty": "medium",
+    "training_focus": "cross_faction"
+  },
+  "elite_units_training": {
+    "description": "Elite unit training with CaptainGravis and Carnifex",
+    "agent_compositions": {
+      "SpaceMarine_Infantry_LeaderElite_MeleeElite": ["CaptainGravis"],
+      "Tyranid_Infantry_Elite_MeleeElite": ["Carnifex"]
+    },
+    "unit_counts": {
+      "CaptainGravis": 2,
+      "Carnifex": 2
+    },
+    "deployment_zones": {
+      "0": [[13,13], [19,12]],
+      "1": [[11,6], [5,7]]
+    },
+    "difficulty": "hard",
+    "training_focus": "cross_faction"
+  },
+  "marines_vs_tyranids_focus": {
+    "description": "New team composition: Marines (2 Intercessors, 1 Captain Gravis) vs Tyranids (6 Hormagaunts, 1 Carnifex)",
+    "agent_compositions": {
+      "SpaceMarine_Infantry_Troop_RangedSwarm": ["Intercessor"],
+      "SpaceMarine_Infantry_LeaderElite_MeleeElite": ["CaptainGravis"],
+      "Tyranid_Infantry_Swarm_MeleeSwarm": ["Hormagaunt"],
+      "Tyranid_Infantry_Elite_MeleeElite": ["Carnifex"]
+    },
+    "unit_counts": {
+      "Intercessor": 2,
+      "CaptainGravis": 1,
+      "Hormagaunt": 8,
+      "Carnifex": 1
+    },
+    "deployment_zones": {
+      "0": [[13,13], [19,12], [7,14]],
+      "1": [[11,6], [5,7], [17,6], [15,4], [15,9], [16,5], [5,8], [9,4], [19,7]]
+    },
+    "difficulty": "hard",
+    "training_focus": "balanced"
+  },
+  "marines_vs_tyranids_scenario": {
+    "description": "New team composition: Marines (2 Intercessors, 1 Captain Gravis) vs Tyranids (6 Hormagaunts, 1 Carnifex)",
+    "agent_compositions": {
+      "SpaceMarine_Infantry_Troop_RangedSwarm": ["Intercessor"],
+      "SpaceMarine_Infantry_LeaderElite_MeleeElite": ["CaptainGravis"],
+      "Tyranid_Infantry_Swarm_MeleeSwarm": ["Hormagaunt"],
+      "Tyranid_Infantry_Elite_MeleeElite": ["Carnifex"]
+    },
+    "unit_counts": {
+      "Intercessor": 2,
+      "CaptainGravis": 1,
+      "Hormagaunt": 8,
+      "Carnifex": 1
+    },
+    "deployment_zones": {
+      "0": [[16,19], [12,19], [14,19]],
+      "1": [[4,3], [6,2], [8,1], [10,1], [12,1], [14,1], [16,1], [18,2], [20,3]]
+    },
+    "difficulty": "hard",
+    "training_focus": "balanced"
+  }
+} 
