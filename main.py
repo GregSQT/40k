@@ -132,7 +132,9 @@ def create_test_scenario(unit_definitions):
         "col": 1,
         "row": 1,
         "unitType": unit_type_0,
-        "CUR_HP": unit_def_0["MAX_HP"]
+        "CUR_HP": unit_def_0["MAX_HP"],  # Set current HP to max HP
+        "SHOOT_LEFT": unit_def_0["RNG_NB"],  # Initialize shots remaining
+        "ATTACK_LEFT": unit_def_0["CC_NB"]   # Initialize attacks remaining
     })
     
     # Player 1 unit
@@ -145,7 +147,9 @@ def create_test_scenario(unit_definitions):
         "col": 8,
         "row": 8,
         "unitType": unit_type_1,
-        "CUR_HP": unit_def_1["MAX_HP"]
+        "CUR_HP": unit_def_1["MAX_HP"],  # Set current HP to max HP
+        "SHOOT_LEFT": unit_def_1["RNG_NB"],  # Initialize shots remaining
+        "ATTACK_LEFT": unit_def_1["CC_NB"]   # Initialize attacks remaining
     })
     
     return units

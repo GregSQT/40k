@@ -430,15 +430,12 @@ project_root/
 │   │       └── config.json                # COPIED FROM LEGACY
 │   │
 │   ├── src/
-│   │   ├── App.tsx                         # COPIED FROM LEGACY
-│   │   ├── App.css                         # COPIED FROM LEGACY
-│   │   ├── Routes.tsx                      # COPIED FROM LEGACY
-│   │   │
 │   │   ├── components/             # PRESERVED FROM LEGACY (PIXI.js components)
 │   │   │   ├── BoardDisplay.tsx             # Main board display component
 │   │   │   ├── BoardInteractions.tsx       # Board interaction handling
 │   │   │   ├── BoardPvp.tsx                # PvP board implementation
 │   │   │   ├── BoardReplay.tsx             # Replay functionality
+│   │   │   ├──BoardWithAPI.tsx
 │   │   │   ├── CombatLogComponent.tsx      # Combat logging display
 │   │   │   ├── DiceRollComponent.tsx       # Dice roll visualization
 │   │   │   ├── ErrorBoundary.tsx           # Error handling wrapper
@@ -454,16 +451,26 @@ project_root/
 │   │   │   ├── UnitSelector.tsx            # Unit selection interface
 │   │   │   └── UnitStatusTable.tsx         # Unit status overview
 │   │   │
-│   │   ├── types/                  # PRESERVED FROM LEGACY
-│   │   │   ├── api.ts                      # API interface definitions
-│   │   │   ├── game.ts                     # Game state type definitions
-│   │   │   ├── index.ts                    # Exported type collections
-│   │   │   └── replay.ts                   # Replay system types
-│   │   │
 │   │   ├── data/                   # PRESERVED FROM LEGACY
 │   │   │   ├── Units.ts                    # Unit data structures
 │   │   │   ├── UnitFactory.ts              # Unit creation logic
 │   │   │   └── Scenario.ts                 # Scenario definitions
+│   │   │
+│   │   ├── hooks/                  # DO NOT COPY (built for legacy API)
+│   │   │   ├── useAIPlayer.ts              # Legacy hook (rebuild needed)
+│   │   │   ├── useAITurn.ts                # Legacy hook (rebuild needed)
+│   │   │   ├── useEngineAPI.ts
+│   │   │   ├── useGameActions.ts           # Legacy hook (rebuild needed)
+│   │   │   ├── useGameConfig.ts            # Legacy hook (rebuild needed)
+│   │   │   ├── useGameLog.ts               # Legacy hook (rebuild needed)
+│   │   │   ├── useGameState.ts             # Legacy hook (rebuild needed)
+│   │   │   └── usePhaseTransition.ts       # Legacy hook (rebuild needed)
+│   │   │
+│   │   ├── pages/                  # PRESERVED FROM LEGACY
+│   │   │   ├── HomePage.tsx                # Home page component
+│   │   │   ├── GamePage.tsx                # Main game page
+│   │   │   ├── PlayerVsAIPage.tsx          # PvE game mode
+│   │   │   └── ReplayPage.tsx              # Replay viewer
 │   │   │
 │   │   ├── roster/                 # PRESERVED FROM LEGACY (complete unit definitions)
 │   │   │   ├── SpaceMarine/
@@ -480,10 +487,19 @@ project_root/
 │   │   │       │   ├── TyranidInfantryEliteMeleeElite.ts
 │   │   │       │   ├── TyranidInfantrySwarmMeleeSwarm.ts
 │   │   │       │   └── TyranidInfantrySwarmRangedSwarm.ts
-│   │   │        └── Units/
+│   │   │       └── Units/
 │   │   │           ├── Termagant.ts
 │   │   │           ├── Hormagaunt.ts
 │   │   │           └── Carnifex.ts
+│   │   │
+│   │   ├── services/
+│   │   │   └── engineApi.ts                # Pure functions only
+│   │   │
+│   │   ├── types/                  # PRESERVED FROM LEGACY
+│   │   │   ├── api.ts                      # API interface definitions
+│   │   │   ├── games.ts                     # Game state type definitions
+│   │   │   ├── index.ts                    # Exported type collections
+│   │   │   └── replay.ts                   # Replay system types
 │   │   │
 │   │   ├── utils/                  # EVALUATE INDIVIDUALLY
 │   │   │   ├── boardClickHandler.ts        # UI event handling (SAFE)
@@ -492,28 +508,18 @@ project_root/
 │   │   │   ├── CombatSequenceManager.ts    # Combat UI logic (EVALUATE)
 │   │   │   └── ShootingSequenceManager.ts  # Shooting UI logic (EVALUATE)
 │   │   │
-│   │   ├── services/
-│   │   │   ├── engineApi.ts                # Pure functions only
-│   │   │
-│   │   ├── hooks/                  # DO NOT COPY (built for legacy API)
-│   │   │   ├── useAIPlayer.ts              # Legacy hook (rebuild needed)
-│   │   │   ├── useAITurn.ts                # Legacy hook (rebuild needed)
-│   │   │   ├── useGameActions.ts           # Legacy hook (rebuild needed)
-│   │   │   ├── useGameConfig.ts            # Legacy hook (rebuild needed)
-│   │   │   ├── useGameLog.ts               # Legacy hook (rebuild needed)
-│   │   │   ├── useGameState.ts             # Legacy hook (rebuild needed)
-│   │   │   └── usePhaseTransition.ts       # Legacy hook (rebuild needed)
-│   │   │
-│   │   └── pages/                  # PRESERVED FROM LEGACY
-│   │       ├── HomePage.tsx                # Home page component
-│   │       ├── GamePage.tsx                # Main game page
-│   │       ├── PlayerVsAIPage.tsx          # PvE game mode
-│   │       └── ReplayPage.tsx              # Replay viewer
+│   │   ├── App.tsx                         # COPIED FROM LEGACY
+│   │   ├── App.css                         # COPIED FROM LEGACY
+│   │   └── Routes.tsx                      # COPIED FROM LEGACY
+│   │
 │   │
 │   ├── package.json                        # COPIED FROM LEGACY (update dependencies)
 │   ├── vite.config.ts                      # COPIED FROM LEGACY
 │   └── tsconfig.json                       # COPIED FROM LEGACY
 │
+├── services/
+│   └── api_server.py 
+│ 
 ├── shared/                         # EVALUATE INDIVIDUALLY FROM LEGACY
 │   ├── __init__.py
 │   ├── gameLogStructure.py                 # Logging structures (Python)
@@ -553,12 +559,9 @@ project_root/
 │       ├── test_sequential.py
 │       └── test_field_naming.py
 │
-├── docs/                           # COPIED FROM LEGACY
-│   ├── AI_ARCHITECTURE.md                 # Architecture specification
-│   ├── AI_GAME.md                         # Game rules specification
-│   ├── AI_GUIDE.md                        # Implementation guide
-│   ├── AI_PROJECT.md                      # Project overview
-│   ├── AI_PROTOCOLE.md                    # Development protocols
+├── docs/
+│   ├── AI_IMPLEMENTATION.md               # Implementation guide
+│   ├── AI_TRAINING.md                     # AI Training
 │   └── AI_TURN.md                         # Turn sequence specification
 │
 ├── legacy_reference/               # ARCHIVED COMPLETE PREVIOUS PROJECT

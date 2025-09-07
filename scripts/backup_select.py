@@ -98,13 +98,14 @@ else:
         "frontend/src/App.css",
         "frontend/src/App.tsx",        
         "frontend/src/main.tsx",
-        #"frontend/src/Routes.tsx",
+        "frontend/src/Routes.tsx",
 
         # Frontend/src/components
         #"frontend/src/components/BoardDisplay.tsx",
         #"frontend/src/components/BoardInteractions.tsx",
-        #"frontend/src/components/BoardPvp.tsx",
+        "frontend/src/components/BoardPvp.tsx",
         #"frontend/src/components/BoardReplay.tsx",
+        "frontend/src/components/BoardWithAPI.tsx",
         #"frontend/src/components/CombatLogComponent.tsx",
         #"frontend/src/components/DiceRollComponent.tsx",
         #"frontend/src/components/ErrorBoundary.tsx",
@@ -126,14 +127,15 @@ else:
         
 
         # Frontend/src/hooks
+        "frontend/src/hooks/useEngineAPI.ts",
         "frontend/src/hooks/useGameConfig.ts",
         "frontend/src/hooks/useGameLogs.ts",
 
         # Frontend/src/pages
-        #"frontend/src/pages/GamePage.tsx",
-        #"frontend/src/pages/HomePage.tsx",
-        #"frontend/src/pages/PlayerVsAIPage.tsx",
-        #"frontend/src/pages/ReplayPage.tsx",
+        "frontend/src/pages/GamePage.tsx",
+        "frontend/src/pages/HomePage.tsx",
+        "frontend/src/pages/PlayerVsAIPage.tsx",
+        "frontend/src/pages/ReplayPage.tsx",
         
         # Frontend/src/roster/spaceMarine
         "frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryLeaderEliteMeleeElite.ts",
@@ -156,7 +158,7 @@ else:
 
         # frontend/src/types
         #"frontend/src/types/api.ts",
-        #"frontend/src/types/game.ts",
+        "frontend/src/types/games.ts",
         #"frontend/src/types/index.ts",
         #"frontend/src/types/replay.ts",
 
@@ -164,6 +166,12 @@ else:
         #"frontend/src/utils/boardClickHandler.ts",
         "frontend/src/utils/gameHelpers.ts",
         #"frontend/src/utils/probabilityCalculator.ts",
+
+######################################################################################################
+##### services files
+######################################################################################################
+
+        "services/api_server.py",
 
 ######################################################################################################
 ##### scripts files

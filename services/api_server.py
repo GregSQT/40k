@@ -20,7 +20,7 @@ sys.path.insert(0, abs_parent)
 engine_dir = os.path.join(abs_parent, 'engine')
 sys.path.insert(0, engine_dir)
 
-from w40k_engine import W40KEngine
+from engine.w40k_engine import W40KEngine
 from main import load_config
 
 # Initialize Flask app
@@ -34,25 +34,72 @@ def initialize_engine():
     """Initialize the W40K engine with configuration."""
     global engine
     try:
+        # Change to project root directory for config loading
+        original_cwd = os.getcwd()
+        project_root = os.path.join(os.path.dirname(__file__), '..')
+        os.chdir(os.path.abspath(project_root))
+        
         config = load_config()
+        print(f"DEBUG: Config loaded successfully with {len(config.get('units', []))} units")
+        
         engine = W40KEngine(config)
+        print(f"DEBUG: W40KEngine created successfully")
+        
+        # Restore original working directory
+        os.chdir(original_cwd)
+        
         print("✅ W40K Engine initialized successfully")
         return True
     except Exception as e:
+        # Restore original working directory on error
+        if 'original_cwd' in locals():
+            os.chdir(original_cwd)
         print(f"❌ Failed to initialize engine: {e}")
+        print(f"❌ Exception type: {type(e).__name__}")
+        import traceback
+        print(f"❌ Full traceback: {traceback.format_exc()}")
         return False
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint."""
+    print("DEBUG: /api/health endpoint called")
     return jsonify({
         "status": "healthy",
         "engine_initialized": engine is not None
     })
 
+@app.route('/api/debug/engine-test', methods=['GET'])
+def test_engine():
+    """Test engine initialization directly."""
+    try:
+        # Test config loading
+        original_cwd = os.getcwd()
+        project_root = os.path.join(os.path.dirname(__file__), '..')
+        os.chdir(os.path.abspath(project_root))
+        
+        from main import load_config
+        config = load_config()
+        
+        os.chdir(original_cwd)
+        
+        return jsonify({
+            "success": True,
+            "config_loaded": True,
+            "units_count": len(config.get("units", [])),
+            "board_config": bool(config.get("board"))
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": str(e.__class__.__name__)
+        }), 500
+
 @app.route('/api/game/start', methods=['POST'])
 def start_game():
     """Start a new game session."""
+    print("DEBUG: /api/game/start endpoint called")
     global engine
     
     if not engine:
@@ -63,9 +110,15 @@ def start_game():
         # Reset the engine for new game
         obs, info = engine.reset()
         
+        # Convert sets to lists for JSON serialization
+        serializable_state = dict(engine.game_state)
+        for key, value in serializable_state.items():
+            if isinstance(value, set):
+                serializable_state[key] = list(value)
+        
         return jsonify({
             "success": True,
-            "game_state": engine.game_state,
+            "game_state": serializable_state,
             "message": "Game started successfully"
         })
     
@@ -88,8 +141,8 @@ def execute_action():
         if not data:
             return jsonify({"success": False, "error": "No JSON data provided"}), 400
         
-        # Extract semantic action
-        action = data.get('action')
+        # Extract complete action dictionary (not just the action field)
+        action = data  # Use the entire request data as the action
         if not action:
             return jsonify({"success": False, "error": "No action provided"}), 400
         
@@ -97,10 +150,16 @@ def execute_action():
         success, result = engine.step(action)
         
         # Return complete game state
+        # Convert sets to lists for JSON serialization
+        serializable_state = dict(engine.game_state)
+        for key, value in serializable_state.items():
+            if isinstance(value, set):
+                serializable_state[key] = list(value)
+        
         return jsonify({
             "success": success,
             "result": result,
-            "game_state": engine.game_state,
+            "game_state": serializable_state,
             "message": "Action executed successfully" if success else "Action failed"
         })
     
