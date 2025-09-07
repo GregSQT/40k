@@ -52,13 +52,37 @@ else:
         "config/scenario_templates.json",
         "config/training_config.json", # AI Training Parameters
         "config/unit_definitions.json", # Unit Stats & Abilities
-        "config/unit_registry.json", # 
+        "config/unit_registry.json", # Unit Registry
+        
+    ### Units
+        #"config/units/space_marines.json", # Unit Definitions
+        #"config/units/tyranids.json", # Unit Definitions   
+        
+        # config/roster/spaceMarine
+        #"config/roster/spaceMarine/classes/SpaceMarineInfantryLeaderEliteMeleeElite.ts",
+        #"config/roster/spaceMarine/classes/SpaceMarineInfantryTroopMeleeTroop.ts",
+        #"config/roster/spaceMarine/classes/SpaceMarineInfantryTroopRangedSwarm.ts",
+        #"config/roster/spaceMarine/units/Intercessor.ts",
+        #"config/roster/spaceMarine/units/AssaultIntercessor.ts",
+        #"config/roster/spaceMarine/units/CaptainGravis.ts",
+
+        # config/roster/tyranid
+        #"config/roster/tyranid/classes/TyranidInfantryEliteMeleeElite.ts",
+        #"config/roster/tyranid/classes/TyranidInfantrySwarmMeleeSwarm.ts",
+        #"config/roster/tyranid/classes/TyranidInfantrySwarmRangedSwarm.ts",
+        #"config/roster/tyranid/units/Termagant.ts",
+        #"config/roster/tyranid/units/Hormagaunt.ts",
+        #"config/roster/tyranid/units/Carnifex.ts",
         
 ######################################################################################################
 ##### Engine files
 ######################################################################################################
         "engine/__init__.py",
         "engine/w40k_engine.py",
+        
+    ### Phase Handlers
+        #"engine/phase_handlers/__init__.py",
+        "engine/phase_handlers/movement_handlers.py",
 
 ######################################################################################################
 ##### Frontend files
@@ -110,8 +134,7 @@ else:
         #"frontend/src/pages/HomePage.tsx",
         #"frontend/src/pages/PlayerVsAIPage.tsx",
         #"frontend/src/pages/ReplayPage.tsx",
-
-
+        
         # Frontend/src/roster/spaceMarine
         "frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryLeaderEliteMeleeElite.ts",
         "frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryTroopMeleeTroop.ts",

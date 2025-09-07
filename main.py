@@ -25,61 +25,126 @@ def load_config():
             raise ValueError(f"Config file is empty: {board_config_path}")
         board_data = json.loads(content)
     
-    # Load unit definitions
-    unit_def_path = "config/unit_definitions.json"
-    if not os.path.exists(unit_def_path):
-        raise FileNotFoundError(f"Required config file missing: {unit_def_path}")
+    # Load unit registry to get unit-to-file mappings
+    unit_registry_path = "config/unit_registry.json"
+    if not os.path.exists(unit_registry_path):
+        raise FileNotFoundError(f"Required config file missing: {unit_registry_path}")
     
-    with open(unit_def_path, 'r') as f:
-        unit_definitions = json.load(f)
+    # Debug file reading
+    print(f"DEBUG: Reading from {unit_registry_path}")
+    print(f"DEBUG: File exists: {os.path.exists(unit_registry_path)}")
+    print(f"DEBUG: File size: {os.path.getsize(unit_registry_path)} bytes")
     
-    # Must have actual unit definitions, not just references
-    if not unit_definitions or "units" not in unit_definitions:
-        raise ValueError(f"Invalid unit_definitions.json: missing 'units' section")
+    with open(unit_registry_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+        print(f"DEBUG: File content length: {len(content)}")
+        print(f"DEBUG: First 100 chars: {repr(content[:100])}")
+        
+        if not content.strip():
+            raise ValueError(f"File {unit_registry_path} is empty")
+        
+        unit_registry = json.loads(content)
+    
+    # Load actual unit definitions from TypeScript files
+    unit_definitions = load_unit_definitions_from_ts(unit_registry)
     
     config["units"] = create_test_scenario(unit_definitions)
     
     return config
 
 
+def load_unit_definitions_from_ts(unit_registry):
+    """Load unit definitions by parsing TypeScript static class properties."""
+    import re
+    
+    unit_definitions = {}
+    
+    for unit_name, faction in unit_registry["units"].items():
+        # Map faction to proper path structure
+        faction_path_map = {
+            "space_marines": "SpaceMarine",
+            "tyranids": "Tyranid"
+        }
+        
+        if faction not in faction_path_map:
+            print(f"Warning: Unknown faction {faction} for unit {unit_name}")
+            continue
+            
+        # Build proper TypeScript file path
+        faction_dir = faction_path_map[faction]
+        ts_file_path = f"frontend/src/roster/{faction_dir}/units/{unit_name}.ts"
+        
+        if not os.path.exists(ts_file_path):
+            print(f"Warning: Unit file not found: {ts_file_path}")
+            continue
+        
+        try:
+            with open(ts_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Extract static properties using regex
+            unit_stats = {}
+            
+            # Pattern to match: static FIELD_NAME = value;
+            static_pattern = r'static\s+([A-Z_]+)\s*=\s*([^;]+);'
+            matches = re.findall(static_pattern, content)
+            
+            for field_name, value_str in matches:
+                # Clean and convert the value
+                value_str = value_str.strip().strip('"\'')
+                
+                # Convert to appropriate type
+                if value_str.isdigit() or (value_str.startswith('-') and value_str[1:].isdigit()):
+                    unit_stats[field_name] = int(value_str)
+                elif value_str.replace('.', '').isdigit():
+                    unit_stats[field_name] = float(value_str)
+                else:
+                    unit_stats[field_name] = value_str
+            
+            # No default values - unit files must be complete
+            # If fields are missing, engine validation will catch this
+            
+            unit_definitions[unit_name] = unit_stats
+            
+        except Exception as e:
+            print(f"Error parsing {ts_file_path}: {e}")
+            continue
+    
+    return unit_definitions
+
+
 def create_test_scenario(unit_definitions):
-    """Create test scenario using actual unit definitions."""
-    print(f"DEBUG: unit_definitions structure: {unit_definitions}")
-    print(f"DEBUG: unit_definitions type: {type(unit_definitions)}")
+    """Create test scenario using actual unit definitions from TypeScript files."""
+    print(f"DEBUG: Loaded {len(unit_definitions)} unit definitions")
     
     units = []
-    
-    # Handle your specific config format
-    if "units" in unit_definitions:
-        unit_types = list(unit_definitions["units"].keys())
-        actual_definitions = unit_definitions["units"]
-    else:
-        unit_types = list(unit_definitions.keys())
-        actual_definitions = unit_definitions
+    unit_types = list(unit_definitions.keys())
     
     if len(unit_types) >= 2:
-        # Player 0 unit
+        # Player 0 unit  
         unit_type_0 = unit_types[0]
-        unit_def_0 = actual_definitions[unit_type_0]
+        unit_def_0 = unit_definitions[unit_type_0]
         units.append({
             **unit_def_0,
             "id": "player0_unit1",
             "player": 0,
             "col": 1,
             "row": 1,
-            "unitType": unit_type_0
+            "unitType": unit_type_0,
+            "CUR_HP": unit_def_0["MAX_HP"]  # Set current HP to max HP
         })
         
         # Player 1 unit
         unit_type_1 = unit_types[1] if len(unit_types) > 1 else unit_types[0]
-        unit_def_1 = actual_definitions[unit_type_1]
+        unit_def_1 = unit_definitions[unit_type_1]
         units.append({
             **unit_def_1,
-            "id": "player1_unit1",
+            "id": "player1_unit1", 
             "player": 1,
             "col": 8,
             "row": 8,
-            "unitType": unit_type_1
+            "unitType": unit_type_1,
+            "CUR_HP": unit_def_1["MAX_HP"]  # Set current HP to max HP
         })
     else:
         print("Warning: Not enough unit definitions found, using defaults")

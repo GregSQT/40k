@@ -393,9 +393,6 @@ project_root/
 │       ├── __init__.py
 │       └── validators.py         # Field validation utilities
 ├── config/                       # Configuration files
-│   ├── board_config.json
-│   ├── unit_definitions.json
-│   └── scenario.json
 ├── docs/                          # Documentation
 ├── frontend/                      # Frontend with direct API calls
 │   └── services/
@@ -466,21 +463,21 @@ project_root/
 │   │   │   └── Scenario.ts                 # Scenario definitions
 │   │   │
 │   │   ├── roster/                 # PRESERVED FROM LEGACY (complete unit definitions)
-│   │   │   ├── spaceMarine/
+│   │   │   ├── SpaceMarine/
 │   │   │   │   ├── classes/
-│   │   │   │   │   ├── SpaceMarineInfantryLeaderEliteMeleeElite.ts
+│   │   │   │   │   ├── SpaceMarineInfantryLeaderMeleeElite.ts
 │   │   │   │   │   ├── SpaceMarineInfantryTroopMeleeTroop.ts
 │   │   │   │   │   └── SpaceMarineInfantryTroopRangedSwarm.ts
 │   │   │   │   └── units/
 │   │   │   │       ├── Intercessor.ts
 │   │   │   │       ├── AssaultIntercessor.ts
 │   │   │   │       └── CaptainGravis.ts
-│   │   │   └── tyranid/
+│   │   │   └── Tyranid/
 │   │   │       ├── classes/
 │   │   │       │   ├── TyranidInfantryEliteMeleeElite.ts
 │   │   │       │   ├── TyranidInfantrySwarmMeleeSwarm.ts
 │   │   │       │   └── TyranidInfantrySwarmRangedSwarm.ts
-│   │   │       └── units/
+│   │   │        └── units/
 │   │   │           ├── Termagant.ts
 │   │   │           ├── Hormagaunt.ts
 │   │   │           └── Carnifex.ts
