@@ -19,41 +19,62 @@ const isUnitInRange = (unit1: any, unit2: any, range: number) => true;
 // Create a mock useGameConfig hook
 const useGameConfig = () => ({
   config: {
-    cols: 16,
-    rows: 12,
+    cols: 25,
+    rows: 21,
     hex_radius: 25,
-    margin: 50,
+    margin: 4,
     colors: {
-      background: '0x111827',
-      highlight: '0x00FF00',
-      attack: '0xFF0000', 
-      charge: '0xFFFF00',
-      eligible: '0x00FF00',
-      objective_zone: '0x0000FF',
-      wall: '0x8B4513'
+      background: '0x002200',
+      cell_even: '0x002200',
+      cell_odd: '0x001a00',
+      cell_border: '0x00ff00',
+      player_0: '0x244488',
+      player_1: '0x882222',
+      hp_full: '0x36e36b',
+      hp_damaged: '0x444444',
+      highlight: '0x80ff80',
+      current_unit: '0xffd700',
+      eligible: '0x00ff00',
+      attack: '0xff4444',
+      charge: '0xff9900',
+      objective_zone: '0xff9933',
+      wall: '0x808080',
+      objective: '0xff9900'
     },
+    wall_hexes: [
+      [2,5],[2,6],[2,7],[3,4],[4,4],[5,3],[6,3],[7,2],[8,2],[9,1],
+      [16,2],[17,2],[18,3],[19,3],[20,4],[21,4],[15,1],[22,5],[22,6],[22,7],
+      [2,14],[2,15],[2,13],[3,15],[4,16],[5,16],[6,17],[7,17],[8,18],[9,18],
+      [22,13],[22,14],[22,15],[21,15],[20,16],[19,16],[18,17],[17,17],[16,18],[15,18],
+      [4,10],[5,10],[6,10],[7,10],[8,10],[8,9],[8,8],[8,7],
+      [20,10],[19,9],[18,10],[17,9],[16,10],[16,11],[16,12],[16,13],
+      [12,17],[12,16],[12,15],[12,14],[12,15],[11,13],[10,14],[9,13],[8,14],
+      [12,3],[12,4],[12,5],[12,6],[13,6],[14,6],[15,6],[16,6]
+    ],
     display: {
-      icon_scale: 1.0,
+      resolution: "auto",
+      autoDensity: true,
+      antialias: true,
+      forceCanvas: true,
+      icon_scale: 1.2,
       eligible_outline_width: 3,
       eligible_outline_alpha: 0.8,
-      hp_bar_width_ratio: 0.8,
-      hp_bar_height: 4,
-      hp_bar_y_offset_ratio: -0.6,
-      unit_circle_radius_ratio: 0.9,
+      hp_bar_width_ratio: 1.4,
+      hp_bar_height: 7,
+      hp_bar_y_offset_ratio: 0.85,
+      unit_circle_radius_ratio: 0.6,
       unit_text_size: 10,
       selected_border_width: 4,
       charge_target_border_width: 3,
       default_border_width: 2,
-      canvas_border: '1px solid #333',
-      antialias: true,
-      resolution: 1,
-      autoDensity: true
-    },
-    wall_hexes: []
+      canvas_border: "1px solid #333",
+      right_column_bottom_offset: 650
+    }
   },
   loading: false,
   error: null
 });
+
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
@@ -514,7 +535,7 @@ export default function Board({
             
             // Add all wall hexes as forbidden
             const wallHexSet = new Set<string>(
-              (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+              (boardConfig.wall_hexes || []).map((wall: number[]) => `${wall[0]},${wall[1]}`)
             );
             wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
             
@@ -762,7 +783,7 @@ export default function Board({
                     // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
                     const pathHexes: any[] = getHexLine(attackFromCol!, attackFromRow!, enemy.col, enemy.row);
                     const wallHexSet = new Set<string>(
-                      (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+                      (boardConfig.wall_hexes || []).map((wall: number[]) => `${wall[0]},${wall[1]}`)
                     );
                     pathHexes.forEach(hex => {
                       const hexKey = `${hex.col},${hex.row}`;

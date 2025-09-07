@@ -3,8 +3,6 @@ import HomePage from "./pages/HomePage";
 import GamePage from "./pages/GamePage";
 import './App.css'
 
-alert('APP.TSX IS LOADING!');
-
 function App() {
   console.log('🔍 APP.TSX IS LOADING');
   console.log('🔍 Current URL on load:', window.location.href);

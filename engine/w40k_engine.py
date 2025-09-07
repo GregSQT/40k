@@ -121,7 +121,11 @@ class W40KEngine:
             "OC": config["OC"],
             "VALUE": config["VALUE"],
             "ICON": config["ICON"],
-            "ICON_SCALE": config["ICON_SCALE"]
+            "ICON_SCALE": config["ICON_SCALE"],
+            
+            # AI_TURN.md action tracking fields
+            "SHOOT_LEFT": config["SHOOT_LEFT"],
+            "ATTACK_LEFT": config["ATTACK_LEFT"]
         }
     
     def _validate_uppercase_fields(self, unit: Dict[str, Any]):
@@ -130,7 +134,8 @@ class W40KEngine:
             "CUR_HP", "MAX_HP", "MOVE", "T", "ARMOR_SAVE", "INVUL_SAVE",
             "RNG_NB", "RNG_RNG", "RNG_ATK", "RNG_STR", "RNG_DMG", "RNG_AP",
             "CC_NB", "CC_RNG", "CC_ATK", "CC_STR", "CC_DMG", "CC_AP",
-            "LD", "OC", "VALUE", "ICON", "ICON_SCALE"
+            "LD", "OC", "VALUE", "ICON", "ICON_SCALE",
+            "SHOOT_LEFT", "ATTACK_LEFT"
         }
         
         for field in required_uppercase:

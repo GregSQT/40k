@@ -125,17 +125,24 @@ def create_test_scenario(unit_definitions):
     # Player 0 unit  
     unit_type_0 = unit_types[0]
     unit_def_0 = unit_definitions[unit_type_0]
-    units.append({
+    print(f"DEBUG: unit_def_0 keys: {list(unit_def_0.keys())}")
+    print(f"DEBUG: unit_def_0.get('RNG_NB'): {unit_def_0.get('RNG_NB', 'NOT_FOUND')}")
+    print(f"DEBUG: unit_def_0.get('CC_NB'): {unit_def_0.get('CC_NB', 'NOT_FOUND')}")
+    
+    created_unit = {
         **unit_def_0,
         "id": "player0_unit1",
         "player": 0,
         "col": 1,
         "row": 1,
         "unitType": unit_type_0,
-        "CUR_HP": unit_def_0["MAX_HP"],  # Set current HP to max HP
-        "SHOOT_LEFT": unit_def_0["RNG_NB"],  # Initialize shots remaining
-        "ATTACK_LEFT": unit_def_0["CC_NB"]   # Initialize attacks remaining
-    })
+        "CUR_HP": unit_def_0.get("MAX_HP", unit_def_0.get("HP_MAX", 1)),
+        "SHOOT_LEFT": unit_def_0.get("RNG_NB", 0),
+        "ATTACK_LEFT": unit_def_0.get("CC_NB", 0)
+    }
+    print(f"DEBUG: Created unit keys: {list(created_unit.keys())}")
+    print(f"DEBUG: Created unit SHOOT_LEFT: {created_unit.get('SHOOT_LEFT', 'NOT_FOUND')}")
+    units.append(created_unit)
     
     # Player 1 unit
     unit_type_1 = unit_types[1]
@@ -147,9 +154,9 @@ def create_test_scenario(unit_definitions):
         "col": 8,
         "row": 8,
         "unitType": unit_type_1,
-        "CUR_HP": unit_def_1["MAX_HP"],  # Set current HP to max HP
-        "SHOOT_LEFT": unit_def_1["RNG_NB"],  # Initialize shots remaining
-        "ATTACK_LEFT": unit_def_1["CC_NB"]   # Initialize attacks remaining
+        "CUR_HP": unit_def_1.get("MAX_HP", unit_def_1.get("HP_MAX", 1)),
+        "SHOOT_LEFT": unit_def_1.get("RNG_NB", 0),
+        "ATTACK_LEFT": unit_def_1.get("CC_NB", 0)
     })
     
     return units

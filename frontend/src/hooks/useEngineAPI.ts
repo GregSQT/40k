@@ -55,6 +55,7 @@ export const useEngineAPI = () => {
 
   // Initialize game
   useEffect(() => {
+    console.log('🚨 useEngineAPI useEffect TRIGGERED');
     const startGame = async () => {
       try {
         console.log('🔍 STARTING GAME API CALL');
