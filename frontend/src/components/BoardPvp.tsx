@@ -842,6 +842,7 @@ export default function Board({
 
 
       // ✅ DRAW BOARD ONCE with populated availableCells
+      console.log("🎯 DRAWING BOARD WITH selectedUnitId:", selectedUnitId);
       drawBoard(app, boardConfig as any, {
         availableCells,
         attackCells,
@@ -849,7 +850,9 @@ export default function Board({
         chargeCells,
         blockedTargets,
         coverTargets,
-        phase
+        phase,
+        selectedUnitId,
+        mode
       });
 
       // ✅ SETUP BOARD INTERACTIONS using shared BoardInteractions component

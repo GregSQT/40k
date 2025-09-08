@@ -60,6 +60,8 @@ interface DrawBoardOptions {
   blockedTargets?: Set<string>;
   coverTargets?: Set<string>;
   phase?: "move" | "shoot" | "charge" | "combat";
+  selectedUnitId?: number | null;
+  mode?: string;
 }
 
 // Helper functions from Board.tsx
@@ -112,7 +114,9 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
       chargeCells = [],
       blockedTargets = new Set<string>(),
       coverTargets = new Set<string>(),
-      phase = "move"
+      phase = "move",
+      selectedUnitId = null,
+      mode = "select"
     } = options || {};
 
     // ✅ OPTIMIZED: Create containers for hex batching - EXACT from Board.tsx
@@ -219,7 +223,20 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
           highlightCell.drawPolygon(points);
           highlightCell.endFill();
           
-          // NO EVENT HANDLERS - Pure visual only
+          // Add click handlers for movement hexes
+          if (isAvailable) {
+            highlightCell.eventMode = 'static';
+            highlightCell.cursor = 'pointer';
+            highlightCell.on('pointerdown', (e: PIXI.FederatedPointerEvent) => {
+              if (e.button === 0) { // Left click only
+                console.log("🟢 GREEN HEX CLICKED:", { col, row, phase, selectedUnitId, mode });
+                window.dispatchEvent(new CustomEvent('boardHexClick', {
+                  detail: { col, row, phase, mode, selectedUnitId }
+                }));
+              }
+            });
+          }
+          
           highlightContainer.addChild(highlightCell);
         }
       }

@@ -2,6 +2,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Unit, PlayerId } from '../types';
 
+// Get max_turns from config instead of hardcoded fallback
+const getMaxTurnsFromConfig = async (): Promise<number> => {
+  try {
+    const response = await fetch('/config/game_config.json');
+    const config = await response.json();
+    return config.game_rules?.max_turns ?? 8;
+  } catch (error) {
+    console.warn('Failed to load max_turns from config, using fallback:', error);
+    return 8;
+  }
+};
+
 const API_BASE = 'http://localhost:5000/api';
 
 interface APIGameState {
@@ -50,9 +62,15 @@ export const useEngineAPI = () => {
   const [gameState, setGameState] = useState<APIGameState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [maxTurnsFromConfig, setMaxTurnsFromConfig] = useState<number>(8);
   const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
   const [mode, setMode] = useState<"select" | "movePreview" | "attackPreview" | "chargePreview">("select");
   const [movePreview, setMovePreview] = useState<{ unitId: number; destCol: number; destRow: number } | null>(null);
+
+  // Load config values
+  useEffect(() => {
+    getMaxTurnsFromConfig().then(setMaxTurnsFromConfig);
+  }, []);
 
   // Initialize game
   useEffect(() => {
@@ -90,10 +108,12 @@ export const useEngineAPI = () => {
     if (!gameState) return;
     
     try {
+      const requestBody = JSON.stringify(action);
+      console.log("📡 SENDING API REQUEST:", requestBody);
       const response = await fetch(`${API_BASE}/game/action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(action)
+        body: requestBody
       });
       
       if (!response.ok) {
@@ -101,8 +121,12 @@ export const useEngineAPI = () => {
       }
       
       const data = await response.json();
+      console.log("✅ API RESPONSE:", data);
       if (data.success) {
+        console.log("🔄 UPDATING GAME STATE");
         setGameState(data.game_state);
+        setSelectedUnitId(null); // Reset after game state is updated
+        console.log("✅ GAME STATE UPDATED");
       }
     } catch (err) {
       console.error('Action error:', err);
@@ -171,6 +195,7 @@ export const useEngineAPI = () => {
   }, []);
 
   const handleDirectMove = useCallback(async (unitId: number | string, col: number | string, row: number | string) => {
+    console.log("🎯 useEngineAPI handleDirectMove CALLED:", { unitId, col, row });
     const action = {
       action: "move",
       unitId: typeof unitId === 'string' ? unitId : unitId.toString(),
@@ -178,10 +203,18 @@ export const useEngineAPI = () => {
       destRow: typeof row === 'string' ? parseInt(row) : row,
     };
     
-    await executeAction(action);
-    setMovePreview(null);
-    setMode("select");
-    setSelectedUnitId(null);
+    try {
+      console.log("🎯 About to call executeAction with action:", action);
+      await executeAction(action);
+      console.log("🎯 executeAction completed - state will be reset when game state updates");
+      // Let executeAction handle state reset after updating game state
+      setMovePreview(null);
+      setMode("select");
+      // Don't reset selectedUnitId here - let it reset when gameState updates
+    } catch (error) {
+      console.error("Move failed:", error);
+      // Don't reset state if move failed
+    }
   }, [executeAction]);
 
   const handleConfirmMove = useCallback(async () => {
@@ -263,7 +296,7 @@ export const useEngineAPI = () => {
     movePreview,
     attackPreview: null,
     currentPlayer: gameState.current_player as PlayerId,
-    maxTurns: gameState.max_turns || (() => { throw new Error('API ERROR: Missing required max_turns field in game state'); })(),
+    maxTurns: maxTurnsFromConfig,
     unitsMoved: gameState.units_moved ? gameState.units_moved.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_moved array'); })(),
     unitsCharged: gameState.units_charged ? gameState.units_charged.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_charged array'); })(),
     unitsAttacked: gameState.units_attacked ? gameState.units_attacked.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_attacked array'); })(),
@@ -282,7 +315,7 @@ export const useEngineAPI = () => {
       unitsFled: gameState.units_fled ? gameState.units_fled.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_fled array in gameState'); })(),
       targetPreview: null,
       currentTurn: gameState.turn,
-      maxTurns: gameState.max_turns,
+      maxTurns: maxTurnsFromConfig,
       unitChargeRolls: {},
     },
     onSelectUnit: handleSelectUnit,
