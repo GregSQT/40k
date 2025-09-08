@@ -4,32 +4,51 @@ import type { GameState, UnitId, Unit } from '../types/game';
 
 interface UseGameActionsParams {
   gameState: GameState;
-  movePreview: any;
-  attackPreview: any;
+  movePreview: any | null;
+  attackPreview: any | null;
   shootingPhaseState: any;
+  boardConfig?: any;
+  gameLog?: any;
   actions: {
-    setSelectedUnitId: (id: UnitId | null) => void;
     setMode: (mode: GameState['mode']) => void;
-    updateUnit: (unitId: UnitId, updates: Partial<Unit>) => void;
+    setSelectedUnitId: (id: UnitId | null) => void;
+    setMovePreview: (preview: any | null) => void;
+    setAttackPreview: (preview: any | null) => void;
     addMovedUnit: (unitId: UnitId) => void;
     addChargedUnit: (unitId: UnitId) => void;
     addAttackedUnit: (unitId: UnitId) => void;
     addFledUnit: (unitId: UnitId) => void;
-    setMovePreview: (preview: any) => void;
-    setAttackPreview: (preview: any) => void;
+    updateUnit: (unitId: UnitId, updates: Partial<Unit>) => void;
+    removeUnit: (unitId: UnitId) => void;
+    initializeShootingPhase: () => void;
+    updateShootingPhaseState: (updates: any) => void;
+    decrementShotsLeft: (unitId: UnitId) => void;
+    setTargetPreview: (preview: any | null) => void;
+    setCombatSubPhase?: (subPhase: any) => void;
+    setCombatActivePlayer?: (player: any) => void;
+    setUnitChargeRoll?: (unitId: UnitId, roll: number) => void;
+    resetUnitChargeRoll?: (unitId: UnitId) => void;
+    showChargeRollPopup?: (unitId: UnitId, roll: number, tooLow: boolean) => void;
+    resetChargeRolls?: () => void;
   };
-  boardConfig?: any;
-  gameLog?: any;
 }
 
-export const useGameActions = ({ gameState, movePreview, attackPreview, shootingPhaseState, actions, boardConfig, gameLog }: UseGameActionsParams) => {
-  
+  export const useGameActions = ({
+    gameState,
+    movePreview,
+    attackPreview,
+    shootingPhaseState,
+    boardConfig,
+    gameLog,
+    actions,
+  }: UseGameActionsParams) => {
+    
   // AI_TURN.md: Single source of truth eligibility function
   const isUnitEligible = useCallback((unit: Unit): boolean => {
     const { phase, currentPlayer, unitsMoved = [], unitsCharged = [], unitsAttacked = [], unitsFled = [] } = gameState;
     
     // AI_TURN.md: Universal eligibility checks
-    if ((unit.CUR_HP ?? unit.HP_MAX) <= 0) return false;
+    if ((unit.HP_CUR ?? unit.HP_MAX) <= 0) return false;
     if (unit.player !== currentPlayer) return false;
     
     switch (phase) {
@@ -92,10 +111,44 @@ export const useGameActions = ({ gameState, movePreview, attackPreview, shooting
   }, [gameState, isUnitEligible, actions]);
 
   const confirmMove = useCallback(() => {
-    // Implementation based on current movePreview state
+    let movedUnitId: UnitId | null = null;
+
+    if (gameState.mode === "movePreview" && movePreview) {
+      const unit = gameState.units.find(u => u.id === movePreview.unitId);
+      if (unit && gameState.phase === "move") {
+        // Check for flee detection
+        const enemyUnits = gameState.units.filter(u => u.player !== unit.player);
+        const wasAdjacentToEnemy = enemyUnits.some(enemy => 
+          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
+        );
+        
+        if (wasAdjacentToEnemy) {
+          const willBeAdjacentToEnemy = enemyUnits.some(enemy => 
+            Math.max(Math.abs(movePreview.destCol - enemy.col), Math.abs(movePreview.destRow - enemy.row)) === 1
+          );
+          
+          if (!willBeAdjacentToEnemy) {
+            actions.addFledUnit(movePreview.unitId);
+          }
+        }
+      }
+      
+      actions.updateUnit(movePreview.unitId, {
+        col: movePreview.destCol,
+        row: movePreview.destRow,
+      });
+      movedUnitId = movePreview.unitId;
+    }
+
+    if (movedUnitId !== null) {
+      actions.addMovedUnit(movedUnitId);
+    }
+
     actions.setMovePreview(null);
+    actions.setAttackPreview(null);
+    actions.setSelectedUnitId(null);
     actions.setMode("select");
-  }, [actions]);
+  }, [gameState, movePreview, actions]);
 
   const cancelMove = useCallback(() => {
     actions.setMovePreview(null);

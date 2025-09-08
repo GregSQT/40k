@@ -59,7 +59,7 @@ export function useAITurn({
         row: u.row,
         // UPPERCASE field compliance
         HP_MAX: u.HP_MAX,
-        CUR_HP: u.CUR_HP ?? u.HP_MAX,
+        HP_CUR: u.HP_CUR ?? u.HP_MAX,
         MOVE: u.MOVE,
         RNG_RNG: u.RNG_RNG,
         RNG_ATK: u.RNG_ATK,
@@ -87,7 +87,7 @@ export function useAITurn({
 
   // Get eligible AI units for current phase
   const getEligibleAIUnits = useCallback((): Unit[] => {
-    const aiUnits = units.filter(u => u.player === 1 && (u.CUR_HP ?? u.HP_MAX) > 0);
+    const aiUnits = units.filter(u => u.player === 1 && (u.HP_CUR ?? u.HP_MAX) > 0);
     
     switch (phase) {
       case "move":
@@ -104,7 +104,7 @@ export function useAITurn({
         return aiUnits.filter(u => {
           if (gameState.unitsAttacked.includes(u.id)) return false;
           // Check if unit is in combat range
-          const enemyUnits = units.filter(enemy => enemy.player === 0 && (enemy.CUR_HP ?? enemy.HP_MAX) > 0);
+          const enemyUnits = units.filter(enemy => enemy.player === 0 && (enemy.HP_CUR ?? enemy.HP_MAX) > 0);
           return enemyUnits.some(enemy => {
             const distance = Math.max(
               Math.abs(u.col - enemy.col),

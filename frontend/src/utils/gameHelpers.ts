@@ -434,17 +434,17 @@ export function calculateDamage(attacker: Unit, _target: Unit, damageType: 'rang
 }
 
 export function applyDamage(unit: Unit, damage: number): Unit {
-  const currentHP = unit.CUR_HP ?? unit.HP_MAX;
+  const currentHP = unit.HP_CUR ?? unit.HP_MAX;
   const newHP = Math.max(0, currentHP - damage);
   
   return {
     ...unit,
-    CUR_HP: newHP,
+    HP_CUR: newHP,
   };
 }
 
 export function isUnitAlive(unit: Unit): boolean {
-  const currentHP = unit.CUR_HP ?? unit.HP_MAX;
+  const currentHP = unit.HP_CUR ?? unit.HP_MAX;
   return currentHP > 0;
 }
 
@@ -486,7 +486,7 @@ export function logGameState(units: Unit[], phase: string, currentPlayer: number
   if (typeof window !== 'undefined' && import.meta.env?.DEV) {
     console.group(`Game State - Phase: ${phase}, Player: ${currentPlayer}`);
     units.forEach(unit => {
-      const hp = unit.CUR_HP ?? unit.HP_MAX;
+      const hp = unit.HP_CUR ?? unit.HP_MAX;
       console.log(`${unit.name} (P${unit.player}): ${hp}/${unit.HP_MAX} HP at (${unit.col}, ${unit.row})`);
     });
     console.groupEnd();

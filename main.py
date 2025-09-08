@@ -147,7 +147,7 @@ def load_scenario_units(unit_definitions):
             "col": scenario_unit["col"],
             "row": scenario_unit["row"],
             "unitType": unit_type,
-            "CUR_HP": unit_def.get("MAX_HP", unit_def.get("HP_MAX", 1)),
+            "HP_CUR": unit_def.get("HP_MAX", unit_def.get("HP_MAX", 1)),
             "SHOOT_LEFT": unit_def.get("RNG_NB", 0),
             "ATTACK_LEFT": unit_def.get("CC_NB", 0)
         }
@@ -193,7 +193,7 @@ def test_basic_functionality():
     print(f"   Units moved: {engine.game_state['units_moved']}")
     print(f"   Move activation pool: {engine.game_state['move_activation_pool']}")
     for unit in engine.game_state["units"]:
-        print(f"   Unit {unit['id']}: Player {unit['player']} at ({unit['col']}, {unit['row']}) HP:{unit['CUR_HP']}")
+        print(f"   Unit {unit['id']}: Player {unit['player']} at ({unit['col']}, {unit['row']}) HP:{unit['HP_CUR']}")
     
     # Test turn/phase based logic (AI_TURN.md compliant)
     max_turns = 3
@@ -224,7 +224,7 @@ def test_basic_functionality():
         
         if current_phase == 'move':
             # Try to move east for current player's first unit
-            eligible_units = [u for u in engine.game_state["units"] if u["player"] == current_player and u["CUR_HP"] > 0]
+            eligible_units = [u for u in engine.game_state["units"] if u["player"] == current_player and u["HP_CUR"] > 0]
             if eligible_units:
                 unit = eligible_units[0]
                 action = {"action": "move", "unitId": unit["id"], "destCol": unit["col"] + 1, "destRow": unit["row"]}
@@ -284,7 +284,7 @@ def test_movement_handlers():
                     "player": 0,
                     "col": 5,
                     "row": 5,
-                    "CUR_HP": 2,
+                    "HP_CUR": 2,
                     "MOVE": 6,
                     "CC_RNG": 1
                 }

@@ -61,8 +61,8 @@ def get_eligible_units(game_state, config):
     current_player = game_state["current_player"]
     
     for unit in game_state["units"]:
-        # AI_TURN.md: "unit.CUR_HP > 0?"
-        if unit["CUR_HP"] <= 0:
+        # AI_TURN.md: "unit.HP_CUR > 0?"
+        if unit["HP_CUR"] <= 0:
             continue  # Dead unit (Skip, no log)
             
         # AI_TURN.md: "unit.player === current_player?"
@@ -127,7 +127,7 @@ def _execute_movement(game_state, unit, col_diff, row_diff, config):
     # AI_TURN.md: Check unit occupation
     for other_unit in game_state["units"]:
         if (other_unit["id"] != unit["id"] and 
-            other_unit["CUR_HP"] > 0 and
+            other_unit["HP_CUR"] > 0 and
             other_unit["col"] == new_col and 
             other_unit["row"] == new_row):
             return False, {"error": "hex_occupied"}
@@ -159,7 +159,7 @@ def _is_adjacent_to_enemy(game_state, unit):
     cc_range = unit.get("CC_RNG", 1)
     
     for enemy in game_state["units"]:
-        if (enemy["player"] != unit["player"] and enemy["CUR_HP"] > 0):
+        if (enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0):
             distance = max(abs(unit["col"] - enemy["col"]), 
                           abs(unit["row"] - enemy["row"]))
             if distance <= cc_range:
@@ -739,7 +739,7 @@ def get_eligible_units(game_state, config):
     # AI_TURN.md: Sub-phase 1 - Charging units first
     charging_units = []
     for unit in game_state["units"]:
-        if (unit["CUR_HP"] > 0 and
+        if (unit["HP_CUR"] > 0 and
             unit["player"] == current_player and
             unit["id"] in game_state["units_charged"] and
             unit["id"] not in game_state["units_attacked"] and
@@ -756,7 +756,7 @@ def get_eligible_units(game_state, config):
     
     # Non-active player units first
     for unit in game_state["units"]:
-        if (unit["CUR_HP"] > 0 and
+        if (unit["HP_CUR"] > 0 and
             unit["player"] == non_active_player and
             unit["id"] not in game_state["units_charged"] and
             unit["id"] not in game_state["units_attacked"] and
@@ -765,7 +765,7 @@ def get_eligible_units(game_state, config):
     
     # Then active player non-charging units
     for unit in game_state["units"]:
-        if (unit["CUR_HP"] > 0 and
+        if (unit["HP_CUR"] > 0 and
             unit["player"] == current_player and
             unit["id"] not in game_state["units_charged"] and
             unit["id"] not in game_state["units_attacked"] and
@@ -801,7 +801,7 @@ def _execute_combat_sequence(game_state, unit, config):
     
     for attack_num in range(attacks):
         # Re-check targets (may have died from previous attacks)
-        valid_targets = [t for t in adjacent_enemies if t["CUR_HP"] > 0]
+        valid_targets = [t for t in adjacent_enemies if t["HP_CUR"] > 0]
         if not valid_targets:
             break  # AI_TURN.md: Slaughter handling
         
@@ -811,7 +811,7 @@ def _execute_combat_sequence(game_state, unit, config):
         
         # Apply damage immediately (AI_TURN.md: immediate update)
         if attack_result["damage"] > 0:
-            target["CUR_HP"] = max(0, target["CUR_HP"] - attack_result["damage"])
+            target["HP_CUR"] = max(0, target["HP_CUR"] - attack_result["damage"])
     
     # Mark as attacked
     game_state["units_attacked"].add(unit["id"])
@@ -1202,8 +1202,8 @@ def test_uppercase_field_validation():
     
     for unit in engine.game_state["units"]:
         # Required UPPERCASE fields must exist
-        assert "CUR_HP" in unit
-        assert "MAX_HP" in unit
+        assert "HP_CUR" in unit
+        assert "HP_MAX" in unit
         
         # No lowercase stat fields allowed
         stat_fields = [k for k in unit.keys() if "_" in k]
@@ -1254,7 +1254,7 @@ def test_movement_phase_implementation():
     
     # Validate each eligibility condition from AI_TURN.md
     for unit in eligible_units:
-        assert unit["CUR_HP"] > 0  # AI_TURN.md requirement
+        assert unit["HP_CUR"] > 0  # AI_TURN.md requirement
         assert unit["player"] == engine.game_state["current_player"]  # AI_TURN.md requirement
         assert unit["id"] not in engine.game_state["units_moved"]  # AI_TURN.md requirement
 

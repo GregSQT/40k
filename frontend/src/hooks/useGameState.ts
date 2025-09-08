@@ -83,9 +83,14 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     currentShooter: null,
     singleShotState: {
       isActive: false,
+      shooterId: 0,
       targetId: null,
-      //shotNumber: 0,
-      totalShots: 0
+      currentShotNumber: 0,
+      totalShots: 0,
+      shotsRemaining: 0,
+      isSelectingTarget: false,
+      currentStep: 'target_selection',
+      stepResults: {}
     }
   });
   const [chargeRollPopup] = useState<ChargeRollPopup | null>(null);

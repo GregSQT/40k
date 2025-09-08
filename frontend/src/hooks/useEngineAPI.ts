@@ -10,8 +10,8 @@ interface APIGameState {
     player: number;
     col: number;
     row: number;
-    CUR_HP: number;
-    MAX_HP: number;
+    HP_CUR: number;
+    HP_MAX: number;
     MOVE: number;
     RNG_RNG: number;
     RNG_DMG: number;
@@ -135,8 +135,8 @@ export const useEngineAPI = () => {
         row: unit.row,
         color: unit.player === 0 ? 0x244488 : 0x882222,
         MOVE: unit.MOVE,
-        MAX_HP: unit.MAX_HP,
-        CUR_HP: unit.CUR_HP,
+        HP_MAX: unit.HP_MAX,
+        HP_CUR: unit.HP_CUR,
         RNG_RNG: unit.RNG_RNG,
         RNG_DMG: unit.RNG_DMG,
         RNG_NB: unit.RNG_NB,

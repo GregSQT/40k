@@ -23,7 +23,7 @@ const UnitRow = memo<UnitRowProps>(({ unit, isSelected, isClicked, onSelect }) =
   if (!unit.HP_MAX) {
     throw new Error(`Unit ${unit.id} missing required HP_MAX field`);
   }
-  const currentHP = unit.CUR_HP ?? unit.HP_MAX;
+  const currentHP = unit.HP_CUR ?? unit.HP_MAX;
   const hpPercentage = (currentHP / unit.HP_MAX) * 100;
   
   return (
@@ -152,7 +152,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
   const playerUnits = useMemo(() => {
     return units.filter(unit => 
       unit.player === player && 
-      (unit.CUR_HP ?? unit.HP_MAX) > 0
+      (unit.HP_CUR ?? unit.HP_MAX) > 0
     );
   }, [units, player]);
 

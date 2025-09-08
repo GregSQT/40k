@@ -1073,7 +1073,7 @@ export default function Board({
       }, [
         // ✅ FIXED DEPENDENCIES - Prevent board re-render but allow HP animations
         units.length, // Only re-render when units count changes
-        units.map(u => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}-${u.ATTACK_LEFT}-${u.SHOOT_LEFT}`).join(','), // Only essential unit changes
+        units.map(u => `${u.id}-${u.col}-${u.row}-${u.HP_CUR}-${u.ATTACK_LEFT}-${u.SHOOT_LEFT}`).join(','), // Only essential unit changes
         selectedUnitId,
         mode,
         phase, // CRITICAL: Phase changes must trigger re-render for isShootable recalculation

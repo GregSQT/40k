@@ -388,7 +388,7 @@ interface ShootingResult {
     
     units.forEach(unit => {
       // AI_TURN.md: ELIGIBILITY CHECK (Queue Building Phase)
-      if (unit.CUR_HP === undefined || unit.CUR_HP <= 0) {
+      if (unit.HP_CUR === undefined || unit.HP_CUR <= 0) {
         return; // Dead unit (Skip, no log)
       }
       if (unit.player !== currentPlayer) {
@@ -479,7 +479,7 @@ interface ShootingResult {
     const chargingEligibleUnits: Unit[] = [];
     
     units.forEach(unit => {
-      if (unit.CUR_HP === undefined || unit.CUR_HP <= 0) return;
+      if (unit.HP_CUR === undefined || unit.HP_CUR <= 0) return;
       if (unit.player !== currentPlayer) return;
       if (!unitsCharged.includes(unit.id)) return;
       if (unitsAttacked.includes(unit.id)) return;
@@ -510,7 +510,7 @@ interface ShootingResult {
     const nonActivePool: Unit[] = [];
     
     units.forEach(unit => {
-      if (unit.CUR_HP !== undefined && unit.CUR_HP > 0 && 
+      if (unit.HP_CUR !== undefined && unit.HP_CUR > 0 && 
           unit.player === currentPlayer && 
           !unitsAttacked.includes(unit.id) && 
           !unitsCharged.includes(unit.id)) {
@@ -532,7 +532,7 @@ interface ShootingResult {
         }
       }
       
-      if (unit.CUR_HP !== undefined && unit.CUR_HP > 0 && 
+      if (unit.HP_CUR !== undefined && unit.HP_CUR > 0 && 
           unit.player !== currentPlayer && 
           !unitsAttacked.includes(unit.id) && 
           !unitsCharged.includes(unit.id)) {
@@ -636,7 +636,7 @@ interface ShootingResult {
       const enemyUnits = units.filter(u => u.player !== clickedUnit.player);
       
       const validTargets = enemyUnits.filter(enemy => {
-        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+        if (enemy.HP_CUR === undefined || enemy.HP_CUR <= 0) return false;
         if (clickedUnit.CC_RNG === undefined) {
           throw new Error(`clickedUnit.CC_RNG is required but was undefined for unit ${clickedUnit.id}`);
         }
@@ -667,7 +667,7 @@ interface ShootingResult {
       const enemyUnits = units.filter(u => u.player !== clickedUnit.player);
       
       const validTargets = enemyUnits.filter(enemy => {
-        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+        if (enemy.HP_CUR === undefined || enemy.HP_CUR <= 0) return false;
         if (clickedUnit.CC_RNG === undefined) {
           throw new Error(`clickedUnit.CC_RNG is required but was undefined for unit ${clickedUnit.id}`);
         }
@@ -698,7 +698,7 @@ interface ShootingResult {
       const enemyUnits = units.filter(u => u.player !== clickedUnit.player);
       
       const validTargets = enemyUnits.filter(enemy => {
-        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+        if (enemy.HP_CUR === undefined || enemy.HP_CUR <= 0) return false;
         if (clickedUnit.CC_RNG === undefined) {
           throw new Error(`clickedUnit.CC_RNG is required but was undefined for unit ${clickedUnit.id}`);
         }
@@ -871,10 +871,10 @@ interface ShootingResult {
         
         let killedUnitIds: number[] = [];
         if (damageDealt > 0) {
-          if (selectedCombatTarget.CUR_HP === undefined) {
-            throw new Error('selectedCombatTarget.CUR_HP is required');
+          if (selectedCombatTarget.HP_CUR === undefined) {
+            throw new Error('selectedCombatTarget.HP_CUR is required');
           }
-          const newHP = selectedCombatTarget.CUR_HP - damageDealt;
+          const newHP = selectedCombatTarget.HP_CUR - damageDealt;
           
           if (newHP <= 0) {
             killedUnitIds.push(selectedCombatTarget.id);
@@ -883,7 +883,7 @@ interface ShootingResult {
             }
             actions.removeUnit(selectedCombatTarget.id);
           } else {
-            actions.updateUnit(selectedCombatTarget.id, { CUR_HP: newHP });
+            actions.updateUnit(selectedCombatTarget.id, { HP_CUR: newHP });
           }
         }
         
@@ -931,7 +931,7 @@ interface ShootingResult {
         );
         
         const updatedValidTargets = updatedEnemyUnits.filter(enemy => {
-          if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+          if (enemy.HP_CUR === undefined || enemy.HP_CUR <= 0) return false;
           if (activeCombatUnit.CC_RNG === undefined) {
             throw new Error(`activeCombatUnit.CC_RNG is required but was undefined for unit ${activeCombatUnit.id}`);
           }
@@ -1185,7 +1185,7 @@ interface ShootingResult {
       const friendlyUnits = units.filter(u => u.player === clickedUnit.player && u.id !== clickedUnit.id);
       
       const validTargets = enemyUnits.filter(enemy => {
-        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+        if (enemy.HP_CUR === undefined || enemy.HP_CUR <= 0) return false;
         if (!isUnitInRange(clickedUnit, enemy, clickedUnit.RNG_RNG)) return false;
         
         const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => {
@@ -1242,7 +1242,7 @@ interface ShootingResult {
         const friendlyUnits = units.filter(u => u.player === clickedUnit.player && u.id !== clickedUnit.id);
         
         const validTargets = enemyUnits.filter(enemy => {
-          if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+          if (enemy.HP_CUR === undefined || enemy.HP_CUR <= 0) return false;
           if (!isUnitInRange(clickedUnit, enemy, clickedUnit.RNG_RNG)) return false;
           
           const isEnemyAdjacentToFriendly = friendlyUnits.some(friendly => {
@@ -1445,10 +1445,10 @@ interface ShootingResult {
         // Apply damage and track killed units
         let killedUnitIds: number[] = [];
         if (damageDealt > 0) {
-          if (selectedShootingTarget.CUR_HP === undefined) {
-            throw new Error('selectedShootingTarget.CUR_HP is required');
+          if (selectedShootingTarget.HP_CUR === undefined) {
+            throw new Error('selectedShootingTarget.HP_CUR is required');
           }
-          const newHP = selectedShootingTarget.CUR_HP - damageDealt;
+          const newHP = selectedShootingTarget.HP_CUR - damageDealt;
           
           if (newHP <= 0) {
             killedUnitIds.push(selectedShootingTarget.id);
@@ -1457,7 +1457,7 @@ interface ShootingResult {
             }
             actions.removeUnit(selectedShootingTarget.id);
           } else {
-            actions.updateUnit(selectedShootingTarget.id, { CUR_HP: newHP });
+            actions.updateUnit(selectedShootingTarget.id, { HP_CUR: newHP });
           }
         }
         
@@ -1513,7 +1513,7 @@ interface ShootingResult {
         const updatedFriendlyUnits = currentUnits.filter(u => u.player === activeShootingUnit.player && u.id !== activeShootingUnit.id);
         
         const updatedValidTargets = updatedEnemyUnits.filter(enemy => {
-          if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+          if (enemy.HP_CUR === undefined || enemy.HP_CUR <= 0) return false;
           if (!isUnitInRange(activeShootingUnit, enemy, activeShootingUnit.RNG_RNG)) return false;
           
           const isEnemyAdjacentToFriendly = updatedFriendlyUnits.some(friendly => {
@@ -2211,7 +2211,7 @@ interface ShootingResult {
       // AI_TURN.md: Build valid_targets pool FRESH each attack iteration
       const validTargets = units.filter(enemy => {
         if (enemy.player === currentAttacker.player) return false;
-        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false; // CRITICAL: Exclude dead units
+        if (enemy.HP_CUR === undefined || enemy.HP_CUR <= 0) return false; // CRITICAL: Exclude dead units
         const cube1 = offsetToCube(currentAttacker.col, currentAttacker.row);
         const cube2 = offsetToCube(enemy.col, enemy.row);
         const hexDistance = cubeDistance(cube1, cube2);
@@ -2311,10 +2311,10 @@ interface ShootingResult {
 
       // Apply damage
       if (damageDealt > 0) {
-        if (currentTarget.CUR_HP === undefined) {
-          throw new Error('currentTarget.CUR_HP is required');
+        if (currentTarget.HP_CUR === undefined) {
+          throw new Error('currentTarget.HP_CUR is required');
         }
-        const newHP = currentTarget.CUR_HP - damageDealt;
+        const newHP = currentTarget.HP_CUR - damageDealt;
 
         if (newHP <= 0) {
           // Log unit death AFTER the attack that killed it
@@ -2324,7 +2324,7 @@ interface ShootingResult {
           actions.removeUnit(currentTarget.id);
           // Target is dead - continue to next attack with fresh target selection
         } else {
-          actions.updateUnit(currentTarget.id, { CUR_HP: newHP });
+          actions.updateUnit(currentTarget.id, { HP_CUR: newHP });
         }
       }
 
@@ -2349,7 +2349,7 @@ interface ShootingResult {
       const currentUnits = gameState.units;
       const remainingEnemies = currentUnits.filter(enemy => {
         if (enemy.player === finalAttacker.player) return false;
-        if (enemy.CUR_HP === undefined || enemy.CUR_HP <= 0) return false;
+        if (enemy.HP_CUR === undefined || enemy.HP_CUR <= 0) return false;
         const cube1 = offsetToCube(finalAttacker.col, finalAttacker.row);
         const cube2 = offsetToCube(enemy.col, enemy.row);
         const hexDistance = cubeDistance(cube1, cube2);

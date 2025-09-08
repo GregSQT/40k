@@ -9,7 +9,7 @@ export class Intercessor extends SpaceMarineInfantryTroopRangedSwarm {
   static T = 4;                // Toughness score
   static ARMOR_SAVE = 3;       // Armor save score
   static INVUL_SAVE = 0;       // Armor invulnerable save score
-  static MAX_HP = 2;           // Max hit points
+  static HP_MAX = 2;           // Max hit points
   static LD = 6;               // Leadership score
   static OC = 2;               // Operative Control
   static VALUE = 20;           // Unit value
@@ -37,6 +37,6 @@ export class Intercessor extends SpaceMarineInfantryTroopRangedSwarm {
   static ICON_SCALE = 1.6;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, Intercessor.MAX_HP, startPos);
+    super(name, Intercessor.HP_MAX, startPos);
   }
 }

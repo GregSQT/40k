@@ -9,7 +9,7 @@ export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
   static T = 3;                // Toughness score
   static ARMOR_SAVE = 5;       // Armor save score
   static INVUL_SAVE = 0;       // Armor invulnerable save score
-  static MAX_HP = 1;           // Max hit points
+  static HP_MAX = 1;           // Max hit points
   static LD = 8;               // Leadership score
   static OC = 2;               // Operative Control
   static VALUE = 10;           // Unit value
@@ -37,7 +37,7 @@ export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
   static ICON_SCALE = 1.4;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, Hormagaunt.MAX_HP, startPos);
+    super(name, Hormagaunt.HP_MAX, startPos);
   }
 }
 

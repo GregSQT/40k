@@ -30,7 +30,7 @@ constructor(config: Partial<AIServiceConfig> = {}) {
 
   async fetchAiAction(gameState: AIGameState, currentUnitId?: number): Promise<AIAction> {
     // Create a unique key for this request to prevent duplicates
-    const requestKey = `${gameState.units.map(u => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}`).join('|')}-${currentUnitId}-${Date.now()}`;
+    const requestKey = `${gameState.units.map(u => `${u.id}-${u.col}-${u.row}-${u.HP_CUR}`).join('|')}-${currentUnitId}-${Date.now()}`;
     
     // If same request is already pending, return existing promise
     if (this.pendingRequests.has(requestKey)) {

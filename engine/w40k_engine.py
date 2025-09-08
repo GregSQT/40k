@@ -93,8 +93,8 @@ class W40KEngine:
             "row": config["row"],
             
             # UPPERCASE STATS (AI_TURN.md requirement) - NO DEFAULTS
-            "CUR_HP": config["CUR_HP"],
-            "MAX_HP": config["MAX_HP"],
+            "HP_CUR": config["HP_CUR"],
+            "HP_MAX": config["HP_MAX"],
             "MOVE": config["MOVE"],
             "T": config["T"],
             "ARMOR_SAVE": config["ARMOR_SAVE"],
@@ -131,7 +131,7 @@ class W40KEngine:
     def _validate_uppercase_fields(self, unit: Dict[str, Any]):
         """Validate unit uses UPPERCASE field naming convention."""
         required_uppercase = {
-            "CUR_HP", "MAX_HP", "MOVE", "T", "ARMOR_SAVE", "INVUL_SAVE",
+            "HP_CUR", "HP_MAX", "MOVE", "T", "ARMOR_SAVE", "INVUL_SAVE",
             "RNG_NB", "RNG_RNG", "RNG_ATK", "RNG_STR", "RNG_DMG", "RNG_AP",
             "CC_NB", "CC_RNG", "CC_ATK", "CC_STR", "CC_DMG", "CC_AP",
             "LD", "OC", "VALUE", "ICON", "ICON_SCALE",
@@ -186,7 +186,7 @@ class W40KEngine:
         
         # Reset unit health and positions
         for unit in self.game_state["units"]:
-            unit["CUR_HP"] = unit["MAX_HP"]
+            unit["HP_CUR"] = unit["HP_MAX"]
         
         # Build initial activation pool for starting player
         self._build_move_activation_pool()
@@ -256,9 +256,9 @@ class W40KEngine:
         print(f"DEBUG: Building pool for player {current_player}")
         
         for unit in self.game_state["units"]:
-            print(f"DEBUG: Checking unit {unit['id']}: Player={unit['player']}, HP={unit['CUR_HP']}")
+            print(f"DEBUG: Checking unit {unit['id']}: Player={unit['player']}, HP={unit['HP_CUR']}")
             # AI_TURN.md eligibility: alive + current_player only
-            if (unit["CUR_HP"] > 0 and 
+            if (unit["HP_CUR"] > 0 and 
                 unit["player"] == current_player):
                 
                 self.game_state["move_activation_pool"].append(unit["id"])
@@ -362,7 +362,7 @@ class W40KEngine:
         # Unit occupation check
         for other_unit in self.game_state["units"]:
             if (other_unit["id"] != unit["id"] and 
-                other_unit["CUR_HP"] > 0 and
+                other_unit["HP_CUR"] > 0 and
                 other_unit["col"] == col and 
                 other_unit["row"] == row):
                 return False
@@ -378,7 +378,7 @@ class W40KEngine:
         cc_range = unit["CC_RNG"]
         
         for enemy in self.game_state["units"]:
-            if (enemy["player"] != unit["player"] and enemy["CUR_HP"] > 0):
+            if (enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0):
                 distance = max(abs(unit["col"] - enemy["col"]), 
                               abs(unit["row"] - enemy["row"]))
                 if distance <= cc_range:
@@ -388,7 +388,7 @@ class W40KEngine:
     def _is_hex_adjacent_to_enemy(self, col: int, row: int, player: int) -> bool:
         """Check if hex position is adjacent to any enemy unit."""
         for enemy in self.game_state["units"]:
-            if enemy["player"] != player and enemy["CUR_HP"] > 0:
+            if enemy["player"] != player and enemy["HP_CUR"] > 0:
                 distance = max(abs(col - enemy["col"]), abs(row - enemy["row"]))
                 if distance <= 1:  # Adjacent check
                     return True
@@ -474,7 +474,7 @@ class W40KEngine:
                 unit = self.game_state["units"][i]
                 obs.extend([
                     unit["col"], unit["row"],
-                    unit["CUR_HP"], unit["MAX_HP"],
+                    unit["HP_CUR"], unit["HP_MAX"],
                     unit["player"],
                     1 if unit["id"] in self.game_state["units_moved"] else 0
                 ])
@@ -502,7 +502,7 @@ class W40KEngine:
         
         # Check UPPERCASE fields
         for unit in self.game_state["units"]:
-            if "CUR_HP" not in unit or "RNG_ATK" not in unit:
+            if "HP_CUR" not in unit or "RNG_ATK" not in unit:
                 violations.append(f"Unit {unit['id']} missing UPPERCASE fields")
         
         # Check tracking sets are sets
@@ -529,8 +529,8 @@ def create_test_config() -> Dict[str, Any]:
                 "unitType": "SpaceMarine_Infantry_Troop_RangedTroop",
                 "col": 1,
                 "row": 1,
-                "CUR_HP": 2,
-                "MAX_HP": 2,
+                "HP_CUR": 2,
+                "HP_MAX": 2,
                 "MOVE": 6,
                 "T": 4,
                 "ARMOR_SAVE": 3,
@@ -554,8 +554,8 @@ def create_test_config() -> Dict[str, Any]:
                 "unitType": "Ork_Infantry_Troop_MeleeTroop",
                 "col": 8,
                 "row": 8,
-                "CUR_HP": 1,
-                "MAX_HP": 1,
+                "HP_CUR": 1,
+                "HP_MAX": 1,
                 "MOVE": 6,
                 "T": 5,
                 "ARMOR_SAVE": 6,

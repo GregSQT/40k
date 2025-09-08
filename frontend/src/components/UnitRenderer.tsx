@@ -93,7 +93,7 @@ export class UnitRenderer {
     const { unit, phase, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled } = this.props;
     
     // AI_TURN.md: Basic eligibility checks
-    if (unit.CUR_HP === undefined || unit.CUR_HP <= 0) return false;
+    if (unit.HP_CUR === undefined || unit.HP_CUR <= 0) return false;
     if (phase !== "combat" && unit.player !== currentPlayer) return false;
     
     switch (phase) {
@@ -356,7 +356,7 @@ export class UnitRenderer {
     app.stage.addChild(barBg);
     
     // HP calculation with preview
-    const currentHP = Math.max(0, unit.CUR_HP ?? unit.HP_MAX);
+    const currentHP = Math.max(0, unit.HP_CUR ?? unit.HP_MAX);
     let displayHP = currentHP;
     if (isTargetPreviewed && targetPreview) {
       const shooter = units.find(u => u.id === targetPreview.shooterId);

@@ -49,7 +49,7 @@ export const useAIPlayer = ({
         player: u.player,
         col: u.col,
         row: u.row,
-        CUR_HP: u.CUR_HP ?? u.HP_MAX,
+        HP_CUR: u.HP_CUR ?? u.HP_MAX,
         MOVE: u.MOVE,
         RNG_RNG: u.RNG_RNG,
         RNG_DMG: u.RNG_DMG,

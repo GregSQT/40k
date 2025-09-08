@@ -186,8 +186,8 @@ export const GameController: React.FC<GameControllerProps> = ({
   // AI Turn Processing Effect - Trigger AI when it's AI player's turn
   React.useEffect(() => {
     // Check if game is over by examining unit health
-    const player0Alive = gameState.units.some(u => u.player === 0 && (u.CUR_HP ?? u.HP_MAX) > 0);
-    const player1Alive = gameState.units.some(u => u.player === 1 && (u.CUR_HP ?? u.HP_MAX) > 0);
+    const player0Alive = gameState.units.some(u => u.player === 0 && (u.HP_CUR ?? u.HP_MAX) > 0);
+    const player1Alive = gameState.units.some(u => u.player === 1 && (u.HP_CUR ?? u.HP_MAX) > 0);
     const gameNotOver = player0Alive && player1Alive;
     
     if (isPvE && gameState.currentPlayer === 1 && !isAIProcessing && gameNotOver) {
@@ -261,7 +261,7 @@ export const GameController: React.FC<GameControllerProps> = ({
 
   // Track unit deaths
   React.useEffect(() => {
-    const deadUnits = gameState.units.filter(unit => (unit.CUR_HP ?? unit.HP_MAX) <= 0);
+    const deadUnits = gameState.units.filter(unit => (unit.HP_CUR ?? unit.HP_MAX) <= 0);
     deadUnits.forEach(unit => {
       // Check if we haven't already logged this death
       const alreadyLogged = gameLog.events.some(event => 

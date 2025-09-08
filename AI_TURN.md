@@ -148,7 +148,7 @@ game_state ← Single authoritative object
 - **Movement**: MOVE, col, row
 - **Shooting**: RNG_NB, RNG_RNG, RNG_ATK, RNG_STR, RNG_DMG, RNG_AP
 - **Combat**: CC_NB, CC_RNG, CC_ATK, CC_STR, CC_DMG, CC_AP  
-- **Defense**: CUR_HP, MAX_HP, T, ARMOR_SAVE, INVUL_SAVE
+- **Defense**: HP_CUR, HP_MAX, T, ARMOR_SAVE, INVUL_SAVE
 
 **⚠️ CRITICAL**: Must use UPPERCASE field names consistently across all components.
 
@@ -213,8 +213,8 @@ attack_sequence(Arg)
 │               └── Damage application:
 │                   ├── damage_dealt = attacker.<OFF>_DMG
 │                   ├── total_damage += damage_dealt
-│                   ├── ⚡ IMMEDIATE UPDATE: selected_target.CUR_HP -= damage_dealt
-│                   └── selected_target.CUR_HP <= 0 ?
+│                   ├── ⚡ IMMEDIATE UPDATE: selected_target.HP_CUR -= damage_dealt
+│                   └── selected_target.HP_CUR <= 0 ?
 │                       ├── NO
 │                           ├── Arg = RNG ?
 │                           │   └── ATTACK_LOG = "Unit <activeUnit ID> SHOT Unit <selectedTarget ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <OFF>_DMG DAMAGE DELT !"
@@ -241,7 +241,7 @@ For each unit
 ├── ❌ Remove Mark units_charged
 └── ❌ Remove Mark units_fought
 ├── ELIGIBILITY CHECK (move_activation_pool Building Phase)
-│   ├── unit.CUR_HP > 0?
+│   ├── unit.HP_CUR > 0?
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
@@ -324,7 +324,7 @@ For each unit
 
 **Key Example:**
 ```
-Wounded Marine (CUR_HP 1) adjacent to healthy Ork
+Wounded Marine (HP_CUR 1) adjacent to healthy Ork
 Flee option: Survive to act later in the game, but lose turn effectiveness
 Stay option: 80% chance of death but maintain capabilities
 Decision factors: Unit value, importance of actions this turn, long term strategy, alternative threats
@@ -337,7 +337,7 @@ Decision factors: Unit value, importance of actions this turn, long term strateg
 ```javascript
 For each PLAYER unit
 ├── ELIGIBILITY CHECK (Pool Building Phase)
-│   ├── unit.CUR_HP > 0?
+│   ├── unit.HP_CUR > 0?
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
@@ -357,7 +357,7 @@ For each PLAYER unit
 │   │   │   ├── Clear TOTAL_ATTACK_LOG
 │   │   │   ├── SHOOT_LEFT = RNG_NB
 │   │   │   ├── While SHOOT_LEFT > 0
-│   │   │   │   ├── Build valid_target_pool : All enemies within range AND in Line of Sight AND having CUR_HP > 0 → added to valid_target_pool
+│   │   │   │   ├── Build valid_target_pool : All enemies within range AND in Line of Sight AND having HP_CUR > 0 → added to valid_target_pool
 │   │   │   │   └── valid_target_pool NOT empty ?
 │   │   │   │       ├── YES → SHOOTING PHASE ACTIONS AVAILABLE
 │   │   │   │       │   ├── 🎯 VALID ACTIONS: [shoot, wait]
@@ -383,7 +383,7 @@ For each PLAYER unit
 │   │       ├── Clear TOTAL_ATTACK log
 │   │       ├── SHOOT_LEFT = RNG_NB
 │   │       ├── While SHOOT_LEFT > 0
-│   │       │   ├── Build valid_target_pool : All enemies within range AND in Line of Sight AND having CUR_HP > 0 → added to valid_target_pool
+│   │       │   ├── Build valid_target_pool : All enemies within range AND in Line of Sight AND having HP_CUR > 0 → added to valid_target_pool
 │   │       │   └── valid_target_pool NOT empty ?
 │   │       │       ├── YES → SHOOTING PHASE ACTIONS AVAILABLE
 │   │       │       │   └── STEP : PLAYER_ACTION_SELECTION
@@ -473,14 +473,14 @@ For each PLAYER unit
 
 **Example 1:**
 ```
-Marine (RNG_NB = 2) faces two wounded Orks (both CUR_HP 1)
+Marine (RNG_NB = 2) faces two wounded Orks (both HP_CUR 1)
 Shot 1: Target Ork A, kill it
 Shot 2: Retarget to Ork B, kill it
 Result: Eliminate two threats in one action through dynamic targeting
 ```
 **Example 2:**
 ```
-Marine (RNG_NB = 2) faces one wounded Orks (CUR_HP 1) which is the only "Valid target"
+Marine (RNG_NB = 2) faces one wounded Orks (HP_CUR 1) which is the only "Valid target"
 Shot 1: Target the Ork, kill it
 Shot 2: No more "Valid target" available, remaining shots are cancelled
 Result: Avoid a shooting unit to be stuck because it as no more "Valid target" while having remaining shots to perform
@@ -494,7 +494,7 @@ Result: Avoid a shooting unit to be stuck because it as no more "Valid target" w
 ```javascript
 For each unit
 ├── ELIGIBILITY CHECK (Pool Building Phase)
-│   ├── unit.CUR_HP > 0?
+│   ├── unit.HP_CUR > 0?
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
@@ -622,7 +622,7 @@ Start of the Figh Phase:
 │   ##### Sub-Phase 1 : Charging units attack first
 │
 ├── For each unit : ELIGIBILITY CHECK (Pool Building Phase)
-│   ├── unit.CUR_HP > 0?
+│   ├── unit.HP_CUR > 0?
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
@@ -639,7 +639,7 @@ Start of the Figh Phase:
 │   │   │   ├── Clear TOTAL_ATTACK_LOG
 │   │   │   ├── ATTACK_LEFT = CC_NB
 │   │   │   ├── While ATTACK_LEFT > 0
-│   │   │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having CUR_HP > 0 → added to valid_target_pool
+│   │   │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having HP_CUR > 0 → added to valid_target_pool
 │   │   │   │   └── valid_target_pool NOT empty ?
 │   │   │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
 │   │   │   │       │   ├── 🎯 VALID ACTIONS: [attack]
@@ -662,7 +662,7 @@ Start of the Figh Phase:
 │   │       ├── Clear TOTAL_ATTACK_LOG
 │   │       ├── ATTACK_LEFT = CC_NB
 │   │       ├── While ATTACK_LEFT > 0
-│   │       │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having CUR_HP > 0 → added to valid_target_pool
+│   │       │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having HP_CUR > 0 → added to valid_target_pool
 │   │       │   └── valid_target_pool NOT empty ?
 │   │       │       ├── YES → STEP : PLAYER_ACTION_SELECTION
 │   │       │       │   ├── Left click on a target in valid_target_pool → Display selected_target confirmation (HP bar blinking + attack preview)
@@ -716,7 +716,7 @@ Start of the Figh Phase:
 │   ##### Sub-Phase 2 : Alternate activation
 │
 ├── ACTIVE PLAYER ELIGIBILITY CHECK (Pool Building Phase)
-│   ├── unit.CUR_HP > 0?
+│   ├── unit.HP_CUR > 0?
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
@@ -729,7 +729,7 @@ Start of the Figh Phase:
 │   └── ALL conditions met → ✅ Add to active_alternating_activation_pool
 │
 ├── NON-ACTIVE PLAYER ELIGIBILITY CHECK (Pool Building Phase)
-│   ├── unit.CUR_HP > 0?
+│   ├── unit.HP_CUR > 0?
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── YES → ❌ Wrong player (Skip, no log)
@@ -749,7 +749,7 @@ Start of the Figh Phase:
 │   │   │   │   ├── Clear TOTAL_ATTACK_LOG
 │   │   │   │   ├── ATTACK_LEFT = CC_NB
 │   │   │   │   ├── While ATTACK_LEFT > 0
-│   │   │   │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having CUR_HP > 0 → added to valid_target_pool
+│   │   │   │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having HP_CUR > 0 → added to valid_target_pool
 │   │   │   │   │   └── valid_target_pool NOT empty ?
 │   │   │   │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
 │   │   │   │   │       │   ├── 🎯 VALID ACTIONS: [attack]
@@ -775,7 +775,7 @@ Start of the Figh Phase:
 │   │   │       ├── Clear TOTAL_ATTACK_LOG
 │   │   │       ├── ATTACK_LEFT = CC_NB
 │   │   │       ├── While ATTACK_LEFT > 0
-│   │   │       │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having CUR_HP > 0 → added to valid_target_pool
+│   │   │       │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having HP_CUR > 0 → added to valid_target_pool
 │   │   │       │   ├── Display the fight preview
 │   │   │       │   └── valid_target_pool NOT empty ?
 │   │   │       │       ├── YES → STEP : PLAYER_ACTION_SELECTION
@@ -831,7 +831,7 @@ Start of the Figh Phase:
 │   │       │   ├── Clear TOTAL_ATTACK_LOG
 │   │       │   ├── ATTACK_LEFT = CC_NB
 │   │       │   ├── While ATTACK_LEFT > 0
-│   │       │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having CUR_HP > 0 → added to valid_target_pool
+│   │       │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having HP_CUR > 0 → added to valid_target_pool
 │   │       │   │   └── valid_target_pool NOT empty ?
 │   │       │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
 │   │       │   │       │   ├── 🎯 VALID ACTIONS: [attack]
@@ -857,7 +857,7 @@ Start of the Figh Phase:
 │   │           ├── Clear TOTAL_ATTACK_LOG
 │   │           ├── ATTACK_LEFT = CC_NB
 │   │           ├── While ATTACK_LEFT > 0
-│   │           │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having CUR_HP > 0 → added to valid_target_pool
+│   │           │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having HP_CUR > 0 → added to valid_target_pool
 │   │           │   ├── Display the fight preview
 │   │           │   └── valid_target_pool NOT empty ?
 │   │           │       ├── YES → STEP : PLAYER_ACTION_SELECTION
@@ -917,7 +917,7 @@ Start of the Figh Phase:
 │           │   ├── Clear TOTAL_ATTACK_LOG
 │           │   ├── ATTACK_LEFT = CC_NB
 │           │   ├── While ATTACK_LEFT > 0
-│           │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having CUR_HP > 0 → added to valid_target_pool
+│           │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having HP_CUR > 0 → added to valid_target_pool
 │           │   │   └── valid_target_pool NOT empty ?
 │           │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
 │           │   │       │   ├── 🎯 VALID ACTIONS: [attack]
@@ -943,7 +943,7 @@ Start of the Figh Phase:
 │               ├── Clear TOTAL_ATTACK_LOG
 │               ├── ATTACK_LEFT = CC_NB
 │               ├── While ATTACK_LEFT > 0
-│               │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having selected_target.CUR_HP > 0 → added to valid_target_pool
+│               │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having selected_target.HP_CUR > 0 → added to valid_target_pool
 │               │   ├── Display the fight preview
 │               │   └── valid_target_pool NOT empty ?
 │               │       ├── YES → STEP : PLAYER_ACTION_SELECTION
@@ -1015,8 +1015,8 @@ function buildChargingActivationPool() {
  chargingActivationPool = []
  
  for (const unit of units) {                // MATCHES: Current script uses 'units' array
-   // REF: Line 5 "unit.CUR_HP > 0?"
-   if (unit.CUR_HP <= 0) continue           // MATCHES: Current script checks CUR_HP
+   // REF: Line 5 "unit.HP_CUR > 0?"
+   if (unit.HP_CUR <= 0) continue           // MATCHES: Current script checks HP_CUR
    
    // REF: Line 7 "unit.player === currentPlayer?"  
    if (unit.player !== currentPlayer) continue // MATCHES: Current script uses currentPlayer
@@ -1225,7 +1225,7 @@ function buildAlternatingPools() {
  // REF: Line 94 "ACTIVE PLAYER ELIGIBILITY CHECK"
  for (const unit of units) {              // MATCHES: Current script units array
    // REF: Lines 95-104 exact conditions
-   if (unit.CUR_HP > 0 &&
+   if (unit.HP_CUR > 0 &&
        unit.player === currentPlayer &&
        !unitsAttacked.includes(unit.id) && // MATCHES: Current script unitsAttacked
        !unitsCharged.includes(unit.id) &&  // MATCHES: Current script unitsCharged
@@ -1238,7 +1238,7 @@ function buildAlternatingPools() {
  // REF: Line 107 "NON-ACTIVE PLAYER ELIGIBILITY CHECK" 
  for (const unit of units) {
    // REF: Lines 108-117 exact conditions
-   if (unit.CUR_HP > 0 &&
+   if (unit.HP_CUR > 0 &&
        unit.player !== currentPlayer &&
        !unitsAttacked.includes(unit.id) &&
        !unitsCharged.includes(unit.id) &&
@@ -1393,14 +1393,14 @@ function executeAttack(attacker, target) {
  
  // Apply damage using current script pattern
  if (damageDealt > 0) {
-   // REF: Line 42 "⚡ IMMEDIATE UPDATE: current_target.CUR_HP -= damage_dealt"
-   const newHP = target.CUR_HP - damageDealt
+   // REF: Line 42 "⚡ IMMEDIATE UPDATE: current_target.HP_CUR -= damage_dealt"
+   const newHP = target.HP_CUR - damageDealt
    
-   // REF: Line 42 "current_target.CUR_HP <= 0 ? → current_target.alive = False"
+   // REF: Line 42 "current_target.HP_CUR <= 0 ? → current_target.alive = False"
    if (newHP <= 0) {
      actions.removeUnit(target.id)        // MATCHES: Current script actions
    } else {
-     actions.updateUnit(target.id, { CUR_HP: newHP }) // MATCHES: Current script
+     actions.updateUnit(target.id, { HP_CUR: newHP }) // MATCHES: Current script
    }
  }
  
@@ -1491,7 +1491,7 @@ function handleCombatClick(clickType, target) {
 3. **Priority 3**: Units with high melee damage output (regardless of vulnerability) AND low chances of being destroyed this phase
 
 **Priority Assessment Logic:**
-- **"Likely to die"**: Enemy CUR_HP ≤ Expected damage from this unit's attacks
+- **"Likely to die"**: Enemy HP_CUR ≤ Expected damage from this unit's attacks
 - **"High melee damage"**: Enemy CC_STR and CC_NB pose significant threat
 - **"Safe targets"**: Enemies already marked as `units_attacked` (cannot retaliate)
 
@@ -1654,7 +1654,7 @@ Decision principle: Coordination often superior to individual optimization
 
 **Scenario 2 - The Flee vs Fight Dilemma:**
 ```
-Wounded Scout (CUR_HP 1) adjacent to healthy Ork
+Wounded Scout (HP_CUR 1) adjacent to healthy Ork
 Combat prediction: 80% chance Scout dies if stays
 Flee consequences: Scout survives but cannot shoot critical targets this turn
 
@@ -1746,7 +1746,7 @@ Prevention: Avoid isolated vulnerabilities
 **Can Claude correctly apply eligibility logic?**
 
 Given a unit that is:
-- Alive (CUR_HP > 0) ✓
+- Alive (HP_CUR > 0) ✓
 - Belongs to current player ✓  
 - Not in units_moved ✓
 - Adjacent to an enemy

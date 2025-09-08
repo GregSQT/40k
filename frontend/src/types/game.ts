@@ -22,9 +22,8 @@ export interface Unit {
   color?: number;
   
   // Engine UPPERCASE fields (AI_TURN.md compliance)
-  CUR_HP: number;
-  MAX_HP?: number;
-  HP_MAX?: number; // Support both naming conventions
+  HP_CUR: number;
+  HP_MAX?: number;
   MOVE: number;
   T?: number;
   ARMOR_SAVE?: number;

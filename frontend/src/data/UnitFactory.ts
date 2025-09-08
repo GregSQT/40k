@@ -79,7 +79,7 @@ export interface Unit {
   CC_RNG?: number;
   ICON: string;
   ICON_SCALE?: number;
-  CUR_HP?: number;
+  HP_CUR?: number;
   RNG_NB?: number;
   RNG_ATK?: number;
   RNG_STR?: number;
@@ -153,7 +153,7 @@ export function createUnit(params: {
     CC_RNG: UnitClass.CC_RNG,
     ICON: UnitClass.ICON,
     ICON_SCALE: UnitClass.ICON_SCALE,
-    CUR_HP: UnitClass.HP_MAX, // AI_TURN.md: Start at full health
+    HP_CUR: UnitClass.HP_MAX, // AI_TURN.md: Start at full health
     RNG_NB: UnitClass.RNG_NB,
     RNG_ATK: UnitClass.RNG_ATK,
     RNG_STR: UnitClass.RNG_STR,

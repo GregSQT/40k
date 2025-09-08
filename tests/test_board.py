@@ -103,7 +103,7 @@ def demonstrate_engine():
     
     print(f"\n📍 Initial Unit Positions:")
     for unit in game_state['units']:
-        print(f"   {unit['id']}: Player {unit['player']} at ({unit['col']}, {unit['row']}) HP:{unit['CUR_HP']}")
+        print(f"   {unit['id']}: Player {unit['player']} at ({unit['col']}, {unit['row']}) HP:{unit['HP_CUR']}")
     
     # Execute some test moves
     print(f"\n🚀 Executing Test Moves:")
@@ -131,7 +131,7 @@ def demonstrate_engine():
     print(f"\n📍 Final Unit Positions:")
     if game_state:
         for unit in game_state['units']:
-            print(f"   {unit['id']}: Player {unit['player']} at ({unit['col']}, {unit['row']}) HP:{unit['CUR_HP']}")
+            print(f"   {unit['id']}: Player {unit['player']} at ({unit['col']}, {unit['row']}) HP:{unit['HP_CUR']}")
     
     return True
 

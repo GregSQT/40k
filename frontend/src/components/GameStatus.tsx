@@ -57,8 +57,8 @@ export const GameStatus = memo<GameStatusProps>(({
   const player1Units = units.filter(u => u.player === 0);
   const player2Units = units.filter(u => u.player === 1);
   
-  const player1HP = player1Units.reduce((total, unit) => total + (unit.CUR_HP ?? unit.HP_MAX), 0);
-  const player2HP = player2Units.reduce((total, unit) => total + (unit.CUR_HP ?? unit.HP_MAX), 0);
+  const player1HP = player1Units.reduce((total, unit) => total + (unit.HP_CUR ?? unit.HP_MAX), 0);
+  const player2HP = player2Units.reduce((total, unit) => total + (unit.HP_CUR ?? unit.HP_MAX), 0);
 
   return (
     <div className="game-status">

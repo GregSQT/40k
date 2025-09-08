@@ -141,7 +141,7 @@ def _build_observation(self):
             unit = self.game_state["units"][i]
             obs_vector.extend([
                 unit["col"], unit["row"],
-                unit["CUR_HP"], unit["MAX_HP"],
+                unit["HP_CUR"], unit["HP_MAX"],
                 unit["player"],
                 1 if unit["id"] in self.game_state["units_moved"] else 0,
                 1 if unit["id"] in self.game_state["units_shot"] else 0,

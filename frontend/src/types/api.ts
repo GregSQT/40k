@@ -19,7 +19,7 @@ export interface AIActionRequest {
       player: number;
       col: number;
       row: number;
-      CUR_HP: number;
+      HP_CUR: number;
       MOVE: number;
       RNG_RNG: number;
       RNG_DMG: number;
