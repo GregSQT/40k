@@ -4,6 +4,9 @@ import type { GameState, UnitId, Unit } from '../types/game';
 
 interface UseGameActionsParams {
   gameState: GameState;
+  movePreview: any;
+  attackPreview: any;
+  shootingPhaseState: any;
   actions: {
     setSelectedUnitId: (id: UnitId | null) => void;
     setMode: (mode: GameState['mode']) => void;
@@ -15,9 +18,11 @@ interface UseGameActionsParams {
     setMovePreview: (preview: any) => void;
     setAttackPreview: (preview: any) => void;
   };
+  boardConfig?: any;
+  gameLog?: any;
 }
 
-export const useGameActions = ({ gameState, actions }: UseGameActionsParams) => {
+export const useGameActions = ({ gameState, movePreview, attackPreview, shootingPhaseState, actions, boardConfig, gameLog }: UseGameActionsParams) => {
   
   // AI_TURN.md: Single source of truth eligibility function
   const isUnitEligible = useCallback((unit: Unit): boolean => {
@@ -61,11 +66,6 @@ export const useGameActions = ({ gameState, actions }: UseGameActionsParams) => 
     
     if (!unit || !isUnitEligible(unit)) return;
 
-    // AI_TURN.md: Built-in step counting (+1 step for selection)
-    if (gameState.episode_steps !== undefined) {
-      gameState.episode_steps = gameState.episode_steps + 1;
-    }
-
     console.log("🔴 SETTING SELECTED UNIT:", unitId);
     actions.setSelectedUnitId(unitId);
     actions.setMode("select");
@@ -75,11 +75,6 @@ export const useGameActions = ({ gameState, actions }: UseGameActionsParams) => 
   const directMove = useCallback((unitId: UnitId, col: number, row: number) => {
     const unit = gameState.units.find(u => u.id === unitId);
     if (!unit || !isUnitEligible(unit) || gameState.phase !== "move") return;
-
-    // AI_TURN.md: Built-in step counting (+1 step for move)
-    if (gameState.episode_steps !== undefined) {
-      gameState.episode_steps = gameState.episode_steps + 1;
-    }
 
     actions.updateUnit(unitId, { col, row });
     actions.addMovedUnit(unitId);

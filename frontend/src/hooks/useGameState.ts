@@ -84,11 +84,11 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     singleShotState: {
       isActive: false,
       targetId: null,
-      shotNumber: 0,
+      //shotNumber: 0,
       totalShots: 0
     }
   });
-  const [chargeRollPopup, setChargeRollPopup] = useState<ChargeRollPopup | null>(null);
+  const [chargeRollPopup] = useState<ChargeRollPopup | null>(null);
 
   // AI_TURN.md: Update unit with UPPERCASE field validation
   const updateUnit = useCallback((unitId: UnitId, updates: Partial<Unit>) => {

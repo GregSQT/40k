@@ -20,6 +20,9 @@ interface UnitRowProps {
 }
 
 const UnitRow = memo<UnitRowProps>(({ unit, isSelected, isClicked, onSelect }) => {
+  if (!unit.HP_MAX) {
+    throw new Error(`Unit ${unit.id} missing required HP_MAX field`);
+  }
   const currentHP = unit.CUR_HP ?? unit.HP_MAX;
   const hpPercentage = (currentHP / unit.HP_MAX) * 100;
   
