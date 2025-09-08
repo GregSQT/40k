@@ -185,6 +185,21 @@ export const useEngineAPI = () => {
     setMovePreview(null);
   }, []);
 
+  const handleSkipUnit = useCallback(async (unitId: number | string) => {
+    const action = {
+      action: "skip",
+      unitId: typeof unitId === 'string' ? unitId : unitId.toString(),
+    };
+    
+    try {
+      await executeAction(action);
+      setSelectedUnitId(null);
+      setMode("select");
+    } catch (error) {
+      console.error("Skip unit failed:", error);
+    }
+  }, [executeAction]);
+
   const handleStartMovePreview = useCallback((unitId: number | string, col: number | string, row: number | string) => {
     setMovePreview({
       unitId: typeof unitId === 'string' ? parseInt(unitId) : unitId,
@@ -195,7 +210,6 @@ export const useEngineAPI = () => {
   }, []);
 
   const handleDirectMove = useCallback(async (unitId: number | string, col: number | string, row: number | string) => {
-    console.log("🎯 useEngineAPI handleDirectMove CALLED:", { unitId, col, row });
     const action = {
       action: "move",
       unitId: typeof unitId === 'string' ? unitId : unitId.toString(),
@@ -204,9 +218,7 @@ export const useEngineAPI = () => {
     };
     
     try {
-      console.log("🎯 About to call executeAction with action:", action);
       await executeAction(action);
-      console.log("🎯 executeAction completed - state will be reset when game state updates");
       // Let executeAction handle state reset after updating game state
       setMovePreview(null);
       setMode("select");
@@ -319,6 +331,7 @@ export const useEngineAPI = () => {
       unitChargeRolls: {},
     },
     onSelectUnit: handleSelectUnit,
+    onSkipUnit: handleSkipUnit,
     onStartMovePreview: handleStartMovePreview,
     onDirectMove: handleDirectMove,
     onStartAttackPreview: () => {},

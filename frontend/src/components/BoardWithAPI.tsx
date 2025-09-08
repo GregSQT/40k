@@ -98,6 +98,7 @@ export const BoardWithAPI: React.FC = () => {
         movePreview={apiProps.movePreview}
         attackPreview={apiProps.attackPreview || null}
         onSelectUnit={apiProps.onSelectUnit}
+        onSkipUnit={apiProps.onSkipUnit}
         onStartMovePreview={apiProps.onStartMovePreview}
         onDirectMove={apiProps.onDirectMove}
         onStartAttackPreview={apiProps.onStartAttackPreview}

@@ -203,19 +203,22 @@ export class UnitRenderer {
           unitCircle.cursor = "default";
         } else {
           unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-            if (e.button === 0) {
-              // Prevent event bubbling and multiple dispatches
-              e.stopPropagation();
-              window.dispatchEvent(new CustomEvent('boardUnitClick', {
-                detail: {
-                  unitId: unit.id,
-                  phase: phase,
-                  mode: mode,
-                  selectedUnitId: selectedUnitId
-                }
-              }));
-            }
-          });
+          if (e.button === 0 || e.button === 2) { // Left or right click
+            // Prevent context menu and event bubbling
+            e.preventDefault();
+            e.stopPropagation();
+            
+            window.dispatchEvent(new CustomEvent('boardUnitClick', {
+              detail: {
+                unitId: unit.id,
+                phase: phase,
+                mode: mode,
+                selectedUnitId: selectedUnitId,
+                clickType: e.button === 0 ? 'left' : 'right'
+              }
+            }));
+          }
+        });
         }
       } else {
         unitCircle.eventMode = 'none';

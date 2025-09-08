@@ -4,7 +4,6 @@ import GamePage from "./pages/GamePage";
 import './App.css'
 
 function App() {
-  console.log('🔍 Current URL on load:', window.location.href);
   return (
     <BrowserRouter>
       <Routes>

@@ -286,6 +286,9 @@ class W40KEngine:
             
         elif action_type == "skip":
             self.game_state["units_moved"].add(unit["id"])
+            # AI_TURN.md: Right-click skip must end activation by removing from pool
+            if unit["id"] in self.game_state["move_activation_pool"]:
+                self.game_state["move_activation_pool"].remove(unit["id"])
             return True, {"action": "skip", "unitId": unit["id"]}
             
         else:
@@ -401,14 +404,42 @@ class W40KEngine:
     # ===== PHASE TRANSITION LOGIC =====
     
     def _advance_to_shooting_phase(self):
-        """Skip other phases for movement-only testing - advance directly to next player."""
-        self._advance_to_next_player()
+        """Advance to shooting phase per AI_TURN.md progression."""
+        self.game_state["phase"] = "shoot"
+        self._phase_initialized = False  # Reset for shooting phase
     
-    def _process_shooting_phase(self, action: int) -> Tuple[bool, Dict[str, Any]]:
-        """Placeholder for shooting phase - implements AI_TURN.md decision tree."""
-        # TODO: Implement shooting phase logic
-        self._advance_to_charge_phase()
-        return self._process_charge_phase(action)
+    def _process_shooting_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Process shooting phase with AI_TURN.md decision tree logic."""
+        
+        # VERY BEGINNING of shooting phase - build pool
+        if not hasattr(self, '_phase_initialized') or not self._phase_initialized:
+            self._build_shoot_activation_pool()
+            self._phase_initialized = True
+        
+        # Check if phase should complete (empty pool means phase is done)
+        if not self.game_state["shoot_activation_pool"]:
+            self._phase_initialized = False  # Reset for next phase
+            self._advance_to_charge_phase()
+            return True, {"type": "phase_complete", "next_phase": "charge"}
+        
+        # AI_TURN.md COMPLIANCE: ONLY semantic actions with unitId
+        if "unitId" not in action:
+            return False, {"error": "semantic_action_required", "action": action}
+        
+        active_unit = self._get_unit_by_id(str(action["unitId"]))
+        if not active_unit:
+            return False, {"error": "unit_not_found", "unitId": action["unitId"]}
+        
+        if active_unit["id"] not in self.game_state["shoot_activation_pool"]:
+            return False, {"error": "unit_not_eligible", "unitId": action["unitId"]}
+        
+        # Remove requested unit from pool
+        self.game_state["shoot_activation_pool"].remove(active_unit["id"])
+        
+        # Execute shooting action
+        success, result = self._execute_shooting_action(active_unit, action)
+        
+        return success, result
     
     def _advance_to_charge_phase(self):
         """Advance to charge phase per AI_TURN.md progression."""
@@ -449,6 +480,181 @@ class W40KEngine:
         self.game_state["units_charged"] = set()
         self.game_state["units_attacked"] = set()
         self.game_state["move_activation_pool"] = []
+    
+    # ===== SHOOTING PHASE IMPLEMENTATION =====
+    
+    def _build_shoot_activation_pool(self):
+        """Build shooting activation pool using AI_TURN.md eligibility logic."""
+        self.game_state["shoot_activation_pool"] = []
+        current_player = self.game_state["current_player"]
+        
+        for unit in self.game_state["units"]:
+            # AI_TURN.md eligibility: alive + current_player + not fled + not adjacent + has weapon + has targets
+            if (unit["HP_CUR"] > 0 and 
+                unit["player"] == current_player and
+                unit["id"] not in self.game_state["units_fled"] and
+                not self._is_adjacent_to_enemy(unit) and
+                unit["RNG_NB"] > 0 and
+                self._has_valid_shooting_targets(unit)):
+                
+                self.game_state["shoot_activation_pool"].append(unit["id"])
+    
+    def _has_valid_shooting_targets(self, unit: Dict[str, Any]) -> bool:
+        """Check if unit has valid shooting targets per AI_TURN.md restrictions."""
+        for enemy in self.game_state["units"]:
+            if (enemy["player"] != unit["player"] and 
+                enemy["HP_CUR"] > 0 and
+                self._is_valid_shooting_target(unit, enemy)):
+                return True
+        return False
+    
+    def _is_valid_shooting_target(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
+        """Validate shooting target per AI_TURN.md restrictions."""
+        
+        # Range check
+        distance = max(abs(shooter["col"] - target["col"]), abs(shooter["row"] - target["row"]))
+        if distance > shooter["RNG_RNG"]:
+            return False
+        
+        # Combat exclusion: target NOT adjacent to shooter
+        if distance <= shooter["CC_RNG"]:
+            return False
+        
+        # Friendly fire prevention: target NOT adjacent to any friendly units
+        for friendly in self.game_state["units"]:
+            if (friendly["player"] == shooter["player"] and 
+                friendly["HP_CUR"] > 0 and 
+                friendly["id"] != shooter["id"]):
+                
+                friendly_distance = max(abs(friendly["col"] - target["col"]), 
+                                      abs(friendly["row"] - target["row"]))
+                if friendly_distance <= 1:  # Adjacent to friendly
+                    return False
+        
+        # Line of sight check
+        return self._has_line_of_sight(shooter, target)
+    
+    def _has_line_of_sight(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
+        """Check line of sight between shooter and target."""
+        # Simple implementation: blocked by walls only
+        start_col, start_row = shooter["col"], shooter["row"]
+        end_col, end_row = target["col"], target["row"]
+        
+        # Bresenham line algorithm for hex path
+        hex_path = self._get_hex_line(start_col, start_row, end_col, end_row)
+        
+        # Check if any hex in path is a wall (excluding start and end)
+        for col, row in hex_path[1:-1]:  # Skip start and end positions
+            if (col, row) in self.game_state["wall_hexes"]:
+                return False
+        
+        return True
+    
+    def _get_hex_line(self, start_col: int, start_row: int, end_col: int, end_row: int) -> List[Tuple[int, int]]:
+        """Get hex line between two points (simplified implementation)."""
+        path = []
+        
+        # Simple linear interpolation for now
+        steps = max(abs(end_col - start_col), abs(end_row - start_row))
+        if steps == 0:
+            return [(start_col, start_row)]
+        
+        for i in range(steps + 1):
+            t = i / steps
+            col = round(start_col + t * (end_col - start_col))
+            row = round(start_row + t * (end_row - start_row))
+            path.append((col, row))
+        
+        return path
+    
+    def _execute_shooting_action(self, unit: Dict[str, Any], action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Execute semantic shooting action with AI_TURN.md restrictions."""
+        
+        action_type = action.get("action")
+        
+        if action_type == "shoot":
+            target_id = action.get("targetId")
+            if not target_id:
+                return False, {"error": "missing_target", "action": action}
+            
+            target = self._get_unit_by_id(str(target_id))
+            if not target:
+                return False, {"error": "target_not_found", "targetId": target_id}
+            
+            return self._attempt_shooting(unit, target)
+            
+        elif action_type == "skip":
+            self.game_state["units_shot"].add(unit["id"])
+            return True, {"action": "skip", "unitId": unit["id"]}
+            
+        else:
+            return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "shoot"}
+    
+    def _attempt_shooting(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Attempt shooting with AI_TURN.md damage resolution."""
+        
+        # Validate target
+        if not self._is_valid_shooting_target(shooter, target):
+            return False, {"error": "invalid_target", "targetId": target["id"]}
+        
+        # Execute shots (RNG_NB shots per activation)
+        total_damage = 0
+        shots_fired = shooter["RNG_NB"]
+        
+        for shot in range(shots_fired):
+            # Hit roll
+            hit_roll = random.randint(1, 6)
+            hit_target = 7 - shooter["RNG_ATK"]  # Convert attack stat to target number
+            
+            if hit_roll >= hit_target:
+                # Wound roll
+                wound_roll = random.randint(1, 6)
+                wound_target = self._calculate_wound_target(shooter["RNG_STR"], target["T"])
+                
+                if wound_roll >= wound_target:
+                    # Save roll
+                    save_roll = random.randint(1, 6)
+                    save_target = target["ARMOR_SAVE"] - shooter["RNG_AP"]
+                    
+                    # Check invulnerable save
+                    if target["INVUL_SAVE"] < save_target:
+                        save_target = target["INVUL_SAVE"]
+                    
+                    if save_roll < save_target:
+                        # Damage dealt
+                        damage = shooter["RNG_DMG"]
+                        total_damage += damage
+                        target["HP_CUR"] -= damage
+                        
+                        # Check if target dies
+                        if target["HP_CUR"] <= 0:
+                            target["HP_CUR"] = 0
+                            break  # Stop shooting at dead target
+        
+        # Apply tracking
+        self.game_state["units_shot"].add(shooter["id"])
+        
+        return True, {
+            "action": "shoot",
+            "shooterId": shooter["id"],
+            "targetId": target["id"],
+            "shotsFired": shots_fired,
+            "totalDamage": total_damage,
+            "targetHP": target["HP_CUR"]
+        }
+    
+    def _calculate_wound_target(self, strength: int, toughness: int) -> int:
+        """Calculate wound target number per W40K rules."""
+        if strength >= toughness * 2:
+            return 2
+        elif strength > toughness:
+            return 3
+        elif strength == toughness:
+            return 4
+        elif strength * 2 <= toughness:
+            return 6
+        else:
+            return 5
     
     # ===== UTILITY METHODS =====
     

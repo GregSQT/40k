@@ -7,6 +7,7 @@ let globalHexClickHandler: ((e: Event) => void) | null = null;
 
 export function setupBoardClickHandler(callbacks: {
   onSelectUnit(unitId: number | null): void;
+  onSkipUnit?(unitId: UnitId): void;
   onStartAttackPreview(shooterId: UnitId): void;
   onShoot(shooterId: UnitId, targetId: UnitId): void;
   onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
@@ -29,15 +30,28 @@ export function setupBoardClickHandler(callbacks: {
   }
 
   const unitClickHandler = (e: Event) => {
-    const { unitId, phase, mode, selectedUnitId } = (e as CustomEvent<{
+    const { unitId, phase, mode, selectedUnitId, clickType } = (e as CustomEvent<{
       unitId: number;
       phase: string;
       mode: string;
       selectedUnitId: number | null;
+      clickType?: 'left' | 'right';
     }>).detail;
 
     if (phase === 'move' && mode === 'select') {
-      callbacks.onSelectUnit(unitId);
+      // AI_TURN.md MOVEMENT PHASE COMPLIANCE
+      if (selectedUnitId === unitId) {
+        if (clickType === 'right') {
+          // Right click on active unit → Move cancelled (skip unit)
+          callbacks.onSkipUnit?.(unitId);
+        } else {
+          // Left click on active unit → Move postponed (deselect)
+          callbacks.onSelectUnit(null);
+        }
+      } else {
+        // Click on different unit → Switch activation
+        callbacks.onSelectUnit(unitId);
+      }
     } else if (phase === 'shoot' && mode === 'select') {
       callbacks.onSelectUnit(unitId);
       callbacks.onStartAttackPreview(unitId);

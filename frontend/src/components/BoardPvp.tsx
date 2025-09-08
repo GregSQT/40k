@@ -94,6 +94,7 @@ type BoardProps = {
   movePreview: { unitId: number; destCol: number; destRow: number } | null;
   attackPreview: { unitId: number; col: number; row: number } | null;
   onSelectUnit: (id: number | string | null) => void;
+  onSkipUnit?: (unitId: number | string) => void;
   onStartMovePreview: (unitId: number | string, col: number | string, row: number | string) => void;
   onDirectMove: (unitId: number | string, col: number | string, row: number | string) => void;
   onStartAttackPreview: (unitId: number, col: number, row: number) => void;
@@ -132,6 +133,7 @@ export default function Board({
   movePreview,
   attackPreview,
   onSelectUnit,
+  onSkipUnit,
   onStartMovePreview,
   onDirectMove,
   onStartAttackPreview,
@@ -173,6 +175,7 @@ export default function Board({
   // ✅ STABLE CALLBACK REFS - Don't change on every render
   const stableCallbacks = useRef<{
     onSelectUnit: (id: number | string | null) => void;
+    onSkipUnit?: (unitId: number | string) => void;
     onStartMovePreview: (unitId: number | string, col: number | string, row: number | string) => void;
     onDirectMove: (unitId: number | string, col: number | string, row: number | string) => void;
     onStartAttackPreview: (unitId: number, col: number, row: number) => void;
@@ -204,6 +207,7 @@ export default function Board({
   // Update refs when props change but don't trigger re-render - MOVE THIS BEFORE useEffect
   stableCallbacks.current = {
     onSelectUnit,
+    onSkipUnit,
     onStartMovePreview,
     onDirectMove,
     onStartAttackPreview,
@@ -396,6 +400,7 @@ export default function Board({
     // Set up board click handler IMMEDIATELY after canvas creation
     setupBoardClickHandler({
       onSelectUnit: stableCallbacks.current.onSelectUnit,
+      onSkipUnit: stableCallbacks.current.onSkipUnit,
       onStartAttackPreview: (shooterId: number) => {
         const unit = units.find(u => u.id === shooterId);
         if (unit) {

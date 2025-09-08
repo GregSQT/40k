@@ -15,8 +15,21 @@ Clear validation criteria for every decision
 Expert-level technical depth required
 Always use two code boxes for updates, indicating the path and name of the updated file, respecting indentation, without ellipse, without workaround or defaut value
 
+POTENTIAL HELP
+I have Added in the knowledge 40k_OLD
+It is the previous version of the application.
+Its main problem is the react conflicting with AI_TURN rules.
+But for other purposes, you may save time having a look at how it manages some features. Of course, the main priority is to maintain the 100% compliance with AI_TURN
+
 IMMEDIATE SITUATION
 I am currently working on the movement phase.
 Preview is OK, but when the target green hex is selected, it is the other unit that is moved.
 
 Last prompt :
+
+
+
+
+
+callback chain: 
+UnitRenderer → boardClickHandler → BoardPvp → BoardWithAPI → useEngineAPI
