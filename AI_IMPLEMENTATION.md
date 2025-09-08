@@ -456,18 +456,18 @@ project_root/
 │   │   │
 │   │   ├── data/                   # PRESERVED FROM LEGACY
 │   │   │   ├── Units.ts                    # Unit data structures
-│   │   │   ├── UnitFactory.ts              # Unit creation logic
+│   │   │   ├── UnitFactory.ts              # REBUILD OK
 │   │   │   └── Scenario.ts                 # Scenario definitions
-│   │   │
+│   │   │useAITurn.ts
 │   │   ├── hooks/                  # DO NOT COPY (built for legacy API)
 │   │   │   ├── useAIPlayer.ts              # Legacy hook (rebuild needed)
-│   │   │   ├── useAITurn.ts                # Legacy hook (rebuild needed)
+│   │   │   ├── useAITurn.ts                # REBUILD OK
 │   │   │   ├── useEngineAPI.ts
-│   │   │   ├── useGameActions.ts           # Legacy hook (rebuild needed)
-│   │   │   ├── useGameConfig.ts            # Legacy hook (rebuild needed)
-│   │   │   ├── useGameLog.ts               # Legacy hook (rebuild needed)
-│   │   │   ├── useGameState.ts             # Legacy hook (rebuild needed)
-│   │   │   └── usePhaseTransition.ts       # Legacy hook (rebuild needed)
+│   │   │   ├── useGameActions.ts           # REBUILD OK
+│   │   │   ├── useGameConfig.ts            # REBUILD OK
+│   │   │   ├── useGameLog.ts               # REBUILD OK
+│   │   │   ├── useGameState.ts             # REBUILD OK
+│   │   │   └── usePhaseTransition.ts       # REBUILD OK
 │   │   │
 │   │   ├── pages/                  # PRESERVED FROM LEGACY
 │   │   │   ├── HomePage.tsx                # Home page component
@@ -505,7 +505,7 @@ project_root/
 │   │   │   └── replay.ts                   # Replay system types
 │   │   │
 │   │   ├── utils/                  # EVALUATE INDIVIDUALLY
-│   │   │   ├── boardClickHandler.ts        # UI event handling (SAFE)
+│   │   │   ├── boardClickHandler.ts        # UI event handling (SAFE) OK
 │   │   │   ├── gameHelpers.ts              # General utilities (EVALUATE)
 │   │   │   ├── probabilityCalculator.ts    # Math utilities (SAFE)
 │   │   │   ├── CombatSequenceManager.ts    # Combat UI logic (EVALUATE)

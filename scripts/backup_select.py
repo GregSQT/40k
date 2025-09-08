@@ -126,14 +126,18 @@ else:
         # Frontend/src/data
         #"frontend/src/data/Scenario.ts",
         #"frontend/src/data/Units.ts",
-        #"frontend/src/data/UnitFactory.ts",
+        "frontend/src/data/UnitFactory.ts",
         #"frontend/src/data/UnitRegistry.ts",
         
 
         # Frontend/src/hooks
+        "frontend/src/hooks/useAITurn.ts",
         "frontend/src/hooks/useEngineAPI.ts",
+        "frontend/src/hooks/useGameActions.ts",
         "frontend/src/hooks/useGameConfig.ts",
-        "frontend/src/hooks/useGameLogs.ts",
+        "frontend/src/hooks/useGameLog.ts",
+        "frontend/src/hooks/useGameState.ts",
+        "frontend/src/hooks/usePhaseTransition.ts",
 
         # Frontend/src/pages
         "frontend/src/pages/GamePage.tsx",
@@ -167,7 +171,7 @@ else:
         #"frontend/src/types/replay.ts",
 
         # frontend/src/utils
-        #"frontend/src/utils/boardClickHandler.ts",
+        "frontend/src/utils/boardClickHandler.ts",
         "frontend/src/utils/gameHelpers.ts",
         #"frontend/src/utils/probabilityCalculator.ts",
 

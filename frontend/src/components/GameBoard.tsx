@@ -2,7 +2,7 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
 import BoardPvp from './BoardPvp';
-import { BoardReplay } from './BoardReplay';
+//import { BoardReplay } from './BoardReplay';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
 import type { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState, TargetPreview, CombatSubPhase, PlayerId } from '../types';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
@@ -48,6 +48,7 @@ interface GameBoardProps {
 }
 
 export const GameBoard: React.FC<GameBoardProps> = (props) => {
+  console.log("🔵 GAMEBOARD COMPONENT RENDERING");
   // Detect game mode from URL
   const location = useLocation();
   const gameMode = location.pathname.includes('/pve') ? 'pve' : 
@@ -57,6 +58,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
   // Convert string/number IDs to proper number type for Board component
   
     React.useEffect(() => {
+      console.log("🔵 GAMEBOARD USEEFFECT RUNNING");
       setupBoardClickHandler({
         onSelectUnit: props.onSelectUnit,
         onStartAttackPreview: (shooterId) => {
@@ -118,7 +120,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
     }
   };
 
-  const BoardComponent = gameMode === 'training' ? BoardReplay : BoardPvp;
+  const BoardComponent = BoardPvp;
   
   return (
     <div className="game-board w-full flex flex-col">
@@ -129,10 +131,10 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         shootingActivationQueue={props.shootingActivationQueue}
         activeShootingUnit={props.activeShootingUnit}
         phase={props.phase}
-        mode={props.mode}
+        mode={props.mode || "select"}
         movePreview={props.movePreview}
         attackPreview={props.attackPreview}
-        currentPlayer={props.currentPlayer}
+        currentPlayer={props.currentPlayer || 0}
         unitsMoved={props.unitsMoved}
         unitsCharged={props.unitsCharged}
         unitsAttacked={props.unitsAttacked}

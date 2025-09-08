@@ -511,7 +511,16 @@ export default function Board({
 
       // Green circles for eligible units (single source of truth)
       if (selectedUnit && mode === "select" && eligibleUnitIds && eligibleUnitIds.includes(typeof selectedUnit.id === 'number' ? selectedUnit.id : parseInt(selectedUnit.id as string))) {
+        console.log("🟢 MOVEMENT PREVIEW CONDITIONS MET:", {
+          phase,
+          selectedUnitId: selectedUnit.id,
+          mode,
+          eligibleUnitIds,
+          isEligible: eligibleUnitIds.includes(typeof selectedUnit.id === 'number' ? selectedUnit.id : parseInt(selectedUnit.id as string))
+        });
+        
         if (phase === "move") {
+          console.log("🟢 RUNNING BFS FOR UNIT:", selectedUnit.id, "MOVE:", selectedUnit.MOVE);
           // For move phase, show available move destinations
           const runMovementBFS = () => {
             if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
@@ -945,6 +954,7 @@ export default function Board({
           return standardResult;
         })();
         
+        console.log("🟠 RENDERING UNIT:", unit.id, "at", centerX, centerY, "eligible:", isEligibleForRendering);
         renderUnit({
           unit, centerX, centerY, app,
           isPreview: false,
