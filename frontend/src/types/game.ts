@@ -175,3 +175,15 @@ export interface ActionResult {
   message?: string;
   error?: string;
 }
+
+export interface MovePreview {
+  unitId: UnitId;
+  destCol: number;
+  destRow: number;
+}
+
+export interface AttackPreview {
+  unitId: UnitId;
+  col: number;
+  row: number;
+}

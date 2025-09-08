@@ -1,11 +1,18 @@
 // frontend/src/services/aiService.ts
-import { AIGameState, AIAction } from '../types';
+
+import type { GameState as AIGameState } from '../types';
+import type { AIActionResponse as AIAction } from '../types/api';
 
 export class AIServiceError extends Error {
-  constructor(message: string, public readonly cause?: Error) {
+  constructor(message: string, cause?: Error) {
     super(message);
     this.name = 'AIServiceError';
+    if (cause) {
+      this.cause = cause;
+    }
   }
+  
+  readonly cause?: Error;
 }
 
 export interface AIServiceConfig {
@@ -30,7 +37,7 @@ constructor(config: Partial<AIServiceConfig> = {}) {
 
   async fetchAiAction(gameState: AIGameState, currentUnitId?: number): Promise<AIAction> {
     // Create a unique key for this request to prevent duplicates
-    const requestKey = `${gameState.units.map(u => `${u.id}-${u.col}-${u.row}-${u.HP_CUR}`).join('|')}-${currentUnitId}-${Date.now()}`;
+    const requestKey = `${gameState.units.map((u: any) => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}`).join('|')}-${currentUnitId}-${Date.now()}`;
     
     // If same request is already pending, return existing promise
     if (this.pendingRequests.has(requestKey)) {

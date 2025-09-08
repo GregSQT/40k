@@ -1,5 +1,5 @@
 // components/GameStatus.tsx
-import React, { memo } from 'react';
+import { memo } from 'react';
 import type { GameState, Unit, UnitId } from '../types';
 
 interface GameStatusProps {
@@ -31,9 +31,10 @@ export const GameStatus = memo<GameStatusProps>(({
   unitsMoved,
   unitsCharged,
   unitsAttacked,
-  unitsFled,  // ✅ ADD THIS LINE
+  unitsFled,
 }) => {
   // Get current player's units that have acted
+  const fledUnitsCount = unitsFled.length;
   const currentPlayerUnits = units.filter(u => u.player === currentPlayer);
   
   const getActedUnits = () => {
@@ -65,7 +66,7 @@ export const GameStatus = memo<GameStatusProps>(({
       <div className="game-status__row">
         <span className="game-status__label">Current Player:</span>{' '}
         <span className="game-status__value">
-          {PLAYER_LABELS[currentPlayer]}
+          {currentPlayer !== undefined ? PLAYER_LABELS[currentPlayer] : 'Unknown Player'}
         </span>
       </div>
       

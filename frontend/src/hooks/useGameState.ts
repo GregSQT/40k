@@ -1,19 +1,6 @@
 // frontend/src/hooks/useGameState.ts
 import { useState, useCallback } from 'react';
-import type { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, ShootingPhaseState, TargetPreview, CombatSubPhase } from '../types/game';
-
-// AI_TURN.md: Define missing preview types locally
-interface MovePreview {
-  unitId: UnitId;
-  col: number;
-  row: number;
-}
-
-interface AttackPreview {
-  unitId: UnitId;
-  col: number;
-  row: number;
-}
+import type { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, ShootingPhaseState, TargetPreview, CombatSubPhase, MovePreview, AttackPreview } from '../types/game';
 
 interface ChargeRollPopup {
   unitId: UnitId;
