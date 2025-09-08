@@ -1,6 +1,6 @@
 // frontend/src/hooks/useEngineAPI.ts
 import { useState, useEffect, useCallback } from 'react';
-import type { Unit, PlayerId } from '../types/games';
+import type { Unit, PlayerId } from '../types';
 
 const API_BASE = 'http://localhost:5000/api';
 
@@ -32,6 +32,7 @@ interface APIGameState {
   phase: string;
   turn: number;
   episode_steps: number;
+  max_turns: number;
   units_moved: string[];
   units_fled: string[];
   units_shot: string[];
@@ -58,7 +59,6 @@ export const useEngineAPI = () => {
     console.log('🚨 useEngineAPI useEffect TRIGGERED');
     const startGame = async () => {
       try {
-        console.log('🔍 STARTING GAME API CALL');
         setLoading(true);
         console.log('🔍 API_BASE:', API_BASE);
         const response = await fetch(`${API_BASE}/game/start`, {
@@ -73,6 +73,11 @@ export const useEngineAPI = () => {
         
         const data = await response.json();
         console.log('🔍 API Response data:', data);
+        console.log('🔍 API Response structure:', Object.keys(data));
+        if (data.game_state) {
+          console.log('🔍 Game state structure:', Object.keys(data.game_state));
+          console.log('🔍 Game state max_turns field:', data.game_state.max_turns);
+        }
         if (data.success) {
           console.log('🔍 Setting game state:', data.game_state);
           setGameState(data.game_state);
@@ -116,9 +121,7 @@ export const useEngineAPI = () => {
 
   // Convert API units to frontend format
   const convertUnits = useCallback((apiUnits: APIGameState['units']): Unit[] => {
-    console.log('🔍 Converting API units:', apiUnits);
     return apiUnits.map(unit => {
-      console.log('🔍 Processing unit:', unit);
       // AI_TURN.md: NEVER create defaults - raise errors for missing data
       if (unit.CC_RNG === undefined || unit.CC_RNG === null) {
         throw new Error(`API ERROR: Unit ${unit.id} missing required CC_RNG field`);
@@ -255,6 +258,15 @@ export const useEngineAPI = () => {
     movePreview,
     attackPreview: null,
     currentPlayer: gameState.current_player as PlayerId,
+    maxTurns: (() => {
+      console.log('🔍 DEBUG: gameState keys:', Object.keys(gameState));
+      console.log('🔍 DEBUG: gameState.max_turns value:', gameState.max_turns);
+      if (gameState.max_turns === undefined) {
+        console.error('🔍 DEBUG: max_turns field is missing from API response');
+        return 8;
+      }
+      return gameState.max_turns;
+    })(),
     unitsMoved: gameState.units_moved ? gameState.units_moved.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_moved array'); })(),
     unitsCharged: gameState.units_charged ? gameState.units_charged.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_charged array'); })(),
     unitsAttacked: gameState.units_attacked ? gameState.units_attacked.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_attacked array'); })(),
@@ -273,6 +285,7 @@ export const useEngineAPI = () => {
       unitsFled: gameState.units_fled ? gameState.units_fled.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_fled array in gameState'); })(),
       targetPreview: null,
       currentTurn: gameState.turn,
+      maxTurns: gameState.max_turns,
       unitChargeRolls: {},
     },
     onSelectUnit: handleSelectUnit,

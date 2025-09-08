@@ -431,25 +431,28 @@ project_root/
 │   │
 │   ├── src/
 │   │   ├── components/             # PRESERVED FROM LEGACY (PIXI.js components)
-│   │   │   ├── BoardDisplay.tsx             # Main board display component
+│   │   │   ├── BoardDisplay.tsx            # Main board display component OK
 │   │   │   ├── BoardInteractions.tsx       # Board interaction handling
-│   │   │   ├── BoardPvp.tsx                # PvP board implementation
-│   │   │   ├── BoardReplay.tsx             # Replay functionality
-│   │   │   ├──BoardWithAPI.tsx
+│   │   │   ├── BoardPvp.tsx                # PvP board implementation OK
+│   │   │   ├── BoardReplay.tsx             # Replay functionality OK
+│   │   │   ├── BoardWithAPI.tsx            # OK
 │   │   │   ├── CombatLogComponent.tsx      # Combat logging display
 │   │   │   ├── DiceRollComponent.tsx       # Dice roll visualization
-│   │   │   ├── ErrorBoundary.tsx           # Error handling wrapper
-│   │   │   ├── GameBoard.tsx               # Core board component
-│   │   │   ├── GameController.tsx          # Game control interface
-│   │   │   ├── GameLog.tsx                 # Action history display
+│   │   │   ├── ErrorBoundary.tsx           # Error handling wrapper OK
+│   │   │   ├── GameBoard.tsx               # Core board component OK
+│   │   │   ├── GameController.tsx          # Game control interface OK
+│   │   │   ├── GameLog.tsx                 # Action history display OK
 │   │   │   ├── GameRightColumn.tsx         # Right panel layout
-│   │   │   ├── GameStatus.tsx              # Game state indicators
-│   │   │   ├── SharedLayout.tsx            # Common layout wrapper
+│   │   │   ├── GameStatus.tsx              # Game state indicators OK
+│   │   │   ├── SharedLayout.tsx            # Common layout wrapper OK
 │   │   │   ├── SingleShotDisplay.tsx       # Single shot result display
-│   │   │   ├── TurnPhaseTracker.tsx        # Turn/phase indicator
-│   │   │   ├── UnitRenderer.tsx            # Unit visualization engine
+│   │   │   ├── TurnPhaseTracker.tsx        # Turn/phase indicator OK
+│   │   │   ├── UnitRenderer.tsx            # Unit visualization engine OK
 │   │   │   ├── UnitSelector.tsx            # Unit selection interface
-│   │   │   └── UnitStatusTable.tsx         # Unit status overview
+│   │   │   └── UnitStatusTable.tsx         # Unit status overview OK
+│   │   │
+│   │   ├── constants/
+│   │   │   └── gameConfig.ts               # OK
 │   │   │
 │   │   ├── data/                   # PRESERVED FROM LEGACY
 │   │   │   ├── Units.ts                    # Unit data structures
@@ -496,9 +499,9 @@ project_root/
 │   │   │   └── engineApi.ts                # Pure functions only
 │   │   │
 │   │   ├── types/                  # PRESERVED FROM LEGACY
-│   │   │   ├── api.ts                      # API interface definitions
-│   │   │   ├── games.ts                     # Game state type definitions
-│   │   │   ├── index.ts                    # Exported type collections
+│   │   │   ├── api.ts                      # API interface definitions OK
+│   │   │   ├── game.ts                     # Game state type definitions OK
+│   │   │   ├── index.ts                    # Exported type collections OK
 │   │   │   └── replay.ts                   # Replay system types
 │   │   │
 │   │   ├── utils/                  # EVALUATE INDIVIDUALLY

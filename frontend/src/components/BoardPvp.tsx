@@ -1,15 +1,15 @@
 // frontend/src/components/BoardPvp.tsx
 import React, { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js-legacy";
-import type { Unit, TargetPreview, CombatSubPhase, PlayerId, GameState } from "../types/games";
+import type { Unit, TargetPreview, CombatSubPhase, PlayerId, GameState } from "../types/game";
 // import { useGameConfig } from '../hooks/useGameConfig';
 // import { SingleShotDisplay } from './SingleShotDisplay';
 // Temporarily stub missing functions with proper signatures
 const setupBoardClickHandler = (config: any) => {};
-const drawBoard = (app: any, boardConfig: any, highlights: any) => {};
+import { drawBoard } from './BoardDisplay';
 const setupBoardInteractions = (app: any, boardConfig: any, config: any) => {};
 const cleanupBoardInteractions = (app: any) => {};
-const renderUnit = (config: any) => {};
+import { renderUnit } from './UnitRenderer';
 const offsetToCube = (col: number, row: number) => ({ x: col, y: 0, z: row });
 const cubeDistance = (a: any, b: any) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
 const hasLineOfSight = (from: any, to: any, walls: any) => ({ canSee: true, inCover: false });

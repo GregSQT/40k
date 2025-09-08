@@ -4,7 +4,6 @@ import BoardPvp from './BoardPvp';
 import { useEngineAPI } from '../hooks/useEngineAPI';
 
 export const BoardWithAPI: React.FC = () => {
-  console.log('🚨 BOARDWITHAPI COMPONENT IS MOUNTING');
   console.log('🚨 ABOUT TO CALL useEngineAPI');
   const apiProps = useEngineAPI();
   console.log('🚨 useEngineAPI returned:', apiProps);

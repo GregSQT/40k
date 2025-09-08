@@ -1,5 +1,5 @@
 // frontend/src/services/aiService.ts
-import { AIGameState, AIAction } from '../types/game';
+import { AIGameState, AIAction } from '../types';
 
 export class AIServiceError extends Error {
   constructor(message: string, public readonly cause?: Error) {

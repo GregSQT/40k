@@ -99,25 +99,29 @@ else:
         "frontend/src/App.tsx",        
         "frontend/src/main.tsx",
         "frontend/src/Routes.tsx",
+        
+     ### frontend/src/components
 
-        # Frontend/src/components
-        #"frontend/src/components/BoardDisplay.tsx",
+        "frontend/src/components/BoardDisplay.tsx",
         #"frontend/src/components/BoardInteractions.tsx",
         "frontend/src/components/BoardPvp.tsx",
         #"frontend/src/components/BoardReplay.tsx",
         "frontend/src/components/BoardWithAPI.tsx",
         #"frontend/src/components/CombatLogComponent.tsx",
         #"frontend/src/components/DiceRollComponent.tsx",
-        #"frontend/src/components/ErrorBoundary.tsx",
-        #"frontend/src/components/GameBoard.tsx",
+        "frontend/src/components/ErrorBoundary.tsx",
+        "frontend/src/components/GameBoard.tsx",
         "frontend/src/components/GameController.tsx",
-        #"frontend/src/components/GameLog.tsx",
+        "frontend/src/components/GameLog.tsx",
+        "frontend/src/components/GameStatus.tsx",
         #"frontend/src/components/GameRightColumn.tsx",
-        #"frontend/src/components/TurnPhaseTracker.tsx",
-        #"frontend/src/components/UnitStatusTable.tsx",
+        "frontend/src/components/SharedLayout.tsx",
+        "frontend/src/components/TurnPhaseTracker.tsx",
+        "frontend/src/components/UnitRenderer.tsx",
+        "frontend/src/components/UnitStatusTable.tsx",
 
         # Frontend/src/constants
-        #"frontend/src/constants/gameConfig.ts",
+        "frontend/src/constants/gameConfig.ts",
 
         # Frontend/src/data
         #"frontend/src/data/Scenario.ts",
@@ -157,9 +161,9 @@ else:
         "frontend/src/services/aiService.ts",
 
         # frontend/src/types
-        #"frontend/src/types/api.ts",
-        "frontend/src/types/games.ts",
-        #"frontend/src/types/index.ts",
+        "frontend/src/types/api.ts",
+        "frontend/src/types/game.ts",
+        "frontend/src/types/index.ts",
         #"frontend/src/types/replay.ts",
 
         # frontend/src/utils
