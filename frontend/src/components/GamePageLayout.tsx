@@ -18,13 +18,21 @@ export default function GamePageLayout() {
   // const gameLogEvents: Array<any> = [];
   // const getElapsedTime = () => "0s";
 
+  if (apiProps.loading) {
+    return <div>Loading game state...</div>;
+  }
+
+  if (!apiProps.loading && (apiProps.maxTurns === null || apiProps.currentPlayer === null || apiProps.phase === null)) {
+    throw new Error('API ERROR: Required game state fields missing from backend');
+  }
+
   const rightColumnContent = (
     <>
       <TurnPhaseTracker 
         currentTurn={apiProps.gameState?.currentTurn || 1} 
-        currentPhase={apiProps.phase}
+        currentPhase={apiProps.phase as string}
         phases={["move", "shoot", "charge", "combat"]}
-        maxTurns={apiProps.maxTurns || 8}
+        maxTurns={apiProps.maxTurns as number}
         className="turn-phase-tracker-right"
       />
       

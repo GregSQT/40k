@@ -116,6 +116,11 @@ def start_game():
             if isinstance(value, set):
                 serializable_state[key] = list(value)
         
+        # Add max_turns from game config
+        from config_loader import get_config_loader
+        config = get_config_loader()
+        serializable_state["max_turns"] = config.get_max_turns()
+        
         return jsonify({
             "success": True,
             "game_state": serializable_state,

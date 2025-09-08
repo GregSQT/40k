@@ -51,7 +51,7 @@ def load_config():
     # Load actual unit definitions from TypeScript files
     unit_definitions = load_unit_definitions_from_ts(unit_registry)
     
-    config["units"] = create_test_scenario(unit_definitions)
+    config["units"] = load_scenario_units(unit_definitions)
     
     return config
 
@@ -111,54 +111,51 @@ def load_unit_definitions_from_ts(unit_registry):
     
     return unit_definitions
 
-
-def create_test_scenario(unit_definitions):
-    """Create test scenario using actual unit definitions from TypeScript files."""
-    print(f"DEBUG: Loaded {len(unit_definitions)} unit definitions")
+def load_scenario_units(unit_definitions):
+    """Load units from config/scenario.json with unit definitions."""
+    scenario_path = "config/scenario.json"
+    
+    if not os.path.exists(scenario_path):
+        raise FileNotFoundError(f"Scenario file not found: {scenario_path}")
+    
+    print(f"DEBUG: Loading scenario from {scenario_path}")
+    
+    with open(scenario_path, 'r', encoding='utf-8') as f:
+        scenario_data = json.load(f)
+    
+    if "units" not in scenario_data:
+        raise KeyError("Scenario file missing required 'units' field")
     
     units = []
-    unit_types = list(unit_definitions.keys())
+    for scenario_unit in scenario_data["units"]:
+        # Validate required scenario fields
+        required_fields = ["id", "unit_type", "player", "col", "row"]
+        for field in required_fields:
+            if field not in scenario_unit:
+                raise KeyError(f"Scenario unit missing required field '{field}': {scenario_unit}")
+        
+        unit_type = scenario_unit["unit_type"]
+        if unit_type not in unit_definitions:
+            raise ValueError(f"Unknown unit type '{unit_type}' in scenario. Available: {list(unit_definitions.keys())}")
+        
+        # Get unit definition and merge with scenario position data
+        unit_def = unit_definitions[unit_type]
+        created_unit = {
+            **unit_def,
+            "id": str(scenario_unit["id"]),  # Ensure string ID for consistency
+            "player": scenario_unit["player"],
+            "col": scenario_unit["col"],
+            "row": scenario_unit["row"],
+            "unitType": unit_type,
+            "CUR_HP": unit_def.get("MAX_HP", unit_def.get("HP_MAX", 1)),
+            "SHOOT_LEFT": unit_def.get("RNG_NB", 0),
+            "ATTACK_LEFT": unit_def.get("CC_NB", 0)
+        }
+        
+        units.append(created_unit)
+        print(f"DEBUG: Loaded unit {scenario_unit['id']} ({unit_type}) at ({scenario_unit['col']}, {scenario_unit['row']})")
     
-    if len(unit_types) < 2:
-        raise ValueError("Must have at least 2 unit types defined in unit definitions")
-    
-    # Player 0 unit  
-    unit_type_0 = unit_types[0]
-    unit_def_0 = unit_definitions[unit_type_0]
-    print(f"DEBUG: unit_def_0 keys: {list(unit_def_0.keys())}")
-    print(f"DEBUG: unit_def_0.get('RNG_NB'): {unit_def_0.get('RNG_NB', 'NOT_FOUND')}")
-    print(f"DEBUG: unit_def_0.get('CC_NB'): {unit_def_0.get('CC_NB', 'NOT_FOUND')}")
-    
-    created_unit = {
-        **unit_def_0,
-        "id": "player0_unit1",
-        "player": 0,
-        "col": 1,
-        "row": 1,
-        "unitType": unit_type_0,
-        "CUR_HP": unit_def_0.get("MAX_HP", unit_def_0.get("HP_MAX", 1)),
-        "SHOOT_LEFT": unit_def_0.get("RNG_NB", 0),
-        "ATTACK_LEFT": unit_def_0.get("CC_NB", 0)
-    }
-    print(f"DEBUG: Created unit keys: {list(created_unit.keys())}")
-    print(f"DEBUG: Created unit SHOOT_LEFT: {created_unit.get('SHOOT_LEFT', 'NOT_FOUND')}")
-    units.append(created_unit)
-    
-    # Player 1 unit
-    unit_type_1 = unit_types[1]
-    unit_def_1 = unit_definitions[unit_type_1]
-    units.append({
-        **unit_def_1,
-        "id": "player1_unit1", 
-        "player": 1,
-        "col": 8,
-        "row": 8,
-        "unitType": unit_type_1,
-        "CUR_HP": unit_def_1.get("MAX_HP", unit_def_1.get("HP_MAX", 1)),
-        "SHOOT_LEFT": unit_def_1.get("RNG_NB", 0),
-        "ATTACK_LEFT": unit_def_1.get("CC_NB", 0)
-    })
-    
+    print(f"DEBUG: Loaded {len(units)} units from scenario")
     return units
 
 def test_basic_functionality():

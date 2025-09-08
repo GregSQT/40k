@@ -2,11 +2,10 @@
 import React from 'react';
 import BoardPvp from './BoardPvp';
 import { useEngineAPI } from '../hooks/useEngineAPI';
+import type { PlayerId } from '../types';
 
 export const BoardWithAPI: React.FC = () => {
-  console.log('🚨 ABOUT TO CALL useEngineAPI');
   const apiProps = useEngineAPI();
-  console.log('🚨 useEngineAPI returned:', apiProps);
 
   if (apiProps.loading) {
     return (
@@ -106,12 +105,12 @@ export const BoardWithAPI: React.FC = () => {
         onCancelMove={apiProps.onCancelMove}
         onShoot={apiProps.onShoot}
         onCombatAttack={apiProps.onCombatAttack}
-        currentPlayer={apiProps.currentPlayer}
+        currentPlayer={apiProps.currentPlayer as PlayerId}
         unitsMoved={apiProps.unitsMoved}
         unitsCharged={apiProps.unitsCharged}
         unitsAttacked={apiProps.unitsAttacked}
         unitsFled={apiProps.unitsFled}
-        phase={apiProps.phase}
+        phase={apiProps.phase as "move" | "shoot" | "charge" | "combat"}
         onCharge={apiProps.onCharge}
         onMoveCharger={apiProps.onMoveCharger}
         onCancelCharge={apiProps.onCancelCharge}

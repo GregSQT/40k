@@ -56,30 +56,20 @@ export const useEngineAPI = () => {
 
   // Initialize game
   useEffect(() => {
-    console.log('🚨 useEngineAPI useEffect TRIGGERED');
     const startGame = async () => {
       try {
         setLoading(true);
-        console.log('🔍 API_BASE:', API_BASE);
         const response = await fetch(`${API_BASE}/game/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         });
         
-        console.log('🔍 Response status:', response.status);
         if (!response.ok) {
           throw new Error(`Failed to start game: ${response.status}`);
         }
         
         const data = await response.json();
-        console.log('🔍 API Response data:', data);
-        console.log('🔍 API Response structure:', Object.keys(data));
-        if (data.game_state) {
-          console.log('🔍 Game state structure:', Object.keys(data.game_state));
-          console.log('🔍 Game state max_turns field:', data.game_state.max_turns);
-        }
         if (data.success) {
-          console.log('🔍 Setting game state:', data.game_state);
           setGameState(data.game_state);
         } else {
           throw new Error(data.error || 'Failed to start game');
@@ -224,18 +214,27 @@ export const useEngineAPI = () => {
   }, []);
 
   // Return props compatible with BoardPvp
-  if (loading || error || !gameState) {
+  if (error) {
+    throw new Error(`API ERROR: ${error}`);
+  }
+  
+  if (loading || !gameState) {
     return {
-      loading,
-      error,
+      loading: true,
+      error: null,
       units: [],
       selectedUnitId: null,
       eligibleUnitIds: [],
       mode: "select" as const,
       movePreview: null,
-      currentPlayer: 0 as PlayerId,
+      attackPreview: null,
+      currentPlayer: null,
+      maxTurns: null,
       unitsMoved: [],
-      phase: "move" as const,
+      unitsCharged: [],
+      unitsAttacked: [],
+      unitsFled: [],
+      phase: null,
       gameState: null,
       onSelectUnit: () => {},
       onStartMovePreview: () => {},
@@ -244,6 +243,12 @@ export const useEngineAPI = () => {
       onConfirmMove: () => {},
       onCancelMove: () => {},
       onShoot: () => {},
+      onCombatAttack: () => {},
+      onCharge: () => {},
+      onMoveCharger: () => {},
+      onCancelCharge: () => {},
+      onValidateCharge: () => {},
+      onLogChargeRoll: () => {},
       getChargeDestinations: () => [],
     };
   }
@@ -258,15 +263,7 @@ export const useEngineAPI = () => {
     movePreview,
     attackPreview: null,
     currentPlayer: gameState.current_player as PlayerId,
-    maxTurns: (() => {
-      console.log('🔍 DEBUG: gameState keys:', Object.keys(gameState));
-      console.log('🔍 DEBUG: gameState.max_turns value:', gameState.max_turns);
-      if (gameState.max_turns === undefined) {
-        console.error('🔍 DEBUG: max_turns field is missing from API response');
-        return 8;
-      }
-      return gameState.max_turns;
-    })(),
+    maxTurns: gameState.max_turns || (() => { throw new Error('API ERROR: Missing required max_turns field in game state'); })(),
     unitsMoved: gameState.units_moved ? gameState.units_moved.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_moved array'); })(),
     unitsCharged: gameState.units_charged ? gameState.units_charged.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_charged array'); })(),
     unitsAttacked: gameState.units_attacked ? gameState.units_attacked.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_attacked array'); })(),
