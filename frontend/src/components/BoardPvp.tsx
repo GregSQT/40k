@@ -842,7 +842,6 @@ export default function Board({
 
 
       // ✅ DRAW BOARD ONCE with populated availableCells
-      console.log("🎯 DRAWING BOARD WITH selectedUnitId:", selectedUnitId);
       drawBoard(app, boardConfig as any, {
         availableCells,
         attackCells,

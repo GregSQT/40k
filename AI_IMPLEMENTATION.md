@@ -380,6 +380,11 @@ if time.time() - self.phase_start > 30:
 
 ```
 project_root/
+├── ai/                       # AI training
+│   ├── gym_interface.py          # Gym wrapper for training
+│   ├── train_w40k.py             # Training script
+│   └── models/                   # Trained models
+
 ├── engine/                       # Main game engine package
 │   ├── __init__.py               # Package initialization
 │   ├── w40k_engine.py            # Core engine class

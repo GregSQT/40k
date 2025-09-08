@@ -38,12 +38,8 @@ def initialize_engine():
         original_cwd = os.getcwd()
         project_root = os.path.join(os.path.dirname(__file__), '..')
         os.chdir(os.path.abspath(project_root))
-        
         config = load_config()
-        print(f"DEBUG: Config loaded successfully with {len(config.get('units', []))} units")
-        
         engine = W40KEngine(config)
-        print(f"DEBUG: W40KEngine created successfully")
         
         # Restore original working directory
         os.chdir(original_cwd)
@@ -63,7 +59,6 @@ def initialize_engine():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint."""
-    print("DEBUG: /api/health endpoint called")
     return jsonify({
         "status": "healthy",
         "engine_initialized": engine is not None
@@ -99,7 +94,6 @@ def test_engine():
 @app.route('/api/game/start', methods=['POST'])
 def start_game():
     """Start a new game session."""
-    print("DEBUG: /api/game/start endpoint called")
     global engine
     
     if not engine:

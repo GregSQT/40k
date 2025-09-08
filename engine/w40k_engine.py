@@ -184,9 +184,16 @@ class W40KEngine:
             "charge_range_rolls": {}
         })
         
-        # Reset unit health and positions
+        # Reset unit health and positions to original scenario values
+        unit_configs = self.config.get("units", [])
         for unit in self.game_state["units"]:
             unit["HP_CUR"] = unit["HP_MAX"]
+            
+            # Find original position from config
+            original_config = next((cfg for cfg in unit_configs if cfg["id"] == unit["id"]), None)
+            if original_config:
+                unit["col"] = original_config["col"]
+                unit["row"] = original_config["row"]
         
         # Build initial activation pool for starting player
         self._build_move_activation_pool()
@@ -218,7 +225,7 @@ class W40KEngine:
     
     # ===== MOVEMENT PHASE IMPLEMENTATION =====
     
-    def _process_movement_phase(self, action: int) -> Tuple[bool, Dict[str, Any]]:
+    def _process_movement_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Process movement phase with AI_TURN.md decision tree logic."""
         
         # VERY BEGINNING of movement phase - clean tracking and build pool
@@ -233,18 +240,22 @@ class W40KEngine:
             self._advance_to_shooting_phase()
             return True, {"type": "phase_complete", "next_player": self.game_state["current_player"]}
         
-        # Get active unit (sequential activation - ONE unit per gym step)
-        active_unit = self._get_unit_by_id(self.game_state["move_activation_pool"][0])
+        # AI_TURN.md COMPLIANCE: ONLY semantic actions with unitId
+        if "unitId" not in action:
+            return False, {"error": "semantic_action_required", "action": action}
+        
+        active_unit = self._get_unit_by_id(str(action["unitId"]))
         if not active_unit:
-            # Remove invalid unit ID and try again
-            self.game_state["move_activation_pool"].pop(0)
-            return self._process_movement_phase(action)
+            return False, {"error": "unit_not_found", "unitId": action["unitId"]}
+        
+        if active_unit["id"] not in self.game_state["move_activation_pool"]:
+            return False, {"error": "unit_not_eligible", "unitId": action["unitId"]}
+        
+        # Remove requested unit from pool
+        self.game_state["move_activation_pool"].remove(active_unit["id"])
         
         # Execute movement action
         success, result = self._execute_movement_action(active_unit, action)
-        
-        # Remove unit from activation pool
-        self.game_state["move_activation_pool"].pop(0)
         
         return success, result
     
@@ -253,18 +264,11 @@ class W40KEngine:
         self.game_state["move_activation_pool"] = []
         current_player = self.game_state["current_player"]
         
-        print(f"DEBUG: Building pool for player {current_player}")
-        
         for unit in self.game_state["units"]:
-            print(f"DEBUG: Checking unit {unit['id']}: Player={unit['player']}, HP={unit['HP_CUR']}")
             # AI_TURN.md eligibility: alive + current_player only
             if (unit["HP_CUR"] > 0 and 
                 unit["player"] == current_player):
-                
                 self.game_state["move_activation_pool"].append(unit["id"])
-                print(f"DEBUG: Added {unit['id']} to activation pool")
-        
-        print(f"DEBUG: Final activation pool: {self.game_state['move_activation_pool']}")
     
     def _execute_movement_action(self, unit: Dict[str, Any], action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Execute semantic movement action with AI_TURN.md restrictions."""
@@ -592,4 +596,4 @@ if __name__ == "__main__":
     
     # Test movement
     obs, reward, done, truncated, info = engine.step(2)  # Move East
-    print(f"After movement - Success: {info['success']}, Phase: {info['phase']}")
+    #print(f"After movement - Success: {info['success']}, Phase: {info['phase']}")

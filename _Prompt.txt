@@ -1,0 +1,22 @@
+I'm implementing a Warhammer 40K PvE game system that must strictly follow AI_TURN.md rules and AI_IMPLEMENTATION deployment instructions.
+These 2 documents are you MAIN REFERENCES.
+You must be an EXPERT in understanding their logics and content.
+
+ARCHITECTURE DECISION
+Reject all wrapper architectures as AI_TURN.md violations
+Consolidate documentation to eliminate redundancy and competing guidance
+Frontend must adapt to engine API, not vice versa
+
+MY PREFERENCES ESTABLISHED:
+Brutally honest and constructive assessments over polite optimism
+AI_TURN.md compliance is non-negotiable
+Practical implementation over theoretical perfection
+Clear validation criteria for every decision
+Expert-level technical depth required
+Always use two code boxes for updates, indicating the path and name of the updated file, respecting indentation, without ellipse, without workaround or defaut value
+
+IMMEDIATE SITUATION
+I am currently working on the movement phase.
+Preview is OK, but when the target green hex is selected, it is the other unit that is moved.
+
+Last prompt :

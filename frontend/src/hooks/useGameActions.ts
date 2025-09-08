@@ -66,14 +66,7 @@ interface UseGameActionsParams {
   }, [gameState]);
 
   // AI_TURN.md: Simple unit selection with step counting
-  const selectUnit = useCallback((unitId: UnitId | null) => {
-    console.log("🔴 SELECT UNIT CALLED:", {
-      unitId,
-      phase: gameState.phase,
-      currentPlayer: gameState.currentPlayer,
-      mode: gameState.mode
-    });
-    
+  const selectUnit = useCallback((unitId: UnitId | null) => {    
     if (unitId === null) {
       actions.setSelectedUnitId(null);
       actions.setMode("select");
@@ -81,11 +74,8 @@ interface UseGameActionsParams {
     }
 
     const unit = gameState.units.find(u => u.id === unitId);
-    console.log("🔴 FOUND UNIT:", unit?.id, "ELIGIBLE:", unit ? isUnitEligible(unit) : "N/A");
     
     if (!unit || !isUnitEligible(unit)) return;
-
-    console.log("🔴 SETTING SELECTED UNIT:", unitId);
     actions.setSelectedUnitId(unitId);
     actions.setMode("select");
   }, [gameState, isUnitEligible, actions]);

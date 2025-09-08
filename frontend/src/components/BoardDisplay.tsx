@@ -229,7 +229,6 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
             highlightCell.cursor = 'pointer';
             highlightCell.on('pointerdown', (e: PIXI.FederatedPointerEvent) => {
               if (e.button === 0) { // Left click only
-                console.log("🟢 GREEN HEX CLICKED:", { col, row, phase, selectedUnitId, mode });
                 window.dispatchEvent(new CustomEvent('boardHexClick', {
                   detail: { col, row, phase, mode, selectedUnitId }
                 }));

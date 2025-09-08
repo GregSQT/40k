@@ -202,10 +202,8 @@ export class UnitRenderer {
           unitCircle.eventMode = 'none';
           unitCircle.cursor = "default";
         } else {
-          console.log("🟠 ADDING CLICK HANDLER TO UNIT:", unit.id, "phase:", phase, "mode:", mode);
           unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
             if (e.button === 0) {
-              console.log("🟡 UNIT CLICKED:", unit.id);
               // Prevent event bubbling and multiple dispatches
               e.stopPropagation();
               window.dispatchEvent(new CustomEvent('boardUnitClick', {

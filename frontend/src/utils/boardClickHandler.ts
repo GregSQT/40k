@@ -92,12 +92,9 @@ export function setupBoardClickHandler(callbacks: {
     }
     } else if (mode === 'select' && selectedUnitId !== null && phase === 'move') {
       // In move phase, clicking green hex should directly move the unit
-      console.log("🎯 HEX CLICK HANDLER:", { selectedUnitId, col, row, hasDirectMove: !!callbacks.onDirectMove });
       if (callbacks.onDirectMove) {
-        console.log("🎯 CALLING onDirectMove");
         callbacks.onDirectMove(selectedUnitId, col, row);
       } else if (callbacks.onStartMovePreview) {
-        console.log("🎯 CALLING onStartMovePreview + onConfirmMove");
         callbacks.onStartMovePreview(selectedUnitId, col, row);
         callbacks.onConfirmMove();
       }
