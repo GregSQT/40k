@@ -4,8 +4,7 @@ import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview, CombatSubPhase, PlayerId, GameState } from "../types/game";
 // import { useGameConfig } from '../hooks/useGameConfig';
 // import { SingleShotDisplay } from './SingleShotDisplay';
-// Temporarily stub missing functions with proper signatures
-const setupBoardClickHandler = (config: any) => {};
+import { setupBoardClickHandler } from '../utils/boardClickHandler';
 import { drawBoard } from './BoardDisplay';
 const setupBoardInteractions = (app: any, boardConfig: any, config: any) => {};
 const cleanupBoardInteractions = (app: any) => {};
@@ -389,7 +388,7 @@ export default function Board({
     containerRef.current.innerHTML = '';
     containerRef.current.appendChild(canvas);
 
-    // Set up board click handler to prevent event conflicts
+    // Set up board click handler IMMEDIATELY after canvas creation
     setupBoardClickHandler({
       onSelectUnit: stableCallbacks.current.onSelectUnit,
       onStartAttackPreview: (shooterId: number) => {
@@ -510,6 +509,7 @@ export default function Board({
     
 
       // Green circles for eligible units (single source of truth)
+      console.log("🔍 MOVEMENT PREVIEW CHECK:", { selectedUnit: !!selectedUnit, mode, eligibleUnitIds });
       if (selectedUnit && mode === "select" && eligibleUnitIds && eligibleUnitIds.includes(typeof selectedUnit.id === 'number' ? selectedUnit.id : parseInt(selectedUnit.id as string))) {
         console.log("🟢 MOVEMENT PREVIEW CONDITIONS MET:", {
           phase,
@@ -641,6 +641,18 @@ export default function Board({
           };
 
           runMovementBFS();
+          console.log("BFS completed, cells:", availableCells.length);
+          
+          // Redraw board with just green hexes
+          drawBoard(app, boardConfig as any, {
+            availableCells,
+            attackCells: [],
+            coverCells: [],
+            chargeCells: [],
+            blockedTargets: new Set(),
+            coverTargets: new Set(),
+            phase
+          });
         } else {
           // For other phases (charge, etc), just show green circle on unit's hex
           availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
