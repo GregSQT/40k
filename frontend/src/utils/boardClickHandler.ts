@@ -18,8 +18,6 @@ export function setupBoardClickHandler(callbacks: {
   onDirectMove?(unitId: UnitId, col: number, row: number): void;
 }) {
 
-  console.log("🔧 SETUP BOARD CLICK HANDLER CALLED", Date.now());
-
   // Remove existing unit click handler
   if (globalClickHandler) {
     window.removeEventListener('boardUnitClick', globalClickHandler);
@@ -37,8 +35,6 @@ export function setupBoardClickHandler(callbacks: {
       mode: string;
       selectedUnitId: number | null;
     }>).detail;
-
-    console.log("🟡 BOARD CLICK HANDLER:", { unitId, phase, mode, selectedUnitId });
 
     if (phase === 'move' && mode === 'select') {
       callbacks.onSelectUnit(unitId);
@@ -60,7 +56,6 @@ export function setupBoardClickHandler(callbacks: {
 
   globalClickHandler = unitClickHandler;
   window.addEventListener('boardUnitClick', globalClickHandler);
-  console.log("🔧 EVENT LISTENER REGISTERED FOR boardUnitClick", !!globalClickHandler);
   
   // Remove existing charge cancel handler before adding new one
   const existingCancelHandler = (window as any).cancelChargeHandler;

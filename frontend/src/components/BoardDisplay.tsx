@@ -213,7 +213,7 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
           } else if (isInCover) {
             highlightCell.beginFill(CHARGE_COLOR, 0.5); // Orange for targets in cover (reuse CHARGE_COLOR)
           } else if (isAvailable) {
-            highlightCell.beginFill(0x00FF00, 1.0);
+            highlightCell.beginFill(0x00FF00, 0.5);
           }
           
           highlightCell.drawPolygon(points);

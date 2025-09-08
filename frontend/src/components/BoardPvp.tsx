@@ -9,8 +9,13 @@ import { drawBoard } from './BoardDisplay';
 const setupBoardInteractions = (app: any, boardConfig: any, config: any) => {};
 const cleanupBoardInteractions = (app: any) => {};
 import { renderUnit } from './UnitRenderer';
-const offsetToCube = (col: number, row: number) => ({ x: col, y: 0, z: row });
-const cubeDistance = (a: any, b: any) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
+const offsetToCube = (col: number, row: number) => {
+  const x = col;
+  const z = row - ((col - (col & 1)) >> 1);
+  const y = -x - z;
+  return { x, y, z };
+};
+const cubeDistance = (a: any, b: any) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.z - b.z));
 const hasLineOfSight = (from: any, to: any, walls: any) => ({ canSee: true, inCover: false });
 const getHexLine = (x1: number, y1: number, x2: number, y2: number) => [];
 const isUnitInRange = (unit1: any, unit2: any, range: number) => true;
@@ -423,7 +428,7 @@ export default function Board({
       });
     }
 
-    // Logic for green (move) and red (attack) highlights
+    // ✅ RESTRUCTURED: Calculate ALL highlight data BEFORE any drawBoard calls
     let availableCells: { col: number; row: number }[] = [];
     const selectedUnit = units.find(u => u.id === selectedUnitId);
 
@@ -506,168 +511,143 @@ export default function Board({
           
       }
     }
-    
 
-      // Green circles for eligible units (single source of truth)
-      console.log("🔍 MOVEMENT PREVIEW CHECK:", { selectedUnit: !!selectedUnit, mode, eligibleUnitIds });
-      if (selectedUnit && mode === "select" && eligibleUnitIds && eligibleUnitIds.includes(typeof selectedUnit.id === 'number' ? selectedUnit.id : parseInt(selectedUnit.id as string))) {
-        console.log("🟢 MOVEMENT PREVIEW CONDITIONS MET:", {
-          phase,
-          selectedUnitId: selectedUnit.id,
-          mode,
-          eligibleUnitIds,
-          isEligible: eligibleUnitIds.includes(typeof selectedUnit.id === 'number' ? selectedUnit.id : parseInt(selectedUnit.id as string))
-        });
-        
-        if (phase === "move") {
-          console.log("🟢 RUNNING BFS FOR UNIT:", selectedUnit.id, "MOVE:", selectedUnit.MOVE);
-          // For move phase, show available move destinations
-          const runMovementBFS = () => {
-            if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
-              throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for movement preview`);
-            }
-
-            const centerCol = selectedUnit.col;
-            const centerRow = selectedUnit.row;
-
-            const visited = new Map<string, number>();
-            const queue: [number, number, number][] = [[centerCol, centerRow, 0]];
-
-            // Use cube coordinate system for proper hex neighbors
-            const cubeDirections = [
-              [1, -1, 0], [1, 0, -1], [0, 1, -1], 
-              [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
-            ];
-
-            // Collect all forbidden hexes (adjacent to any enemy + wall hexes) using cube coordinates  
-            const forbiddenSet = new Set<string>();
-            
-            // Add all wall hexes as forbidden
-            const wallHexSet = new Set<string>(
-              (boardConfig.wall_hexes || []).map((wall: number[]) => `${wall[0]},${wall[1]}`)
-            );
-            wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
-            
-            for (const enemy of units) {
-              if (enemy.player === selectedUnit.player) continue;
-
-              // Add enemy position itself
-              forbiddenSet.add(`${enemy.col},${enemy.row}`);
-
-              // Use cube coordinates for proper hex adjacency
-              const enemyCube = offsetToCube(enemy.col, enemy.row);
-              for (const [dx, dy, dz] of cubeDirections) {
-                const adjCube = {
-                  x: enemyCube.x + dx,
-                  y: enemyCube.y + dy,
-                  z: enemyCube.z + dz
-                };
-                
-                // Convert back to offset coordinates
-                const adjCol = adjCube.x;
-                const adjRow = adjCube.z + ((adjCube.x - (adjCube.x & 1)) >> 1);
-                
-                if (
-                  adjCol >= 0 && adjCol < BOARD_COLS &&
-                  adjRow >= 0 && adjRow < BOARD_ROWS
-                ) {
-                  forbiddenSet.add(`${adjCol},${adjRow}`);
-                }
-              }
-            }
-
-            while (queue.length > 0) {
-              const next = queue.shift();
-              if (!next) continue;
-              const [col, row, steps] = next;
-              const key = `${col},${row}`;
-              
-              if (visited.has(key) && steps >= visited.get(key)!) {
-                continue;
-              }
-
-              visited.set(key, steps);
-
-              // ⛔ Skip forbidden positions completely - don't expand from them
-              if (forbiddenSet.has(key) && steps > 0) {
-                continue;
-              }
-
-              const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
-
-                if (steps > 0 && steps <= selectedUnit.MOVE && !blocked && !forbiddenSet.has(key)) {
-                  availableCells.push({ col, row });
-                }
-
-                if (steps >= selectedUnit.MOVE) {
-                  continue;
-                }
-
-                // Use cube coordinates for proper hex neighbors
-                const currentCube = offsetToCube(col, row);
-                for (const [dx, dy, dz] of cubeDirections) {
-                  const neighborCube = {
-                    x: currentCube.x + dx,
-                    y: currentCube.y + dy,
-                    z: currentCube.z + dz
-                  };
-                  
-                  // Convert back to offset coordinates
-                  const ncol = neighborCube.x;
-                  const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
-                  
-                  const nkey = `${ncol},${nrow}`;
-                  const nextSteps = steps + 1;
-
-                  if (
-                    ncol >= 0 && ncol < BOARD_COLS &&
-                    nrow >= 0 && nrow < BOARD_ROWS &&
-                    nextSteps <= selectedUnit.MOVE &&
-                    !forbiddenSet.has(nkey)
-                  ) {
-                    const nblocked = units.some(u => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id);
-                    // Wall hexes are already handled by forbiddenSet above
-                    
-                    if (
-                      !nblocked &&
-                      (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
-                    ) {
-                      queue.push([ncol, nrow, nextSteps]);
-                    }
-                  }
-                }
-
-            }
-          };
-
-          runMovementBFS();
-          console.log("BFS completed, cells:", availableCells.length);
-          
-          // Redraw board with just green hexes
-          drawBoard(app, boardConfig as any, {
-            availableCells,
-            attackCells: [],
-            coverCells: [],
-            chargeCells: [],
-            blockedTargets: new Set(),
-            coverTargets: new Set(),
-            phase
-          });
-        } else {
-          // For other phases (charge, etc), just show green circle on unit's hex
-          availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
+    // ✅ CALCULATE MOVEMENT PREVIEW BEFORE MAIN DRAWBOARD CALL
+    if (selectedUnit && mode === "select" && eligibleUnitIds && eligibleUnitIds.includes(typeof selectedUnit.id === 'number' ? selectedUnit.id : parseInt(selectedUnit.id as string))) {
+      if (phase === "move") {
+        // For move phase, show available move destinations
+        if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
+          throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for movement preview`);
         }
-      }
 
-      // Green circles for all eligible charge units (not just selected)
-      if (phase === "charge" && mode === "select") {
-        eligibleUnitIds.forEach(unitId => {
-          const eligibleUnit = units.find(u => u.id === unitId);
-          if (eligibleUnit) {
-            availableCells.push({ col: eligibleUnit.col, row: eligibleUnit.row });
+        const centerCol = selectedUnit.col;
+        const centerRow = selectedUnit.row;
+
+        const visited = new Set<string>();
+        const queue: [number, number][] = [[centerCol, centerRow]];
+        const originCube = offsetToCube(centerCol, centerRow);
+
+        // Use cube coordinate system for proper hex neighbors
+        const cubeDirections = [
+          [1, -1, 0], [1, 0, -1], [0, 1, -1], 
+          [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+        ];
+
+        // Collect all forbidden hexes (adjacent to any enemy + wall hexes) using cube coordinates  
+        const forbiddenSet = new Set<string>();
+        
+        // Add all wall hexes as forbidden
+        const wallHexSet = new Set<string>(
+          (boardConfig.wall_hexes || []).map((wall: number[]) => `${wall[0]},${wall[1]}`)
+        );
+        wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
+        
+        for (const enemy of units) {
+          if (enemy.player === selectedUnit.player) continue;
+
+          // Add enemy position itself
+          forbiddenSet.add(`${enemy.col},${enemy.row}`);
+
+          // Use cube coordinates for proper hex adjacency
+          const enemyCube = offsetToCube(enemy.col, enemy.row);
+          for (const [dx, dy, dz] of cubeDirections) {
+            const adjCube = {
+              x: enemyCube.x + dx,
+              y: enemyCube.y + dy,
+              z: enemyCube.z + dz
+            };
+            
+            // Convert back to offset coordinates
+            const adjCol = adjCube.x;
+            const adjRow = adjCube.z + ((adjCube.x - (adjCube.x & 1)) >> 1);
+            
+            if (
+              adjCol >= 0 && adjCol < BOARD_COLS &&
+              adjRow >= 0 && adjRow < BOARD_ROWS
+            ) {
+              forbiddenSet.add(`${adjCol},${adjRow}`);
+            }
           }
-        });
+        }
+
+        while (queue.length > 0) {
+          const next = queue.shift();
+          if (!next) continue;
+          const [col, row] = next;
+          const key = `${col},${row}`;
+          
+          if (visited.has(key)) {
+            continue;
+          }
+
+          visited.add(key);
+
+          const currentCube = offsetToCube(col, row);
+          const distanceFromOrigin = cubeDistance(originCube, currentCube);
+
+          // ⛔ Skip forbidden positions completely - don't expand from them
+          if (forbiddenSet.has(key) && distanceFromOrigin > 0) {
+            continue;
+          }
+
+          const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
+
+          if (distanceFromOrigin > 0 && distanceFromOrigin <= selectedUnit.MOVE && !blocked && !forbiddenSet.has(key)) {
+            availableCells.push({ col, row });
+          }
+
+          if (distanceFromOrigin >= selectedUnit.MOVE) {
+            continue;
+          }
+
+          // Use cube coordinates for proper hex neighbors
+          for (const [dx, dy, dz] of cubeDirections) {
+            const neighborCube = {
+              x: currentCube.x + dx,
+              y: currentCube.y + dy,
+              z: currentCube.z + dz
+            };
+            
+            // Convert back to offset coordinates  
+            const ncol = neighborCube.x;
+            const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+            
+            const nkey = `${ncol},${nrow}`;
+            const neighborDistance = cubeDistance(originCube, neighborCube);
+
+            if (
+              ncol >= 0 && ncol < BOARD_COLS &&
+              nrow >= 0 && nrow < BOARD_ROWS &&
+              neighborDistance <= selectedUnit.MOVE &&
+              !forbiddenSet.has(nkey) &&
+              !visited.has(nkey)
+            ) {
+              const nblocked = units.some(u => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id);
+              // Wall hexes are already handled by forbiddenSet above
+              
+              if (!nblocked) {
+                queue.push([ncol, nrow]);
+              }
+            }
+          }
+
+        }
+
+      } else {
+        // For other phases (charge, etc), just show green circle on unit's hex
+        availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
       }
+    }
+
+    // Green circles for all eligible charge units (not just selected)
+    if (phase === "charge" && mode === "select") {
+      eligibleUnitIds.forEach(unitId => {
+        const eligibleUnit = units.find(u => u.id === unitId);
+        if (eligibleUnit) {
+          availableCells.push({ col: eligibleUnit.col, row: eligibleUnit.row });
+        }
+      });
+    }
 
       // Attack cells: Different colors for different line of sight conditions
       let attackCells: { col: number; row: number }[] = []; // Red = clear line of sight
@@ -861,7 +841,7 @@ export default function Board({
         }
 
 
-      // ✅ DRAW BOARD using shared BoardDisplay component
+      // ✅ DRAW BOARD ONCE with populated availableCells
       drawBoard(app, boardConfig as any, {
         availableCells,
         attackCells,
@@ -966,7 +946,6 @@ export default function Board({
           return standardResult;
         })();
         
-        console.log("🟠 RENDERING UNIT:", unit.id, "at", centerX, centerY, "eligible:", isEligibleForRendering);
         renderUnit({
           unit, centerX, centerY, app,
           isPreview: false,
