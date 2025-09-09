@@ -125,7 +125,7 @@ export const useEngineAPI = () => {
     
     try {
       const requestId = Date.now();
-      console.log(`🎮 EXECUTING ACTION [${requestId}]:`, action);
+      console.log(`🎮 EXECUTING ACTION`, action);
       const requestBody = JSON.stringify({...action, requestId});
       const response = await fetch(`${API_BASE}/game/action`, {
         method: 'POST',

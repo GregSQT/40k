@@ -40,7 +40,7 @@ export function setupBoardClickHandler(callbacks: {
       clickType?: 'left' | 'right';
     }>).detail;
 
-    console.log(`🔥 BOARD CLICK HANDLER DEBUG: Unit=${unitId}, Phase=${phase}, Mode=${mode}, Selected=${selectedUnitId}, Click=${clickType}`);
+    console.log(`🔥 BOARD CLICK HANDLER | Unit : ${unitId} | Phase : ${phase} | Mode : ${mode} | Selected : ${selectedUnitId} | Click : ${clickType} |`);
 
     if (phase === 'move' && mode === 'select') {
       if (selectedUnitId === unitId) {
