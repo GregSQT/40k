@@ -10,8 +10,9 @@ export function setupBoardClickHandler(callbacks: {
   onSkipUnit?(unitId: UnitId): void;
   onSkipShoot?(unitId: UnitId): void;
   onStartAttackPreview(shooterId: UnitId): void;
+  onStartTargetPreview?(shooterId: UnitId, targetId: UnitId): void;
   onShoot(shooterId: UnitId, targetId: UnitId): void;
-  onFightAttack(attackerId: UnitId, targetId: UnitId | null): void;
+  onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
   onConfirmMove(): void;
   onCancelCharge?(): void;
   onValidateCharge?(chargerId: UnitId): void;
@@ -58,16 +59,24 @@ export function setupBoardClickHandler(callbacks: {
       callbacks.onStartAttackPreview(unitId);
     } else if (phase === 'shoot' && mode === 'attackPreview' && selectedUnitId != null) {
       if (selectedUnitId !== unitId) {
-        callbacks.onShoot(selectedUnitId, unitId);
+        // First click on enemy target - start targeting preview with HP blinking
+        if (callbacks.onStartTargetPreview) {
+          callbacks.onStartTargetPreview(selectedUnitId, unitId);
+        }
       } else {
-        callbacks.onSelectUnit(null);
+        // AI_TURN.md: Left click on active unit - no effect
+        // Right-click behavior handled in unit renderer
+        return;
       }
+    } else if (phase === 'shoot' && mode === 'targetPreview' && selectedUnitId != null) {
+      // Second click on same target - execute shooting
+      callbacks.onShoot(selectedUnitId, unitId);
     } else if (mode === 'movePreview') {
       callbacks.onConfirmMove();
     } else if (phase === 'fight' && selectedUnitId != null && selectedUnitId !== unitId) {
-      callbacks.onFightAttack(selectedUnitId, unitId);
+      callbacks.onCombatAttack(selectedUnitId, unitId);
     } else if (phase === 'fight' && selectedUnitId === unitId) {
-      callbacks.onFightAttack(selectedUnitId, null);
+      callbacks.onCombatAttack(selectedUnitId, null);
     } else {
       callbacks.onSelectUnit(unitId);
     }

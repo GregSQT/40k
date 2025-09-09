@@ -9,16 +9,7 @@ import { drawBoard } from './BoardDisplay';
 const setupBoardInteractions = (app: any, boardConfig: any, config: any) => {};
 const cleanupBoardInteractions = (app: any) => {};
 import { renderUnit } from './UnitRenderer';
-const offsetToCube = (col: number, row: number) => {
-  const x = col;
-  const z = row - ((col - (col & 1)) >> 1);
-  const y = -x - z;
-  return { x, y, z };
-};
-const cubeDistance = (a: any, b: any) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.z - b.z));
-const hasLineOfSight = (from: any, to: any, walls: any) => ({ canSee: true, inCover: false });
-const getHexLine = (x1: number, y1: number, x2: number, y2: number) => [];
-const isUnitInRange = (unit1: any, unit2: any, range: number) => true;
+import { offsetToCube, cubeDistance, hasLineOfSight, getHexLine, isUnitInRange } from '../utils/gameHelpers';
 
 // Create a mock useGameConfig hook
 const useGameConfig = () => ({
@@ -413,7 +404,7 @@ export default function Board({
         }
       },
       onShoot: stableCallbacks.current.onShoot,
-      onFightAttack: stableCallbacks.current.onFightAttack || (() => {}),
+      onCombatAttack: stableCallbacks.current.onFightAttack || (() => {}),
       onConfirmMove: stableCallbacks.current.onConfirmMove,
       onCancelCharge: stableCallbacks.current.onCancelCharge,
       onMoveCharger: stableCallbacks.current.onMoveCharger,
@@ -679,7 +670,7 @@ export default function Board({
             const lineOfSight = hasLineOfSight(
               { col: selectedUnit.col, row: selectedUnit.row },
               { col: enemy.col, row: enemy.row },
-              boardConfig.wall_hexes || []
+              (boardConfig.wall_hexes || []) as [number, number][]
             );
             
             if (!lineOfSight.canSee) {
@@ -733,7 +724,7 @@ export default function Board({
                 const lineOfSight = hasLineOfSight(
                   { col: attackFromCol, row: attackFromRow },
                   { col: enemy.col, row: enemy.row },
-                  boardConfig.wall_hexes || []
+                  (boardConfig.wall_hexes || []) as [number, number][]
                 );
                 
                 if (!lineOfSight.canSee) {
@@ -780,9 +771,9 @@ export default function Board({
                 if (distance > 0 && distance <= range) {
                   
                   const lineOfSight = hasLineOfSight(
-                    { col: attackFromCol, row: attackFromRow },
+                    { col: attackFromCol!, row: attackFromRow! },
                     { col: enemy.col, row: enemy.row },
-                    boardConfig.wall_hexes || []
+                    (boardConfig.wall_hexes || []) as [number, number][]
                   );
                   
                   
@@ -832,8 +823,8 @@ export default function Board({
                       } else {
                         const lineOfSight = hasLineOfSight(
                           { col: attackFromCol!, row: attackFromRow! },
-                          { col, row },
-                          boardConfig.wall_hexes || []
+                          { col: col, row: row },
+                          (boardConfig.wall_hexes || []) as [number, number][]
                         );
                         
                         if (lineOfSight.canSee && !lineOfSight.inCover) {
@@ -913,7 +904,7 @@ export default function Board({
               const lineOfSight = hasLineOfSight(
                 { col: selectedUnit.col, row: selectedUnit.row },
                 { col: unit.col, row: unit.row },
-                boardConfig.wall_hexes || []
+                (boardConfig.wall_hexes || []) as [number, number][]
               );
               if (!lineOfSight.canSee) {
                 isShootable = false;

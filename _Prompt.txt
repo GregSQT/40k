@@ -2,10 +2,23 @@ I'm implementing a Warhammer 40K PvE game system that must strictly follow AI_TU
 These 2 documents are you MAIN REFERENCES.
 You must be an EXPERT in understanding their logics and content.
 
-ARCHITECTURE DECISION
-Reject all wrapper architectures as AI_TURN.md violations
-Consolidate documentation to eliminate redundancy and competing guidance
-Frontend must adapt to engine API, not vice versa
+PROJECT CONTEXT:
+TypeScript/React frontend with PIXI.js rendering
+Python backend with pure stateless functions
+Hex-based board game with sequential unit activation
+Zero tolerance for architectural violations of AI_TURN.md specification
+
+CURRENT STATUS:
+We've implemented approximately 60% of the AI_TURN.md shooting phase specification but have critical gaps remaining. The basic structure is correct but missing key dynamic behaviors.
+
+ARCHITECTURAL PRINCIPLES ESTABLISHED:
+AI_TURN.md compliance is absolutely critical - no shortcuts or approximations
+Sequential activation: ONE unit per gym step only
+Built-in step counting in engine only, never retrofitted
+Eligibility-based phases: phases end when activation pools empty
+UPPERCASE fields: all unit stats must use proper naming convention
+Single game_state: one authoritative state object, no wrapper patterns
+Pure functions: handlers are stateless, no internal state storage
 
 MY PREFERENCES ESTABLISHED:
 Brutally honest and constructive assessments over polite optimism
@@ -15,21 +28,66 @@ Clear validation criteria for every decision
 Expert-level technical depth required
 Always use two code boxes for updates, indicate the path and name of the updated file, respect indentation, without ellipse, without workaround or defaut value
 
-POTENTIAL HELP
+POTENTIAL REFERENCE HELP:
 I have Added in the knowledge 40k_OLD
 It is the previous version of the application.
 Its main problem is the react conflicting with AI_TURN rules.
 But for other purposes, you may save time having a look at how it manages some features. Of course, the main priority is to maintain the 100% compliance with AI_TURN
 
-IMMEDIATE SITUATION
-I am currently working on the movement phase.
-Preview is OK, but when the target green hex is selected, it is the other unit that is moved.
+WHAT'S WORKING:
+Movement phase: complete AI_TURN.md compliance including right-click skip and phase transitions
+Line of sight: proper wall blocking implemented with accurate hex pathfinding
+Basic shooting activation: units can be selected and show targeting preview
+HP bar blinking animation: works correctly during target preview
+State management: proper targetPreview and shootingState tracking
+
+CRITICAL GAPS IDENTIFIED:
+Missing dynamic valid_target_pool building and management
+No While SHOOT_LEFT > 0 loop implementation
+Incomplete right-click WAIT vs ACTION behavior
+Missing target death/survival handling after shooting
+No end activation conditions for no targets vs no shots scenarios
+
+SPECIFIC ISSUES:
+Units without valid targets still show green circles and can be activated
+After shooting, target pool isn't updated for dead/surviving enemies
+Right-click behavior doesn't properly distinguish WAIT vs ACTION based on SHOOT_LEFT
+No automatic end activation when valid_target_pool becomes empty
+Missing concatenation to TOTAL_ACTION log during shooting sequence
+
+USER PREFERENCES:
+Extremely detail-oriented about AI_TURN.md compliance
+Wants exact specification implementation, not approximations
+Prefers systematic debugging with evidence before solutions
+Requires proper file paths and change tracking in format: FILE: path / CHANGE# / LINES / TYPE / BEFORE/AFTER / RESULT
+Uses specific error reporting format with TypeScript compiler output
+
+IMMEDIATE NEXT STEPS:
+We need to implement the missing 40% of the shooting phase specification, specifically the dynamic target pool management and the While SHOOT_LEFT > 0 loop logic that drives the core decision tree.
+
+FILES TO PROVIDE:
+Yes, provide these specific files:
+frontend/src/hooks/useEngineAPI.ts - contains the shooting state management we've been working on
+engine/phase_handlers/shooting_handlers.py - contains the backend eligibility and action logic
+frontend/src/components/UnitRenderer.tsx - contains the right-click behavior we partially implemented
+The AI_TURN.md shooting phase specification document - the complete decision tree we're implementing
+These files contain our current implementation state and will allow seamless continuation of the exact technical work we were doing.
+
+CONTEXT NOTE:
+The user has been very patient with multiple iterations and wants the implementation to be correct rather than fast. They will provide detailed feedback and expect systematic compliance verification with each change.
 
 Last prompt :
 
+Check shooting LoS logic (cube ?)
+Split BoardPvP like w40k_engin ?
 
-
-
+TEST :
+Terminal 1 : 
+python services/api_server.py
+Terminal 2 :
+app
+Terminal 3 :
+python tests/test_board.py
 
 callback chain: 
 UnitRenderer → boardClickHandler → BoardPvp → BoardWithAPI → useEngineAPI

@@ -237,12 +237,11 @@ class W40KEngine:
             self._build_move_activation_pool()
             self._phase_initialized = True
         
-        # Check if phase should complete using AI_IMPLEMENTATION.md delegation
-        eligible_units = movement_handlers.get_eligible_units(self.game_state)
-        if not eligible_units:
+        # AI_TURN.md LOOP: Check if phase should complete (empty pool means phase is done)
+        if not self.game_state["move_activation_pool"]:
             self._phase_initialized = False
             self._advance_to_shooting_phase()
-            return True, {"type": "phase_complete", "next_player": self.game_state["current_player"]}
+            return True, {"type": "phase_complete", "next_phase": "shoot", "current_player": self.game_state["current_player"]}
         
         # AI_TURN.md COMPLIANCE: ONLY semantic actions with unitId
         if "unitId" not in action:
@@ -252,11 +251,22 @@ class W40KEngine:
         if not active_unit:
             return False, {"error": "unit_not_found", "unitId": action["unitId"]}
         
-        if active_unit["id"] not in eligible_units:
+        if active_unit["id"] not in self.game_state["move_activation_pool"]:
             return False, {"error": "unit_not_eligible", "unitId": action["unitId"]}
         
         # AI_IMPLEMENTATION.md: Delegate to pure function
         success, result = movement_handlers.execute_action(self.game_state, active_unit, action, self.config)
+        
+        # Remove unit from activation pool AFTER successful action
+        if success:
+            self.game_state["move_activation_pool"].remove(active_unit["id"])
+            
+            # AI_TURN.md LOOP: After removing unit, check if pool is now empty (same check condition)
+            if not self.game_state["move_activation_pool"]:
+                self._phase_initialized = False
+                self._advance_to_shooting_phase()
+                result["phase_transition"] = True
+                result["next_phase"] = "shoot"
         
         return success, result
     
@@ -274,6 +284,8 @@ class W40KEngine:
         """Advance to shooting phase per AI_TURN.md progression."""
         self.game_state["phase"] = "shoot"
         self._phase_initialized = False  # Reset for shooting phase
+        # Clear previous phase activation pool
+        self.game_state["move_activation_pool"] = []
     
     def _process_shooting_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Process shooting phase with AI_TURN.md decision tree logic."""
@@ -285,9 +297,9 @@ class W40KEngine:
         
         # Check if phase should complete (empty pool means phase is done)
         if not self.game_state["shoot_activation_pool"]:
-            self._phase_initialized = False  # Reset for next phase
+            self._phase_initialized = False
             self._advance_to_charge_phase()
-            return True, {"type": "phase_complete", "next_phase": "charge"}
+            return True, {"type": "phase_complete", "next_phase": "charge", "current_player": self.game_state["current_player"]}
         
         # AI_TURN.md COMPLIANCE: ONLY semantic actions with unitId
         if "unitId" not in action:
@@ -300,18 +312,28 @@ class W40KEngine:
         if active_unit["id"] not in self.game_state["shoot_activation_pool"]:
             return False, {"error": "unit_not_eligible", "unitId": action["unitId"]}
         
-        # Remove requested unit from pool
-        self.game_state["shoot_activation_pool"].remove(active_unit["id"])
+        # AI_IMPLEMENTATION.md: Delegate to pure function
+        success, result = shooting_handlers.execute_action(self.game_state, active_unit, action, self.config)
         
-        # Execute shooting action
-        success, result = self._execute_shooting_action(active_unit, action)
+        # Remove unit from activation pool AFTER successful action
+        if success:
+            self.game_state["shoot_activation_pool"].remove(active_unit["id"])
+            
+            # AI_TURN.md LOOP: After removing unit, check if pool is now empty (same check condition)
+            if not self.game_state["shoot_activation_pool"]:
+                self._phase_initialized = False
+                self._advance_to_charge_phase()
+                result["phase_transition"] = True
+                result["next_phase"] = "charge"
         
         return success, result
     
     def _advance_to_charge_phase(self):
         """Advance to charge phase per AI_TURN.md progression."""
         self.game_state["phase"] = "charge"
-        self.game_state["charge_activation_pool"] = []
+        self._phase_initialized = False  # Reset for charge phase
+        # Clear previous phase activation pool
+        self.game_state["shoot_activation_pool"] = []
     
     def _process_charge_phase(self, action: int) -> Tuple[bool, Dict[str, Any]]:
         """Placeholder for charge phase - implements AI_TURN.md decision tree."""
@@ -351,20 +373,9 @@ class W40KEngine:
     # ===== SHOOTING PHASE IMPLEMENTATION =====
     
     def _build_shoot_activation_pool(self):
-        """Build shooting activation pool using AI_TURN.md eligibility logic."""
-        self.game_state["shoot_activation_pool"] = []
-        current_player = self.game_state["current_player"]
-        
-        for unit in self.game_state["units"]:
-            # AI_TURN.md eligibility: alive + current_player + not fled + not adjacent + has weapon + has targets
-            if (unit["HP_CUR"] > 0 and 
-                unit["player"] == current_player and
-                unit["id"] not in self.game_state["units_fled"] and
-                not self._is_adjacent_to_enemy(unit) and
-                unit["RNG_NB"] > 0 and
-                self._has_valid_shooting_targets(unit)):
-                
-                self.game_state["shoot_activation_pool"].append(unit["id"])
+        """Build shooting activation pool using AI_IMPLEMENTATION.md delegation."""
+        eligible_units = shooting_handlers.get_eligible_units(self.game_state)
+        self.game_state["shoot_activation_pool"] = eligible_units
     
     def _has_valid_shooting_targets(self, unit: Dict[str, Any]) -> bool:
         """Check if unit has valid shooting targets per AI_TURN.md restrictions."""
@@ -376,63 +387,19 @@ class W40KEngine:
         return False
     
     def _is_valid_shooting_target(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
-        """Validate shooting target per AI_TURN.md restrictions."""
-        
-        # Range check
-        distance = max(abs(shooter["col"] - target["col"]), abs(shooter["row"] - target["row"]))
-        if distance > shooter["RNG_RNG"]:
-            return False
-        
-        # Fight exclusion: target NOT adjacent to shooter
-        if distance <= shooter["CC_RNG"]:
-            return False
-        
-        # Friendly fire prevention: target NOT adjacent to any friendly units
-        for friendly in self.game_state["units"]:
-            if (friendly["player"] == shooter["player"] and 
-                friendly["HP_CUR"] > 0 and 
-                friendly["id"] != shooter["id"]):
-                
-                friendly_distance = max(abs(friendly["col"] - target["col"]), 
-                                      abs(friendly["row"] - target["row"]))
-                if friendly_distance <= 1:  # Adjacent to friendly
-                    return False
-        
-        # Line of sight check
-        return self._has_line_of_sight(shooter, target)
+        """Validate shooting target using handler delegation."""
+        # AI_IMPLEMENTATION.md: Delegate to shooting_handlers for consistency
+        return shooting_handlers._is_valid_shooting_target(self.game_state, shooter, target)
     
     def _has_line_of_sight(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
-        """Check line of sight between shooter and target."""
-        # Simple implementation: blocked by walls only
-        start_col, start_row = shooter["col"], shooter["row"]
-        end_col, end_row = target["col"], target["row"]
-        
-        # Bresenham line algorithm for hex path
-        hex_path = self._get_hex_line(start_col, start_row, end_col, end_row)
-        
-        # Check if any hex in path is a wall (excluding start and end)
-        for col, row in hex_path[1:-1]:  # Skip start and end positions
-            if (col, row) in self.game_state["wall_hexes"]:
-                return False
-        
-        return True
+        """Check line of sight between shooter and target using handler delegation."""
+        # AI_IMPLEMENTATION.md: Delegate to shooting_handlers for consistency
+        return shooting_handlers._has_line_of_sight(self.game_state, shooter, target)
     
     def _get_hex_line(self, start_col: int, start_row: int, end_col: int, end_row: int) -> List[Tuple[int, int]]:
-        """Get hex line between two points (simplified implementation)."""
-        path = []
-        
-        # Simple linear interpolation for now
-        steps = max(abs(end_col - start_col), abs(end_row - start_row))
-        if steps == 0:
-            return [(start_col, start_row)]
-        
-        for i in range(steps + 1):
-            t = i / steps
-            col = round(start_col + t * (end_col - start_col))
-            row = round(start_row + t * (end_row - start_row))
-            path.append((col, row))
-        
-        return path
+        """Get hex line using handler delegation."""
+        # AI_IMPLEMENTATION.md: Delegate to shooting_handlers for consistency
+        return shooting_handlers._get_accurate_hex_line(start_col, start_row, end_col, end_row)
     
     def _execute_shooting_action(self, unit: Dict[str, Any], action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Execute semantic shooting action with AI_TURN.md restrictions."""

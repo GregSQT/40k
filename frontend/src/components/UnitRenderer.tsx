@@ -56,7 +56,24 @@ export class UnitRenderer {
     this.props = props;
   }
   
+  private cleanupExistingBlinkIntervals(): void {
+    // Find any existing blink containers and clean them up
+    const existingBlinkContainers = this.props.app.stage.children.filter(
+      child => child.name === 'hp-blink-container'
+    );
+    
+    existingBlinkContainers.forEach(container => {
+      if ((container as any).cleanupBlink) {
+        (container as any).cleanupBlink();
+      }
+      container.destroy({ children: true });
+    });
+  }
+  
   render(): void {
+    // Clean up any existing blink intervals before rendering new ones
+    this.cleanupExistingBlinkIntervals();
+    
     const {
       unit, centerX, centerY, app, isPreview = false, previewType,
       boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
@@ -209,9 +226,21 @@ export class UnitRenderer {
             e.stopPropagation();
             
             if (e.button === 2 && phase === "shoot" && mode === "attackPreview" && selectedUnitId === unit.id) {
-              window.dispatchEvent(new CustomEvent('boardSkipShoot', {
-                detail: { unitId: unit.id }
-              }));
+              // AI_TURN.md: Right click behavior depends on SHOOT_LEFT
+              const shootLeft = unit.SHOOT_LEFT || 0;
+              const rngNb = unit.RNG_NB || 0;
+              
+              if (shootLeft === rngNb) {
+                // SHOOT_LEFT = RNG_NB: Cancel activation (WAIT)
+                window.dispatchEvent(new CustomEvent('boardCancelShoot', {
+                  detail: { unitId: unit.id, type: 'wait' }
+                }));
+              } else {
+                // SHOOT_LEFT < RNG_NB: Stop shooting (ACTION)
+                window.dispatchEvent(new CustomEvent('boardSkipShoot', {
+                  detail: { unitId: unit.id, type: 'action' }
+                }));
+              }
               return;
             }
             
@@ -339,7 +368,7 @@ export class UnitRenderer {
   
   private renderHPBar(unitIconScale: number): void {
     const { unit, centerX, centerY, app, isPreview, HEX_RADIUS, HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT,
-             targetPreview, units, boardConfig, parseColor } = this.props;
+             targetPreview, units, boardConfig, parseColor, mode } = this.props;
     
     if (!unit.HP_MAX) return; // Only skip if no HP_MAX, not if isPreview
     
@@ -349,7 +378,7 @@ export class UnitRenderer {
     const barY = centerY - scaledYOffset - HP_BAR_HEIGHT;
     
     // Check if this unit is being previewed for shooting
-    const isTargetPreviewed = targetPreview && targetPreview.targetId === unit.id;
+    const isTargetPreviewed = mode === "targetPreview" && targetPreview && targetPreview.targetId === unit.id;
     const finalBarWidth = isTargetPreviewed ? HP_BAR_WIDTH * 2.5 : HP_BAR_WIDTH;
     const finalBarHeight = isTargetPreviewed ? HP_BAR_HEIGHT * 2.5 : HP_BAR_HEIGHT;
     const finalBarX = isTargetPreviewed ? centerX - finalBarWidth / 2 : barX;
@@ -386,16 +415,71 @@ export class UnitRenderer {
       }
     }
     
-    // HP slices
+    // HP slices with blinking animation for target preview
     const sliceWidth = finalBarWidth / unit.HP_MAX;
-    for (let i = 0; i < unit.HP_MAX; i++) {
-      const slice = new PIXI.Graphics();
-      const color = i < displayHP ? (unit.player === 0 ? 0x4da6ff : 0xff4d4d) : parseColor(boardConfig.colors.hp_damaged);
-      slice.beginFill(color, 1);
-      slice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
-      slice.endFill();
-      slice.zIndex = 350;
-      app.stage.addChild(slice);
+    
+    if (isTargetPreviewed) {
+      // Create blinking HP bar animation
+      const hpContainer = new PIXI.Container();
+      hpContainer.name = 'hp-blink-container';
+      hpContainer.zIndex = 350;
+      
+      // Create normal HP slices
+      const normalSlices: PIXI.Graphics[] = [];
+      const highlightSlices: PIXI.Graphics[] = [];
+      
+      for (let i = 0; i < unit.HP_MAX; i++) {
+        // Normal HP slice
+        const normalSlice = new PIXI.Graphics();
+        const normalColor = i < displayHP ? (unit.player === 0 ? 0x4da6ff : 0xff4d4d) : parseColor(boardConfig.colors.hp_damaged);
+        normalSlice.beginFill(normalColor, 1);
+        normalSlice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
+        normalSlice.endFill();
+        normalSlices.push(normalSlice);
+        hpContainer.addChild(normalSlice);
+        
+        // Highlight HP slice (red/yellow for damage preview)
+        const highlightSlice = new PIXI.Graphics();
+        const highlightColor = i < displayHP ? 0xFF4444 : 0xFFAA00; // Red for current HP, yellow for damage
+        highlightSlice.beginFill(highlightColor, 1);
+        highlightSlice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
+        highlightSlice.endFill();
+        highlightSlice.visible = false; // Start hidden
+        highlightSlices.push(highlightSlice);
+        hpContainer.addChild(highlightSlice);
+      }
+      
+      // Animate blinking every 300ms
+      let blinkState = false;
+      const blinkInterval = setInterval(() => {
+        blinkState = !blinkState;
+        normalSlices.forEach(slice => slice.visible = !blinkState);
+        highlightSlices.forEach(slice => slice.visible = blinkState);
+      }, 300);
+      
+      // Store interval for cleanup using PIXI-compatible approach
+      (hpContainer as any).blinkInterval = blinkInterval;
+      app.stage.addChild(hpContainer);
+      
+      // Store cleanup function for later use
+      (hpContainer as any).cleanupBlink = () => {
+        if ((hpContainer as any).blinkInterval) {
+          clearInterval((hpContainer as any).blinkInterval);
+          (hpContainer as any).blinkInterval = null;
+        }
+      };
+      
+    } else {
+      // Normal non-blinking HP slices
+      for (let i = 0; i < unit.HP_MAX; i++) {
+        const slice = new PIXI.Graphics();
+        const color = i < displayHP ? (unit.player === 0 ? 0x4da6ff : 0xff4d4d) : parseColor(boardConfig.colors.hp_damaged);
+        slice.beginFill(color, 1);
+        slice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
+        slice.endFill();
+        slice.zIndex = 350;
+        app.stage.addChild(slice);
+      }
     }
     
     // Probability display for previewed targets

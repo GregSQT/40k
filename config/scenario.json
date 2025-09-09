@@ -4,15 +4,16 @@
       "id": 1,
       "unit_type": "Intercessor",
       "player": 0,
-      "col": 16,
-      "row": 9
+      "col": 12,
+      "row": 13
     },
     {
       "id": 2,
       "unit_type": "Intercessor",
       "player": 0,
-      "col": 12,
-      "row": 13
+      "col": 20,
+      "row": 11
+
     },
     {
       "id": 3,
@@ -32,7 +33,7 @@
       "id": 5,
       "unit_type": "Hormagaunt",
       "player": 1,
-      "col": 17,
+      "col": 16,
       "row": 5
     }
   ]
