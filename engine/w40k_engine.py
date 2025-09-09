@@ -284,8 +284,11 @@ class W40KEngine:
         """Advance to shooting phase per AI_TURN.md progression."""
         self.game_state["phase"] = "shoot"
         self._phase_initialized = False  # Reset for shooting phase
-        # Clear previous phase activation pool
-        self.game_state["move_activation_pool"] = []
+        # Build shooting pool for new phase
+        self._build_shoot_activation_pool()
+        # If no units eligible for shooting, advance immediately to charge
+        if not self.game_state["shoot_activation_pool"]:
+            self._advance_to_charge_phase()
     
     def _process_shooting_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Process shooting phase with AI_TURN.md decision tree logic."""
@@ -312,8 +315,8 @@ class W40KEngine:
         if active_unit["id"] not in self.game_state["shoot_activation_pool"]:
             return False, {"error": "unit_not_eligible", "unitId": action["unitId"]}
         
-        # AI_IMPLEMENTATION.md: Delegate to pure function
-        success, result = shooting_handlers.execute_action(self.game_state, active_unit, action, self.config)
+        # Use internal shooting implementation to avoid action format conflicts
+        success, result = self._execute_shooting_action(active_unit, action)
         
         # Remove unit from activation pool AFTER successful action
         if success:
@@ -374,8 +377,18 @@ class W40KEngine:
     
     def _build_shoot_activation_pool(self):
         """Build shooting activation pool using AI_IMPLEMENTATION.md delegation."""
+        print(f"🎯 BUILDING SHOOT ACTIVATION POOL DEBUG:")
+        print(f"  - Current player: {self.game_state['current_player']}")
+        print(f"  - Phase: {self.game_state['phase']}")
+        print(f"  - Units in game: {len(self.game_state['units'])}")
+        
+        for unit in self.game_state["units"]:
+            print(f"    Unit {unit['id']}: player={unit['player']}, HP={unit['HP_CUR']}, RNG_NB={unit.get('RNG_NB', 'MISSING')}")
+        
         eligible_units = shooting_handlers.get_eligible_units(self.game_state)
+        print(f"  - Eligible units returned: {eligible_units}")
         self.game_state["shoot_activation_pool"] = eligible_units
+        print(f"  - Final pool: {self.game_state['shoot_activation_pool']}")
     
     def _has_valid_shooting_targets(self, unit: Dict[str, Any]) -> bool:
         """Check if unit has valid shooting targets per AI_TURN.md restrictions."""

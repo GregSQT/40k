@@ -105,6 +105,8 @@ export const BoardWithAPI: React.FC = () => {
         onConfirmMove={apiProps.onConfirmMove}
         onCancelMove={apiProps.onCancelMove}
         onShoot={apiProps.onShoot}
+        onSkipShoot={apiProps.onSkipShoot}
+        onStartTargetPreview={apiProps.onStartTargetPreview}
         onFightAttack={apiProps.onFightAttack}
         currentPlayer={apiProps.currentPlayer as PlayerId}
         unitsMoved={apiProps.unitsMoved}

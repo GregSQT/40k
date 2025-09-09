@@ -40,44 +40,62 @@ export function setupBoardClickHandler(callbacks: {
       clickType?: 'left' | 'right';
     }>).detail;
 
+    console.log("🔥 BOARD CLICK HANDLER DEBUG:");
+    console.log("  - Unit ID:", unitId);
+    console.log("  - Phase:", phase);
+    console.log("  - Mode:", mode);
+    console.log("  - Selected unit:", selectedUnitId);
+    console.log("  - Click type:", clickType);
+
     if (phase === 'move' && mode === 'select') {
-      // AI_TURN.md MOVEMENT PHASE COMPLIANCE
+      console.log("  ✅ MOVEMENT LOGIC TRIGGERED");
       if (selectedUnitId === unitId) {
         if (clickType === 'right') {
-          // Right click on active unit → Move cancelled (skip unit)
+          console.log("    - Right click on active unit → calling onSkipUnit");
           callbacks.onSkipUnit?.(unitId);
         } else {
-          // Left click on active unit → Move postponed (deselect)
+          console.log("    - Left click on active unit → calling onSelectUnit(null)");
           callbacks.onSelectUnit(null);
         }
       } else {
-        // Click on different unit → Switch activation
+        console.log("    - Click on different unit → calling onSelectUnit");
         callbacks.onSelectUnit(unitId);
       }
     } else if (phase === 'shoot' && mode === 'select') {
+      console.log("  ✅ SHOOTING SELECT LOGIC TRIGGERED");
+      console.log("    - Calling onSelectUnit with unitId:", unitId);
       callbacks.onSelectUnit(unitId);
+      console.log("    - Calling onStartAttackPreview with unitId:", unitId);
       callbacks.onStartAttackPreview(unitId);
     } else if (phase === 'shoot' && mode === 'attackPreview' && selectedUnitId != null) {
+      console.log("  ✅ SHOOTING ATTACK PREVIEW LOGIC");
       if (selectedUnitId !== unitId) {
-        // First click on enemy target - start targeting preview with HP blinking
+        console.log("    - First click on enemy target → calling onStartTargetPreview");
         if (callbacks.onStartTargetPreview) {
           callbacks.onStartTargetPreview(selectedUnitId, unitId);
         }
       } else {
-        // AI_TURN.md: Left click on active unit - no effect
-        // Right-click behavior handled in unit renderer
+        console.log("    - Left click on active unit → no effect");
         return;
       }
     } else if (phase === 'shoot' && mode === 'targetPreview' && selectedUnitId != null) {
-      // Second click on same target - execute shooting
+      console.log("  ✅ SHOOTING TARGET PREVIEW LOGIC");
+      console.log("    - Second click on target → calling onShoot");
       callbacks.onShoot(selectedUnitId, unitId);
     } else if (mode === 'movePreview') {
+      console.log("  ✅ MOVE PREVIEW LOGIC → calling onConfirmMove");
       callbacks.onConfirmMove();
     } else if (phase === 'fight' && selectedUnitId != null && selectedUnitId !== unitId) {
+      console.log("  ✅ FIGHT LOGIC (different unit) → calling onCombatAttack");
       callbacks.onCombatAttack(selectedUnitId, unitId);
     } else if (phase === 'fight' && selectedUnitId === unitId) {
+      console.log("  ✅ FIGHT LOGIC (same unit) → calling onCombatAttack");
       callbacks.onCombatAttack(selectedUnitId, null);
     } else {
+      console.log("  ✅ DEFAULT LOGIC → calling onSelectUnit");
+      console.log("    - No specific condition matched");
+      console.log("    - Expected for shooting: phase='shoot' && mode='select'");
+      console.log("    - Actual: phase='" + phase + "' && mode='" + mode + "'");
       callbacks.onSelectUnit(unitId);
     }
   };

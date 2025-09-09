@@ -39,6 +39,10 @@ interface APIGameState {
     unitType: string;
     SHOOT_LEFT?: number;
     ATTACK_LEFT?: number;
+    // AI_TURN.md shooting state fields
+    valid_target_pool?: string[];
+    selected_target_id?: string;
+    TOTAL_ATTACK_LOG?: string;
   }>;
   current_player: number;
   phase: string;
@@ -56,6 +60,8 @@ interface APIGameState {
   charging_activation_pool: string[];
   active_alternating_activation_pool: string[];
   non_active_alternating_activation_pool: string[];
+  // AI_TURN.md shooting phase state
+  active_shooting_unit?: string;
 }
 
 export const useEngineAPI = () => {
@@ -68,21 +74,6 @@ export const useEngineAPI = () => {
   const [movePreview, setMovePreview] = useState<{ unitId: number; destCol: number; destRow: number } | null>(null);
   const [targetPreview, setTargetPreview] = useState<{shooterId: number, targetId: number} | null>(null);
   
-  // AI_TURN.md: Shooting phase state management
-  const [shootingState, setShootingState] = useState<{
-    activeShooterId: number | null;
-    shootLeft: number;
-    rngNb: number;
-    validTargetPool: number[];
-    totalActionLog: string;
-  }>({
-    activeShooterId: null,
-    shootLeft: 0,
-    rngNb: 0,
-    validTargetPool: [],
-    totalActionLog: ""
-  });
-
   // Load config values
   useEffect(() => {
     getMaxTurnsFromConfig().then(setMaxTurnsFromConfig);
@@ -125,7 +116,6 @@ export const useEngineAPI = () => {
     
     try {
       const requestBody = JSON.stringify(action);
-      console.log("📡 SENDING API REQUEST:", requestBody);
       const response = await fetch(`${API_BASE}/game/action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -137,11 +127,21 @@ export const useEngineAPI = () => {
       }
       
       const data = await response.json();
-      console.log("✅ API RESPONSE:", data);
       if (data.success) {
-        console.log("🔄 UPDATING GAME STATE");
+        // Only log shooting phase state changes
+        if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
+          console.log("🎯 UNIT ACTIVATED:", data.game_state.active_shooting_unit);
+        }
         setGameState(data.game_state);
-        setSelectedUnitId(null); // Reset after game state is updated
+        
+        // Set visual state based on shooting activation
+        if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
+          console.log("  🎯 SETTING ATTACK PREVIEW MODE");
+          setSelectedUnitId(parseInt(data.game_state.active_shooting_unit));
+          setMode("attackPreview");
+        } else {
+          setSelectedUnitId(null);
+        }
         console.log("✅ GAME STATE UPDATED");
       }
     } catch (err) {
@@ -194,68 +194,92 @@ export const useEngineAPI = () => {
     });
   }, []);
 
-  // Event handlers
-  const handleSelectUnit = useCallback((unitId: number | string | null) => {
+  // Helper function using backend state only
+  const determineClickTarget = useCallback((unitId: number, gameState: APIGameState): string => {
+    if (!gameState) return "elsewhere";
+    
+    const unit = gameState.units.find((u: any) => parseInt(u.id) === unitId);
+    if (!unit) return "elsewhere";
+    
+    const currentPlayer = gameState.current_player;
+    const activeShooterId = gameState.active_shooting_unit ? parseInt(gameState.active_shooting_unit) : null;
+    
+    if (unit.player === currentPlayer) {
+      if (unitId === activeShooterId) {
+        return "active_unit";
+      } else {
+        return "friendly";
+      }
+    } else {
+      return "enemy";
+    }
+  }, []);
+
+  // AI_TURN.md: Backend-driven shooting phase management
+  const handleShootingPhaseClick = useCallback(async (unitId: number, clickType: 'left' | 'right') => {
+    if (!gameState) return;
+    
+    const clickTarget = determineClickTarget(unitId, gameState);
+    const activeShooterId = gameState.active_shooting_unit;
+    
+    // AI_TURN.md: Backend handles all context awareness
+    const action = {
+      action: clickType === 'left' ? 'left_click' : 'right_click',
+      unitId: activeShooterId || selectedUnitId?.toString(),
+      targetId: unitId.toString(),
+      clickTarget: clickTarget
+    };
+    
+    await executeAction(action);
+  }, [gameState, selectedUnitId, determineClickTarget, executeAction]);
+
+  // Event handlers aligned with backend
+  const handleSelectUnit = useCallback(async (unitId: number | string | null) => {
     const numericUnitId = typeof unitId === 'string' ? parseInt(unitId) : unitId;
     
     // AI_TURN.md: Shooting phase click handling
+    // AI_TURN.md: Shooting phase activation with comprehensive debugging
     if (gameState && gameState.phase === "shoot") {
+      console.log("🎯 SHOOTING PHASE CLICK DEBUG:");
+      console.log("  - Phase:", gameState.phase);
+      console.log("  - Clicked unit ID:", numericUnitId);
+      console.log("  - Active shooting unit:", gameState.active_shooting_unit);
+      console.log("  - Shoot activation pool:", gameState.shoot_activation_pool);
       
-      // Case 1: No unit currently selected - start activation
-      if (selectedUnitId === null && numericUnitId !== null) {
-        // AI_TURN.md: Clear any unit remaining in valid_target_pool + Clear TOTAL_ATTACK log + SHOOT_LEFT = RNG_NB
-        const unit = gameState.units.find(u => parseInt(u.id) === numericUnitId);
-        if (unit) {
-          setShootingState({
-            activeShooterId: numericUnitId,
-            shootLeft: unit.RNG_NB,
-            rngNb: unit.RNG_NB,
-            validTargetPool: [],
-            totalActionLog: ""
+      if (numericUnitId !== null) {
+        const shootActivationPool = gameState.shoot_activation_pool?.map(id => parseInt(id)) || [];
+        console.log("  - Parsed pool:", shootActivationPool);
+        console.log("  - Unit in pool?", shootActivationPool.includes(numericUnitId));
+        console.log("  - No active unit?", !gameState.active_shooting_unit);
+        
+        if (shootActivationPool.includes(numericUnitId) && !gameState.active_shooting_unit) {
+          console.log("  ✅ ACTIVATING UNIT:", numericUnitId);
+          await executeAction({
+            action: "activate_unit", 
+            unitId: numericUnitId.toString()
           });
-          setSelectedUnitId(numericUnitId);
-          setMode("attackPreview");
+          return;
+        } else if (gameState.active_shooting_unit) {
+          console.log("  ✅ SENDING LEFT_CLICK - Active unit exists");
+          console.log("    - Active unit:", gameState.active_shooting_unit);
+          console.log("    - Target unit:", numericUnitId);
+          console.log("    - Click target type:", determineClickTarget(numericUnitId, gameState));
+          await executeAction({
+            action: "left_click",
+            unitId: gameState.active_shooting_unit,
+            targetId: numericUnitId.toString(),
+            clickTarget: determineClickTarget(numericUnitId, gameState)
+          });
+          return;
+        } else {
+          console.log("  ❌ NO ACTION: Unit not in pool or conditions not met");
+          console.log("    - Unit in pool:", shootActivationPool.includes(numericUnitId));
+          console.log("    - Active unit exists:", !!gameState.active_shooting_unit);
         }
-        return;
+      } else {
+        console.log("  ❌ NO ACTION: numericUnitId is null");
       }
-      
-      // Case 2: Unit already selected
-      if (selectedUnitId !== null) {
-        
-        // Case 2a: Left click on active unit during target preview - no effect
-        if (mode === "targetPreview" && numericUnitId === selectedUnitId) {
-          return;
-        }
-        
-        // Case 2b: Left click on another unit
-        if (numericUnitId !== selectedUnitId && numericUnitId !== null) {
-          // AI_TURN.md: Check if SHOOT_LEFT = RNG_NB for postpone
-          if (shootingState.shootLeft === shootingState.rngNb) {
-            // Can postpone - start new unit activation
-            const newUnit = gameState.units.find(u => parseInt(u.id) === numericUnitId);
-            if (newUnit) {
-              setShootingState({
-                activeShooterId: numericUnitId,
-                shootLeft: newUnit.RNG_NB,
-                rngNb: newUnit.RNG_NB,
-                validTargetPool: [],
-                totalActionLog: ""
-              });
-              setSelectedUnitId(numericUnitId);
-              setMode("attackPreview");
-              setTargetPreview(null);
-            }
-          }
-          // If SHOOT_LEFT < RNG_NB, unit must end activation - no switch allowed
-          return;
-        }
-        
-        // Case 2c: Left click on same unit
-        if (numericUnitId === selectedUnitId) {
-          // During attackPreview - no effect per AI_TURN.md
-          return;
-        }
-      }
+      return;
     }
     
     // Normal unit selection for other phases
@@ -263,14 +287,15 @@ export const useEngineAPI = () => {
     setMode("select");
     setMovePreview(null);
     setTargetPreview(null);
-    setShootingState({
-      activeShooterId: null,
-      shootLeft: 0,
-      rngNb: 0,
-      validTargetPool: [],
-      totalActionLog: ""
-    });
-  }, [gameState, mode, selectedUnitId, shootingState]);
+    // Remove all frontend shooting state - backend manages everything
+  }, [gameState, handleShootingPhaseClick, executeAction]);
+
+  // Right-click handler for shooting phase
+  const handleRightClick = useCallback(async (unitId: number) => {
+    if (gameState?.phase === "shoot") {
+      await handleShootingPhaseClick(unitId, 'right');
+    }
+  }, [gameState, handleShootingPhaseClick]);
 
   const handleSkipUnit = useCallback(async (unitId: number | string) => {
     const action = {
@@ -327,77 +352,32 @@ export const useEngineAPI = () => {
     setMode("select");
   }, []);
 
-  const handleShoot = useCallback(async (shooterId: number | string, targetId: number | string) => {
-    const action = {
-      action: "shoot",
-      unitId: typeof shooterId === 'string' ? shooterId : shooterId.toString(),
-      targetId: typeof targetId === 'string' ? targetId : targetId.toString(),
-    };
-    
-    try {
-      await executeAction(action);
-      
-      // AI_TURN.md: SHOOT_LEFT -= 1, update total action log
-      const newShootLeft = Math.max(0, shootingState.shootLeft - 1);
-      setShootingState(prev => ({
-        ...prev,
-        shootLeft: newShootLeft,
-        totalActionLog: prev.totalActionLog + `Shot at target ${targetId}; `
-      }));
-      
-      setTargetPreview(null);
-      
-      // If SHOOT_LEFT > 0, continue shooting
-      if (newShootLeft > 0) {
-        setMode("attackPreview");
-      } else {
-        // End activation when SHOOT_LEFT = 0
-        setSelectedUnitId(null);
-        setMode("select");
-        setShootingState({
-          activeShooterId: null,
-          shootLeft: 0,
-          rngNb: 0,
-          validTargetPool: [],
-          totalActionLog: ""
-        });
-      }
-    } catch (error) {
-      console.error("Shoot action failed:", error);
-    }
-  }, [executeAction, shootingState]);
+  // AI_TURN.md: Backend handles all shooting logic - frontend just sends clicks
+  const handleShoot = useCallback(async (_shooterId: number | string, targetId: number | string) => {
+    // Convert to left_click action that backend understands
+    await handleShootingPhaseClick(typeof targetId === 'string' ? parseInt(targetId) : targetId, 'left');
+  }, [handleShootingPhaseClick]);
 
   const handleSkipShoot = useCallback(async (unitId: number | string, actionType: 'wait' | 'action' = 'action') => {
-    const action = {
-      action: actionType === 'wait' ? "wait" : "skip",
-      unitId: typeof unitId === 'string' ? unitId : unitId.toString(),
-    };
-    
-    try {
-      await executeAction(action);
-      // AI_TURN.md: Both WAIT and ACTION end activation
-      setSelectedUnitId(null);
-      setTargetPreview(null);
-      setMode("select");
-      setShootingState({
-        activeShooterId: null,
-        shootLeft: 0,
-        rngNb: 0,
-        validTargetPool: [],
-        totalActionLog: ""
+    // Convert to right_click or skip action
+    if (actionType === 'wait') {
+      await handleRightClick(typeof unitId === 'string' ? parseInt(unitId) : unitId);
+    } else {
+      await executeAction({
+        action: "skip",
+        unitId: typeof unitId === 'string' ? unitId : unitId.toString()
       });
-    } catch (error) {
-      console.error("Skip/Wait shoot failed:", error);
     }
-  }, [executeAction]);
+  }, [handleRightClick, executeAction]);
 
   const handleStartTargetPreview = useCallback((shooterId: number | string, targetId: number | string) => {
-    // Start HP bar blinking animation for target
-    setMode("targetPreview");
+    console.log("🎯 STARTING TARGET PREVIEW:", {shooterId, targetId});
     setTargetPreview({
       shooterId: typeof shooterId === 'number' ? shooterId : parseInt(shooterId),
       targetId: typeof targetId === 'number' ? targetId : parseInt(targetId)
     });
+    setMode("targetPreview");
+    console.log("✅ TARGET PREVIEW STATE SET");
   }, []);
 
   // Get eligible units
@@ -406,6 +386,8 @@ export const useEngineAPI = () => {
     
     if (gameState.phase === 'move') {
       return gameState.move_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
+    } else if (gameState.phase === 'shoot') {
+      return gameState.shoot_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
     }
     
     return gameState.units
@@ -503,7 +485,10 @@ export const useEngineAPI = () => {
     onCancelMove: handleCancelMove,
     onShoot: handleShoot,
     onSkipShoot: handleSkipShoot,
-    onStartTargetPreview: handleStartTargetPreview,
+    onStartTargetPreview: (shooterId: number | string, targetId: number | string) => {
+      console.log("🔗 CALLBACK RECEIVED - onStartTargetPreview");
+      handleStartTargetPreview(shooterId, targetId);
+    },
     onFightAttack: () => {},
     onCharge: () => {},
     onMoveCharger: () => {},

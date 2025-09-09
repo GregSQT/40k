@@ -3,7 +3,7 @@
 export type PlayerId = 0 | 1;
 export type UnitId = number;
 export type GamePhase = "move" | "shoot" | "charge" | "fight";
-export type GameMode = "select" | "movePreview" | "attackPreview" | "chargePreview";
+export type GameMode = "select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview";
 export type FightSubPhase = "charged_units" | "alternating_fight";
 
 export interface Position {

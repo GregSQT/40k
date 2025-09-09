@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-api_server.py - HTTP API Server for W40K Engine
+services/api_server.py - HTTP API Server for W40K Engine
 Connects AI_TURN.md compliant engine to frontend board visualization
 """
 
@@ -145,15 +145,65 @@ def execute_action():
         if not action:
             return jsonify({"success": False, "error": "No action provided"}), 400
         
-        # Execute action through engine
-        success, result = engine.step(action)
+        # AI_TURN.md: Route shooting actions directly to compliant handlers
+        current_phase = engine.game_state.get("phase", "move")
+        action_type = action.get("action")
         
-        # Return complete game state
+        if current_phase == "shoot" and action_type in ["activate_unit", "left_click", "right_click"]:
+            # Import from correct engine location
+            import sys
+            import os
+            # Navigate from services/ to engine/phase_handlers/
+            # Direct file loading to bypass module structure requirements
+            handlers_file = os.path.join(os.path.dirname(__file__), '..', 'engine', 'phase_handlers', 'shooting_handlers.py')
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("shooting_handlers", handlers_file)
+            shooting_handlers = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(shooting_handlers)
+            
+            # Get active unit if exists, otherwise pass None
+            active_unit = None
+            if engine.game_state.get("active_shooting_unit"):
+                active_unit = next(
+                    (u for u in engine.game_state["units"] 
+                     if u["id"] == engine.game_state["active_shooting_unit"]), 
+                    None
+                )
+            
+            # Handle unit selection for shooting_handlers compatibility
+            if action_type == "activate_unit":
+                # Unit activation - find unit from action
+                target_unit_id = action.get("unitId")
+                target_unit = next(
+                    (u for u in engine.game_state["units"] if u["id"] == target_unit_id), 
+                    None
+                )
+                if not target_unit:
+                    success, result = False, {"error": "unit_not_found", "unitId": target_unit_id}
+                else:
+                    success, result = shooting_handlers.execute_action(engine.game_state, target_unit, action, engine.config)
+            elif active_unit:
+                # Active unit exists - use it
+                success, result = shooting_handlers.execute_action(engine.game_state, active_unit, action, engine.config)
+            else:
+                # No active unit - this shouldn't happen in shooting phase
+                success, result = False, {"error": "no_active_shooting_unit", "action": action_type}
+        else:
+            # Other phases use engine
+            success, result = engine.step(action)
+        
         # Convert sets to lists for JSON serialization
         serializable_state = dict(engine.game_state)
         for key, value in serializable_state.items():
             if isinstance(value, set):
                 serializable_state[key] = list(value)
+        
+        # Debug critical game state
+        print(f"🔍 API RESPONSE DEBUG:")
+        print(f"  - Phase: {serializable_state.get('phase')}")
+        print(f"  - Current player: {serializable_state.get('current_player')}")
+        print(f"  - Move pool: {serializable_state.get('move_activation_pool')}")
+        print(f"  - Shoot pool: {serializable_state.get('shoot_activation_pool')}")
         
         return jsonify({
             "success": success,
@@ -163,9 +213,16 @@ def execute_action():
         })
     
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"🔥 FULL ERROR TRACEBACK:")
+        print(error_details)
+        print(f"🔥 ERROR TYPE: {type(e).__name__}")
+        print(f"🔥 ERROR MESSAGE: {str(e)}")
         return jsonify({
             "success": False,
-            "error": f"Action execution failed: {str(e)}"
+            "error": f"Action execution failed: {str(e)}",
+            "traceback": error_details
         }), 500
 
 @app.route('/api/game/state', methods=['GET'])
