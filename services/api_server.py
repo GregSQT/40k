@@ -96,11 +96,14 @@ def start_game():
     """Start a new game session."""
     global engine
     
+    print(f"🚀 /api/game/start called - Starting new game session")
+    
     if not engine:
         if not initialize_engine():
             return jsonify({"success": False, "error": "Engine initialization failed"}), 500
     
     try:
+        print(f"🔄 Calling engine.reset()")
         # Reset the engine for new game
         obs, info = engine.reset()
         
@@ -131,6 +134,9 @@ def start_game():
 def execute_action():
     """Execute a semantic action in the game."""
     global engine
+    
+    print(f"🎮 /api/game/action endpoint called")
+    print(f"🎯 Should execute action, NOT start game")
     
     if not engine:
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
@@ -205,10 +211,18 @@ def execute_action():
         print(f"  - Move pool: {serializable_state.get('move_activation_pool')}")
         print(f"  - Shoot pool: {serializable_state.get('shoot_activation_pool')}")
         
+        # Extract and clear debug logs for frontend
+        debug_logs = serializable_state.pop("debug_logs", [])
+        
+        # Send debug logs to browser console
+        for log in debug_logs:
+            print(f"🔧 ENGINE LOG: {log}")
+        
         return jsonify({
             "success": success,
             "result": result,
             "game_state": serializable_state,
+            "debug_logs": debug_logs,
             "message": "Action executed successfully" if success else "Action failed"
         })
     

@@ -1,5 +1,5 @@
 // frontend/src/hooks/useEngineAPI.ts
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Unit, PlayerId } from '../types';
 
 // Get max_turns from config instead of hardcoded fallback
@@ -79,11 +79,19 @@ export const useEngineAPI = () => {
     getMaxTurnsFromConfig().then(setMaxTurnsFromConfig);
   }, []);
 
-  // Initialize game
+  // Initialize game - FIXED: Added ref to prevent multiple calls
+  const gameInitialized = useRef(false);
+  
   useEffect(() => {
+    if (gameInitialized.current) {
+      return;
+    }
+    
     const startGame = async () => {
       try {
+        gameInitialized.current = true;
         setLoading(true);
+        console.log("🚀 Starting game - single initialization");
         const response = await fetch(`${API_BASE}/game/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
@@ -102,6 +110,7 @@ export const useEngineAPI = () => {
       } catch (err) {
         console.error('🔍 API Error:', err);
         setError(err instanceof Error ? err.message : 'Unknown error');
+        gameInitialized.current = false; // Reset on error
       } finally {
         setLoading(false);
       }
@@ -115,6 +124,8 @@ export const useEngineAPI = () => {
     if (!gameState) return;
     
     try {
+      console.log("🎮 EXECUTING ACTION:", action);
+      console.log("🌐 Calling endpoint: /api/game/action");
       const requestBody = JSON.stringify(action);
       const response = await fetch(`${API_BASE}/game/action`, {
         method: 'POST',
@@ -127,12 +138,17 @@ export const useEngineAPI = () => {
       }
       
       const data = await response.json();
-      if (data.success) {
-        // Only log shooting phase state changes
-        if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
-          console.log("🎯 UNIT ACTIVATED:", data.game_state.active_shooting_unit);
-        }
-        setGameState(data.game_state);
+        if (data.success) {
+          // Forward engine debug logs to browser console
+          if (data.debug_logs && Array.isArray(data.debug_logs)) {
+            data.debug_logs.forEach((log: string) => console.log(log));
+          }
+          
+          // Only log shooting phase state changes
+          if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
+            console.log("🎯 UNIT ACTIVATED:", data.game_state.active_shooting_unit);
+          }
+          setGameState(data.game_state);
         
         // Set visual state based on shooting activation
         if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {

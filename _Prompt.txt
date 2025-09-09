@@ -40,25 +40,6 @@ Uses specific error reporting format with TypeScript compiler output
 
 
 
-CURRENT PROBLEM:
-Testing revealed critical failures. Backend is running stub implementations returning "not_implemented" errors while frontend still uses legacy action patterns. Our complete AI_TURN.md compliant implementation exists only in conversation, never deployed to actual files.
-TEST RESULTS:
-Shooting phase initialization: Eligible units show green circles (OK), Non-eligible units incorrectly show green circles (KO). Unit activation: Left click should show shooting preview but preview blinks once and disappears, unit becomes inactive (KO).
-IMMEDIATE NEXT STEPS:
-
-Deploy complete backend shooting_handlers.py implementation to replace stub code
-Update frontend useEngineAPI.ts to use left_click/right_click pattern instead of legacy shoot actions
-Verify integration layer connects frontend actions to backend handlers correctly
-Add debug logging to trace execution path and validate pool building logic
-Test the deployed implementation against AI_TURN.md specification requirements
-
-FILES TO PROVIDE:
-Include current shooting_handlers.py and useEngineAPI.ts files so I can see the actual deployed state versus our theoretical implementation. Also provide any API routing or integration files that connect frontend actions to backend handlers.
-
-
-
-
-
 Externalize end_activation fuction
 Check shooting LoS logic (cube ?)
 Split BoardPvP like w40k_engin ?
@@ -72,4 +53,12 @@ Terminal 3 :
 python tests/test_board.py
 
 callback chain: 
-UnitRenderer → boardClickHandler → BoardPvp → BoardWithAPI → useEngineAPI
+UnitRenderer (event dispatch) → 
+window.addEventListener (boardClickHandler) → 
+setupBoardClickHandler callbacks → 
+BoardPvp prop callbacks → 
+BoardWithAPI prop spreading → 
+useEngineAPI handlers → 
+executeAction fetch → 
+API Server → 
+shooting_handlers.py (should be, but currently conflicts)

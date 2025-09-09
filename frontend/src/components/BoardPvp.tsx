@@ -73,7 +73,7 @@ const useGameConfig = () => ({
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
-type Mode = "select" | "movePreview" | "attackPreview" | "chargePreview";
+type Mode = "select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview";
 
 type BoardProps = {
   units: Unit[];
@@ -86,6 +86,8 @@ type BoardProps = {
   attackPreview: { unitId: number; col: number; row: number } | null;
   onSelectUnit: (id: number | string | null) => void;
   onSkipUnit?: (unitId: number | string) => void;
+  onSkipShoot?: (unitId: number | string) => void;
+  onStartTargetPreview?: (shooterId: number | string, targetId: number | string) => void;
   onStartMovePreview: (unitId: number | string, col: number | string, row: number | string) => void;
   onDirectMove: (unitId: number | string, col: number | string, row: number | string) => void;
   onStartAttackPreview: (unitId: number, col: number, row: number) => void;

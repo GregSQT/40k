@@ -17,6 +17,9 @@ def build_shoot_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     For each PLAYER unit → ELIGIBILITY CHECK → Add to shoot_activation_pool
     """
     current_player = game_state["current_player"]
+    print(f"🎯 BUILDING SHOOT ACTIVATION POOL:")
+    print(f"  - Current player: {current_player}")
+    print(f"  - Pool before build: {game_state.get('shoot_activation_pool', [])}")
     shoot_activation_pool = []
     
     for unit in game_state["units"]:
@@ -43,14 +46,20 @@ def build_shoot_activation_pool(game_state: Dict[str, Any]) -> List[str]:
             continue  # No ranged weapon (Skip, no log)
         
         # Has LOS to enemies within RNG_RNG?
-        if not _has_los_to_enemies_within_range(game_state, unit):
+        has_los = _has_los_to_enemies_within_range(game_state, unit)
+        print(f"    Unit {unit['id']}: LoS check = {has_los}")
+        if not has_los:
+            print(f"    Unit {unit['id']}: EXCLUDED - No LoS to enemies within range")
             continue  # No valid targets (Skip, no log)
+        print(f"    Unit {unit['id']}: LoS validation PASSED")
         
         # ALL conditions met → Add to shoot_activation_pool
         shoot_activation_pool.append(unit["id"])
     
     # Update game_state pool
     game_state["shoot_activation_pool"] = shoot_activation_pool
+    print(f"  - Pool after build: {shoot_activation_pool}")
+    print(f"  - Total eligible units: {len(shoot_activation_pool)}")
     return shoot_activation_pool
 
 
@@ -68,12 +77,16 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
 
 def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """Check if unit has LOS to any enemies within RNG_RNG."""
+    print(f"      LoS check for Unit {unit['id']} at ({unit['col']}, {unit['row']}):")
+    valid_targets = 0
     for enemy in game_state["units"]:
-        if (enemy["player"] != unit["player"] and 
-            enemy["HP_CUR"] > 0 and
-            _is_valid_shooting_target(game_state, unit, enemy)):
-            return True
-    return False
+        if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+            is_valid = _is_valid_shooting_target(game_state, unit, enemy)
+            print(f"        Enemy {enemy['id']} at ({enemy['col']}, {enemy['row']}): valid={is_valid}")
+            if is_valid:
+                valid_targets += 1
+    print(f"      Total valid targets for Unit {unit['id']}: {valid_targets}")
+    return valid_targets > 0
 
 
 def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
@@ -81,11 +94,15 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     
     # Range check
     distance = max(abs(shooter["col"] - target["col"]), abs(shooter["row"] - target["row"]))
+    print(f"          Range check: distance={distance}, RNG_RNG={shooter['RNG_RNG']}")
     if distance > shooter["RNG_RNG"]:
+        print(f"          FAILED: Out of range")
         return False
     
     # NOT adjacent to shooter (within CC_RNG)
+    print(f"          Adjacency check: distance={distance}, CC_RNG={shooter['CC_RNG']}")
     if distance <= shooter["CC_RNG"]:
+        print(f"          FAILED: Too close for shooting")
         return False
     
     # NOT adjacent to any friendly units
@@ -97,10 +114,13 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
             friendly_distance = max(abs(friendly["col"] - target["col"]), 
                                   abs(friendly["row"] - target["row"]))
             if friendly_distance <= 1:  # Adjacent to friendly
+                print(f"          FAILED: Target adjacent to friendly {friendly['id']}")
                 return False
     
     # Line of sight check
-    return _has_line_of_sight(game_state, shooter, target)
+    has_los = _has_line_of_sight(game_state, shooter, target)
+    print(f"          LoS check: {has_los}")
+    return has_los
 
 
 def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:

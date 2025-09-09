@@ -447,6 +447,7 @@ project_root/
 │   │   │   ├── GameBoard.tsx               # Core board component OK
 │   │   │   ├── GameController.tsx          # Game control interface OK
 │   │   │   ├── GameLog.tsx                 # Action history display OK
+│   │   │   ├── GamePageLayout.tsx
 │   │   │   ├── GameRightColumn.tsx         # Right panel layout
 │   │   │   ├── GameStatus.tsx              # Game state indicators OK
 │   │   │   ├── SharedLayout.tsx            # Common layout wrapper OK
