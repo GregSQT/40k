@@ -40,15 +40,9 @@ export function setupBoardClickHandler(callbacks: {
       clickType?: 'left' | 'right';
     }>).detail;
 
-    console.log("🔥 BOARD CLICK HANDLER DEBUG:");
-    console.log("  - Unit ID:", unitId);
-    console.log("  - Phase:", phase);
-    console.log("  - Mode:", mode);
-    console.log("  - Selected unit:", selectedUnitId);
-    console.log("  - Click type:", clickType);
+    console.log(`🔥 BOARD CLICK HANDLER DEBUG: Unit=${unitId}, Phase=${phase}, Mode=${mode}, Selected=${selectedUnitId}, Click=${clickType}`);
 
     if (phase === 'move' && mode === 'select') {
-      console.log("  ✅ MOVEMENT LOGIC TRIGGERED");
       if (selectedUnitId === unitId) {
         if (clickType === 'right') {
           console.log("    - Right click on active unit → calling onSkipUnit");
@@ -58,7 +52,6 @@ export function setupBoardClickHandler(callbacks: {
           callbacks.onSelectUnit(null);
         }
       } else {
-        console.log("    - Click on different unit → calling onSelectUnit");
         callbacks.onSelectUnit(unitId);
       }
     } else if (phase === 'shoot' && mode === 'select') {

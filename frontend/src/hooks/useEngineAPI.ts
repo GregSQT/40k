@@ -126,7 +126,6 @@ export const useEngineAPI = () => {
     try {
       const requestId = Date.now();
       console.log(`🎮 EXECUTING ACTION [${requestId}]:`, action);
-      console.log(`🌐 Calling endpoint: /api/game/action [${requestId}]`);
       const requestBody = JSON.stringify({...action, requestId});
       const response = await fetch(`${API_BASE}/game/action`, {
         method: 'POST',
@@ -159,7 +158,6 @@ export const useEngineAPI = () => {
         } else {
           setSelectedUnitId(null);
         }
-        console.log("✅ GAME STATE UPDATED");
       }
     } catch (err) {
       console.error('Action error:', err);

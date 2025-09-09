@@ -99,16 +99,11 @@ def start_game():
     """Start a new game session."""
     global engine
     
-    # Add to engine debug logs instead of print
-    if engine:
-        engine._add_debug_logs(["🚀 /api/game/start called - Starting new game session"])
-    
     if not engine:
         if not initialize_engine():
             return jsonify({"success": False, "error": "Engine initialization failed"}), 500
     
     try:
-        engine._add_debug_logs(["🔄 Calling engine.reset()"])
         # Reset the engine for new game
         obs, info = engine.reset()
         
@@ -142,9 +137,6 @@ def execute_action():
     
     if not engine:
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
-    
-    # Minimal endpoint logging
-    engine._add_debug_logs(["🎮 Action endpoint called"])
     
     try:
         data = request.json
@@ -209,18 +201,6 @@ def execute_action():
             if isinstance(value, set):
                 serializable_state[key] = list(value)
         
-        # Debug critical game state via engine logs
-        engine._add_debug_logs([
-            "🏁 API RESPONSE DEBUG:",
-            f"  - Phase: {serializable_state.get('phase')}",
-            f"  - Current player: {serializable_state.get('current_player')}",
-            f"  - Move pool: {serializable_state.get('move_activation_pool')}",
-            f"  - Shoot pool: {serializable_state.get('shoot_activation_pool')}"
-        ])
-        
-        # Extract and clear debug logs for frontend
-        debug_logs = serializable_state.pop("debug_logs", [])
-        
         # Include Flask middleware logs that occurred before engine initialization
         global flask_request_logs
         if flask_request_logs:
@@ -231,7 +211,6 @@ def execute_action():
             "success": success,
             "result": result,
             "game_state": serializable_state,
-            "debug_logs": debug_logs,
             "message": "Action executed successfully" if success else "Action failed"
         })
     
