@@ -237,9 +237,10 @@ class W40KEngine:
             self._build_move_activation_pool()
             self._phase_initialized = True
         
-        # Check if phase should complete (empty pool means phase is done)
-        if not self.game_state["move_activation_pool"]:
-            self._phase_initialized = False  # Reset for next phase
+        # Check if phase should complete using AI_IMPLEMENTATION.md delegation
+        eligible_units = movement_handlers.get_eligible_units(self.game_state)
+        if not eligible_units:
+            self._phase_initialized = False
             self._advance_to_shooting_phase()
             return True, {"type": "phase_complete", "next_player": self.game_state["current_player"]}
         
@@ -251,158 +252,21 @@ class W40KEngine:
         if not active_unit:
             return False, {"error": "unit_not_found", "unitId": action["unitId"]}
         
-        if active_unit["id"] not in self.game_state["move_activation_pool"]:
+        if active_unit["id"] not in eligible_units:
             return False, {"error": "unit_not_eligible", "unitId": action["unitId"]}
         
-        # Remove requested unit from pool
-        self.game_state["move_activation_pool"].remove(active_unit["id"])
-        
-        # Execute movement action
-        success, result = self._execute_movement_action(active_unit, action)
+        # AI_IMPLEMENTATION.md: Delegate to pure function
+        success, result = movement_handlers.execute_action(self.game_state, active_unit, action, self.config)
         
         return success, result
     
     def _build_move_activation_pool(self):
-        """Build movement activation pool using AI_TURN.md eligibility logic."""
-        self.game_state["move_activation_pool"] = []
-        current_player = self.game_state["current_player"]
-        
-        for unit in self.game_state["units"]:
-            # AI_TURN.md eligibility: alive + current_player only
-            if (unit["HP_CUR"] > 0 and 
-                unit["player"] == current_player):
-                self.game_state["move_activation_pool"].append(unit["id"])
+        """Build movement activation pool using AI_IMPLEMENTATION.md delegation."""
+        eligible_units = movement_handlers.get_eligible_units(self.game_state)
+        self.game_state["move_activation_pool"] = eligible_units
     
-    def _execute_movement_action(self, unit: Dict[str, Any], action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """Execute semantic movement action with AI_TURN.md restrictions."""
-        
-        action_type = action.get("action")
-        
-        if action_type == "move":
-            dest_col = action.get("destCol")
-            dest_row = action.get("destRow")
-            
-            if dest_col is None or dest_row is None:
-                return False, {"error": "missing_destination", "action": action}
-            
-            return self._attempt_movement_to_destination(unit, dest_col, dest_row)
-            
-        elif action_type == "skip":
-            self.game_state["units_moved"].add(unit["id"])
-            # AI_TURN.md: Right-click skip must end activation by removing from pool
-            if unit["id"] in self.game_state["move_activation_pool"]:
-                self.game_state["move_activation_pool"].remove(unit["id"])
-            return True, {"action": "skip", "unitId": unit["id"]}
-            
-        else:
-            return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "move"}
-    
-    def _attempt_movement_to_destination(self, unit: Dict[str, Any], dest_col: int, dest_row: int) -> Tuple[bool, Dict[str, Any]]:
-        """Attempt unit movement to specific destination with AI_TURN.md validation."""
-        
-        # Validate destination
-        if not self._is_valid_destination(dest_col, dest_row, unit):
-            return False, {"error": "invalid_destination", "target": (dest_col, dest_row)}
-        
-        # Check for flee (was adjacent to enemy before move)
-        was_adjacent = self._is_adjacent_to_enemy(unit)
-        
-        # Store original position
-        orig_col, orig_row = unit["col"], unit["row"]
-        
-        # Execute movement
-        unit["col"] = dest_col
-        unit["row"] = dest_row
-        
-        # Apply AI_TURN.md tracking
-        self.game_state["units_moved"].add(unit["id"])
-        if was_adjacent:
-            self.game_state["units_fled"].add(unit["id"])
-        
-        return True, {
-            "action": "flee" if was_adjacent else "move",
-            "unitId": unit["id"],
-            "fromCol": orig_col,
-            "fromRow": orig_row,
-            "toCol": dest_col,
-            "toRow": dest_row
-        }
-    
-    def _attempt_movement(self, unit: Dict[str, Any], col_diff: int, row_diff: int) -> Tuple[bool, Dict[str, Any]]:
-        """Attempt unit movement with AI_TURN.md validation."""
-        new_col = unit["col"] + col_diff
-        new_row = unit["row"] + row_diff
-        
-        # Validate destination
-        if not self._is_valid_destination(new_col, new_row, unit):
-            return False, {"error": "invalid_destination", "target": (new_col, new_row)}
-        
-        # Check for flee (was adjacent to enemy before move)
-        was_adjacent = self._is_adjacent_to_enemy(unit)
-        
-        # Execute movement
-        unit["col"] = new_col
-        unit["row"] = new_row
-        
-        # Apply AI_TURN.md tracking
-        self.game_state["units_moved"].add(unit["id"])
-        if was_adjacent:
-            self.game_state["units_fled"].add(unit["id"])
-        
-        return True, {
-            "type": "flee" if was_adjacent else "move",
-            "unit_id": unit["id"],
-            "from": (unit["col"] - col_diff, unit["row"] - row_diff),
-            "to": (new_col, new_row)
-        }
-    
-    def _is_valid_destination(self, col: int, row: int, unit: Dict[str, Any]) -> bool:
-        """Validate movement destination per AI_TURN.md restrictions."""
-        
-        # Board bounds check
-        if (col < 0 or row < 0 or 
-            col >= self.game_state["board_width"] or 
-            row >= self.game_state["board_height"]):
-            return False
-        
-        # Wall collision check
-        if (col, row) in self.game_state["wall_hexes"]:
-            return False
-        
-        # Unit occupation check
-        for other_unit in self.game_state["units"]:
-            if (other_unit["id"] != unit["id"] and 
-                other_unit["HP_CUR"] > 0 and
-                other_unit["col"] == col and 
-                other_unit["row"] == row):
-                return False
-        
-        # AI_TURN.md: Cannot move TO hexes adjacent to enemies
-        if self._is_hex_adjacent_to_enemy(col, row, unit["player"]):
-            return False
-        
-        return True
-    
-    def _is_adjacent_to_enemy(self, unit: Dict[str, Any]) -> bool:
-        """Check if unit is adjacent to enemy (AI_TURN.md flee detection)."""
-        cc_range = unit["CC_RNG"]
-        
-        for enemy in self.game_state["units"]:
-            if (enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0):
-                distance = max(abs(unit["col"] - enemy["col"]), 
-                              abs(unit["row"] - enemy["row"]))
-                if distance <= cc_range:
-                    return True
-        return False
-    
-    def _is_hex_adjacent_to_enemy(self, col: int, row: int, player: int) -> bool:
-        """Check if hex position is adjacent to any enemy unit."""
-        for enemy in self.game_state["units"]:
-            if enemy["player"] != player and enemy["HP_CUR"] > 0:
-                distance = max(abs(col - enemy["col"]), abs(row - enemy["row"]))
-                if distance <= 1:  # Adjacent check
-                    return True
-        return False
+    # AI_IMPLEMENTATION.md: Movement logic delegated to movement_handlers.py
+    # All movement validation and execution now handled by pure functions
     
     # ===== PHASE TRANSITION LOGIC =====
     
