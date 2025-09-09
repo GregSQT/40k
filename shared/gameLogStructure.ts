@@ -4,7 +4,7 @@ export function getEventIcon(eventType: string): string {
     'move': '🚶',
     'shoot': '🎯', 
     'charge': '⚡',
-    'combat': '⚔️',
+    'fight': '⚔️',
     'wait': '⏸️',
     'error': '❌',
     'default': '📝'
@@ -17,7 +17,7 @@ export function getEventTypeClass(eventType: string): string {
     'move': 'text-blue-400',
     'shoot': 'text-red-400',
     'charge': 'text-yellow-400', 
-    'combat': 'text-purple-400',
+    'fight': 'text-purple-400',
     'wait': 'text-gray-400',
     'error': 'text-red-600',
     'default': 'text-white'

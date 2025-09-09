@@ -18,9 +18,7 @@ __version__ = "0.1.0"
 __author__ = "W40K Study Project"
 
 # Package-level exports
-__all__ = [
-    "W40KEngine"
-]
+__all__ = ["W40KEngine"]
 
 # AI_TURN.md compliance validation
 def validate_package_compliance():

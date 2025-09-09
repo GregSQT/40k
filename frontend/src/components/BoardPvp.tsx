@@ -1,7 +1,7 @@
 // frontend/src/components/BoardPvp.tsx
 import React, { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js-legacy";
-import type { Unit, TargetPreview, CombatSubPhase, PlayerId, GameState } from "../types/game";
+import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState } from "../types/game";
 // import { useGameConfig } from '../hooks/useGameConfig';
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
@@ -101,15 +101,15 @@ type BoardProps = {
   onConfirmMove: () => void;
   onCancelMove: () => void;
   onShoot: (shooterId: number, targetId: number) => void;
-  onCombatAttack?: (attackerId: number, targetId: number | null) => void;
+  onFightAttack?: (attackerId: number, targetId: number | null) => void;
   currentPlayer: 0 | 1;
   unitsMoved: number[];
   unitsCharged?: number[];
   unitsAttacked?: number[];
   unitsFled?: number[];
-  combatSubPhase?: CombatSubPhase; // NEW
-  combatActivePlayer?: PlayerId; // NEW
-  phase: "move" | "shoot" | "charge" | "combat";
+  fightSubPhase?: FightSubPhase; // NEW
+  fightActivePlayer?: PlayerId; // NEW
+  phase: "move" | "shoot" | "charge" | "fight";
   onCharge?: (chargerId: number, targetId: number) => void;
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
   onCancelCharge?: () => void;
@@ -143,13 +143,13 @@ export default function Board({
   unitsMoved,
   phase,
   onShoot,
-  onCombatAttack,
+  onFightAttack,
   onCharge,
   unitsCharged,
   unitsAttacked,
   unitsFled,
-  combatSubPhase,
-  combatActivePlayer,
+  fightSubPhase,
+  fightActivePlayer,
   onMoveCharger,
   onCancelCharge,
   onValidateCharge,
@@ -182,7 +182,7 @@ export default function Board({
     onConfirmMove: () => void;
     onCancelMove: () => void;
     onShoot: (shooterId: number, targetId: number) => void;
-    onCombatAttack?: (attackerId: number, targetId: number | null) => void;
+    onFightAttack?: (attackerId: number, targetId: number | null) => void;
     onCharge?: (chargerId: number, targetId: number) => void;
     onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
     onCancelCharge?: () => void;
@@ -196,7 +196,7 @@ export default function Board({
     onConfirmMove,
     onCancelMove,
     onShoot,
-    onCombatAttack,
+    onFightAttack,
     onCharge,
     onMoveCharger,
     onCancelCharge,
@@ -214,7 +214,7 @@ export default function Board({
     onConfirmMove,
     onCancelMove,
     onShoot,
-    onCombatAttack,
+    onFightAttack,
     onCharge,
     onMoveCharger,
     onCancelCharge,
@@ -230,8 +230,8 @@ export default function Board({
   // const [currentShootingTarget, setCurrentShootingTarget] = useState<number | null>(null);
   // const [selectedShootingTarget, setSelectedShootingTarget] = useState<number | null>(null);
   // const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  // const [currentCombatTarget, setCurrentCombatTarget] = useState<number | null>(null);
-  // const [selectedCombatTarget, setSelectedCombatTarget] = useState<number | null>(null);
+  // const [currentFightTarget, setCurrentFightTarget] = useState<number | null>(null);
+  // const [selectedFightTarget, setSelectedFightTarget] = useState<number | null>(null);
 
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
@@ -401,6 +401,11 @@ export default function Board({
     setupBoardClickHandler({
       onSelectUnit: stableCallbacks.current.onSelectUnit,
       onSkipUnit: stableCallbacks.current.onSkipUnit,
+      onSkipShoot: (unitId: number) => {
+        if (stableCallbacks.current.onSkipUnit) {
+          stableCallbacks.current.onSkipUnit(unitId);
+        }
+      },
       onStartAttackPreview: (shooterId: number) => {
         const unit = units.find(u => u.id === shooterId);
         if (unit) {
@@ -408,7 +413,7 @@ export default function Board({
         }
       },
       onShoot: stableCallbacks.current.onShoot,
-      onCombatAttack: stableCallbacks.current.onCombatAttack || (() => {}),
+      onFightAttack: stableCallbacks.current.onFightAttack || (() => {}),
       onConfirmMove: stableCallbacks.current.onConfirmMove,
       onCancelCharge: stableCallbacks.current.onCancelCharge,
       onMoveCharger: stableCallbacks.current.onMoveCharger,
@@ -441,17 +446,17 @@ export default function Board({
     let chargeCells: { col: number; row: number }[] = [];
     let chargeTargets: Unit[] = [];
 
-    // Combat preview: combatTargets for red outline on enemies within combat range
-    let combatTargets: Unit[] = [];
-    if (phase === "combat" && selectedUnit) {
+    // Fight preview: fightTargets for red outline on enemies within fight range
+    let fightTargets: Unit[] = [];
+    if (phase === "fight" && selectedUnit) {
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
       
       // Validate CC_RNG is defined
       if (selectedUnit.CC_RNG === undefined || selectedUnit.CC_RNG === null) {
-        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required CC_RNG property for combat phase`);
+        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required CC_RNG property for fight phase`);
       }
       
-      const combatRange = selectedUnit.CC_RNG;
+      const fightRange = selectedUnit.CC_RNG;
       
       // Use stored charge roll from gameState (rolled when unit was first selected)
         const chargeDistance = gameState.unitChargeRolls && gameState.unitChargeRolls[Number(selectedUnit.id)];
@@ -476,9 +481,9 @@ export default function Board({
       shootingTarget = enemiesInRange[0] || null;
     }
 
-    // ✅ SIMPLIFIED COMBAT PREVIEW - No animations to prevent re-render loop
-    let combatTarget: Unit | null = null;
-    if (phase === "combat" && selectedUnit) {
+    // ✅ SIMPLIFIED FIGHT PREVIEW - No animations to prevent re-render loop
+    let fightTarget: Unit | null = null;
+    if (phase === "fight" && selectedUnit) {
       // Simple target identification - no state changes here
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
       const enemiesInRange = units.filter(u =>
@@ -487,7 +492,7 @@ export default function Board({
       );
       
       // Use the first valid target or null
-      combatTarget = enemiesInRange[0] || null;
+      fightTarget = enemiesInRange[0] || null;
     }
 
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
@@ -520,7 +525,7 @@ export default function Board({
     // ✅ CALCULATE MOVEMENT PREVIEW BEFORE MAIN DRAWBOARD CALL
     if (selectedUnit && mode === "select" && eligibleUnitIds && eligibleUnitIds.includes(typeof selectedUnit.id === 'number' ? selectedUnit.id : parseInt(selectedUnit.id as string))) {
       if (phase === "move") {
-        // For move phase, show available move destinations
+        // For Movement Phase, show available move destinations
         if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
           throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for movement preview`);
         }
@@ -742,12 +747,12 @@ export default function Board({
           
           // Validate required range properties are defined and get range
           let range: number;
-          if (phase === "combat") {
+          if (phase === "fight") {
             if (previewUnit.CC_RNG === undefined || previewUnit.CC_RNG === null) {
-              throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required CC_RNG property for combat phase preview`);
+              throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required CC_RNG property for fight phase preview`);
             }
             range = previewUnit.CC_RNG;
-            // For combat phase, show all hexes in range (original behavior)
+            // For fight phase, show all hexes in range (original behavior)
             for (let col = 0; col < BOARD_COLS; col++) {
               for (let row = 0; row < BOARD_ROWS; row++) {
                 const targetCube = offsetToCube(col, row);
@@ -962,8 +967,8 @@ export default function Board({
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
           phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
-          combatSubPhase, combatActivePlayer,
-          units, chargeTargets, combatTargets, targetPreview,
+          fightSubPhase, fightActivePlayer,
+          units, chargeTargets, fightTargets, targetPreview,
           onConfirmMove, parseColor
         });
       }
@@ -983,8 +988,8 @@ export default function Board({
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
             phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
-            combatSubPhase, combatActivePlayer,
-            units, chargeTargets, combatTargets, targetPreview,
+            fightSubPhase, fightActivePlayer,
+            units, chargeTargets, fightTargets, targetPreview,
             onConfirmMove, parseColor
           });
         }
@@ -1005,8 +1010,8 @@ export default function Board({
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
             phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
-            combatSubPhase, combatActivePlayer,
-            units, chargeTargets, combatTargets, targetPreview,
+            fightSubPhase, fightActivePlayer,
+            units, chargeTargets, fightTargets, targetPreview,
             onConfirmMove, parseColor
           });
         }
@@ -1076,8 +1081,8 @@ export default function Board({
         mode,
         phase, // CRITICAL: Phase changes must trigger re-render for isShootable recalculation
         `${phase}-${selectedUnitId}`, // CRITICAL: Phase+selectedUnit combination must trigger re-render
-        combatSubPhase, // NEW: Trigger re-render when combat sub-phase changes
-        combatActivePlayer, // NEW: Trigger re-render when combat active player changes
+        fightSubPhase, // NEW: Trigger re-render when fight sub-phase changes
+        fightActivePlayer, // NEW: Trigger re-render when fight active player changes
         boardConfig?.cols, // Only re-render if board structure changes
         loading,
         error,

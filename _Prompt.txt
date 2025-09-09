@@ -13,7 +13,7 @@ AI_TURN.md compliance is non-negotiable
 Practical implementation over theoretical perfection
 Clear validation criteria for every decision
 Expert-level technical depth required
-Always use two code boxes for updates, indicating the path and name of the updated file, respecting indentation, without ellipse, without workaround or defaut value
+Always use two code boxes for updates, indicate the path and name of the updated file, respect indentation, without ellipse, without workaround or defaut value
 
 POTENTIAL HELP
 I have Added in the knowledge 40k_OLD

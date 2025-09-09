@@ -342,7 +342,7 @@ export function getAdjacentPositions(position: Position, boardCols: number, boar
   return adjacent;
 }
 
-// Combat utility functions
+// Fight utility functions
 export function areUnitsAdjacent(unit1: Unit, unit2: Unit): boolean {
   return getHexDistance(
     { col: unit1.col, row: unit1.row },

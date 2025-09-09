@@ -105,13 +105,13 @@ export const BoardWithAPI: React.FC = () => {
         onConfirmMove={apiProps.onConfirmMove}
         onCancelMove={apiProps.onCancelMove}
         onShoot={apiProps.onShoot}
-        onCombatAttack={apiProps.onCombatAttack}
+        onFightAttack={apiProps.onFightAttack}
         currentPlayer={apiProps.currentPlayer as PlayerId}
         unitsMoved={apiProps.unitsMoved}
         unitsCharged={apiProps.unitsCharged}
         unitsAttacked={apiProps.unitsAttacked}
         unitsFled={apiProps.unitsFled}
-        phase={apiProps.phase as "move" | "shoot" | "charge" | "combat"}
+        phase={apiProps.phase as "move" | "shoot" | "charge" | "fight"}
         onCharge={apiProps.onCharge}
         onMoveCharger={apiProps.onMoveCharger}
         onCancelCharge={apiProps.onCancelCharge}

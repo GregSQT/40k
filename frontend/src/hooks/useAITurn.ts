@@ -6,7 +6,7 @@ interface GameActions {
   confirmMove: (unitId: number, destCol: number, destRow: number) => void;
   handleShoot: (shooterId: number, targetId: number) => void;
   handleCharge: (unitId: number, targetId: number) => void;
-  handleCombatAttack: (attackerId: number, targetId: number) => void;
+  handleFightAttack: (attackerId: number, targetId: number) => void;
   addMovedUnit: (unitId: number) => void;
   addChargedUnit: (unitId: number) => void;
   addAttackedUnit: (unitId: number) => void;
@@ -101,7 +101,7 @@ export function useAITurn({
         );
       case "charge":
         return aiUnits.filter(u => !(gameState.unitsCharged ?? []).includes(u.id));
-      case "combat":
+      case "fight":
         return aiUnits.filter(u => {
           if ((gameState.unitsAttacked ?? []).includes(u.id)) return false;
           const enemyUnits = units.filter(enemy => enemy.player === 0 && (enemy.HP_CUR ?? enemy.HP_MAX) > 0);
@@ -165,9 +165,9 @@ export function useAITurn({
           }
           break;
 
-        case "combat":
+        case "fight":
           if (response.action === "attack" && response.targetId !== undefined) {
-            gameActions.handleCombatAttack(unit.id, response.targetId);
+            gameActions.handleFightAttack(unit.id, response.targetId);
             return true;
           } else if (response.action === "skip") {
             gameActions.addAttackedUnit(unit.id);
@@ -219,7 +219,7 @@ export function useAITurn({
             case "charge":
               gameActions.addChargedUnit(unit.id);
               break;
-            case "combat":
+            case "fight":
               gameActions.addAttackedUnit(unit.id);
               break;
           }

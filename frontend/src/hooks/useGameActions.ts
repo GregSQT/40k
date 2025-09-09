@@ -24,8 +24,8 @@ interface UseGameActionsParams {
     updateShootingPhaseState: (updates: any) => void;
     decrementShotsLeft: (unitId: UnitId) => void;
     setTargetPreview: (preview: any | null) => void;
-    setCombatSubPhase?: (subPhase: any) => void;
-    setCombatActivePlayer?: (player: any) => void;
+    setFightSubPhase?: (subPhase: any) => void;
+    setFightActivePlayer?: (player: any) => void;
     setUnitChargeRoll?: (unitId: UnitId, roll: number) => void;
     resetUnitChargeRoll?: (unitId: UnitId) => void;
     showChargeRollPopup?: (unitId: UnitId, roll: number, tooLow: boolean) => void;
@@ -58,7 +58,7 @@ interface UseGameActionsParams {
         return !unitsMoved.includes(unit.id) && !unitsFled.includes(unit.id);
       case "charge":
         return !unitsCharged.includes(unit.id) && !unitsFled.includes(unit.id);
-      case "combat":
+      case "fight":
         return !unitsAttacked.includes(unit.id);
       default:
         return false;
@@ -151,8 +151,8 @@ interface UseGameActionsParams {
     // AI_TURN.md compliant shooting implementation
   }, []);
 
-  const handleCombatAttack = useCallback((attackerId: UnitId, targetId: UnitId | null) => {
-    // AI_TURN.md compliant combat implementation
+  const handleFightAttack = useCallback((attackerId: UnitId, targetId: UnitId | null) => {
+    // AI_TURN.md compliant fight implementation
   }, []);
 
   const handleCharge = useCallback((chargerId: UnitId, targetId: UnitId) => {
@@ -178,7 +178,7 @@ interface UseGameActionsParams {
     confirmMove,
     cancelMove,
     handleShoot,
-    handleCombatAttack,
+    handleFightAttack,
     handleCharge,
     moveCharger,
     cancelCharge,

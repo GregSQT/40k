@@ -4,7 +4,7 @@ import { useLocation } from 'react-router-dom';
 import BoardPvp from './BoardPvp';
 //import { BoardReplay } from './BoardReplay';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
-import type { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState, TargetPreview, CombatSubPhase, PlayerId } from '../types';
+import type { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState, TargetPreview, FightSubPhase, PlayerId } from '../types';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
 
 
@@ -23,8 +23,8 @@ interface GameBoardProps {
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
   unitsFled: UnitId[];
-  combatSubPhase?: CombatSubPhase;
-  combatActivePlayer?: PlayerId;
+  fightSubPhase?: FightSubPhase;
+  fightActivePlayer?: PlayerId;
   currentTurn: number;
   gameState: GameState;
   maxTurns?: number;
@@ -36,7 +36,7 @@ interface GameBoardProps {
   onConfirmMove: () => void;
   onCancelMove: () => void;
   onShoot: (shooterId: UnitId, targetId: UnitId) => void;
-  onCombatAttack: (attackerId: UnitId, targetId: UnitId | null) => void;
+  onFightAttack: (attackerId: UnitId, targetId: UnitId | null) => void;
   onCharge: (chargerId: UnitId, targetId: UnitId) => void;
   onMoveCharger: (chargerId: UnitId, destCol: number, destRow: number) => void;
   onCancelCharge: () => void;
@@ -68,7 +68,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
           }
         },
         onShoot:        props.onShoot,
-        onCombatAttack: props.onCombatAttack,
+        onFightAttack: props.onFightAttack,
         onConfirmMove:  props.onConfirmMove,
         onCancelCharge: props.onCancelCharge,
         onValidateCharge: props.onValidateCharge,
@@ -80,7 +80,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
       props.onSelectUnit,
       props.onStartAttackPreview,
       props.onShoot,
-      props.onCombatAttack,
+      props.onFightAttack,
       props.onConfirmMove,
       props.onCancelCharge,
       props.onValidateCharge,
@@ -139,8 +139,8 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         unitsCharged={props.unitsCharged}
         unitsAttacked={props.unitsAttacked}
         unitsFled={props.unitsFled}
-        combatSubPhase={props.combatSubPhase}
-        combatActivePlayer={props.combatActivePlayer}
+        fightSubPhase={props.fightSubPhase}
+        fightActivePlayer={props.fightActivePlayer}
         gameState={props.gameState}
         onSelectUnit={handleSelectUnit}
         onStartMovePreview={handleStartMovePreview}
@@ -149,7 +149,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         onConfirmMove={props.onConfirmMove}
         onCancelMove={props.onCancelMove}
         onShoot={props.onShoot}
-        onCombatAttack={props.onCombatAttack}
+        onFightAttack={props.onFightAttack}
         onCharge={props.onCharge}
         onMoveCharger={props.onMoveCharger}
         onCancelCharge={props.onCancelCharge}

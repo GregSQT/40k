@@ -1,6 +1,6 @@
 // frontend/src/hooks/useGameState.ts
 import { useState, useCallback } from 'react';
-import type { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, ShootingPhaseState, TargetPreview, CombatSubPhase, MovePreview, AttackPreview } from '../types/game';
+import type { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, ShootingPhaseState, TargetPreview, FightSubPhase, MovePreview, AttackPreview } from '../types/game';
 
 interface ChargeRollPopup {
   unitId: UnitId;
@@ -34,13 +34,13 @@ interface UseGameStateReturn {
     updateUnit: (unitId: UnitId, updates: Partial<Unit>) => void;
     removeUnit: (unitId: UnitId) => void;
     initializeShootingPhase: () => void;
-    initializeCombatPhase: () => void;
+    initializeFightPhase: () => void;
     updateShootingPhaseState: (updates: Partial<ShootingPhaseState>) => void;
     decrementShotsLeft: (unitId: UnitId) => void;
     setTargetPreview: (preview: TargetPreview | null) => void;
     setCurrentTurn: (turn: number) => void;
-    setCombatSubPhase: (subPhase: CombatSubPhase | undefined) => void;
-    setCombatActivePlayer: (player: PlayerId | undefined) => void;
+    setFightSubPhase: (subPhase: FightSubPhase | undefined) => void;
+    setFightActivePlayer: (player: PlayerId | undefined) => void;
   };
 }
 
@@ -58,8 +58,8 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     unitsAttacked: [],
     unitsFled: [],
     episode_steps: 0, // AI_TURN.md: Built-in step counting
-    combatSubPhase: undefined,
-    combatActivePlayer: undefined,
+    fightSubPhase: undefined,
+    fightActivePlayer: undefined,
     targetPreview: null
   });
 
@@ -112,8 +112,8 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     }));
   }, []);
 
-  // AI_TURN.md: Initialize combat phase with UPPERCASE field validation
-  const initializeCombatPhase = useCallback(() => {
+  // AI_TURN.md: Initialize fight phase with UPPERCASE field validation
+  const initializeFightPhase = useCallback(() => {
     setGameState(prev => ({
       ...prev,
       units: prev.units.map(unit => {
@@ -173,12 +173,12 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     setGameState(prev => ({ ...prev, currentTurn: turn }));
   }, []);
 
-  const setCombatSubPhase = useCallback((subPhase: CombatSubPhase | undefined) => {
-    setGameState(prev => ({ ...prev, combatSubPhase: subPhase }));
+  const setFightSubPhase = useCallback((subPhase: FightSubPhase | undefined) => {
+    setGameState(prev => ({ ...prev, fightSubPhase: subPhase }));
   }, []);
 
-  const setCombatActivePlayer = useCallback((player: PlayerId | undefined) => {
-    setGameState(prev => ({ ...prev, combatActivePlayer: player }));
+  const setFightActivePlayer = useCallback((player: PlayerId | undefined) => {
+    setGameState(prev => ({ ...prev, fightActivePlayer: player }));
   }, []);
 
   // AI_TURN.md: Tracking set management (sequential activation)
@@ -259,13 +259,13 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       updateUnit,
       removeUnit,
       initializeShootingPhase,
-      initializeCombatPhase,
+      initializeFightPhase,
       updateShootingPhaseState,
       decrementShotsLeft,
       setTargetPreview,
       setCurrentTurn,
-      setCombatSubPhase,
-      setCombatActivePlayer,
+      setFightSubPhase,
+      setFightActivePlayer,
     },
   };
 };

@@ -155,12 +155,12 @@ export function useGameLog() {
     turnNumber: number
   ) => {
     addEvent({
-      type: 'combat',
-      message: `${attacker.name} attacked ${target.name} in combat`,
+      type: 'fight',
+      message: `${attacker.name} attacked ${target.name} in fight`,
       unitId: attacker.id,
       targetId: target.id,
       turnNumber,
-      phase: 'combat',
+      phase: 'fight',
       shootDetails: combatDetails
     });
   }, [addEvent]);

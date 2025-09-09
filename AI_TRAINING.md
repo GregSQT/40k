@@ -125,8 +125,8 @@ def _build_observation(self):
     # Current player indicator
     obs_vector.append(self.game_state["current_player"])
     
-    # Phase encoding (move=0, shoot=1, charge=2, combat=3)
-    phase_map = {"move": 0, "shoot": 1, "charge": 2, "combat": 3}
+    # Phase encoding (move=0, shoot=1, charge=2, fight=3)
+    phase_map = {"move": 0, "shoot": 1, "charge": 2, "fight": 3}
     obs_vector.append(phase_map[self.game_state["phase"]])
     
     # Turn number
@@ -182,8 +182,8 @@ def _process_action(self, action):
         return self._process_shooting_phase(action)
     elif current_phase == "charge":
         return self._process_charge_phase(action)
-    elif current_phase == "combat":
-        return self._process_combat_phase(action)
+    elif current_phase == "fight":
+        return self._process_fight_phase(action)
 ```
 
 ---
@@ -543,7 +543,7 @@ def setup_training_callbacks(training_params):
   },
   "environment_params": {
     "rewards_config": "default",
-    "scenario_template": "balanced_combat",
+    "scenario_template": "balanced_fight",
     "enable_replay_logging": false,
     "enable_step_logging": false
   }

@@ -15,6 +15,9 @@ import json
 import random
 from typing import Dict, List, Tuple, Set, Optional, Any
 
+# AI_IMPLEMENTATION.md: Import phase handlers for delegation pattern
+from .phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers
+
 
 class W40KEngine:
     """
@@ -58,8 +61,8 @@ class W40KEngine:
             "active_alternating_activation_pool": [],
             "non_active_alternating_activation_pool": [],
             
-            # Combat state
-            "combat_subphase": None,
+            # Fight state
+            "fight_subphase": None,
             "charge_range_rolls": {},
             
             # Board state
@@ -100,7 +103,7 @@ class W40KEngine:
             "ARMOR_SAVE": config["ARMOR_SAVE"],
             "INVUL_SAVE": config["INVUL_SAVE"],
             
-            # Ranged combat stats - NO DEFAULTS
+            # Ranged fight stats - NO DEFAULTS
             "RNG_NB": config["RNG_NB"],
             "RNG_RNG": config["RNG_RNG"],
             "RNG_ATK": config["RNG_ATK"],
@@ -108,7 +111,7 @@ class W40KEngine:
             "RNG_DMG": config["RNG_DMG"],
             "RNG_AP": config["RNG_AP"],
             
-            # Close combat stats - NO DEFAULTS
+            # Close fight stats - NO DEFAULTS
             "CC_NB": config["CC_NB"],
             "CC_RNG": config["CC_RNG"],
             "CC_ATK": config["CC_ATK"],
@@ -180,7 +183,7 @@ class W40KEngine:
             "units_charged": set(),
             "units_attacked": set(),
             "move_activation_pool": [],
-            "combat_subphase": None,
+            "fight_subphase": None,
             "charge_range_rolls": {}
         })
         
@@ -207,7 +210,7 @@ class W40KEngine:
         """
         Process semantic action using AI_TURN.md state machine.
         
-        Phase sequence: move -> shoot -> charge -> combat -> next player
+        Phase sequence: move -> shoot -> charge -> fight -> next player
         Actions: {'action': 'move', 'unitId': 1, 'destCol': 5, 'destRow': 3}
         """
         current_phase = self.game_state["phase"]
@@ -218,8 +221,8 @@ class W40KEngine:
             return self._process_shooting_phase(action)
         elif current_phase == "charge":
             return self._process_charge_phase(action)
-        elif current_phase == "combat":
-            return self._process_combat_phase(action)
+        elif current_phase == "fight":
+            return self._process_fight_phase(action)
         else:
             return False, {"error": "invalid_phase", "phase": current_phase}
     
@@ -449,17 +452,17 @@ class W40KEngine:
     def _process_charge_phase(self, action: int) -> Tuple[bool, Dict[str, Any]]:
         """Placeholder for charge phase - implements AI_TURN.md decision tree."""
         # TODO: Implement charge phase logic
-        self._advance_to_combat_phase()
-        return self._process_combat_phase(action)
+        self._advance_to_fight_phase()
+        return self._process_fight_phase(action)
     
-    def _advance_to_combat_phase(self):
-        """Advance to combat phase per AI_TURN.md progression."""
-        self.game_state["phase"] = "combat"
-        self.game_state["combat_subphase"] = "charging_units"
+    def _advance_to_fight_phase(self):
+        """Advance to fight phase per AI_TURN.md progression."""
+        self.game_state["phase"] = "fight"
+        self.game_state["fight_subphase"] = "charging_units"
     
-    def _process_combat_phase(self, action: int) -> Tuple[bool, Dict[str, Any]]:
-        """Placeholder for combat phase - implements AI_TURN.md sub-phases."""
-        # TODO: Implement combat phase logic
+    def _process_fight_phase(self, action: int) -> Tuple[bool, Dict[str, Any]]:
+        """Placeholder for fight phase - implements AI_TURN.md sub-phases."""
+        # TODO: Implement fight phase logic
         self._advance_to_next_player()
         return True, {"type": "phase_complete", "next_player": self.game_state["current_player"]}
     
@@ -516,7 +519,7 @@ class W40KEngine:
         if distance > shooter["RNG_RNG"]:
             return False
         
-        # Combat exclusion: target NOT adjacent to shooter
+        # Fight exclusion: target NOT adjacent to shooter
         if distance <= shooter["CC_RNG"]:
             return False
         
@@ -672,7 +675,7 @@ class W40KEngine:
         # Game state info
         obs.extend([
             self.game_state["current_player"],
-            {"move": 0, "shoot": 1, "charge": 2, "combat": 3}[self.game_state["phase"]],
+            {"move": 0, "shoot": 1, "charge": 2, "fight": 3}[self.game_state["phase"]],
             self.game_state["turn"],
             self.game_state["episode_steps"]
         ])

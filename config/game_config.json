@@ -5,7 +5,7 @@
     "charge_max_distance": 13
   },
   "gameplay": {
-    "phase_order": ["move", "shoot", "charge", "combat"],
+    "phase_order": ["move", "shoot", "charge", "fight"],
     "simultaneous_actions": false,
     "auto_end_turn": true
   },

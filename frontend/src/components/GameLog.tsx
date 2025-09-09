@@ -96,7 +96,7 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
                   )}
                   <span className="game-log-entry__message">
                     {event.message}
-                    {(event.type === 'shoot' || event.type === 'combat') && event.shootDetails && (
+                    {(event.type === 'shoot' || event.type === 'fight') && event.shootDetails && (
                       <span className="game-log-entry__shoot-inline">
                         {event.shootDetails.map((shot, index) => {
                           let shotText = ` - Shot ${shot.shotNumber}: Hit (${shot.hitTarget}+) ${shot.attackRoll}: ${shot.hitResult === 'HIT' ? 'Success!' : 'Failed!'}`;

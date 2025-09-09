@@ -8,7 +8,7 @@ interface UseAIPlayerParams {
   gameState: GameState;
   gameActions: {
     handleShoot: (shooterId: UnitId, targetId: UnitId) => void;
-    handleCombatAttack: (attackerId: UnitId, targetId: UnitId | null) => void;
+    handleFightAttack: (attackerId: UnitId, targetId: UnitId | null) => void;
     handleCharge: (chargerId: UnitId, targetId: UnitId) => void;
     addMovedUnit: (unitId: UnitId) => void;
     addChargedUnit: (unitId: UnitId) => void;
@@ -157,7 +157,7 @@ export const useAIPlayer = ({
 
         case "combat":
           if (result.action === "attack" && result.targetId !== undefined) {
-            gameActions.handleCombatAttack(result.unitId, result.targetId);
+            gameActions.handleFightAttack(result.unitId, result.targetId);
             return true;
           } else if (result.action === "skip") {
             markUnitAction(result.unitId, 'attacked');

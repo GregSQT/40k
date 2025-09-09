@@ -214,10 +214,10 @@ export const GameController: React.FC<GameControllerProps> = ({
       resetChargedUnits: actions.resetChargedUnits,
       resetAttackedUnits: actions.resetAttackedUnits,
       resetFledUnits: actions.resetFledUnits,
-      initializeCombatPhase: actions.initializeCombatPhase,
+      initializeFightPhase: actions.initializeFightPhase,
       setCurrentTurn: actions.setCurrentTurn,
-      setCombatSubPhase: actions.setCombatSubPhase,
-      setCombatActivePlayer: actions.setCombatActivePlayer,
+      setFightSubPhase: actions.setFightSubPhase,
+      setFightActivePlayer: actions.setFightActivePlayer,
       setUnits: actions.setUnits,
     },
   });
@@ -231,7 +231,7 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Initialize combat phase when entering combat phase
   React.useEffect(() => {
     if (gameState.phase === 'combat') {
-      actions.initializeCombatPhase();
+      actions.initializeFightPhase();
     }
   }, [gameState.phase]);
 
@@ -406,7 +406,7 @@ export const GameController: React.FC<GameControllerProps> = ({
         onCancelMove={gameActions.cancelMove}
         onDirectMove={gameActions.directMove}
         onShoot={gameActions.handleShoot}
-        onCombatAttack={gameActions.handleCombatAttack}
+        onFightAttack={gameActions.handleFightAttack}
         onCharge={gameActions.handleCharge}
         onMoveCharger={gameActions.moveCharger}
         onCancelCharge={gameActions.cancelCharge}

@@ -2,7 +2,7 @@
 
 ## Claude Search Optimization
 
-**Search Terms**: turn sequence, phase management, eligibility rules, step counting, unit activation, movement phase, shooting phase, charge phase, combat phase, tracking sets, phase transitions, decision logic, game state management
+**Search Terms**: turn sequence, phase management, eligibility rules, step counting, unit activation, movement phase, shooting phase, charge phase, fight phase, tracking sets, phase transitions, decision logic, game state management
 
 **Core Concepts**: sequential activation, dynamic validation, atomic actions, phase completion, turn progression, episode lifecycle, state consistency, rule interactions, decision frameworks, validation checkpoints
 
@@ -29,7 +29,7 @@ This document teaches Claude to **understand the logic** behind the Warhammer 40
 - [Movement Phase Logic](#-movement-phase-logic) - Movement rules and reasoning
 - [Shooting Phase Logic](#-shooting-phase-logic) - Shooting rules and targeting
 - [Charge Phase Logic](#-charge-phase-logic) - Charge mechanics and distance
-- [Combat Phase Logic](#-combat-phase-logic) - Combat phases and alternating turns
+- [Fight Phase Logic](#-fight-phase-logic) - Fight phases and alternating turns
 - [Tracking System Logic](#-tracking-system-logic) - How the game remembers actions
 - [Key Scenarios](#-key-scenarios) - Essential decision examples
 - [Rule Interactions](#-rule-interactions) - How different rules affect each other
@@ -102,8 +102,8 @@ If NO units are eligible: Phase ends, advance to next phase
 
 **Turn Progression Sequence:**
 ```
-Turn 1: P0 Move → P0 Shoot → P0 Charge → P0 Combat → P1 Move → P1 Shoot → P1 Charge → P1 Combat
-Turn 2: P0 Move (Turn++ here) → P0 Shoot → P0 Charge → P0 Combat → P1 Move → P1 Shoot → P1 Charge → P1 Combat
+Turn 1: P0 Move → P0 Shoot → P0 Charge → P0 Fight → P1 Move → P1 Shoot → P1 Charge → P1 Fight
+Turn 2: P0 Move (Turn++ here) → P0 Shoot → P0 Charge → P0 Fight → P1 Move → P1 Shoot → P1 Charge → P1 Fight
 Turn 3: P0 Move (Turn++ here) → ...
 ```
 
@@ -147,7 +147,7 @@ game_state ← Single authoritative object
 **Field Categories:**
 - **Movement**: MOVE, col, row
 - **Shooting**: RNG_NB, RNG_RNG, RNG_ATK, RNG_STR, RNG_DMG, RNG_AP
-- **Combat**: CC_NB, CC_RNG, CC_ATK, CC_STR, CC_DMG, CC_AP  
+- **Fight**: CC_NB, CC_RNG, CC_ATK, CC_STR, CC_DMG, CC_AP  
 - **Defense**: HP_CUR, HP_MAX, T, ARMOR_SAVE, INVUL_SAVE
 
 **⚠️ CRITICAL**: Must use UPPERCASE field names consistently across all components.
@@ -296,12 +296,12 @@ For each unit
 
 **Forbidden Destinations (Cannot Move To AND through):**
 - **Occupied hexes**: Other units prevent movement
-- **Enemy adjacent hexes**: Adjacent to enemy = entering combat
+- **Enemy adjacent hexes**: Adjacent to enemy = entering fight
 - **Wall hexes**: Terrain blocks movement
 
 **Why These Restrictions:**
 - **Spatial logic**: Physical objects cannot overlap
-- **Engagement rules**: Adjacent = combat = different phase handles it
+- **Engagement rules**: Adjacent = fight = different phase handles it
 - **Terrain realism**: Walls block movement paths
 
 ### Flee Mechanics Logic
@@ -314,7 +314,7 @@ For each unit
 **Flee Consequences:**
 - **Shooting phase**: Cannot shoot (disorganized from retreat)
 - **Charge phase**: Cannot charge (poor position/morale)
-- **Combat phase**: Can fight normally (no restriction)
+- **Fight phase**: Can fight normally (no restriction)
 - **Duration**: Until end of current turn only
 
 **Why Flee Exists:**
@@ -442,7 +442,7 @@ For each PLAYER unit
 
 1. **Range check**: Enemy within unit's RNG_RNG hexes (varies by weapon)
 2. **Line of sight**: No wall hexes between shooter and target
-3. **Combat exclusion**: Enemy NOT adjacent to shooter (adjacent = melee combat)
+3. **Fight exclusion**: Enemy NOT adjacent to shooter (adjacent = melee fight)
 4. **Friendly fire prevention**: Enemy NOT adjacent to any friendly units
 
 **Target becomes invalid when:**
@@ -453,7 +453,7 @@ For each PLAYER unit
 **Why These Restrictions:**
 - **Weapon limitations**: Ranged weapons have effective range
 - **Visual requirement**: Cannot shoot what cannot be seen
-- **Engagement types**: Adjacent = melee combat, not shooting
+- **Engagement types**: Adjacent = melee fight, not shooting
 - **Safety**: Prevent accidental damage to own forces
 
 ### Multiple Shots Logic
@@ -583,34 +583,34 @@ For each unit
 ```
 Marine 7 hexes from the closest hex adjacent to an Ork (average charge distance)
 Roll 6 or less: Charge fails (42% chance)
-Roll 7+: Charge succeeds, gains combat priority (58% chance)
-Decision: Weigh 42% failure risk vs combat advantage gained
+Roll 7+: Charge succeeds, gains fight priority (58% chance)
+Decision: Weigh 42% failure risk vs fight advantage gained
 ```
 
 ### Charge Priority Logic
 
-**Combat Priority Benefit:**
-- **Sub-phase 1**: Charging units attack first in combat phase
+**Fight Priority Benefit:**
+- **Sub-phase 1**: Charging units attack first in fight phase
 - **Tactical advantage**: Can eliminate enemies before they fight back
 
 **Why Charging Units Fight First:**
-- **Momentum**: Charge gives initiative in combat
+- **Momentum**: Charge gives initiative in fight
 - **Tactical exposure**: Positioning for a charge often exposes the unit to deadly enemy fire during the opponent's turn
-- **Risk compensation**: First strike in combat compensates for the vulnerability incurred when moving into charge position
+- **Risk compensation**: First strike in fight compensates for the vulnerability incurred when moving into charge position
 
 ---
 
-## ⚔️ COMBAT PHASE LOGIC
+## ⚔️ FIGHT PHASE LOGIC
 
-### Combat Phase Overview
+### Fight Phase Overview
 
 **Two-Part Structure:**
 1. **Charging Priority** (Sub-phase 1): Current player's charging units attack first
-2. **Alternating Combat** (Sub-phase 2): Remaining units alternate between players
+2. **Alternating Fight** (Sub-phase 2): Remaining units alternate between players
 
 **Key Principles:**
 - **Charge Reward**: Successful charges grant first-strike advantage
-- **Mutual Combat**: Both players' units can act (unique to combat phase)
+- **Mutual Fight**: Both players' units can act (unique to fight phase)
 - **Sequential Resolution**: Complete one unit's attacks before next unit acts
 - **Target Validation**: Check for adjacent enemies before each attack
 
@@ -994,7 +994,7 @@ Start of the Figh Phase:
 ```
 
 ```javascript
-CLAUDE VERSION :// COMBAT PHASE - DIRECT TRANSLATION FROM DECISION TREE
+CLAUDE VERSION :// FIGHT PHASE - DIRECT TRANSLATION FROM DECISION TREE
 // EXACT MAPPING TO YOUR REFERENCE TREE WITH CURRENT SCRIPT NAMING
 
 // ===== POOLS - MATCHING CURRENT SCRIPT NAMES =====
@@ -1006,7 +1006,7 @@ let non_active_alternating_activation_pool = []  // MATCHES: Current script uses
 let active_unit = null                        // MATCHES: Current script uses active_unit
 let selected_target = null                    // MATCHES: Current script uses selected_target
 let attacksLeft = 0                          // MATCHES: Current script uses ATTACK_LEFT field on units
-let combatActionLog = []                     // MATCHES: Current script logging pattern
+let fightActionLog = []                     // MATCHES: Current script logging pattern
 
 // ===== SUB-PHASE 1: CHARGING UNITS =====
 
@@ -1052,7 +1052,7 @@ function processChargingPhase() {
 }
 
 function processChargingAI() {
- // REF: Line 16 "pick one → COMBAT PHASE SUB-PHASE 1 ACTION AVAILABLE"
+ // REF: Line 16 "pick one → FIGHT PHASE SUB-PHASE 1 ACTION AVAILABLE"
  const selectedUnit = chargingActivationPool[0]
  
  // REF: Line 20 "Choose attack?"
@@ -1061,7 +1061,7 @@ function processChargingAI() {
    executeAIAttackSequence(selectedUnit)
    // REF: Line 25 "Result: +1 step, Attack sequence logged, Mark as units_attacked"
    gameState.episode_steps += 1            // MATCHES: Current script step counting
-   logAttackSequence(selectedUnit, combatActionLog)
+   logAttackSequence(selectedUnit, fightActionLog)
    actions.addAttackedUnit(selectedUnit.id) // MATCHES: Current script actions pattern
  }
  
@@ -1098,7 +1098,7 @@ function onChargingUnitClick(clickedUnit) {
  // REF: Line 28 "Build valid_targets pool (enemies adjacents) for the active unit"
  const validTargets = buildValidTargetsPool(activeUnit)
  
- // REF: Line 28 "Display the combat preview"
+ // REF: Line 28 "Display the fight preview"
  actions.setAttackPreview({ unitId: active_unit.id, col: active_unit.col, row: active_unit.row })
  actions.setMode("attackPreview")         // MATCHES: Current script UI state management
  
@@ -1110,12 +1110,12 @@ function chargingWaitingForAction(clickType, target) {
  const validTargets = getValidTargets(activeUnit)
  
  if (validTargets.length === 0) {
-   // REF: Line 67 "NO → Result: +1 step, Combat sequence logged, Mark as units_attacked"
+   // REF: Line 67 "NO → Result: +1 step, Fight sequence logged, Mark as units_attacked"
    chargingEndActivation("attacked")
    return
  }
  
- // REF: Line 35 "YES → COMBAT PHASE ACTIONS AVAILABLE"
+ // REF: Line 35 "YES → FIGHT PHASE ACTIONS AVAILABLE"
  if (clickType === "leftClick" && isValidTarget(target)) {
    // REF: Line 37 "Left click on a target in valid_targets → Display target confirmation"
    selected_target = target
@@ -1126,7 +1126,7 @@ function chargingWaitingForAction(clickType, target) {
    // REF: Line 47 "Left click on another unit in activation queue ?"
    // REF: Line 49 "ATTACK_LEFT = CC_NB ?"
    if (attacksLeft === active_unit.CC_NB) {
-     // REF: Line 50 "YES → Postpone the combat phase for this unit"
+     // REF: Line 50 "YES → Postpone the fight phase for this unit"
      postponeUnit(target)
    } else {
      // REF: Line 52 "NO → The unit must end its activation when started"
@@ -1140,7 +1140,7 @@ function chargingWaitingForAction(clickType, target) {
      // REF: Line 62 "YES → Result: +1 step, Wait action logged, no Mark"
      chargingEndActivation("wait")
    } else {
-     // REF: Line 60 "NO → Result: +1 step, combat sequence logged, Mark as units_attacked"
+     // REF: Line 60 "NO → Result: +1 step, fight sequence logged, Mark as units_attacked"
      chargingEndActivation("attacked")
    }
  }
@@ -1150,7 +1150,7 @@ function chargingWaitingForAction(clickType, target) {
 
 function chargingTargetPreviewing(clickType, target) {
  if (clickType === "leftClick" && target === selected_target) {
-   // REF: Line 38 "Left click SAME target again → Confirm attack → Execute Combat sequence"
+   // REF: Line 38 "Left click SAME target again → Confirm attack → Execute Fight sequence"
    executeAttack(activeUnit, selected_target)
    
    // REF: Line 42 "ATTACK_LEFT -= 1"
@@ -1202,7 +1202,7 @@ function chargingEndActivation(type) {
  
  if (type === "attacked") {
    if (gameLog) {                         // MATCHES: Current script logging pattern
-     gameLog.logCombatSequenceComplete(activeUnit, combatActionLog, gameState.currentTurn)
+     gameLog.logFightSequenceComplete(activeUnit, fightActionLog, gameState.currentTurn)
    }
    actions.addAttackedUnit(activeUnit.id) // MATCHES: Current script actions
  } else if (type === "wait") {
@@ -1215,7 +1215,7 @@ function chargingEndActivation(type) {
  resetActiveUnit()                        // MATCHES: Current script helper function
 }
 
-// ===== SUB-PHASE 2: ALTERNATING COMBAT =====
+// ===== SUB-PHASE 2: ALTERNATING FIGHT =====
 
 // Pool Building (REF: Lines 92-142) - USING CURRENT SCRIPT PATTERNS
 function buildAlternatingPools() {
@@ -1256,8 +1256,8 @@ function processAlternatingPhase() {
  // REF: Line 144 condition checks
  if (activeAlternatingActivationPool.length === 0 && 
      non_active_alternating_activation_pool.length === 0) {
-   // Both pools empty → End combat
-   endCombatPhase()
+   // Both pools empty → End fight
+   endFightPhase()
    return
  }
  
@@ -1318,7 +1318,7 @@ function executeAlternatingAI(unit, pool) {
    executeAIAttackSequence(unit)
    // REF: Line 158 "Result: +1 step → Attack sequence logged → Mark as units_attacked"
    gameState.episode_steps += 1          // MATCHES: Current script step counting
-   logAttackSequence(unit, combatActionLog)
+   logAttackSequence(unit, fightActionLog)
    actions.addAttackedUnit(unit.id)      // MATCHES: Current script actions
  }
  // No else clause needed - REF: Line 161 shows pass/no log/no mark is automatic
@@ -1339,7 +1339,7 @@ function processCleanupPhase() {
                       non_active_alternating_activation_pool
  
  if (remainingPool.length === 0) {
-   endCombatPhase()
+   endFightPhase()
    return
  }
  
@@ -1404,7 +1404,7 @@ function executeAttack(attacker, target) {
    }
  }
  
- combatActionLog.push({attacker: attacker.id, target: target.id, damage: damageDealt})
+ fightActionLog.push({attacker: attacker.id, target: target.id, damage: damageDealt})
 }
 
 // REF: Line 49 "ATTACK_LEFT = CC_NB ?"
@@ -1443,33 +1443,33 @@ function shouldExitAlternatingLoop() {
         non_active_alternating_activation_pool.length === 0
 }
 
-function endCombatPhase() {
- // Reset all combat state
+function endFightPhase() {
+ // Reset all fight state
  chargingActivationPool = []
  active_alternating_activation_pool = []
  non_active_alternating_activation_pool = []
  resetActiveUnit()
  
- // REF: Line 260 "End Combat Phase: Advance to next player's Movement Phase"
+ // REF: Line 260 "End Fight Phase: Advance to next player's Movement Phase"
  advanceToNextPlayerMovementPhase()       // MATCHES: Current script function naming
 }
 
 // ===== INTEGRATION FUNCTIONS FOR CURRENT SCRIPT =====
 
-// Main entry point for combat phase
-function startCombatPhase() {
- // Initialize combat sub-phase tracking
- actions.setCombatSubPhase("charged_units") // MATCHES: Current script sub-phase management
+// Main entry point for fight phase
+function startFightPhase() {
+ // Initialize fight sub-phase tracking
+ actions.setFightSubPhase("charged_units") // MATCHES: Current script sub-phase management
  
  // Start with charging units
  processChargingPhase()
 }
 
-// Function to handle combat clicks from UI
-function handleCombatClick(clickType, target) {
- if (combatSubPhase === "charged_units") {
+// Function to handle fight clicks from UI
+function handleFightClick(clickType, target) {
+ if (fightSubPhase === "charged_units") {
    chargingWaitingForAction(clickType, target)
- } else if (combatSubPhase === "alternating_combat") {
+ } else if (fightSubPhase === "alternating_fight") {
    alternatingWaitingForAction(clickType, target)
  }
  // Add other sub-phase handlers as needed
@@ -1477,7 +1477,7 @@ function handleCombatClick(clickType, target) {
 ```
 
 
-### Alternating Combat Tactical Considerations
+### Alternating Fight Tactical Considerations
 
 **Target Priority During Alternating Phase:**
 
@@ -1501,15 +1501,15 @@ function handleCombatClick(clickType, target) {
 - **Risk mitigation**: Prioritize survival of your own valuable units
 - **Delayed gratification**: When safe, consider delaying to see how battle develops
 
-### Combat Phase Structure Logic
+### Fight Phase Structure Logic
 
 **Two Sub-Phases:**
 1. **Charging Units Priority**: Current player's charging units attack first
-2. **Alternating Combat**: All other engaged units alternate between players
+2. **Alternating Fight**: All other engaged units alternate between players
 
 **Why Two Sub-Phases:**
 - **Charge reward**: Charging units earned first strike through positioning
-- **Alternating fairness**: Non-charging combat alternates for balance
+- **Alternating fairness**: Non-charging fight alternates for balance
 - **Clear sequence**: Eliminates confusion about attack order
 
 ### Sub-Phase 1: Charging Units Logic
@@ -1522,11 +1522,11 @@ function handleCombatClick(clickType, target) {
 - **Complete all attacks**: All CC_NB attacks in one action
 
 **Why Charging Units Go First:**
-- **Earned advantage**: Successfully positioned for combat
+- **Earned advantage**: Successfully positioned for fight
 - **Momentum bonus**: Charge provides initiative
 - **Risk reward**: Compensation for charge risks taken
 
-### Sub-Phase 2: Alternating Combat Logic
+### Sub-Phase 2: Alternating Fight Logic
 
 **Player Order Logic:**
 - **Non-active player starts**: During P0's turn, P1 units act first
@@ -1548,7 +1548,7 @@ Process any remaining eligible units from either player
 
 **Example:**
 ```
-P0's turn, Combat Phase:
+P0's turn, Fight Phase:
 Sub-phase 1: P0 Marine (charged) attacks Ork first
 Sub-phase 2: P1 Grot attacks P0 Scout → P0 Heavy attacks P1 Boss → Continue alternating
 Result: Charging grants first strike, then fair alternation
@@ -1563,7 +1563,7 @@ Result: Charging grants first strike, then fair alternation
 **Why Tracking Exists:**
 - **Prevent duplicate actions**: Ensure units act only once per phase
 - **Apply penalties**: Remember fled status for cross-phase restrictions
-- **Enable priority systems**: Track charging for combat advantages
+- **Enable priority systems**: Track charging for fight advantages
 - **Determine phase completion**: Know when no eligible units remain
 
 ### Tracking Set Logic
@@ -1582,7 +1582,7 @@ Result: Charging grants first strike, then fair alternation
 - **Usage**: `units_moved` contains `unit.id` Used to identify units having shot during this turn
 
 **units_fled** (Movement Phase):
-- **Purpose**: Track units that fled from combat
+- **Purpose**: Track units that fled from fight
 - **Reset timing**: Start of movement phase (turn-level tracking)
 - **Usage**: Apply shooting and charging penalties
 
@@ -1594,9 +1594,9 @@ Result: Charging grants first strike, then fair alternation
 **units_charged** (Charge Phase):
 - **Purpose**: Track units that have charged
 - **Reset timing**: Start of movement phase
-- **Usage**: Combat priority determination
+- **Usage**: Fight priority determination
 
-**units_attacked** (Combat Phase):
+**units_attacked** (Fight Phase):
 - **Purpose**: Track units that have attacked
 - **Reset timing**: Start of movement phase
 - **Usage**: Used to identify units having attacked during this turn
@@ -1655,7 +1655,7 @@ Decision principle: Coordination often superior to individual optimization
 **Scenario 2 - The Flee vs Fight Dilemma:**
 ```
 Wounded Scout (HP_CUR 1) adjacent to healthy Ork
-Combat prediction: 80% chance Scout dies if stays
+Fight prediction: 80% chance Scout dies if stays
 Flee consequences: Scout survives but cannot shoot critical targets this turn
 
 Decision factors:
@@ -1691,7 +1691,7 @@ Principle: Optimize total force effectiveness, not individual actions
 Movement phase: Unit flees (marked as fled)
 Shooting phase: Fled unit cannot shoot (penalty applied)
 Charge phase: Fled unit cannot charge (penalty continues)
-Combat phase: Fled unit can fight normally (penalty ends)
+Fight phase: Fled unit can fight normally (penalty ends)
 
 Strategic insight: Flee penalties span multiple phases but aren't permanent
 ```
@@ -1699,13 +1699,13 @@ Strategic insight: Flee penalties span multiple phases but aren't permanent
 **Charge Priority Chain:**
 ```
 Charge phase: Unit successfully charges
-Combat sub-phase 1: Charging unit attacks first
-Combat sub-phase 2: If enemy survives, alternating combat begins
+Fight sub-phase 1: Charging unit attacks first
+Fight sub-phase 2: If enemy survives, alternating fight begins
 
 Tactical advantage: First strike may eliminate enemy before retaliation
 ```
 
-### Movement-Combat Interactions
+### Movement-Fight Interactions
 
 **Positioning Cascade Effects:**
 ```
@@ -1734,12 +1734,12 @@ Prevention: Avoid isolated vulnerabilities
    - Why: Eligibility-based phase completion
 
 3. **"Why can't fled units charge?"**
-   - Correct: They're too far from combat and demoralized
+   - Correct: They're too far from fight and demoralized
    - Why: Logical consequence of retreat action
 
-4. **"What makes Combat phase unique?"**
+4. **"What makes Fight phase unique?"**
    - Correct: Both players' units can act (only such phase)
-   - Why: Combat involves units from both sides
+   - Why: Fight involves units from both sides
 
 ### Rule Application Checks
 
@@ -1752,7 +1752,7 @@ Given a unit that is:
 - Adjacent to an enemy
 
 **Movement phase eligibility**: ELIGIBLE (adjacency doesn't prevent movement)
-**Shooting phase eligibility**: INELIGIBLE (adjacent = in combat = cannot shoot)
+**Shooting phase eligibility**: INELIGIBLE (adjacent = in fight = cannot shoot)
 
 ### Sequence Understanding Checks
 
@@ -1847,7 +1847,7 @@ Claude should identify: VIOLATION - No charge allowed for units adjacent to enem
 
 ### Level 2: Rule Application
 - ✅ Can apply eligibility logic to complex scenarios
-- ✅ Understands rule interactions (flee penalties, combat priority)
+- ✅ Understands rule interactions (flee penalties, fight priority)
 - ✅ Can trace game state changes through multiple actions
 - ✅ Recognizes common error patterns
 
@@ -1869,8 +1869,8 @@ Claude should identify: VIOLATION - No charge allowed for units adjacent to enem
 ### Critical Test Scenarios
 Implementation must validate these complex interactions:
 - Flee penalty chain (Move → Shoot → Charge restrictions)
-- Charge priority in combat (Sub-phase 1 first strike)
-- Alternating combat sequence (Sub-phase 2 player ordering)
+- Charge priority in fight (Sub-phase 1 first strike)
+- Alternating fight sequence (Sub-phase 2 player ordering)
 - Tracking set lifecycle (Persistence and cleanup timing)
 
 ### Integration Requirements

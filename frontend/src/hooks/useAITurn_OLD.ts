@@ -6,7 +6,7 @@ interface GameActions {
   confirmMove: (unitId: number, destCol: number, destRow: number) => void;
   handleShoot: (shooterId: number, targetId: number) => void;
   handleCharge: (unitId: number, targetId: number) => void;
-  handleCombatAttack: (attackerId: number, targetId: number) => void;
+  handleFightAttack: (attackerId: number, targetId: number) => void;
   addMovedUnit: (unitId: number) => void;
   addChargedUnit: (unitId: number) => void;
   addAttackedUnit: (unitId: number) => void;
@@ -197,7 +197,7 @@ export function useAITurn({
 
         case "combat":
           if (response.action === "attack" && response.targetId !== undefined) {
-            gameActions.handleCombatAttack(unit.id, response.targetId);
+            gameActions.handleFightAttack(unit.id, response.targetId);
             return true;
           } else if (response.action === "skip") {
             gameActions.addAttackedUnit(unit.id);

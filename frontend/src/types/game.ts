@@ -2,9 +2,9 @@
 
 export type PlayerId = 0 | 1;
 export type UnitId = number;
-export type GamePhase = "move" | "shoot" | "charge" | "combat";
+export type GamePhase = "move" | "shoot" | "charge" | "fight";
 export type GameMode = "select" | "movePreview" | "attackPreview" | "chargePreview";
-export type CombatSubPhase = "charged_units" | "alternating_combat";
+export type FightSubPhase = "charged_units" | "alternating_fight";
 
 export interface Position {
   col: number;
@@ -104,7 +104,7 @@ export interface ShootingPhaseState {
   singleShotState: SingleShotState | null;
 }
 
-export interface CombatPhaseState {
+export interface FightPhaseState {
   activeAttackers: UnitId[];
   currentAttacker: UnitId | null;
   singleAttackState: SingleAttackState | null;
@@ -155,8 +155,8 @@ export interface GameState {
   mode?: GameMode;
   selectedUnitId?: UnitId | null;
   targetPreview?: TargetPreview | null;
-  combatSubPhase?: CombatSubPhase;
-  combatActivePlayer?: PlayerId;
+  fightSubPhase?: FightSubPhase;
+  fightActivePlayer?: PlayerId;
   unitChargeRolls?: Record<UnitId, number>;
 }
 

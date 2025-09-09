@@ -34,7 +34,7 @@ This document covers **game engine architecture compliance** only. The training 
 - [Architecture Compliance](#architecture-compliance) - Single source of truth implementation
 - [AI Training Integration](AI_TRAINING_INTEGRATION.md) - DQN compatibility with compliant architecture
 - [Code Organization](#code-organization) - File structure and migration strategy  
-- [Concrete Complex Rule Implementations](#concrete-complex-rule-implementations) - Combat phase examples
+- [Concrete Complex Rule Implementations](#concrete-complex-rule-implementations) - Fight phase examples
 - [Real Frontend Integration Challenges](#real-frontend-integration-challenges) - UI data mapping
 - [Integration Strategy](#integration-strategy) - Gym and HTTP API patterns
 - [Testing Methodology](#testing-methodology) - AI_TURN.md compliance validation
@@ -211,9 +211,9 @@ class W40KEngine:
             "valid_move_destinations_pool": [],
             "valid_charge_destinations_pool": [],
             
-            # ADDED: Combat state machine
-            "combat_subphase": None,  # "charging_units", "alternating_combat", "cleanup"
-            "alternating_combat_turn": "non_active",
+            # ADDED: Fight state machine
+            "fight_subphase": None,  # "charging_units", "alternating_fight", "cleanup"
+            "alternating_fight_turn": "non_active",
             "charge_range_rolls": {},  # unit_id -> 2d6 result
             "attack_left": 0,
             "shoot_left": 0,
@@ -304,8 +304,8 @@ def _process_action(self, action):
         return self._process_shooting_phase(action)
     elif current_phase == "charge":
         return self._process_charge_phase(action)
-    elif current_phase == "combat":
-        return self._process_combat_phase(action)
+    elif current_phase == "fight":
+        return self._process_fight_phase(action)
 
 def _process_movement_phase(self, action):
     """Movement phase with pool management"""
@@ -353,8 +353,8 @@ def _advance_phase_if_complete(self):
         eligible = shooting_handlers.get_eligible_units(self.game_state)
     elif current_phase == "charge":
         eligible = charge_handlers.get_eligible_units(self.game_state)
-    elif current_phase == "combat":
-        eligible = combat_handlers.get_eligible_units(self.game_state)
+    elif current_phase == "fight":
+        eligible = fight_handlers.get_eligible_units(self.game_state)
     
     # Phase ends when NO eligible units remain
     if not eligible:
@@ -386,14 +386,14 @@ project_root/
 │   └── models/                   # Trained models
 
 ├── engine/                       # Main game engine package
-│   ├── __init__.py               # Package initialization
+│   ├── init.py               # Package initialization
 │   ├── w40k_engine.py            # Core engine class
 │   ├── phase_handlers/           # AI_TURN.md phase implementations
 │   │   ├── __init__.py
 │   │   ├── movement_handlers.py  # Movement phase logic
 │   │   ├── shooting_handlers.py  # Shooting phase logic (future)
 │   │   ├── charge_handlers.py    # Charge phase logic (future)
-│   │   └── combat_handlers.py    # Combat phase logic (future)
+│   │   └── fight_handlers.py    # Fight phase logic (future)
 │   └── utils/                    # Engine utilities
 │       ├── __init__.py
 │       └── validators.py         # Field validation utilities
@@ -513,7 +513,7 @@ project_root/
 │   │   │   ├── boardClickHandler.ts        # UI event handling (SAFE) OK
 │   │   │   ├── gameHelpers.ts              # General utilities (EVALUATE)
 │   │   │   ├── probabilityCalculator.ts    # Math utilities (SAFE)
-│   │   │   ├── CombatSequenceManager.ts    # Combat UI logic (EVALUATE)
+│   │   │   ├── FightSequenceManager.ts    # Fight UI logic (EVALUATE)
 │   │   │   └── ShootingSequenceManager.ts  # Shooting UI logic (EVALUATE)
 │   │   │
 │   │   ├── App.tsx                         # COPIED FROM LEGACY
@@ -553,7 +553,7 @@ project_root/
 │   │   ├── test_movement_handlers.py
 │   │   ├── test_shooting_handlers.py
 │   │   ├── test_charge_handlers.py
-│   │   └── test_combat_handlers.py
+│   │   └── test_fight_handlers.py
 │   │
 │   ├── integration/
 │   │   ├── __init__.py
@@ -681,7 +681,7 @@ def detect_flee_action(game_state, unit, old_pos, new_pos):
 
 ```python
 # w40k_engine.py - Delegation to pure functions
-from phase_handlers import movement_handlers, shooting_handlers, charge_handlers, combat_handlers
+from phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers
 
 class W40KEngine:
     def _execute_movement_action(self, unit, action):
@@ -729,15 +729,15 @@ def validate_destination(game_state, col, row):
 
 ## CONCRETE COMPLEX RULE IMPLEMENTATIONS
 
-### Combat Phase Sub-Phase Implementation
+### Fight Phase Sub-Phase Implementation
 **The most complex AI_TURN.md rule - concrete implementation:**
 
 ```python
-# combat_handlers.py - EXACT AI_TURN.md combat sub-phase implementation
+# fight_handlers.py - EXACT AI_TURN.md fight sub-phase implementation
 def get_eligible_units(game_state, config):
     """
-    CONCRETE implementation of AI_TURN.md combat sub-phases.
-    Reference: AI_TURN.md Section ⚔️ COMBAT PHASE LOGIC
+    CONCRETE implementation of AI_TURN.md fight sub-phases.
+    Reference: AI_TURN.md Section ⚔️ Fight PHASE LOGIC
     """
     current_player = game_state["current_player"]
     
@@ -754,7 +754,7 @@ def get_eligible_units(game_state, config):
     if charging_units:
         return charging_units  # Charging units have priority
     
-    # AI_TURN.md: Sub-phase 2 - Alternating combat
+    # AI_TURN.md: Sub-phase 2 - Alternating fight
     # Non-active player first, then active player
     alternating_units = []
     non_active_player = 1 - current_player
@@ -780,7 +780,7 @@ def get_eligible_units(game_state, config):
     return alternating_units
 
 def execute_action(game_state, action, config):
-    """CONCRETE combat action execution with multi-attack handling"""
+    """CONCRETE fight action execution with multi-attack handling"""
     eligible_units = get_eligible_units(game_state, config)
     if not eligible_units:
         return False, {"error": "no_eligible_units"}
@@ -788,11 +788,11 @@ def execute_action(game_state, action, config):
     active_unit = eligible_units[0]
     
     if action == 6:  # Attack action
-        return _execute_combat_sequence(game_state, active_unit, config)
+        return _execute_fight_sequence(game_state, active_unit, config)
     else:
         return False, {"error": "invalid_action_for_phase"}
 
-def _execute_combat_sequence(game_state, unit, config):
+def _execute_fight_sequence(game_state, unit, config):
     """
     CONCRETE multi-attack implementation per AI_TURN.md.
     Tests architecture handles complex sequential logic.
@@ -822,7 +822,7 @@ def _execute_combat_sequence(game_state, unit, config):
     game_state["units_attacked"].add(unit["id"])
     
     return True, {
-        "type": "combat",
+        "type": "fight",
         "unit_id": unit["id"],
         "attacks": attack_results,
         "total_damage": sum(r["damage"] for r in attack_results)
@@ -985,7 +985,7 @@ const result = await executeAction(action);
             actions.push("SHOOT", "WAIT");
         } else if (phase === "charge") {
             actions.push("CHARGE", "WAIT");
-        } else if (phase === "combat") {
+        } else if (phase === "fight") {
             actions.push("ATTACK", "WAIT");
         }
         
@@ -1277,10 +1277,10 @@ def test_charge_phase_implementation():
     # Test charge priority mechanics per AI_TURN.md
     pass
 
-def test_combat_phase_implementation():
-    """Test combat handlers implement AI_TURN.md combat logic"""
+def test_fight_phase_implementation():
+    """Test fight handlers implement AI_TURN.md fight logic"""
     # Test sub-phase ordering per AI_TURN.md
-    # Test alternating combat per AI_TURN.md
+    # Test alternating fight per AI_TURN.md
     # Test charging unit priority per AI_TURN.md
     pass
 ```
@@ -1589,7 +1589,7 @@ mv current_project w40k_legacy_reference
 ### Phase 2: Complex Mechanics (Days 8-14)
 **Deliverable:** Full W40K mechanics with AI_TURN.md compliance
 - Implement charge handlers with 2D6 rolls and pathfinding
-- Implement combat handlers with sub-phases and alternating logic
+- Implement fight handlers with sub-phases and alternating logic
 - Validate all complex rule interactions
 - Performance testing with large scenarios
 

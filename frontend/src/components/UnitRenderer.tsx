@@ -1,6 +1,6 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
-import type { Unit, TargetPreview, CombatSubPhase, PlayerId } from "../types/game";
+import type { Unit, TargetPreview, FightSubPhase, PlayerId } from "../types/game";
 import { areUnitsAdjacent, isUnitInRange, hasLineOfSight, offsetToCube, cubeDistance } from '../utils/gameHelpers';
 
 interface UnitRendererProps {
@@ -29,7 +29,7 @@ interface UnitRendererProps {
   DEFAULT_BORDER_WIDTH: number;
   
   // Game state
-  phase: "move" | "shoot" | "charge" | "combat";
+  phase: "move" | "shoot" | "charge" | "fight";
   mode: string;
   currentPlayer: 0 | 1;
   selectedUnitId: number | null;
@@ -37,11 +37,11 @@ interface UnitRendererProps {
   unitsCharged?: number[];
   unitsAttacked?: number[];
   unitsFled?: number[];
-  combatSubPhase?: CombatSubPhase; // NEW
-  combatActivePlayer?: PlayerId; // NEW
+  fightSubPhase?: FightSubPhase; // NEW
+  fightActivePlayer?: PlayerId; // NEW
   units: Unit[];
   chargeTargets: Unit[];
-  combatTargets: Unit[];
+  fightTargets: Unit[];
   targetPreview?: TargetPreview | null;
   
   // Callbacks
@@ -63,7 +63,7 @@ export class UnitRenderer {
       HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
       SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
       phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked,
-      units, chargeTargets, combatTargets, targetPreview,
+      units, chargeTargets, fightTargets, targetPreview,
       onConfirmMove, parseColor
     } = this.props;
     
@@ -94,7 +94,7 @@ export class UnitRenderer {
     
     // AI_TURN.md: Basic eligibility checks
     if (unit.HP_CUR === undefined || unit.HP_CUR <= 0) return false;
-    if (phase !== "combat" && unit.player !== currentPlayer) return false;
+    if (phase !== "fight" && unit.player !== currentPlayer) return false;
     
     switch (phase) {
       case "move":
@@ -110,9 +110,9 @@ export class UnitRenderer {
         if (unitsCharged && unitsCharged.includes(unit.id)) return false;
         if (unitsFled && unitsFled.includes(unit.id)) return false;
         return true; // Simplified for charge phase
-      case "combat":
+      case "fight":
         if (unitsAttacked && unitsAttacked.includes(unit.id)) return false;
-        return true; // Simplified for combat phase
+        return true; // Simplified for fight phase
       default:
         return false;
     }
@@ -120,7 +120,7 @@ export class UnitRenderer {
   
   private renderUnitCircle(iconZIndex: number): void {
     const { unit, centerX, centerY, app, isPreview, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked,
-             chargeTargets, combatTargets, boardConfig, HEX_RADIUS, UNIT_CIRCLE_RADIUS_RATIO,
+             chargeTargets, fightTargets, boardConfig, HEX_RADIUS, UNIT_CIRCLE_RADIUS_RATIO,
              SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
              phase, mode, currentPlayer, units, parseColor } = this.props;
     
@@ -160,7 +160,7 @@ export class UnitRenderer {
     if (chargeTargets.some(target => target.id === unit.id)) {
       borderColor = 0xff0000;
       borderWidth = CHARGE_TARGET_BORDER_WIDTH;
-    } else if (combatTargets.some(target => target.id === unit.id)) {
+    } else if (fightTargets.some(target => target.id === unit.id)) {
       borderColor = 0xff0000;
       borderWidth = CHARGE_TARGET_BORDER_WIDTH;
     }
@@ -207,6 +207,13 @@ export class UnitRenderer {
             // Prevent context menu and event bubbling
             e.preventDefault();
             e.stopPropagation();
+            
+            if (e.button === 2 && phase === "shoot" && mode === "attackPreview" && selectedUnitId === unit.id) {
+              window.dispatchEvent(new CustomEvent('boardSkipShoot', {
+                detail: { unitId: unit.id }
+              }));
+              return;
+            }
             
             window.dispatchEvent(new CustomEvent('boardUnitClick', {
               detail: {
@@ -318,9 +325,9 @@ export class UnitRenderer {
     eligibleOutline.zIndex = greenCircleZIndex;
     app.stage.addChild(eligibleOutline);
     
-    // NEW: Add red circle around green circle for charged units in combat phase
-    const { unit, phase, combatSubPhase } = this.props;
-    if (phase === "combat" && combatSubPhase === "charged_units" && unit.hasChargedThisTurn && isEligible) {
+    // NEW: Add red circle around green circle for charged units in fight phase
+    const { unit, phase, fightSubPhase } = this.props;
+    if (phase === "fight" && fightSubPhase === "charged_units" && unit.hasChargedThisTurn && isEligible) {
       const chargedOutline = new PIXI.Graphics();
       const outerCircleRadius = circleRadius + ELIGIBLE_OUTLINE_WIDTH + 2; // Slightly larger than green circle
       chargedOutline.lineStyle(ELIGIBLE_OUTLINE_WIDTH, 0xff0000, ELIGIBLE_OUTLINE_ALPHA); // Red color
@@ -365,8 +372,8 @@ export class UnitRenderer {
         if (targetPreview.currentBlinkStep === 0) {
           displayHP = currentHP;
         } else {
-          // ✅ FIX: Use CC_DMG for combat phase, RNG_DMG for shooting phase
-          if (this.props.phase === 'combat') {
+          // ✅ FIX: Use CC_DMG for fight phase, RNG_DMG for shooting phase
+          if (this.props.phase === 'fight') {
             if (shooter.CC_DMG === undefined) throw new Error(`shooter.CC_DMG is undefined for unit ${shooter.name || shooter.id}`);
             const totalDamage = targetPreview.currentBlinkStep * shooter.CC_DMG;
             displayHP = Math.max(0, currentHP - totalDamage);
@@ -451,16 +458,16 @@ export class UnitRenderer {
   private renderAttackCounter(unitIconScale: number): void {
     const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled, units } = this.props;
     
-    if (phase !== 'combat' || unit.player !== currentPlayer) return;
+    if (phase !== 'fight' || unit.player !== currentPlayer) return;
     
     // NEW: Only show attack counter for units that have enemies in melee range
     const enemies = units.filter(u => u.player !== unit.player);
-    const combatRange = unit.CC_RNG || 1;
+    const fightRange = unit.CC_RNG || 1;
     const hasEnemiesInMeleeRange = enemies.some(enemy => {
       const cube1 = offsetToCube(unit.col, unit.row);
       const cube2 = offsetToCube(enemy.col, enemy.row);
       const distance = cubeDistance(cube1, cube2);
-      return distance <= combatRange;
+      return distance <= fightRange;
     });
     
     if (!hasEnemiesInMeleeRange) return;

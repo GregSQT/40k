@@ -59,7 +59,7 @@ interface DrawBoardOptions {
   chargeCells?: HighlightCell[];
   blockedTargets?: Set<string>;
   coverTargets?: Set<string>;
-  phase?: "move" | "shoot" | "charge" | "combat";
+  phase?: "move" | "shoot" | "charge" | "fight";
   selectedUnitId?: number | null;
   mode?: string;
 }

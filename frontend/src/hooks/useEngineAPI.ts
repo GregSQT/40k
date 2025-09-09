@@ -240,6 +240,37 @@ export const useEngineAPI = () => {
     setMode("select");
   }, []);
 
+  const handleShoot = useCallback(async (shooterId: number | string, targetId: number | string) => {
+    const action = {
+      action: "shoot",
+      unitId: typeof shooterId === 'string' ? shooterId : shooterId.toString(),
+      targetId: typeof targetId === 'string' ? targetId : targetId.toString(),
+    };
+    
+    try {
+      await executeAction(action);
+      setSelectedUnitId(null);
+      setMode("select");
+    } catch (error) {
+      console.error("Shoot action failed:", error);
+    }
+  }, [executeAction]);
+
+  const handleSkipShoot = useCallback(async (unitId: number | string) => {
+    const action = {
+      action: "skip",
+      unitId: typeof unitId === 'string' ? unitId : unitId.toString(),
+    };
+    
+    try {
+      await executeAction(action);
+      setSelectedUnitId(null);
+      setMode("select");
+    } catch (error) {
+      console.error("Skip shoot failed:", error);
+    }
+  }, [executeAction]);
+
   // Get eligible units
   const getEligibleUnitIds = useCallback((): number[] => {
     if (!gameState) return [];
@@ -288,7 +319,7 @@ export const useEngineAPI = () => {
       onConfirmMove: () => {},
       onCancelMove: () => {},
       onShoot: () => {},
-      onCombatAttack: () => {},
+      onFightAttack: () => {},
       onCharge: () => {},
       onMoveCharger: () => {},
       onCancelCharge: () => {},
@@ -313,12 +344,12 @@ export const useEngineAPI = () => {
     unitsCharged: gameState.units_charged ? gameState.units_charged.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_charged array'); })(),
     unitsAttacked: gameState.units_attacked ? gameState.units_attacked.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_attacked array'); })(),
     unitsFled: gameState.units_fled ? gameState.units_fled.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_fled array'); })(),
-    phase: gameState.phase as "move" | "shoot" | "charge" | "combat",
+    phase: gameState.phase as "move" | "shoot" | "charge" | "fight",
     gameState: {
       episode_steps: gameState.episode_steps,
       units: convertUnits(gameState.units),
       currentPlayer: gameState.current_player as PlayerId,
-      phase: gameState.phase as "move" | "shoot" | "charge" | "combat",
+      phase: gameState.phase as "move" | "shoot" | "charge" | "fight",
       mode,
       selectedUnitId,
       unitsMoved: gameState.units_moved ? gameState.units_moved.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_moved array in gameState'); })(),
@@ -334,11 +365,15 @@ export const useEngineAPI = () => {
     onSkipUnit: handleSkipUnit,
     onStartMovePreview: handleStartMovePreview,
     onDirectMove: handleDirectMove,
-    onStartAttackPreview: () => {},
+    onStartAttackPreview: (unitId: number) => {
+      setSelectedUnitId(typeof unitId === 'string' ? parseInt(unitId) : unitId);
+      setMode("attackPreview");
+    },
     onConfirmMove: handleConfirmMove,
     onCancelMove: handleCancelMove,
-    onShoot: () => {},
-    onCombatAttack: () => {},
+    onShoot: handleShoot,
+    onSkipShoot: handleSkipShoot,
+    onFightAttack: () => {},
     onCharge: () => {},
     onMoveCharger: () => {},
     onCancelCharge: () => {},

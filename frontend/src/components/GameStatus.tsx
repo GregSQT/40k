@@ -16,7 +16,7 @@ const PHASE_LABELS = {
   move: 'Movement',
   shoot: 'Shooting',
   charge: 'Charge',
-  combat: 'Combat',
+  fight: 'Fight',
 } as const;
 
 const PLAYER_LABELS = {
@@ -44,7 +44,7 @@ export const GameStatus = memo<GameStatusProps>(({
         return currentPlayerUnits.filter(u => unitsMoved.includes(u.id));
       case 'charge':
         return currentPlayerUnits.filter(u => unitsCharged.includes(u.id));
-      case 'combat':
+      case 'fight':
         return currentPlayerUnits.filter(u => unitsAttacked.includes(u.id));
       default:
         return [];
@@ -79,7 +79,7 @@ export const GameStatus = memo<GameStatusProps>(({
 
       <div className="game-status__row">
         <span className="game-status__label">
-          Units {phase === 'combat' ? 'attacked' : phase === 'charge' ? 'charged' : 'acted'}:
+          Units {phase === 'fight' ? 'attacked' : phase === 'charge' ? 'charged' : 'acted'}:
         </span>{' '}
         <span className={`game-status__value ${actedUnits.length === 0 ? 'game-status__value--empty' : ''}`}>
           {actedUnitNames}

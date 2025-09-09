@@ -1,6 +1,6 @@
 // src/hooks/useGameActions.ts
 import React, { useCallback, useState } from 'react';
-import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState, TargetPreview, CombatSubPhase, PlayerId } from '../types/game';
+import { GameState, UnitId, MovePreview, AttackPreview, Unit, ShootingPhaseState, TargetPreview, FightSubPhase, PlayerId } from '../types/game';
 import { calculateHitProbability, calculateWoundProbability, calculateSaveProbability, calculateOverallProbability, calculateCombatHitProbability, calculateCombatWoundProbability, calculateCombatSaveProbability, calculateCombatOverallProbability } from '../utils/probabilityCalculator';
 import { areUnitsAdjacent, isUnitInRange, hasLineOfSight, offsetToCube, cubeDistance, getHexLine } from '../utils/gameHelpers';
 import { singleShotSequenceManager } from '../utils/ShootingSequenceManager';
@@ -28,8 +28,8 @@ interface UseGameActionsParams {
     updateShootingPhaseState: (updates: Partial<ShootingPhaseState>) => void;
     decrementShotsLeft: (unitId: UnitId) => void;
     setTargetPreview: (preview: TargetPreview | null) => void;
-    setCombatSubPhase: (subPhase: CombatSubPhase | undefined) => void; // NEW
-    setCombatActivePlayer: (player: PlayerId | undefined) => void; // NEW
+    setFightSubPhase: (subPhase: FightSubPhase | undefined) => void; // NEW
+    setFightActivePlayer: (player: PlayerId | undefined) => void; // NEW
     setUnitChargeRoll: (unitId: UnitId, roll: number) => void;
     resetUnitChargeRoll: (unitId: UnitId) => void;
     showChargeRollPopup: (unitId: UnitId, roll: number, tooLow: boolean) => void;
@@ -68,16 +68,16 @@ export const useGameActions = ({
   const [validTargetsPool, setValidTargetsPool] = useState<Unit[]>([]);
   const [shootingState, setShootingState] = useState<'WAITING_FOR_ACTIVATION' | 'WAITING_FOR_ACTION' | 'TARGET_PREVIEWING'>('WAITING_FOR_ACTIVATION');
 
-  // AI_TURN.md: Combat phase state machine variables (additive integration)
-  const [combatState, setCombatState] = useState<'CHARGING_PHASE_WAITING_FOR_ACTIVATION' | 'CHARGING_WAITING_FOR_ACTION' | 'CHARGING_TARGET_PREVIEWING' | 'SUB_PHASE_2_INIT' | 'ALTERNATING_NON_ACTIVE_TURN' | 'ALTERNATING_ACTIVE_TURN' | 'ALTERNATING_WAITING_FOR_ACTION' | 'ALTERNATING_TARGET_PREVIEWING' | 'ALTERNATING_CHECK_POOLS' | 'CLEANUP_REMAINING_UNITS'>('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
+  // AI_TURN.md: Fight phase state machine variables (additive integration)
+  const [combatState, setFightState] = useState<'CHARGING_PHASE_WAITING_FOR_ACTIVATION' | 'CHARGING_WAITING_FOR_ACTION' | 'CHARGING_TARGET_PREVIEWING' | 'SUB_PHASE_2_INIT' | 'ALTERNATING_NON_ACTIVE_TURN' | 'ALTERNATING_ACTIVE_TURN' | 'ALTERNATING_WAITING_FOR_ACTION' | 'ALTERNATING_TARGET_PREVIEWING' | 'ALTERNATING_CHECK_POOLS' | 'CLEANUP_REMAINING_UNITS'>('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
   const [chargingActivationQueue, setChargingActivationQueue] = useState<Unit[]>([]);
   const [activeAlternatingPool, setActiveAlternatingPool] = useState<Unit[]>([]);
   const [nonActiveAlternatingPool, setNonActiveAlternatingPool] = useState<Unit[]>([]);
-  const [activeCombatUnit, setActiveCombatUnit] = useState<Unit | null>(null);
-  const [selectedCombatTarget, setSelectedCombatTarget] = useState<Unit | null>(null);
+  const [activeFightUnit, setActiveFightUnit] = useState<Unit | null>(null);
+  const [selectedFightTarget, setSelectedFightTarget] = useState<Unit | null>(null);
   const [attacksLeft, setAttacksLeft] = useState<number | undefined>(undefined);
-  const [combatActionLog, setCombatActionLog] = useState<any[]>([]);
-  const [validCombatTargetsPool, setValidCombatTargetsPool] = useState<Unit[]>([]);
+  const [combatActionLog, setFightActionLog] = useState<any[]>([]);
+  const [validFightTargetsPool, setValidFightTargetsPool] = useState<Unit[]>([]);
   const [currentAlternatingTurn, setCurrentAlternatingTurn] = useState<'NON_ACTIVE' | 'ACTIVE'>('NON_ACTIVE');
 
   // Helper function to find unit by ID
@@ -467,13 +467,13 @@ interface ShootingResult {
     });
   }, [clearTargetPreview, actions]);
 
-  // AI_TURN.md: Combat Phase State Machine Functions (additive integration)
-  const initializeCombatPhase = useCallback(() => {
-    setCombatActionLog([]);
-    setActiveCombatUnit(null);
-    setSelectedCombatTarget(null);
+  // AI_TURN.md: Fight Phase State Machine Functions (additive integration)
+  const initializeFightPhase = useCallback(() => {
+    setFightActionLog([]);
+    setActiveFightUnit(null);
+    setSelectedFightTarget(null);
     setAttacksLeft(undefined);
-    setValidCombatTargetsPool([]);
+    setValidFightTargetsPool([]);
     clearTargetPreview();
     
     const chargingEligibleUnits: Unit[] = [];
@@ -501,7 +501,7 @@ interface ShootingResult {
     });
     
     setChargingActivationQueue(chargingEligibleUnits);
-    setCombatState('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
+    setFightState('CHARGING_PHASE_WAITING_FOR_ACTIVATION');
     return chargingEligibleUnits.length > 0;
   }, [units, currentPlayer, unitsCharged, unitsAttacked, clearTargetPreview]);
 
@@ -562,7 +562,7 @@ interface ShootingResult {
     return { activePool, nonActivePool };
   }, [units, currentPlayer, unitsAttacked, unitsCharged]);
 
-  const cleanupCombatPhase = useCallback(() => {
+  const cleanupFightPhase = useCallback(() => {
     clearTargetPreview();
     setChargingActivationQueue([]);
     setActiveAlternatingPool([]);

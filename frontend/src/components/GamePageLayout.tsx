@@ -31,7 +31,7 @@ export default function GamePageLayout() {
       <TurnPhaseTracker 
         currentTurn={apiProps.gameState?.currentTurn || 1} 
         currentPhase={apiProps.phase as string}
-        phases={["move", "shoot", "charge", "combat"]}
+        phases={["move", "shoot", "charge", "fight"]}
         maxTurns={apiProps.maxTurns as number}
         className="turn-phase-tracker-right"
       />

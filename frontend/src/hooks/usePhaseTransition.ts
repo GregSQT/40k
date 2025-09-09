@@ -1,6 +1,6 @@
 // frontend/src/hooks/usePhaseTransition.ts
 import { useEffect, useCallback } from 'react';
-import type { GameState, Unit, UnitId, PlayerId, CombatSubPhase } from '../types/game';
+import type { GameState, Unit, UnitId, PlayerId, FightSubPhase } from '../types/game';
 
 interface UsePhaseTransitionParams {
   gameState: GameState;
@@ -15,10 +15,10 @@ interface UsePhaseTransitionParams {
     resetChargedUnits: () => void;
     resetAttackedUnits: () => void;
     resetFledUnits: () => void;
-    initializeCombatPhase: () => void;
+    initializeFightPhase: () => void;
     setCurrentTurn: (turn: number) => void;
-    setCombatSubPhase: (subPhase: CombatSubPhase | undefined) => void;
-    setCombatActivePlayer: (player: PlayerId | undefined) => void;
+    setFightSubPhase: (subPhase: FightSubPhase | undefined) => void;
+    setFightActivePlayer: (player: PlayerId | undefined) => void;
     setUnits: (units: Unit[]) => void;
   };
 }
@@ -49,9 +49,9 @@ export const usePhaseTransition = ({
             actions.setPhase("charge");
             break;
           case "charge":
-            actions.setPhase("combat");
+            actions.setPhase("fight");
             break;
-          case "combat":
+          case "fight":
             // End turn
             const newPlayer = gameState.currentPlayer === 0 ? 1 : 0;
             actions.setCurrentPlayer(newPlayer);

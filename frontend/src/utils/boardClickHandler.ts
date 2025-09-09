@@ -8,9 +8,10 @@ let globalHexClickHandler: ((e: Event) => void) | null = null;
 export function setupBoardClickHandler(callbacks: {
   onSelectUnit(unitId: number | null): void;
   onSkipUnit?(unitId: UnitId): void;
+  onSkipShoot?(unitId: UnitId): void;
   onStartAttackPreview(shooterId: UnitId): void;
   onShoot(shooterId: UnitId, targetId: UnitId): void;
-  onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
+  onFightAttack(attackerId: UnitId, targetId: UnitId | null): void;
   onConfirmMove(): void;
   onCancelCharge?(): void;
   onValidateCharge?(chargerId: UnitId): void;
@@ -56,13 +57,17 @@ export function setupBoardClickHandler(callbacks: {
       callbacks.onSelectUnit(unitId);
       callbacks.onStartAttackPreview(unitId);
     } else if (phase === 'shoot' && mode === 'attackPreview' && selectedUnitId != null) {
-      callbacks.onShoot(selectedUnitId, unitId);
+      if (selectedUnitId !== unitId) {
+        callbacks.onShoot(selectedUnitId, unitId);
+      } else {
+        callbacks.onSelectUnit(null);
+      }
     } else if (mode === 'movePreview') {
       callbacks.onConfirmMove();
-    } else if (phase === 'combat' && selectedUnitId != null && selectedUnitId !== unitId) {
-      callbacks.onCombatAttack(selectedUnitId, unitId);
-    } else if (phase === 'combat' && selectedUnitId === unitId) {
-      callbacks.onCombatAttack(selectedUnitId, null);
+    } else if (phase === 'fight' && selectedUnitId != null && selectedUnitId !== unitId) {
+      callbacks.onFightAttack(selectedUnitId, unitId);
+    } else if (phase === 'fight' && selectedUnitId === unitId) {
+      callbacks.onFightAttack(selectedUnitId, null);
     } else {
       callbacks.onSelectUnit(unitId);
     }
@@ -85,6 +90,13 @@ export function setupBoardClickHandler(callbacks: {
   
   window.addEventListener('boardCancelCharge', cancelChargeHandler);
   
+  const skipShootHandler = (e: Event) => {
+    const { unitId } = (e as CustomEvent<{ unitId: number }>).detail;
+    callbacks.onSkipShoot?.(unitId);
+  };
+  
+  window.addEventListener('boardSkipShoot', skipShootHandler);
+  
   globalHexClickHandler = (e: Event) => {
     const { col, row, phase, mode, selectedUnitId } = (e as CustomEvent<{
       col: number;
@@ -105,7 +117,7 @@ export function setupBoardClickHandler(callbacks: {
       console.error(`🟠 onMoveCharger callback is missing!`);
     }
     } else if (mode === 'select' && selectedUnitId !== null && phase === 'move') {
-      // In move phase, clicking green hex should directly move the unit
+      // In Movement Phase, clicking green hex should directly move the unit
       if (callbacks.onDirectMove) {
         callbacks.onDirectMove(selectedUnitId, col, row);
       } else if (callbacks.onStartMovePreview) {

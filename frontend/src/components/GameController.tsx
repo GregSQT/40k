@@ -68,7 +68,7 @@ export const GameController: React.FC<GameControllerProps> = ({
   const { config, loading, error } = useGameConfig();
   const configAny = config as any; // Bypass TypeScript restrictions
   const maxTurns = configAny?.game_rules?.max_turns as number;
-  const phases = configAny?.gameplay?.phase_order || ["move", "shoot", "charge", "combat"];
+  const phases = configAny?.gameplay?.phase_order || ["move", "shoot", "charge", "fight"];
   
   // AI_TURN.md: Get game configuration for turn limits and phases
   // Handle loading and error states
@@ -207,10 +207,10 @@ export const GameController: React.FC<GameControllerProps> = ({
       resetChargedUnits: actions.resetChargedUnits,
       resetAttackedUnits: actions.resetAttackedUnits,
       resetFledUnits: actions.resetFledUnits,
-      initializeCombatPhase: actions.initializeCombatPhase,
+      initializeFightPhase: actions.initializeFightPhase,
       setCurrentTurn: actions.setCurrentTurn,
-      setCombatSubPhase: actions.setCombatSubPhase,
-      setCombatActivePlayer: actions.setCombatActivePlayer,
+      setFightSubPhase: actions.setFightSubPhase,
+      setFightActivePlayer: actions.setFightActivePlayer,
       setUnits: actions.setUnits,
     },
   });
@@ -221,10 +221,10 @@ export const GameController: React.FC<GameControllerProps> = ({
     }
   }, [gameState.phase]);
 
-  // Initialize combat phase when entering combat phase
+  // Initialize fight phase when entering fight phase
   React.useEffect(() => {
-    if (gameState.phase === 'combat') {
-      actions.initializeCombatPhase();
+    if (gameState.phase === 'fight') {
+      actions.initializeFightPhase();
     }
   }, [gameState.phase]);
 
@@ -414,8 +414,8 @@ export const GameController: React.FC<GameControllerProps> = ({
           }
           return gameState.unitsFled;
         })()}
-        combatSubPhase={gameState.combatSubPhase}
-        combatActivePlayer={gameState.combatActivePlayer}
+        fightSubPhase={gameState.fightSubPhase}
+        fightActivePlayer={gameState.fightActivePlayer}
         currentTurn={(() => {
           if (gameState.currentTurn === undefined) {
             throw new Error('gameState.currentTurn is undefined when rendering GameBoard');
@@ -435,7 +435,7 @@ export const GameController: React.FC<GameControllerProps> = ({
         onCancelMove={gameActions.cancelMove}
         onDirectMove={gameActions.directMove}
         onShoot={gameActions.handleShoot}
-        onCombatAttack={gameActions.handleCombatAttack}
+        onFightAttack={gameActions.handleFightAttack}
         onCharge={gameActions.handleCharge}
         onMoveCharger={gameActions.moveCharger}
         onCancelCharge={gameActions.cancelCharge}
