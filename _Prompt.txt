@@ -39,8 +39,8 @@ Requires proper file paths and change tracking in format: FILE: path / CHANGE# /
 Uses specific error reporting format with TypeScript compiler output
 
 
-
-Externalize end_activation fuction
+Move : preview ET MOVE NE TIENNENT PLUS COMPTE DES MURS
+Externalize end_activation fuction ?
 Check shooting LoS logic (cube ?)
 Split BoardPvP like w40k_engin ?
 

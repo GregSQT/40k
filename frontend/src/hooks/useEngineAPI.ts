@@ -124,9 +124,10 @@ export const useEngineAPI = () => {
     if (!gameState) return;
     
     try {
-      console.log("🎮 EXECUTING ACTION:", action);
-      console.log("🌐 Calling endpoint: /api/game/action");
-      const requestBody = JSON.stringify(action);
+      const requestId = Date.now();
+      console.log(`🎮 EXECUTING ACTION [${requestId}]:`, action);
+      console.log(`🌐 Calling endpoint: /api/game/action [${requestId}]`);
+      const requestBody = JSON.stringify({...action, requestId});
       const response = await fetch(`${API_BASE}/game/action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

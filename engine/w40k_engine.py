@@ -73,6 +73,14 @@ class W40KEngine:
         
         # Initialize units from config
         self._initialize_units()
+        
+        # Debug log initial state
+        self._add_debug_logs([
+            f"🏗️ ENGINE CONSTRUCTOR COMPLETE:",
+            f"  - Phase: {self.game_state['phase']}",
+            f"  - Move pool: {self.game_state.get('move_activation_pool', [])}",
+            f"  - Units count: {len(self.game_state['units'])}"
+        ])
     
     def _add_debug_logs(self, logs: List[str]):
         """Add debug logs to game state for frontend console."""
@@ -252,13 +260,12 @@ class W40KEngine:
             f"  - Pool before processing: {self.game_state.get('move_activation_pool', [])}",
         ]
         
-        # AI_TURN.md VIOLATION FIX: Pool should only be built at phase start, never during actions
-        debug_logs.append(f"  - Phase initialized: {getattr(self, '_phase_initialized', False)}")
+        # AI_TURN.md COMPLIANCE: Pool should already exist from phase initialization
         debug_logs.append(f"  - Current pool: {self.game_state.get('move_activation_pool', [])}")
         
-        # CRITICAL: Pool building should happen in phase transition, not here
+        # Pool should NEVER be empty during action processing if phase was properly initialized
         if not self.game_state.get("move_activation_pool"):
-            debug_logs.append("  - ERROR: Empty pool detected during action - this violates AI_TURN.md")
+            debug_logs.append("  - CRITICAL ERROR: Pool empty during action - phase initialization failed")
         
         # AI_TURN.md LOOP: Check if phase should complete (empty pool means phase is done)
         if not self.game_state["move_activation_pool"]:
@@ -414,9 +421,13 @@ class W40KEngine:
         
         # Remove unit from activation pool AFTER successful action
         if success:
-            print(f"🎯 REMOVING UNIT FROM SHOOT POOL: {active_unit['id']}")
+            debug_logs = [
+                f"🎯 REMOVING UNIT FROM SHOOT POOL: {active_unit['id']}",
+                f"  - Shoot pool after removal: {self.game_state['shoot_activation_pool']}"
+            ]
             self.game_state["shoot_activation_pool"].remove(active_unit["id"])
-            print(f"  - Shoot pool after removal: {self.game_state['shoot_activation_pool']}")
+            debug_logs.append(f"  - Pool after removal: {self.game_state['shoot_activation_pool']}")
+            self._add_debug_logs(debug_logs)
             
             # AI_TURN.md LOOP: After removing unit, check if pool is now empty (same check condition)
             if not self.game_state["shoot_activation_pool"]:
@@ -480,6 +491,11 @@ class W40KEngine:
         ]
         self._add_debug_logs(debug_logs)
         self.game_state["phase"] = "move"
+        
+        # AI_TURN.md: Clear tracking sets at START OF PHASE
+        self._tracking_cleanup()
+        
+        # AI_TURN.md: Build activation pool at START OF PHASE
         self._build_move_activation_pool()  
     
     def _tracking_cleanup(self):
@@ -495,18 +511,23 @@ class W40KEngine:
     
     def _build_shoot_activation_pool(self):
         """Build shooting activation pool using AI_IMPLEMENTATION.md delegation."""
-        print(f"🎯 BUILDING SHOOT ACTIVATION POOL DEBUG:")
-        print(f"  - Current player: {self.game_state['current_player']}")
-        print(f"  - Phase: {self.game_state['phase']}")
-        print(f"  - Units in game: {len(self.game_state['units'])}")
+        debug_logs = [
+            "🎯 BUILDING SHOOT ACTIVATION POOL DEBUG:",
+            f"  - Current player: {self.game_state['current_player']}",
+            f"  - Phase: {self.game_state['phase']}",
+            f"  - Units in game: {len(self.game_state['units'])}"
+        ]
         
         for unit in self.game_state["units"]:
-            print(f"    Unit {unit['id']}: player={unit['player']}, HP={unit['HP_CUR']}, RNG_NB={unit.get('RNG_NB', 'MISSING')}")
+            debug_logs.append(f"    Unit {unit['id']}: player={unit['player']}, HP={unit['HP_CUR']}, RNG_NB={unit.get('RNG_NB', 'MISSING')}")
         
         eligible_units = shooting_handlers.get_eligible_units(self.game_state)
-        print(f"  - Eligible units returned: {eligible_units}")
+        debug_logs.extend([
+            f"  - Eligible units returned: {eligible_units}",
+            f"  - Final pool: {eligible_units}"
+        ])
         self.game_state["shoot_activation_pool"] = eligible_units
-        print(f"  - Final pool: {self.game_state['shoot_activation_pool']}")
+        self._add_debug_logs(debug_logs)
     
     def _has_valid_shooting_targets(self, unit: Dict[str, Any]) -> bool:
         """Check if unit has valid shooting targets per AI_TURN.md restrictions."""

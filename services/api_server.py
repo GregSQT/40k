@@ -27,6 +27,9 @@ from main import load_config
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend requests
 
+# Minimal Flask logging for debugging when needed
+flask_request_logs = []
+
 # Global engine instance
 engine: Optional[W40KEngine] = None
 
@@ -96,14 +99,16 @@ def start_game():
     """Start a new game session."""
     global engine
     
-    print(f"🚀 /api/game/start called - Starting new game session")
+    # Add to engine debug logs instead of print
+    if engine:
+        engine._add_debug_logs(["🚀 /api/game/start called - Starting new game session"])
     
     if not engine:
         if not initialize_engine():
             return jsonify({"success": False, "error": "Engine initialization failed"}), 500
     
     try:
-        print(f"🔄 Calling engine.reset()")
+        engine._add_debug_logs(["🔄 Calling engine.reset()"])
         # Reset the engine for new game
         obs, info = engine.reset()
         
@@ -135,11 +140,11 @@ def execute_action():
     """Execute a semantic action in the game."""
     global engine
     
-    print(f"🎮 /api/game/action endpoint called")
-    print(f"🎯 Should execute action, NOT start game")
-    
     if not engine:
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
+    
+    # Minimal endpoint logging
+    engine._add_debug_logs(["🎮 Action endpoint called"])
     
     try:
         data = request.json
@@ -204,19 +209,23 @@ def execute_action():
             if isinstance(value, set):
                 serializable_state[key] = list(value)
         
-        # Debug critical game state
-        print(f"🔍 API RESPONSE DEBUG:")
-        print(f"  - Phase: {serializable_state.get('phase')}")
-        print(f"  - Current player: {serializable_state.get('current_player')}")
-        print(f"  - Move pool: {serializable_state.get('move_activation_pool')}")
-        print(f"  - Shoot pool: {serializable_state.get('shoot_activation_pool')}")
+        # Debug critical game state via engine logs
+        engine._add_debug_logs([
+            "🏁 API RESPONSE DEBUG:",
+            f"  - Phase: {serializable_state.get('phase')}",
+            f"  - Current player: {serializable_state.get('current_player')}",
+            f"  - Move pool: {serializable_state.get('move_activation_pool')}",
+            f"  - Shoot pool: {serializable_state.get('shoot_activation_pool')}"
+        ])
         
         # Extract and clear debug logs for frontend
         debug_logs = serializable_state.pop("debug_logs", [])
         
-        # Send debug logs to browser console
-        for log in debug_logs:
-            print(f"🔧 ENGINE LOG: {log}")
+        # Include Flask middleware logs that occurred before engine initialization
+        global flask_request_logs
+        if flask_request_logs:
+            debug_logs = flask_request_logs + debug_logs
+            flask_request_logs = []  # Clear after forwarding
         
         return jsonify({
             "success": success,
