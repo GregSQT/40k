@@ -91,7 +91,6 @@ export const useEngineAPI = () => {
       try {
         gameInitialized.current = true;
         setLoading(true);
-        console.log("🚀 Starting game - single initialization");
         const response = await fetch(`${API_BASE}/game/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
@@ -108,7 +107,6 @@ export const useEngineAPI = () => {
           throw new Error(data.error || 'Failed to start game');
         }
       } catch (err) {
-        console.error('🔍 API Error:', err);
         setError(err instanceof Error ? err.message : 'Unknown error');
         gameInitialized.current = false; // Reset on error
       } finally {
@@ -125,7 +123,6 @@ export const useEngineAPI = () => {
     
     try {
       const requestId = Date.now();
-      console.log(`🎮 EXECUTING ACTION`, action);
       const requestBody = JSON.stringify({...action, requestId});
       const response = await fetch(`${API_BASE}/game/action`, {
         method: 'POST',
@@ -139,20 +136,16 @@ export const useEngineAPI = () => {
       
       const data = await response.json();
         if (data.success) {
-          // Forward engine debug logs to browser console
-          if (data.debug_logs && Array.isArray(data.debug_logs)) {
-            data.debug_logs.forEach((log: string) => console.log(log));
-          }
-          
-          // Only log shooting phase state changes
-          if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
-            console.log("🎯 UNIT ACTIVATED:", data.game_state.active_shooting_unit);
+          // Auto-display Python console logs in browser (only during actions)
+          if (data.game_state?.console_logs) {
+            data.game_state.console_logs.forEach((log: string) => console.log(log));
+            // Clear logs from the data before setting state to prevent persistence
+            data.game_state.console_logs = [];
           }
           setGameState(data.game_state);
         
         // Set visual state based on shooting activation
         if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
-          console.log("  🎯 SETTING ATTACK PREVIEW MODE");
           setSelectedUnitId(parseInt(data.game_state.active_shooting_unit));
           setMode("attackPreview");
         } else {
@@ -253,32 +246,18 @@ export const useEngineAPI = () => {
     const numericUnitId = typeof unitId === 'string' ? parseInt(unitId) : unitId;
     
     // AI_TURN.md: Shooting phase click handling
-    // AI_TURN.md: Shooting phase activation with comprehensive debugging
+    // AI_TURN.md: Shooting phase click handling
     if (gameState && gameState.phase === "shoot") {
-      console.log("🎯 SHOOTING PHASE CLICK DEBUG:");
-      console.log("  - Phase:", gameState.phase);
-      console.log("  - Clicked unit ID:", numericUnitId);
-      console.log("  - Active shooting unit:", gameState.active_shooting_unit);
-      console.log("  - Shoot activation pool:", gameState.shoot_activation_pool);
-      
       if (numericUnitId !== null) {
         const shootActivationPool = gameState.shoot_activation_pool?.map(id => parseInt(id)) || [];
-        console.log("  - Parsed pool:", shootActivationPool);
-        console.log("  - Unit in pool?", shootActivationPool.includes(numericUnitId));
-        console.log("  - No active unit?", !gameState.active_shooting_unit);
         
         if (shootActivationPool.includes(numericUnitId) && !gameState.active_shooting_unit) {
-          console.log("  ✅ ACTIVATING UNIT:", numericUnitId);
           await executeAction({
             action: "activate_unit", 
             unitId: numericUnitId.toString()
           });
           return;
         } else if (gameState.active_shooting_unit) {
-          console.log("  ✅ SENDING LEFT_CLICK - Active unit exists");
-          console.log("    - Active unit:", gameState.active_shooting_unit);
-          console.log("    - Target unit:", numericUnitId);
-          console.log("    - Click target type:", determineClickTarget(numericUnitId, gameState));
           await executeAction({
             action: "left_click",
             unitId: gameState.active_shooting_unit,
@@ -286,13 +265,7 @@ export const useEngineAPI = () => {
             clickTarget: determineClickTarget(numericUnitId, gameState)
           });
           return;
-        } else {
-          console.log("  ❌ NO ACTION: Unit not in pool or conditions not met");
-          console.log("    - Unit in pool:", shootActivationPool.includes(numericUnitId));
-          console.log("    - Active unit exists:", !!gameState.active_shooting_unit);
         }
-      } else {
-        console.log("  ❌ NO ACTION: numericUnitId is null");
       }
       return;
     }
@@ -386,13 +359,11 @@ export const useEngineAPI = () => {
   }, [handleRightClick, executeAction]);
 
   const handleStartTargetPreview = useCallback((shooterId: number | string, targetId: number | string) => {
-    console.log("🎯 STARTING TARGET PREVIEW:", {shooterId, targetId});
     setTargetPreview({
       shooterId: typeof shooterId === 'number' ? shooterId : parseInt(shooterId),
       targetId: typeof targetId === 'number' ? targetId : parseInt(targetId)
     });
     setMode("targetPreview");
-    console.log("✅ TARGET PREVIEW STATE SET");
   }, []);
 
   // Get eligible units
@@ -500,10 +471,7 @@ export const useEngineAPI = () => {
     onCancelMove: handleCancelMove,
     onShoot: handleShoot,
     onSkipShoot: handleSkipShoot,
-    onStartTargetPreview: (shooterId: number | string, targetId: number | string) => {
-      console.log("🔗 CALLBACK RECEIVED - onStartTargetPreview");
-      handleStartTargetPreview(shooterId, targetId);
-    },
+    onStartTargetPreview: handleStartTargetPreview,
     onFightAttack: () => {},
     onCharge: () => {},
     onMoveCharger: () => {},

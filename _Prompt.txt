@@ -39,10 +39,12 @@ Requires proper file paths and change tracking in format: FILE: path / CHANGE# /
 Uses specific error reporting format with TypeScript compiler output
 
 
-Move : preview ET MOVE NE TIENNENT PLUS COMPTE DES MURS
+
+Shooting phase :
+Eligibility bug
+
 Externalize end_activation fuction ?
 Check shooting LoS logic (cube ?)
-Split BoardPvP like w40k_engin ?
 
 TEST :
 Terminal 1 : 

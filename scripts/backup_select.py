@@ -125,8 +125,6 @@ else:
         "frontend/src/components/TurnPhaseTracker.tsx",
         "frontend/src/components/UnitRenderer.tsx",
         "frontend/src/components/UnitStatusTable.tsx",
-        
-        "frontend/src/components/GameController_OLD.tsx",
 
         # Frontend/src/constants
         "frontend/src/constants/gameConfig.ts",
@@ -147,14 +145,6 @@ else:
         "frontend/src/hooks/useGameLog.ts",
         "frontend/src/hooks/useGameState.ts",
         "frontend/src/hooks/usePhaseTransition.ts",
-        
-        "frontend/src/hooks/useAIPlayer_OLD.ts",
-        "frontend/src/hooks/useAITurn_OLD.ts",
-        "frontend/src/hooks/useGameActions_OLD.ts",
-        "frontend/src/hooks/useGameConfig_OLD.ts",
-        "frontend/src/hooks/useGameLog_OLD.ts",
-        "frontend/src/hooks/useGameState_OLD.ts",
-        "frontend/src/hooks/usePhaseTransition_OLD.ts",
 
         # Frontend/src/pages
         "frontend/src/pages/GamePage.tsx",

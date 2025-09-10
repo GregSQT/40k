@@ -1,79 +1,18 @@
 // frontend/src/components/BoardPvp.tsx
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js-legacy";
-import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState } from "../types/game";
-// import { useGameConfig } from '../hooks/useGameConfig';
-// import { SingleShotDisplay } from './SingleShotDisplay';
+import type { Unit, TargetPreview, CombatSubPhase, PlayerId, GameState } from "../types/game";
+import { useGameConfig } from '../hooks/useGameConfig';
+import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
-import { drawBoard } from './BoardDisplay';
-const setupBoardInteractions = (app: any, boardConfig: any, config: any) => {};
-const cleanupBoardInteractions = (app: any) => {};
 import { renderUnit } from './UnitRenderer';
-import { offsetToCube, cubeDistance, hasLineOfSight, getHexLine, isUnitInRange } from '../utils/gameHelpers';
-
-// Create a mock useGameConfig hook
-const useGameConfig = () => ({
-  config: {
-    cols: 25,
-    rows: 21,
-    hex_radius: 25,
-    margin: 4,
-    colors: {
-      background: '0x002200',
-      cell_even: '0x002200',
-      cell_odd: '0x001a00',
-      cell_border: '0x00ff00',
-      player_0: '0x244488',
-      player_1: '0x882222',
-      hp_full: '0x36e36b',
-      hp_damaged: '0x444444',
-      highlight: '0x80ff80',
-      current_unit: '0xffd700',
-      eligible: '0x00ff00',
-      attack: '0xff4444',
-      charge: '0xff9900',
-      objective_zone: '0xff9933',
-      wall: '0x808080',
-      objective: '0xff9900'
-    },
-    wall_hexes: [
-      [2,5],[2,6],[2,7],[3,4],[4,4],[5,3],[6,3],[7,2],[8,2],[9,1],
-      [16,2],[17,2],[18,3],[19,3],[20,4],[21,4],[15,1],[22,5],[22,6],[22,7],
-      [2,14],[2,15],[2,13],[3,15],[4,16],[5,16],[6,17],[7,17],[8,18],[9,18],
-      [22,13],[22,14],[22,15],[21,15],[20,16],[19,16],[18,17],[17,17],[16,18],[15,18],
-      [4,10],[5,10],[6,10],[7,10],[8,10],[8,9],[8,8],[8,7],
-      [20,10],[19,9],[18,10],[17,9],[16,10],[16,11],[16,12],[16,13],
-      [12,17],[12,16],[12,15],[12,14],[12,15],[11,13],[10,14],[9,13],[8,14],
-      [12,3],[12,4],[12,5],[12,6],[13,6],[14,6],[15,6],[16,6]
-    ],
-    display: {
-      resolution: "auto",
-      autoDensity: true,
-      antialias: true,
-      forceCanvas: true,
-      icon_scale: 1.2,
-      eligible_outline_width: 3,
-      eligible_outline_alpha: 0.8,
-      hp_bar_width_ratio: 1.4,
-      hp_bar_height: 7,
-      hp_bar_y_offset_ratio: 0.85,
-      unit_circle_radius_ratio: 0.6,
-      unit_text_size: 10,
-      selected_border_width: 4,
-      charge_target_border_width: 3,
-      default_border_width: 2,
-      canvas_border: "1px solid #333",
-      right_column_bottom_offset: 650
-    }
-  },
-  loading: false,
-  error: null
-});
-
+import { drawBoard } from './BoardDisplay';
+import { setupBoardInteractions, cleanupBoardInteractions } from './BoardInteractions';
+import { isMovementBlocked, hasLineOfSight, isChargeBlocked, offsetToCube, cubeDistance, getHexLine, isUnitInRange } from '../utils/gameHelpers';
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
-type Mode = "select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview";
+type Mode = "select" | "movePreview" | "attackPreview" | "chargePreview";
 
 type BoardProps = {
   units: Unit[];
@@ -85,24 +24,21 @@ type BoardProps = {
   movePreview: { unitId: number; destCol: number; destRow: number } | null;
   attackPreview: { unitId: number; col: number; row: number } | null;
   onSelectUnit: (id: number | string | null) => void;
-  onSkipUnit?: (unitId: number | string) => void;
-  onSkipShoot?: (unitId: number | string) => void;
-  onStartTargetPreview?: (shooterId: number | string, targetId: number | string) => void;
   onStartMovePreview: (unitId: number | string, col: number | string, row: number | string) => void;
   onDirectMove: (unitId: number | string, col: number | string, row: number | string) => void;
   onStartAttackPreview: (unitId: number, col: number, row: number) => void;
   onConfirmMove: () => void;
   onCancelMove: () => void;
   onShoot: (shooterId: number, targetId: number) => void;
-  onFightAttack?: (attackerId: number, targetId: number | null) => void;
+  onCombatAttack?: (attackerId: number, targetId: number | null) => void;
   currentPlayer: 0 | 1;
   unitsMoved: number[];
   unitsCharged?: number[];
   unitsAttacked?: number[];
   unitsFled?: number[];
-  fightSubPhase?: FightSubPhase; // NEW
-  fightActivePlayer?: PlayerId; // NEW
-  phase: "move" | "shoot" | "charge" | "fight";
+  combatSubPhase?: CombatSubPhase; // NEW
+  combatActivePlayer?: PlayerId; // NEW
+  phase: "move" | "shoot" | "charge" | "combat";
   onCharge?: (chargerId: number, targetId: number) => void;
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
   onCancelCharge?: () => void;
@@ -126,8 +62,6 @@ export default function Board({
   movePreview,
   attackPreview,
   onSelectUnit,
-  onSkipUnit,
-  onStartTargetPreview,
   onStartMovePreview,
   onDirectMove,
   onStartAttackPreview,
@@ -137,13 +71,13 @@ export default function Board({
   unitsMoved,
   phase,
   onShoot,
-  onFightAttack,
+  onCombatAttack,
   onCharge,
   unitsCharged,
   unitsAttacked,
   unitsFled,
-  fightSubPhase,
-  fightActivePlayer,
+  combatSubPhase,
+  combatActivePlayer,
   onMoveCharger,
   onCancelCharge,
   onValidateCharge,
@@ -155,10 +89,6 @@ export default function Board({
   chargeRollPopup,
   getChargeDestinations,
 }: BoardProps) {
-  // Debug targetPreview state
-  React.useEffect(() => {
-    console.log("🎯 TARGET PREVIEW STATE:", targetPreview);
-  }, [targetPreview]);
   React.useEffect(() => {
   }, [phase, mode, selectedUnitId]);
   
@@ -169,18 +99,17 @@ export default function Board({
   const containerRef = useRef<HTMLDivElement>(null);
   
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
-  const { config: boardConfig, loading, error } = useGameConfig();
+  const { boardConfig, loading, error } = useGameConfig();
   // ✅ STABLE CALLBACK REFS - Don't change on every render
   const stableCallbacks = useRef<{
     onSelectUnit: (id: number | string | null) => void;
-    onSkipUnit?: (unitId: number | string) => void;
     onStartMovePreview: (unitId: number | string, col: number | string, row: number | string) => void;
     onDirectMove: (unitId: number | string, col: number | string, row: number | string) => void;
     onStartAttackPreview: (unitId: number, col: number, row: number) => void;
     onConfirmMove: () => void;
     onCancelMove: () => void;
     onShoot: (shooterId: number, targetId: number) => void;
-    onFightAttack?: (attackerId: number, targetId: number | null) => void;
+    onCombatAttack?: (attackerId: number, targetId: number | null) => void;
     onCharge?: (chargerId: number, targetId: number) => void;
     onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
     onCancelCharge?: () => void;
@@ -194,7 +123,7 @@ export default function Board({
     onConfirmMove,
     onCancelMove,
     onShoot,
-    onFightAttack,
+    onCombatAttack,
     onCharge,
     onMoveCharger,
     onCancelCharge,
@@ -205,14 +134,13 @@ export default function Board({
   // Update refs when props change but don't trigger re-render - MOVE THIS BEFORE useEffect
   stableCallbacks.current = {
     onSelectUnit,
-    onSkipUnit,
     onStartMovePreview,
     onDirectMove,
     onStartAttackPreview,
     onConfirmMove,
     onCancelMove,
     onShoot,
-    onFightAttack,
+    onCombatAttack,
     onCharge,
     onMoveCharger,
     onCancelCharge,
@@ -228,8 +156,8 @@ export default function Board({
   // const [currentShootingTarget, setCurrentShootingTarget] = useState<number | null>(null);
   // const [selectedShootingTarget, setSelectedShootingTarget] = useState<number | null>(null);
   // const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  // const [currentFightTarget, setCurrentFightTarget] = useState<number | null>(null);
-  // const [selectedFightTarget, setSelectedFightTarget] = useState<number | null>(null);
+  // const [currentCombatTarget, setCurrentCombatTarget] = useState<number | null>(null);
+  // const [selectedCombatTarget, setSelectedCombatTarget] = useState<number | null>(null);
 
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
@@ -372,7 +300,7 @@ export default function Board({
       backgroundColor: parseInt(boardConfig.colors.background.replace('0x', ''), 16),
       antialias: displayConfig.antialias!,
       powerPreference: "high-performance" as WebGLPowerPreference,
-      resolution: String(displayConfig.resolution) === "auto" ? (window.devicePixelRatio || 1) : (typeof displayConfig.resolution === 'number' ? displayConfig.resolution : 1),
+      resolution: displayConfig.resolution === "auto" ? (window.devicePixelRatio || 1) : displayConfig.resolution!,
       autoDensity: displayConfig.autoDensity!,
     };
     
@@ -395,24 +323,17 @@ export default function Board({
     containerRef.current.innerHTML = '';
     containerRef.current.appendChild(canvas);
 
-    // Set up board click handler IMMEDIATELY after canvas creation
+    // Set up board click handler to prevent event conflicts
     setupBoardClickHandler({
       onSelectUnit: stableCallbacks.current.onSelectUnit,
-      onSkipUnit: stableCallbacks.current.onSkipUnit,
-      onSkipShoot: (unitId: number) => {
-        if (stableCallbacks.current.onSkipUnit) {
-          stableCallbacks.current.onSkipUnit(unitId);
-        }
-      },
       onStartAttackPreview: (shooterId: number) => {
         const unit = units.find(u => u.id === shooterId);
         if (unit) {
           stableCallbacks.current.onStartAttackPreview(shooterId, unit.col, unit.row);
         }
       },
-      onStartTargetPreview: onStartTargetPreview,
       onShoot: stableCallbacks.current.onShoot,
-      onCombatAttack: stableCallbacks.current.onFightAttack || (() => {}),
+      onCombatAttack: stableCallbacks.current.onCombatAttack || (() => {}),
       onConfirmMove: stableCallbacks.current.onConfirmMove,
       onCancelCharge: stableCallbacks.current.onCancelCharge,
       onMoveCharger: stableCallbacks.current.onMoveCharger,
@@ -437,7 +358,7 @@ export default function Board({
       });
     }
 
-    // ✅ RESTRUCTURED: Calculate ALL highlight data BEFORE any drawBoard calls
+    // Logic for green (move) and red (attack) highlights
     let availableCells: { col: number; row: number }[] = [];
     const selectedUnit = units.find(u => u.id === selectedUnitId);
 
@@ -445,20 +366,23 @@ export default function Board({
     let chargeCells: { col: number; row: number }[] = [];
     let chargeTargets: Unit[] = [];
 
-    // Fight preview: fightTargets for red outline on enemies within fight range
-    let fightTargets: Unit[] = [];
-    if (phase === "fight" && selectedUnit) {
+    // Combat preview: combatTargets for red outline on enemies within combat range
+    let combatTargets: Unit[] = [];
+    if (phase === "combat" && selectedUnit) {
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
       
       // Validate CC_RNG is defined
       if (selectedUnit.CC_RNG === undefined || selectedUnit.CC_RNG === null) {
-        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required CC_RNG property for fight phase`);
+        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required CC_RNG property for combat phase`);
       }
       
-      const fightRange = selectedUnit.CC_RNG;
+      const combatRange = selectedUnit.CC_RNG;
       
-      // Use stored charge roll from gameState (rolled when unit was first selected)
-        const chargeDistance = gameState.unitChargeRolls && gameState.unitChargeRolls[Number(selectedUnit.id)];
+      // Red outline: all enemy units within combat range of the selected unit
+      combatTargets = units.filter(u =>
+        u.player !== selectedUnit.player &&
+        cubeDistance(c1, offsetToCube(u.col, u.row)) <= combatRange
+      );
     }
 
     // ✅ SIMPLIFIED SHOOTING PREVIEW - No animations to prevent re-render loop
@@ -480,9 +404,9 @@ export default function Board({
       shootingTarget = enemiesInRange[0] || null;
     }
 
-    // ✅ SIMPLIFIED FIGHT PREVIEW - No animations to prevent re-render loop
-    let fightTarget: Unit | null = null;
-    if (phase === "fight" && selectedUnit) {
+    // ✅ SIMPLIFIED COMBAT PREVIEW - No animations to prevent re-render loop
+    let combatTarget: Unit | null = null;
+    if (phase === "combat" && selectedUnit) {
       // Simple target identification - no state changes here
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
       const enemiesInRange = units.filter(u =>
@@ -491,7 +415,7 @@ export default function Board({
       );
       
       // Use the first valid target or null
-      fightTarget = enemiesInRange[0] || null;
+      combatTarget = enemiesInRange[0] || null;
     }
 
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
@@ -504,7 +428,7 @@ export default function Board({
         chargeTargets = [];
       } else {
       // Use authoritative getChargeDestinations function (single source of truth)
-      chargeCells = getChargeDestinations(0); // Stub function returns empty array anyway
+      chargeCells = getChargeDestinations(selectedUnit.id);
 
           // Red outline: enemy units that can be reached via valid charge movement
           chargeTargets = units.filter(u => {
@@ -520,142 +444,146 @@ export default function Board({
           
       }
     }
+    
 
-    // ✅ CALCULATE MOVEMENT PREVIEW BEFORE MAIN DRAWBOARD CALL
-    if (selectedUnit && mode === "select" && eligibleUnitIds && eligibleUnitIds.includes(typeof selectedUnit.id === 'number' ? selectedUnit.id : parseInt(selectedUnit.id as string))) {
-      if (phase === "move") {
-        // For Movement Phase, show available move destinations
-        if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
-          throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for movement preview`);
-        }
-
-        const centerCol = selectedUnit.col;
-        const centerRow = selectedUnit.row;
-
-        const originCube = offsetToCube(centerCol, centerRow);
-
-        // Use cube coordinate system for proper hex neighbors
-        const cubeDirections = [
-          [1, -1, 0], [1, 0, -1], [0, 1, -1], 
-          [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
-        ];
-
-        // Collect all forbidden hexes (adjacent to any enemy + wall hexes) using cube coordinates  
-        const forbiddenSet = new Set<string>();
-        
-        // Add all wall hexes as forbidden
-        const wallHexSet = new Set<string>(
-          (boardConfig.wall_hexes || []).map((wall: number[]) => `${wall[0]},${wall[1]}`)
-        );
-        wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
-        
-        for (const enemy of units) {
-          if (enemy.player === selectedUnit.player) continue;
-
-          // Add enemy position itself
-          forbiddenSet.add(`${enemy.col},${enemy.row}`);
-
-          // Use cube coordinates for proper hex adjacency
-          const enemyCube = offsetToCube(enemy.col, enemy.row);
-          for (const [dx, dy, dz] of cubeDirections) {
-            const adjCube = {
-              x: enemyCube.x + dx,
-              y: enemyCube.y + dy,
-              z: enemyCube.z + dz
-            };
-            
-            // Convert back to offset coordinates
-            const adjCol = adjCube.x;
-            const adjRow = adjCube.z + ((adjCube.x - (adjCube.x & 1)) >> 1);
-            
-            if (
-              adjCol >= 0 && adjCol < BOARD_COLS &&
-              adjRow >= 0 && adjRow < BOARD_ROWS
-            ) {
-              forbiddenSet.add(`${adjCol},${adjRow}`);
+      // Green circles for eligible units (single source of truth)
+      if (selectedUnit && mode === "select" && eligibleUnitIds && eligibleUnitIds.includes(selectedUnit.id)) {
+        if (phase === "move") {
+          // For move phase, show available move destinations
+          const runMovementBFS = () => {
+            if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
+              throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for movement preview`);
             }
-          }
-        }
 
-        const visited = new Map<string, number>();
-        const queue: [number, number, number][] = [[centerCol, centerRow, 0]];
+            const centerCol = selectedUnit.col;
+            const centerRow = selectedUnit.row;
 
-        while (queue.length > 0) {
-          const next = queue.shift();
-          if (!next) continue;
-          const [col, row, steps] = next;
-          const key = `${col},${row}`;
-          
-          if (visited.has(key) && steps >= visited.get(key)!) {
-            continue;
-          }
+            const visited = new Map<string, number>();
+            const queue: [number, number, number][] = [[centerCol, centerRow, 0]];
 
-          visited.set(key, steps);
+            // Use cube coordinate system for proper hex neighbors
+            const cubeDirections = [
+              [1, -1, 0], [1, 0, -1], [0, 1, -1], 
+              [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
+            ];
 
-          // ⛔ Skip forbidden positions completely - don't expand from them
-          if (forbiddenSet.has(key) && steps > 0) {
-            continue;
-          }
-
-          const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
-
-          if (steps > 0 && steps <= selectedUnit.MOVE && !blocked && !forbiddenSet.has(key)) {
-            availableCells.push({ col, row });
-          }
-
-          if (steps >= selectedUnit.MOVE) {
-            continue;
-          }
-
-          // Use cube coordinates for proper hex neighbors
-          const currentCube = offsetToCube(col, row);
-          for (const [dx, dy, dz] of cubeDirections) {
-            const neighborCube = {
-              x: currentCube.x + dx,
-              y: currentCube.y + dy,
-              z: currentCube.z + dz
-            };
+            // Collect all forbidden hexes (adjacent to any enemy + wall hexes) using cube coordinates  
+            const forbiddenSet = new Set<string>();
             
-            // Convert back to offset coordinates
-            const ncol = neighborCube.x;
-            const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+            // Add all wall hexes as forbidden
+            const wallHexSet = new Set<string>(
+              (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
+            );
+            wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
             
-            const nkey = `${ncol},${nrow}`;
-            const nextSteps = steps + 1;
+            for (const enemy of units) {
+              if (enemy.player === selectedUnit.player) continue;
 
-            if (
-              ncol >= 0 && ncol < BOARD_COLS &&
-              nrow >= 0 && nrow < BOARD_ROWS &&
-              nextSteps <= selectedUnit.MOVE &&
-              !forbiddenSet.has(nkey)
-            ) {
-              const nblocked = units.some(u => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id);
-              
-              if (
-                !nblocked &&
-                (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
-              ) {
-                queue.push([ncol, nrow, nextSteps]);
+              // Add enemy position itself
+              forbiddenSet.add(`${enemy.col},${enemy.row}`);
+
+              // Use cube coordinates for proper hex adjacency
+              const enemyCube = offsetToCube(enemy.col, enemy.row);
+              for (const [dx, dy, dz] of cubeDirections) {
+                const adjCube = {
+                  x: enemyCube.x + dx,
+                  y: enemyCube.y + dy,
+                  z: enemyCube.z + dz
+                };
+                
+                // Convert back to offset coordinates
+                const adjCol = adjCube.x;
+                const adjRow = adjCube.z + ((adjCube.x - (adjCube.x & 1)) >> 1);
+                
+                if (
+                  adjCol >= 0 && adjCol < BOARD_COLS &&
+                  adjRow >= 0 && adjRow < BOARD_ROWS
+                ) {
+                  forbiddenSet.add(`${adjCol},${adjRow}`);
+                }
               }
             }
-          }
-        }
 
-      } else {
-        // For other phases (charge, etc), just show green circle on unit's hex
-        availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
+            while (queue.length > 0) {
+              const next = queue.shift();
+              if (!next) continue;
+              const [col, row, steps] = next;
+              const key = `${col},${row}`;
+              
+              if (visited.has(key) && steps >= visited.get(key)!) {
+                continue;
+              }
+
+              visited.set(key, steps);
+
+              // ⛔ Skip forbidden positions completely - don't expand from them
+              if (forbiddenSet.has(key) && steps > 0) {
+                continue;
+              }
+
+              const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
+
+                if (steps > 0 && steps <= selectedUnit.MOVE && !blocked && !forbiddenSet.has(key)) {
+                  availableCells.push({ col, row });
+                }
+
+                if (steps >= selectedUnit.MOVE) {
+                  continue;
+                }
+
+                // Use cube coordinates for proper hex neighbors
+                const currentCube = offsetToCube(col, row);
+                for (const [dx, dy, dz] of cubeDirections) {
+                  const neighborCube = {
+                    x: currentCube.x + dx,
+                    y: currentCube.y + dy,
+                    z: currentCube.z + dz
+                  };
+                  
+                  // Convert back to offset coordinates
+                  const ncol = neighborCube.x;
+                  const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+                  
+                  const nkey = `${ncol},${nrow}`;
+                  const nextSteps = steps + 1;
+
+                  if (
+                    ncol >= 0 && ncol < BOARD_COLS &&
+                    nrow >= 0 && nrow < BOARD_ROWS &&
+                    nextSteps <= selectedUnit.MOVE &&
+                    !forbiddenSet.has(nkey)
+                  ) {
+                    const nblocked = units.some(u => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id);
+                    // Wall hexes are already handled by forbiddenSet above
+                    
+                    if (
+                      !nblocked &&
+                      (!visited.has(nkey) || visited.get(nkey)! > nextSteps)
+                    ) {
+                      queue.push([ncol, nrow, nextSteps]);
+                    }
+                  }
+                }
+
+            }
+          };
+
+          runMovementBFS();
+        } else {
+          // For other phases (charge, etc), just show green circle on unit's hex
+          availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
+        }
       }
-    }
 
-    // Green circles for all eligible charge units (not just selected)
-    if (phase === "charge" && mode === "select") {
-      eligibleUnitIds.forEach(unitId => {
-        const eligibleUnit = units.find(u => u.id === unitId);
-        if (eligibleUnit) {
-          availableCells.push({ col: eligibleUnit.col, row: eligibleUnit.row });
-        }
-      });
-    }
+      // Green circles for all eligible charge units (not just selected)
+      if (phase === "charge" && mode === "select") {
+        eligibleUnitIds.forEach(unitId => {
+          const eligibleUnit = units.find(u => u.id === unitId);
+          if (eligibleUnit) {
+            availableCells.push({ col: eligibleUnit.col, row: eligibleUnit.row });
+          }
+        });
+      }
 
       // Attack cells: Different colors for different line of sight conditions
       let attackCells: { col: number; row: number }[] = []; // Red = clear line of sight
@@ -677,7 +605,7 @@ export default function Board({
             const lineOfSight = hasLineOfSight(
               { col: selectedUnit.col, row: selectedUnit.row },
               { col: enemy.col, row: enemy.row },
-              (boardConfig.wall_hexes || []) as [number, number][]
+              boardConfig.wall_hexes || []
             );
             
             if (!lineOfSight.canSee) {
@@ -731,7 +659,7 @@ export default function Board({
                 const lineOfSight = hasLineOfSight(
                   { col: attackFromCol, row: attackFromRow },
                   { col: enemy.col, row: enemy.row },
-                  (boardConfig.wall_hexes || []) as [number, number][]
+                  boardConfig.wall_hexes || []
                 );
                 
                 if (!lineOfSight.canSee) {
@@ -745,12 +673,12 @@ export default function Board({
           
           // Validate required range properties are defined and get range
           let range: number;
-          if (phase === "fight") {
+          if (phase === "combat") {
             if (previewUnit.CC_RNG === undefined || previewUnit.CC_RNG === null) {
-              throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required CC_RNG property for fight phase preview`);
+              throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required CC_RNG property for combat phase preview`);
             }
             range = previewUnit.CC_RNG;
-            // For fight phase, show all hexes in range (original behavior)
+            // For combat phase, show all hexes in range (original behavior)
             for (let col = 0; col < BOARD_COLS; col++) {
               for (let row = 0; row < BOARD_ROWS; row++) {
                 const targetCube = offsetToCube(col, row);
@@ -778,9 +706,9 @@ export default function Board({
                 if (distance > 0 && distance <= range) {
                   
                   const lineOfSight = hasLineOfSight(
-                    { col: attackFromCol!, row: attackFromRow! },
+                    { col: attackFromCol, row: attackFromRow },
                     { col: enemy.col, row: enemy.row },
-                    (boardConfig.wall_hexes || []) as [number, number][]
+                    boardConfig.wall_hexes || []
                   );
                   
                   
@@ -790,9 +718,9 @@ export default function Board({
                     coverTargets.add(`${enemy.col},${enemy.row}`);
                     
                     // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
-                    const pathHexes: any[] = getHexLine(attackFromCol!, attackFromRow!, enemy.col, enemy.row);
+                    const pathHexes = getHexLine(attackFromCol, attackFromRow, enemy.col, enemy.row);
                     const wallHexSet = new Set<string>(
-                      (boardConfig.wall_hexes || []).map((wall: number[]) => `${wall[0]},${wall[1]}`)
+                      (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
                     );
                     pathHexes.forEach(hex => {
                       const hexKey = `${hex.col},${hex.row}`;
@@ -829,9 +757,9 @@ export default function Board({
                         coverCells.push({ col, row });
                       } else {
                         const lineOfSight = hasLineOfSight(
-                          { col: attackFromCol!, row: attackFromRow! },
-                          { col: col, row: row },
-                          (boardConfig.wall_hexes || []) as [number, number][]
+                          { col: attackFromCol, row: attackFromRow },
+                          { col, row },
+                          boardConfig.wall_hexes || []
                         );
                         
                         if (lineOfSight.canSee && !lineOfSight.inCover) {
@@ -849,7 +777,7 @@ export default function Board({
         }
 
 
-      // ✅ DRAW BOARD ONCE with populated availableCells
+      // ✅ DRAW BOARD using shared BoardDisplay component
       drawBoard(app, boardConfig as any, {
         availableCells,
         attackCells,
@@ -857,9 +785,7 @@ export default function Board({
         chargeCells,
         blockedTargets,
         coverTargets,
-        phase,
-        selectedUnitId,
-        mode
+        phase
       });
 
       // ✅ SETUP BOARD INTERACTIONS using shared BoardInteractions component
@@ -911,7 +837,7 @@ export default function Board({
               const lineOfSight = hasLineOfSight(
                 { col: selectedUnit.col, row: selectedUnit.row },
                 { col: unit.col, row: unit.row },
-                (boardConfig.wall_hexes || []) as [number, number][]
+                boardConfig.wall_hexes || []
               );
               if (!lineOfSight.canSee) {
                 isShootable = false;
@@ -936,8 +862,8 @@ export default function Board({
         const isEligibleForRendering = (() => {
           if (phase === "shoot" && shootingActivationQueue && shootingActivationQueue.length > 0) {
             // During active shooting: unit is eligible if in queue OR is active unit
-            const inQueue = shootingActivationQueue.some((u: Unit) => String(u.id) === String(unit.id));
-            const isActive = activeShootingUnit && String(activeShootingUnit.id) === String(unit.id);
+            const inQueue = shootingActivationQueue.some((u: Unit) => u.id === unit.id);
+            const isActive = activeShootingUnit && activeShootingUnit.id === unit.id;
             const result = inQueue || isActive;
             
             if (unit.id === 8 || unit.id === 9) { // Debug key units
@@ -949,7 +875,7 @@ export default function Board({
             return result;
           }
           // All other phases: use standard eligibility
-          const standardResult = eligibleUnitIds.includes(typeof unit.id === 'number' ? unit.id : parseInt(unit.id as string));
+          const standardResult = eligibleUnitIds.includes(unit.id);
           if (unit.id === 8 || unit.id === 9) {
             console.log(`🟢 STANDARD ELIGIBILITY Unit ${unit.id}: ${standardResult}`);
           }
@@ -965,8 +891,8 @@ export default function Board({
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
           phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
-          fightSubPhase, fightActivePlayer,
-          units, chargeTargets, fightTargets, targetPreview,
+          combatSubPhase, combatActivePlayer,
+          units, chargeTargets, combatTargets, targetPreview,
           onConfirmMove, parseColor
         });
       }
@@ -986,8 +912,8 @@ export default function Board({
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
             phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
-            fightSubPhase, fightActivePlayer,
-            units, chargeTargets, fightTargets, targetPreview,
+            combatSubPhase, combatActivePlayer,
+            units, chargeTargets, combatTargets, targetPreview,
             onConfirmMove, parseColor
           });
         }
@@ -1008,8 +934,8 @@ export default function Board({
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
             phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
-            fightSubPhase, fightActivePlayer,
-            units, chargeTargets, fightTargets, targetPreview,
+            combatSubPhase, combatActivePlayer,
+            units, chargeTargets, combatTargets, targetPreview,
             onConfirmMove, parseColor
           });
         }
@@ -1074,13 +1000,13 @@ export default function Board({
       }, [
         // ✅ FIXED DEPENDENCIES - Prevent board re-render but allow HP animations
         units.length, // Only re-render when units count changes
-        units.map(u => `${u.id}-${u.col}-${u.row}-${u.HP_CUR}-${u.ATTACK_LEFT}-${u.SHOOT_LEFT}`).join(','), // Only essential unit changes
+        units.map(u => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}-${u.ATTACK_LEFT}-${u.SHOOT_LEFT}`).join(','), // Only essential unit changes
         selectedUnitId,
         mode,
         phase, // CRITICAL: Phase changes must trigger re-render for isShootable recalculation
         `${phase}-${selectedUnitId}`, // CRITICAL: Phase+selectedUnit combination must trigger re-render
-        fightSubPhase, // NEW: Trigger re-render when fight sub-phase changes
-        fightActivePlayer, // NEW: Trigger re-render when fight active player changes
+        combatSubPhase, // NEW: Trigger re-render when combat sub-phase changes
+        combatActivePlayer, // NEW: Trigger re-render when combat active player changes
         boardConfig?.cols, // Only re-render if board structure changes
         loading,
         error,
@@ -1096,7 +1022,6 @@ export default function Board({
       return (
         <div>
           <div ref={containerRef} />
-          {/* SingleShotDisplay temporarily disabled - missing component
           {shootingPhaseState?.singleShotState && (
             <SingleShotDisplay
               singleShotState={shootingPhaseState.singleShotState}
@@ -1112,7 +1037,6 @@ export default function Board({
               }
             />
           )}
-          */}
         </div>
       );
 
