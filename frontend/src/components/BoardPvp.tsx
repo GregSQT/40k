@@ -354,7 +354,10 @@ export default function Board({
       onCancelCharge: stableCallbacks.current.onCancelCharge,
       onMoveCharger: stableCallbacks.current.onMoveCharger,
       onStartMovePreview: onStartMovePreview,
-      onDirectMove: onDirectMove,
+      onDirectMove: (unitId: number | string, col: number | string, row: number | string) => {
+        console.log("🎯 BoardPvp onDirectMove wrapper called:", { unitId, col, row });
+        onDirectMove(unitId, col, row);
+      },
     });
 
     // Right click cancels move/attack preview

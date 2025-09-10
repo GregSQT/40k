@@ -72,12 +72,19 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
   };
 
   const handleDirectMove = (unitId: number | string, col: number | string, row: number | string) => {
+    console.log("GameBoard handleDirectMove called:", { unitId, col, row });
+    
     const numUnitId = typeof unitId === 'string' ? parseInt(unitId, 10) : unitId;
     const numCol = typeof col === 'string' ? parseInt(col, 10) : col;
     const numRow = typeof row === 'string' ? parseInt(row, 10) : row;
     
+    console.log("GameBoard parsed values:", { numUnitId, numCol, numRow });
+    console.log("GameBoard calling props.onDirectMove...");
+    
     if (!isNaN(numUnitId) && !isNaN(numCol) && !isNaN(numRow)) {
       props.onDirectMove(numUnitId, numCol, numRow);
+    } else {
+      console.error("GameBoard: Invalid parsed values, not calling props.onDirectMove");
     }
   };
 

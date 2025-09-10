@@ -119,7 +119,15 @@ export const useEngineAPI = () => {
 
   // Execute action via API
   const executeAction = useCallback(async (action: any) => {
-    if (!gameState) return;
+    console.log("🎯 executeAction called with:", action);
+    console.log("🎯 gameState exists:", !!gameState);
+    
+    if (!gameState) {
+      console.log("🎯 executeAction EARLY RETURN: gameState is null");
+      return;
+    }
+    
+    console.log("🎯 executeAction proceeding to fetch...");
     
     try {
       const requestId = Date.now();
@@ -137,8 +145,9 @@ export const useEngineAPI = () => {
       const data = await response.json();
         if (data.success) {
           // Auto-display Python console logs in browser (only during actions)
-          if (data.game_state?.console_logs) {
-            data.game_state.console_logs.forEach((log: string) => console.log(log));
+          if (data.game_state?.console_logs && data.game_state.console_logs.length > 0) {
+            console.log("🎮 W40K ENGINE LOGS:");
+            data.game_state.console_logs.forEach((log: string) => console.log(`  ${log}`));
             // Clear logs from the data before setting state to prevent persistence
             data.game_state.console_logs = [];
           }
@@ -310,6 +319,8 @@ export const useEngineAPI = () => {
   }, []);
 
   const handleDirectMove = useCallback(async (unitId: number | string, col: number | string, row: number | string) => {
+    console.log("🎯 handleDirectMove called:", { unitId, col, row });
+    
     const action = {
       action: "move",
       unitId: typeof unitId === 'string' ? unitId : unitId.toString(),
@@ -317,15 +328,15 @@ export const useEngineAPI = () => {
       destRow: typeof row === 'string' ? parseInt(row) : row,
     };
     
+    console.log("🎯 Action to send:", action);
+    
     try {
+      console.log("🎯 Calling executeAction...");
       await executeAction(action);
-      // Let executeAction handle state reset after updating game state
       setMovePreview(null);
       setMode("select");
-      // Don't reset selectedUnitId here - let it reset when gameState updates
     } catch (error) {
       console.error("Move failed:", error);
-      // Don't reset state if move failed
     }
   }, [executeAction]);
 
@@ -462,7 +473,10 @@ export const useEngineAPI = () => {
     onSelectUnit: handleSelectUnit,
     onSkipUnit: handleSkipUnit,
     onStartMovePreview: handleStartMovePreview,
-    onDirectMove: handleDirectMove,
+    onDirectMove: (unitId: number | string, col: number | string, row: number | string) => {
+      console.log("🎯 useEngineAPI onDirectMove called:", { unitId, col, row });
+      return handleDirectMove(unitId, col, row);
+    },
     onStartAttackPreview: (unitId: number) => {
       setSelectedUnitId(typeof unitId === 'string' ? parseInt(unitId) : unitId);
       setMode("attackPreview");

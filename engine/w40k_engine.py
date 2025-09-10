@@ -66,8 +66,8 @@ class W40KEngine:
             "charge_range_rolls": {},
             
             # Board state
-            "board_width": config["board"]["width"],
-            "board_height": config["board"]["height"],
+            "board_width": config["board"]["cols"],
+            "board_height": config["board"]["rows"],
             "wall_hexes": set(map(tuple, config["board"]["wall_hexes"]))
         }
         
