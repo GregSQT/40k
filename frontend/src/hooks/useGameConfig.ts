@@ -2,12 +2,29 @@
 import { useState, useEffect } from 'react';
 
 interface GameConfig {
-  board: {
-    width: number;
-    height: number;
-    wall_hexes: any[];
+  game_rules: {
+    max_turns: number;
+    turn_limit_penalty: number;
+    charge_max_distance: number;
   };
-  // Add other config properties as needed
+  gameplay: {
+    phase_order: string[];
+    simultaneous_actions: boolean;
+    auto_end_turn: boolean;
+  };
+  ai_behavior: {
+    timeout_ms: number;
+    retries: number;
+    fallback_action: string;
+  };
+  api: {
+    prefix: string;
+    action_endpoint: string;
+    actions_endpoint: string;
+  };
+  ui: {
+    log_available_height: number;
+  };
 }
 
 export function useGameConfig() {
@@ -18,18 +35,40 @@ export function useGameConfig() {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        // Placeholder - will load from actual config files
-        const defaultConfig: GameConfig = {
-          board: {
-            width: 24,
-            height: 18,
-            wall_hexes: []
-          }
-        };
-        setConfig(defaultConfig);
-        setLoading(false);
+        setLoading(true);
+        setError(null);
+
+        const response = await fetch('/config/game_config.json');
+        
+        if (!response.ok) {
+          throw new Error(`Failed to load game config: HTTP ${response.status}`);
+        }
+
+        const responseText = await response.text();
+        
+        if (!responseText.trim()) {
+          throw new Error('Game config file is empty');
+        }
+
+        const gameData = JSON.parse(responseText);
+        
+        // Validate required sections
+        if (!gameData.game_rules) {
+          throw new Error('Game config missing required game_rules section');
+        }
+
+        if (!gameData.game_rules.max_turns) {
+          throw new Error('Game config missing required game_rules.max_turns');
+        }
+
+        setConfig(gameData);
+
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Config load error');
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load configuration';
+        setError(errorMessage);
+        console.error('Game config loading error:', err);
+        setConfig(null);
+      } finally {
         setLoading(false);
       }
     };

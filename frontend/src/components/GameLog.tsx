@@ -1,7 +1,8 @@
 // frontend/src/components/GameLog.tsx
 // frontend/src/components/GameLog.tsx
 import React from 'react';
-import { BaseLogEntry, getEventIcon, getEventTypeClass } from '../../../shared/gameLogStructure';
+import type { BaseLogEntry } from '../../../shared/gameLogStructure.ts';
+import { getEventIcon, getEventTypeClass } from '../../../shared/gameLogStructure.ts';
 
 // Use shared interface as base, add frontend-specific fields
 export interface GameLogEvent extends BaseLogEntry {
@@ -16,7 +17,7 @@ interface GameLogProps {
   useStepNumbers?: boolean;
 }
 
-export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElapsedTime, availableHeight = 220, useStepNumbers = false }) => {
+export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availableHeight = 220, useStepNumbers = false }) => {
   const [visibleRowCount, setVisibleRowCount] = React.useState(4);
   const eventsContainerRef = React.useRef<HTMLDivElement>(null);
   
@@ -96,7 +97,7 @@ export const GameLog: React.FC<GameLogProps> = ({ events, maxEvents = 5, getElap
                   )}
                   <span className="game-log-entry__message">
                     {event.message}
-                    {(event.type === 'shoot' || event.type === 'fight') && event.shootDetails && (
+                    {(event.type === 'shoot' || event.type === 'combat') && event.shootDetails && (
                       <span className="game-log-entry__shoot-inline">
                         {event.shootDetails.map((shot, index) => {
                           let shotText = ` - Shot ${shot.shotNumber}: Hit (${shot.hitTarget}+) ${shot.attackRoll}: ${shot.hitResult === 'HIT' ? 'Success!' : 'Failed!'}`;

@@ -2,20 +2,7 @@
 import { useState, useCallback, useRef } from 'react';
 import type { Unit } from '../types/game';
 
-// AI_TURN.md compliant interface matching GameController expectations
-export interface GameLogEvent {
-  id: string;
-  timestamp: Date;
-  type: string;
-  message: string;
-  unitId?: number;
-  targetId?: number;
-  phase?: string;
-  turnNumber?: number;
-  startHex?: string;
-  endHex?: string;
-  shootDetails?: any;
-}
+import type { GameLogEvent } from '../components/GameLog';
 
 export function useGameLog() {
   const [events, setEvents] = useState<GameLogEvent[]>([]);

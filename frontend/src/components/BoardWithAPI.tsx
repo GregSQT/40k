@@ -59,36 +59,6 @@ export const BoardWithAPI: React.FC = () => {
 
   return (
     <div style={{ padding: '20px' }}>
-      {/* Game Status */}
-      <div style={{ 
-        marginBottom: '20px', 
-        padding: '15px', 
-        background: '#1f2937', 
-        borderRadius: '8px',
-        color: 'white',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <div>
-          <h3 style={{ margin: '0 0 5px 0' }}>W40K Engine - Live Board</h3>
-          <div>
-            Turn: {apiProps.gameState?.currentTurn} | 
-            Player: {apiProps.currentPlayer} | 
-            Phase: {apiProps.phase} | 
-            Steps: {apiProps.gameState?.episode_steps}
-          </div>
-        </div>
-        <div style={{ 
-          padding: '8px 12px', 
-          background: '#065f46', 
-          borderRadius: '4px',
-          fontSize: '14px'
-        }}>
-          AI_TURN.md Compliant
-        </div>
-      </div>
-
       {/* Board */}
       <BoardPvp
         units={apiProps.units}
