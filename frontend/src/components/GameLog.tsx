@@ -26,7 +26,10 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
     // Wait for DOM to render, then measure actual log entry height
     const timer = setTimeout(() => {
       const sampleLogEntry = document.querySelector('.game-log-entry');
-      if (!sampleLogEntry) throw new Error('No log entry found to measure height in GameLog');
+      if (!sampleLogEntry) {
+        setVisibleRowCount(4); // Safe default
+        return;
+      }
       
       const actualRowHeight = sampleLogEntry.getBoundingClientRect().height;
       const maxRows = Math.floor(availableHeight / actualRowHeight);

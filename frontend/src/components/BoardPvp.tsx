@@ -2,7 +2,7 @@
 import React, { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState } from "../types/game";
-// import { useGameConfig } from '../hooks/useGameConfig';
+import { useGameConfig } from '../hooks/useGameConfig';
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
 import { drawBoard } from './BoardDisplay';
@@ -10,66 +10,6 @@ const setupBoardInteractions = (app: any, boardConfig: any, config: any) => {};
 const cleanupBoardInteractions = (app: any) => {};
 import { renderUnit } from './UnitRenderer';
 import { offsetToCube, cubeDistance, hasLineOfSight, getHexLine, isUnitInRange } from '../utils/gameHelpers';
-
-// Create a mock useGameConfig hook
-const useGameConfig = () => ({
-  config: {
-    cols: 25,
-    rows: 21,
-    hex_radius: 25,
-    margin: 4,
-    colors: {
-      background: '0x002200',
-      cell_even: '0x002200',
-      cell_odd: '0x001a00',
-      cell_border: '0x00ff00',
-      player_0: '0x244488',
-      player_1: '0x882222',
-      hp_full: '0x36e36b',
-      hp_damaged: '0x444444',
-      highlight: '0x80ff80',
-      current_unit: '0xffd700',
-      eligible: '0x00ff00',
-      attack: '0xff4444',
-      charge: '0xff9900',
-      objective_zone: '0xff9933',
-      wall: '0x808080',
-      objective: '0xff9900'
-    },
-    wall_hexes: [
-      [2,5],[2,6],[2,7],[3,4],[4,4],[5,3],[6,3],[7,2],[8,2],[9,1],
-      [16,2],[17,2],[18,3],[19,3],[20,4],[21,4],[15,1],[22,5],[22,6],[22,7],
-      [2,14],[2,15],[2,13],[3,15],[4,16],[5,16],[6,17],[7,17],[8,18],[9,18],
-      [22,13],[22,14],[22,15],[21,15],[20,16],[19,16],[18,17],[17,17],[16,18],[15,18],
-      [4,10],[5,10],[6,10],[7,10],[8,10],[8,9],[8,8],[8,7],
-      [20,10],[19,9],[18,10],[17,9],[16,10],[16,11],[16,12],[16,13],
-      [12,17],[12,16],[12,15],[12,14],[12,15],[11,13],[10,14],[9,13],[8,14],
-      [12,3],[12,4],[12,5],[12,6],[13,6],[14,6],[15,6],[16,6]
-    ],
-    display: {
-      resolution: "auto",
-      autoDensity: true,
-      antialias: true,
-      forceCanvas: true,
-      icon_scale: 1.2,
-      eligible_outline_width: 3,
-      eligible_outline_alpha: 0.8,
-      hp_bar_width_ratio: 1.4,
-      hp_bar_height: 7,
-      hp_bar_y_offset_ratio: 0.85,
-      unit_circle_radius_ratio: 0.6,
-      unit_text_size: 10,
-      selected_border_width: 4,
-      charge_target_border_width: 3,
-      default_border_width: 2,
-      canvas_border: "1px solid #333",
-      right_column_bottom_offset: 650
-    }
-  },
-  loading: false,
-  error: null
-});
-
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
@@ -155,10 +95,6 @@ export default function Board({
   chargeRollPopup,
   getChargeDestinations,
 }: BoardProps) {
-  // Debug targetPreview state
-  React.useEffect(() => {
-    console.log("🎯 TARGET PREVIEW STATE:", targetPreview);
-  }, [targetPreview]);
   React.useEffect(() => {
   }, [phase, mode, selectedUnitId]);
   
@@ -169,7 +105,7 @@ export default function Board({
   const containerRef = useRef<HTMLDivElement>(null);
   
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
-  const { config: boardConfig, loading, error } = useGameConfig();
+  const { boardConfig, loading, error } = useGameConfig();
   // ✅ STABLE CALLBACK REFS - Don't change on every render
   const stableCallbacks = useRef<{
     onSelectUnit: (id: number | string | null) => void;
@@ -370,6 +306,7 @@ export default function Board({
       width: canvasWidth,
       height: canvasHeight,
       backgroundColor: parseInt(boardConfig.colors.background.replace('0x', ''), 16),
+      backgroundAlpha: 1, // Ensure background is opaque
       antialias: displayConfig.antialias!,
       powerPreference: "high-performance" as WebGLPowerPreference,
       resolution: String(displayConfig.resolution) === "auto" ? (window.devicePixelRatio || 1) : (typeof displayConfig.resolution === 'number' ? displayConfig.resolution : 1),
@@ -387,7 +324,7 @@ export default function Board({
     // ✅ CANVAS STYLING FROM CONFIG - EXACT BOARDREPLAY MATCH
     const canvas = app.view as HTMLCanvasElement;
     canvas.style.display = 'block';
-    canvas.style.maxWidth = '100%';
+    // Removed maxWidth constraint to allow full board size
     canvas.style.height = 'auto';
     canvas.style.border = displayConfig?.canvas_border ?? '1px solid #333';
     
@@ -1072,30 +1009,20 @@ export default function Board({
       };
 
       }, [
-        // ✅ FIXED DEPENDENCIES - Prevent board re-render but allow HP animations
-        units.length, // Only re-render when units count changes
-        units.map(u => `${u.id}-${u.col}-${u.row}-${u.HP_CUR}-${u.ATTACK_LEFT}-${u.SHOOT_LEFT}`).join(','), // Only essential unit changes
+        // Essential dependencies only - prevent infinite re-renders
+        units.length,
         selectedUnitId,
         mode,
-        phase, // CRITICAL: Phase changes must trigger re-render for isShootable recalculation
-        `${phase}-${selectedUnitId}`, // CRITICAL: Phase+selectedUnit combination must trigger re-render
-        fightSubPhase, // NEW: Trigger re-render when fight sub-phase changes
-        fightActivePlayer, // NEW: Trigger re-render when fight active player changes
-        boardConfig?.cols, // Only re-render if board structure changes
+        phase,
+        boardConfig?.cols,
         loading,
-        error,
-        movePreview?.unitId, // Add this to ensure preview changes trigger re-render
-        movePreview?.destCol, // Add this too
-        movePreview?.destRow,  // And this
-        targetPreview, // Keep full targetPreview for HP bar blinking
-        eligibleUnitIds.join(','), // Add eligibleUnitIds to trigger re-render when eligibility changes
-        chargeRollPopup // Add chargeRollPopup to trigger re-render when popup state changes
+        error
       ]);
 
       // Simple container return - loading/error handled inside useEffect
       return (
         <div>
-          <div ref={containerRef} />
+          <div ref={containerRef} style={{ display: 'inline-block', lineHeight: 0 }} />
           {/* SingleShotDisplay temporarily disabled - missing component
           {shootingPhaseState?.singleShotState && (
             <SingleShotDisplay

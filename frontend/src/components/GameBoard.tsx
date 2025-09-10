@@ -1,11 +1,10 @@
 // src/components/GameBoard.tsx
 import React from 'react';
-import { useLocation } from 'react-router-dom';
 import BoardPvp from './BoardPvp';
 //import { BoardReplay } from './BoardReplay';
-import { TurnPhaseTracker } from './TurnPhaseTracker';
+//import { TurnPhaseTracker } from './TurnPhaseTracker';
 import type { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState, TargetPreview, FightSubPhase, PlayerId } from '../types';
-import { setupBoardClickHandler } from '../utils/boardClickHandler';
+//import { setupBoardClickHandler } from '../utils/boardClickHandler';
 
 
 interface GameBoardProps {
@@ -48,48 +47,10 @@ interface GameBoardProps {
 }
 
 export const GameBoard: React.FC<GameBoardProps> = (props) => {
-  console.log("🔵 GAMEBOARD COMPONENT RENDERING");
-  // Detect game mode from URL
-  const location = useLocation();
-  const gameMode = location.pathname.includes('/pve') ? 'pve' : 
-                   location.pathname.includes('/replay') ? 'training' : 'pvp';
-
   // Type-safe wrapper for Board component
   // Convert string/number IDs to proper number type for Board component
   
-    React.useEffect(() => {
-      console.log("🔵 GAMEBOARD USEEFFECT RUNNING");
-      setupBoardClickHandler({
-        onSelectUnit: props.onSelectUnit,
-        onStartAttackPreview: (shooterId) => {
-          const unit = props.units.find(u => u.id === shooterId);
-          if (unit) {
-            props.onStartAttackPreview(shooterId, unit.col, unit.row);
-          }
-        },
-        onShoot:        props.onShoot,
-        onFightAttack: props.onFightAttack,
-        onConfirmMove:  props.onConfirmMove,
-        onCancelCharge: props.onCancelCharge,
-        onValidateCharge: props.onValidateCharge,
-        onMoveCharger:    props.onMoveCharger,
-        onStartMovePreview: props.onStartMovePreview,
-        onDirectMove: handleDirectMove
-      });
-    }, [
-      props.onSelectUnit,
-      props.onStartAttackPreview,
-      props.onShoot,
-      props.onFightAttack,
-      props.onConfirmMove,
-      props.onCancelCharge,
-      props.onValidateCharge,
-      props.onMoveCharger,
-      props.units
-    ]);
-
-
-
+    // Remove problematic useEffect - setupBoardClickHandler will be handled by BoardPvp directly
   
   const handleSelectUnit = (id: number | string | null) => {
     if (typeof id === 'string') {

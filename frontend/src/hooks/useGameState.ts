@@ -1,5 +1,5 @@
 // frontend/src/hooks/useGameState.ts
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import type { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, ShootingPhaseState, TargetPreview, FightSubPhase, MovePreview, AttackPreview } from '../types/game';
 
 interface ChargeRollPopup {
@@ -47,7 +47,7 @@ interface UseGameStateReturn {
 export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   // AI_TURN.md: Single source of truth - one game_state object
   const [gameState, setGameState] = useState<GameState>({
-    units: initialUnits,
+    units: [],
     currentPlayer: 0,
     phase: "move",
     mode: "select",
@@ -62,6 +62,26 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     fightActivePlayer: undefined,
     targetPreview: null
   });
+
+  // React hook pattern: respond to parameter changes
+  React.useEffect(() => {
+    if (initialUnits.length > 0) {
+      setGameState(prev => ({
+        ...prev,
+        units: initialUnits.map(unit => {
+          // Ensure required UPPERCASE fields with fallbacks
+          if (unit.RNG_NB === undefined) {
+            throw new Error(`Unit ${unit.id} missing required RNG_NB field`);
+          }
+          return {
+            ...unit,
+            SHOOT_LEFT: unit.RNG_NB,
+            HP_CUR: unit.HP_CUR ?? unit.HP_MAX
+          };
+        })
+      }));
+    }
+  }, [initialUnits]);
 
   const [movePreview, setMovePreview] = useState<MovePreview | null>(null);
   const [attackPreview, setAttackPreview] = useState<AttackPreview | null>(null);

@@ -1,0 +1,8 @@
+{
+  "action_mappings": {
+    "0": {"name": "Move", "phase": "move", "type": "movement"},
+    "1": {"name": "Shoot", "phase": "shoot", "type": "ranged"},
+    "2": {"name": "Charge", "phase": "charge", "type": "movement"},
+    "3": {"name": "Attack", "phase": "fight", "type": "melee"}
+  }
+}

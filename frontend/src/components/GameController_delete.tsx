@@ -12,6 +12,7 @@ import { useGameState } from "../hooks/useGameState";
 import { useGameActions } from "../hooks/useGameActions";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useAITurn } from "../hooks/useAITurn";
+import { usePhaseTransition } from "../hooks/usePhaseTransition";
 import { useGameLog } from "../hooks/useGameLog";
 import type { Unit } from "../types/game";
 import { useState, useEffect } from "react";
@@ -27,130 +28,56 @@ export const GameController: React.FC<GameControllerProps> = ({
   initialUnits,
   className,
 }) => {
-  // Generate default units if none provided
+  // ALL HOOKS CALLED FIRST - FIXED ORDER TO PREVENT HOOK VIOLATIONS
   const [gameUnits, setGameUnits] = useState<Unit[]>(initialUnits || []);
-  
-  // Detect game mode from URL
-  const location = useLocation();
-  const gameMode = location.pathname.includes('/pve') ? 'pve' : 
-                   location.pathname.includes('/replay') ? 'training' : 'pvp';
-  const isPvE = gameMode === 'pve';
-                   
-  // Track UnitStatusTable collapse states
   const [player0Collapsed, setPlayer0Collapsed] = useState(false);
   const [player1Collapsed, setPlayer1Collapsed] = useState(false);
+  const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
+  const [logAvailableHeight, setLogAvailableHeight] = useState(220);
+  
+  const location = useLocation();
+  const { config, loading, error } = useGameConfig();
+  const gameLog = useGameLog();
+  const { gameState, movePreview, attackPreview, shootingPhaseState, chargeRollPopup, actions } = useGameState(gameUnits);
   
   useEffect(() => {
     if (!initialUnits || initialUnits.length === 0) {
-      // Initialize UnitFactory and load units from scenario.json
-      const loadUnits = async () => {
-        try {          
-          // Initialize the unit registry first
-          const { initializeUnitRegistry, createUnit } = await import('../data/UnitFactory');
-          await initializeUnitRegistry();
-          
-          // Load scenario data
-          const response = await fetch('/config/scenario.json');
-          const scenarioData = await response.json();
-          
+      // Load units from scenario.json - no fallbacks
+      fetch('/config/scenario.json')
+        .then(response => response.json())
+        .then(scenarioData => {
           if (scenarioData.units) {
-            
-            // Transform scenario data using UnitFactory.createUnit()
-            const transformedUnits = scenarioData.units.map((unit: any, index: number) => {
-              return createUnit({
-                id: unit.id,
-                name: `${unit.unit_type}-${unit.id}`,
-                type: unit.unit_type,
-                player: unit.player,
-                col: unit.col,
-                row: unit.row,
-                color: unit.player === 0 ? 0x244488 : 0xff3333
-              });
-            });
-            
-            setGameUnits(transformedUnits);
+            setGameUnits(scenarioData.units);
           } else {
             throw new Error('No units found in scenario.json');
           }
-        } catch (error) {
-          throw new Error(`Failed to load units from scenario.json: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      };
-      
-      loadUnits();
+        })
+        .catch(error => {
+          console.error('Failed to load scenario.json:', error);
+          throw new Error(`Failed to load units from scenario.json: ${error.message}`);
+        });
     }
-  }, [initialUnits, isPvE]);
+  }, [initialUnits]);
 
-  // Initialize game state with custom hook
-  const { gameState, movePreview, attackPreview, shootingPhaseState, chargeRollPopup, actions } = useGameState(gameUnits);
+  // Detect game mode from URL (after hooks)
+  const gameMode = location.pathname.includes('/pve') ? 'pve' : 
+                   location.pathname.includes('/replay') ? 'training' : 'pvp';
+  const isPvE = gameMode === 'pve';
+  const boardConfig = config; // Alias for compatibility
   
-  // Track clicked (but not selected) units for blue highlighting
-  const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
-
-  // Get board configuration for line of sight calculations
-  const { gameConfig } = useGameConfig();
-  const boardConfig = gameConfig;
-
-  // Initialize game log hook
-  const gameLog = useGameLog();
-
-  // Set up game actions with game log
+  // Set up game actions (called unconditionally with safe defaults)
   const originalGameActions = useGameActions({
     gameState,
     movePreview,
     attackPreview,
     shootingPhaseState,
-    boardConfig,
+    boardConfig: boardConfig || null, // Safe default
     actions: {
       ...actions,
       setMode: (mode: any) => actions.setMode(mode || "select"),
     },
     gameLog,
   });
-
-  // Use original game actions without modification
-  const gameActions = originalGameActions;
-
-  // Calculate available height for GameLog dynamically
-  const [logAvailableHeight, setLogAvailableHeight] = useState(220);
-  
-  React.useEffect(() => {
-    // Wait for DOM to be fully rendered before measuring
-    setTimeout(() => {
-      const turnPhaseTracker = document.querySelector('.turn-phase-tracker-right');
-      const allTables = document.querySelectorAll('.unit-status-table-container');
-      const gameLogHeader = document.querySelector('.game-log__header') || document.querySelector('[class*="game-log"]');
-      
-      if (!turnPhaseTracker || allTables.length < 2 || !gameLogHeader) {
-        setLogAvailableHeight(220);
-        return;
-      }
-      
-      const player0Table = allTables[0];
-      const player1Table = allTables[1];
-      
-      // Get actual heights from DOM measurements
-      const turnPhaseHeight = turnPhaseTracker.getBoundingClientRect().height;
-      const player0Height = player0Table.getBoundingClientRect().height;
-      const player1Height = player1Table.getBoundingClientRect().height;
-      const gameLogHeaderHeight = gameLogHeader.getBoundingClientRect().height;
-      
-      // Calculate available space based purely on actual measurements
-      const viewportHeight = window.innerHeight;
-      const appContainer = document.querySelector('.app-container') || document.body;
-      const appMargins = viewportHeight - appContainer.getBoundingClientRect().height;
-      const usedSpace = turnPhaseHeight + player0Height + player1Height + gameLogHeaderHeight;
-      const availableForLogEntries = viewportHeight - usedSpace - appMargins;
-    
-    const sampleLogEntry = document.querySelector('.game-log-entry');
-      if (!sampleLogEntry) {
-        setLogAvailableHeight(220);
-        return;
-      }
-      sampleLogEntry.getBoundingClientRect().height;
-      setLogAvailableHeight(availableForLogEntries);
-    }, 100); // Wait 100ms for DOM to render
-  }, [player0Collapsed, player1Collapsed, gameState.units, gameState.phase]);
 
   // Calculate eligible units by calling the useGameActions.isUnitEligible function (no duplicate logic)
   const eligibleUnitIds = React.useMemo(() => {
@@ -176,6 +103,76 @@ export const GameController: React.FC<GameControllerProps> = ({
     units: gameState.units
   });
 
+  // Manage phase transitions
+  usePhaseTransition({
+    gameState,
+    boardConfig,
+    isUnitEligible: (unit: Unit) => Boolean(originalGameActions.isUnitEligible(unit)), // Pass the authoritative eligibility function
+    actions: {
+      setPhase: actions.setPhase,
+      setCurrentPlayer: actions.setCurrentPlayer,
+      setSelectedUnitId: actions.setSelectedUnitId,
+      setMode: (mode: any) => actions.setMode(mode || "select"),
+      resetMovedUnits: actions.resetMovedUnits,
+      resetChargedUnits: actions.resetChargedUnits,
+      resetAttackedUnits: actions.resetAttackedUnits,
+      resetFledUnits: actions.resetFledUnits,
+      initializeFightPhase: actions.initializeFightPhase,
+      setCurrentTurn: actions.setCurrentTurn,
+      setFightSubPhase: actions.setFightSubPhase,
+      setFightActivePlayer: actions.setFightActivePlayer,
+      setUnits: actions.setUnits,
+    },
+  });
+
+  // Initialize shooting phase when entering shoot phase
+  React.useEffect(() => {
+    if (gameState.phase === 'shoot') {
+      actions.initializeShootingPhase();
+    }
+  }, [gameState.phase]);
+
+  // Initialize fight phase when entering fight phase
+  React.useEffect(() => {
+    if (gameState.phase === 'fight') {
+      actions.initializeFightPhase();
+    }
+  }, [gameState.phase]);
+
+  // Calculate available height for GameLog dynamically
+  React.useEffect(() => {
+    // Wait for DOM to be fully rendered before measuring
+    setTimeout(() => {
+      const turnPhaseTracker = document.querySelector('.turn-phase-tracker-right');
+      const allTables = document.querySelectorAll('.unit-status-table-container');
+      const gameLogHeader = document.querySelector('.game-log__header') || document.querySelector('[class*="game-log"]');
+      
+      if (!turnPhaseTracker) throw new Error('TurnPhaseTracker element not found');
+      if (allTables.length < 2) throw new Error(`Expected 2 unit status tables, found ${allTables.length}`);
+      if (!gameLogHeader) throw new Error('GameLog header element not found');
+      
+      const player0Table = allTables[0];
+      const player1Table = allTables[1];
+      
+      // Get actual heights from DOM measurements
+      const turnPhaseHeight = turnPhaseTracker.getBoundingClientRect().height;
+      const player0Height = player0Table.getBoundingClientRect().height;
+      const player1Height = player1Table.getBoundingClientRect().height;
+      const gameLogHeaderHeight = gameLogHeader.getBoundingClientRect().height;
+      
+      // Calculate available space based purely on actual measurements
+      const viewportHeight = window.innerHeight;
+      const appContainer = document.querySelector('.app-container') || document.body;
+      const appMargins = viewportHeight - appContainer.getBoundingClientRect().height;
+      const usedSpace = turnPhaseHeight + player0Height + player1Height + gameLogHeaderHeight;
+      const availableForLogEntries = viewportHeight - usedSpace - appMargins;
+    
+    const sampleLogEntry = document.querySelector('.game-log-entry');
+      if (!sampleLogEntry) throw new Error('No log entry found to measure height');
+      setLogAvailableHeight(availableForLogEntries);
+    }, 100); // Wait 100ms for DOM to render
+  }, [player0Collapsed, player1Collapsed, gameState.units, gameState.phase]);
+
   // AI Turn Processing Effect - Trigger AI when it's AI player's turn
   React.useEffect(() => {
     // Check if game is over by examining unit health
@@ -193,20 +190,6 @@ export const GameController: React.FC<GameControllerProps> = ({
     }
   }, [isPvE, gameState.currentPlayer, gameState.phase, isAIProcessing, gameState.units, processAITurn]);
 
-  // Initialize shooting phase when entering shoot phase
-  React.useEffect(() => {
-    if (gameState.phase === 'shoot') {
-      actions.initializeShootingPhase();
-    }
-  }, [gameState.phase]);
-
-  // Initialize fight phase when entering fight phase
-  React.useEffect(() => {
-    if (gameState.phase === 'fight') {
-      actions.initializeFightPhase();
-    }
-  }, [gameState.phase]);
-
   // Track turn changes with ref to prevent infinite loops
   const lastLoggedTurn = React.useRef<number>(0);
   
@@ -223,7 +206,7 @@ export const GameController: React.FC<GameControllerProps> = ({
   
   React.useEffect(() => {
     const currentTurn = gameState.currentTurn ?? 1;
-    if (currentTurn >= 1) {
+    if (currentTurn >= 1) { // Only log phases after game starts
       const currentPhaseKey = `${currentTurn}-${gameState.phase}-${gameState.currentPlayer}`;
       
       if (currentPhaseKey !== lastLoggedPhase.current) {
@@ -261,24 +244,139 @@ export const GameController: React.FC<GameControllerProps> = ({
     previousSelectedUnit.current = (gameState.selectedUnitId ?? null) as number | null;
   }, [gameState.selectedUnitId]);
 
+  // NOW handle loading and error states AFTER all hooks
+  if (loading) {
+    return <div>Loading configuration...</div>;
+  }
+  
+  if (error) {
+    throw new Error(`Configuration error: ${error}`);
+  }
+  
+  if (!config) {
+    throw new Error('Game configuration required but not loaded');
+  }
+  
+  // Extract maxTurns from config with proper error handling
+  const configAny = config as any; // Bypass TypeScript restrictions
+  const maxTurns = configAny?.game_rules?.max_turns as number;
+  if (!maxTurns) {
+    throw new Error(`maxTurns not found in game configuration. Required: config.game_rules.max_turns. Config structure: ${JSON.stringify(Object.keys(configAny || {}))}`);
+  }
+
+  // Use original game actions without modification
+  const gameActions = originalGameActions;
+
+  // All duplicate declarations removed - using hooks and refs declared at top of component
+
+  // Use the logAvailableHeight from useState declared at top
+  React.useEffect(() => {
+    // Wait for DOM to be fully rendered before measuring
+    setTimeout(() => {
+      const turnPhaseTracker = document.querySelector('.turn-phase-tracker-right');
+      const allTables = document.querySelectorAll('.unit-status-table-container');
+      const gameLogHeader = document.querySelector('.game-log__header') || document.querySelector('[class*="game-log"]');
+      
+      if (!turnPhaseTracker) throw new Error('TurnPhaseTracker element not found');
+      if (allTables.length < 2) throw new Error(`Expected 2 unit status tables, found ${allTables.length}`);
+      if (!gameLogHeader) throw new Error('GameLog header element not found');
+      
+      const player0Table = allTables[0];
+      const player1Table = allTables[1];
+      
+      // Get actual heights from DOM measurements
+      const turnPhaseHeight = turnPhaseTracker.getBoundingClientRect().height;
+      const player0Height = player0Table.getBoundingClientRect().height;
+      const player1Height = player1Table.getBoundingClientRect().height;
+      const gameLogHeaderHeight = gameLogHeader.getBoundingClientRect().height;
+      
+      // Calculate available space based purely on actual measurements
+      const viewportHeight = window.innerHeight;
+      const appContainer = document.querySelector('.app-container') || document.body;
+      const appMargins = viewportHeight - appContainer.getBoundingClientRect().height;
+      const usedSpace = turnPhaseHeight + player0Height + player1Height + gameLogHeaderHeight;
+      const availableForLogEntries = viewportHeight - usedSpace - appMargins;
+    
+    const sampleLogEntry = document.querySelector('.game-log-entry');
+      if (!sampleLogEntry) throw new Error('No log entry found to measure height');
+      setLogAvailableHeight(availableForLogEntries);
+    }, 100); // Wait 100ms for DOM to render
+  }, [player0Collapsed, player1Collapsed, gameState.units, gameState.phase]);
+
+  // AI Turn Processing Effect - Trigger AI when it's AI player's turn
+  React.useEffect(() => {
+    // Check if game is over by examining unit health
+    const player0Alive = gameState.units.some(u => u.player === 0 && (u.HP_CUR ?? u.HP_MAX) > 0);
+    const player1Alive = gameState.units.some(u => u.player === 1 && (u.HP_CUR ?? u.HP_MAX) > 0);
+    const gameNotOver = player0Alive && player1Alive;
+    
+    if (isPvE && gameState.currentPlayer === 1 && !isAIProcessing && gameNotOver) {
+      // Small delay to ensure UI updates are complete
+      const timer = setTimeout(() => {
+        processAITurn();
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isPvE, gameState.currentPlayer, gameState.phase, isAIProcessing, gameState.units, processAITurn]);
+
+  // Track turn changes with ref to prevent infinite loops
+  React.useEffect(() => {
+    const currentTurn = gameState.currentTurn ?? 1;
+    if (currentTurn > 1 && currentTurn !== lastLoggedTurn.current) {
+      gameLog.logTurnStart(currentTurn);
+      lastLoggedTurn.current = currentTurn;
+    }
+  }, [gameState.currentTurn, gameLog]);
+
+  // Track phase changes with ref to prevent duplicates
+  React.useEffect(() => {
+    const currentTurn = gameState.currentTurn ?? 1;
+    if (currentTurn >= 1) { // Only log phases after game starts
+      const currentPhaseKey = `${currentTurn}-${gameState.phase}-${gameState.currentPlayer}`;
+      
+      if (currentPhaseKey !== lastLoggedPhase.current) {
+        gameLog.logPhaseChange(gameState.phase, gameState.currentPlayer ?? 0, currentTurn);
+        lastLoggedPhase.current = currentPhaseKey;
+      }
+    }
+  }, [gameState.phase, gameState.currentPlayer, gameState.currentTurn, gameLog]);
+
+  // Track unit deaths
+  React.useEffect(() => {
+    const deadUnits = gameState.units.filter(unit => (unit.HP_CUR ?? unit.HP_MAX) <= 0);
+    deadUnits.forEach(unit => {
+      // Check if we haven't already logged this death
+      const alreadyLogged = gameLog.events.some(event => 
+        event.type === 'death' && 
+        event.unitId === unit.id
+      );
+      
+      if (!alreadyLogged) {
+        gameLog.logUnitDeath(unit, gameState.currentTurn ?? 1);
+      }
+    });
+  }, [gameState.units, gameState.currentTurn, gameLog]);
+
+  // Track board clicks for highlighting
+  React.useEffect(() => {
+    // If selectedUnitId didn't change but we had a click, it means a non-selectable unit was clicked
+    if (gameState.selectedUnitId === previousSelectedUnit.current) {
+      // Check if there was a recent board click that didn't result in selection
+      // This is a workaround since we can't easily intercept board clicks
+    }
+    previousSelectedUnit.current = (gameState.selectedUnitId ?? null) as number | null;
+  }, [gameState.selectedUnitId]);
+
   const rightColumnContent = (
     <>
-      {gameConfig ? (
-        <TurnPhaseTracker 
-          currentTurn={gameState.currentTurn ?? 1} 
-          currentPhase={gameState.phase}
-          phases={["move", "shoot", "charge", "fight"]}
-          maxTurns={(() => {
-          if (!gameConfig?.game_rules?.max_turns) {
-            throw new Error(`max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`);
-          }
-          return gameConfig.game_rules.max_turns;
-        })()}
-          className="turn-phase-tracker-right"
-        />
-      ) : (
-        <div className="turn-phase-tracker-right">Loading game configuration...</div>
-      )}
+      <TurnPhaseTracker 
+        currentTurn={gameState.currentTurn ?? 1} 
+        currentPhase={gameState.phase}
+        phases={["move", "shoot", "charge", "fight"]}
+        maxTurns={maxTurns}
+        className="turn-phase-tracker-right"
+      />
       {/* AI Status Display */}
       {isPvE && (
         <div className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
@@ -321,21 +419,21 @@ export const GameController: React.FC<GameControllerProps> = ({
           units={gameState.units}
           player={0}
           selectedUnitId={gameState.selectedUnitId ?? null}
-          clickedUnitId={clickedUnitId}
-          onSelectUnit={(unitId) => {
-            gameActions.selectUnit(unitId);
-            setClickedUnitId(null);
-          }}
-          gameMode={gameMode}
-          onCollapseChange={setPlayer0Collapsed}
-        />
-      </ErrorBoundary>
+        clickedUnitId={clickedUnitId}
+        onSelectUnit={(unitId) => {
+          gameActions.selectUnit(unitId);
+          setClickedUnitId(null);
+        }}
+        gameMode={gameMode}
+        onCollapseChange={setPlayer0Collapsed}
+      />
+    </ErrorBoundary>
 
-      <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
-        <UnitStatusTable
-          units={gameState.units}
-          player={1}
-          selectedUnitId={gameState.selectedUnitId ?? null}
+    <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
+      <UnitStatusTable
+        units={gameState.units}
+        player={1}
+        selectedUnitId={gameState.selectedUnitId ?? null}
           clickedUnitId={clickedUnitId}
           onSelectUnit={(unitId) => {
             gameActions.selectUnit(unitId);

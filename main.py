@@ -118,8 +118,6 @@ def load_scenario_units(unit_definitions):
     if not os.path.exists(scenario_path):
         raise FileNotFoundError(f"Scenario file not found: {scenario_path}")
     
-    print(f"DEBUG: Loading scenario from {scenario_path}")
-    
     with open(scenario_path, 'r', encoding='utf-8') as f:
         scenario_data = json.load(f)
     

@@ -53,7 +53,6 @@ async function initializeUnitRegistry(): Promise<void> {
     }
     
     initialized = true;
-    console.log(`✅ Unit registry initialized with ${availableUnitTypes.length} units:`, availableUnitTypes);
     
   } catch (error) {
     console.error('❌ Failed to initialize unit registry:', error);
