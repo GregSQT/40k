@@ -44,6 +44,7 @@ interface UnitRendererProps {
   unitsFled?: number[];
   fightSubPhase?: FightSubPhase; // NEW
   fightActivePlayer?: PlayerId; // NEW
+  gameState?: any; // Add gameState property for active_shooting_unit access
   units: Unit[];
   chargeTargets: Unit[];
   fightTargets: Unit[];
@@ -498,8 +499,34 @@ export class UnitRenderer {
       }
     }
     
-    // Probability display for previewed targets
-    if (isTargetPreviewed && targetPreview) {
+    // Probability display for previewed targets (both individual and multi-unit)
+    if ((isTargetPreviewed && targetPreview) || (shouldBlink && shouldShowBlinkingHP)) {
+      let displayProbability = 0;
+      
+      if (isTargetPreviewed && targetPreview) {
+        displayProbability = targetPreview.overallProbability || 0;
+      } else if (shouldBlink) {
+        // Calculate probability for multi-unit blinking
+        const activeShooterId = this.props.gameState?.active_shooting_unit || this.props.selectedUnitId;
+        const activeShooter = this.props.units.find(u => u.id === activeShooterId);
+        
+        if (activeShooter && this.props.phase === "shoot") {
+          const hitProb = Math.max(0, (7 - (activeShooter.RNG_ATK || 4)) / 6);          
+          const strength = activeShooter.RNG_STR || 4;
+          const toughness = unit.T || 4;
+          let woundTarget = 4;
+          if (strength >= toughness * 2) woundTarget = 2;
+          else if (strength > toughness) woundTarget = 3;
+          else if (strength === toughness) woundTarget = 4;
+          else if (strength < toughness) woundTarget = 5;
+          else woundTarget = 6;
+          const woundProb = Math.max(0, (7 - woundTarget) / 6);          
+          const saveTarget = Math.max(2, Math.min((unit.ARMOR_SAVE || 5) - (activeShooter.RNG_AP || 0), unit.INVUL_SAVE || 7));
+          const saveFailProb = Math.max(0, (saveTarget - 1) / 6);        
+          displayProbability = hitProb * woundProb * saveFailProb;
+        }
+      }
+      
       const squareSize = 35;
       const squareX = centerX - squareSize/2;
       const squareY = finalBarY - squareSize - 8;
@@ -511,7 +538,7 @@ export class UnitRenderer {
       probBg.endFill();
       app.stage.addChild(probBg);
       
-      const probText = new PIXI.Text(`${Math.round((targetPreview.overallProbability || 0) * 100)}%`, {
+      const probText = new PIXI.Text(`${Math.round(displayProbability * 100)}%`, {
         fontSize: 12,
         fill: 0x00ff00,
         align: "center",

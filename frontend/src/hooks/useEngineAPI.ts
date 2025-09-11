@@ -194,7 +194,6 @@ export const useEngineAPI = () => {
                 ...prev,
                 blinkState: !prev.blinkState
               }));
-              console.log("🔥 BLINKING TICK for units:", unitIds);
             }, 500);
             
             setBlinkingUnits({unitIds, blinkTimer: timer, blinkState: false});
@@ -247,15 +246,21 @@ export const useEngineAPI = () => {
         MOVE: unit.MOVE,
         HP_MAX: unit.HP_MAX,
         HP_CUR: unit.HP_CUR,
+        T: unit.T,
+        ARMOR_SAVE: unit.ARMOR_SAVE,
+        INVUL_SAVE: unit.INVUL_SAVE,
         RNG_RNG: unit.RNG_RNG,
         RNG_DMG: unit.RNG_DMG,
         RNG_NB: unit.RNG_NB,
         RNG_ATK: unit.RNG_ATK,
+        RNG_STR: unit.RNG_STR,
+        RNG_AP: unit.RNG_AP,
         CC_DMG: unit.CC_DMG,
         CC_RNG: unit.CC_RNG,
         CC_NB: unit.CC_NB,
         CC_ATK: unit.CC_ATK,
         CC_STR: unit.CC_STR,
+        CC_AP: unit.CC_AP,
         ICON: unit.ICON,
         ICON_SCALE: unit.ICON_SCALE,
         SHOOT_LEFT: unit.SHOOT_LEFT,
@@ -636,9 +641,6 @@ onLogChargeRoll: () => {},
     isBlinkingActive: blinkingUnits.blinkTimer !== null,
     blinkState: blinkingUnits.blinkState,
   };
-  
-  // Debug: Log actual export values
-  console.log(`🔥 USEENGINEAPI EXPORT: unitIds=${JSON.stringify(blinkingUnits.unitIds)}, active=${blinkingUnits.blinkTimer !== null}, state=${blinkingUnits.blinkState}`);
   
   return returnObject;
 };
