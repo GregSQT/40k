@@ -106,6 +106,7 @@ export const useEngineAPI = () => {
 
   // Initialize game - FIXED: Added ref to prevent multiple calls
   const gameInitialized = useRef(false);
+  const lastShownLogs = useRef(new Set<string>());
   
   useEffect(() => {
     if (gameInitialized.current) {
@@ -165,21 +166,28 @@ export const useEngineAPI = () => {
       const data = await response.json();
       
       // DEBUG: Log full response structure to understand blinking data location
-      console.log("🔥 FULL RESPONSE DATA:", data);
-      console.log("🔥 data.result:", data.result);
-      console.log("🔥 data.result keys:", data.result ? Object.keys(data.result) : "No result");
       
         if (data.success) {
           // Auto-display Python console logs in browser (only during actions)
           if (data.game_state?.console_logs && data.game_state.console_logs.length > 0) {
-            data.game_state.console_logs.forEach((log: string) => console.log(`  ${log}`));
+            // Filter out logs we've already shown to prevent duplicates
+            const newLogs = data.game_state.console_logs.filter((log: string) => 
+              !lastShownLogs.current.has(log)
+            );
+            
+            if (newLogs.length > 0) {
+              newLogs.forEach((log: string) => {
+                console.log(`  ${log}`);
+                lastShownLogs.current.add(log);
+              });
+            }
+            
             // Clear logs from the data before setting state to prevent persistence
             data.game_state.console_logs = [];
           }
           
           // Process blinking data from backend
           if (data.result?.blinking_units && data.result?.start_blinking) {
-            console.log("🔥 PROCESSING BLINKING DATA:", data.result.blinking_units);
             
             // Clear any existing blinking timer
             if (blinkingUnits.blinkTimer) {

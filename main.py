@@ -151,9 +151,6 @@ def load_scenario_units(unit_definitions):
         }
         
         units.append(created_unit)
-        print(f"DEBUG: Loaded unit {scenario_unit['id']} ({unit_type}) at ({scenario_unit['col']}, {scenario_unit['row']})")
-    
-    print(f"DEBUG: Loaded {len(units)} units from scenario")
     return units
 
 def test_basic_functionality():

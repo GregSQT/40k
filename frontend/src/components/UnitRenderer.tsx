@@ -69,8 +69,8 @@ export class UnitRenderer {
     );
     
     existingBlinkContainers.forEach((container) => {
-      // Only cleanup containers that don't belong to current unit
-      if ((container as any).unitId && (container as any).unitId !== this.props.unit.id) {
+      // Only cleanup OLD containers that belong to current unit (prevent duplicates)
+      if ((container as any).unitId && (container as any).unitId === this.props.unit.id) {
         if ((container as any).cleanupBlink) {
           (container as any).cleanupBlink();
         }
@@ -384,8 +384,7 @@ export class UnitRenderer {
     const shouldBlink = this.props.isBlinkingActive && this.props.blinkingUnits?.includes(unit.id);
     
     // Use either individual target preview OR multi-unit blinking
-    const shouldShowBlinkingHP = isTargetPreviewed || shouldBlink;
-    
+    const shouldShowBlinkingHP = isTargetPreviewed || shouldBlink;    
     const finalBarWidth = shouldShowBlinkingHP ? HP_BAR_WIDTH * 2.5 : HP_BAR_WIDTH;
     const finalBarHeight = shouldShowBlinkingHP ? HP_BAR_HEIGHT * 2.5 : HP_BAR_HEIGHT;
     const finalBarX = shouldShowBlinkingHP ? centerX - finalBarWidth / 2 : barX;
@@ -449,9 +448,19 @@ export class UnitRenderer {
         
         // Highlight HP slice for damage preview
         const highlightSlice = new PIXI.Graphics();
-        // Only show damage (dark grey) for slices that would be lost to damage
-        const shooterDamage = targetPreview && units.find(u => u.id === targetPreview.shooterId)?.RNG_DMG || 0;
-        const wouldBeDamaged = i >= (displayHP - shooterDamage) && i < displayHP;
+        // Calculate damage for both targetPreview and multi-unit blinking
+        let shooterDamage = 0;
+        if (targetPreview) {
+          const previewShooter = units.find(u => u.id === targetPreview.shooterId);
+          shooterDamage = this.props.phase === 'fight' ? (previewShooter?.CC_DMG || 0) : (previewShooter?.RNG_DMG || 0);
+        } else if (shouldBlink) {
+          const activeShooterId = this.props.gameState?.active_shooting_unit || this.props.selectedUnitId;
+          const activeShooter = this.props.units.find(u => u.id === activeShooterId);
+          if (activeShooter) {
+            shooterDamage = this.props.phase === 'fight' ? (activeShooter.CC_DMG || 0) : (activeShooter.RNG_DMG || 0);
+          }
+        }
+        const wouldBeDamaged = i >= (currentHP - shooterDamage) && i < currentHP;
         const highlightColor = wouldBeDamaged ? 0x222222 : (unit.player === 0 ? 0x4da6ff : 0xff4d4d);
         highlightSlice.beginFill(highlightColor, 1);
         highlightSlice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
@@ -462,15 +471,29 @@ export class UnitRenderer {
         hpContainer.addChild(highlightSlice);
       }
       
-      // Use React state directly for blinking
-      const currentBlinkState = this.props.blinkState || false;
+      // Create continuous blinking animation with PIXI render forcing
+      let blinkState = false;
+      const blinkTicker = () => {
+        blinkState = !blinkState;
+        normalSlices.forEach(slice => {
+          slice.visible = !blinkState;
+        });
+        highlightSlices.forEach(slice => {
+          slice.visible = blinkState;
+        });
+        // Force PIXI to re-render the stage
+        app.renderer.render(app.stage);
+      };
       
-      normalSlices.forEach(slice => {
-        slice.visible = !currentBlinkState;
-      });
-      highlightSlices.forEach(slice => {
-        slice.visible = currentBlinkState;
-      });
+      // Start blinking immediately and set interval
+      const blinkInterval = setInterval(blinkTicker, 500);
+      
+      // Store cleanup function
+      (hpContainer as any).cleanupBlink = () => {
+        if (blinkInterval) {
+          clearInterval(blinkInterval);
+        }
+      };
       
       // Store cleanup function (no interval to clear)
       (hpContainer as any).cleanupBlink = () => {};

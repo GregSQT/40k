@@ -812,7 +812,6 @@ def _execute_while_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool,
         "blinking_units": valid_targets,
         "start_blinking": True
     }
-    print(f"🔥 BLINKING DATA SENT: blinking_units={valid_targets}, start_blinking=True")
     return True, response
 
 
