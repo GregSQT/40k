@@ -40,8 +40,12 @@ Uses specific error reporting format with TypeScript compiler output
 
 
 
+
+
 Shooting phase :
-Eligibility bug
+remove default pour probas
+Couleur de HP bar dans css (et couleur du blink preview aussi)
+
 
 Externalize end_activation fuction ?
 Check shooting LoS logic (cube ?)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ai/gym_interface.py - Minimal Translation Layer for W40KEngine
+ai/training/gym_interface.py - Minimal Translation Layer for W40KEngine
 
 PURPOSE: Enable training with existing ML libraries
 ARCHITECTURAL CONSTRAINT: Zero game logic, pure translation only
@@ -8,8 +8,18 @@ ARCHITECTURAL CONSTRAINT: Zero game logic, pure translation only
 
 import gymnasium as gym
 import numpy as np
+import sys
+import os
 from typing import Dict, Any, Tuple
-from ..engine.w40k_engine import W40KEngine
+
+# Fix import paths for your project structure
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(script_dir))
+sys.path.insert(0, project_root)
+
+from engine.w40k_engine import W40KEngine
+
+from engine.w40k_engine import W40KEngine
 
 
 class W40KGymEnv(gym.Env):

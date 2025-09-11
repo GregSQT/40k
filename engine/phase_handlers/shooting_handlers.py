@@ -23,37 +23,54 @@ def build_shoot_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     shoot_activation_pool = []
     
     for unit in game_state["units"]:
+        print(f"  Checking Unit {unit['id']} (Player {unit['player']}):")
+        
         # AI_TURN.md eligibility checks in exact order
         
         # unit.HP_CUR > 0?
+        print(f"    HP_CUR check: {unit['HP_CUR']} > 0")
         if unit["HP_CUR"] <= 0:
-            continue  # Dead unit (Skip, no log)
+            print(f"    Unit {unit['id']}: EXCLUDED - Dead (HP={unit['HP_CUR']})")
+            continue
         
         # unit.player === current_player?
+        print(f"    Player check: {unit['player']} === {current_player}")
         if unit["player"] != current_player:
-            continue  # Wrong player (Skip, no log)
+            print(f"    Unit {unit['id']}: EXCLUDED - Wrong player")
+            continue
         
         # units_fled.includes(unit.id)?
-        if unit["id"] in game_state["units_fled"]:
-            continue  # Fled unit (Skip, no log)
+        units_fled = game_state.get("units_fled", set())
+        print(f"    Fled check: {unit['id']} in {units_fled}")
+        if unit["id"] in units_fled:
+            print(f"    Unit {unit['id']}: EXCLUDED - Fled")
+            continue
         
         # Adjacent to enemy unit within CC_RNG?
+        print(f"    Adjacency check...")
         if _is_adjacent_to_enemy_within_cc_range(game_state, unit):
-            continue  # In fight (Skip, no log)
+            print(f"    Unit {unit['id']}: EXCLUDED - Adjacent to enemy (in fight)")
+            continue
+        print(f"    Unit {unit['id']}: Not adjacent to enemies")
         
         # unit.RNG_NB > 0?
-        if unit["RNG_NB"] <= 0:
-            continue  # No ranged weapon (Skip, no log)
+        rng_nb = unit.get("RNG_NB", 0)
+        print(f"    Ranged weapon check: RNG_NB={rng_nb}")
+        if rng_nb <= 0:
+            print(f"    Unit {unit['id']}: EXCLUDED - No ranged weapon")
+            continue
         
         # Has LOS to enemies within RNG_RNG?
+        print(f"    Starting LoS validation...")
         has_los = _has_los_to_enemies_within_range(game_state, unit)
-        print(f"    Unit {unit['id']}: LoS check = {has_los}")
+        print(f"    Unit {unit['id']}: LoS check result = {has_los}")
         if not has_los:
             print(f"    Unit {unit['id']}: EXCLUDED - No LoS to enemies within range")
-            continue  # No valid targets (Skip, no log)
+            continue
         print(f"    Unit {unit['id']}: LoS validation PASSED")
         
         # ALL conditions met → Add to shoot_activation_pool
+        print(f"    Unit {unit['id']}: ALL CHECKS PASSED - Adding to pool")
         shoot_activation_pool.append(unit["id"])
     
     # Update game_state pool
@@ -64,69 +81,206 @@ def build_shoot_activation_pool(game_state: Dict[str, Any]) -> List[str]:
 
 
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """Check if unit is adjacent to enemy within CC_RNG."""
-    cc_range = unit["CC_RNG"]
+    """
+    AI_TURN.md EXACT: Check if unit is adjacent to enemy within CC_RNG.
+    Uses proper hex distance calculation for accurate adjacency detection.
+    """
+    cc_range = unit.get("CC_RNG", 1)  # Default CC range if missing
     
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
+            # AI_TURN.md: Use proper hex distance calculation
+            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
             if distance <= cc_range:
+                print(f"    Unit {unit['id']}: EXCLUDED - Adjacent to enemy {enemy['id']} (distance={distance}, CC_RNG={cc_range})")
                 return True
     return False
 
 
 def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """Check if unit has LOS to any enemies within RNG_RNG."""
+    """
+    AI_TURN.md EXACT: Check if unit has LOS to any enemies within RNG_RNG.
+    Enhanced debugging to identify why units without LoS are being included.
+    """
     print(f"      LoS check for Unit {unit['id']} at ({unit['col']}, {unit['row']}):")
+    
+    # Validate required fields first
+    rng_rng = unit.get("RNG_RNG", 0)
+    print(f"      Unit {unit['id']} RNG_RNG: {rng_rng}")
+    if rng_rng <= 0:
+        print(f"      Unit {unit['id']}: EXCLUDED - Invalid RNG_RNG={rng_rng}")
+        return False
+    
     valid_targets = 0
+    print(f"      Checking enemies for Unit {unit['id']}:")
+    
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+            print(f"        Enemy {enemy['id']} at ({enemy['col']}, {enemy['row']}):")
+            
+            # Quick range check first using proper hex distance
+            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+            print(f"          Hex distance: {distance}, Max range: {rng_rng}")
+            
+            if distance > rng_rng:
+                print(f"          REJECTED: Out of range")
+                continue
+            
+            # Full target validation with detailed output
+            print(f"          Running full target validation...")
             is_valid = _is_valid_shooting_target(game_state, unit, enemy)
-            print(f"        Enemy {enemy['id']} at ({enemy['col']}, {enemy['row']}): valid={is_valid}")
+            print(f"          Target validation result: {is_valid}")
+            
             if is_valid:
                 valid_targets += 1
-    print(f"      Total valid targets for Unit {unit['id']}: {valid_targets}")
-    return valid_targets > 0
+                print(f"          VALID TARGET FOUND: {enemy['id']}")
+            else:
+                print(f"          Target {enemy['id']} REJECTED by validation")
+    
+    print(f"      Final result for Unit {unit['id']}: {valid_targets} valid targets")
+    los_result = valid_targets > 0
+    print(f"      Unit {unit['id']} LoS eligibility: {los_result}")
+    return los_result
 
 
 def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
-    """AI_TURN.md target validation: range + not adjacent + not friendly adjacent + LOS."""
+    """
+    AI_TURN.md EXACT: Target validation with proper hex distance calculations.
+    Validates: range + not adjacent + not friendly adjacent + line of sight.
+    """
     
-    # Range check
-    distance = max(abs(shooter["col"] - target["col"]), abs(shooter["row"] - target["row"]))
-    print(f"          Range check: distance={distance}, RNG_RNG={shooter['RNG_RNG']}")
-    if distance > shooter["RNG_RNG"]:
+    # Validate required fields
+    shooter_range = shooter.get("RNG_RNG", 0)
+    shooter_cc_range = shooter.get("CC_RNG", 1)
+    
+    if shooter_range <= 0:
+        print(f"          FAILED: Invalid shooter RNG_RNG={shooter_range}")
+        return False
+    
+    # Range check using proper hex distance
+    distance = _calculate_hex_distance(shooter["col"], shooter["row"], target["col"], target["row"])
+    print(f"          Range check: hex_distance={distance}, RNG_RNG={shooter_range}")
+    if distance > shooter_range:
         print(f"          FAILED: Out of range")
         return False
     
-    # NOT adjacent to shooter (within CC_RNG)
-    print(f"          Adjacency check: distance={distance}, CC_RNG={shooter['CC_RNG']}")
-    if distance <= shooter["CC_RNG"]:
-        print(f"          FAILED: Too close for shooting")
+    # NOT adjacent to shooter (within CC_RNG) - prevents close combat shooting
+    print(f"          Adjacency check: hex_distance={distance}, CC_RNG={shooter_cc_range}")
+    if distance <= shooter_cc_range:
+        print(f"          FAILED: Too close for shooting (in melee range)")
         return False
     
-    # NOT adjacent to any friendly units
+    # NOT adjacent to any friendly units (prevents friendly fire)
     for friendly in game_state["units"]:
         if (friendly["player"] == shooter["player"] and 
             friendly["HP_CUR"] > 0 and 
             friendly["id"] != shooter["id"]):
             
-            friendly_distance = max(abs(friendly["col"] - target["col"]), 
-                                  abs(friendly["row"] - target["row"]))
+            friendly_distance = _calculate_hex_distance(friendly["col"], friendly["row"], target["col"], target["row"])
             if friendly_distance <= 1:  # Adjacent to friendly
-                print(f"          FAILED: Target adjacent to friendly {friendly['id']}")
+                print(f"          FAILED: Target adjacent to friendly {friendly['id']} (distance={friendly_distance})")
                 return False
     
-    # Line of sight check
+    # Line of sight check with proper hex pathfinding
     has_los = _has_line_of_sight(game_state, shooter, target)
     print(f"          LoS check: {has_los}")
     return has_los
 
 
+def _calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
+    """
+    Calculate accurate hex distance using cube coordinates.
+    Converts offset coordinates to cube coordinates for proper distance calculation.
+    """
+    # Convert offset coordinates to cube coordinates
+    def offset_to_cube(col: int, row: int) -> Tuple[int, int, int]:
+        x = col - (row - (row & 1)) // 2
+        z = row
+        y = -x - z
+        return (x, y, z)
+    
+    # Calculate cube distance
+    def cube_distance(a: Tuple[int, int, int], b: Tuple[int, int, int]) -> int:
+        return (abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2])) // 2
+    
+    cube1 = offset_to_cube(col1, row1)
+    cube2 = offset_to_cube(col2, row2)
+    return cube_distance(cube1, cube2)
+
+
 def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
-    """Line of sight check with accurate hex pathfinding."""
+    """
+    AI_TURN.md EXACT: Line of sight check with proper hex pathfinding.
+    Fixed to get wall data from multiple possible sources.
+    """
     start_col, start_row = shooter["col"], shooter["row"]
     end_col, end_row = target["col"], target["row"]
+    
+    print(f"            LoS check from ({start_col},{start_row}) to ({end_col},{end_row})")
+    
+    # Try multiple sources for wall hexes
+    wall_hexes_data = []
+    
+    # Source 1: Direct in game_state
+    if "wall_hexes" in game_state:
+        wall_hexes_data = game_state["wall_hexes"]
+        print(f"            Found wall_hexes in game_state: {wall_hexes_data}")
+    
+    # Source 2: In board configuration within game_state
+    elif "board" in game_state and "wall_hexes" in game_state["board"]:
+        wall_hexes_data = game_state["board"]["wall_hexes"]
+        print(f"            Found wall_hexes in game_state.board: {wall_hexes_data}")
+    
+    # Source 3: Check if walls exist in board config (fallback pattern)
+    elif hasattr(game_state, 'get') and game_state.get("board_config", {}).get("wall_hexes"):
+        wall_hexes_data = game_state["board_config"]["wall_hexes"]
+        print(f"            Found wall_hexes in board_config: {wall_hexes_data}")
+    
+    else:
+        print(f"            No wall data found in any location - assuming clear LoS")
+        print(f"            Available keys in game_state: {list(game_state.keys()) if isinstance(game_state, dict) else 'not dict'}")
+        return True  # No walls = clear line of sight
+    
+    if not wall_hexes_data:
+        print(f"            Wall data empty - clear LoS")
+        return True
+    
+    # Convert wall_hexes to set for fast lookup
+    wall_hexes = set()
+    for wall_hex in wall_hexes_data:
+        if isinstance(wall_hex, (list, tuple)) and len(wall_hex) >= 2:
+            wall_hexes.add((wall_hex[0], wall_hex[1]))
+        else:
+            print(f"            Invalid wall hex format: {wall_hex}")
+    
+    print(f"            Processed wall hexes: {wall_hexes}")
+    
+    try:
+        hex_path = _get_accurate_hex_line(start_col, start_row, end_col, end_row)
+        print(f"            Hex path: {hex_path}")
+        
+        # Check if any hex in path is a wall (excluding start and end)
+        blocked = False
+        for i, (col, row) in enumerate(hex_path):
+            # Skip start and end hexes
+            if i == 0 or i == len(hex_path) - 1:
+                continue
+            
+            print(f"            Checking path hex ({col},{row}) against walls")
+            if (col, row) in wall_hexes:
+                print(f"            LoS BLOCKED by wall at ({col}, {row})")
+                blocked = True
+                break
+        
+        if not blocked:
+            print(f"            LoS CLEAR - no wall interference")
+        
+        return not blocked
+        
+    except Exception as e:
+        print(f"            LoS calculation error: {e}")
+        # Default to blocked if calculation fails
+        return False
     
     if not game_state["wall_hexes"]:
         return True
@@ -268,11 +422,13 @@ def handle_target_selection(game_state: Dict[str, Any], unit_id: str, target_id:
     else:
         # First click or different target - start blinking animation
         unit["selected_target_id"] = target_id
-        return {
-            "action": "target_selected",
+        response = {
+            "action": "target_selected", 
             "targetId": target_id,
             "startBlinking": True
         }
+        print(f"🔥 BLINKING RESPONSE: {response}")
+        return response
 
 
 def execute_shot(game_state: Dict[str, Any], unit_id: str, target_id: str) -> Dict[str, Any]:
@@ -288,10 +444,10 @@ def execute_shot(game_state: Dict[str, Any], unit_id: str, target_id: str) -> Di
     # Execute attack_sequence(RNG)
     shot_result = _execute_attack_sequence_rng(unit, target)
     
-    # AI_TURN.md tracking updates
+    # AI_TURN.md tracking updates - Document 6 simplified
     unit["SHOOT_LEFT"] -= 1
     unit["TOTAL_ATTACK_LOG"] += f"Shot at {target.get('name', target['id'])}; "
-    unit["selected_target_id"] = None  # Clear selection
+    # Document 6: No selected_target_id to clear
     
     # Remove dead targets from valid_target_pool
     if target["HP_CUR"] <= 0:
@@ -557,6 +713,13 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     return eligible_units
 
 
+def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> str:
+    """Determine current shooting context for nested behavior."""
+    if unit.get("selected_target_id"):
+        return "target_selected"
+    else:
+        return "no_target_selected"
+
 def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_TURN.md EXACT: Context-aware action routing with nested state machine
@@ -605,15 +768,6 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         
     else:
         return False, {"error": "invalid_action_for_shooting_phase", "action": action_type}
-
-
-def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> str:
-    """Determine current shooting context for nested behavior."""
-    if unit.get("selected_target_id"):
-        return "target_selected"
-    else:
-        return "no_target_selected"
-
 
 def _execute_while_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool, Dict[str, Any]]:
     """

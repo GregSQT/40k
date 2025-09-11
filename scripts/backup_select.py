@@ -38,10 +38,19 @@ else:
 ######################################################################################################
 ##### ai files
 ######################################################################################################
+    
+    ### ai/
+        "ai/game_replay_logger.py",
+        "ai/multi_agent_trainer.py",
+        "ai/scenario_manager.py",
+        "ai/train.py",
+        "ai/unit_registry.py",
 
-    ### ai
-        "ai/gym_interface.py",          # Gym wrapper for training
-        "ai/train_w40k.py",              # Training script
+    ### ai/training
+        "ai/training/evaluator.py",
+        "ai/training/gym_interface.py",
+        "ai/training/orchestrator.py",
+        "ai/training/train_w40k.py",
 
 ######################################################################################################
 ##### config files

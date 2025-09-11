@@ -355,7 +355,6 @@ export default function Board({
       onMoveCharger: stableCallbacks.current.onMoveCharger,
       onStartMovePreview: onStartMovePreview,
       onDirectMove: (unitId: number | string, col: number | string, row: number | string) => {
-        console.log("🎯 BoardPvp onDirectMove wrapper called:", { unitId, col, row });
         onDirectMove(unitId, col, row);
       },
     });

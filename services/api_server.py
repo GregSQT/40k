@@ -143,8 +143,21 @@ def execute_action():
         if not data:
             return jsonify({"success": False, "error": "No JSON data provided"}), 400
         
-        # Extract complete action dictionary (not just the action field)
-        action = data  # Use the entire request data as the action
+        # DEBUG: Log what frontend is sending
+        print(f"🔍 FRONTEND DATA: {data}")
+        print(f"🔍 DATA KEYS: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+        
+        # Convert frontend hex click to engine semantic action format
+        if "col" in data and "row" in data and "selectedUnitId" in data:
+            action = {
+                "action": "move",
+                "unitId": str(data["selectedUnitId"]),
+                "destCol": data["col"],
+                "destRow": data["row"]
+            }
+        else:
+            action = data  # Pass through already formatted actions
+        
         if not action:
             return jsonify({"success": False, "error": "No action provided"}), 400
         
@@ -192,8 +205,8 @@ def execute_action():
                 # No active unit - this shouldn't happen in shooting phase
                 success, result = False, {"error": "no_active_shooting_unit", "action": action_type}
         else:
-            # Other phases use engine
-            success, result = engine.step(action)
+            # Other phases use engine semantic action processing
+            success, result = engine.execute_semantic_action(action)
         
         # Convert sets to lists for JSON serialization
         serializable_state = dict(engine.game_state)

@@ -1,7 +1,7 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview, FightSubPhase, PlayerId } from "../types/game";
-import { areUnitsAdjacent, isUnitInRange, hasLineOfSight, offsetToCube, cubeDistance } from '../utils/gameHelpers';
+import { areUnitsAdjacent, offsetToCube, cubeDistance } from '../utils/gameHelpers';
 
 interface UnitRendererProps {
   unit: Unit;
@@ -62,11 +62,14 @@ export class UnitRenderer {
       child => child.name === 'hp-blink-container'
     );
     
-    existingBlinkContainers.forEach(container => {
-      if ((container as any).cleanupBlink) {
-        (container as any).cleanupBlink();
+    existingBlinkContainers.forEach((container) => {
+      // Only cleanup containers that don't belong to current unit
+      if ((container as any).unitId && (container as any).unitId !== this.props.unit.id) {
+        if ((container as any).cleanupBlink) {
+          (container as any).cleanupBlink();
+        }
+        container.destroy({ children: true });
       }
-      container.destroy({ children: true });
     });
   }
   
@@ -74,17 +77,8 @@ export class UnitRenderer {
     // Clean up any existing blink intervals before rendering new ones
     this.cleanupExistingBlinkIntervals();
     
-    const {
-      unit, centerX, centerY, app, isPreview = false, previewType,
-      boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
-      HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
-      SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-      phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked,
-      units, chargeTargets, fightTargets, targetPreview,
-      onConfirmMove, parseColor
-    } = this.props;
-    
-    const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
+    const { unit } = this.props;
+    const unitIconScale = unit.ICON_SCALE || this.props.ICON_SCALE;
     
     // ===== Z-INDEX CALCULATIONS =====
     const unitZIndexRange = 149;
@@ -266,7 +260,7 @@ export class UnitRenderer {
   }
   
   private renderUnitIcon(iconZIndex: number): void {
-    const { unit, centerX, centerY, app, isPreview, previewType, HEX_RADIUS, UNIT_TEXT_SIZE,
+    const { unit, centerX, centerY, app, isPreview, previewType, HEX_RADIUS,
              ICON_SCALE, phase, currentPlayer, units, onConfirmMove } = this.props;
     
     const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
@@ -318,10 +312,10 @@ export class UnitRenderer {
   }
   
   private renderTextFallback(iconZIndex: number): void {
-    const { unit, centerX, centerY, app, UNIT_TEXT_SIZE } = this.props;
+    const { unit, centerX, centerY, app } = this.props;
     
     const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
-      fontSize: UNIT_TEXT_SIZE,
+      fontSize: this.props.UNIT_TEXT_SIZE,
       fill: 0xffffff,
       align: "center",
       fontWeight: "bold",
@@ -367,8 +361,8 @@ export class UnitRenderer {
   }
   
   private renderHPBar(unitIconScale: number): void {
-    const { unit, centerX, centerY, app, isPreview, HEX_RADIUS, HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT,
-             targetPreview, units, boardConfig, parseColor, mode } = this.props;
+    const { unit, centerX, centerY, app, targetPreview, units, boardConfig, parseColor, mode,
+             HEX_RADIUS, HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT } = this.props;
     
     if (!unit.HP_MAX) return; // Only skip if no HP_MAX, not if isPreview
     
@@ -378,7 +372,7 @@ export class UnitRenderer {
     const barY = centerY - scaledYOffset - HP_BAR_HEIGHT;
     
     // Check if this unit is being previewed for shooting
-    const isTargetPreviewed = mode === "targetPreview" && targetPreview && targetPreview.targetId === unit.id;
+    const isTargetPreviewed = (mode === "targetPreview" || mode === "attackPreview") && targetPreview && targetPreview.targetId === unit.id;
     const finalBarWidth = isTargetPreviewed ? HP_BAR_WIDTH * 2.5 : HP_BAR_WIDTH;
     const finalBarHeight = isTargetPreviewed ? HP_BAR_HEIGHT * 2.5 : HP_BAR_HEIGHT;
     const finalBarX = isTargetPreviewed ? centerX - finalBarWidth / 2 : barX;
@@ -423,6 +417,7 @@ export class UnitRenderer {
       const hpContainer = new PIXI.Container();
       hpContainer.name = 'hp-blink-container';
       hpContainer.zIndex = 350;
+      (hpContainer as any).unitId = unit.id; // Tag container with unit ID
       
       // Create normal HP slices
       const normalSlices: PIXI.Graphics[] = [];
@@ -435,29 +430,34 @@ export class UnitRenderer {
         normalSlice.beginFill(normalColor, 1);
         normalSlice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
         normalSlice.endFill();
+        normalSlice.zIndex = 360; // Above background
         normalSlices.push(normalSlice);
         hpContainer.addChild(normalSlice);
         
-        // Highlight HP slice (red/yellow for damage preview)
+        // Highlight HP slice for damage preview
         const highlightSlice = new PIXI.Graphics();
-        const highlightColor = i < displayHP ? 0xFF4444 : 0xFFAA00; // Red for current HP, yellow for damage
+        // Only show damage (dark grey) for slices that would be lost to damage
+        const shooterDamage = targetPreview && units.find(u => u.id === targetPreview.shooterId)?.RNG_DMG || 0;
+        const wouldBeDamaged = i >= (displayHP - shooterDamage) && i < displayHP;
+        const highlightColor = wouldBeDamaged ? 0x222222 : (unit.player === 0 ? 0x4da6ff : 0xff4d4d);
         highlightSlice.beginFill(highlightColor, 1);
         highlightSlice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
         highlightSlice.endFill();
         highlightSlice.visible = false; // Start hidden
+        highlightSlice.zIndex = 360; // Above background
         highlightSlices.push(highlightSlice);
         hpContainer.addChild(highlightSlice);
       }
       
-      // Animate blinking every 300ms
+      // Animate blinking every 500ms
       let blinkState = false;
       const blinkInterval = setInterval(() => {
         blinkState = !blinkState;
         normalSlices.forEach(slice => slice.visible = !blinkState);
         highlightSlices.forEach(slice => slice.visible = blinkState);
-      }, 300);
+      }, 500);
       
-      // Store interval for cleanup using PIXI-compatible approach
+      // Store interval for cleanup
       (hpContainer as any).blinkInterval = blinkInterval;
       app.stage.addChild(hpContainer);
       
@@ -495,7 +495,7 @@ export class UnitRenderer {
       probBg.endFill();
       app.stage.addChild(probBg);
       
-      const probText = new PIXI.Text(`${Math.round(targetPreview.overallProbability)}%`, {
+      const probText = new PIXI.Text(`${Math.round((targetPreview.overallProbability || 0) * 100)}%`, {
         fontSize: 12,
         fill: 0x00ff00,
         align: "center",
@@ -508,7 +508,7 @@ export class UnitRenderer {
   }
   
   private renderShootingCounter(unitIconScale: number): void {
-    const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled, mode, selectedUnitId, isEligible } = this.props;
+    const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled, isEligible } = this.props;
     
     if (phase !== 'shoot' || unit.player !== currentPlayer) return;
     

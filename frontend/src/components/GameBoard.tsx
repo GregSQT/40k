@@ -72,7 +72,6 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
   };
 
   const handleDirectMove = (unitId: number | string, col: number | string, row: number | string) => {
-    console.log("GameBoard handleDirectMove called:", { unitId, col, row });
     
     const numUnitId = typeof unitId === 'string' ? parseInt(unitId, 10) : unitId;
     const numCol = typeof col === 'string' ? parseInt(col, 10) : col;

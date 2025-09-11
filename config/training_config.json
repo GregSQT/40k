@@ -188,8 +188,8 @@
 
   "debug": {
     "description": "Proportional training: number_of_turns_per_episode (10) × max_steps_per_episode (100) × total_episodes (100) = 100,000 timesteps",
-    "total_episodes": 10,
-    "max_turns_per_episode": 5,
+    "total_episodes": 2,
+    "max_turns_per_episode": 8,
     "max_steps_per_turn": 50,
     "eval_episodes": 1,
     "max_concurrent_sessions": 4,

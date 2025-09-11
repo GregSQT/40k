@@ -25,15 +25,24 @@ interface APIGameState {
     HP_CUR: number;
     HP_MAX: number;
     MOVE: number;
+    T: number;
+    ARMOR_SAVE: number;
+    INVUL_SAVE: number;
     RNG_RNG: number;
     RNG_DMG: number;
     RNG_NB: number;
     RNG_ATK: number;
+    RNG_STR: number;
+    RNG_AP: number;
     CC_DMG: number;
     CC_RNG?: number;
     CC_NB: number;
     CC_ATK: number;
     CC_STR: number;
+    CC_AP: number;
+    LD: number;
+    OC: number;
+    VALUE: number;
     ICON: string;
     ICON_SCALE?: number;
     unitType: string;
@@ -72,7 +81,20 @@ export const useEngineAPI = () => {
   const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
   const [mode, setMode] = useState<"select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview">("select");
   const [movePreview, setMovePreview] = useState<{ unitId: number; destCol: number; destRow: number } | null>(null);
-  const [targetPreview, setTargetPreview] = useState<{shooterId: number, targetId: number} | null>(null);
+  const [targetPreview, setTargetPreview] = useState<{
+  shooterId: number;
+  targetId: number;
+  currentBlinkStep?: number;
+  totalBlinkSteps?: number;
+  blinkTimer?: number | null;
+  hitProbability?: number;
+  woundProbability?: number;
+  saveProbability?: number;
+  overallProbability?: number;
+  potentialDamage?: number;
+  expectedDamage?: number;
+  lastUpdate?: number;
+} | null>(null);
   
   // Load config values
   useEffect(() => {
@@ -119,15 +141,10 @@ export const useEngineAPI = () => {
 
   // Execute action via API
   const executeAction = useCallback(async (action: any) => {
-    console.log("🎯 executeAction called with:", action);
-    console.log("🎯 gameState exists:", !!gameState);
     
     if (!gameState) {
-      console.log("🎯 executeAction EARLY RETURN: gameState is null");
       return;
     }
-    
-    console.log("🎯 executeAction proceeding to fetch...");
     
     try {
       const requestId = Date.now();
@@ -146,7 +163,6 @@ export const useEngineAPI = () => {
         if (data.success) {
           // Auto-display Python console logs in browser (only during actions)
           if (data.game_state?.console_logs && data.game_state.console_logs.length > 0) {
-            console.log("🎮 W40K ENGINE LOGS:");
             data.game_state.console_logs.forEach((log: string) => console.log(`  ${log}`));
             // Clear logs from the data before setting state to prevent persistence
             data.game_state.console_logs = [];
@@ -319,7 +335,6 @@ export const useEngineAPI = () => {
   }, []);
 
   const handleDirectMove = useCallback(async (unitId: number | string, col: number | string, row: number | string) => {
-    console.log("🎯 handleDirectMove called:", { unitId, col, row });
     
     const action = {
       action: "move",
@@ -328,10 +343,7 @@ export const useEngineAPI = () => {
       destRow: typeof row === 'string' ? parseInt(row) : row,
     };
     
-    console.log("🎯 Action to send:", action);
-    
     try {
-      console.log("🎯 Calling executeAction...");
       await executeAction(action);
       setMovePreview(null);
       setMode("select");
@@ -370,12 +382,87 @@ export const useEngineAPI = () => {
   }, [handleRightClick, executeAction]);
 
   const handleStartTargetPreview = useCallback((shooterId: number | string, targetId: number | string) => {
-    setTargetPreview({
-      shooterId: typeof shooterId === 'number' ? shooterId : parseInt(shooterId),
-      targetId: typeof targetId === 'number' ? targetId : parseInt(targetId)
-    });
+    const numericShooterId = typeof shooterId === 'number' ? shooterId : parseInt(shooterId);
+    const numericTargetId = typeof targetId === 'number' ? targetId : parseInt(targetId);
+    
+    // Calculate actual probabilities using game units
+    const shooter = gameState?.units.find(u => parseInt(u.id) === numericShooterId);
+    const target = gameState?.units.find(u => parseInt(u.id) === numericTargetId);
+    
+    let hitProbability = 0.5;
+    let woundProbability = 0.5;
+    let saveProbability = 0.5;
+    let potentialDamage = 0;
+    
+    if (shooter && target) {
+      // Calculate hit probability (need 7 - RNG_ATK or higher on d6)
+      const hitTarget = 7 - shooter.RNG_ATK;
+      hitProbability = Math.max(0, (7 - hitTarget) / 6);
+      
+      // Calculate wound probability based on STR vs T
+      const strength = shooter.RNG_STR;
+      const toughness = target.T;
+      let woundTarget = 4; // Default
+      
+      if (strength >= toughness * 2) woundTarget = 2;
+      else if (strength > toughness) woundTarget = 3;
+      else if (strength === toughness) woundTarget = 4;
+      else if (strength * 2 <= toughness) woundTarget = 6;
+      else woundTarget = 5;
+      
+      woundProbability = Math.max(0, (7 - woundTarget) / 6);
+      
+      // Calculate save probability (save succeeds if roll >= save target)
+      const saveTarget = Math.max(2, Math.min(target.ARMOR_SAVE - shooter.RNG_AP, target.INVUL_SAVE));
+      saveProbability = Math.max(0, (saveTarget - 1) / 6);
+      
+      // Potential damage per shot
+      potentialDamage = shooter.RNG_DMG;
+    }
+    
+    const overallProbability = hitProbability * woundProbability * (1 - saveProbability);
+    const expectedDamage = overallProbability * potentialDamage;
+    
+    // Create target preview with blinking animation
+    const preview = {
+      shooterId: numericShooterId,
+      targetId: numericTargetId,
+      currentBlinkStep: 0,
+      totalBlinkSteps: 2,
+      blinkTimer: null as number | null,
+      hitProbability,
+      woundProbability,
+      saveProbability,
+      overallProbability,
+      potentialDamage,
+      expectedDamage
+    };
+    
+    // Start blinking animation with functional state updates
+    preview.blinkTimer = window.setInterval(() => {
+      setTargetPreview(prevPreview => {
+        if (!prevPreview) return null;
+        const newStep = ((prevPreview.currentBlinkStep || 0) + 1) % (prevPreview.totalBlinkSteps || 2);
+        return {
+          ...prevPreview,
+          currentBlinkStep: newStep,
+          lastUpdate: Date.now()
+        };
+      });
+    }, 500);
+    
+    setTargetPreview(preview);
     setMode("targetPreview");
-  }, []);
+  }, [gameState]);
+
+  // Cleanup interval when targetPreview changes or component unmounts
+  useEffect(() => {
+    return () => {
+      if (targetPreview?.blinkTimer) {
+        clearInterval(targetPreview.blinkTimer);
+      }
+    };
+  }, [targetPreview?.blinkTimer]);
 
   // Get eligible units
   const getEligibleUnitIds = useCallback((): number[] => {
@@ -474,7 +561,6 @@ export const useEngineAPI = () => {
     onSkipUnit: handleSkipUnit,
     onStartMovePreview: handleStartMovePreview,
     onDirectMove: (unitId: number | string, col: number | string, row: number | string) => {
-      console.log("🎯 useEngineAPI onDirectMove called:", { unitId, col, row });
       return handleDirectMove(unitId, col, row);
     },
     onStartAttackPreview: (unitId: number) => {

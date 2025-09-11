@@ -7,13 +7,8 @@ import HomePage from "./pages/HomePage";
 //import ReplayPage from "./pages/ReplayPage";
 import { BoardWithAPI } from "./components/BoardWithAPI";
 
-export default function App() {
-  console.log('🔍 ROUTES.TSX IS LOADING');
-  console.log('🔍 Current URL on load:', window.location.href);
-  
+export default function App() {  
   React.useEffect(() => {
-    console.log('🔍 Routes.tsx current path:', window.location.pathname);
-    console.log('🔍 Should render BoardWithAPI for /game route');
   }, []);
   
   return (

@@ -56,7 +56,7 @@ export const GameController: React.FC<GameControllerProps> = ({
           if (scenarioData.units) {
             
             // Transform scenario data using UnitFactory.createUnit()
-            const transformedUnits = scenarioData.units.map((unit: any, index: number) => {
+            const transformedUnits = scenarioData.units.map((unit: any, _index: number) => {
               return createUnit({
                 id: unit.id,
                 name: `${unit.unit_type}-${unit.id}`,

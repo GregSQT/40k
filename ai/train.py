@@ -1,0 +1,1790 @@
+﻿# ai/train.py
+#!/usr/bin/env python3
+"""
+ai/train.py - Main training script following AI_INSTRUCTIONS.md exactly
+"""
+
+import os
+import sys
+import argparse
+import subprocess
+import json
+import glob
+import shutil
+from pathlib import Path
+
+# Fix import paths - Add both script dir and project root
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, script_dir)
+sys.path.insert(0, project_root)
+from ai.unit_registry import UnitRegistry
+sys.path.insert(0, project_root)
+
+# Import standard DQN - action masking implemented manually in gym environment
+from stable_baselines3 import DQN
+MASKABLE_DQN_AVAILABLE = False
+
+from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
+from stable_baselines3.common.monitor import Monitor
+# Multi-agent orchestration imports
+from ai.scenario_manager import ScenarioManager
+from ai.multi_agent_trainer import MultiAgentTrainer
+from config_loader import get_config_loader
+from ai.game_replay_logger import GameReplayIntegration
+import torch
+import time  # Add time import for StepLogger timestamps
+
+
+class EpisodeTerminationCallback(BaseCallback):
+    """Callback to terminate training after exact episode count."""
+    
+    def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0):
+        super().__init__(verbose)
+        if max_episodes <= 0:
+            raise ValueError("max_episodes must be positive - no defaults allowed")
+        if expected_timesteps <= 0:
+            raise ValueError("expected_timesteps must be positive - no defaults allowed")
+        self.max_episodes = max_episodes
+        self.expected_timesteps = expected_timesteps
+        self.episode_count = 0
+        self.step_count = 0
+        
+    def _on_step(self) -> bool:
+        self.step_count += 1
+        
+        # Episode-based progress display for AI_TURN.md compliance
+        if self.step_count % 10 == 0:
+            episode_progress_pct = min(100, (self.episode_count / self.max_episodes) * 100)
+            print(f"🎮 Episode Progress: {episode_progress_pct:.1f}% ({self.episode_count}/{self.max_episodes} episodes)")
+            if hasattr(self, 'model') and hasattr(self.model, 'num_timesteps'):
+                step_progress_pct = min(100, (self.model.num_timesteps / self.expected_timesteps) * 100)
+                print(f"🔍 Step Progress: {step_progress_pct:.1f}% ({self.model.num_timesteps}/{self.expected_timesteps} steps)")
+        
+    def _on_step(self) -> bool:
+        self.step_count += 1
+        
+        # Debug: Print every 100 steps to see if callback is working
+        if self.step_count % 100 == 0:
+            print(f"🔍 Callback alive: Step {self.step_count}")
+        
+        # Try multiple ways to detect episode end for DummyVecEnv
+        episode_ended = False
+        
+        # Method 1: Check self.locals for dones
+        if hasattr(self, 'locals') and 'dones' in self.locals:
+            if any(self.locals['dones']):
+                episode_ended = True
+                print(f"🎯 Episode end detected via locals.dones")
+        
+        # Method 2: Check infos for episode termination  
+        if hasattr(self, 'locals') and 'infos' in self.locals:
+            for info in self.locals['infos']:
+                if info.get('episode', False):
+                    episode_ended = True
+                    print(f"🎯 Episode end detected via infos")
+                    break
+        
+        # Method 3: Check training environment directly
+        if hasattr(self, 'training_env') and hasattr(self.training_env, 'get_attr'):
+            try:
+                # Get episode count from environment if available
+                env_episodes = self.training_env.get_attr('episode_count')
+                if env_episodes and env_episodes[0] > self.episode_count:
+                    episode_ended = True
+                    print(f"🎯 Episode end detected via env.episode_count")
+            except:
+                pass
+        
+        if episode_ended:
+            self.episode_count += 1
+            episode_progress_pct = (self.episode_count / self.max_episodes) * 100
+            print(f"✅ Episode {self.episode_count}/{self.max_episodes} completed ({episode_progress_pct:.1f}%)")
+            
+            # Stop training if max episodes reached
+            if self.episode_count >= self.max_episodes:
+                print(f"🛑 TRAINING STOPPED: {self.max_episodes} episodes completed (100%)")
+                return False
+                
+        return True
+
+
+class StepLogger:
+    """
+    Step-by-step action logger for training debugging.
+    Captures ALL actions that generate step increments per AI_TURN.md.
+    """
+    
+    def __init__(self, output_file="train_step.log", enabled=False):
+        self.output_file = output_file
+        self.enabled = enabled
+        self.step_count = 0
+        self.action_count = 0
+        
+        if self.enabled:
+            # Clear existing log file
+            with open(self.output_file, 'w') as f:
+                f.write("=== STEP-BY-STEP ACTION LOG ===\n")
+                f.write("AI_TURN.md COMPLIANCE: Actions that increment episode_steps are logged\n")
+                f.write("STEP INCREMENT ACTIONS: move, shoot, charge, combat, wait (SUCCESS OR FAILURE)\n")
+                f.write("NO STEP INCREMENT: auto-skip ineligible units, phase transitions\n")
+                f.write("FAILED ACTIONS: Still increment steps - unit consumed time/effort\n")
+                f.write("=" * 80 + "\n\n")
+            print(f"📝 Step logging enabled: {self.output_file}")
+    
+    def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None):
+        """Log action with step increment information using clear format"""
+        if not self.enabled:
+            return
+            
+        self.action_count += 1
+        if step_increment:
+            self.step_count += 1
+            
+        try:
+            with open(self.output_file, 'a') as f:
+                timestamp = time.strftime("%H:%M:%S", time.localtime())
+                
+                # Enhanced format: [timestamp] TX(col, row) PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
+                step_status = "STEP: YES" if step_increment else "STEP: NO"
+                success_status = "SUCCESS" if success else "FAILED"
+                phase_upper = phase.upper()
+                
+                # Format message using gameLogUtils.ts style
+                message = self._format_replay_style_message(unit_id, action_type, action_details)
+                
+                # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
+                step_status = "STEP: YES" if step_increment else "STEP: NO"
+                success_status = "SUCCESS" if success else "FAILED"
+                phase_upper = phase.upper()
+                
+                # Get turn from SINGLE SOURCE OF TRUTH
+                turn_number = action_details.get('current_turn', 1) if action_details else 1
+                f.write(f"[{timestamp}] T{turn_number} P{player} {phase_upper} : {message} [{success_status}] [{step_status}]\n")
+                
+        except Exception as e:
+            print(f"⚠️ Step logging error: {e}")
+    
+    def log_episode_start(self, units_data, scenario_info=None):
+        """Log episode start with all unit starting positions"""
+        if not self.enabled:
+            return
+            
+        try:
+            with open(self.output_file, 'a') as f:
+                timestamp = time.strftime("%H:%M:%S", time.localtime())
+                f.write(f"\n[{timestamp}] === EPISODE START ===\n")
+                
+                if scenario_info:
+                    f.write(f"[{timestamp}] Scenario: {scenario_info}\n")
+                
+                # Log all unit starting positions
+                for unit in units_data:
+                    if "id" not in unit:
+                        raise KeyError("Unit missing required 'id' field")
+                    if "col" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'col' field")
+                    if "row" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'row' field")
+                    if "player" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'player' field")
+                    if "name" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'name' field")
+                        
+                    player_name = f"P{unit['player']}"
+                    f.write(f"[{timestamp}] Unit {unit['id']} ({unit['name']}) {player_name}: Starting position ({unit['col']}, {unit['row']})\n")
+                
+                f.write(f"[{timestamp}] === ACTIONS START ===\n")
+                
+        except Exception as e:
+            print(f"⚠️ Episode start logging error: {e}")
+    
+    def _format_replay_style_message(self, unit_id, action_type, details):
+        """Format messages with detailed combat info - enhanced replay format"""
+        # Extract unit coordinates from action_details for consistent format
+        unit_coords = ""
+        if details and "unit_with_coords" in details:
+            # Extract coordinates from format "3(12, 7)" -> "(12, 7)"
+            coords_part = details["unit_with_coords"]
+            if "(" in coords_part:
+                coord_start = coords_part.find("(")
+                unit_coords = coords_part[coord_start:]
+        
+        if action_type == "move" and details:
+            # Extract position info for move message
+            if "start_pos" in details and "end_pos" in details:
+                start_col, start_row = details["start_pos"]
+                end_col, end_row = details["end_pos"]
+                return f"Unit {unit_id}{unit_coords} MOVED from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+            elif "col" in details and "row" in details:
+                # Use destination coordinates from mirror_action
+                return f"Unit {unit_id}{unit_coords} MOVED to ({details['col']}, {details['row']})"
+            else:
+                raise KeyError("Move action missing required position data")
+                
+        elif action_type == "shoot":
+            if "target_id" not in details:
+                raise KeyError("Shoot action missing required target_id")
+            if "hit_roll" not in details:
+                raise KeyError("Shoot action missing required hit_roll")
+            if "wound_roll" not in details:
+                raise KeyError("Shoot action missing required wound_roll")
+            if "save_roll" not in details:
+                raise KeyError("Shoot action missing required save_roll")
+            if "damage_dealt" not in details:
+                raise KeyError("Shoot action missing required damage_dealt")
+            if "hit_result" not in details:
+                raise KeyError("Shoot action missing required hit_result")
+            if "wound_result" not in details:
+                raise KeyError("Shoot action missing required wound_result")
+            if "save_result" not in details:
+                raise KeyError("Shoot action missing required save_result")
+            if "hit_target" not in details:
+                raise KeyError("Shoot action missing required hit_target")
+            if "wound_target" not in details:
+                raise KeyError("Shoot action missing required wound_target")
+            if "save_target" not in details:
+                raise KeyError("Shoot action missing required save_target")
+            
+            target_id = details["target_id"]
+            hit_roll = details["hit_roll"]
+            wound_roll = details["wound_roll"]
+            save_roll = details["save_roll"]
+            damage = details["damage_dealt"]
+            hit_result = details["hit_result"]
+            wound_result = details["wound_result"]
+            save_result = details["save_result"]
+            
+            hit_target = details["hit_target"]
+            wound_target = details["wound_target"]
+            save_target = details["save_target"]
+            
+            base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}"
+            detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+            return base_msg + detail_msg
+            
+        elif action_type == "shoot_individual":
+            # Individual shot within multi-shot sequence
+            if "target_id" not in details:
+                raise KeyError("Individual shot missing required target_id")
+            if "shot_number" not in details or "total_shots" not in details:
+                raise KeyError("Individual shot missing required shot_number or total_shots")
+                
+            target_id = details["target_id"]
+            shot_num = details["shot_number"]
+            total_shots = details["total_shots"]
+            
+            # Check if this shot actually fired (hit_roll > 0 means it was attempted)
+            if details.get("hit_roll") > 0:
+                hit_roll = details["hit_roll"]
+                wound_roll = details["wound_roll"]
+                save_roll = details["save_roll"]
+                damage = details["damage_dealt"]
+                hit_result = details["hit_result"]
+                wound_result = details["wound_result"]
+                save_result = details["save_result"]
+                hit_target = details["hit_target"]
+                wound_target = details["wound_target"]
+                save_target = details["save_target"]
+                
+                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id} (Shot {shot_num}/{total_shots})"
+                if hit_result == "MISS":
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}(MISS)"
+                elif wound_result == "FAIL":
+                    # Failed wound - stop progression, don't show save/damage
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}(FAIL)"
+                else:
+                    # Successful wound - show full progression
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+                return base_msg + detail_msg
+            else:
+                return f"Unit {unit_id}{unit_coords} SHOT at unit {target_id} (Shot {shot_num}/{total_shots}) - MISS"
+                
+        elif action_type == "shoot_summary":
+            # Summary of multi-shot sequence
+            if "target_id" not in details:
+                raise KeyError("Shoot summary missing required target_id")
+            if "total_shots" not in details or "total_damage" not in details:
+                raise KeyError("Shoot summary missing required total_shots or total_damage")
+                
+            target_id = details["target_id"]
+            total_shots = details["total_shots"]
+            total_damage = details["total_damage"]
+            hits = details.get("hits")
+            wounds = details.get("wounds")
+            failed_saves = details.get("failed_saves")
+            
+            return f"Unit {unit_id}{unit_coords} SHOOTING COMPLETE at unit {target_id} - {total_shots} shots, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
+            
+        elif action_type == "charge" and details:
+            if "target_id" in details:
+                target_id = details["target_id"]
+                if "start_pos" in details and "end_pos" in details:
+                    start_col, start_row = details["start_pos"]
+                    end_col, end_row = details["end_pos"]
+                    # Remove unit names, keep only IDs per your request
+                    return f"Unit {unit_id}{unit_coords} CHARGED unit {target_id} from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+                else:
+                    return f"Unit {unit_id}{unit_coords} CHARGED unit {target_id}"
+            else:
+                return f"Unit {unit_id}{unit_coords} CHARGED"
+                
+        elif action_type == "combat":
+            if "target_id" not in details:
+                return f"Unit {unit_id}{unit_coords} FOUGHT (no target data)"
+            
+            target_id = details["target_id"]
+            
+            # Check if all required dice data is present - if not, return simple message
+            required_fields = ["hit_roll", "wound_roll", "save_roll", "damage_dealt", "hit_result", "wound_result", "save_result", "hit_target", "wound_target", "save_target"]
+            if not all(field in details for field in required_fields):
+                return f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (dice data incomplete)"
+            
+            # All dice data present - format detailed message
+            hit_roll = details["hit_roll"]
+            wound_roll = details["wound_roll"]
+            save_roll = details["save_roll"]
+            damage = details["damage_dealt"]
+            hit_result = details["hit_result"]
+            wound_result = details["wound_result"]
+            save_result = details["save_result"]
+            hit_target = details["hit_target"]
+            wound_target = details["wound_target"]
+            save_target = details["save_target"]
+            
+            base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id}"
+            
+            # Apply truncation logic like shooting phase - stop after first failure
+            detail_parts = [f"Hit:{hit_target}+:{hit_roll}({hit_result})"]
+            
+            # Only show wound if hit succeeded
+            if hit_result == "HIT":
+                detail_parts.append(f"Wound:{wound_target}+:{wound_roll}({wound_result})")
+                
+                # Only show save if wound succeeded  
+                if wound_result == "WOUND":
+                    detail_parts.append(f"Save:{save_target}+:{save_roll}({save_result})")
+                    
+                    # Only show damage if save failed (damage > 0)
+                    if damage > 0:
+                        detail_parts.append(f"Dmg:{damage}HP")
+            
+            detail_msg = f" - {' '.join(detail_parts)}"
+            return base_msg + detail_msg
+            
+        elif action_type == "wait":
+            return f"Unit {unit_id}{unit_coords} WAIT"
+            
+        elif action_type == "combat_individual":
+            # Individual attack within multi-attack sequence
+            if "target_id" not in details:
+                raise KeyError("Individual attack missing required target_id")
+            if "attack_number" not in details or "total_attacks" not in details:
+                raise KeyError("Individual attack missing required attack_number or total_attacks")
+                
+            target_id = details["target_id"]
+            attack_num = details["attack_number"]
+            total_attacks = details["total_attacks"]
+            
+            # Check if this attack actually happened (hit_roll > 0 means it was attempted)
+            if details.get("hit_roll") > 0:
+                hit_roll = details["hit_roll"]
+                wound_roll = details["wound_roll"]
+                save_roll = details["save_roll"]
+                damage = details["damage_dealt"]
+                hit_result = details["hit_result"]
+                wound_result = details["wound_result"]
+                save_result = details["save_result"]
+                hit_target = details["hit_target"]
+                wound_target = details["wound_target"]
+                save_target = details["save_target"]
+                
+                base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks})"
+                if hit_result == "MISS":
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}(MISS)"
+                elif wound_result == "FAIL":
+                    # Failed wound - stop progression, don't show save/damage
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}(FAIL)"
+                else:
+                    # Successful wound - show full progression
+                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+                return base_msg + detail_msg
+            else:
+                return f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks}) - MISS"
+                
+        elif action_type == "combat_summary":
+            # Summary of multi-attack sequence
+            if "target_id" not in details:
+                raise KeyError("Combat summary missing required target_id")
+            if "total_attacks" not in details or "total_damage" not in details:
+                raise KeyError("Combat summary missing required total_attacks or total_damage")
+                
+            target_id = details["target_id"]
+            total_attacks = details["total_attacks"]
+            total_damage = details["total_damage"]
+            hits = details.get("hits")
+            wounds = details.get("wounds")
+            failed_saves = details.get("failed_saves")
+            
+            return f"Unit {unit_id}{unit_coords} COMBAT COMPLETE at unit {target_id} - {total_attacks} attacks, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
+            
+        else:
+            raise ValueError(f"Unknown action_type '{action_type}' - no fallback allowed")
+    
+    def log_phase_transition(self, from_phase, to_phase, player, turn_number=1):
+        """Log phase transitions (no step increment) using simplified format"""
+        if not self.enabled:
+            return
+            
+        try:
+            with open(self.output_file, 'a') as f:
+                timestamp = time.strftime("%H:%M:%S", time.localtime())
+                # Clearer format: [timestamp] TX PX PHASE phase Start
+                phase_upper = to_phase.upper()
+                f.write(f"[{timestamp}] T{turn_number} P{player} {phase_upper} phase Start\n")
+        except Exception as e:
+            print(f"⚠️ Step logging error: {e}")
+    
+    def log_episode_end(self, total_episodes_steps, winner):
+        """Log episode completion summary using replay-style format"""
+        if not self.enabled:
+            return
+            
+        try:
+            with open(self.output_file, 'a') as f:
+                timestamp = time.strftime("%H:%M:%S", time.localtime())
+                f.write(f"[{timestamp}] EPISODE END: Winner={winner}, Actions={self.action_count}, Steps={self.step_count}, Total={total_episodes_steps}\n")
+                f.write("=" * 80 + "\n")
+        except Exception as e:
+            print(f"⚠️ Step logging error: {e}")
+
+
+# Global step logger instance
+step_logger = None
+
+class SelectiveEvalCallback(EvalCallback):
+    """Custom evaluation callback that saves best/worst/shortest episode replays."""
+    
+    def __init__(self, *args, output_dir="ai/event_log", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.output_dir = output_dir
+        self.episodes_data = []
+        os.makedirs(output_dir, exist_ok=True)
+    
+    def _on_step(self) -> bool:
+        """Override to capture episode data during evaluation."""
+        continue_training = super()._on_step()
+        
+        # Only save replays after all evaluation episodes are complete
+        if self.n_calls % self.eval_freq == 0 and hasattr(self.eval_env, 'replay_logger'):
+            self._save_selective_replays()
+        
+        return continue_training
+    
+    def _save_selective_replays(self):
+        """Save best/worst/shortest replays from evaluation episodes per specification."""
+        # Access SelectiveEpisodeTracker for proper best/worst/shortest selection
+        if not hasattr(self.eval_env, 'episode_tracker'):
+            raise RuntimeError("Environment missing required episode_tracker for replay selection")
+        if not self.eval_env.episode_tracker:
+            raise RuntimeError("Environment episode_tracker is None")
+        
+        self.eval_env.episode_tracker.save_selective_replays(self.output_dir)
+
+def check_gpu_availability():
+    """Check and display GPU availability for training."""
+    print("\n🔍 GPU AVAILABILITY CHECK")
+    print("=" * 30)
+    
+    if torch.cuda.is_available():
+        device_count = torch.cuda.device_count()
+        current_device = torch.cuda.current_device()
+        device_name = torch.cuda.get_device_name(current_device)
+        memory_gb = torch.cuda.get_device_properties(current_device).total_memory / 1024**3
+        
+        print(f"✅ CUDA Available: YES")
+        print(f"📊 GPU Devices: {device_count}")
+        print(f"🎯 Current Device: {current_device} ({device_name})")
+        print(f"💾 GPU Memory: {memory_gb:.1f} GB")
+        print(f"🚀 PyTorch CUDA Version: {torch.version.cuda}")
+        
+        # Force PyTorch to use GPU for Stable-Baselines3
+        torch.cuda.set_device(current_device)
+        
+        return True
+    else:
+        print(f"❌ CUDA Available: NO")
+        print(f"⚠️  Training will use CPU (much slower)")
+        print(f"💡 Install CUDA-enabled PyTorch: pip install torch --index-url https://download.pytorch.org/whl/cu118")
+        
+        return False
+
+def setup_imports():
+    """Set up import paths and return required modules."""
+    try:
+        # AI_TURN.md COMPLIANCE: Use compliant engine with gym interface
+        from engine.w40k_engine import W40KEngine
+        
+        # Compatibility function for training system
+        def register_environment():
+            """No registration needed for direct engine usage"""
+            pass
+            
+        return W40KEngine, register_environment
+    except ImportError as e:
+        raise ImportError(f"AI_TURN.md: w40k_engine import failed: {e}")
+
+def create_model(config, training_config_name, rewards_config_name, new_model, append_training, args):
+    """Create or load DQN model with configuration following AI_INSTRUCTIONS.md."""
+    
+    # Check GPU availability
+    gpu_available = check_gpu_availability()
+    
+    # Load training configuration from config files (not script parameters)
+    training_config = config.load_training_config(training_config_name)
+    model_params = training_config["model_params"]
+    
+    # Import environment
+    W40KEnv, register_environment = setup_imports()
+    
+    # Register environment
+    register_environment()
+    
+    # Create environment with specified rewards config
+    # ensure scenario.json exists in config/
+    cfg = get_config_loader()
+    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+    if not os.path.isfile(scenario_file):
+        raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
+    # Load unit registry for environment creation
+    from ai.unit_registry import UnitRegistry
+    unit_registry = UnitRegistry()
+    
+    base_env = W40KEnv(
+        rewards_config=rewards_config_name,
+        training_config_name=training_config_name,
+        controlled_agent=None,
+        active_agents=None,
+        scenario_file=scenario_file,
+        unit_registry=unit_registry,
+        quiet=False
+    )
+    
+    # Connect step logger after environment creation - compliant engine compatibility
+    if step_logger:
+        # Connect StepLogger directly to compliant W40KEngine
+        base_env.step_logger = step_logger
+        print("✅ StepLogger connected to compliant W40KEngine")
+    
+    # Enable replay logging for replay generation modes only
+    if args.replay or args.convert_steplog:
+        # Use same pattern as evaluate.py for working icon movement
+        base_env.is_evaluation_mode = True
+        base_env._force_evaluation_mode = True
+        enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
+        if hasattr(enhanced_env, 'replay_logger') and enhanced_env.replay_logger:
+            enhanced_env.replay_logger.is_evaluation_mode = True
+            enhanced_env.replay_logger.capture_initial_state()
+        env = Monitor(enhanced_env)
+    else:
+        # DISABLED: No logging during training for speed
+        env = Monitor(base_env)
+    
+    model_path = config.get_model_path()
+    
+    # Set device for model creation
+    device = "cuda" if gpu_available else "cpu"
+    model_params["device"] = device
+    
+    # Determine whether to create new model or load existing
+    if new_model or not os.path.exists(model_path):
+        print(f"🆕 Creating new model on {device.upper()}...")
+        print("✅ Using DQN with manual action masking in gym environment")
+        model = DQN(env=env, **model_params)
+    elif append_training:
+        print(f"📁 Loading existing model for continued training: {model_path}")
+        try:
+            model = DQN.load(model_path, env=env, device=device)
+            # Update any model parameters that might have changed
+            model.tensorboard_log = model_params["tensorboard_log"]
+            model.verbose = model_params["verbose"]
+        except Exception as e:
+            print(f"⚠️ Failed to load model: {e}")
+            print("🆕 Creating new model instead...")
+            model = DQN(env=env, **model_params)
+    else:
+        print(f"📁 Loading existing model: {model_path}")
+        try:
+            model = DQN.load(model_path, env=env, device=device)
+        except Exception as e:
+            print(f"⚠️ Failed to load model: {e}")
+            print("🆕 Creating new model instead...")
+            model = DQN(env=env, **model_params)
+    
+    return model, env, training_config
+
+def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default", 
+                            agent_key=None, new_model=False, append_training=False):
+    """Create or load DQN model for specific agent with configuration following AI_INSTRUCTIONS.md."""
+    
+    # Check GPU availability
+    gpu_available = check_gpu_availability()
+    
+    # Load training configuration from config files (not script parameters)
+    training_config = config.load_training_config(training_config_name)
+    model_params = training_config["model_params"]
+    
+    # Import environment
+    W40KEnv, register_environment = setup_imports()
+    
+    # Register environment
+    register_environment()
+    
+    # Create agent-specific environment
+    cfg = get_config_loader()
+    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+    if not os.path.isfile(scenario_file):
+        raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
+    # Load unit registry for multi-agent environment
+    from ai.unit_registry import UnitRegistry
+    unit_registry = UnitRegistry()
+    
+    base_env = W40KEnv(
+        rewards_config=rewards_config_name,
+        training_config_name=training_config_name,
+        controlled_agent=agent_key,
+        active_agents=None,
+        scenario_file=scenario_file,
+        unit_registry=unit_registry,
+        quiet=False
+    )
+    
+    # Connect step logger after environment creation - compliant engine compatibility
+    if step_logger:
+        # Connect StepLogger directly to compliant W40KEngine
+        base_env.step_logger = step_logger
+        print("✅ StepLogger connected to compliant W40KEngine")
+    
+    # DISABLED: No logging during training for speed
+    # Enhanced logging only during evaluation
+    env = Monitor(base_env)
+    
+    # Agent-specific model path
+    model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
+    
+    # Set device for model creation
+    device = "cuda" if gpu_available else "cpu"
+    model_params["device"] = device
+    
+    # Determine whether to create new model or load existing
+    if new_model or not os.path.exists(model_path):
+        print(f"🆕 Creating new model for {agent_key} on {device.upper()}...")
+        model = DQN(env=env, **model_params)
+    elif append_training:
+        print(f"📁 Loading existing model for continued training: {model_path}")
+        try:
+            model = DQN.load(model_path, env=env, device=device)
+            if "tensorboard_log" not in model_params:
+                raise KeyError("model_params missing required 'tensorboard_log' field")
+            model.tensorboard_log = model_params["tensorboard_log"]
+            model.verbose = model_params["verbose"]
+        except Exception as e:
+            print(f"⚠️ Failed to load model: {e}")
+            print("🆕 Creating new model instead...")
+            model = DQN(env=env, **model_params)
+    else:
+        print(f"📁 Loading existing model: {model_path}")
+        try:
+            model = DQN.load(model_path, env=env, device=device)
+        except Exception as e:
+            print(f"⚠️ Failed to load model: {e}")
+            print("🆕 Creating new model instead...")
+            model = DQN(env=env, **model_params)
+    
+    return model, env, training_config, model_path
+
+def setup_callbacks(config, model_path, training_config, training_config_name="default"):
+    W40KEnv, _ = setup_imports()
+    callbacks = []
+    
+    # Add episode termination callback for debug config - NO FALLBACKS
+    if training_config_name == "debug":
+        if "total_episodes" not in training_config:
+            raise KeyError(f"Debug training config missing required 'total_episodes'")
+        if "max_turns_per_episode" not in training_config:
+            raise KeyError(f"Debug training config missing required 'max_turns_per_episode'")
+        if "max_steps_per_turn" not in training_config:
+            raise KeyError(f"Debug training config missing required 'max_steps_per_turn'")
+        
+        max_episodes = training_config["total_episodes"]
+        max_steps_per_episode = training_config["max_turns_per_episode"] * training_config["max_steps_per_turn"]
+        expected_timesteps = max_episodes * max_steps_per_episode
+        episode_callback = EpisodeTerminationCallback(max_episodes, expected_timesteps, verbose=1)
+        callbacks.append(episode_callback)
+    
+    # Evaluation callback - test model periodically with logging enabled
+    # Load scenario and unit registry for evaluation callback
+    from ai.unit_registry import UnitRegistry
+    cfg = get_config_loader()
+    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+    unit_registry = UnitRegistry()
+    
+    base_eval_env = W40KEnv(
+        rewards_config="default",
+        training_config_name=training_config_name,
+        controlled_agent=None,
+        active_agents=None,
+        scenario_file=scenario_file,
+        unit_registry=unit_registry,
+        quiet=True
+    )
+    
+    # Enable logging ONLY for evaluation
+    enhanced_eval_env = GameReplayIntegration.enhance_training_env(base_eval_env)
+    eval_env = Monitor(enhanced_eval_env)
+    eval_env.replay_logger = enhanced_eval_env.replay_logger
+    # Handle different config formats - calculate missing fields from available data
+    if 'eval_freq' in training_config:
+        eval_freq = training_config['eval_freq']
+    else:
+        # Debug config uses total_episodes - calculate eval_freq
+        total_episodes = training_config['total_episodes']
+        max_steps = training_config['max_turns_per_episode'] * training_config['max_steps_per_turn']
+        eval_freq = total_episodes * max_steps // 2  # Evaluate halfway through
+    
+    if 'total_timesteps' in training_config:
+        total_timesteps = training_config['total_timesteps']
+    else:
+        # Debug config uses total_episodes and max_steps_per_episode
+        total_episodes = training_config['total_episodes']
+        max_steps = training_config['max_turns_per_episode'] * training_config['max_steps_per_turn']
+        total_timesteps = total_episodes * max_steps
+    
+    # VALIDATION: Prevent deadlock when eval_freq >= total_timesteps
+    if eval_freq >= total_timesteps:
+        raise ValueError(f"eval_freq ({eval_freq}) must be less than total_timesteps ({total_timesteps}). "
+                        f"This prevents evaluation callback deadlock. "
+                        f"Either increase total_timesteps or decrease eval_freq to {total_timesteps // 2}.")
+    
+    # Get callback parameters from config with defaults
+    if "callback_params" not in training_config:
+        raise KeyError("Training config missing required 'callback_params' field")
+    callback_params = training_config["callback_params"]
+    
+    # Skip evaluation callback for debug config to prevent hanging
+    if training_config_name != "debug":
+        required_callback_fields = ["eval_deterministic", "eval_render", "n_eval_episodes"]
+        for field in required_callback_fields:
+            if field not in callback_params:
+                raise KeyError(f"callback_params missing required '{field}' field")
+                
+        eval_callback = SelectiveEvalCallback(
+            eval_env,
+            best_model_save_path=os.path.dirname(model_path),
+            log_path=os.path.dirname(model_path),
+            eval_freq=eval_freq,
+            deterministic=callback_params["eval_deterministic"],
+            render=callback_params["eval_render"],
+            n_eval_episodes=callback_params["n_eval_episodes"],
+            output_dir="ai/event_log"
+        )
+        callbacks.append(eval_callback)
+    
+    # Checkpoint callback - save model periodically
+    # Use reasonable checkpoint frequency based on total timesteps and config
+    if "checkpoint_save_freq" not in callback_params:
+        raise KeyError("callback_params missing required 'checkpoint_save_freq' field")
+    if "checkpoint_name_prefix" not in callback_params:
+        raise KeyError("callback_params missing required 'checkpoint_name_prefix' field")
+        
+    checkpoint_callback = CheckpointCallback(
+        save_freq=callback_params["checkpoint_save_freq"],
+        save_path=os.path.dirname(model_path),
+        name_prefix=callback_params["checkpoint_name_prefix"]
+    )
+    callbacks.append(checkpoint_callback)
+    
+    return callbacks
+
+def train_model(model, training_config, callbacks, model_path):
+    """Execute the training process."""
+    
+    try:
+        # Start training
+        # AI_TURN COMPLIANCE: Use episode-based training
+        if 'total_timesteps' in training_config:
+            total_timesteps = training_config['total_timesteps']
+            print(f"🎯 Training Mode: Step-based ({total_timesteps:,} steps)")
+        elif 'total_episodes' in training_config:
+            total_episodes = training_config['total_episodes']
+            # Calculate timesteps based on required config values - NO DEFAULTS ALLOWED
+            if "max_turns_per_episode" not in training_config:
+                raise KeyError(f"Training config missing required 'max_turns_per_episode' field")
+            if "max_steps_per_turn" not in training_config:
+                raise KeyError(f"Training config missing required 'max_steps_per_turn' field")
+            max_turns_per_episode = training_config["max_turns_per_episode"]
+            max_steps_per_turn = training_config["max_steps_per_turn"]
+            total_timesteps = total_episodes * max_turns_per_episode * max_steps_per_turn
+            print(f"🎮 Training Mode: Episode-based ({total_episodes:,} episodes = {total_timesteps:,} steps)")
+        else:
+            raise ValueError("Training config must have either 'total_timesteps' or 'total_episodes'")
+        
+        print(f"📊 Progress tracking: Episodes are primary metric (AI_TURN.md compliance)")
+        
+        model.learn(
+            total_timesteps=total_timesteps,
+            callback=callbacks,
+            log_interval=100,
+            progress_bar=True
+        )
+        
+        # Save final model
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        model.save(model_path)
+        return True
+        
+    except KeyboardInterrupt:
+        print("\n⏹️ Training interrupted by user")
+        # Save current progress
+        interrupted_path = model_path.replace('.zip', '_interrupted.zip')
+        model.save(interrupted_path)
+        print(f"💾 Progress saved to: {interrupted_path}")
+        return False
+        
+    except Exception as e:
+        print(f"❌ Training failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def test_trained_model(model, num_episodes, training_config_name="default"):
+    """Test the trained model."""
+    
+    W40KEnv, _ = setup_imports()
+    # Load scenario and unit registry for testing
+    from ai.unit_registry import UnitRegistry
+    cfg = get_config_loader()
+    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+    unit_registry = UnitRegistry()
+    
+    env = W40KEnv(
+        rewards_config="default",
+        training_config_name=training_config_name,
+        controlled_agent=None,
+        active_agents=None,
+        scenario_file=scenario_file,
+        unit_registry=unit_registry,
+        quiet=True
+    )
+    wins = 0
+    total_rewards = []
+    
+    for episode in range(num_episodes):
+        obs, info = env.reset()
+        episode_reward = 0
+        done = False
+        step_count = 0
+        
+        while not done and step_count < 1000:  # Prevent infinite loops
+            action, _ = model.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = env.step(action)
+            episode_reward += reward
+            done = terminated or truncated
+            step_count += 1
+        
+        total_rewards.append(episode_reward)
+        
+        if info['winner'] == 1:  # AI won
+            wins += 1
+    
+    if num_episodes <= 0:
+            raise ValueError("num_episodes must be positive - no default episodes allowed")
+    
+    win_rate = wins / num_episodes
+    avg_reward = sum(total_rewards) / len(total_rewards)
+    
+    print(f"\n📊 Test Results:")
+    print(f"   Win Rate: {win_rate:.1%} ({wins}/{num_episodes})")
+    print(f"   Average Reward: {avg_reward:.2f}")
+    print(f"   Reward Range: {min(total_rewards):.2f} to {max(total_rewards):.2f}")
+    
+    env.close()
+    return win_rate, avg_reward
+
+def test_scenario_manager_integration():
+    """Test scenario manager integration."""
+    print("🧪 Testing Scenario Manager Integration")
+    print("=" * 50)
+    
+    try:
+        config = get_config_loader()
+        
+        # Test unit registry integration
+        unit_registry = UnitRegistry()
+        
+        # Test scenario manager
+        scenario_manager = ScenarioManager(config, unit_registry)
+        print(f"✅ ScenarioManager initialized with {len(scenario_manager.get_available_templates())} templates")
+        agents = unit_registry.get_required_models()
+        print(f"✅ UnitRegistry found {len(agents)} agents: {agents}")
+        
+        # Test scenario generation
+        if len(agents) >= 2:
+            template_name = scenario_manager.get_available_templates()[0]
+            scenario = scenario_manager.generate_training_scenario(
+                template_name, agents[0], agents[1]
+            )
+            print(f"✅ Generated scenario with {len(scenario['units'])} units")
+        
+        # Test training rotation
+        rotation = scenario_manager.get_balanced_training_rotation(100)
+        print(f"✅ Generated training rotation with {len(rotation)} matchups")
+        
+        print("🎉 Scenario manager integration tests passed!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Integration test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def start_multi_agent_orchestration(config, total_episodes: int, training_config_name: str = "default",
+                                   rewards_config_name: str = "default", max_concurrent: int = None,
+                                   training_phase: str = None):
+    """Start multi-agent orchestration training with optional phase specification."""
+    
+    try:
+        trainer = MultiAgentTrainer(config, max_concurrent_sessions=max_concurrent)
+        results = trainer.start_balanced_training(
+            total_episodes=total_episodes,
+            training_config_name=training_config_name,
+            rewards_config_name=rewards_config_name,
+            training_phase=training_phase
+        )
+        
+        print(f"✅ Orchestration completed: {results['total_matchups']} matchups")
+        return results
+        
+    except Exception as e:
+        print(f"❌ Orchestration failed: {e}")
+        return None
+
+def extract_scenario_name_for_replay():
+    """Extract scenario name for replay filename from scenario template name."""
+    # Check if generate_steplog_and_replay stored template name
+    if hasattr(extract_scenario_name_for_replay, '_current_template_name') and extract_scenario_name_for_replay._current_template_name:
+        return extract_scenario_name_for_replay._current_template_name
+    
+    # Check if convert_to_replay_format detected template name
+    if hasattr(convert_to_replay_format, '_detected_template_name') and convert_to_replay_format._detected_template_name:
+        return convert_to_replay_format._detected_template_name
+    
+    # Fallback: use scenario from filename if template not available
+    return "scenario"   
+
+def convert_steplog_to_replay(steplog_path):
+    """Convert existing steplog file to replay JSON format."""
+    import re
+    from datetime import datetime
+    
+    if not os.path.exists(steplog_path):
+        raise FileNotFoundError(f"Steplog file not found: {steplog_path}")
+    
+    print(f"🔄 Converting steplog: {steplog_path}")
+    
+    # Parse steplog file
+    steplog_data = parse_steplog_file(steplog_path)
+    
+    # Convert to replay format
+    replay_data = convert_to_replay_format(steplog_data)
+    
+    # Generate output filename with scenario name
+    scenario_name = extract_scenario_name_for_replay()
+    output_file = f"ai/event_log/replay_{scenario_name}.json"
+    
+    # Ensure output directory exists
+    os.makedirs("ai/event_log", exist_ok=True)
+    
+    # Save replay file
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(replay_data, f, indent=2, ensure_ascii=False)
+    
+    print(f"✅ Conversion complete: {output_file}")
+    print(f"   📊 {len(replay_data.get('combat_log', []))} combat log entries")
+    print(f"   🎯 {len(replay_data.get('game_states', []))} game state snapshots")
+    print(f"   🎮 {replay_data.get('game_info', {}).get('total_turns', 0)} turns")
+    
+    return True
+
+def generate_steplog_and_replay(config, args):
+    """Generate steplog AND convert to replay in one command - the perfect workflow!"""
+    from datetime import datetime
+    
+    print("🎮 W40K Replay Generator - One-Shot Workflow")
+    print("=" * 50)
+    
+    try:
+        # Step 1: Enable step logging temporarily
+        temp_steplog = "temp_steplog_for_replay.log"
+        temp_step_logger = StepLogger(temp_steplog, enabled=True)
+        original_step_logger = globals().get('step_logger')
+        globals()['step_logger'] = temp_step_logger
+        
+        # Step 2: Load model for testing
+        print("🎯 Loading model for steplog generation...")
+        
+        # Use explicit model path if provided, otherwise use config default
+        if args.model:
+            model_path = args.model
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Specified model not found: {model_path}")
+        else:
+            model_path = config.get_model_path()
+            if not os.path.exists(model_path):
+                # List available models for user guidance
+                models_dir = os.path.dirname(model_path)
+                if os.path.exists(models_dir):
+                    available_models = [f for f in os.listdir(models_dir) if f.endswith('.zip')]
+                    if available_models:
+                        raise FileNotFoundError(f"Default model not found: {model_path}\nAvailable models in {models_dir}: {available_models}\nUse --model to specify a model file")
+                    else:
+                        raise FileNotFoundError(f"Default model not found: {model_path}\nNo models found in {models_dir}")
+                else:
+                    raise FileNotFoundError(f"Default model not found: {model_path}\nModels directory does not exist: {models_dir}")
+        
+        W40KEnv, _ = setup_imports()
+        from ai.unit_registry import UnitRegistry
+        from ai.scenario_manager import ScenarioManager
+        unit_registry = UnitRegistry()
+        
+        # Generate dynamic scenario using ScenarioManager
+        scenario_manager = ScenarioManager(config, unit_registry)
+        available_templates = scenario_manager.get_available_templates()
+        
+        if not available_templates:
+            raise RuntimeError("No scenario templates available")
+        
+        # Select template from argument or find compatible one
+        if hasattr(args, 'scenario_template') and args.scenario_template:
+            if args.scenario_template not in available_templates:
+                raise ValueError(f"Scenario template '{args.scenario_template}' not found. Available templates: {available_templates}")
+            template_name = args.scenario_template
+        else:
+            # Extract agent from model filename for template matching
+            agent_name = "Bot"
+            if args.model:
+                model_filename = os.path.basename(args.model)
+                if model_filename.startswith('model_') and model_filename.endswith('.zip'):
+                    agent_name = model_filename[6:-4]  # SpaceMarine_Infantry_Troop_RangedSwar
+            
+            # Find compatible template for this agent
+            compatible_template = None
+            for template in available_templates:
+                try:
+                    template_info = scenario_manager.get_template_info(template)
+                    if agent_name in template_info.agent_compositions:
+                        compatible_template = template
+                        break
+                except:
+                    continue
+            
+            if compatible_template:
+                template_name = compatible_template
+                print(f"Found compatible template: {template_name} for agent: {agent_name}")
+            else:
+                # Try partial matching - look for similar agent patterns
+                agent_parts = agent_name.lower().split('_')
+                for template in available_templates:
+                    template_lower = template.lower()
+                    # Check if template contains key parts of agent name
+                    if any(part in template_lower for part in agent_parts[-3:]):  # Last 3 parts: Troop_RangedSwar
+                        template_name = template
+                        print(f"Using similar template: {template_name} for agent: {agent_name}")
+                        break
+                else:
+                    # Final fallback: use first template and warn user
+                    template_name = available_templates[0]
+                    print(f"WARNING: No compatible template found for agent {agent_name}")
+                    print(f"Using fallback template: {template_name}")
+                    print(f"Available templates: {available_templates}")
+        
+        # Agent name already extracted in template selection above
+        
+        # For solo scenarios, use same agent for both players
+        # For cross scenarios, use agent vs different agent
+        if "solo_" in template_name.lower():
+            player_1_agent = agent_name  # Same agent for solo scenarios
+        else:
+            # For cross scenarios, try to find a different agent
+            template_info = scenario_manager.get_template_info(template_name)
+            available_agents = list(template_info.agent_compositions.keys())
+            if len(available_agents) > 1:
+                # Use a different agent from the template
+                player_1_agent = [a for a in available_agents if a != agent_name][0]
+            else:
+                player_1_agent = agent_name  # Fallback to same agent
+
+        # Store template name for filename generation
+        extract_scenario_name_for_replay._current_template_name = template_name
+        
+        # Generate scenario with descriptive name
+        scenario_data = scenario_manager.generate_training_scenario(
+            template_name, agent_name, player_1_agent
+        )
+        
+        # Save temporary scenario file
+        temp_scenario_file = f"temp_{template_name}_scenario.json"
+        with open(temp_scenario_file, 'w') as f:
+            json.dump(scenario_data, f, indent=2)
+        
+        # Load training config to override max_turns for this environment
+        training_config = config.load_training_config(args.training_config)
+        max_turns_override = training_config.get("max_turns_per_episode", 5)
+        print(f"🎯 Using max_turns_per_episode: {max_turns_override} from config '{args.training_config}'")
+        
+        # Temporarily override game_config max_turns for this environment
+        original_max_turns = config.get_max_turns()
+        config._cache['game_config']['game_rules']['max_turns'] = max_turns_override
+        
+        try:
+            env = W40KEnv(
+                rewards_config=args.rewards_config,
+                training_config_name=args.training_config,
+                controlled_agent=None,
+                active_agents=None,
+                scenario_file=temp_scenario_file,
+                unit_registry=unit_registry,
+                quiet=True
+            )
+        finally:
+            # Restore original max_turns after environment creation
+            config._cache['game_config']['game_rules']['max_turns'] = original_max_turns
+        
+        # Connect step logger
+        env.controller.connect_step_logger(temp_step_logger)
+        model = DQN.load(model_path, env=env)
+        
+        # Step 3: Run test episodes with step logging
+        if not hasattr(args, 'test_episodes') or args.test_episodes is None:
+            raise ValueError("--test-episodes required for replay generation - no default episodes allowed")
+        episodes = args.test_episodes
+        print(f"🎲 Running {episodes} episodes with step logging...")
+        
+        for episode in range(episodes):
+            print(f"   Episode {episode + 1}/{episodes}")
+            obs, info = env.reset()
+            done = False
+            step_count = 0
+            
+            while not done and step_count < 1000:
+                action, _ = model.predict(obs, deterministic=True)
+                obs, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
+                step_count += 1
+        
+        env.close()
+        
+        # Step 4: Convert steplog to replay
+        print("🔄 Converting steplog to replay format...")
+        
+        success = convert_steplog_to_replay(temp_steplog)
+        
+        # Step 5: Cleanup temporary files
+        if os.path.exists(temp_steplog):
+            os.remove(temp_steplog)
+            print("🧹 Cleaned up temporary steplog file")
+        
+        # Clean up temporary scenario file
+        if 'temp_scenario_file' in locals() and os.path.exists(temp_scenario_file):
+            os.remove(temp_scenario_file)
+        
+        # Clean up template name context
+        if hasattr(extract_scenario_name_for_replay, '_current_template_name'):
+            delattr(extract_scenario_name_for_replay, '_current_template_name')
+        
+        # Restore original step logger
+        globals()['step_logger'] = original_step_logger
+        
+        if success:
+            print("✅ One-shot replay generation complete!")
+            return True
+        else:
+            print("❌ Replay conversion failed")
+            return False
+            
+    except Exception as e:
+        print(f"❌ One-shot workflow failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def parse_steplog_file(steplog_path):
+    """Parse steplog file and extract structured data."""
+    import re
+    
+    print(f"📖 Parsing steplog file...")
+    
+    with open(steplog_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    lines = content.strip().split('\n')
+    
+    # Skip header lines (everything before first action)
+    action_lines = []
+    in_actions = False
+    
+    for line in lines:
+        if line.startswith('[') and '] T' in line:
+            in_actions = True
+        if in_actions:
+            action_lines.append(line)
+    
+    # Parse action entries
+    actions = []
+    max_turn = 1
+    units_positions = {}
+    
+    # Regex patterns for parsing
+    action_pattern = r'\[([^\]]+)\] T(\d+) P(\d+) (\w+) : (.+?) \[(SUCCESS|FAILED)\] \[STEP: (YES|NO)\]'
+    phase_pattern = r'\[([^\]]+)\] T(\d+) P(\d+) (\w+) phase Start'
+    
+    for line in action_lines:
+        # Try to match action pattern
+        action_match = re.match(action_pattern, line)
+        if action_match:
+            timestamp, turn, player, phase, message, success, step_increment = action_match.groups()
+            
+            # Parse action details from message
+            action_data = parse_action_message(message, {
+                'timestamp': timestamp,
+                'turn': int(turn),
+                'player': int(player), 
+                'phase': phase.lower(),
+                'success': success == 'SUCCESS',
+                'step_increment': step_increment == 'YES'
+            })
+            
+            if action_data:
+                actions.append(action_data)
+                max_turn = max(max_turn, int(turn))
+                
+                # Update unit positions from ALL actions (move, shoot, combat, charge, wait)
+                unit_id = action_data.get('unitId')
+                if unit_id:
+                    # Try to extract position from action message if available
+                    position_extracted = False
+                    
+                    if action_data['type'] == 'move' and 'startHex' in action_data and 'endHex' in action_data:
+                        # Parse coordinates from "(col, row)" format
+                        import re
+                        end_match = re.match(r'\((\d+),\s*(\d+)\)', action_data['endHex'])
+                        if end_match:
+                            end_col, end_row = end_match.groups()
+                            units_positions[unit_id] = {
+                                'col': int(end_col),
+                                'row': int(end_row),
+                                'last_seen_turn': int(turn)
+                            }
+                            position_extracted = True
+                    
+                    # For non-move actions, try to extract position from message format
+                    if not position_extracted and 'message' in action_data:
+                        import re
+                        # Look for "Unit X(col, row)" pattern in any message
+                        pos_match = re.search(r'Unit \d+\((\d+), (\d+)\)', action_data['message'])
+                        if pos_match:
+                            col, row = pos_match.groups()
+                            units_positions[unit_id] = {
+                                'col': int(col),
+                                'row': int(row),
+                                'last_seen_turn': int(turn)
+                            }
+                            position_extracted = True
+        
+        # Try to match phase change pattern  
+        phase_match = re.match(phase_pattern, line)
+        if phase_match:
+            timestamp, turn, player, phase = phase_match.groups()
+            
+            phase_data = {
+                'type': 'phase_change',
+                'message': f'{phase.capitalize()} phase Start',
+                'turnNumber': int(turn),
+                'phase': phase.lower(),
+                'player': int(player),
+                'timestamp': timestamp
+            }
+            actions.append(phase_data)
+    
+    print(f"   📝 Parsed {len(actions)} action entries")
+    print(f"   🎮 {max_turn} total turns detected")
+    print(f"   👥 {len(units_positions)} units tracked")
+    
+    return {
+        'actions': actions,
+        'max_turn': max_turn,
+        'units_positions': units_positions
+    }
+
+def parse_action_message(message, context):
+    """Parse action message and extract details."""
+    import re
+    
+    action_type = None
+    details = {
+        'turnNumber': context['turn'],
+        'phase': context['phase'],
+        'player': context['player'],
+        'timestamp': context['timestamp']
+    }
+    
+    # Parse different action types based on message content
+    if "MOVED from" in message:
+        # Unit X(col, row) MOVED from (start_col, start_row) to (end_col, end_row)
+        move_match = re.match(r'Unit (\d+)\((\d+), (\d+)\) MOVED from \((\d+), (\d+)\) to \((\d+), (\d+)\)', message)
+        if move_match:
+            unit_id, _, _, start_col, start_row, end_col, end_row = move_match.groups()
+            action_type = 'move'
+            details.update({
+                'type': action_type,
+                'message': message,
+                'unitId': int(unit_id),
+                'startHex': f"({start_col}, {start_row})",
+                'endHex': f"({end_col}, {end_row})"
+            })
+    
+    elif "SHOT at" in message:
+        # Unit X(col, row) SHOT at unit Y - details...
+        shoot_match = re.match(r'Unit (\d+)\([^)]+\) SHOT at unit (\d+)', message)
+        if shoot_match:
+            unit_id, target_id = shoot_match.groups()
+            action_type = 'shoot'
+            details.update({
+                'type': action_type,
+                'message': message,
+                'unitId': int(unit_id),
+                'targetUnitId': int(target_id)
+            })
+    
+    elif "FOUGHT" in message:
+        # Unit X(col, row) FOUGHT unit Y - details...
+        combat_match = re.match(r'Unit (\d+)\([^)]+\) FOUGHT unit (\d+)', message)
+        if combat_match:
+            unit_id, target_id = combat_match.groups()
+            action_type = 'combat'
+            details.update({
+                'type': action_type,
+                'message': message,
+                'unitId': int(unit_id),
+                'targetUnitId': int(target_id)
+            })
+    
+    elif "CHARGED" in message:
+        # Unit X(col, row) CHARGED unit Y from (start) to (end)
+        charge_match = re.match(r'Unit (\d+)\([^)]+\) CHARGED unit (\d+)', message)
+        if charge_match:
+            unit_id, target_id = charge_match.groups()
+            action_type = 'charge'
+            details.update({
+                'type': action_type,
+                'message': message,
+                'unitId': int(unit_id),
+                'targetUnitId': int(target_id)
+            })
+    
+    elif "WAIT" in message:
+        # Unit X(col, row) WAIT
+        wait_match = re.match(r'Unit (\d+)\([^)]+\) WAIT', message)
+        if wait_match:
+            unit_id = wait_match.groups()[0]
+            action_type = 'wait'
+            details.update({
+                'type': action_type,
+                'message': message,
+                'unitId': int(unit_id)
+            })
+    
+    return details if action_type else None
+
+def calculate_episode_reward_from_actions(actions, winner):
+    """Calculate episode reward from action log and winner."""
+    # Simple reward calculation based on winner and action count
+    if winner is None:
+        return 0.0
+    
+    # Basic reward: winner gets positive, loser gets negative
+    base_reward = 10.0 if winner == 0 else -10.0
+    
+    # Add small bonus/penalty based on action efficiency
+    action_count = len([a for a in actions if a.get('type') != 'phase_change'])
+    efficiency_bonus = max(-5.0, min(5.0, (50 - action_count) * 0.1))
+    
+    return base_reward + efficiency_bonus
+
+def convert_to_replay_format(steplog_data):
+    """Convert parsed steplog data to frontend-compatible replay format."""
+    from datetime import datetime
+    from ai.unit_registry import UnitRegistry
+    
+    print(f"🔄 Converting to replay format...")
+    
+    # Store agent info for filename generation
+    convert_to_replay_format._detected_agents = None
+    
+    actions = steplog_data['actions']
+    max_turn = steplog_data['max_turn']
+    
+    # Load unit registry for complete unit data
+    unit_registry = UnitRegistry()
+    
+    # Load config for board size and other settings
+    config = get_config_loader()
+    
+    # Get board size from board_config.json (single source of truth)
+    board_cols, board_rows = config.get_board_size()
+    board_size = [board_cols, board_rows]
+    
+    # Load scenario for units data
+    scenario_file = os.path.join(config.config_dir, "scenario.json")
+    if not os.path.exists(scenario_file):
+        raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
+    
+    with open(scenario_file, 'r') as f:
+        scenario_data = json.load(f)
+    
+    # Determine winner from final actions
+    winner = None
+    for action in reversed(actions):
+        if action.get('type') == 'phase_change' and 'winner' in action:
+            winner = action['winner']
+            break
+    
+    # Build initial state using actual unit registry data
+    initial_units = []
+    if not steplog_data['units_positions']:
+        raise ValueError("No unit position data found in steplog - cannot generate replay without unit data")
+    
+    # Get initial scenario units for complete unit data
+    if 'units' not in scenario_data:
+        raise KeyError("Scenario missing required 'units' field")
+    
+    scenario_units = {unit['id']: unit for unit in scenario_data['units']}
+    
+    # No need to detect scenario name - handled by filename extraction
+    
+    # Use ALL units from scenario, not just those tracked in steplog
+    for unit_id, scenario_unit in scenario_units.items():
+        if 'col' not in scenario_unit or 'row' not in scenario_unit:
+            raise KeyError(f"Unit {unit_id} missing required position data (col/row) in scenario")
+        
+        # Get unit statistics from unit registry
+        if 'unit_type' not in scenario_unit:
+            raise KeyError(f"Unit {unit_id} missing required 'unit_type' field")
+        
+        try:
+            unit_stats = unit_registry.get_unit_data(scenario_unit['unit_type'])
+        except ValueError as e:
+            raise ValueError(f"Failed to get unit data for '{scenario_unit['unit_type']}': {e}")
+        
+        # Get final position from steplog tracking or use initial position
+        if unit_id in steplog_data['units_positions']:
+            final_col = steplog_data['units_positions'][unit_id]['col']
+            final_row = steplog_data['units_positions'][unit_id]['row']
+        else:
+            final_col = scenario_unit['col']
+            final_row = scenario_unit['row']
+        
+        # Build complete unit data with FINAL positions from steplog tracking
+        unit_data = {
+            'id': unit_id,
+            'unit_type': scenario_unit['unit_type'],
+            'player': scenario_unit.get('player', 0),
+            'col': final_col,  # Use FINAL position from steplog tracking
+            'row': final_row   # Use FINAL position from steplog tracking
+        }
+        
+        # Copy all unit statistics from registry (preserves UPPERCASE field names)
+        for field_name, field_value in unit_stats.items():
+            if field_name.isupper():  # Only copy UPPERCASE fields per AI_TURN.md
+                unit_data[field_name] = field_value
+        
+        # Ensure CUR_HP is set to HP_MAX initially
+        if 'HP_MAX' in unit_stats:
+            unit_data['CUR_HP'] = unit_stats['HP_MAX']
+        
+        initial_units.append(unit_data)
+    
+    # Game states require actual game state snapshots from steplog - not generated defaults
+    game_states = []
+    # Note: Real implementation would need to capture actual game states during steplog generation
+    
+    # Build replay data structure matching frontend expectations
+    replay_data = {
+        'game_info': {
+            'scenario': 'steplog_conversion',
+            'ai_behavior': 'sequential_activation',
+            'total_turns': max_turn,
+            'winner': winner
+        },
+        'metadata': {
+            'total_combat_log_entries': len(actions),
+            'final_turn': max_turn,
+            'episode_reward': 0.0,
+            'format_version': '2.0',
+            'replay_type': 'steplog_converted',
+            'conversion_timestamp': datetime.now().isoformat(),
+            'source_file': 'steplog'
+        },
+        'initial_state': {
+            'units': initial_units,
+            'board_size': board_size
+        },
+        'combat_log': actions,
+        'game_states': game_states,
+        'episode_steps': len([a for a in actions if a.get('type') != 'phase_change']),
+        'episode_reward': calculate_episode_reward_from_actions(actions, winner)
+    }
+    
+    return replay_data
+
+def ensure_scenario():
+    """Ensure scenario.json exists."""
+    scenario_path = os.path.join(project_root, "config", "scenario.json")
+    if not os.path.exists(scenario_path):
+        raise FileNotFoundError(f"Missing required scenario.json file: {scenario_path}. AI_INSTRUCTIONS.md: No fallbacks allowed - scenario file must exist.")
+
+def main():
+    """Main training function following AI_INSTRUCTIONS.md exactly."""
+    parser = argparse.ArgumentParser(description="Train W40K AI following AI_GAME_OVERVIEW.md specifications")
+    parser.add_argument("--training-config", required=True,
+                       help="Training configuration to use from config/training_config.json")
+    parser.add_argument("--rewards-config", required=True,
+                       help="Rewards configuration to use from config/rewards_config.json")
+    parser.add_argument("--new", action="store_true", 
+                       help="Force creation of new model")
+    parser.add_argument("--append", action="store_true", 
+                       help="Continue training existing model")
+    parser.add_argument("--test-only", action="store_true", 
+                       help="Only test existing model, don't train")
+    parser.add_argument("--test-episodes", type=int, default=0, 
+                       help="Number of episodes for testing")
+    parser.add_argument("--multi-agent", action="store_true",
+                       help="Use multi-agent training system")
+    parser.add_argument("--agent", type=str, default=None,
+                       help="Train specific agent (e.g., 'SpaceMarine_Ranged')")
+    parser.add_argument("--orchestrate", action="store_true",
+                       help="Start balanced multi-agent orchestration training")
+    parser.add_argument("--total-episodes", type=int, default=None,
+                       help="Total episodes for training (overrides config file value)")
+    parser.add_argument("--max-concurrent", type=int, default=None,
+                       help="Maximum concurrent training sessions")
+    parser.add_argument("--training-phase", type=str, choices=["solo", "cross_faction", "full_composition"],
+                       help="Specific training phase for 3-phase training plan")
+    parser.add_argument("--test-integration", action="store_true",
+                       help="Test scenario manager integration")
+    parser.add_argument("--step", action="store_true",
+                       help="Enable step-by-step action logging to train_step.log")
+    parser.add_argument("--convert-steplog", type=str, metavar="STEPLOG_FILE",
+                       help="Convert existing steplog file to replay JSON format")
+    parser.add_argument("--replay", action="store_true", 
+                       help="Generate steplog AND convert to replay in one command")
+    parser.add_argument("--model", type=str, default=None,
+                       help="Specific model file to use for replay generation")
+    parser.add_argument("--scenario-template", type=str, default=None,
+                       help="Scenario template name from scenario_templates.json for replay generation")
+    
+    args = parser.parse_args()
+    
+    print("🎮 W40K AI Training - Following AI_GAME_OVERVIEW.md specifications")
+    print("=" * 70)
+    print(f"Training config: {args.training_config}")
+    print(f"Rewards config: {args.rewards_config}")
+    print(f"New model: {args.new}")
+    print(f"Append training: {args.append}")
+    print(f"Test only: {args.test_only}")
+    print(f"Multi-agent: {args.multi_agent}")
+    print(f"Orchestrate: {args.orchestrate}")
+    print(f"Step logging: {args.step}")
+    if hasattr(args, 'convert_steplog') and args.convert_steplog:
+        print(f"Convert steplog: {args.convert_steplog}")
+    if hasattr(args, 'replay') and args.replay:
+        print(f"Replay generation: {args.replay}")
+        if args.model:
+            print(f"Model file: {args.model}")
+        else:
+            print(f"Model file: auto-detect")
+    print()
+    
+    try:
+        # Initialize global step logger based on --step argument
+        global step_logger
+        step_logger = StepLogger("train_step.log", enabled=args.step)
+        
+        # Sync configs to frontend automatically
+        try:
+            subprocess.run(['node', 'scripts/copy-configs.js'], 
+                         cwd=project_root, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Config sync failed: {e}")
+        
+        # Setup environment and configuration
+        config = get_config_loader()
+        
+        # Ensure scenario exists
+        ensure_scenario()
+        
+        # Convert existing steplog mode
+        if args.convert_steplog:
+            success = convert_steplog_to_replay(args.convert_steplog)
+            return 0 if success else 1
+
+        # Generate steplog AND convert to replay (one-shot mode)
+        if args.replay:
+            success = generate_steplog_and_replay(config, args)
+            return 0 if success else 1
+
+        # Test integration if requested
+        if args.test_integration:
+            success = test_scenario_manager_integration()
+            return 0 if success else 1
+        
+        # Multi-agent orchestration mode
+        if args.orchestrate:
+            # Use config fallback for total_episodes if not provided
+            total_episodes = args.total_episodes
+            if total_episodes is None:
+                training_config = config.load_training_config(args.training_config)
+                total_episodes = training_config.get("total_episodes", 500)  # Reasonable default
+                print(f"📊 Using total_episodes from config: {total_episodes}")
+            else:
+                print(f"📊 Using total_episodes from command line: {total_episodes}")
+                
+            results = start_multi_agent_orchestration(
+                config=config,
+                total_episodes=total_episodes,
+                training_config_name=args.training_config,
+                rewards_config_name=args.rewards_config,
+                max_concurrent=args.max_concurrent,
+                training_phase=args.training_phase
+            )
+            return 0 if results else 1
+
+        # Single agent training mode
+        elif args.agent:
+            model, env, training_config, model_path = create_multi_agent_model(
+                config,
+                args.training_config,
+                args.rewards_config,
+                agent_key=args.agent,
+                new_model=args.new,
+                append_training=args.append
+            )
+            
+            # Setup callbacks with agent-specific model path
+            callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
+            
+            # Train model
+            success = train_model(model, training_config, callbacks, model_path)
+            
+            if success:
+                # Only test if episodes > 0
+                if args.test_episodes > 0:
+                    test_trained_model(model, args.test_episodes, args.training_config)
+                else:
+                    print("📊 Skipping testing (--test-episodes 0)")
+                return 0
+            else:
+                return 1
+
+        elif args.test_only:
+            # Load existing model for testing only
+            model_path = config.get_model_path()
+            # Ensure model directory exists
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            print(f"📁 Model path: {model_path}")
+            
+            # Determine whether to create new model or load existing
+            if not os.path.exists(model_path):
+                print(f"❌ Model not found: {model_path}")
+                return 1
+            
+            W40KEnv, _ = setup_imports()
+            # Load scenario and unit registry for testing
+            from ai.unit_registry import UnitRegistry
+            cfg = get_config_loader()
+            scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+            unit_registry = UnitRegistry()
+            
+            env = W40KEnv(
+                rewards_config=args.rewards_config,
+                training_config_name=args.training_config,
+                controlled_agent=None,
+                active_agents=None,
+                scenario_file=scenario_file,
+                unit_registry=unit_registry,
+                quiet=True
+            )
+            
+            # Connect step logger after environment creation
+            if step_logger:
+                env.controller.connect_step_logger(step_logger)
+                print("✅ StepLogger connected to SequentialGameController")
+            model = DQN.load(model_path, env=env)
+            if args.test_episodes is None:
+                raise ValueError("--test-episodes is required for test-only mode")
+            test_trained_model(model, args.test_episodes, args.training_config)
+            return 0
+        
+        else:
+            # Generic training mode
+            # Create/load model
+            model, env, training_config = create_model(
+            config, 
+            args.training_config,
+            args.rewards_config, 
+            args.new, 
+            args.append,
+            args
+        )
+
+        # Get model path for callbacks and training
+        model_path = config.get_model_path()
+        
+        # Setup callbacks
+        callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
+        
+        # Train model
+        success = train_model(model, training_config, callbacks, model_path)
+        
+        if success:
+            # Only test if episodes > 0
+            if args.test_episodes > 0:
+                test_trained_model(model, args.test_episodes, args.training_config)
+                
+                # Save training replay with our unified system
+                if hasattr(env, 'replay_logger'):
+                    from ai.game_replay_logger import GameReplayIntegration
+                    final_reward = 0.0  # Average reward from testing
+                    replay_file = GameReplayIntegration.save_episode_replay(
+                        env, 
+                        episode_reward=final_reward, 
+                        output_dir="ai/event_log", 
+                        is_best=False
+                    )
+            else:
+                print("📊 Skipping testing (--test-episodes 0)")
+            
+            return 0
+        else:
+            return 1
+            
+    except Exception as e:
+        print(f"💥 Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+if __name__ == "__main__":
+    exit_code = main()
+    sys.exit(exit_code)

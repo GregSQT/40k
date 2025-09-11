@@ -139,15 +139,10 @@ export function setupBoardClickHandler(callbacks: {
       console.error(`🟠 onMoveCharger callback is missing!`);
     }
     } else if (mode === 'select' && selectedUnitId !== null && phase === 'move') {
-      // In Movement Phase, clicking green hex should directly move the unit
-      console.log("🎯 MOVEMENT LOGIC TRIGGERED:", { mode, selectedUnitId, phase });
-      console.log("🎯 onDirectMove callback exists:", !!callbacks.onDirectMove);
-      
+      // In Movement Phase, clicking green hex should directly move the unit      
       if (callbacks.onDirectMove) {
-        console.log("🎯 CALLING onDirectMove with:", selectedUnitId, col, row);
         callbacks.onDirectMove(selectedUnitId, col, row);
       } else if (callbacks.onStartMovePreview) {
-        console.log("🎯 FALLBACK: Using onStartMovePreview");
         callbacks.onStartMovePreview(selectedUnitId, col, row);
         callbacks.onConfirmMove();
       }

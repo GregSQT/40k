@@ -381,19 +381,22 @@ if time.time() - self.phase_start > 30:
 ```
 project_root/
 ├── ai/                       # AI training
-│   ├── gym_interface.py          # Gym wrapper for training
-│   ├── train_w40k.py             # Training script
+│   ├── training/                 # 
+│   │   ├── evaluator.py          # 
+│   │   ├── gym_interface.py      # Gym wrapper for training
+│   │   ├── orchestrator.py       # 
+│   │   ├── train_w40k.py         # Training script
 │   └── models/                   # Trained models
 
 ├── engine/                       # Main game engine package
-│   ├── init.py               # Package initialization
+│   ├── init.py                   # Package initialization
 │   ├── w40k_engine.py            # Core engine class
 │   ├── phase_handlers/           # AI_TURN.md phase implementations
 │   │   ├── __init__.py
 │   │   ├── movement_handlers.py  # Movement phase logic
 │   │   ├── shooting_handlers.py  # Shooting phase logic (future)
 │   │   ├── charge_handlers.py    # Charge phase logic (future)
-│   │   └── fight_handlers.py    # Fight phase logic (future)
+│   │   └── fight_handlers.py     # Fight phase logic (future)
 │   └── utils/                    # Engine utilities
 │       ├── __init__.py
 │       └── validators.py         # Field validation utilities
