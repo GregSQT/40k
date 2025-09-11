@@ -379,7 +379,7 @@ def start_unit_activation(game_state: Dict[str, Any], unit_id: str) -> Dict[str,
 
 def build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -> List[str]:
     """
-    AI_TURN.md EXACT: Build valid_target_pool within While SHOOT_LEFT > 0 loop
+    Build valid_target_pool and always send blinking data to frontend.
     All enemies within range AND in Line of Sight AND having HP_CUR > 0
     """
     unit = _get_unit_by_id(game_state, unit_id)
@@ -387,6 +387,8 @@ def build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -> List[st
         return []
     
     valid_target_pool = []
+    
+    print(f"🔥 BUILDING TARGET POOL for unit {unit_id}")
     
     for enemy in game_state["units"]:
         if (enemy["player"] != unit["player"] and 
@@ -744,11 +746,15 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         target_id = action.get("targetId")
         click_target = action.get("clickTarget")  # "enemy", "friendly", "active_unit", "elsewhere"
         
+        print(f"🔥 LEFT CLICK ROUTING: context={current_context}, target_id={target_id}, click_target={click_target}")
+        
         if current_context == "target_selected":
             # Nested under "Left click on a target" - handle sub-actions
+            print(f"🔥 TAKING NESTED PATH")
             return _handle_nested_left_click(game_state, unit, target_id, click_target)
         else:
             # Top-level PLAYER_ACTION_SELECTION
+            print(f"🔥 TAKING TOP-LEVEL PATH")
             return _handle_top_level_left_click(game_state, unit, target_id, click_target)
     
     elif action_type == "right_click":
@@ -798,13 +804,16 @@ def _execute_while_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool,
             return True, result
     
     # AI_TURN.md: SHOOTING PHASE ACTIONS AVAILABLE → PLAYER_ACTION_SELECTION
-    return True, {
+    response = {
         "while_loop_active": True,
         "validTargets": valid_targets,
         "shootLeft": unit["SHOOT_LEFT"],
         "context": "player_action_selection",
-        "selectedTargetId": unit.get("selected_target_id")
+        "blinking_units": valid_targets,
+        "start_blinking": True
     }
+    print(f"🔥 BLINKING DATA SENT: blinking_units={valid_targets}, start_blinking=True")
+    return True, response
 
 
 def _handle_nested_left_click(game_state: Dict[str, Any], unit: Dict[str, Any], target_id: str, click_target: str) -> Tuple[bool, Dict[str, Any]]:
@@ -872,8 +881,16 @@ def _handle_top_level_left_click(game_state: Dict[str, Any], unit: Dict[str, Any
             return _handle_unit_switch_with_context(game_state, unit_id, target_id, "top_level")
     
     elif click_target == "active_unit":
-        # AI_TURN.md: Left click on the active_unit → No effect
-        return True, {"action": "no_effect", "context": "active_unit_clicked"}
+        # AI_TURN.md: Left click on the active_unit → Build target pool and show blinking
+        valid_targets = build_valid_target_pool(game_state, unit_id)
+        return True, {
+            "while_loop_active": True,
+            "validTargets": valid_targets,
+            "shootLeft": unit["SHOOT_LEFT"],
+            "context": "player_action_selection",
+            "blinking_units": valid_targets,
+            "start_blinking": True
+        }
     
     else:
         # AI_TURN.md: Left click anywhere else → GO TO STEP : PLAYER_ACTION_SELECTION

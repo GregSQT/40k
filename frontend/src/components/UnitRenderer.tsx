@@ -13,6 +13,11 @@ interface UnitRendererProps {
   isEligible?: boolean; // Add eligibility as a prop instead of calculating it
   isShootable?: boolean; // Add shootability based on LoS validation
   
+  // Blinking state for multi-unit HP bars
+  blinkingUnits?: number[];
+  isBlinkingActive?: boolean;
+  blinkState?: boolean;
+  
   // Board configuration
   boardConfig: any;
   HEX_RADIUS: number;
@@ -373,10 +378,17 @@ export class UnitRenderer {
     
     // Check if this unit is being previewed for shooting
     const isTargetPreviewed = (mode === "targetPreview" || mode === "attackPreview") && targetPreview && targetPreview.targetId === unit.id;
-    const finalBarWidth = isTargetPreviewed ? HP_BAR_WIDTH * 2.5 : HP_BAR_WIDTH;
-    const finalBarHeight = isTargetPreviewed ? HP_BAR_HEIGHT * 2.5 : HP_BAR_HEIGHT;
-    const finalBarX = isTargetPreviewed ? centerX - finalBarWidth / 2 : barX;
-    const finalBarY = isTargetPreviewed ? barY - (finalBarHeight - HP_BAR_HEIGHT) : barY;
+    
+    // Check if this unit should be blinking (multi-unit blinking for valid targets)
+    const shouldBlink = this.props.isBlinkingActive && this.props.blinkingUnits?.includes(unit.id);
+    
+    // Use either individual target preview OR multi-unit blinking
+    const shouldShowBlinkingHP = isTargetPreviewed || shouldBlink;
+    
+    const finalBarWidth = shouldShowBlinkingHP ? HP_BAR_WIDTH * 2.5 : HP_BAR_WIDTH;
+    const finalBarHeight = shouldShowBlinkingHP ? HP_BAR_HEIGHT * 2.5 : HP_BAR_HEIGHT;
+    const finalBarX = shouldShowBlinkingHP ? centerX - finalBarWidth / 2 : barX;
+    const finalBarY = shouldShowBlinkingHP ? barY - (finalBarHeight - HP_BAR_HEIGHT) : barY;
     
     // Background
     const barBg = new PIXI.Graphics();
@@ -412,8 +424,8 @@ export class UnitRenderer {
     // HP slices with blinking animation for target preview
     const sliceWidth = finalBarWidth / unit.HP_MAX;
     
-    if (isTargetPreviewed) {
-      // Create blinking HP bar animation
+    if (shouldShowBlinkingHP) {
+      // Create blinking HP bar animation (works for both individual and multi-unit)
       const hpContainer = new PIXI.Container();
       hpContainer.name = 'hp-blink-container';
       hpContainer.zIndex = 350;
@@ -426,7 +438,7 @@ export class UnitRenderer {
       for (let i = 0; i < unit.HP_MAX; i++) {
         // Normal HP slice
         const normalSlice = new PIXI.Graphics();
-        const normalColor = i < displayHP ? (unit.player === 0 ? 0x4da6ff : 0xff4d4d) : parseColor(boardConfig.colors.hp_damaged);
+        const normalColor = i < currentHP ? (unit.player === 0 ? 0x4da6ff : 0xff4d4d) : 0x444444;
         normalSlice.beginFill(normalColor, 1);
         normalSlice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
         normalSlice.endFill();
@@ -449,16 +461,20 @@ export class UnitRenderer {
         hpContainer.addChild(highlightSlice);
       }
       
-      // Animate blinking every 500ms
-      let blinkState = false;
-      const blinkInterval = setInterval(() => {
-        blinkState = !blinkState;
-        normalSlices.forEach(slice => slice.visible = !blinkState);
-        highlightSlices.forEach(slice => slice.visible = blinkState);
-      }, 500);
+      // Use React state directly for blinking
+      const currentBlinkState = this.props.blinkState || false;
+      
+      normalSlices.forEach(slice => {
+        slice.visible = !currentBlinkState;
+      });
+      highlightSlices.forEach(slice => {
+        slice.visible = currentBlinkState;
+      });
+      
+      // Store cleanup function (no interval to clear)
+      (hpContainer as any).cleanupBlink = () => {};
       
       // Store interval for cleanup
-      (hpContainer as any).blinkInterval = blinkInterval;
       app.stage.addChild(hpContainer);
       
       // Store cleanup function for later use

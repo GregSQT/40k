@@ -96,6 +96,9 @@ export const useEngineAPI = () => {
   lastUpdate?: number;
 } | null>(null);
   
+  // State for multi-unit HP bar blinking
+  const [blinkingUnits, setBlinkingUnits] = useState<{unitIds: number[], blinkTimer: number | null, blinkState: boolean}>({unitIds: [], blinkTimer: null, blinkState: false});
+  
   // Load config values
   useEffect(() => {
     getMaxTurnsFromConfig().then(setMaxTurnsFromConfig);
@@ -160,6 +163,12 @@ export const useEngineAPI = () => {
       }
       
       const data = await response.json();
+      
+      // DEBUG: Log full response structure to understand blinking data location
+      console.log("🔥 FULL RESPONSE DATA:", data);
+      console.log("🔥 data.result:", data.result);
+      console.log("🔥 data.result keys:", data.result ? Object.keys(data.result) : "No result");
+      
         if (data.success) {
           // Auto-display Python console logs in browser (only during actions)
           if (data.game_state?.console_logs && data.game_state.console_logs.length > 0) {
@@ -167,6 +176,34 @@ export const useEngineAPI = () => {
             // Clear logs from the data before setting state to prevent persistence
             data.game_state.console_logs = [];
           }
+          
+          // Process blinking data from backend
+          if (data.result?.blinking_units && data.result?.start_blinking) {
+            console.log("🔥 PROCESSING BLINKING DATA:", data.result.blinking_units);
+            
+            // Clear any existing blinking timer
+            if (blinkingUnits.blinkTimer) {
+              clearInterval(blinkingUnits.blinkTimer);
+            }
+            
+            // Start blinking for all valid targets
+            const unitIds = data.result.blinking_units.map((id: string) => parseInt(id));
+            const timer = window.setInterval(() => {
+              // Toggle blink state for visual effect
+              setBlinkingUnits(prev => ({
+                ...prev,
+                blinkState: !prev.blinkState
+              }));
+              console.log("🔥 BLINKING TICK for units:", unitIds);
+            }, 500);
+            
+            setBlinkingUnits({unitIds, blinkTimer: timer, blinkState: false});
+            setMode("attackPreview");
+            
+            // Force component re-render to ensure props propagate
+            setSelectedUnitId(prevId => prevId);
+          }
+          
           setGameState(data.game_state);
         
         // Set visual state based on shooting activation
@@ -381,9 +418,17 @@ export const useEngineAPI = () => {
     }
   }, [handleRightClick, executeAction]);
 
-  const handleStartTargetPreview = useCallback((shooterId: number | string, targetId: number | string) => {
+  const handleStartTargetPreview = useCallback(async (shooterId: number | string, targetId: number | string) => {
     const numericShooterId = typeof shooterId === 'number' ? shooterId : parseInt(shooterId);
     const numericTargetId = typeof targetId === 'number' ? targetId : parseInt(targetId);
+    
+    // Send backend action to trigger target selection and blinking response
+    await executeAction({
+      action: "left_click",
+      unitId: numericShooterId.toString(),
+      targetId: numericTargetId.toString(),
+      clickTarget: "enemy"
+    });
     
     // Calculate actual probabilities using game units
     const shooter = gameState?.units.find(u => parseInt(u.id) === numericShooterId);
@@ -499,6 +544,7 @@ export const useEngineAPI = () => {
       mode: "select" as const,
       movePreview: null,
       attackPreview: null,
+      targetPreview: null,
       currentPlayer: null,
       maxTurns: null,
       unitsMoved: [],
@@ -508,12 +554,15 @@ export const useEngineAPI = () => {
       phase: null,
       gameState: null,
       onSelectUnit: () => {},
+      onSkipUnit: () => {},
       onStartMovePreview: () => {},
       onDirectMove: () => {},
       onStartAttackPreview: () => {},
       onConfirmMove: () => {},
       onCancelMove: () => {},
       onShoot: () => {},
+      onSkipShoot: () => {},
+      onStartTargetPreview: () => {},
       onFightAttack: () => {},
       onCharge: () => {},
       onMoveCharger: () => {},
@@ -521,10 +570,13 @@ export const useEngineAPI = () => {
       onValidateCharge: () => {},
       onLogChargeRoll: () => {},
       getChargeDestinations: () => [],
+      blinkingUnits: [],
+      isBlinkingActive: false,
+      blinkState: false,
     };
   }
 
-  return {
+  const returnObject = {
     loading: false,
     error: null,
     units: convertUnits(gameState.units),
@@ -577,7 +629,16 @@ export const useEngineAPI = () => {
     onMoveCharger: () => {},
     onCancelCharge: () => {},
     onValidateCharge: () => {},
-    onLogChargeRoll: () => {},
+onLogChargeRoll: () => {},
     getChargeDestinations,
+    // Export blinking state for HP bar components
+    blinkingUnits: blinkingUnits.unitIds,
+    isBlinkingActive: blinkingUnits.blinkTimer !== null,
+    blinkState: blinkingUnits.blinkState,
   };
+  
+  // Debug: Log actual export values
+  console.log(`🔥 USEENGINEAPI EXPORT: unitIds=${JSON.stringify(blinkingUnits.unitIds)}, active=${blinkingUnits.blinkTimer !== null}, state=${blinkingUnits.blinkState}`);
+  
+  return returnObject;
 };

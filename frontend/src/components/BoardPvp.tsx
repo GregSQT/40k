@@ -24,6 +24,10 @@ type BoardProps = {
   mode: Mode;
   movePreview: { unitId: number; destCol: number; destRow: number } | null;
   attackPreview: { unitId: number; col: number; row: number } | null;
+  // Blinking state for multi-unit HP bars
+  blinkingUnits?: number[];
+  isBlinkingActive?: boolean;
+  blinkState?: boolean;
   onSelectUnit: (id: number | string | null) => void;
   onSkipUnit?: (unitId: number | string) => void;
   onSkipShoot?: (unitId: number | string) => void;
@@ -65,6 +69,10 @@ export default function Board({
   mode,
   movePreview,
   attackPreview,
+  // Blinking props
+  blinkingUnits,
+  isBlinkingActive,
+  blinkState,
   onSelectUnit,
   onSkipUnit,
   onStartTargetPreview,
@@ -906,7 +914,9 @@ export default function Board({
           phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
           fightSubPhase, fightActivePlayer,
           units, chargeTargets, fightTargets, targetPreview,
-          onConfirmMove, parseColor
+          onConfirmMove, parseColor,
+          // Pass blinking state
+          blinkingUnits, isBlinkingActive, blinkState
         });
       }
 
@@ -1018,7 +1028,10 @@ export default function Board({
         phase,
         boardConfig?.cols,
         loading,
-        error
+        error,
+        // Add blinking state to trigger re-render
+        isBlinkingActive,
+        JSON.stringify(blinkingUnits)
       ]);
 
       // Simple container return - loading/error handled inside useEffect

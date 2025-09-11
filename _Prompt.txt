@@ -39,7 +39,19 @@ Requires proper file paths and change tracking in format: FILE: path / CHANGE# /
 Uses specific error reporting format with TypeScript compiler output
 
 
+What I have :
+Click on a unit in the pool :
+* Red hexes preview : OK
+* Blinking HPS : KO : nothing displayed
+Click on a valid target : 
+* HP blink
 
+What I want :
+Click on a unit in the pool :
+* Red hexes preview : OK
+* Blinking HPS for ALL the unhits in valid target
+Click on a valid target : 
+* Shoot
 
 
 Shooting phase :
