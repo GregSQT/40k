@@ -6,11 +6,16 @@ import type { Unit, PlayerId } from '../types';
 const getMaxTurnsFromConfig = async (): Promise<number> => {
   try {
     const response = await fetch('/config/game_config.json');
+    if (!response.ok) {
+      throw new Error(`Config fetch failed: ${response.status}`);
+    }
     const config = await response.json();
-    return config.game_rules?.max_turns ?? 8;
+    if (!config.game_rules?.max_turns) {
+      throw new Error(`Missing required max_turns in game config`);
+    }
+    return config.game_rules.max_turns;
   } catch (error) {
-    console.warn('Failed to load max_turns from config, using fallback:', error);
-    return 8;
+    throw new Error(`CRITICAL CONFIG ERROR: Failed to load max_turns from config: ${error}`);
   }
 };
 
@@ -324,7 +329,10 @@ export const useEngineAPI = () => {
     // AI_TURN.md: Shooting phase click handling
     if (gameState && gameState.phase === "shoot") {
       if (numericUnitId !== null) {
-        const shootActivationPool = gameState.shoot_activation_pool?.map(id => parseInt(id)) || [];
+        if (!gameState.shoot_activation_pool) {
+          throw new Error(`API ERROR: Missing required shoot_activation_pool during shooting phase`);
+        }
+        const shootActivationPool = gameState.shoot_activation_pool.map(id => parseInt(id));
         
         if (shootActivationPool.includes(numericUnitId) && !gameState.active_shooting_unit) {
           await executeAction({
@@ -524,18 +532,23 @@ export const useEngineAPI = () => {
 
   // Get eligible units
   const getEligibleUnitIds = useCallback((): number[] => {
-    if (!gameState) return [];
+    if (!gameState) {
+      throw new Error(`API ERROR: gameState is null when getting eligible units`);
+    }
     
     if (gameState.phase === 'move') {
+      if (!gameState.move_activation_pool) {
+        throw new Error(`API ERROR: Missing move_activation_pool in move phase`);
+      }
       return gameState.move_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
     } else if (gameState.phase === 'shoot') {
+      if (!gameState.shoot_activation_pool) {
+        throw new Error(`API ERROR: Missing shoot_activation_pool in shoot phase`);
+      }
       return gameState.shoot_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
     }
     
-    return gameState.units
-      .filter(unit => unit.player === gameState.current_player)
-      .map(unit => parseInt(unit.id))
-      .filter(id => !isNaN(id));
+    throw new Error(`API ERROR: Unsupported phase for eligible units: ${gameState.phase}`);
   }, [gameState]);
 
   const getChargeDestinations = useCallback((_unitId: number) => {
