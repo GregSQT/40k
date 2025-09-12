@@ -418,9 +418,9 @@ class W40KEngine(gym.Env):
     # ===== PHASE TRANSITION LOGIC =====
     
     def _shooting_phase_init(self):
-        """Initialize shooting phase and build activation pool."""
-        self.game_state["phase"] = "shoot"
-        self._shooting_build_activation_pool()
+        """AI_SHOOT.md EXACT: Pure delegation to handler"""
+        # Handler manages everything including phase setting and pool building
+        shooting_handlers.shooting_phase_start(self.game_state)
     
     def _charge_phase_init(self):
         """Initialize charge phase and build activation pool."""
@@ -436,15 +436,22 @@ class W40KEngine(gym.Env):
             self._charge_phase_init()
 
     def _process_shooting_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """Pure delegation to shooting_handlers - engine orchestration only."""
+        """
+        AI_SHOOT.md: Engine validation + handler delegation (hybrid approach for unit selection)
+        """
         
-        # Check if phase should complete (empty pool means phase is done)
+        # First call to phase? → shooting_phase_start(game_state)
+        if not hasattr(self, '_shooting_phase_initialized') or not self._shooting_phase_initialized:
+            shooting_handlers.shooting_phase_start(self.game_state)
+            self._shooting_phase_initialized = True
+        
+        # Check phase completion
         if not self.game_state["shoot_activation_pool"]:
-            self._phase_initialized = False
+            self._shooting_phase_initialized = False
             self._charge_phase_init()
             return True, {"type": "phase_complete", "next_phase": "charge", "current_player": self.game_state["current_player"]}
         
-        # AI_TURN.md COMPLIANCE: ONLY semantic actions with unitId
+        # Basic action validation (engine responsibility for unit selection)
         if "unitId" not in action:
             return False, {"error": "semantic_action_required", "action": action}
         
@@ -455,16 +462,16 @@ class W40KEngine(gym.Env):
         if active_unit["id"] not in self.game_state["shoot_activation_pool"]:
             return False, {"error": "unit_not_eligible", "unitId": action["unitId"]}
         
-        # PURE DELEGATION: All shooting logic in handlers
+        # DELEGATION: Pass validated unit to handler
         success, result = shooting_handlers.execute_action(self.game_state, active_unit, action, self.config)
         
-        # Remove unit from activation pool AFTER successful action
-        if success:
+        # Engine handles pool removal after successful action (for now)
+        if success and active_unit["id"] in self.game_state["shoot_activation_pool"]:
             self.game_state["shoot_activation_pool"].remove(active_unit["id"])
             
-            # AI_TURN.md LOOP: After removing unit, check if pool is now empty (same check condition)
+            # Check if pool now empty
             if not self.game_state["shoot_activation_pool"]:
-                self._phase_initialized = False
+                self._shooting_phase_initialized = False
                 self._charge_phase_init()
                 result["phase_transition"] = True
                 result["next_phase"] = "charge"
@@ -535,7 +542,7 @@ class W40KEngine(gym.Env):
     
     # ===== SHOOTING PHASE IMPLEMENTATION =====
     
-    def _shooting_build_activation_pool(self):
+    def _shooting_build_activation_pool_old(self):
         """Pure delegation to shooting_handlers for pool building."""
         eligible_units = shooting_handlers.shooting_build_activation_pool(self.game_state)
         
