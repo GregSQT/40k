@@ -209,7 +209,9 @@ else:
 ######################################################################################################
 
         # shared
-        "shared/gameLogStructure.ts"
+        "shared/gameLogStructure.py",
+        "shared/gameLogStructure.ts",
+        "shared/gameLogUtils.py"
 
     ]
 

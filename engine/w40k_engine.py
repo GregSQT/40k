@@ -420,7 +420,7 @@ class W40KEngine(gym.Env):
     def _shooting_phase_init(self):
         """Initialize shooting phase and build activation pool."""
         self.game_state["phase"] = "shoot"
-        self._build_shoot_activation_pool()
+        self._shooting_build_activation_pool()
     
     def _charge_phase_init(self):
         """Initialize charge phase and build activation pool."""
@@ -436,7 +436,7 @@ class W40KEngine(gym.Env):
             self._charge_phase_init()
 
     def _process_shooting_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """Process shooting phase with AI_TURN.md decision tree logic."""
+        """Pure delegation to shooting_handlers - engine orchestration only."""
         
         # Check if phase should complete (empty pool means phase is done)
         if not self.game_state["shoot_activation_pool"]:
@@ -455,8 +455,8 @@ class W40KEngine(gym.Env):
         if active_unit["id"] not in self.game_state["shoot_activation_pool"]:
             return False, {"error": "unit_not_eligible", "unitId": action["unitId"]}
         
-        # Use internal shooting implementation to avoid action format conflicts
-        success, result = self._execute_shooting_action(active_unit, action)
+        # PURE DELEGATION: All shooting logic in handlers
+        success, result = shooting_handlers.execute_action(self.game_state, active_unit, action, self.config)
         
         # Remove unit from activation pool AFTER successful action
         if success:
@@ -535,10 +535,9 @@ class W40KEngine(gym.Env):
     
     # ===== SHOOTING PHASE IMPLEMENTATION =====
     
-    def _build_shoot_activation_pool(self):
-        """Build shooting activation pool using AI_IMPLEMENTATION.md delegation with full LoS validation."""
-        # AI_TURN.md COMPLIANCE: Use consistent rules regardless of training/evaluation mode
-        eligible_units = shooting_handlers.build_shoot_activation_pool(self.game_state)
+    def _shooting_build_activation_pool(self):
+        """Pure delegation to shooting_handlers for pool building."""
+        eligible_units = shooting_handlers.shooting_build_activation_pool(self.game_state)
         
         # Add console log for web browser visibility only in non-training mode
         if not (self.is_training or self.quiet):
@@ -549,6 +548,8 @@ class W40KEngine(gym.Env):
             # Silent mode: update without console logs but use same eligibility rules
             if "console_logs" not in self.game_state:
                 self.game_state["console_logs"] = []
+        
+        return eligible_units
         
     def _has_valid_shooting_targets(self, unit: Dict[str, Any]) -> bool:
         """Check if unit has valid shooting targets per AI_TURN.md restrictions."""

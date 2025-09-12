@@ -328,7 +328,7 @@ Wounded Marine (HP_CUR 1) adjacent to healthy Ork
 Flee option: Survive to act later in the game, but lose turn effectiveness
 Stay option: 80% chance of death but maintain capabilities
 Decision factors: Unit value, importance of actions this turn, long term strategy, alternative threats
-```
+  ```
 
 ## 🎯 SHOOTING PHASE Decision Tree
 
