@@ -170,6 +170,32 @@ export const useEngineAPI = () => {
       
       const data = await response.json();
       
+      // Process detailed backend action logs FIRST
+      if (data.action_logs && data.action_logs.length > 0) {
+        data.action_logs.forEach((logEntry: any) => {
+          console.log(`🎯 DETAILED BACKEND LOG: ${logEntry.message}`);
+          
+          // Send detailed log to GameLog component via custom event
+          window.dispatchEvent(new CustomEvent('backendLogEvent', {
+            detail: {
+              type: logEntry.type,
+              message: logEntry.message,
+              turn: logEntry.turn,
+              phase: logEntry.phase,
+              shooterId: logEntry.shooterId,
+              targetId: logEntry.targetId,
+              damage: logEntry.damage,
+              target_died: logEntry.target_died,
+              hitRoll: logEntry.hitRoll,
+              woundRoll: logEntry.woundRoll,
+              saveRoll: logEntry.saveRoll,
+              saveTarget: logEntry.saveTarget,
+              timestamp: new Date()
+            }
+          }));
+        });
+      }
+      
       // DEBUG: Log full response structure to understand blinking data location
       
         if (data.success) {

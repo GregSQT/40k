@@ -520,6 +520,26 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         if target["HP_CUR"] <= 0:
             attack_result["target_died"] = True
     
+    # CRITICAL: Store detailed log for frontend display
+    if "action_logs" not in game_state:
+        game_state["action_logs"] = []
+    
+    game_state["action_logs"].append({
+        "type": "shoot",
+        "message": attack_result["attack_log"],  # Full detailed message
+        "turn": game_state.get("current_turn", 1),
+        "phase": "shoot",
+        "shooterId": unit_id,
+        "targetId": target_id,
+        "damage": attack_result["damage"],
+        "target_died": attack_result.get("target_died", False),
+        "hitRoll": attack_result.get("hit_roll"),
+        "woundRoll": attack_result.get("wound_roll"),
+        "saveRoll": attack_result.get("save_roll"),
+        "saveTarget": attack_result.get("save_target"),
+        "timestamp": "server_time"
+    })
+    
     return {
         "action": "shot_executed",
         "shooterId": unit_id,
@@ -546,7 +566,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
     
     if not hit_success:
         # MISS case
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}) : MISSED !"
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}+) : MISSED !"
         return {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
@@ -562,7 +582,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
     
     if not wound_success:
         # FAIL case
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}) - Wound {wound_roll}({wound_target}) : FAILED !"
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) : FAILED !"
         return {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
@@ -580,7 +600,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
     
     if save_success:
         # SAVE case
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}) - Wound {wound_roll}({wound_target}) - Save {save_roll}({save_target}) : SAVED !"
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) : SAVED !"
         return {
             "hit_roll": hit_roll,
             "wound_roll": wound_roll,
@@ -597,10 +617,10 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
     
     if new_hp <= 0:
         # Target dies
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}) - Wound {wound_roll}({wound_target}) - Save {save_roll}({save_target}) - {damage_dealt} delt : Unit {target_id} DIED !"
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} delt : Unit {target_id} DIED !"
     else:
         # Target survives
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}) - Wound {wound_roll}({wound_target}) - Save {save_roll}({save_target}) - {damage_dealt} DAMAGE DELT !"
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DELT !"
     
     return {
         "hit_roll": hit_roll,

@@ -1,7 +1,7 @@
 // frontend/src/pages/PlayerVsAIPage.tsx
 import React, { useEffect, useState } from "react";
 import { ErrorBoundary } from "../components/ErrorBoundary";
-import { GameController } from "../components/GameController";
+import { GameController } from "../components/GameController_test_pour_del";
 import "../App.css";
 import { initializeUnitRegistry } from "../data/UnitFactory";
 

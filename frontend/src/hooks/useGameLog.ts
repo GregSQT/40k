@@ -1,5 +1,5 @@
 // frontend/src/hooks/useGameLog.ts
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Unit } from '../types/game';
 
 import type { GameLogEvent } from '../components/GameLog';
@@ -29,6 +29,37 @@ export function useGameLog() {
     
     setEvents(prevEvents => [newEvent, ...prevEvents]);
   }, []);
+
+  // Listen for detailed backend log events
+  useEffect(() => {
+    const handleBackendLog = (event: CustomEvent) => {
+      const logData = event.detail;
+      addEvent({
+        type: logData.type,
+        message: logData.message,  // Full detailed message from backend
+        turnNumber: logData.turn,
+        phase: logData.phase,
+        unitId: parseInt(logData.shooterId),
+        targetId: parseInt(logData.targetId),
+        shootDetails: logData.hitRoll ? [{
+          shotNumber: 1,
+          attackRoll: logData.hitRoll,
+          strengthRoll: logData.woundRoll,
+          saveRoll: logData.saveRoll,
+          saveTarget: logData.saveTarget,
+          damageDealt: logData.damage,
+          hitResult: logData.hitRoll ? 'HIT' : 'MISS',
+          strengthResult: logData.woundRoll ? 'SUCCESS' : 'FAILED',
+          saveSuccess: logData.saveRoll >= logData.saveTarget
+        }] : undefined
+      });
+    };
+
+    window.addEventListener('backendLogEvent', handleBackendLog as EventListener);
+    return () => {
+      window.removeEventListener('backendLogEvent', handleBackendLog as EventListener);
+    };
+  }, [addEvent]);
 
   // GameController compatible logging functions
   const logTurnStart = useCallback((turnNumber: number) => {

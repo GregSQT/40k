@@ -211,7 +211,8 @@ else:
         # shared
         "shared/gameLogStructure.py",
         "shared/gameLogStructure.ts",
-        "shared/gameLogUtils.py"
+        "shared/gameLogUtils.py",
+        "shared/gameLogUtils.ts"
 
     ]
 

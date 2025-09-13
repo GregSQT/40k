@@ -216,10 +216,17 @@ def execute_action():
             debug_logs = flask_request_logs + debug_logs
             flask_request_logs = []  # Clear after forwarding
         
+        # Extract and send detailed action logs to frontend
+        action_logs = serializable_state.get("action_logs", [])
+        if action_logs:
+            # Clear logs after extraction to prevent duplication
+            serializable_state["action_logs"] = []
+        
         return jsonify({
             "success": success,
             "result": result,
             "game_state": serializable_state,
+            "action_logs": action_logs,
             "message": "Action executed successfully" if success else "Action failed"
         })
     
