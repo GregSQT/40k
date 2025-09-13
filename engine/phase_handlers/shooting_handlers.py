@@ -634,11 +634,15 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
 
 def _calculate_save_target(target: Dict[str, Any], ap: int) -> int:
     """Calculate save target with AP modifier and invulnerable save"""
-    armor_save = target.get("ARMOR_SAVE", 7)
+    armor_save = target.get("ARMOR_SAVE")
     invul_save = target.get("INVUL_SAVE", 7)
     
-    # Apply AP to armor save
-    modified_armor = armor_save + ap
+    # Apply AP to armor save (AP makes saves worse, so subtract from save)
+    modified_armor = armor_save - ap
+    
+    # Cap impossible saves at 7 (no save on d6)
+    if modified_armor > 6:
+        modified_armor = 7
     
     # Use best available save
     return min(modified_armor, invul_save)
