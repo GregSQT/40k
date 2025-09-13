@@ -358,6 +358,24 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     unit["col"] = dest_col
     unit["row"] = dest_row
     
+    # Generate movement log per requested format
+    if "action_logs" not in game_state:
+        game_state["action_logs"] = []
+    
+    game_state["action_logs"].append({
+        "type": "move",
+        "message": f"Unit {unit['id']} ({orig_col}, {orig_row}) MOVED to ({dest_col}, {dest_row})",
+        "turn": game_state.get("current_turn", 1),
+        "phase": "move",
+        "unitId": unit["id"],
+        "fromCol": orig_col,
+        "fromRow": orig_row,
+        "toCol": dest_col,
+        "toRow": dest_row,
+        "was_flee": was_adjacent,
+        "timestamp": "server_time"
+    })
+    
     # Clear preview
     movement_clear_preview(game_state)
     
@@ -377,6 +395,21 @@ def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any
 
 def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """AI_MOVE.md: Handle skip action"""
+    # Generate WAIT log for cancelled movement
+    if "action_logs" not in game_state:
+        game_state["action_logs"] = []
+    
+    game_state["action_logs"].append({
+        "type": "wait",
+        "message": f"Unit {unit['id']} ({unit['col']}, {unit['row']}) WAIT",
+        "turn": game_state.get("current_turn", 1),
+        "phase": "move",
+        "unitId": unit["id"],
+        "col": unit["col"],
+        "row": unit["row"],
+        "timestamp": "server_time"
+    })
+    
     movement_clear_preview(game_state)
     return _end_activation(game_state, unit, False)
 

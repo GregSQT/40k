@@ -100,29 +100,6 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
                   )}
                   <span className="game-log-entry__message">
                     {event.message}
-                    {(event.type === 'shoot' || event.type === 'combat') && event.shootDetails && (
-                      <span className="game-log-entry__shoot-inline">
-                        {event.shootDetails.map((shot, index) => {
-                          let shotText = ` - Shot ${shot.shotNumber}: Hit (${shot.hitTarget}+) ${shot.attackRoll}: ${shot.hitResult === 'HIT' ? 'Success!' : 'Failed!'}`;
-                          
-                          // Show wound roll if we have wound target data
-                          if (shot.woundTarget && shot.woundTarget > 0) {
-                            shotText += ` - Wound (${shot.woundTarget}+) ${shot.strengthRoll}: ${shot.strengthResult === 'SUCCESS' ? 'Success!' : 'Failed!'}`;
-                          }
-                          
-                          // Show save roll if we have save target data  
-                          if (shot.saveTarget && shot.saveTarget > 0) {
-                            shotText += ` - Armor (${shot.saveTarget}+) ${shot.saveRoll}: ${shot.saveSuccess ? 'Success!' : 'Failed!'} : -${shot.damageDealt} HP`;
-                          }
-                          
-                          return (
-                            <span key={index} className="game-log-shot-inline">
-                              {shotText}
-                            </span>
-                          );
-                        })}
-                      </span>
-                    )}
                   </span>
                 </div>
               </div>
