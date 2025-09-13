@@ -212,11 +212,18 @@ class W40KEngine(gym.Env):
         # BUILT-IN STEP COUNTING - Only location in entire system
         self.game_state["episode_steps"] += 1
         
+        # Check for game termination after each action
+        self.game_state["game_over"] = self._check_game_over()
+        
         # Convert gym integer action to semantic action
         semantic_action = self._convert_gym_action(action)
         
         # Process semantic action with AI_TURN.md compliance
-        success, result = self._process_semantic_action(semantic_action)
+        action_result = self._process_semantic_action(semantic_action)
+        if isinstance(action_result, tuple) and len(action_result) == 2:
+            success, result = action_result
+        else:
+            success, result = True, action_result
         
         # Log action ONLY if it's a real agent action (not skip) and successful
         if (self.step_logger and self.step_logger.enabled and 
@@ -256,10 +263,13 @@ class W40KEngine(gym.Env):
                         "save_target": 4
                     })
                 
+                # Capture phase AFTER action execution for accurate logging
+                post_action_phase = self._get_action_phase_for_logging(semantic_action.get("action"))
+                
                 self.step_logger.log_action(
                     unit_id=active_unit["id"],
-                    action_type=semantic_action.get("action"),
-                    phase=self.game_state["phase"],
+                    action_type=semantic_action.get("action"), 
+                    phase=post_action_phase,
                     player=self.game_state["current_player"],
                     success=success,
                     step_increment=True,
@@ -274,6 +284,12 @@ class W40KEngine(gym.Env):
         info = result.copy() if isinstance(result, dict) else {}
         info["success"] = success
         
+        # Add winner info when game ends
+        if terminated:
+            info["winner"] = self._determine_winner()
+        else:
+            info["winner"] = None
+            
         return observation, reward, terminated, truncated, info
     
     def execute_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -404,15 +420,60 @@ class W40KEngine(gym.Env):
             shooting_handlers.shooting_phase_start(self.game_state)
             self._shooting_phase_initialized = True
         
-        # **FULL DELEGATION**: shooting_handlers.execute_action(game_state, unit, action, config)
-        success, result = shooting_handlers.execute_action(self.game_state, None, action, self.config)
+        # AI_TURN.md: Check if shooting phase is complete before getting active unit
+        if not self.game_state.get("shoot_activation_pool"):
+            self._shooting_phase_initialized = False
+            
+            # AI_TURN.md EXACT: Player progression logic after shooting
+            if self.game_state["current_player"] == 0:
+                # Player 0 complete → Player 1 movement phase
+                self.game_state["current_player"] = 1
+                self._movement_phase_init()
+                return True, {"type": "phase_complete", "next_phase": "move", "current_player": 1}
+            elif self.game_state["current_player"] == 1:
+                # Player 1 complete → Increment turn, Player 0 movement phase
+                self.game_state["turn"] += 1
+                self.game_state["current_player"] = 0
+                self._movement_phase_init()
+                return True, {"type": "phase_complete", "next_phase": "move", "current_player": 0, "new_turn": self.game_state["turn"]}
         
-        # Check response for phase_complete flag
+        # AI_TURN.md: Get active unit from shooting phase pool
+        active_unit_id = self.game_state["shoot_activation_pool"][0]
+        active_unit = self._get_unit_by_id(active_unit_id)
+        if not active_unit:
+            return False, {"error": "active_unit_not_found", "unitId": active_unit_id}
+            
+        # **FULL DELEGATION**: shooting_handlers.execute_action(game_state, unit, action, config)
+        handler_result = shooting_handlers.execute_action(self.game_state, active_unit, action, self.config)
+        if isinstance(handler_result, tuple):
+            if len(handler_result) == 2:
+                success, result = handler_result
+            else:
+                success, result = handler_result[0], handler_result[1]
+        else:
+            success, result = True, handler_result
+        
+        # Check response for phase_complete flag - delegate to shooting completion logic
         if result.get("phase_complete"):
             self._shooting_phase_initialized = False
-            self._charge_phase_init()
-            result["phase_transition"] = True
-            result["next_phase"] = "charge"
+            
+            # Use shooting completion logic instead of charge phase
+            if self.game_state["current_player"] == 0:
+                # Player 0 complete → Player 1 movement phase
+                self.game_state["current_player"] = 1
+                self._movement_phase_init()
+                result["phase_transition"] = True
+                result["next_phase"] = "move"
+                result["current_player"] = 1
+            elif self.game_state["current_player"] == 1:
+                # Player 1 complete → Increment turn, Player 0 movement phase
+                self.game_state["turn"] += 1
+                self.game_state["current_player"] = 0
+                self._movement_phase_init()
+                result["phase_transition"] = True
+                result["next_phase"] = "move"
+                result["current_player"] = 0
+                result["new_turn"] = self.game_state["turn"]
         
         return success, result
     
@@ -670,6 +731,52 @@ class W40KEngine(gym.Env):
     
     # ===== VALIDATION METHODS =====
     
+    def _determine_winner(self) -> Optional[int]:
+        """Determine winner based on remaining living units."""
+        living_units_by_player = {}
+        
+        for unit in self.game_state["units"]:
+            if unit["HP_CUR"] > 0:
+                player = unit["player"]
+                if player not in living_units_by_player:
+                    living_units_by_player[player] = 0
+                living_units_by_player[player] += 1
+        
+        # If only one player has living units, they win
+        living_players = list(living_units_by_player.keys())
+        if len(living_players) == 1:
+            return living_players[0]
+        elif len(living_players) == 0:
+            return None  # Draw/no winner
+        else:
+            return None  # Game still ongoing
+    
+    def _check_game_over(self) -> bool:
+        """Check if game is over - one or both players have no living units."""
+        living_units_by_player = {}
+        
+        for unit in self.game_state["units"]:
+            if unit["HP_CUR"] > 0:
+                player = unit["player"]
+                if player not in living_units_by_player:
+                    living_units_by_player[player] = 0
+                living_units_by_player[player] += 1
+        
+        # Game is over if any player has no living units
+        return len(living_units_by_player) <= 1
+    
+    def _get_action_phase_for_logging(self, action_type: str) -> str:
+        """Map action types to their logical phases for step logging."""
+        action_phase_map = {
+            "move": "move",
+            "shoot": "shoot", 
+            "charge": "charge",
+            "combat": "fight",
+            "fight": "fight",
+            "skip": self.game_state["phase"]  # Use current phase for skip
+        }
+        return action_phase_map.get(action_type, self.game_state["phase"])
+    
     def validate_compliance(self) -> List[str]:
         """Validate AI_TURN.md compliance - returns list of violations."""
         violations = []
@@ -698,22 +805,60 @@ class W40KEngine(gym.Env):
         # Get currently active unit from activation pool
         active_unit = self._get_active_unit()
         
+        # AI_TURN.md: If no active unit, phase may be transitioning
         if not active_unit:
+            # Force phase progression by returning skip
             return {"action": "skip", "unitId": "none"}
         
-        # Convert gym action to semantic action
-        action_map = {
-            0: {"action": "move", "unitId": active_unit["id"], "destCol": active_unit["col"], "destRow": active_unit["row"] - 1},  # North
-            1: {"action": "move", "unitId": active_unit["id"], "destCol": active_unit["col"], "destRow": active_unit["row"] + 1},  # South  
-            2: {"action": "move", "unitId": active_unit["id"], "destCol": active_unit["col"] + 1, "destRow": active_unit["row"]},  # East
-            3: {"action": "move", "unitId": active_unit["id"], "destCol": active_unit["col"] - 1, "destRow": active_unit["row"]},  # West
-            4: {"action": "shoot", "unitId": active_unit["id"], "targetId": self._find_nearest_enemy(active_unit)},
-            5: {"action": "charge", "unitId": active_unit["id"], "targetId": self._find_nearest_enemy(active_unit)},
-            6: {"action": "combat", "unitId": active_unit["id"], "targetId": self._find_nearest_enemy(active_unit)},
-            7: {"action": "skip", "unitId": active_unit["id"]}
-        }
+        # Ensure action is hashable integer
+        action_int = int(action.item()) if hasattr(action, 'item') else int(action)
         
-        return action_map.get(action, {"action": "skip", "unitId": active_unit["id"]})
+        # Convert gym action to semantic action
+        # AI_TURN.md PHASE VALIDATION: Only allow valid actions per phase
+        current_phase = self.game_state["phase"]
+        
+        # Movement actions (0-3) - only valid in move phase
+        if 0 <= action_int <= 3:
+            if current_phase != "move":
+                converted_action = {"action": "skip", "unitId": active_unit["id"]}  # Invalid move action
+            else:
+                move_directions = {
+                    0: (active_unit["col"], active_unit["row"] - 1),  # North
+                    1: (active_unit["col"], active_unit["row"] + 1),  # South  
+                    2: (active_unit["col"] + 1, active_unit["row"]),  # East
+                    3: (active_unit["col"] - 1, active_unit["row"])   # West
+                }
+                dest_col, dest_row = move_directions[action_int]
+                converted_action = {"action": "move", "unitId": active_unit["id"], "destCol": dest_col, "destRow": dest_row}
+        
+        # Shooting action (4) - only valid in shoot phase
+        elif action_int == 4:
+            if current_phase != "shoot":
+                converted_action = {"action": "skip", "unitId": active_unit["id"]}  # Invalid shoot action
+            else:
+                converted_action = {"action": "shoot", "unitId": active_unit["id"], "targetId": self._find_nearest_enemy(active_unit)}
+        
+        # Charge action (5) - invalid in 2-phase system
+        elif action_int == 5:
+            converted_action = {"action": "skip", "unitId": active_unit["id"]}  # No charge phase in development
+        
+        # Combat action (6) - invalid in 2-phase system  
+        elif action_int == 6:
+            converted_action = {"action": "skip", "unitId": active_unit["id"]}  # No fight phase in development
+        
+        # Wait/Skip action (7) - always valid
+        elif action_int == 7:
+            converted_action = {"action": "skip", "unitId": active_unit["id"]}
+        
+        # Unknown action - default to skip
+        else:
+            converted_action = {"action": "skip", "unitId": active_unit["id"]}
+        
+        # Debug: Remove excessive logging for training
+        if not (self.is_training or self.quiet):
+            print(f"   → Converted gym action {action_int} to {converted_action['action']}")
+            
+        return converted_action
     
     def _get_active_unit(self) -> Optional[Dict[str, Any]]:
         """Get currently active unit from appropriate activation pool."""
@@ -744,107 +889,88 @@ class W40KEngine(gym.Env):
         # Return ID of first enemy (simple targeting)
         return enemies[0]["id"]
     
-    def _load_units_from_scenario(self, scenario_file, unit_registry):
-        """Load units from scenario file for training system compatibility."""
-        if not scenario_file or not unit_registry:
-            # Return minimal test units if no scenario provided
-            return [
-                {
-                    "id": "test_unit_1", "player": 0, "unitType": "TestUnit",
-                    "col": 1, "row": 1, "HP_CUR": 2, "HP_MAX": 2, "MOVE": 6,
-                    "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
-                    "RNG_NB": 1, "RNG_RNG": 24, "RNG_ATK": 3, "RNG_STR": 4, "RNG_DMG": 1, "RNG_AP": 0,
-                    "CC_NB": 1, "CC_RNG": 1, "CC_ATK": 3, "CC_STR": 4, "CC_DMG": 1, "CC_AP": 0,
-                    "LD": 7, "OC": 1, "VALUE": 10, "ICON": "marine", "ICON_SCALE": 1,
-                    "SHOOT_LEFT": 1, "ATTACK_LEFT": 1
-                }
-            ]
+def _load_units_from_scenario(self, scenario_file, unit_registry):
+        """Load units from scenario file - NO FALLBACKS ALLOWED."""
+        if not scenario_file:
+            raise ValueError("scenario_file is required - no fallbacks allowed")
+        if not unit_registry:
+            raise ValueError("unit_registry is required - no fallbacks allowed")
         
         import json
         import os
         
-        # Load scenario file
+        if not os.path.exists(scenario_file):
+            raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
+        
         try:
             with open(scenario_file, 'r') as f:
                 scenario_data = json.load(f)
-            
-            if isinstance(scenario_data, list):
-                basic_units = scenario_data
-            elif isinstance(scenario_data, dict) and "units" in scenario_data:
-                basic_units = scenario_data["units"]
-            else:
-                raise ValueError("Invalid scenario format")
-            
-            # Enhance units with registry data
-            enhanced_units = []
-            for unit_data in basic_units:
-                unit_type = unit_data["unit_type"]
-                
-                try:
-                    full_unit_data = unit_registry.get_unit_data(unit_type)
-                except:
-                    # Fallback if unit registry fails
-                    full_unit_data = {
-                        "HP_MAX": 2, "MOVE": 6, "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
-                        "RNG_NB": 1, "RNG_RNG": 24, "RNG_ATK": 3, "RNG_STR": 4, "RNG_DMG": 1, "RNG_AP": 0,
-                        "CC_NB": 1, "CC_RNG": 1, "CC_ATK": 3, "CC_STR": 4, "CC_DMG": 1, "CC_AP": 0,
-                        "LD": 7, "OC": 1, "VALUE": 10, "ICON": "default", "ICON_SCALE": 1
-                    }
-                
-                enhanced_unit = {
-                    "id": str(unit_data["id"]),
-                    "player": unit_data["player"],
-                    "unitType": unit_type,
-                    "col": unit_data["col"],
-                    "row": unit_data["row"],
-                    "HP_CUR": full_unit_data["HP_MAX"],
-                    "HP_MAX": full_unit_data["HP_MAX"],
-                    "MOVE": full_unit_data["MOVE"],
-                    "T": full_unit_data["T"],
-                    "ARMOR_SAVE": full_unit_data["ARMOR_SAVE"],
-                    "INVUL_SAVE": full_unit_data["INVUL_SAVE"],
-                    "RNG_NB": full_unit_data["RNG_NB"],
-                    "RNG_RNG": full_unit_data["RNG_RNG"],
-                    "RNG_ATK": full_unit_data["RNG_ATK"],
-                    "RNG_STR": full_unit_data["RNG_STR"],
-                    "RNG_DMG": full_unit_data["RNG_DMG"],
-                    "RNG_AP": full_unit_data["RNG_AP"],
-                    "CC_NB": full_unit_data["CC_NB"],
-                    "CC_RNG": full_unit_data["CC_RNG"],
-                    "CC_ATK": full_unit_data["CC_ATK"],
-                    "CC_STR": full_unit_data["CC_STR"],
-                    "CC_DMG": full_unit_data["CC_DMG"],
-                    "CC_AP": full_unit_data["CC_AP"],
-                    "LD": full_unit_data["LD"],
-                    "OC": full_unit_data["OC"],
-                    "VALUE": full_unit_data["VALUE"],
-                    "ICON": full_unit_data["ICON"],
-                    "ICON_SCALE": full_unit_data["ICON_SCALE"],
-                    "SHOOT_LEFT": full_unit_data["RNG_NB"],
-                    "ATTACK_LEFT": full_unit_data["CC_NB"]
-                }
-                
-                enhanced_units.append(enhanced_unit)
-            
-            return enhanced_units
-            
         except Exception as e:
-            if not hasattr(self, 'quiet') or not self.quiet:
-                print(f"Warning: Failed to load scenario {scenario_file}: {e}")
+            raise ValueError(f"Failed to parse scenario file {scenario_file}: {e}")
+        
+        if isinstance(scenario_data, list):
+            basic_units = scenario_data
+        elif isinstance(scenario_data, dict) and "units" in scenario_data:
+            basic_units = scenario_data["units"]
+        else:
+            raise ValueError(f"Invalid scenario format in {scenario_file}: must have 'units' array")
+        
+        if not basic_units:
+            raise ValueError(f"Scenario file {scenario_file} contains no units")
+        
+        enhanced_units = []
+        for unit_data in basic_units:
+            if "unit_type" not in unit_data:
+                raise KeyError(f"Unit missing required 'unit_type' field: {unit_data}")
             
-            # Return minimal test scenario
-            # Return minimal test scenario
-            return [
-                {
-                    "id": "fallback_unit", "player": 0, "unitType": "TestUnit",
-                    "col": 1, "row": 1, "HP_CUR": 2, "HP_MAX": 2, "MOVE": 6,
-                    "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
-                    "RNG_NB": 1, "RNG_RNG": 24, "RNG_ATK": 3, "RNG_STR": 4, "RNG_DMG": 1, "RNG_AP": 0,
-                    "CC_NB": 1, "CC_RNG": 1, "CC_ATK": 3, "CC_STR": 4, "CC_DMG": 1, "CC_AP": 0,
-                    "LD": 7, "OC": 1, "VALUE": 10, "ICON": "default", "ICON_SCALE": 1,
-                    "SHOOT_LEFT": 1, "ATTACK_LEFT": 1
-                }
-            ]
+            unit_type = unit_data["unit_type"]
+            
+            try:
+                full_unit_data = unit_registry.get_unit_data(unit_type)
+            except Exception as e:
+                raise ValueError(f"Failed to get unit data for '{unit_type}': {e}")
+            
+            required_fields = ["id", "player", "col", "row"]
+            for field in required_fields:
+                if field not in unit_data:
+                    raise KeyError(f"Unit missing required field '{field}': {unit_data}")
+            
+            enhanced_unit = {
+                "id": str(unit_data["id"]),
+                "player": unit_data["player"],
+                "unitType": unit_type,
+                "col": unit_data["col"],
+                "row": unit_data["row"],
+                "HP_CUR": full_unit_data["HP_MAX"],
+                "HP_MAX": full_unit_data["HP_MAX"],
+                "MOVE": full_unit_data["MOVE"],
+                "T": full_unit_data["T"],
+                "ARMOR_SAVE": full_unit_data["ARMOR_SAVE"],
+                "INVUL_SAVE": full_unit_data["INVUL_SAVE"],
+                "RNG_NB": full_unit_data["RNG_NB"],
+                "RNG_RNG": full_unit_data["RNG_RNG"],
+                "RNG_ATK": full_unit_data["RNG_ATK"],
+                "RNG_STR": full_unit_data["RNG_STR"],
+                "RNG_DMG": full_unit_data["RNG_DMG"],
+                "RNG_AP": full_unit_data["RNG_AP"],
+                "CC_NB": full_unit_data["CC_NB"],
+                "CC_RNG": full_unit_data["CC_RNG"],
+                "CC_ATK": full_unit_data["CC_ATK"],
+                "CC_STR": full_unit_data["CC_STR"],
+                "CC_DMG": full_unit_data["CC_DMG"],
+                "CC_AP": full_unit_data["CC_AP"],
+                "LD": full_unit_data["LD"],
+                "OC": full_unit_data["OC"],
+                "VALUE": full_unit_data["VALUE"],
+                "ICON": full_unit_data["ICON"],
+                "ICON_SCALE": full_unit_data["ICON_SCALE"],
+                "SHOOT_LEFT": full_unit_data["RNG_NB"],
+                "ATTACK_LEFT": full_unit_data["CC_NB"]
+            }
+            
+            enhanced_units.append(enhanced_unit)
+        
+        return enhanced_units
 
 
 def create_test_config() -> Dict[str, Any]:

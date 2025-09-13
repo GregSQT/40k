@@ -38,16 +38,20 @@ Prefers systematic debugging with evidence before solutions
 Requires proper file paths and change tracking in format: FILE: path / CHANGE# / LINES / TYPE / BEFORE/AFTER / RESULT
 Uses specific error reporting format with TypeScript compiler output
 
-
+----------------------------------------------------------------------------
+BUGS
+----------------------------------------------------------------------------
+MOVE :
+Probleme quand on passe a cote d'un mur ?
 Shooting phase :
 Couleur de HP bar dans css (et couleur du blink preview aussi)
 Calcul different entre les hex rouges et les unit blink
-shoot counter
-
+dead : noir et retirer icon
+Utilise App.css pour la log ?
 
 Externalize end_activation fuction ?
 Check shooting LoS logic (cube ?)
-
+----------------------------------------------------------------------------
 TEST :
 Terminal 1 : 
 python services/api_server.py
@@ -55,7 +59,19 @@ Terminal 2 :
 app
 Terminal 3 :
 python tests/test_board.py
+----------------------------------------------------------------------------
+ARCHITECTURE
+Engine Responsibilities (Global Management):	
+Phase sequencing: ✅ Controls phase transitions
+Turn management: ✅ Player switching and turn counter
+Global Episode step counting: ✅ Stores the counter variable
+Game over detection: ✅ Win/loss conditions
 
+Handler Responsibilities (Phase Execution):
+Episode step incrementation: ✅ Handlers call increment via _end_activation()
+All phase logic: ✅ Complete state machines in handlers
+All unit management: ✅ Eligibility, activation, tracking
+----------------------------------------------------------------------------
 callback chain: 
 UnitRenderer (event dispatch) → 
 window.addEventListener (boardClickHandler) → 

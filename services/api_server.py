@@ -157,52 +157,8 @@ def execute_action():
         if not action:
             return jsonify({"success": False, "error": "No action provided"}), 400
         
-        # AI_TURN.md: Route shooting actions directly to compliant handlers
-        current_phase = engine.game_state.get("phase", "move")
-        action_type = action.get("action")
-        
-        if current_phase == "shoot" and action_type in ["activate_unit", "left_click", "right_click"]:
-            # Import from correct engine location
-            import sys
-            import os
-            # Navigate from services/ to engine/phase_handlers/
-            # Direct file loading to bypass module structure requirements
-            handlers_file = os.path.join(os.path.dirname(__file__), '..', 'engine', 'phase_handlers', 'shooting_handlers.py')
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("shooting_handlers", handlers_file)
-            shooting_handlers = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(shooting_handlers)
-            
-            # Get active unit if exists, otherwise pass None
-            active_unit = None
-            if engine.game_state.get("active_shooting_unit"):
-                active_unit = next(
-                    (u for u in engine.game_state["units"] 
-                     if u["id"] == engine.game_state["active_shooting_unit"]), 
-                    None
-                )
-            
-            # Handle unit selection for shooting_handlers compatibility
-            if action_type == "activate_unit":
-                # Unit activation - find unit from action
-                target_unit_id = action.get("unitId")
-                target_unit = next(
-                    (u for u in engine.game_state["units"] if u["id"] == target_unit_id), 
-                    None
-                )
-                if not target_unit:
-                    success, result = False, {"error": "unit_not_found", "unitId": target_unit_id}
-                else:
-                    success, result = shooting_handlers.execute_action(engine.game_state, target_unit, action, engine.config)
-            elif active_unit:
-                # Active unit exists - use it
-                success, result = shooting_handlers.execute_action(engine.game_state, active_unit, action, engine.config)
-            else:
-                # No active unit - this shouldn't happen in shooting phase
-                success, result = False, {"error": "no_active_shooting_unit", "action": action_type}
-        else:
-            # Other phases use engine semantic action processing
-            success, result = engine.execute_semantic_action(action)
+        # AI_TURN.md: Route ALL actions through engine consistently
+        success, result = engine.execute_semantic_action(action)
         
         # Convert sets to lists for JSON serialization
         serializable_state = dict(engine.game_state)

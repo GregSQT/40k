@@ -696,15 +696,8 @@ class MultiAgentTrainer:
                            rewards_config_name: str, scenario_path: str) -> Tuple[DQN, Any]:
         """Create or load DQN model for specific agent."""
         try:
-            # Import environment here to avoid circular imports
-            try:
-                from gym40k import W40KEnv
-            except ImportError:
-                try:
-                    from ai.gym40k import W40KEnv
-                except ImportError as e:
-                    print(f"❌ Failed to import W40KEnv: {e}")
-                    raise ImportError(f"Cannot import W40KEnv: {e}")
+            # AI_TURN.md COMPLIANCE: Use compliant engine directly
+            from engine.w40k_engine import W40KEngine
             
             # Load training configuration
             training_config = self.config.load_training_config(training_config_name)
@@ -717,7 +710,7 @@ class MultiAgentTrainer:
             
             # Create agent-specific environment with generated scenario and shared registry
             try:
-                base_env = W40KEnv(
+                base_env = W40KEngine(
                     rewards_config=rewards_config_name,
                     training_config_name=training_config_name,
                     controlled_agent=agent_key,
@@ -818,11 +811,8 @@ class MultiAgentTrainer:
 
     def _create_eval_env_for_session(self, session: TrainingSession):
         """Create evaluation environment for session callbacks."""
-        # Import environment
-        try:
-            from gym40k import W40KEnv
-        except ImportError:
-            from ai.gym40k import W40KEnv
+        # Import environment - AI_TURN.md compliant
+        from engine.w40k_engine import W40KEngine
         
         # Create evaluation environment identical to training environment
         scenario = self.scenario_manager.generate_training_scenario(
@@ -839,7 +829,7 @@ class MultiAgentTrainer:
             temp_scenario_path = f.name
         
         # Create environment with same fixes as training environment
-        base_eval_env = W40KEnv(
+        base_eval_env = W40KEngine(
             controlled_agent=session.agent_key,
             scenario_file=temp_scenario_path,
             unit_registry=self.unit_registry,
@@ -929,7 +919,9 @@ class MultiAgentTrainer:
                 
                 # CRITICAL FIX: Check game over conditions properly
                 if not done:
-                    current_turn = info.get('current_turn')
+                    current_turn = info.get('current_turn', 1)
+                if current_turn is None:
+                    current_turn = 1
                     eligible_units = info.get('eligible_units')
                     ai_units_alive = info.get('ai_units_alive')
                     enemy_units_alive = info.get('enemy_units_alive')
@@ -939,7 +931,7 @@ class MultiAgentTrainer:
                         print(f"🏁 Episode {episode + 1} ended: AI={ai_units_alive}, Enemy={enemy_units_alive}")
                         done = True
                     # Use config-based max_turns from game_config.json
-                    elif current_turn > self.config.get_max_turns():
+                    elif current_turn and current_turn > self.config.get_max_turns():
                         config_max_turns = self.config.get_max_turns()
                         print(f"⚠️ Episode {episode + 1} auto-terminated due to turn limit (turn {current_turn}, max: {config_max_turns})")
                         done = True

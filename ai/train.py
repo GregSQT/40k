@@ -65,7 +65,7 @@ class EpisodeTerminationCallback(BaseCallback):
         self.step_count += 1
         
         # Debug: Print every 100 steps to see if callback is working
-        if self.step_count % 100 == 0:
+        if self.step_count % 1000 == 0:
             print(f"🔍 Callback alive: Step {self.step_count}")
         
         # Try multiple ways to detect episode end for DummyVecEnv

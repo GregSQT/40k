@@ -289,7 +289,7 @@ def shooting_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     
     return {
         "phase_complete": True,
-        "next_phase": "charge",
+        "next_phase": "move",
         "units_processed": len(game_state.get("units_shot", set()))
     }
 
@@ -343,7 +343,10 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     if "active_shooting_unit" in game_state:
         del game_state["active_shooting_unit"]
     
-    return {
+    # Check if shooting pool is now empty after removing this unit
+    pool_empty = len(game_state.get("shoot_activation_pool", [])) == 0
+    
+    response = {
         "activation_ended": True,
         "endType": arg1,
         "unitId": unit["id"],
@@ -351,6 +354,12 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         "reset_mode": "select",
         "clear_selected_unit": True
     }
+    
+    # Signal phase completion if pool is empty
+    if pool_empty:
+        response["phase_complete"] = True
+    
+    return response
 
 def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool, Dict[str, Any]]:
     """
@@ -422,21 +431,16 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return True, result
     
     elif action_type == "left_click":
-        print(f"   → LEFT_CLICK route")
         target_id = action.get("targetId")
-        print(f"   → Target ID: {target_id}")
         return shooting_click_handler(game_state, unit_id, action)
     
     elif action_type == "right_click":
-        print(f"   → RIGHT_CLICK route")
         return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
     
     elif action_type == "skip":
-        print(f"   → SKIP route")
         return _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
     
     else:
-        print(f"   → UNKNOWN ACTION: {action_type}")
         return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "shoot"}
 
 
@@ -474,27 +478,20 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     target = _get_unit_by_id(game_state, target_id)
     
     if not unit or not target:
-        print(f"   ERROR: Unit or target not found")
         return False, {"error": "unit_or_target_not_found"}
     
     # Validate target is in valid pool
     valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
-    print(f"   Valid targets: {valid_targets}")
     
     if target_id not in valid_targets:
-        print(f"   ERROR: Target not in valid pool")
         return False, {"error": "target_not_valid", "targetId": target_id}
     
     # Execute shooting attack
     attack_result = shooting_attack_controller(game_state, unit_id, target_id)
-    print(f"   Attack result: {attack_result}")
     
     # Update SHOOT_LEFT and continue loop per AI_TURN.md
     unit["SHOOT_LEFT"] -= 1
     # TOTAL_ATTACK_LOG is handled in shooting_attack_controller - no duplication
-    
-    print(f"   → SHOOT_LEFT now: {unit['SHOOT_LEFT']}")
-    print(f"   → Continuing execution loop")
     
     # Continue execution loop to check for more shots or end activation
     return _shooting_unit_execution_loop(game_state, unit_id)
@@ -504,15 +501,11 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     """
     AI_TURN.md EXACT: attack_sequence(RNG) implementation with proper logging
     """
-    print(f"🎯 SHOOTING_ATTACK_CONTROLLER CALLED: shooter={unit_id}, target={target_id}")
     shooter = _get_unit_by_id(game_state, unit_id)
     target = _get_unit_by_id(game_state, target_id)
     
     if not shooter or not target:
-        print(f"🎯 ERROR: shooter={shooter is not None}, target={target is not None}")
         return {"error": "unit_or_target_not_found"}
-    
-    print(f"🎯 UNITS FOUND: Starting attack sequence")
     
     # Execute single attack_sequence(RNG) per AI_TURN.md
     attack_result = _attack_sequence_rng(shooter, target)
@@ -639,17 +632,19 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
 def _calculate_save_target(target: Dict[str, Any], ap: int) -> int:
     """Calculate save target with AP modifier and invulnerable save"""
     armor_save = target.get("ARMOR_SAVE")
-    invul_save = target.get("INVUL_SAVE", 7)
+    invul_save = target.get("INVUL_SAVE", 0)
     
-    # Apply AP to armor save (AP makes saves worse, so subtract from save)
-    modified_armor = armor_save - ap
+    # Apply AP to armor save (AP makes saves worse, so add to target number)
+    modified_armor_save = armor_save + ap
     
-    # Cap impossible saves at 7 (no save on d6)
-    if modified_armor > 6:
-        modified_armor = 7
+    # Handle invulnerable saves: 0 means no invul save, use 7 (impossible)
+    effective_invul = invul_save if invul_save > 0 else 7
     
-    # Use best available save
-    return min(modified_armor, invul_save)
+    # Use best available save (lower target number is better)
+    best_save = min(modified_armor_save, effective_invul)
+    
+    # Cap impossible saves at 7, minimum save is 2+
+    return max(2, min(best_save, 6))
 
 
 def _calculate_wound_target(strength: int, toughness: int) -> int:
