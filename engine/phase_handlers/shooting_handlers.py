@@ -134,8 +134,6 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     
     valid_target_pool = []
     
-    print(f"🔥 BUILDING TARGET POOL for unit {unit_id}")
-    
     for enemy in game_state["units"]:
         if (enemy["player"] != unit["player"] and 
             enemy["HP_CUR"] > 0 and
@@ -371,7 +369,6 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> T
     
     # AI_TURN.md: While SHOOT_LEFT > 0
     if unit["SHOOT_LEFT"] <= 0:
-        print(f"   → SHOOT_LEFT = 0, ending activation")
         result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
         return True, result  # Ensure consistent (bool, dict) format
     
