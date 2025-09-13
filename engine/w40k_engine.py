@@ -889,166 +889,90 @@ class W40KEngine(gym.Env):
         # Return ID of first enemy (simple targeting)
         return enemies[0]["id"]
     
-def _load_units_from_scenario(self, scenario_file, unit_registry):
-        """Load units from scenario file - NO FALLBACKS ALLOWED."""
-        if not scenario_file:
-            raise ValueError("scenario_file is required - no fallbacks allowed")
-        if not unit_registry:
-            raise ValueError("unit_registry is required - no fallbacks allowed")
-        
-        import json
-        import os
-        
-        if not os.path.exists(scenario_file):
-            raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
-        
-        try:
-            with open(scenario_file, 'r') as f:
-                scenario_data = json.load(f)
-        except Exception as e:
-            raise ValueError(f"Failed to parse scenario file {scenario_file}: {e}")
-        
-        if isinstance(scenario_data, list):
-            basic_units = scenario_data
-        elif isinstance(scenario_data, dict) and "units" in scenario_data:
-            basic_units = scenario_data["units"]
-        else:
-            raise ValueError(f"Invalid scenario format in {scenario_file}: must have 'units' array")
-        
-        if not basic_units:
-            raise ValueError(f"Scenario file {scenario_file} contains no units")
-        
-        enhanced_units = []
-        for unit_data in basic_units:
-            if "unit_type" not in unit_data:
-                raise KeyError(f"Unit missing required 'unit_type' field: {unit_data}")
+    def _load_units_from_scenario(self, scenario_file, unit_registry):
+            """Load units from scenario file - NO FALLBACKS ALLOWED."""
+            if not scenario_file:
+                raise ValueError("scenario_file is required - no fallbacks allowed")
+            if not unit_registry:
+                raise ValueError("unit_registry is required - no fallbacks allowed")
             
-            unit_type = unit_data["unit_type"]
+            import json
+            import os
+            
+            if not os.path.exists(scenario_file):
+                raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
             
             try:
-                full_unit_data = unit_registry.get_unit_data(unit_type)
+                with open(scenario_file, 'r') as f:
+                    scenario_data = json.load(f)
             except Exception as e:
-                raise ValueError(f"Failed to get unit data for '{unit_type}': {e}")
+                raise ValueError(f"Failed to parse scenario file {scenario_file}: {e}")
             
-            required_fields = ["id", "player", "col", "row"]
-            for field in required_fields:
-                if field not in unit_data:
-                    raise KeyError(f"Unit missing required field '{field}': {unit_data}")
+            if isinstance(scenario_data, list):
+                basic_units = scenario_data
+            elif isinstance(scenario_data, dict) and "units" in scenario_data:
+                basic_units = scenario_data["units"]
+            else:
+                raise ValueError(f"Invalid scenario format in {scenario_file}: must have 'units' array")
             
-            enhanced_unit = {
-                "id": str(unit_data["id"]),
-                "player": unit_data["player"],
-                "unitType": unit_type,
-                "col": unit_data["col"],
-                "row": unit_data["row"],
-                "HP_CUR": full_unit_data["HP_MAX"],
-                "HP_MAX": full_unit_data["HP_MAX"],
-                "MOVE": full_unit_data["MOVE"],
-                "T": full_unit_data["T"],
-                "ARMOR_SAVE": full_unit_data["ARMOR_SAVE"],
-                "INVUL_SAVE": full_unit_data["INVUL_SAVE"],
-                "RNG_NB": full_unit_data["RNG_NB"],
-                "RNG_RNG": full_unit_data["RNG_RNG"],
-                "RNG_ATK": full_unit_data["RNG_ATK"],
-                "RNG_STR": full_unit_data["RNG_STR"],
-                "RNG_DMG": full_unit_data["RNG_DMG"],
-                "RNG_AP": full_unit_data["RNG_AP"],
-                "CC_NB": full_unit_data["CC_NB"],
-                "CC_RNG": full_unit_data["CC_RNG"],
-                "CC_ATK": full_unit_data["CC_ATK"],
-                "CC_STR": full_unit_data["CC_STR"],
-                "CC_DMG": full_unit_data["CC_DMG"],
-                "CC_AP": full_unit_data["CC_AP"],
-                "LD": full_unit_data["LD"],
-                "OC": full_unit_data["OC"],
-                "VALUE": full_unit_data["VALUE"],
-                "ICON": full_unit_data["ICON"],
-                "ICON_SCALE": full_unit_data["ICON_SCALE"],
-                "SHOOT_LEFT": full_unit_data["RNG_NB"],
-                "ATTACK_LEFT": full_unit_data["CC_NB"]
-            }
+            if not basic_units:
+                raise ValueError(f"Scenario file {scenario_file} contains no units")
             
-            enhanced_units.append(enhanced_unit)
-        
-        return enhanced_units
-
-
-def create_test_config() -> Dict[str, Any]:
-    """Create test configuration for validation."""
-    return {
-        "board": {
-            "width": 10,
-            "height": 10,
-            "wall_hexes": [[2, 2], [3, 3]]
-        },
-        "units": [
-            {
-                "id": "marine_1",
-                "player": 0,
-                "unitType": "SpaceMarine_Infantry_Troop_RangedTroop",
-                "col": 1,
-                "row": 1,
-                "HP_CUR": 2,
-                "HP_MAX": 2,
-                "MOVE": 6,
-                "T": 4,
-                "ARMOR_SAVE": 3,
-                "INVUL_SAVE": 7,
-                "RNG_NB": 1,
-                "RNG_RNG": 24,
-                "RNG_ATK": 3,
-                "RNG_STR": 4,
-                "RNG_DMG": 1,
-                "RNG_AP": 0,
-                "CC_NB": 1,
-                "CC_RNG": 1,
-                "CC_ATK": 3,
-                "CC_STR": 4,
-                "CC_DMG": 1,
-                "CC_AP": 0
-            },
-            {
-                "id": "ork_1",
-                "player": 1,
-                "unitType": "Ork_Infantry_Troop_MeleeTroop",
-                "col": 8,
-                "row": 8,
-                "HP_CUR": 1,
-                "HP_MAX": 1,
-                "MOVE": 6,
-                "T": 5,
-                "ARMOR_SAVE": 6,
-                "INVUL_SAVE": 7,
-                "RNG_NB": 1,
-                "RNG_RNG": 12,
-                "RNG_ATK": 5,
-                "RNG_STR": 4,
-                "RNG_DMG": 1,
-                "RNG_AP": 0,
-                "CC_NB": 2,
-                "CC_RNG": 1,
-                "CC_ATK": 3,
-                "CC_STR": 4,
-                "CC_DMG": 1,
-                "CC_AP": 0
-            }
-        ]
-    }
+            enhanced_units = []
+            for unit_data in basic_units:
+                if "unit_type" not in unit_data:
+                    raise KeyError(f"Unit missing required 'unit_type' field: {unit_data}")
+                
+                unit_type = unit_data["unit_type"]
+                
+                try:
+                    full_unit_data = unit_registry.get_unit_data(unit_type)
+                except Exception as e:
+                    raise ValueError(f"Failed to get unit data for '{unit_type}': {e}")
+                
+                required_fields = ["id", "player", "col", "row"]
+                for field in required_fields:
+                    if field not in unit_data:
+                        raise KeyError(f"Unit missing required field '{field}': {unit_data}")
+                
+                enhanced_unit = {
+                    "id": str(unit_data["id"]),
+                    "player": unit_data["player"],
+                    "unitType": unit_type,
+                    "col": unit_data["col"],
+                    "row": unit_data["row"],
+                    "HP_CUR": full_unit_data["HP_MAX"],
+                    "HP_MAX": full_unit_data["HP_MAX"],
+                    "MOVE": full_unit_data["MOVE"],
+                    "T": full_unit_data["T"],
+                    "ARMOR_SAVE": full_unit_data["ARMOR_SAVE"],
+                    "INVUL_SAVE": full_unit_data["INVUL_SAVE"],
+                    "RNG_NB": full_unit_data["RNG_NB"],
+                    "RNG_RNG": full_unit_data["RNG_RNG"],
+                    "RNG_ATK": full_unit_data["RNG_ATK"],
+                    "RNG_STR": full_unit_data["RNG_STR"],
+                    "RNG_DMG": full_unit_data["RNG_DMG"],
+                    "RNG_AP": full_unit_data["RNG_AP"],
+                    "CC_NB": full_unit_data["CC_NB"],
+                    "CC_RNG": full_unit_data["CC_RNG"],
+                    "CC_ATK": full_unit_data["CC_ATK"],
+                    "CC_STR": full_unit_data["CC_STR"],
+                    "CC_DMG": full_unit_data["CC_DMG"],
+                    "CC_AP": full_unit_data["CC_AP"],
+                    "LD": full_unit_data["LD"],
+                    "OC": full_unit_data["OC"],
+                    "VALUE": full_unit_data["VALUE"],
+                    "ICON": full_unit_data["ICON"],
+                    "ICON_SCALE": full_unit_data["ICON_SCALE"],
+                    "SHOOT_LEFT": full_unit_data["RNG_NB"],
+                    "ATTACK_LEFT": full_unit_data["CC_NB"]
+                }
+                
+                enhanced_units.append(enhanced_unit)
+            
+            return enhanced_units
 
 
 if __name__ == "__main__":
-    # Basic validation test
-    config = create_test_config()
-    engine = W40KEngine(config)
-    
-    print("W40K Engine initialized successfully!")
-    print(f"Compliance violations: {engine.validate_compliance()}")
-    
-    # Test basic functionality
-    obs, info = engine.reset()
-    print(f"Initial observation size: {len(obs)}")
-    print(f"Initial phase: {info['phase']}")
-    
-    # Test movement
-    obs, reward, done, truncated, info = engine.step(2)  # Move East
+    print("W40K Engine requires proper config from training system - no standalone execution")
     #print(f"After movement - Success: {info['success']}, Phase: {info['phase']}")
