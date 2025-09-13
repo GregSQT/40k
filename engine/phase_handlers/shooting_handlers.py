@@ -504,11 +504,15 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     """
     AI_TURN.md EXACT: attack_sequence(RNG) implementation with proper logging
     """
+    print(f"🎯 SHOOTING_ATTACK_CONTROLLER CALLED: shooter={unit_id}, target={target_id}")
     shooter = _get_unit_by_id(game_state, unit_id)
     target = _get_unit_by_id(game_state, target_id)
     
     if not shooter or not target:
+        print(f"🎯 ERROR: shooter={shooter is not None}, target={target is not None}")
         return {"error": "unit_or_target_not_found"}
+    
+    print(f"🎯 UNITS FOUND: Starting attack sequence")
     
     # Execute single attack_sequence(RNG) per AI_TURN.md
     attack_result = _attack_sequence_rng(shooter, target)

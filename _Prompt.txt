@@ -40,8 +40,9 @@ Uses specific error reporting format with TypeScript compiler output
 
 
 Shooting phase :
-remove default pour probas
 Couleur de HP bar dans css (et couleur du blink preview aussi)
+Calcul different entre les hex rouges et les unit blink
+shoot counter
 
 
 Externalize end_activation fuction ?
