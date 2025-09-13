@@ -143,10 +143,6 @@ def execute_action():
         if not data:
             return jsonify({"success": False, "error": "No JSON data provided"}), 400
         
-        # DEBUG: Log what frontend is sending
-        print(f"🔍 FRONTEND DATA: {data}")
-        print(f"🔍 DATA KEYS: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
-        
         # Convert frontend hex click to engine semantic action format
         if "col" in data and "row" in data and "selectedUnitId" in data:
             action = {

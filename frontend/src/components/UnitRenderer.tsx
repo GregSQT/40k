@@ -481,33 +481,28 @@ export class UnitRenderer {
         highlightSlices.forEach(slice => {
           slice.visible = blinkState;
         });
-        // Force PIXI to re-render the stage
-        app.renderer.render(app.stage);
+        // Force PIXI to re-render the stage with safety check
+        if (app && app.renderer && app.renderer.type !== undefined) {
+          try {
+            app.renderer.render(app.stage);
+          } catch (error) {
+            console.warn('Renderer error during HP bar blink, clearing interval:', error);
+          }
+        }
       };
       
       // Start blinking immediately and set interval
       const blinkInterval = setInterval(blinkTicker, 500);
       
-      // Store cleanup function
+      // Store cleanup function with proper interval reference
       (hpContainer as any).cleanupBlink = () => {
         if (blinkInterval) {
           clearInterval(blinkInterval);
         }
       };
+      (hpContainer as any).blinkInterval = blinkInterval;
       
-      // Store cleanup function (no interval to clear)
-      (hpContainer as any).cleanupBlink = () => {};
-      
-      // Store interval for cleanup
       app.stage.addChild(hpContainer);
-      
-      // Store cleanup function for later use
-      (hpContainer as any).cleanupBlink = () => {
-        if ((hpContainer as any).blinkInterval) {
-          clearInterval((hpContainer as any).blinkInterval);
-          (hpContainer as any).blinkInterval = null;
-        }
-      };
       
     } else {
       // Normal non-blinking HP slices

@@ -173,6 +173,41 @@ export const useEngineAPI = () => {
       // DEBUG: Log full response structure to understand blinking data location
       
         if (data.success) {
+          // Process backend cleanup signals FIRST
+          if (data.result?.clear_preview) {
+            console.log("🧹 Backend requested preview cleanup");
+            setTargetPreview(null);
+          }
+          
+          if (data.result?.clear_blinking_gentle) {
+            console.log("🧹 Backend requested gentle blinking cleanup");
+            // Clear central timers only - don't destroy renderer
+            if (blinkingUnits.blinkTimer) {
+              clearInterval(blinkingUnits.blinkTimer);
+            }
+            setBlinkingUnits({unitIds: [], blinkTimer: null, blinkState: false});
+            
+            if (targetPreview?.blinkTimer) {
+              clearInterval(targetPreview.blinkTimer);
+            }
+            setTargetPreview(null);
+          }
+          
+          if (data.result?.reset_mode) {
+            console.log("🧹 Backend requested mode reset");
+            setMode("select");
+          }
+          
+          if (data.result?.clear_selected_unit) {
+            console.log("🧹 Backend requested selected unit clear");
+            setSelectedUnitId(null);
+          }
+          
+          if (data.result?.clear_attack_preview) {
+            console.log("🧹 Backend requested attack preview clear");
+            setMode("select");
+          }
+          
           // Auto-display Python console logs in browser (only during actions)
           if (data.game_state?.console_logs && data.game_state.console_logs.length > 0) {
             // Filter out logs we've already shown to prevent duplicates

@@ -10,7 +10,6 @@ export function setupBoardClickHandler(callbacks: {
   onSkipUnit?(unitId: UnitId): void;
   onSkipShoot?(unitId: UnitId): void;
   onStartAttackPreview(shooterId: UnitId): void;
-  onStartTargetPreview?(shooterId: UnitId, targetId: UnitId): void;
   onShoot(shooterId: UnitId, targetId: UnitId): void;
   onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
   onConfirmMove(): void;
@@ -63,18 +62,12 @@ export function setupBoardClickHandler(callbacks: {
     } else if (phase === 'shoot' && mode === 'attackPreview' && selectedUnitId != null) {
       console.log("  ✅ SHOOTING ATTACK PREVIEW LOGIC");
       if (selectedUnitId !== unitId) {
-        console.log("    - First click on enemy target → calling onStartTargetPreview");
-        if (callbacks.onStartTargetPreview) {
-          callbacks.onStartTargetPreview(selectedUnitId, unitId);
-        }
+        console.log("    - Single click on enemy target → calling onShoot");
+        callbacks.onShoot(selectedUnitId, unitId);  // Execute immediately
       } else {
         console.log("    - Left click on active unit → no effect");
         return;
       }
-    } else if (phase === 'shoot' && mode === 'targetPreview' && selectedUnitId != null) {
-      console.log("  ✅ SHOOTING TARGET PREVIEW LOGIC");
-      console.log("    - Second click on target → calling onShoot");
-      callbacks.onShoot(selectedUnitId, unitId);
     } else if (mode === 'movePreview') {
       console.log("  ✅ MOVE PREVIEW LOGIC → calling onConfirmMove");
       callbacks.onConfirmMove();

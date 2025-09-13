@@ -355,7 +355,6 @@ export default function Board({
           stableCallbacks.current.onStartAttackPreview(shooterId, unit.col, unit.row);
         }
       },
-      onStartTargetPreview: onStartTargetPreview,
       onShoot: stableCallbacks.current.onShoot,
       onCombatAttack: stableCallbacks.current.onFightAttack || (() => {}),
       onConfirmMove: stableCallbacks.current.onConfirmMove,

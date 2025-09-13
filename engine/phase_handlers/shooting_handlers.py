@@ -155,33 +155,25 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
     start_col, start_row = shooter["col"], shooter["row"]
     end_col, end_row = target["col"], target["row"]
     
-    print(f"            LoS check from ({start_col},{start_row}) to ({end_col},{end_row})")
-    
     # Try multiple sources for wall hexes
     wall_hexes_data = []
     
     # Source 1: Direct in game_state
     if "wall_hexes" in game_state:
         wall_hexes_data = game_state["wall_hexes"]
-        print(f"            Found wall_hexes in game_state: {wall_hexes_data}")
     
     # Source 2: In board configuration within game_state
     elif "board" in game_state and "wall_hexes" in game_state["board"]:
         wall_hexes_data = game_state["board"]["wall_hexes"]
-        print(f"            Found wall_hexes in game_state.board: {wall_hexes_data}")
     
     # Source 3: Check if walls exist in board config (fallback pattern)
     elif hasattr(game_state, 'get') and game_state.get("board_config", {}).get("wall_hexes"):
         wall_hexes_data = game_state["board_config"]["wall_hexes"]
-        print(f"            Found wall_hexes in board_config: {wall_hexes_data}")
     
     else:
-        print(f"            No wall data found in any location - assuming clear LoS")
-        print(f"            Available keys in game_state: {list(game_state.keys()) if isinstance(game_state, dict) else 'not dict'}")
         return True  # No walls = clear line of sight
     
     if not wall_hexes_data:
-        print(f"            Wall data empty - clear LoS")
         return True
     
     # Convert wall_hexes to set for fast lookup
@@ -192,11 +184,8 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         else:
             print(f"            Invalid wall hex format: {wall_hex}")
     
-    print(f"            Processed wall hexes: {wall_hexes}")
-    
     try:
         hex_path = _get_accurate_hex_line(start_col, start_row, end_col, end_row)
-        print(f"            Hex path: {hex_path}")
         
         # Check if any hex in path is a wall (excluding start and end)
         blocked = False
@@ -205,20 +194,14 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
             if i == 0 or i == len(hex_path) - 1:
                 continue
             
-            print(f"            Checking path hex ({col},{row}) against walls")
             if (col, row) in wall_hexes:
-                print(f"            LoS BLOCKED by wall at ({col}, {row})")
                 blocked = True
                 break
-        
-        if not blocked:
-            print(f"            LoS CLEAR - no wall interference")
         
         return not blocked
         
     except Exception as e:
         print(f"            LoS calculation error: {e}")
-        # Default to blocked if calculation fails
         return False
     
     if not game_state["wall_hexes"]:
@@ -337,33 +320,41 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     
     # Arg3 tracking
     if arg3 == "SHOOTING":
+        if "units_shot" not in game_state:
+            game_state["units_shot"] = set()
         game_state["units_shot"].add(unit["id"])
     # arg3 == "PASS" → no tracking update
     
     # Arg4 pool removal
     if arg4 == "SHOOTING":
-        if unit["id"] in game_state["shoot_activation_pool"]:
+        if "shoot_activation_pool" in game_state and unit["id"] in game_state["shoot_activation_pool"]:
             game_state["shoot_activation_pool"].remove(unit["id"])
     
     # Clean up unit activation state
-    unit.pop("valid_target_pool", None)
-    unit.pop("TOTAL_ATTACK_LOG", None)
-    unit.pop("selected_target_id", None)
+    if "valid_target_pool" in unit:
+        del unit["valid_target_pool"]
+    if "TOTAL_ATTACK_LOG" in unit:
+        del unit["TOTAL_ATTACK_LOG"]
+    if "selected_target_id" in unit:
+        del unit["selected_target_id"]
     unit["SHOOT_LEFT"] = 0
     
     # Clear active unit
-    game_state.pop("active_shooting_unit", None)
+    if "active_shooting_unit" in game_state:
+        del game_state["active_shooting_unit"]
     
     return {
         "activation_ended": True,
         "endType": arg1,
-        "unitId": unit["id"]
+        "unitId": unit["id"],
+        "clear_blinking_gentle": True,
+        "reset_mode": "select",
+        "clear_selected_unit": True
     }
 
 def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_TURN.md EXACT: Execute While SHOOT_LEFT > 0 loop automatically
-    This replaces manual check_loop calls with automatic execution
     """
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
@@ -371,7 +362,9 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> T
     
     # AI_TURN.md: While SHOOT_LEFT > 0
     if unit["SHOOT_LEFT"] <= 0:
-        return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+        print(f"   → SHOOT_LEFT = 0, ending activation")
+        result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+        return True, result  # Ensure consistent (bool, dict) format
     
     # AI_TURN.md: Build valid_target_pool
     valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
@@ -401,61 +394,267 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> T
 
 def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_SHOOT.md EXACT: Handler manages ALL validation and logic
+    AI_SHOOT.md EXACT: Complete action routing with handler autonomy
     """
     
+    # Extract unit from action if not provided (engine passes None now)
+    if unit is None:
+        if "unitId" not in action:
+            return False, {"error": "semantic_action_required", "action": action}
+        
+        unit_id = str(action["unitId"])
+        unit = _get_unit_by_id(game_state, unit_id)
+        if not unit:
+            return False, {"error": "unit_not_found", "unitId": unit_id}
     
     action_type = action.get("action")
     unit_id = unit["id"]
     
-    # Get current context for nested behavior
-    current_context = _get_shooting_context(game_state, unit)
+    # Handler validates unit eligibility for all actions
+    if unit_id not in game_state.get("shoot_activation_pool", []):
+        return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
+    # AI_SHOOT.md action routing
     if action_type == "activate_unit":
-        # Start unit activation from pool
         result = shooting_unit_activation_start(game_state, unit_id)
         if result.get("success"):
-            # AI_TURN.md: Automatically enter While SHOOT_LEFT > 0 loop
             return _shooting_unit_execution_loop(game_state, unit_id)
         return True, result
     
+    elif action_type == "left_click":
+        print(f"   → LEFT_CLICK route")
+        target_id = action.get("targetId")
+        print(f"   → Target ID: {target_id}")
+        return shooting_click_handler(game_state, unit_id, action)
+    
+    elif action_type == "right_click":
+        print(f"   → RIGHT_CLICK route")
+        return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+    
+    elif action_type == "skip":
+        print(f"   → SKIP route")
+        return _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
+    
+    else:
+        print(f"   → UNKNOWN ACTION: {action_type}")
+        return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "shoot"}
 
+
+def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """
+    AI_SHOOT.md: Route click actions to appropriate handlers
+    """
+    target_id = action.get("targetId")
+    click_target = action.get("clickTarget", "target")
     
-    # Handler validates action format
-    if "unitId" not in action:
-        return False, {"error": "semantic_action_required", "action": action}
+    if click_target in ["target", "enemy"] and target_id:
+        return shooting_target_selection_handler(game_state, unit_id, target_id)
     
-    # Handler gets unit from game_state
-    unit_id = str(action["unitId"])
-    active_unit = None
-    for u in game_state["units"]:
-        if u["id"] == unit_id:
-            active_unit = u
-            break
+    elif click_target == "friendly_unit" and target_id:
+        # Left click on another unit in pool - switch units
+        if target_id in game_state.get("shoot_activation_pool", []):
+            return _handle_unit_switch_with_context(game_state, unit_id, target_id)
+        return False, {"error": "unit_not_in_pool", "targetId": target_id}
     
-    if not active_unit:
-        return False, {"error": "unit_not_found", "unitId": unit_id}
+    elif click_target == "active_unit":
+        # Left click on active unit - no effect or show targets again
+        return _shooting_unit_execution_loop(game_state, unit_id)
     
-    # Handler validates unit eligibility
-    if active_unit["id"] not in game_state.get("shoot_activation_pool", []):
-        return False, {"error": "unit_not_eligible", "unitId": unit_id}
+    else:
+        # Left click elsewhere - continue selection
+        return True, {"action": "continue_selection", "context": "elsewhere_clicked"}
+
+
+def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, target_id: str) -> Tuple[bool, Dict[str, Any]]:
+    """
+    AI_SHOOT.md: Handle target selection and shooting execution
+    """
     
-    # Check phase completion
-    if not game_state.get("shoot_activation_pool"):
-        result = shooting_phase_end(game_state)
-        return True, result
+    unit = _get_unit_by_id(game_state, unit_id)
+    target = _get_unit_by_id(game_state, target_id)
     
-    # Handler removes unit from pool when action succeeds
-    if active_unit["id"] in game_state["shoot_activation_pool"]:
-        game_state["shoot_activation_pool"].remove(active_unit["id"])
+    if not unit or not target:
+        print(f"   ERROR: Unit or target not found")
+        return False, {"error": "unit_or_target_not_found"}
     
-    # Check if pool now empty after removal
-    if not game_state["shoot_activation_pool"]:
-        result = shooting_phase_end(game_state)
-        return True, result
+    # Validate target is in valid pool
+    valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
+    print(f"   Valid targets: {valid_targets}")
     
-    # Placeholder for future action implementation
-    return True, {"action": "placeholder_success", "unitId": unit_id}
+    if target_id not in valid_targets:
+        print(f"   ERROR: Target not in valid pool")
+        return False, {"error": "target_not_valid", "targetId": target_id}
+    
+    # Execute shooting attack
+    attack_result = shooting_attack_controller(game_state, unit_id, target_id)
+    print(f"   Attack result: {attack_result}")
+    
+    # Update SHOOT_LEFT and continue loop per AI_TURN.md
+    unit["SHOOT_LEFT"] -= 1
+    # TOTAL_ATTACK_LOG is handled in shooting_attack_controller - no duplication
+    
+    print(f"   → SHOOT_LEFT now: {unit['SHOOT_LEFT']}")
+    print(f"   → Continuing execution loop")
+    
+    # Continue execution loop to check for more shots or end activation
+    return _shooting_unit_execution_loop(game_state, unit_id)
+
+
+def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_id: str) -> Dict[str, Any]:
+    """
+    AI_TURN.md EXACT: attack_sequence(RNG) implementation with proper logging
+    """
+    shooter = _get_unit_by_id(game_state, unit_id)
+    target = _get_unit_by_id(game_state, target_id)
+    
+    if not shooter or not target:
+        return {"error": "unit_or_target_not_found"}
+    
+    # Execute single attack_sequence(RNG) per AI_TURN.md
+    attack_result = _attack_sequence_rng(shooter, target)
+    
+    # Apply damage immediately per AI_TURN.md
+    if attack_result["damage"] > 0:
+        target["HP_CUR"] = max(0, target["HP_CUR"] - attack_result["damage"])
+        # Check if target died
+        if target["HP_CUR"] <= 0:
+            attack_result["target_died"] = True
+    
+    return {
+        "action": "shot_executed",
+        "shooterId": unit_id,
+        "targetId": target_id,
+        "attack_result": attack_result,
+        "target_hp_remaining": target["HP_CUR"],
+        "target_died": target["HP_CUR"] <= 0
+    }
+
+
+def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    AI_TURN.md EXACT: attack_sequence(RNG) with proper <OFF> replacement
+    """
+    import random
+    
+    attacker_id = attacker["id"] 
+    target_id = target["id"]
+    
+    # Hit roll → hit_roll >= attacker.RNG_ATK
+    hit_roll = random.randint(1, 6)
+    hit_target = attacker["RNG_ATK"]
+    hit_success = hit_roll >= hit_target
+    
+    if not hit_success:
+        # MISS case
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}) : MISSED !"
+        return {
+            "hit_roll": hit_roll,
+            "hit_target": hit_target,
+            "hit_success": False,
+            "damage": 0,
+            "attack_log": attack_log
+        }
+    
+    # HIT → Continue to wound roll
+    wound_roll = random.randint(1, 6)
+    wound_target = _calculate_wound_target(attacker["RNG_STR"], target["T"])
+    wound_success = wound_roll >= wound_target
+    
+    if not wound_success:
+        # FAIL case
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}) - Wound {wound_roll}({wound_target}) : FAILED !"
+        return {
+            "hit_roll": hit_roll,
+            "hit_target": hit_target,
+            "wound_roll": wound_roll,
+            "wound_target": wound_target,
+            "wound_success": False,
+            "damage": 0,
+            "attack_log": attack_log
+        }
+    
+    # WOUND → Continue to save roll
+    save_roll = random.randint(1, 6)
+    save_target = _calculate_save_target(target, attacker["RNG_AP"])
+    save_success = save_roll >= save_target
+    
+    if save_success:
+        # SAVE case
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}) - Wound {wound_roll}({wound_target}) - Save {save_roll}({save_target}) : SAVED !"
+        return {
+            "hit_roll": hit_roll,
+            "wound_roll": wound_roll,
+            "save_roll": save_roll,
+            "save_target": save_target,
+            "save_success": True,
+            "damage": 0,
+            "attack_log": attack_log
+        }
+    
+    # FAIL → Continue to damage
+    damage_dealt = attacker["RNG_DMG"]
+    new_hp = max(0, target["HP_CUR"] - damage_dealt)
+    
+    if new_hp <= 0:
+        # Target dies
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}) - Wound {wound_roll}({wound_target}) - Save {save_roll}({save_target}) - {damage_dealt} delt : Unit {target_id} DIED !"
+    else:
+        # Target survives
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}) - Wound {wound_roll}({wound_target}) - Save {save_roll}({save_target}) - {damage_dealt} DAMAGE DELT !"
+    
+    return {
+        "hit_roll": hit_roll,
+        "wound_roll": wound_roll,
+        "save_roll": save_roll,
+        "save_target": save_target,
+        "damage": damage_dealt,
+        "attack_log": attack_log
+    }
+
+
+def _calculate_save_target(target: Dict[str, Any], ap: int) -> int:
+    """Calculate save target with AP modifier and invulnerable save"""
+    armor_save = target.get("ARMOR_SAVE", 7)
+    invul_save = target.get("INVUL_SAVE", 7)
+    
+    # Apply AP to armor save
+    modified_armor = armor_save + ap
+    
+    # Use best available save
+    return min(modified_armor, invul_save)
+
+
+def _calculate_wound_target(strength: int, toughness: int) -> int:
+    """EXACT COPY from 40k_OLD w40k_engine.py wound calculation"""
+    if strength >= toughness * 2:
+        return 2
+    elif strength > toughness:
+        return 3
+    elif strength == toughness:
+        return 4
+    elif strength * 2 <= toughness:
+        return 6
+    else:
+        return 5
+
+
+def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id: str, new_unit_id: str) -> Tuple[bool, Dict[str, Any]]:
+    """
+    AI_SHOOT.md: Handle switching between units in activation pool
+    """
+    # End current unit activation
+    current_unit = _get_unit_by_id(game_state, current_unit_id)
+    if current_unit:
+        _shooting_activation_end(game_state, current_unit, "WAIT", 1, "PASS", "SHOOTING")
+    
+    # Start new unit activation
+    new_unit = _get_unit_by_id(game_state, new_unit_id)
+    if new_unit:
+        result = shooting_unit_activation_start(game_state, new_unit_id)
+        if result.get("success"):
+            return _shooting_unit_execution_loop(game_state, new_unit_id)
+    
+    return False, {"error": "unit_switch_failed"}
 
 
 # === HELPER FUNCTIONS (Minimal Implementation) ===

@@ -437,7 +437,7 @@ class W40KEngine(gym.Env):
 
     def _process_shooting_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """
-        AI_SHOOT.md: Engine validation + handler delegation (hybrid approach for unit selection)
+        AI_SHOOT.md EXACT: Pure engine orchestration - handler manages everything
         """
         
         # First call to phase? → shooting_phase_start(game_state)
@@ -445,36 +445,15 @@ class W40KEngine(gym.Env):
             shooting_handlers.shooting_phase_start(self.game_state)
             self._shooting_phase_initialized = True
         
-        # Check phase completion
-        if not self.game_state["shoot_activation_pool"]:
+        # **FULL DELEGATION**: shooting_handlers.execute_action(game_state, unit, action, config)
+        success, result = shooting_handlers.execute_action(self.game_state, None, action, self.config)
+        
+        # Check response for phase_complete flag
+        if result.get("phase_complete"):
             self._shooting_phase_initialized = False
             self._charge_phase_init()
-            return True, {"type": "phase_complete", "next_phase": "charge", "current_player": self.game_state["current_player"]}
-        
-        # Basic action validation (engine responsibility for unit selection)
-        if "unitId" not in action:
-            return False, {"error": "semantic_action_required", "action": action}
-        
-        active_unit = self._get_unit_by_id(str(action["unitId"]))
-        if not active_unit:
-            return False, {"error": "unit_not_found", "unitId": action["unitId"]}
-        
-        if active_unit["id"] not in self.game_state["shoot_activation_pool"]:
-            return False, {"error": "unit_not_eligible", "unitId": action["unitId"]}
-        
-        # DELEGATION: Pass validated unit to handler
-        success, result = shooting_handlers.execute_action(self.game_state, active_unit, action, self.config)
-        
-        # Engine handles pool removal after successful action (for now)
-        if success and active_unit["id"] in self.game_state["shoot_activation_pool"]:
-            self.game_state["shoot_activation_pool"].remove(active_unit["id"])
-            
-            # Check if pool now empty
-            if not self.game_state["shoot_activation_pool"]:
-                self._shooting_phase_initialized = False
-                self._charge_phase_init()
-                result["phase_transition"] = True
-                result["next_phase"] = "charge"
+            result["phase_transition"] = True
+            result["next_phase"] = "charge"
         
         return success, result
     
