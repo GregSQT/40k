@@ -104,6 +104,11 @@ class W40KEngine(gym.Env):
             "active_alternating_activation_pool": [],
             "non_active_alternating_activation_pool": [],
             
+            # AI_MOVE.md movement preview state
+            "valid_move_destinations_pool": [],
+            "preview_hexes": [],
+            "active_movement_unit": None,
+            
             # Fight state
             "fight_subphase": None,
             "charge_range_rolls": {},
@@ -347,70 +352,24 @@ class W40KEngine(gym.Env):
     # ===== MOVEMENT PHASE IMPLEMENTATION =====
     
     def _process_movement_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """Process movement phase with AI_TURN.md decision tree logic."""
+        """AI_MOVE.md EXACT: Pure engine orchestration - handler manages everything"""
         
-        # AI_TURN.md LOOP: Check if phase should complete (empty pool means phase is done)
-        if not self.game_state["move_activation_pool"]:
-            self._phase_initialized = False
-            self._shooting_phase_init()
-            return True, {"type": "phase_complete", "next_phase": "shoot", "current_player": self.game_state["current_player"]}
+        # First call to phase? → movement_phase_start(game_state)
+        if not hasattr(self, '_movement_phase_initialized') or not self._movement_phase_initialized:
+            movement_handlers.movement_phase_start(self.game_state)
+            self._movement_phase_initialized = True
         
-        # AI_TURN.md COMPLIANCE: ONLY semantic actions with unitId
-        if "unitId" not in action:
-            return False, {"error": "semantic_action_required", "action": action}
+        # **FULL DELEGATION**: movement_handlers.execute_action(game_state, unit, action, config)
+        success, result = movement_handlers.execute_action(self.game_state, None, action, self.config)
         
-        action_unit_id = str(action["unitId"])        
-        active_unit = self._get_unit_by_id(action_unit_id)
-        if not active_unit:
-            return False, {"error": "unit_not_found", "unitId": action["unitId"]}
-        
-        if active_unit["id"] not in self.game_state["move_activation_pool"]:
-            return False, {"error": "unit_not_eligible", "unitId": action["unitId"]}
-        
-        # AI_IMPLEMENTATION.md: Delegate to pure function
-        success, result = movement_handlers.execute_action(self.game_state, active_unit, action, self.config)
-        
-        # Remove unit from pool and log AFTER successful action
-        if success:
-            # Remove unit from activation pool
-            if active_unit["id"] in self.game_state["move_activation_pool"]:
-                pool_before = self.game_state["move_activation_pool"].copy()
-                self.game_state["move_activation_pool"].remove(active_unit["id"])
-                
-                # Create temporary log for this action only
-                if "console_logs" not in self.game_state:
-                    self.game_state["console_logs"] = []
-                
-                # Clear any existing logs and add only current action log
-                self.game_state["console_logs"] = [
-                    f"UNIT REMOVED FROM MOVE POOL: {active_unit['id']} → Pool: {pool_before} → {self.game_state['move_activation_pool']}"
-                ]
-        
-        # AI_TURN.md LOOP: After removing unit, check if pool is now empty (same check condition)
-        if success and not self.game_state["move_activation_pool"]:
-            self.game_state["console_logs"].append(
-                f"PHASE TRANSITION: Pool empty → Moving to shooting phase"
-            )
+        # Check response for phase_complete flag
+        if result.get("phase_complete"):
+            self._movement_phase_initialized = False
             self._shooting_phase_init()
             result["phase_transition"] = True
             result["next_phase"] = "shoot"
-        else:
-            # Debug why phase transition didn't happen
-            self.game_state["console_logs"].append(
-                f"NO PHASE TRANSITION: success={success}, pool_empty={not self.game_state['move_activation_pool']}, pool={self.game_state['move_activation_pool']}"
-            )
-       
-        return success, result
-    
-    def _build_move_activation_pool(self):
-        """Build movement activation pool using AI_IMPLEMENTATION.md delegation."""
-        eligible_units = movement_handlers.get_eligible_units(self.game_state)
-        self.game_state["move_activation_pool"] = eligible_units
         
-        # Add console log for web browser visibility (replace any existing logs)
-        self.game_state["console_logs"] = [
-            f"MOVE POOL BUILT: Player {self.game_state['current_player']} → Units: {eligible_units}"
-        ]
+        return success, result
     
     # AI_IMPLEMENTATION.md: Movement logic delegated to movement_handlers.py
     # All movement validation and execution now handled by pure functions
@@ -501,14 +460,9 @@ class W40KEngine(gym.Env):
             self._movement_phase_init()
     
     def _movement_phase_init(self):
-        """Initialize movement phase and build activation pool."""
-        self.game_state["phase"] = "move"
-        
-        # AI_TURN.md: Clear tracking sets at START OF PHASE
-        self._tracking_cleanup()
-        
-        # AI_TURN.md: Build activation pool at START OF PHASE
-        self._build_move_activation_pool()  
+        """Initialize movement phase using AI_MOVE.md delegation."""
+        # AI_MOVE.md: Handler manages phase initialization
+        movement_handlers.movement_phase_start(self.game_state)  
     
     def _tracking_cleanup(self):
         """Clear tracking sets at the VERY BEGINNING of movement phase."""
