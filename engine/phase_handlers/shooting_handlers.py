@@ -305,13 +305,6 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     shooting_activation_end(Arg1, Arg2, Arg3, Arg4, Arg5)
     """
     
-    # Arg1 logging
-    if arg1 == "ACTION":
-        print(f"Unit {unit['id']} action logged: {unit.get('TOTAL_ATTACK_LOG', '')}")
-    elif arg1 == "WAIT":
-        print(f"Unit {unit['id']} wait action logged")
-    # arg1 == "PASS" or "NO" → no logging
-    
     # Arg2 step increment
     if arg2 == 1:
         game_state["episode_steps"] = game_state.get("episode_steps", 0) + 1
@@ -416,6 +409,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     action_type = action.get("action")
     unit_id = unit["id"]
     
+    # CRITICAL FIX: Validate unit is current player's unit to prevent self-targeting
+    if unit["player"] != game_state["current_player"]:
+        return False, {"error": "wrong_player_unit", "unitId": unit_id, "unit_player": unit["player"], "current_player": game_state["current_player"]}
+    
     # Handler validates unit eligibility for all actions
     if unit_id not in game_state.get("shoot_activation_pool", []):
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
@@ -426,6 +423,15 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         if result.get("success"):
             return _shooting_unit_execution_loop(game_state, unit_id)
         return True, result
+    
+    elif action_type == "shoot":
+        # Handle gym-style shoot action with targetId
+        target_id = action.get("targetId")
+        if not target_id:
+            return False, {"error": "missing_target", "action": action}
+        
+        # Convert to shooting handler format and execute
+        return shooting_target_selection_handler(game_state, unit_id, str(target_id))
     
     elif action_type == "left_click":
         target_id = action.get("targetId")

@@ -4,29 +4,37 @@
       "id": 1,
       "unit_type": "Intercessor",
       "player": 0,
-      "col": 13,
+      "col": 12,
       "row": 13
     },
     {
       "id": 2,
       "unit_type": "Intercessor",
       "player": 0,
-      "col": 19,
-      "row": 12
+      "col": 20,
+      "row": 11
+
     },
     {
       "id": 3,
-      "unit_type": "Intercessor",
+      "unit_type": "Carnifex",
       "player": 1,
-      "col": 11,
-      "row": 6
+      "col": 8,
+      "row": 11
     },
     {
       "id": 4,
-      "unit_type": "Intercessor",
+      "unit_type": "Hormagaunt",
       "player": 1,
-      "col": 5,
+      "col": 12,
       "row": 7
+    },
+        {
+      "id": 5,
+      "unit_type": "Hormagaunt",
+      "player": 1,
+      "col": 16,
+      "row": 5
     }
   ]
 }

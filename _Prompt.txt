@@ -41,9 +41,10 @@ Uses specific error reporting format with TypeScript compiler output
 ----------------------------------------------------------------------------
 BUGS
 ----------------------------------------------------------------------------
-MOVE :
-Probleme quand on passe a cote d'un mur ?
-Shooting phase :
+TRAIN:
+Quel fichier de reward ?
+
+SHOOT
 Couleur de HP bar dans css (et couleur du blink preview aussi)
 Calcul different entre les hex rouges et les unit blink
 dead : noir et retirer icon
@@ -82,3 +83,6 @@ useEngineAPI handlers →
 executeAction fetch → 
 API Server → 
 shooting_handlers.py (should be, but currently conflicts)
+----------------------------------------------------------------------------
+code $PROFILE
+Relancer VSC
