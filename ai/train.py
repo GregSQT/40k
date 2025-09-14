@@ -707,14 +707,14 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     W40KEnv, _ = setup_imports()
     callbacks = []
     
-    # Add episode termination callback for debug config - NO FALLBACKS
-    if training_config_name == "debug":
+    # Add episode termination callback for debug AND step configs - NO FALLBACKS
+    if training_config_name in ["debug", "step"]:
         if "total_episodes" not in training_config:
-            raise KeyError(f"Debug training config missing required 'total_episodes'")
+            raise KeyError(f"{training_config_name} training config missing required 'total_episodes'")
         if "max_turns_per_episode" not in training_config:
-            raise KeyError(f"Debug training config missing required 'max_turns_per_episode'")
+            raise KeyError(f"{training_config_name} training config missing required 'max_turns_per_episode'")
         if "max_steps_per_turn" not in training_config:
-            raise KeyError(f"Debug training config missing required 'max_steps_per_turn'")
+            raise KeyError(f"{training_config_name} training config missing required 'max_steps_per_turn'")
         
         max_episodes = training_config["total_episodes"]
         max_steps_per_episode = training_config["max_turns_per_episode"] * training_config["max_steps_per_turn"]

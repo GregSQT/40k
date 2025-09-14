@@ -222,5 +222,42 @@
         "ai/event_log/web_replay_latest.json"
       ]
     }
+  },
+  "step": {
+    "description": "Proportional training: number_of_turns_per_episode (10) × max_steps_per_episode (100) × total_episodes (100) = 100,000 timesteps",
+    "total_episodes": 1,
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 50,
+    "eval_episodes": 0,
+    "max_concurrent_sessions": 1,
+    "log_interval": 100,
+    "callback_params": {
+      "eval_deterministic": false,
+      "eval_render": false,
+      "n_eval_episodes": 2,
+      "checkpoint_save_freq": 100,
+      "checkpoint_name_prefix": "debug_model_checkpoint"
+    },
+    "model_params": {
+      "policy": "MlpPolicy",
+      "verbose": 1,
+      "buffer_size": 500,
+      "learning_rate": 0.001,
+      "learning_starts": 50,
+      "batch_size": 8,
+      "train_freq": 1,
+      "target_update_interval": 25,
+      "exploration_fraction": 0.8,
+      "exploration_final_eps": 0.3,
+      "tensorboard_log": "./tensorboard/",
+      "device": "cuda"
+      },
+    "replay_config": {
+      "default_file": "ai/event_log/train_best_game_replay.json",
+      "backup_files": [
+        "ai/event_log/phase_based_replay_latest.json",
+        "ai/event_log/web_replay_latest.json"
+      ]
+    }
   }
 }

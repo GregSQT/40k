@@ -224,7 +224,7 @@ class W40KEngine(gym.Env):
         # CRITICAL: Check turn limit BEFORE processing any action
         if hasattr(self, 'training_config'):
             max_turns = self.training_config.get("max_turns_per_episode")
-            if max_turns and self.game_state["turn"] >= max_turns:
+            if max_turns and self.game_state["turn"] > max_turns:
                 # Turn limit exceeded - return terminated episode immediately
                 observation = self._build_observation()
                 info = {"turn_limit_exceeded": True, "winner": self._determine_winner()}
