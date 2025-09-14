@@ -41,8 +41,26 @@ def initialize_engine():
         original_cwd = os.getcwd()
         project_root = os.path.join(os.path.dirname(__file__), '..')
         os.chdir(os.path.abspath(project_root))
+        
+        # Load configuration and scenario
         config = load_config()
-        engine = W40KEngine(config)
+        scenario_file = os.path.join("config", "scenario.json")
+        
+        # Initialize unit registry
+        from ai.unit_registry import UnitRegistry
+        unit_registry = UnitRegistry()
+        
+        # Create engine with proper parameters
+        engine = W40KEngine(
+            config=config,
+            rewards_config="default",
+            training_config_name="default",
+            controlled_agent=None,
+            active_agents=None,
+            scenario_file=scenario_file,
+            unit_registry=unit_registry,
+            quiet=True
+        )
         
         # Restore original working directory
         os.chdir(original_cwd)
@@ -104,8 +122,17 @@ def start_game():
             return jsonify({"success": False, "error": "Engine initialization failed"}), 500
     
     try:
+        print("DEBUG: About to call engine.reset()")
         # Reset the engine for new game
-        obs, info = engine.reset()
+        try:
+            obs, info = engine.reset()
+        except Exception as reset_error:
+            print(f"CRITICAL ERROR in engine.reset(): {reset_error}")
+            print(f"ERROR TYPE: {type(reset_error).__name__}")
+            import traceback
+            print(f"FULL TRACEBACK:\n{traceback.format_exc()}")
+            raise
+        print("DEBUG: engine.reset() completed successfully")
         
         # Convert sets to lists for JSON serialization
         serializable_state = dict(engine.game_state)

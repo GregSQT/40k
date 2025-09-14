@@ -12,16 +12,6 @@ Core Principles:
 """
 
 import torch
-print(f"PyTorch version: {torch.__version__}")
-print(f"CUDA available: {torch.cuda.is_available()}")
-print(f"CUDA version: {torch.version.cuda}")
-if torch.cuda.is_available():
-    print(f"GPU devices: {torch.cuda.device_count()}")
-    print(f"Current device: {torch.cuda.current_device()}")
-    print(f"Device name: {torch.cuda.get_device_name()}")
-
-
-
 import json
 import random
 import gymnasium as gym
@@ -67,8 +57,10 @@ class W40KEngine(gym.Env):
                 raise RuntimeError(f"Failed to load training configuration: {training_config_name}")
             
             # Load base configuration
+            board_config = config_loader.get_board_config()
+            
             self.config = {
-                "board": config_loader.get_board_config(),
+                "board": board_config,
                 "units": self._load_units_from_scenario(scenario_file, unit_registry),
                 "rewards_config": rewards_config,
                 "training_config_name": training_config_name,
@@ -124,10 +116,10 @@ class W40KEngine(gym.Env):
             "fight_subphase": None,
             "charge_range_rolls": {},
             
-            # Board state
-            "board_width": self.config.get("board", {}).get("cols", 10),
-            "board_height": self.config.get("board", {}).get("rows", 10),
-            "wall_hexes": set(map(tuple, self.config.get("board", {}).get("wall_hexes", [])))
+            # Board state - handle both config formats
+            "board_cols": self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"],
+            "board_rows": self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"],
+            "wall_hexes": set(map(tuple, self.config["board"]["default"]["wall_hexes"] if "default" in self.config["board"] else self.config["board"]["wall_hexes"]))
         }
         
         # Initialize units from config
@@ -249,17 +241,15 @@ class W40KEngine(gym.Env):
         # Log action ONLY if it's a real agent action with valid unit
         if (self.step_logger and self.step_logger.enabled and success):
             
-            active_unit = self._get_active_unit()
             action_type = semantic_action.get("action")
             unit_id = semantic_action.get("unitId")
             
             # Filter out system actions and invalid entries
-            if (active_unit and 
-                action_type in ["move", "shoot", "charge", "combat"] and
+            if (action_type in ["move", "shoot", "charge", "combat"] and
                 unit_id != "none" and unit_id != "SYSTEM"):
                 
-                # CRITICAL FIX: Get unit coordinates AFTER action execution
-                updated_unit = self._get_unit_by_id(str(unit_id))
+                # Get unit coordinates AFTER action execution using semantic action unitId
+                updated_unit = self._get_unit_by_id(str(unit_id)) if unit_id else None
                 if updated_unit:
                     # Build complete action details for step logger with CURRENT coordinates
                     action_details = {
@@ -268,43 +258,43 @@ class W40KEngine(gym.Env):
                         "semantic_action": semantic_action
                     }
                 
-                # Add specific data for different action types
-                if semantic_action.get("action") == "move":
-                    action_details.update({
-                        "start_pos": (active_unit["col"], active_unit["row"]),
-                        "end_pos": (semantic_action.get("destCol", active_unit["col"]), 
-                                  semantic_action.get("destRow", active_unit["row"])),
-                        "col": semantic_action.get("destCol", active_unit["col"]),
-                        "row": semantic_action.get("destRow", active_unit["row"])
-                    })
-                elif semantic_action.get("action") == "shoot":
-                    # Add shooting-specific data with correct field names
-                    action_details.update({
-                        "target_id": semantic_action.get("targetId"),  # StepLogger expects target_id
-                        "hit_roll": 0,  # Will be filled by actual shooting execution
-                        "wound_roll": 0,
-                        "save_roll": 0,
-                        "damage_dealt": 0,
-                        "hit_result": "PENDING",
-                        "wound_result": "PENDING", 
-                        "save_result": "PENDING",
-                        "hit_target": 4,  # Default values
-                        "wound_target": 4,
-                        "save_target": 4
-                    })
-                
-                # Capture phase AFTER action execution for accurate logging
-                post_action_phase = self._get_action_phase_for_logging(semantic_action.get("action"))
-                
-                self.step_logger.log_action(
-                    unit_id=active_unit["id"],
-                    action_type=semantic_action.get("action"), 
-                    phase=post_action_phase,
-                    player=self.game_state["current_player"],
-                    success=success,
-                    step_increment=True,
-                    action_details=action_details
-                )
+                    # Add specific data for different action types
+                    if semantic_action.get("action") == "move":
+                        action_details.update({
+                            "start_pos": (updated_unit["col"], updated_unit["row"]),
+                            "end_pos": (semantic_action.get("destCol", updated_unit["col"]), 
+                                      semantic_action.get("destRow", updated_unit["row"])),
+                            "col": semantic_action.get("destCol", updated_unit["col"]),
+                            "row": semantic_action.get("destRow", updated_unit["row"])
+                        })
+                    elif semantic_action.get("action") == "shoot":
+                        # Add shooting-specific data with correct field names
+                        action_details.update({
+                            "target_id": semantic_action.get("targetId"),  # StepLogger expects target_id
+                            "hit_roll": 0,  # Will be filled by actual shooting execution
+                            "wound_roll": 0,
+                            "save_roll": 0,
+                            "damage_dealt": 0,
+                            "hit_result": "PENDING",
+                            "wound_result": "PENDING", 
+                            "save_result": "PENDING",
+                            "hit_target": 4,  # Default values
+                            "wound_target": 4,
+                            "save_target": 4
+                        })
+                    
+                    # Capture phase AFTER action execution for accurate logging
+                    post_action_phase = self._get_action_phase_for_logging(semantic_action.get("action"))
+                    
+                    self.step_logger.log_action(
+                        unit_id=updated_unit["id"],
+                        action_type=semantic_action.get("action"), 
+                        phase=post_action_phase,
+                        player=self.game_state["current_player"],
+                        success=success,
+                        step_increment=True,
+                        action_details=action_details
+                    )
         
         # Convert to gym format
         observation = self._build_observation()
@@ -375,8 +365,8 @@ class W40KEngine(gym.Env):
             else:
                 raise ValueError(f"Unit {unit['id']} not found in scenario config during reset")
         
-        # Initialize movement phase for game start
-        self._movement_phase_init()
+        # Initialize movement phase for game start using handler delegation
+        movement_handlers.movement_phase_start(self.game_state)
         
         observation = self._build_observation()
         info = {"phase": self.game_state["phase"]}
@@ -420,8 +410,33 @@ class W40KEngine(gym.Env):
         # **FULL DELEGATION**: movement_handlers.execute_action(game_state, unit, action, config)
         success, result = movement_handlers.execute_action(self.game_state, None, action, self.config)
         
+        # DEBUG: Check if unit position actually changed
+        if success and action.get("action") == "move":
+            unit_id = action.get("unitId")
+            if unit_id:
+                unit = self._get_unit_by_id(unit_id)
+                if unit:
+                    print(f"DEBUG: Unit {unit_id} actual position after movement: ({unit['col']}, {unit['row']})")
+                    expected_col = action.get("destCol", "unknown")
+                    expected_row = action.get("destRow", "unknown") 
+                    print(f"DEBUG: Expected position: ({expected_col}, {expected_row})")
+                    if expected_col == unit["col"] and expected_row == unit["row"]:
+                        print(f"DEBUG: WARNING - Unit {unit_id} trying to move to same position!")
+        
+        # CRITICAL FIX: Handle failed actions to prevent infinite loops
+        if not success and result.get("error") == "invalid_destination":
+            # Force unit to skip/wait when movement fails
+            print(f"DEBUG: Movement failed, forcing unit to skip")
+            skip_result = movement_handlers.execute_action(self.game_state, None, {"action": "skip", "unitId": action.get("unitId")}, self.config)
+            print(f"DEBUG: Skip action result: {skip_result}")
+            if isinstance(skip_result, tuple):
+                success, result = skip_result
+            else:
+                success, result = True, skip_result
+        
         # Check response for phase_complete flag
         if result.get("phase_complete"):
+            print(f"DEBUG: Phase completion detected, transitioning to shoot phase")
             self._movement_phase_initialized = False
             self._shooting_phase_init()
             result["phase_transition"] = True
@@ -752,8 +767,13 @@ class W40KEngine(gym.Env):
         enemy_units = [u for u in all_units if u["player"] == 0][:2]  # Max 2 enemy units
         
         # AI units (2 units * 11 features = 22 elements, positions 4-25)
-        board_width = self.game_state.get("board_width", 25)
-        board_height = self.game_state.get("board_height", 25)
+        board_width = self.game_state.get("board_cols")
+        board_height = self.game_state.get("board_rows")
+        
+        if board_width is None:
+            raise RuntimeError("board_cols is None - config loading failed, check config/board_config.json")
+        if board_height is None:
+            raise RuntimeError("board_rows is None - config loading failed, check config/board_config.json")
         
         for i in range(2):
             base_idx = 4 + i * 11
@@ -777,8 +797,10 @@ class W40KEngine(gym.Env):
         """Calculate reward using rewards config with debug logging."""
         if not success:
             if isinstance(result, dict) and "forbidden_in" in result.get("error", ""):
+                print(f"DEBUG: NEGATIVE REWARD -0.5 for phase violation: {result.get('error')}")
                 return -0.5  # Heavy penalty for phase violations
             else:
+                print(f"DEBUG: NEGATIVE REWARD -0.1 for invalid action: {result}")
                 return -0.1  # Small penalty for other invalid actions
         
         # Get active unit for reward calculation
@@ -975,88 +997,44 @@ class W40KEngine(gym.Env):
 # ===== GYM INTERFACE HELPER METHODS =====
     
     def _convert_gym_action(self, action: int) -> Dict[str, Any]:
-        """Convert gym integer action with PROPER target selection and validation."""
-        # Get currently active unit from activation pool
-        active_unit = self._get_active_unit()
-        
-        # AI_TURN.md: If no active unit, phase may be transitioning
-        if not active_unit:
-            return {"action": "skip", "unitId": "none"}
-        
-        # Ensure action is hashable integer
+        """Convert gym integer action to semantic action - handlers determine target units."""
         action_int = int(action.item()) if hasattr(action, 'item') else int(action)
         current_phase = self.game_state["phase"]
         
-        # STRICT PHASE-ACTION ENFORCEMENT with proper target selection
         if current_phase == "move":
-            # Movement phase: ONLY actions 0,1,2,3,7 allowed
-            if action_int not in [0, 1, 2, 3, 7]:
-                return {"action": "invalid", "error": f"action_{action_int}_forbidden_in_movement_phase", "unitId": active_unit["id"]}
-            
-            # Execute valid movement actions
-            if 0 <= action_int <= 3:
-                move_directions = {
-                    0: (active_unit["col"], active_unit["row"] - 1),  # North
-                    1: (active_unit["col"], active_unit["row"] + 1),  # South  
-                    2: (active_unit["col"] + 1, active_unit["row"]),  # East
-                    3: (active_unit["col"] - 1, active_unit["row"])   # West
-                }
-                dest_col, dest_row = move_directions[action_int]
-                return {"action": "move", "unitId": active_unit["id"], "destCol": dest_col, "destRow": dest_row}
-            elif action_int == 7:
-                return {"action": "skip", "unitId": active_unit["id"]}
-        
+            direction_map = {
+                0: {"action": "move", "destCol": 0, "destRow": -1},
+                1: {"action": "move", "destCol": 0, "destRow": 1},
+                2: {"action": "move", "destCol": 1, "destRow": 0},
+                3: {"action": "move", "destCol": -1, "destRow": 0},
+                7: {"action": "skip"}
+            }
+            if action_int in direction_map:
+                return direction_map[action_int]
         elif current_phase == "shoot":
-            # Shooting phase: ONLY actions 4,7 allowed
-            if action_int not in [4, 7]:
-                return {"action": "invalid", "error": f"action_{action_int}_forbidden_in_shooting_phase", "unitId": active_unit["id"]}
-            
-            # Execute valid shooting actions
             if action_int == 4:
-                # Use existing method to check if unit has valid targets
-                if not self._has_valid_shooting_targets(active_unit):
-                    return {"action": "skip", "unitId": active_unit["id"]}  # No valid targets
-                
-                # Find first valid enemy (simple target selection for now)
-                target_id = self._find_nearest_enemy(active_unit)
-                if not target_id:
-                    return {"action": "skip", "unitId": active_unit["id"]}
-                
-                return {"action": "shoot", "unitId": active_unit["id"], "targetId": target_id}
+                return {"action": "shoot"}
             elif action_int == 7:
-                return {"action": "skip", "unitId": active_unit["id"]}
+                return {"action": "skip"}
         
-        # Fallback for unknown phase
-        return {"action": "skip", "unitId": active_unit["id"]}
+        valid_actions = self._get_valid_actions_for_phase(current_phase)
+        if action_int not in valid_actions:
+            return {"action": "invalid", "error": f"action_{action_int}_forbidden_in_{current_phase}_phase"}
+        
+        return {"action": "skip"}
     
-    def _get_active_unit(self) -> Optional[Dict[str, Any]]:
-        """Get currently active unit from appropriate activation pool."""
-        current_phase = self.game_state["phase"]
-        
-        if current_phase == "move" and self.game_state["move_activation_pool"]:
-            unit_id = self.game_state["move_activation_pool"][0]
-            return self._get_unit_by_id(unit_id)
-        elif current_phase == "shoot" and self.game_state["shoot_activation_pool"]:
-            unit_id = self.game_state["shoot_activation_pool"][0]
-            return self._get_unit_by_id(unit_id)
-        
-        # If no active unit in pool, return any eligible unit
-        for unit in self.game_state["units"]:
-            if unit["HP_CUR"] > 0:
-                return unit
-        
-        return None
-    
-    def _find_nearest_enemy(self, unit: Dict[str, Any]) -> Optional[str]:
-        """Find nearest enemy unit for targeting actions."""
-        enemies = [u for u in self.game_state["units"] 
-                  if u["player"] != unit["player"] and u["HP_CUR"] > 0]
-        
-        if not enemies:
-            return None
-        
-        # Return ID of first enemy (simple targeting)
-        return enemies[0]["id"]
+    def _get_valid_actions_for_phase(self, phase: str) -> List[int]:
+        """Get valid action types for current phase - EXACT copy from OLD system."""
+        if phase == "move":
+            return [0, 1, 2, 3, 7]  # Move directions + skip
+        elif phase == "shoot":
+            return [4, 7]  # Shoot + skip
+        elif phase == "charge":
+            return [5, 7]  # Charge + skip
+        elif phase == "combat":
+            return [6, 7]  # Combat + skip
+        else:
+            return [7]  # Only skip for unknown phases
     
     def _load_units_from_scenario(self, scenario_file, unit_registry):
             """Load units from scenario file - NO FALLBACKS ALLOWED."""

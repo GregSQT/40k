@@ -210,8 +210,8 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
     """
     # Board bounds check
     if (col < 0 or row < 0 or 
-        col >= game_state["board_width"] or 
-        row >= game_state["board_height"]):
+        col >= game_state["board_cols"] or 
+        row >= game_state["board_rows"]):
         return False
     
     # Wall collision check
