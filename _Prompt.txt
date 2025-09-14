@@ -41,6 +41,11 @@ Uses specific error reporting format with TypeScript compiler output
 ----------------------------------------------------------------------------
 BUGS
 ----------------------------------------------------------------------------
+
+WAIT is for when the agent DECIDES to NOT perform an action.
+SKIP is when the agent CANNO perform an action !!!!!
+
+
 TRAIN:
 Quel fichier de reward ?
 

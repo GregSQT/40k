@@ -94,6 +94,7 @@ else:
         
     ### Phase Handlers
         "engine/phase_handlers/__init__.py",
+        "engine/phase_handlers/generic_handlers.py",
         "engine/phase_handlers/movement_handlers.py",
         "engine/phase_handlers/shooting_handlers.py",
         #"engine/phase_handlers/charging_handlers.py",
