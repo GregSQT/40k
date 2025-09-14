@@ -407,7 +407,7 @@ class W40KEngine(gym.Env):
             movement_handlers.movement_phase_start(self.game_state)
             self._movement_phase_initialized = True
         
-        # **FULL DELEGATION**: movement_handlers.execute_action(game_state, unit, action, config)
+        # **FULL DELEGATION**: movement_handlers.execute_action(game_state, None, action, config)
         success, result = movement_handlers.execute_action(self.game_state, None, action, self.config)
         
         # DEBUG: Check if unit position actually changed
@@ -503,14 +503,9 @@ class W40KEngine(gym.Env):
                 self._movement_phase_init()
                 return True, {"type": "phase_complete", "next_phase": "move", "current_player": 0, "new_turn": self.game_state["turn"]}
         
-        # AI_TURN.md: Get active unit from shooting phase pool
-        active_unit_id = self.game_state["shoot_activation_pool"][0]
-        active_unit = self._get_unit_by_id(active_unit_id)
-        if not active_unit:
-            return False, {"error": "active_unit_not_found", "unitId": active_unit_id}
-            
-        # **FULL DELEGATION**: shooting_handlers.execute_action(game_state, unit, action, config)
-        handler_result = shooting_handlers.execute_action(self.game_state, active_unit, action, self.config)
+        # CRITICAL FIX: Let handler extract unit from action instead of forcing pool[0]
+        # **FULL DELEGATION**: shooting_handlers.execute_action(game_state, None, action, config)
+        handler_result = shooting_handlers.execute_action(self.game_state, None, action, self.config)
         if isinstance(handler_result, tuple):
             if len(handler_result) == 2:
                 success, result = handler_result

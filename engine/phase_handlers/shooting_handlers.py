@@ -117,10 +117,14 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     unit["SHOOT_LEFT"] = unit["RNG_NB"]
     unit["selected_target_id"] = None  # For two-click confirmation
     
+    # CRITICAL: Capture unit's current location for shooting phase tracking
+    unit["activation_position"] = {"col": unit["col"], "row": unit["row"]}
+    
     # Mark unit as currently active
     game_state["active_shooting_unit"] = unit_id
     
-    return {"success": True, "unitId": unit_id, "shootLeft": unit["SHOOT_LEFT"]}
+    return {"success": True, "unitId": unit_id, "shootLeft": unit["SHOOT_LEFT"], 
+            "position": {"col": unit["col"], "row": unit["row"]}}
 
 
 def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -> List[str]:
@@ -321,13 +325,15 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "shoot_activation_pool" in game_state and unit["id"] in game_state["shoot_activation_pool"]:
             game_state["shoot_activation_pool"].remove(unit["id"])
     
-    # Clean up unit activation state
+    # Clean up unit activation state including position tracking
     if "valid_target_pool" in unit:
         del unit["valid_target_pool"]
     if "TOTAL_ATTACK_LOG" in unit:
         del unit["TOTAL_ATTACK_LOG"]
     if "selected_target_id" in unit:
         del unit["selected_target_id"]
+    if "activation_position" in unit:
+        del unit["activation_position"]  # Clear position tracking
     unit["SHOOT_LEFT"] = 0
     
     # Clear active unit
@@ -520,17 +526,24 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         if target["HP_CUR"] <= 0:
             attack_result["target_died"] = True
     
-    # CRITICAL: Store detailed log for frontend display
+    # CRITICAL: Store detailed log for frontend display with location data
     if "action_logs" not in game_state:
         game_state["action_logs"] = []
     
+    # Enhanced message format including shooter position per movement phase integration
+    enhanced_message = f"Unit {unit_id} ({shooter['col']}, {shooter['row']}) SHOT Unit {target_id} ({target['col']}, {target['row']}) : {attack_result['attack_log'].split(' : ', 1)[1] if ' : ' in attack_result['attack_log'] else attack_result['attack_log']}"
+    
     game_state["action_logs"].append({
         "type": "shoot",
-        "message": attack_result["attack_log"],  # Full detailed message
+        "message": enhanced_message,  # Enhanced with position data
         "turn": game_state.get("current_turn", 1),
         "phase": "shoot",
         "shooterId": unit_id,
         "targetId": target_id,
+        "shooterCol": shooter["col"],  # Shooter current position
+        "shooterRow": shooter["row"],
+        "targetCol": target["col"],    # Target current position  
+        "targetRow": target["row"],
         "damage": attack_result["damage"],
         "target_died": attack_result.get("target_died", False),
         "hitRoll": attack_result.get("hit_roll"),
