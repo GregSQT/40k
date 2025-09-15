@@ -54,6 +54,7 @@ def movement_build_activation_pool(game_state: Dict[str, Any]) -> None:
     """
     eligible_units = get_eligible_units(game_state)
     game_state["move_activation_pool"] = eligible_units
+    print(f"MOVEMENT POOL CREATED: Player {game_state['current_player']} -> {eligible_units}")
 
 
 def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
@@ -434,6 +435,7 @@ def _end_activation(game_state: Dict[str, Any], unit: Dict[str, Any], was_adjace
     # Remove from activation pool
     if unit["id"] in game_state["move_activation_pool"]:
         game_state["move_activation_pool"].remove(unit["id"])
+        print(f"MOVEMENT POOL REMOVAL: Unit {unit['id']} removed. Remaining: {game_state['move_activation_pool']}")
     
     # Clear active unit
     game_state["active_movement_unit"] = None

@@ -14,6 +14,13 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Set phase
     game_state["phase"] = "shoot"
     
+    # AI_TURN.md COMPLIANCE: Reset SHOOT_LEFT for all units at phase start
+    current_player = game_state["current_player"]
+    for unit in game_state["units"]:
+        if unit["player"] == current_player and unit["HP_CUR"] > 0:
+            unit["SHOOT_LEFT"] = unit["RNG_NB"]
+            # print(f"RESET SHOOT_LEFT: Unit {unit['id']} -> {unit['SHOOT_LEFT']}")
+    
     # Build activation pool
     eligible_units = shooting_build_activation_pool(game_state)
     
@@ -46,6 +53,7 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     
     # Update game_state pool
     game_state["shoot_activation_pool"] = shoot_activation_pool
+    # print(f"SHOOTING POOL CREATED: Player {current_player} -> {shoot_activation_pool}")
     return shoot_activation_pool
 
 
@@ -324,6 +332,7 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     if arg4 == "SHOOTING":
         if "shoot_activation_pool" in game_state and unit["id"] in game_state["shoot_activation_pool"]:
             game_state["shoot_activation_pool"].remove(unit["id"])
+            print(f"SHOOTING POOL REMOVAL: Unit {unit['id']} removed. Remaining: {game_state['shoot_activation_pool']}")
     
     # Clean up unit activation state including position tracking
     if "valid_target_pool" in unit:
@@ -414,6 +423,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         
         game_state["shoot_activation_pool"] = updated_pool
         current_pool = updated_pool
+        print(f"SHOOTING POOL CLEANUP: Removed depleted units. Remaining: {current_pool}")
     
     # Check if shooting phase should complete after cleanup
     if not current_pool:

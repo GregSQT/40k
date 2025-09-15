@@ -581,14 +581,14 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         # Use same pattern as evaluate.py for working icon movement
         base_env.is_evaluation_mode = True
         base_env._force_evaluation_mode = True
-        enhanced_env = GameReplayIntegration.enhance_training_env(base_env)
-        if hasattr(enhanced_env, 'replay_logger') and enhanced_env.replay_logger:
-            enhanced_env.replay_logger.is_evaluation_mode = True
-            enhanced_env.replay_logger.capture_initial_state()
-        env = Monitor(enhanced_env)
-    else:
-        # DISABLED: No logging during training for speed
-        env = Monitor(base_env)
+        # AI_TURN.md: Direct integration without wrapper
+        base_env = GameReplayIntegration.enhance_training_env(base_env)
+        if hasattr(base_env, 'replay_logger') and base_env.replay_logger:
+            base_env.replay_logger.is_evaluation_mode = True
+            base_env.replay_logger.capture_initial_state()
+    
+    # SB3 Required: Monitor base environment directly
+    env = Monitor(base_env)
     
     model_path = config.get_model_path()
     
@@ -740,9 +740,10 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     )
     
     # Enable logging ONLY for evaluation
-    enhanced_eval_env = GameReplayIntegration.enhance_training_env(base_eval_env)
-    eval_env = Monitor(enhanced_eval_env)
-    eval_env.replay_logger = enhanced_eval_env.replay_logger
+    # AI_TURN.md: Direct integration without wrapper
+    base_eval_env = GameReplayIntegration.enhance_training_env(base_eval_env)
+    eval_env = Monitor(base_eval_env)
+    eval_env.replay_logger = base_eval_env.replay_logger
     # Handle different config formats - calculate missing fields from available data
     if 'eval_freq' in training_config:
         eval_freq = training_config['eval_freq']
@@ -1178,8 +1179,11 @@ def generate_steplog_and_replay(config, args):
             step_count = 0
             
             while not done and step_count < 1000:
+                print(f"TEST DEBUG: Step {step_count}, about to predict action")
                 action, _ = model.predict(obs, deterministic=True)
+                print(f"TEST DEBUG: Step {step_count}, predicted action {action}, about to execute")
                 obs, reward, terminated, truncated, info = env.step(action)
+                print(f"TEST DEBUG: Step {step_count}, executed. terminated={terminated}, truncated={truncated}, reward={reward:.3f}")
                 done = terminated or truncated
                 step_count += 1
         
@@ -1727,9 +1731,12 @@ def main():
             )
             
             # Connect step logger after environment creation
+            print(f"STEP LOGGER ASSIGNMENT DEBUG: step_logger={step_logger}, enabled={step_logger.enabled if step_logger else 'None'}")
             if step_logger:
-                env.controller.connect_step_logger(step_logger)
-                print("✅ StepLogger connected to SequentialGameController")
+                env.step_logger = step_logger
+                print(f"✅ StepLogger connected directly to W40KEngine: {env.step_logger}")
+            else:
+                print("❌ No step logger available")
             model = DQN.load(model_path, env=env)
             if args.test_episodes is None:
                 raise ValueError("--test-episodes is required for test-only mode")

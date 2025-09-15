@@ -50,6 +50,7 @@ TRAIN:
 Quel fichier de reward ?
 
 SHOOT
+If i select en enemy unit before selecting a activable unit, i see the enmy unit's preview and I am stuck
 Couleur de HP bar dans css (et couleur du blink preview aussi)
 Calcul different entre les hex rouges et les unit blink
 dead : noir et retirer icon

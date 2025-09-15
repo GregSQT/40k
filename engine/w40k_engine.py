@@ -216,11 +216,14 @@ class W40KEngine(gym.Env):
         # CRITICAL: Check turn limit BEFORE processing any action
         if hasattr(self, 'training_config'):
             max_turns = self.training_config.get("max_turns_per_episode")
+            # print(f"TERMINATION DEBUG: Turn {self.game_state['turn']}, max_turns={max_turns}, has_training_config=True")
             if max_turns and self.game_state["turn"] > max_turns:
                 # Turn limit exceeded - return terminated episode immediately
                 observation = self._build_observation()
                 info = {"turn_limit_exceeded": True, "winner": self._determine_winner()}
                 return observation, 0.0, True, False, info
+        # else:
+        #     print(f"TERMINATION DEBUG: Turn {self.game_state['turn']}, has_training_config=False")
         
         # Check for game termination before action
         self.game_state["game_over"] = self._check_game_over()
@@ -242,6 +245,18 @@ class W40KEngine(gym.Env):
             success, result = action_result
         else:
             success, result = True, action_result
+        
+        # Capture unit position BEFORE action execution for accurate logging
+        pre_action_positions = {}
+        # print(f"STEP LOGGER DETECTION: has_step_logger={hasattr(self, 'step_logger')}, step_logger={getattr(self, 'step_logger', 'None')}")
+        if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
+            unit_id = semantic_action.get("unitId")
+            print(f"STEP LOGGER ACTIVE: Processing unit {unit_id}")
+            if unit_id:
+                pre_unit = self._get_unit_by_id(str(unit_id))
+                if pre_unit:
+                    pre_action_positions[str(unit_id)] = (pre_unit["col"], pre_unit["row"])
+                    print(f"STEP LOGGER DEBUG: Captured pre-action position for unit {unit_id}: {(pre_unit['col'], pre_unit['row'])}")
         
         # Log action ONLY if it's a real agent action with valid unit
         if (self.step_logger and self.step_logger.enabled and success):
@@ -265,12 +280,15 @@ class W40KEngine(gym.Env):
                 
                     # Add specific data for different action types
                     if semantic_action.get("action") == "move":
+                        # Use captured pre-action position for accurate start_pos
+                        start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
+                        end_pos = (updated_unit["col"], updated_unit["row"])  # Use unit's actual final position
+                        print(f"STEP LOGGER FIX: Unit {unit_id}, pre_positions={pre_action_positions}, start_pos={start_pos}, end_pos={end_pos}")
                         action_details.update({
-                            "start_pos": (updated_unit["col"], updated_unit["row"]),
-                            "end_pos": (semantic_action.get("destCol", updated_unit["col"]), 
-                                      semantic_action.get("destRow", updated_unit["row"])),
-                            "col": semantic_action.get("destCol", updated_unit["col"]),
-                            "row": semantic_action.get("destRow", updated_unit["row"])
+                            "start_pos": start_pos,
+                            "end_pos": end_pos,
+                            "col": updated_unit["col"],  # Use actual final position
+                            "row": updated_unit["row"]   # Use actual final position
                         })
                     elif semantic_action.get("action") == "shoot":
                         # Add shooting-specific data with correct field names
@@ -429,8 +447,12 @@ class W40KEngine(gym.Env):
                     expected_col = action.get("destCol", "unknown")
                     expected_row = action.get("destRow", "unknown") 
                     print(f"DEBUG: Expected position: ({expected_col}, {expected_row})")
+                    # Check if unit moved to its destination (this should always be true for valid moves)
                     if expected_col == unit["col"] and expected_row == unit["row"]:
-                        print(f"DEBUG: WARNING - Unit {unit_id} trying to move to same position!")
+                        # This is actually CORRECT behavior - unit reached its destination
+                        pass
+                    else:
+                        print(f"DEBUG: ERROR - Unit {unit_id} failed to reach destination: expected ({expected_col}, {expected_row}) but at ({unit['col']}, {unit['row']})")
         
         # CRITICAL FIX: Handle failed actions to prevent infinite loops
         if not success and result.get("error") == "invalid_destination":
@@ -483,19 +505,25 @@ class W40KEngine(gym.Env):
         
         # First call to phase? → shooting_phase_start(game_state)
         if not hasattr(self, '_shooting_phase_initialized') or not self._shooting_phase_initialized:
+            print(f"SHOOTING PHASE INIT: Player {self.game_state['current_player']} - initializing shooting phase")
             shooting_handlers.shooting_phase_start(self.game_state)
             self._shooting_phase_initialized = True
+        else:
+            print(f"SHOOTING PHASE CONTINUE: Player {self.game_state['current_player']} - already initialized")
         
         # CRITICAL: Force phase completion check every step to prevent infinite loops
         current_pool = self.game_state.get("shoot_activation_pool", [])
         if not current_pool:
-            if not self.quiet:
-                print(f"DEBUG: Shooting phase complete - empty activation pool")
+            print(f"SHOOTING PHASE COMPLETE: Player {self.game_state['current_player']} - empty activation pool")
+        else:
+            print(f"SHOOTING PHASE DEBUG: Pool {current_pool}, Action received: {action}")
+            print(f"SHOOTING PHASE DEBUG: About to process action, initialized={getattr(self, '_shooting_phase_initialized', 'None')}")
             self._shooting_phase_initialized = False
             
             # AI_TURN.md EXACT: Player progression logic after shooting
             if self.game_state["current_player"] == 0:
                 # Player 0 complete → Player 1 movement phase
+                print(f"SHOOTING COMPLETE: Player 0 -> Player 1 movement phase")
                 self.game_state["current_player"] = 1
                 self._movement_phase_init()
                 return True, {"type": "phase_complete", "next_phase": "move", "current_player": 1}
@@ -829,7 +857,8 @@ class W40KEngine(gym.Env):
         # Handle system responses (no unit-specific rewards)
         system_response_indicators = [
             "phase_complete", "phase_transition", "while_loop_active", 
-            "context", "blinking_units", "start_blinking", "validTargets"
+            "context", "blinking_units", "start_blinking", "validTargets",
+            "type", "next_phase", "current_player", "new_turn", "episode_complete"
         ]
         
         if any(indicator in result for indicator in system_response_indicators):
@@ -1097,13 +1126,19 @@ class W40KEngine(gym.Env):
         if current_phase == "move":
             if action_int == 0:  # Move action
                 selected_unit = self._ai_select_unit(eligible_units, "move")
-                destination = self._ai_select_movement_destination(selected_unit)
-                return {
-                    "action": "move", 
-                    "unitId": selected_unit, 
-                    "destCol": destination[0], 
-                    "destRow": destination[1]
-                }
+                try:
+                    destination = self._ai_select_movement_destination(selected_unit)
+                    return {
+                        "action": "move", 
+                        "unitId": selected_unit, 
+                        "destCol": destination[0], 
+                        "destRow": destination[1]
+                    }
+                except ValueError:
+                    # No valid moves - convert to WAIT action
+                    if not self.quiet:
+                        print(f"DEBUG: Converting move to wait for unit {selected_unit} - no valid destinations")
+                    return {"action": "wait", "unitId": selected_unit}
             elif action_int == 7:  # WAIT - agent chooses not to move
                 selected_unit = self._ai_select_unit(eligible_units, "wait")
                 return {"action": "wait", "unitId": selected_unit}
@@ -1206,16 +1241,17 @@ class W40KEngine(gym.Env):
         # CRITICAL: Filter out current position to force actual movement
         actual_moves = [dest for dest in valid_destinations if dest != current_pos]
         
-        # If no actual moves possible, use wait action instead of invalid move
-        if not actual_moves:
-            print(f"DEBUG: No valid moves for unit {unit_id} at {current_pos} - using wait")
-            return current_pos  # This will trigger wait logic in movement handler
+        # DEBUG: Log destination selection process
+        print(f"DEBUG MOVEMENT: Unit {unit_id} at {current_pos}")
+        print(f"DEBUG MOVEMENT: Valid destinations from handler: {valid_destinations}")
+        print(f"DEBUG MOVEMENT: Actual moves (excluding current): {actual_moves}")
         
+        # AI_TURN.md COMPLIANCE: No actual moves available → unit must WAIT, not attempt invalid move
         if not actual_moves:
-            # If no actual moves possible, return current position (will trigger skip)
-            if not self.quiet:
-                print(f"DEBUG: No valid moves for unit {unit_id} at {current_pos}")
-            return current_pos
+            print(f"DEBUG MOVEMENT: No valid moves for unit {unit_id} at {current_pos} - unit should WAIT")
+            # DO NOT return current position - this causes infinite loop
+            # Raise exception to signal calling code should use WAIT action instead
+            raise ValueError(f"No valid movement destinations for unit {unit_id} - should use WAIT action")
         
         # Strategy: Move toward nearest enemy for aggressive positioning
         enemies = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
@@ -1229,13 +1265,15 @@ class W40KEngine(gym.Env):
             best_move = min(actual_moves, 
                            key=lambda dest: abs(dest[0] - enemy_pos[0]) + abs(dest[1] - enemy_pos[1]))
             
-            if not self.quiet:
-                print(f"DEBUG: Unit {unit_id} moving from {current_pos} to {best_move} (toward enemy at {enemy_pos})")
+            print(f"DEBUG DESTINATION: Unit {unit_id} at {current_pos} selected destination {best_move} from {len(actual_moves)} options")
+            print(f"DEBUG DESTINATION: Nearest enemy at {enemy_pos}")
             
             return best_move
         else:
             # No enemies - just take first available move
-            return actual_moves[0]
+            selected = actual_moves[0]
+            print(f"DEBUG DESTINATION: Unit {unit_id} at {current_pos} selected destination {selected} (first of {len(actual_moves)} options)")
+            return selected
     
     def _ai_select_shooting_target(self, unit_id: str) -> str:
         """AI selects shooting target using tactical priorities."""
