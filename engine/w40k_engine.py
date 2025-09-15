@@ -356,6 +356,10 @@ class W40KEngine(gym.Env):
         for unit in self.game_state["units"]:
             unit["HP_CUR"] = unit["HP_MAX"]
             
+            # CRITICAL: Reset shooting state per episode
+            unit["SHOOT_LEFT"] = unit["RNG_NB"]
+            unit["ATTACK_LEFT"] = unit["CC_NB"]
+            
             # Find original position from config - match by string conversion
             unit_id_str = str(unit["id"])
             original_config = None
@@ -513,12 +517,21 @@ class W40KEngine(gym.Env):
         # CRITICAL FIX: Let handler extract unit from action instead of forcing pool[0]
         # Debug: Log what action is being sent to shooting handler
         if not self.quiet:
+            unit_id = action.get("unitId")
+            if unit_id:
+                unit = self._get_unit_by_id(unit_id)
+                if unit:
+                    print(f"DEBUG ENGINE: Before handler - Unit {unit_id} SHOOT_LEFT: {unit.get('SHOOT_LEFT', 'None')}")
             print(f"DEBUG: Sending action to shooting handler: {action}")
         
         # **FULL DELEGATION**: shooting_handlers.execute_action(game_state, None, action, config)
         handler_result = shooting_handlers.execute_action(self.game_state, None, action, self.config)
         
         if not self.quiet:
+            if unit_id:
+                unit = self._get_unit_by_id(unit_id)
+                if unit:
+                    print(f"DEBUG ENGINE: After handler - Unit {unit_id} SHOOT_LEFT: {unit.get('SHOOT_LEFT', 'None')}")
             print(f"DEBUG: Shooting handler returned: {handler_result}")
         if isinstance(handler_result, tuple):
             if len(handler_result) == 2:
@@ -1192,6 +1205,11 @@ class W40KEngine(gym.Env):
         
         # CRITICAL: Filter out current position to force actual movement
         actual_moves = [dest for dest in valid_destinations if dest != current_pos]
+        
+        # If no actual moves possible, use wait action instead of invalid move
+        if not actual_moves:
+            print(f"DEBUG: No valid moves for unit {unit_id} at {current_pos} - using wait")
+            return current_pos  # This will trigger wait logic in movement handler
         
         if not actual_moves:
             # If no actual moves possible, return current position (will trigger skip)

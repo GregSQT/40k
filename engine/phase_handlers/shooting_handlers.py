@@ -402,8 +402,20 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     AI_SHOOT.md EXACT: Complete action routing with handler autonomy
     """
     
-    # CRITICAL: Check if shooting phase should complete before processing actions
+    # CRITICAL: Remove depleted units from activation pool
     current_pool = game_state.get("shoot_activation_pool", [])
+    if current_pool:
+        # Remove units with no shots remaining
+        updated_pool = []
+        for unit_id in current_pool:
+            unit_check = _get_unit_by_id(game_state, unit_id)
+            if unit_check and unit_check.get("SHOOT_LEFT", 0) > 0:
+                updated_pool.append(unit_id)
+        
+        game_state["shoot_activation_pool"] = updated_pool
+        current_pool = updated_pool
+    
+    # Check if shooting phase should complete after cleanup
     if not current_pool:
         return True, shooting_phase_end(game_state)
     
@@ -445,8 +457,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         if unit_id not in game_state.get("shoot_activation_pool", []):
             return False, {"error": "unit_not_eligible", "unitId": unit_id}
         
-        # Initialize unit for shooting if needed
-        if game_state.get("active_shooting_unit") != unit_id:
+        # Initialize unit for shooting if needed (only if not already activated)
+        if (game_state.get("active_shooting_unit") != unit_id and 
+            unit.get("SHOOT_LEFT", 0) == unit.get("RNG_NB", 0)):
+            # Only initialize if unit hasn't started shooting yet
             shooting_unit_activation_start(game_state, unit_id)
         
         # Execute shooting directly without UI loops
@@ -508,6 +522,13 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     if not unit or not target:
         return False, {"error": "unit_or_target_not_found"}
     
+    print(f"DEBUG SHOOT: Unit {unit_id} SHOOT_LEFT before: {unit['SHOOT_LEFT']}")
+    
+    # CRITICAL: Validate unit has shots remaining
+    if unit.get("SHOOT_LEFT", 0) <= 0:
+        print(f"DEBUG SHOOT: Unit {unit_id} has no shots remaining - rejecting shoot action")
+        return False, {"error": "no_shots_remaining", "unitId": unit_id, "shootLeft": unit.get("SHOOT_LEFT", 0)}
+    
     # Validate target is in valid pool
     valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
     
@@ -516,12 +537,16 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     
     # Execute shooting attack
     attack_result = shooting_attack_controller(game_state, unit_id, target_id)
+    print(f"DEBUG SHOOT: Attack executed, result: {attack_result.get('action', 'unknown')}")
     
     # Update SHOOT_LEFT and continue loop per AI_TURN.md
     unit["SHOOT_LEFT"] -= 1
+    print(f"DEBUG SHOOT: Unit {unit_id} SHOOT_LEFT after: {unit['SHOOT_LEFT']}")
     
     # Continue execution loop to check for more shots or end activation
-    return _shooting_unit_execution_loop(game_state, unit_id)
+    result = _shooting_unit_execution_loop(game_state, unit_id)
+    print(f"DEBUG SHOOT: Execution loop returned: {result}")
+    return result
 
 
 def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_id: str) -> Dict[str, Any]:
