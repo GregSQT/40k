@@ -41,6 +41,9 @@ export function setupBoardClickHandler(callbacks: {
 
     console.log(`🔥 BOARD CLICK HANDLER | Unit : ${unitId} | Phase : ${phase} | Mode : ${mode} | Selected : ${selectedUnitId} | Click : ${clickType} |`);
 
+    // AI_TURN.md: Validate player context before processing clicks
+    // Note: Actual player validation happens in useGameActions.selectUnit
+    
     if (phase === 'move' && mode === 'select') {
       if (selectedUnitId === unitId) {
         if (clickType === 'right') {
@@ -51,6 +54,7 @@ export function setupBoardClickHandler(callbacks: {
           callbacks.onSelectUnit(null);
         }
       } else {
+        console.log("    - Attempting unit selection (player validation in useGameActions)");
         callbacks.onSelectUnit(unitId);
       }
     } else if (phase === 'shoot' && mode === 'select') {

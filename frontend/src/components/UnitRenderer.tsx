@@ -202,8 +202,14 @@ export class UnitRenderer {
         }
       });
     } else {
-      // Always add click handlers so we can detect clicks on non-selectable units
+      // AI_TURN.md: Block enemy unit clicks when no friendly unit is selected
       let addClickHandler = true;
+      
+      // Block enemy clicks when no unit is selected (prevents stuck preview)
+      if (unit.player !== currentPlayer && selectedUnitId === null) {
+        addClickHandler = false;
+      }
+      
       if (phase === "shoot" && mode === "attackPreview" && unit.player !== currentPlayer && selectedUnitId !== null) {
         const selectedUnit = units.find(u => u.id === selectedUnitId);
         if (selectedUnit && !this.props.isShootable) {

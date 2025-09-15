@@ -75,7 +75,12 @@ interface UseGameActionsParams {
 
     const unit = gameState.units.find(u => u.id === unitId);
     
-    if (!unit || !isUnitEligible(unit)) return;
+    // AI_TURN.md: Strict player validation - only current player units selectable
+    if (!unit || unit.player !== gameState.currentPlayer || !isUnitEligible(unit)) {
+      console.log(`[AI_TURN.md] Blocked selection of unit ${unitId}: player=${unit?.player}, currentPlayer=${gameState.currentPlayer}, eligible=${unit ? isUnitEligible(unit) : false}`);
+      return;
+    }
+    
     actions.setSelectedUnitId(unitId);
     actions.setMode("select");
   }, [gameState, isUnitEligible, actions]);

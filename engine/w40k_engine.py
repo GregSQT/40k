@@ -511,36 +511,9 @@ class W40KEngine(gym.Env):
         else:
             print(f"SHOOTING PHASE CONTINUE: Player {self.game_state['current_player']} - already initialized")
         
-        # CRITICAL: Force phase completion check every step to prevent infinite loops
-        current_pool = self.game_state.get("shoot_activation_pool", [])
-        if not current_pool:
-            print(f"SHOOTING PHASE COMPLETE: Player {self.game_state['current_player']} - empty activation pool")
-        else:
-            print(f"SHOOTING PHASE DEBUG: Pool {current_pool}, Action received: {action}")
-            print(f"SHOOTING PHASE DEBUG: About to process action, initialized={getattr(self, '_shooting_phase_initialized', 'None')}")
-            self._shooting_phase_initialized = False
-            
-            # AI_TURN.md EXACT: Player progression logic after shooting
-            if self.game_state["current_player"] == 0:
-                # Player 0 complete → Player 1 movement phase
-                print(f"SHOOTING COMPLETE: Player 0 -> Player 1 movement phase")
-                self.game_state["current_player"] = 1
-                self._movement_phase_init()
-                return True, {"type": "phase_complete", "next_phase": "move", "current_player": 1}
-            elif self.game_state["current_player"] == 1:
-                # Check turn limit before incrementing
-                if hasattr(self, 'training_config'):
-                    max_turns = self.training_config.get("max_turns_per_episode")
-                    if max_turns and self.game_state["turn"] >= max_turns:
-                        # Turn limit reached - end episode instead of incrementing
-                        self.game_state["game_over"] = True
-                        return True, {"episode_complete": True}
-                
-                # Player 1 complete → Increment turn, Player 0 movement phase
-                self.game_state["turn"] += 1
-                self.game_state["current_player"] = 0
-                self._movement_phase_init()
-                return True, {"type": "phase_complete", "next_phase": "move", "current_player": 0, "new_turn": self.game_state["turn"]}
+        # AI_TURN.md: Process shooting action through handler delegation
+        print(f"SHOOTING PHASE DEBUG: Pool {self.game_state.get('shoot_activation_pool', [])}, Action received: {action}")
+        print(f"SHOOTING PHASE DEBUG: About to process action, initialized={getattr(self, '_shooting_phase_initialized', 'None')}")
         
         # CRITICAL FIX: Let handler extract unit from action instead of forcing pool[0]
         # Debug: Log what action is being sent to shooting handler

@@ -376,15 +376,19 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> T
         return False, {"error": "unit_not_found"}
     
     # AI_TURN.md: While SHOOT_LEFT > 0
+    print(f"DEBUG EXECUTION LOOP: Unit {unit_id} SHOOT_LEFT={unit['SHOOT_LEFT']}, RNG_NB={unit.get('RNG_NB', 'MISSING')}")
     if unit["SHOOT_LEFT"] <= 0:
+        print(f"DEBUG: Unit {unit_id} has no shots left - ending activation")
         result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
         return True, result  # Ensure consistent (bool, dict) format
     
     # AI_TURN.md: Build valid_target_pool
     valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
+    print(f"DEBUG: Unit {unit_id} found {len(valid_targets)} valid targets: {valid_targets}")
     
     # AI_TURN.md: valid_target_pool NOT empty?
     if len(valid_targets) == 0:
+        print(f"DEBUG: Unit {unit_id} has no valid targets - ending activation (SHOOT_LEFT={unit['SHOOT_LEFT']}, RNG_NB={unit['RNG_NB']})")
         # SHOOT_LEFT = RNG_NB?
         if unit["SHOOT_LEFT"] == unit["RNG_NB"]:
             # No targets at activation
@@ -413,13 +417,18 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     # CRITICAL: Remove depleted units from activation pool
     current_pool = game_state.get("shoot_activation_pool", [])
+    print(f"DEBUG POOL CLEANUP: Initial pool: {current_pool}")
     if current_pool:
         # Remove units with no shots remaining
         updated_pool = []
         for unit_id in current_pool:
             unit_check = _get_unit_by_id(game_state, unit_id)
-            if unit_check and unit_check.get("SHOOT_LEFT", 0) > 0:
+            shots_left = unit_check.get("SHOOT_LEFT", 0) if unit_check else 0
+            print(f"DEBUG POOL CLEANUP: Unit {unit_id} has SHOOT_LEFT={shots_left}")
+            if unit_check and shots_left > 0:
                 updated_pool.append(unit_id)
+            else:
+                print(f"DEBUG POOL CLEANUP: Removing unit {unit_id} (SHOOT_LEFT={shots_left})")
         
         game_state["shoot_activation_pool"] = updated_pool
         current_pool = updated_pool
@@ -427,6 +436,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     # Check if shooting phase should complete after cleanup
     if not current_pool:
+        print(f"DEBUG: Pool empty after cleanup - ending shooting phase")
         return True, shooting_phase_end(game_state)
     
     # Extract unit from action if not provided (engine passes None now)
