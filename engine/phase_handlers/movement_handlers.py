@@ -93,14 +93,24 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if not game_state["move_activation_pool"]:
         return True, movement_phase_end(game_state)
     
-    # Get active unit (first in pool)
-    active_unit_id = game_state["move_activation_pool"][0]
-    active_unit = _get_unit_by_id(game_state, active_unit_id)
-    if not active_unit:
-        return False, {"error": "active_unit_not_found", "unit_id": active_unit_id}
-    
-    # Action routing per AI_MOVE.md
+    # Get unit from action (frontend specifies which unit to move)
     action_type = action.get("action")
+    unit_id = action.get("unitId")
+    
+    # For gym training, if no unitId specified, use first eligible unit
+    if not unit_id:
+        if game_state["move_activation_pool"]:
+            unit_id = game_state["move_activation_pool"][0]
+        else:
+            return True, movement_phase_end(game_state)
+    
+    # Validate unit is eligible
+    if unit_id not in game_state["move_activation_pool"]:
+        return False, {"error": "unit_not_eligible", "unitId": unit_id}
+    
+    active_unit = _get_unit_by_id(game_state, unit_id)
+    if not active_unit:
+        return False, {"error": "unit_not_found", "unitId": unit_id}
     
     # Auto-activate unit if not already activated and preview not shown
     if not game_state.get("active_movement_unit") and action_type in ["move", "left_click"]:
@@ -110,13 +120,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return _handle_unit_activation(game_state, active_unit, config)
     
     elif action_type == "move":
-        return movement_destination_selection_handler(game_state, active_unit["id"], action)
+        return movement_destination_selection_handler(game_state, unit_id, action)
     
     elif action_type == "skip":
         return _handle_skip_action(game_state, active_unit)
     
     elif action_type == "left_click":
-        return movement_click_handler(game_state, active_unit["id"], action)
+        return movement_click_handler(game_state, unit_id, action)
     
     elif action_type == "right_click":
         return _handle_skip_action(game_state, active_unit)

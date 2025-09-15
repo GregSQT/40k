@@ -222,10 +222,7 @@ class W40KEngine(gym.Env):
                 info = {"turn_limit_exceeded": True, "winner": self._determine_winner()}
                 return observation, 0.0, True, False, info
         
-        # BUILT-IN STEP COUNTING - Only location in entire system
-        self.game_state["episode_steps"] += 1
-        
-        # Check for game termination after each action
+        # Check for game termination before action
         self.game_state["game_over"] = self._check_game_over()
         
         # Convert gym integer action to semantic action
@@ -233,6 +230,14 @@ class W40KEngine(gym.Env):
         
         # Process semantic action with AI_TURN.md compliance
         action_result = self._process_semantic_action(semantic_action)
+        if isinstance(action_result, tuple) and len(action_result) == 2:
+            success, result = action_result
+        else:
+            success, result = True, action_result
+        
+        # BUILT-IN STEP COUNTING - AFTER validation, only for successful actions
+        if success:
+            self.game_state["episode_steps"] += 1
         if isinstance(action_result, tuple) and len(action_result) == 2:
             success, result = action_result
         else:
@@ -477,8 +482,11 @@ class W40KEngine(gym.Env):
             shooting_handlers.shooting_phase_start(self.game_state)
             self._shooting_phase_initialized = True
         
-        # AI_TURN.md: Check if shooting phase is complete before getting active unit
-        if not self.game_state.get("shoot_activation_pool"):
+        # CRITICAL: Force phase completion check every step to prevent infinite loops
+        current_pool = self.game_state.get("shoot_activation_pool", [])
+        if not current_pool:
+            if not self.quiet:
+                print(f"DEBUG: Shooting phase complete - empty activation pool")
             self._shooting_phase_initialized = False
             
             # AI_TURN.md EXACT: Player progression logic after shooting
@@ -494,8 +502,7 @@ class W40KEngine(gym.Env):
                     if max_turns and self.game_state["turn"] >= max_turns:
                         # Turn limit reached - end episode instead of incrementing
                         self.game_state["game_over"] = True
-                        result["episode_complete"] = True
-                        return True, result
+                        return True, {"episode_complete": True}
                 
                 # Player 1 complete → Increment turn, Player 0 movement phase
                 self.game_state["turn"] += 1
@@ -504,8 +511,15 @@ class W40KEngine(gym.Env):
                 return True, {"type": "phase_complete", "next_phase": "move", "current_player": 0, "new_turn": self.game_state["turn"]}
         
         # CRITICAL FIX: Let handler extract unit from action instead of forcing pool[0]
+        # Debug: Log what action is being sent to shooting handler
+        if not self.quiet:
+            print(f"DEBUG: Sending action to shooting handler: {action}")
+        
         # **FULL DELEGATION**: shooting_handlers.execute_action(game_state, None, action, config)
         handler_result = shooting_handlers.execute_action(self.game_state, None, action, self.config)
+        
+        if not self.quiet:
+            print(f"DEBUG: Shooting handler returned: {handler_result}")
         if isinstance(handler_result, tuple):
             if len(handler_result) == 2:
                 success, result = handler_result
@@ -750,6 +764,9 @@ class W40KEngine(gym.Env):
         """Build observation vector matching old system format (26 elements)."""
         obs = np.zeros(26, dtype=np.float32)
         
+        # Minimal logging only for training issues
+        pass
+        
         # Global features (4 elements) - normalized to 0-1 range
         obs[0] = self.game_state["current_player"]  # 0 or 1
         obs[1] = {"move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}[self.game_state["phase"]]
@@ -789,33 +806,95 @@ class W40KEngine(gym.Env):
         return obs
     
     def _calculate_reward(self, success: bool, result: Dict[str, Any]) -> float:
-        """Calculate reward using rewards config with debug logging."""
+        """Calculate reward using actual acting unit with reward mapper integration."""
         if not success:
             if isinstance(result, dict) and "forbidden_in" in result.get("error", ""):
-                print(f"DEBUG: NEGATIVE REWARD -0.5 for phase violation: {result.get('error')}")
                 return -0.5  # Heavy penalty for phase violations
             else:
-                print(f"DEBUG: NEGATIVE REWARD -0.1 for invalid action: {result}")
                 return -0.1  # Small penalty for other invalid actions
         
-        # Get active unit for reward calculation
-        active_unit = self._get_active_unit()
-        if not active_unit:
-            return 0.1  # Default for unknown unit
+        # Handle system responses (no unit-specific rewards)
+        system_response_indicators = [
+            "phase_complete", "phase_transition", "while_loop_active", 
+            "context", "blinking_units", "start_blinking", "validTargets"
+        ]
+        
+        if any(indicator in result for indicator in system_response_indicators):
+            # System responses are not unit actions - no reward needed
+            return 0.0
+        
+        # Get ACTUAL acting unit from result, not pool[0]
+        acting_unit_id = result.get("unitId") or result.get("shooterId") or result.get("unit_id")
+        if not acting_unit_id:
+            raise ValueError(f"Action result missing acting unit ID: {result}")
+        
+        acting_unit = self._get_unit_by_id(str(acting_unit_id))
+        if not acting_unit:
+            raise ValueError(f"Acting unit not found: {acting_unit_id}")
         
         # Get action type from result
         action_type = result.get("action", "unknown") if isinstance(result, dict) else "unknown"
-        phase = self.game_state["phase"]
         
-        # Convert to gym40k.py format action dict
+        # Full reward mapper integration - use unit registry for proper config mapping
+        reward_mapper = self._get_reward_mapper()
+        
+        # Enrich unit data with tactical flags required by reward_mapper
+        enriched_unit = self._enrich_unit_for_reward_mapper(acting_unit)
+        
+        # Debug: Log agent assignment for rewards
+        if not self.quiet:
+            original_type = acting_unit.get('unitType', 'unknown')
+            agent_type = enriched_unit.get('unitType', 'unknown')
+            controlled_agent = self.config.get('controlled_agent', 'none') if self.config else 'none'
+            print(f"DEBUG: Unit {acting_unit['id']} ({original_type}) -> Using agent rewards: {agent_type} (controlled_agent: {controlled_agent})")
+        
+        if action_type == "shoot" and "targetId" in result:
+            target = self._get_unit_by_id(str(result["targetId"]))
+            enriched_target = self._enrich_unit_for_reward_mapper(target)
+            
+            # Get base shooting reward
+            unit_rewards = reward_mapper._get_unit_rewards(enriched_unit)
+            base_reward = unit_rewards["base_actions"]["ranged_attack"]
+            
+            # Add target type bonus/penalty
+            target_bonus = reward_mapper._get_target_type_bonus(enriched_unit, enriched_target)
+            
+            # Add result bonuses if target was killed/wounded
+            result_bonus = 0.0
+            if result.get("target_died", False):
+                result_bonus += unit_rewards["result_bonuses"]["kill_target"]
+            
+            final_reward = base_reward + target_bonus + result_bonus
+            
+            if not self.quiet:
+                print(f"DEBUG: Shooting reward - Base: {base_reward}, Target bonus: {target_bonus}, Result: {result_bonus}, Final: {final_reward}")
+            
+            return final_reward
+        elif action_type == "move":
+            old_pos = (result.get("fromCol", 0), result.get("fromRow", 0))
+            new_pos = (result.get("toCol", 0), result.get("toRow", 0))
+            tactical_context = self._build_tactical_context(acting_unit, result)
+            return reward_mapper.get_movement_reward(enriched_unit, old_pos, new_pos, tactical_context)
+        elif action_type == "charge" and "targetId" in result:
+            target = self._get_unit_by_id(str(result["targetId"]))
+            enriched_target = self._enrich_unit_for_reward_mapper(target)
+            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit)]
+            return reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets)
+        elif action_type == "fight" and "targetId" in result:
+            target = self._get_unit_by_id(str(result["targetId"]))
+            enriched_target = self._enrich_unit_for_reward_mapper(target)
+            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit)]
+            return reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets)
+        elif action_type == "wait":
+            # Use base wait penalty from config
+            return self._calculate_reward_from_config(acting_unit, {"type": "wait"}, success)
+        
+        # Use standard config-based reward for other actions
+        return self._calculate_reward_from_config(acting_unit, {"type": action_type}, success)
+        
+        # Use standard config-based reward calculation
         action = {"type": action_type}
-        
-        # Use gym40k.py reward calculation method
-        try:
-            reward = self._calculate_reward_from_config(active_unit, action, success)
-            return reward
-        except Exception as e:
-            return 0.1  # Fallback if config fails
+        return self._calculate_reward_from_config(acting_unit, action, success)
     
     def _calculate_reward_from_config(self, acting_unit: Dict[str, Any], action: Dict[str, Any], success: bool) -> float:
         """Exact reproduction of gym40k.py reward calculation."""
@@ -992,45 +1071,413 @@ class W40KEngine(gym.Env):
 # ===== GYM INTERFACE HELPER METHODS =====
     
     def _convert_gym_action(self, action: int) -> Dict[str, Any]:
-        """Convert gym integer action to semantic action - handlers determine target units."""
+        """Convert gym integer action to semantic action - AI selects units dynamically."""
         action_int = int(action.item()) if hasattr(action, 'item') else int(action)
         current_phase = self.game_state["phase"]
         
+        # Get eligible units for current phase - AI_TURN.md sequential activation
+        eligible_units = self._get_eligible_units_for_current_phase()
+        
+        if not eligible_units:
+            return {"action": "invalid", "error": "no_eligible_units"}
+        
         if current_phase == "move":
-            direction_map = {
-                0: {"action": "move", "destCol": 0, "destRow": -1},
-                1: {"action": "move", "destCol": 0, "destRow": 1},
-                2: {"action": "move", "destCol": 1, "destRow": 0},
-                3: {"action": "move", "destCol": -1, "destRow": 0},
-                7: {"action": "skip"}
-            }
-            if action_int in direction_map:
-                return direction_map[action_int]
+            if action_int == 0:  # Move action
+                selected_unit = self._ai_select_unit(eligible_units, "move")
+                destination = self._ai_select_movement_destination(selected_unit)
+                return {
+                    "action": "move", 
+                    "unitId": selected_unit, 
+                    "destCol": destination[0], 
+                    "destRow": destination[1]
+                }
+            elif action_int == 7:  # WAIT - agent chooses not to move
+                selected_unit = self._ai_select_unit(eligible_units, "wait")
+                return {"action": "wait", "unitId": selected_unit}
         elif current_phase == "shoot":
-            if action_int == 4:
-                return {"action": "shoot"}
-            elif action_int == 7:
-                return {"action": "skip"}
+            if action_int == 4:  # Shoot action
+                selected_unit = self._ai_select_unit(eligible_units, "shoot")
+                target = self._ai_select_shooting_target(selected_unit)
+                return {
+                    "action": "shoot", 
+                    "unitId": selected_unit, 
+                    "targetId": target
+                }
+            elif action_int == 7:  # WAIT - agent chooses not to shoot
+                selected_unit = self._ai_select_unit(eligible_units, "wait")
+                return {"action": "wait", "unitId": selected_unit}
+        elif current_phase == "charge":
+            if action_int == 5:  # Charge action
+                selected_unit = self._ai_select_unit(eligible_units, "charge")
+                target = self._ai_select_charge_target(selected_unit)
+                return {
+                    "action": "charge", 
+                    "unitId": selected_unit, 
+                    "targetId": target
+                }
+            elif action_int == 7:  # WAIT - agent chooses not to charge
+                selected_unit = self._ai_select_unit(eligible_units, "wait")
+                return {"action": "wait", "unitId": selected_unit}
+        elif current_phase == "fight":
+            if action_int == 6:  # Fight action - NO WAIT option in fight phase
+                selected_unit = self._ai_select_unit(eligible_units, "fight")
+                target = self._ai_select_combat_target(selected_unit)
+                return {
+                    "action": "fight", 
+                    "unitId": selected_unit, 
+                    "targetId": target
+                }
         
         valid_actions = self._get_valid_actions_for_phase(current_phase)
         if action_int not in valid_actions:
             return {"action": "invalid", "error": f"action_{action_int}_forbidden_in_{current_phase}_phase"}
         
-        return {"action": "skip"}
+        # SKIP is system response when no valid actions possible (not agent choice)
+        return {"action": "skip", "reason": "no_valid_action_found"}
     
     def _get_valid_actions_for_phase(self, phase: str) -> List[int]:
-        """Get valid action types for current phase - EXACT copy from OLD system."""
+        """Get valid action types for current phase with correct WAIT vs FIGHT semantics."""
         if phase == "move":
-            return [0, 1, 2, 3, 7]  # Move directions + skip
+            return [0, 7]  # Move + wait
         elif phase == "shoot":
-            return [4, 7]  # Shoot + skip
+            return [4, 7]  # Shoot + wait
         elif phase == "charge":
-            return [5, 7]  # Charge + skip
-        elif phase == "combat":
-            return [6, 7]  # Combat + skip
+            return [5, 7]  # Charge + wait
+        elif phase == "fight":
+            return [6]  # Fight only - NO WAIT in fight phase
         else:
-            return [7]  # Only skip for unknown phases
+            return [7]  # Only wait for unknown phases
     
+    def _get_eligible_units_for_current_phase(self) -> List[Dict[str, Any]]:
+        """Get eligible units for current phase using handler delegation."""
+        current_phase = self.game_state["phase"]
+        
+        if current_phase == "move":
+            eligible_unit_ids = movement_handlers.get_eligible_units(self.game_state)
+            return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
+        elif current_phase == "shoot":
+            eligible_unit_ids = shooting_handlers.shooting_build_activation_pool(self.game_state)
+            return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
+        else:
+            return []
+    
+    def _ai_select_unit(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:
+        """AI selects which unit to activate using reward-based priorities."""
+        if not eligible_units:
+            raise ValueError("No eligible units available for selection")
+        
+        # Handle different selection strategies per action type
+        if action_type == "wait":
+            # For WAIT actions, select first eligible unit (agent chose not to act)
+            return eligible_units[0]["id"]
+        
+        # Strategy: Round-robin to ensure all units get training opportunities
+        if not hasattr(self, '_unit_selection_index'):
+            self._unit_selection_index = 0
+        
+        unit_index = self._unit_selection_index % len(eligible_units)
+        self._unit_selection_index += 1
+        return eligible_units[unit_index]["id"]
+    
+    def _ai_select_movement_destination(self, unit_id: str) -> Tuple[int, int]:
+        """AI selects movement destination that actually moves the unit."""
+        unit = self._get_unit_by_id(unit_id)
+        if not unit:
+            raise ValueError(f"Unit not found: {unit_id}")
+        
+        current_pos = (unit["col"], unit["row"])
+        
+        # Use movement handler to get valid destinations
+        valid_destinations = movement_handlers.movement_build_valid_destinations_pool(self.game_state, unit_id)
+        
+        # CRITICAL: Filter out current position to force actual movement
+        actual_moves = [dest for dest in valid_destinations if dest != current_pos]
+        
+        if not actual_moves:
+            # If no actual moves possible, return current position (will trigger skip)
+            if not self.quiet:
+                print(f"DEBUG: No valid moves for unit {unit_id} at {current_pos}")
+            return current_pos
+        
+        # Strategy: Move toward nearest enemy for aggressive positioning
+        enemies = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        
+        if enemies:
+            # Find nearest enemy
+            nearest_enemy = min(enemies, key=lambda e: abs(e["col"] - unit["col"]) + abs(e["row"] - unit["row"]))
+            enemy_pos = (nearest_enemy["col"], nearest_enemy["row"])
+            
+            # Select move that gets closest to nearest enemy
+            best_move = min(actual_moves, 
+                           key=lambda dest: abs(dest[0] - enemy_pos[0]) + abs(dest[1] - enemy_pos[1]))
+            
+            if not self.quiet:
+                print(f"DEBUG: Unit {unit_id} moving from {current_pos} to {best_move} (toward enemy at {enemy_pos})")
+            
+            return best_move
+        else:
+            # No enemies - just take first available move
+            return actual_moves[0]
+    
+    def _ai_select_shooting_target(self, unit_id: str) -> str:
+        """AI selects shooting target using tactical priorities."""
+        unit = self._get_unit_by_id(unit_id)
+        if not unit:
+            raise ValueError(f"Unit not found: {unit_id}")
+        
+        # Use shooting handler to get valid targets
+        valid_targets = shooting_handlers.shooting_build_valid_target_pool(self.game_state, unit_id)
+        
+        if not valid_targets:
+            raise ValueError(f"No valid targets for unit {unit_id}")
+        
+        # Strategy: Target lowest HP enemy first
+        target_units = [self._get_unit_by_id(tid) for tid in valid_targets]
+        target_units = [t for t in target_units if t]  # Filter None
+        
+        if not target_units:
+            raise ValueError(f"No valid target units found")
+        
+        lowest_hp_target = min(target_units, key=lambda t: t["HP_CUR"])
+        return lowest_hp_target["id"]
+    
+    def _ai_select_charge_target(self, unit_id: str) -> str:
+        """AI selects charge target - placeholder implementation."""
+        # TODO: Implement charge target selection
+        raise NotImplementedError("Charge target selection not implemented")
+    
+    def _ai_select_combat_target(self, unit_id: str) -> str:
+        """AI selects combat target - placeholder implementation."""
+        # TODO: Implement combat target selection
+        raise NotImplementedError("Combat target selection not implemented")
+    
+    def _get_reward_mapper(self):
+        """Get reward mapper instance with current rewards config."""
+        from ai.reward_mapper import RewardMapper
+        return RewardMapper(self.rewards_config)
+    
+    def _build_tactical_context(self, unit: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+        """Build tactical context for reward mapper."""
+        action_type = result.get("action")
+        
+        if action_type == "move":
+            old_col = result.get("fromCol", unit["col"])
+            old_row = result.get("fromRow", unit["row"])
+            new_col = result.get("toCol", unit["col"])
+            new_row = result.get("toRow", unit["row"])
+            
+            # Calculate movement context
+            moved_closer = self._moved_closer_to_enemies(unit, (old_col, old_row), (new_col, new_row))
+            moved_away = self._moved_away_from_enemies(unit, (old_col, old_row), (new_col, new_row))
+            moved_to_optimal_range = self._moved_to_optimal_range(unit, (new_col, new_row))
+            moved_to_charge_range = self._moved_to_charge_range(unit, (new_col, new_row))
+            moved_to_safety = self._moved_to_safety(unit, (new_col, new_row))
+            
+            context = {
+                "moved_closer": moved_closer,
+                "moved_away": moved_away,
+                "moved_to_optimal_range": moved_to_optimal_range,
+                "moved_to_charge_range": moved_to_charge_range,
+                "moved_to_safety": moved_to_safety
+            }
+            
+            # Debug tactical context
+            if not self.quiet:
+                print(f"DEBUG: Tactical context for unit {unit['id']}: {context}")
+                print(f"DEBUG: Movement from ({old_col}, {old_row}) to ({new_col}, {new_row})")
+            
+            # Handle same-position movement (no actual movement)
+            if old_col == new_col and old_row == new_row:
+                # Unit didn't actually move - this should be treated as a wait action
+                context = {"moved_to_safety": True}  # Conservative choice for no movement
+                if not self.quiet:
+                    print(f"DEBUG: No actual movement detected, setting moved_to_safety=True")
+            elif not any(context.values()):
+                # If unit moved but no tactical benefit detected, default to moved_closer
+                context["moved_closer"] = True
+                if not self.quiet:
+                    print(f"DEBUG: Movement detected but no tactical context, defaulting to moved_closer=True")
+            
+            return context
+        
+        return {}
+    
+    def _get_all_valid_targets(self, unit: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Get all valid targets for unit based on current phase."""
+        targets = []
+        for enemy in self.game_state["units"]:
+            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+                targets.append(enemy)
+        return targets
+    
+    def _can_melee_units_charge_target(self, target: Dict[str, Any]) -> bool:
+        """Check if any friendly melee units can charge this target."""
+        current_player = self.game_state["current_player"]
+        
+        for unit in self.game_state["units"]:
+            if (unit["player"] == current_player and 
+                unit["HP_CUR"] > 0 and
+                unit.get("CC_DMG", 0) > 0):  # Has melee capability
+                
+                # Simple charge range check (2d6 movement + unit MOVE)
+                distance = abs(unit["col"] - target["col"]) + abs(unit["row"] - target["row"])
+                max_charge_range = unit["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
+                
+                if distance <= max_charge_range:
+                    return True
+        
+        return False
+    
+    def _moved_closer_to_enemies(self, unit: Dict[str, Any], old_pos: Tuple[int, int], new_pos: Tuple[int, int]) -> bool:
+        """Check if unit moved closer to enemies."""
+        enemies = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        if not enemies:
+            return False
+        
+        old_min_distance = min(abs(old_pos[0] - e["col"]) + abs(old_pos[1] - e["row"]) for e in enemies)
+        new_min_distance = min(abs(new_pos[0] - e["col"]) + abs(new_pos[1] - e["row"]) for e in enemies)
+        
+        return new_min_distance < old_min_distance
+    
+    def _moved_away_from_enemies(self, unit: Dict[str, Any], old_pos: Tuple[int, int], new_pos: Tuple[int, int]) -> bool:
+        """Check if unit moved away from enemies."""
+        enemies = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        if not enemies:
+            return False
+        
+        old_min_distance = min(abs(old_pos[0] - e["col"]) + abs(old_pos[1] - e["row"]) for e in enemies)
+        new_min_distance = min(abs(new_pos[0] - e["col"]) + abs(new_pos[1] - e["row"]) for e in enemies)
+        
+        return new_min_distance > old_min_distance
+    
+    def _moved_to_optimal_range(self, unit: Dict[str, Any], new_pos: Tuple[int, int]) -> bool:
+        """Check if unit moved to optimal shooting range per W40K shooting rules."""
+        if unit.get("RNG_RNG", 0) <= 0:
+            return False
+        
+        max_range = unit["RNG_RNG"]
+        min_range = unit.get("CC_RNG", 1)  # Minimum engagement distance
+        enemies = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        
+        for enemy in enemies:
+            distance = abs(new_pos[0] - enemy["col"]) + abs(new_pos[1] - enemy["row"])
+            # Optimal range: can shoot but not in melee (min_range < distance <= max_range)
+            if min_range < distance <= max_range:
+                return True
+        
+        return False
+    
+    def _moved_closer_to_enemies(self, unit: Dict[str, Any], old_pos: Tuple[int, int], new_pos: Tuple[int, int]) -> bool:
+        """Check if unit moved closer to the nearest threatening enemy."""
+        enemies = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        if not enemies:
+            return False
+        
+        # Find the nearest threatening enemy (has weapons that can harm this unit)
+        threatening_enemies = []
+        for enemy in enemies:
+            # Enemy is threatening if it has ranged or melee weapons
+            if enemy.get("RNG_DMG", 0) > 0 or enemy.get("CC_DMG", 0) > 0:
+                old_distance = abs(old_pos[0] - enemy["col"]) + abs(old_pos[1] - enemy["row"])
+                new_distance = abs(new_pos[0] - enemy["col"]) + abs(new_pos[1] - enemy["row"])
+                threatening_enemies.append((enemy, old_distance, new_distance))
+        
+        if not threatening_enemies:
+            return False
+        
+        # Check if moved closer to the nearest threatening enemy
+        nearest_enemy = min(threatening_enemies, key=lambda x: x[1])  # Nearest by old distance
+        old_distance, new_distance = nearest_enemy[1], nearest_enemy[2]
+        
+        return new_distance < old_distance
+    
+    def _moved_to_charge_range(self, unit: Dict[str, Any], new_pos: Tuple[int, int]) -> bool:
+        """Check if unit moved to charge range of enemies."""
+        if unit.get("CC_DMG", 0) <= 0:
+            return False
+        
+        enemies = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        max_charge_range = unit["MOVE"] + 12  # Average 2d6 charge distance
+        
+        for enemy in enemies:
+            distance = abs(new_pos[0] - enemy["col"]) + abs(new_pos[1] - enemy["row"])
+            if distance <= max_charge_range:
+                return True
+        
+        return False
+    
+    def _moved_to_safety(self, unit: Dict[str, Any], new_pos: Tuple[int, int]) -> bool:
+        """Check if unit moved to safety from enemy threats."""
+        enemies = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        
+        for enemy in enemies:
+            # Check if moved out of enemy threat range
+            distance = abs(new_pos[0] - enemy["col"]) + abs(new_pos[1] - enemy["row"])
+            enemy_threat_range = max(enemy.get("RNG_RNG", 0), enemy.get("CC_RNG", 1))
+            
+            if distance > enemy_threat_range:
+                return True
+        
+        return False
+    
+    def _get_reward_mapper_unit_rewards(self, unit: Dict[str, Any]) -> Dict[str, Any]:
+        """Get unit-specific rewards config for reward_mapper."""
+        enriched_unit = self._enrich_unit_for_reward_mapper(unit)
+        reward_mapper = self._get_reward_mapper()
+        return reward_mapper._get_unit_rewards(enriched_unit)
+
+    def _enrich_unit_for_reward_mapper(self, unit: Dict[str, Any]) -> Dict[str, Any]:
+        """Enrich unit data with tactical flags required by reward_mapper."""
+        enriched = unit.copy()
+        
+        # Remove debug spam
+        pass
+        
+        # Use the training agent key directly from config
+        # The controlled_agent parameter specifies which agent reward config to use
+        if self.config and self.config.get("controlled_agent"):
+            agent_key = self.config["controlled_agent"]
+        elif hasattr(self, 'unit_registry') and self.unit_registry:
+            # Get agent key from unit registry as fallback
+            scenario_unit_type = unit.get("unitType", "unknown")
+            try:
+                agent_key = self.unit_registry.get_model_key(scenario_unit_type)
+            except (ValueError, AttributeError):
+                # Final fallback based on unit stats
+                is_ranged = unit.get("RNG_RNG", 0) > unit.get("CC_RNG", 1)
+                agent_key = "SpaceMarine_Infantry_Troop_RangedSwarm" if is_ranged else "SpaceMarine_Infantry_Troop_MeleeTroop"
+        else:
+            # Emergency fallback
+            is_ranged = unit.get("RNG_RNG", 0) > unit.get("CC_RNG", 1)
+            agent_key = "SpaceMarine_Infantry_Troop_RangedSwarm" if is_ranged else "SpaceMarine_Infantry_Troop_MeleeTroop"
+        
+        # CRITICAL: Set the agent type as unitType for reward config lookup
+        enriched["unitType"] = agent_key
+        
+        # Add required tactical flags based on unit stats
+        enriched["is_ranged"] = unit.get("RNG_RNG", 0) > unit.get("CC_RNG", 1)
+        enriched["is_melee"] = not enriched["is_ranged"]
+        
+        # Map UPPERCASE fields to lowercase for reward_mapper compatibility
+        enriched["name"] = unit.get("unitType", f"Unit_{unit['id']}")
+        enriched["rng_dmg"] = unit.get("RNG_DMG", 0)
+        enriched["cc_dmg"] = unit.get("CC_DMG", 0)
+        
+        return enriched
+    
+    def _get_reward_config_key_for_unit(self, unit: Dict[str, Any]) -> str:
+        """Map unit type to reward config key using unit registry."""
+        unit_type = unit.get("unitType", "unknown")
+        
+        # Use unit registry to get agent key (matches rewards config)
+        try:
+            agent_key = self.unit_registry.get_model_key(unit_type)
+            return agent_key
+        except ValueError:
+            # Fallback: determine from unit stats
+            is_ranged = unit.get("RNG_RNG", 0) > unit.get("CC_RNG", 1)
+            return "SpaceMarineRanged" if is_ranged else "SpaceMarineMelee"
+
     def _load_units_from_scenario(self, scenario_file, unit_registry):
             """Load units from scenario file - NO FALLBACKS ALLOWED."""
             if not scenario_file:

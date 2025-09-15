@@ -46,6 +46,7 @@ else:
         "ai/scenario_manager.py",
         "ai/train.py",
         "ai/unit_registry.py",
+        "ai/reward_mapper.py",
 
     ### ai/training
         "ai/training/evaluator.py",

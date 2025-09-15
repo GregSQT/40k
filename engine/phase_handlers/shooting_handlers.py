@@ -402,6 +402,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     AI_SHOOT.md EXACT: Complete action routing with handler autonomy
     """
     
+    # CRITICAL: Check if shooting phase should complete before processing actions
+    current_pool = game_state.get("shoot_activation_pool", [])
+    if not current_pool:
+        return True, shooting_phase_end(game_state)
+    
     # Extract unit from action if not provided (engine passes None now)
     if unit is None:
         if "unitId" not in action:
@@ -436,8 +441,22 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         if not target_id:
             return False, {"error": "missing_target", "action": action}
         
-        # Convert to shooting handler format and execute
+        # CRITICAL: Activate unit first if not already active
+        if unit_id not in game_state.get("shoot_activation_pool", []):
+            return False, {"error": "unit_not_eligible", "unitId": unit_id}
+        
+        # Initialize unit for shooting if needed
+        if game_state.get("active_shooting_unit") != unit_id:
+            shooting_unit_activation_start(game_state, unit_id)
+        
+        # Execute shooting directly without UI loops
         return shooting_target_selection_handler(game_state, unit_id, str(target_id))
+    
+    elif action_type == "wait" or action_type == "skip":
+        # Handle gym wait/skip actions - unit chooses not to shoot
+        if unit_id in game_state.get("shoot_activation_pool", []):
+            return _shooting_activation_end(game_state, unit, "SKIP", 1, "PASS", "SHOOTING")
+        return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
     elif action_type == "left_click":
         target_id = action.get("targetId")
@@ -500,7 +519,6 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     
     # Update SHOOT_LEFT and continue loop per AI_TURN.md
     unit["SHOOT_LEFT"] -= 1
-    # TOTAL_ATTACK_LOG is handled in shooting_attack_controller - no duplication
     
     # Continue execution loop to check for more shots or end activation
     return _shooting_unit_execution_loop(game_state, unit_id)
