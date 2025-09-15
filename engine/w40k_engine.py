@@ -500,69 +500,23 @@ class W40KEngine(gym.Env):
 
     def _process_shooting_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """
-        AI_SHOOT.md EXACT: Pure engine orchestration - handler manages everything
+        AI_TURN.md EXACT: Pure delegation - handler manages complete phase lifecycle
         """
+        # Pure delegation - handler manages initialization, player progression, everything
+        success, result = shooting_handlers.execute_action(self.game_state, None, action, self.config)
         
-        # First call to phase? → shooting_phase_start(game_state)
-        if not hasattr(self, '_shooting_phase_initialized') or not self._shooting_phase_initialized:
-            print(f"SHOOTING PHASE INIT: Player {self.game_state['current_player']} - initializing shooting phase")
-            shooting_handlers.shooting_phase_start(self.game_state)
-            self._shooting_phase_initialized = True
-        else:
-            print(f"SHOOTING PHASE CONTINUE: Player {self.game_state['current_player']} - already initialized")
-        
-        # AI_TURN.md: Process shooting action through handler delegation
-        print(f"SHOOTING PHASE DEBUG: Pool {self.game_state.get('shoot_activation_pool', [])}, Action received: {action}")
-        print(f"SHOOTING PHASE DEBUG: About to process action, initialized={getattr(self, '_shooting_phase_initialized', 'None')}")
-        
-        # CRITICAL FIX: Let handler extract unit from action instead of forcing pool[0]
-        # Debug: Log what action is being sent to shooting handler
-        if not self.quiet:
-            unit_id = action.get("unitId")
-            if unit_id:
-                unit = self._get_unit_by_id(unit_id)
-                if unit:
-                    print(f"DEBUG ENGINE: Before handler - Unit {unit_id} SHOOT_LEFT: {unit.get('SHOOT_LEFT', 'None')}")
-            print(f"DEBUG: Sending action to shooting handler: {action}")
-        
-        # **FULL DELEGATION**: shooting_handlers.execute_action(game_state, None, action, config)
-        handler_result = shooting_handlers.execute_action(self.game_state, None, action, self.config)
-        
-        if not self.quiet:
-            if unit_id:
-                unit = self._get_unit_by_id(unit_id)
-                if unit:
-                    print(f"DEBUG ENGINE: After handler - Unit {unit_id} SHOOT_LEFT: {unit.get('SHOOT_LEFT', 'None')}")
-            print(f"DEBUG: Shooting handler returned: {handler_result}")
-        if isinstance(handler_result, tuple):
-            if len(handler_result) == 2:
-                success, result = handler_result
+        # Handle phase transitions signaled by handler
+        print(f"DEBUG ENGINE: Checking phase transition - phase_complete={result.get('phase_complete')}, phase_transition={result.get('phase_transition')}")
+        if result.get("phase_complete") or result.get("phase_transition"):
+            next_phase = result.get("next_phase")
+            print(f"DEBUG ENGINE: Phase transition triggered - next_phase={next_phase}")
+            if next_phase == "move":
+                print(f"DEBUG ENGINE: Calling _movement_phase_init()")
+                self._movement_phase_init()
             else:
-                success, result = handler_result[0], handler_result[1]
+                print(f"DEBUG ENGINE: Next phase is not 'move', ignoring transition")
         else:
-            success, result = True, handler_result
-        
-        # Check response for phase_complete flag - delegate to shooting completion logic
-        if result.get("phase_complete"):
-            self._shooting_phase_initialized = False
-            
-            # Use shooting completion logic instead of charge phase
-            if self.game_state["current_player"] == 0:
-                # Player 0 complete → Player 1 movement phase
-                self.game_state["current_player"] = 1
-                self._movement_phase_init()
-                result["phase_transition"] = True
-                result["next_phase"] = "move"
-                result["current_player"] = 1
-            elif self.game_state["current_player"] == 1:
-                # Player 1 complete → Increment turn, Player 0 movement phase
-                self.game_state["turn"] += 1
-                self.game_state["current_player"] = 0
-                self._movement_phase_init()
-                result["phase_transition"] = True
-                result["next_phase"] = "move"
-                result["current_player"] = 0
-                result["new_turn"] = self.game_state["turn"]
+            print(f"DEBUG ENGINE: No phase transition flags found in result")
         
         return success, result
     

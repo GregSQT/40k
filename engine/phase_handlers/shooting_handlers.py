@@ -285,9 +285,9 @@ def _cube_round(x: float, y: float, z: float) -> CubeCoordinate:
     
     return CubeCoordinate(rx, ry, rz)
 
-def shooting_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
+def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    AI_Shooting_Phase.md EXACT: Clean up and end shooting phase
+    Complete shooting phase with player progression and turn management
     """
     # Final cleanup
     game_state["shoot_activation_pool"] = []
@@ -297,11 +297,45 @@ def shooting_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
         game_state["console_logs"] = []
     game_state["console_logs"].append("SHOOTING PHASE COMPLETE")
     
-    return {
-        "phase_complete": True,
-        "next_phase": "move",
-        "units_processed": len(game_state.get("units_shot", set()))
-    }
+    # AI_TURN.md: Player progression logic
+    if game_state["current_player"] == 0:
+        # Player 0 complete → Player 1 movement phase
+        print(f"SHOOTING COMPLETE: Player 0 -> Player 1 movement phase")
+        game_state["current_player"] = 1
+        return {
+            "phase_complete": True,
+            "phase_transition": True,
+            "next_phase": "move",
+            "current_player": 1,
+            "units_processed": len(game_state.get("units_shot", set())),
+            # CRITICAL: Add missing frontend cleanup signals
+            "clear_blinking_gentle": True,
+            "reset_mode": "select",
+            "clear_selected_unit": True,
+            "clear_attack_preview": True
+        }
+    elif game_state["current_player"] == 1:
+        # Player 1 complete → Increment turn, Player 0 movement phase
+        game_state["turn"] += 1
+        game_state["current_player"] = 0
+        print(f"SHOOTING COMPLETE: Player 1 -> Turn {game_state['turn']}, Player 0 movement phase")
+        return {
+            "phase_complete": True,
+            "phase_transition": True,
+            "next_phase": "move",
+            "current_player": 0,
+            "new_turn": game_state["turn"],
+            "units_processed": len(game_state.get("units_shot", set())),
+            # CRITICAL: Add missing frontend cleanup signals
+            "clear_blinking_gentle": True,
+            "reset_mode": "select", 
+            "clear_selected_unit": True,
+            "clear_attack_preview": True
+        }
+
+def shooting_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Legacy function - redirects to new complete function"""
+    return _shooting_phase_complete(game_state)
 
 def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> str:
     """Determine current shooting context for nested behavior."""
@@ -361,9 +395,10 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         "clear_selected_unit": True
     }
     
-    # Signal phase completion if pool is empty
+    # Signal phase completion if pool is empty - delegate to proper phase end function
     if pool_empty:
-        response["phase_complete"] = True
+        # Don't just set a flag - call the complete phase transition function
+        return _shooting_phase_complete(game_state)
     
     return response
 
@@ -412,11 +447,20 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> T
 
 def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_SHOOT.md EXACT: Complete action routing with handler autonomy
+    AI_SHOOT.md EXACT: Complete action routing with full phase lifecycle management
     """
     
-    # CRITICAL: Remove depleted units from activation pool
+    # Phase initialization on first call
+    if not game_state.get("_shooting_phase_initialized"):
+        print(f"SHOOTING PHASE INIT: Player {game_state['current_player']} - initializing shooting phase")
+        shooting_phase_start(game_state)
+        game_state["_shooting_phase_initialized"] = True
+    
+    # Debug logging
     current_pool = game_state.get("shoot_activation_pool", [])
+    print(f"SHOOTING PHASE DEBUG: Pool {current_pool}, Action received: {action}")
+    
+    # CRITICAL: Remove depleted units from activation pool
     print(f"DEBUG POOL CLEANUP: Initial pool: {current_pool}")
     if current_pool:
         # Remove units with no shots remaining
@@ -436,8 +480,9 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     # Check if shooting phase should complete after cleanup
     if not current_pool:
+        game_state["_shooting_phase_initialized"] = False
         print(f"DEBUG: Pool empty after cleanup - ending shooting phase")
-        return True, shooting_phase_end(game_state)
+        return True, _shooting_phase_complete(game_state)
     
     # Extract unit from action if not provided (engine passes None now)
     if unit is None:
