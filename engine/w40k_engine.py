@@ -683,6 +683,11 @@ class W40KEngine(gym.Env):
             self.game_state["units_shot"].add(unit["id"])
             return True, {"action": "skip", "unitId": unit["id"]}
             
+        elif action_type == "advance_phase":
+            # Handle empty pool phase advancement
+            if action.get("phase") == "shoot":
+                return True, shooting_handlers._shooting_phase_complete(self.game_state)
+                
         else:
             return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "shoot"}
     

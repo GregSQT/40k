@@ -213,6 +213,16 @@ export const useEngineAPI = () => {
       // DEBUG: Log full response structure to understand blinking data location
       
         if (data.success) {
+          // CRITICAL: Handle empty activation pools before other processing
+          if (data.game_state?.phase === "shoot" && 
+              Array.isArray(data.game_state.shoot_activation_pool) && 
+              data.game_state.shoot_activation_pool.length === 0) {
+            console.log("🔥 EMPTY SHOOTING POOL DETECTED - Auto-advancing phase");
+            setTimeout(async () => {
+              await executeAction({ action: "advance_phase", phase: "shoot" });
+            }, 100);
+          }
+          
           // Process backend cleanup signals FIRST
           if (data.result?.clear_preview) {
             console.log("🧹 Backend requested preview cleanup");
