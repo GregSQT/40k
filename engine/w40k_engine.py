@@ -540,7 +540,14 @@ class W40KEngine(gym.Env):
         AI_TURN.md EXACT: Pure delegation - handler manages complete phase lifecycle
         """
         # Pure delegation - handler manages initialization, player progression, everything
-        success, result = shooting_handlers.execute_action(self.game_state, None, action, self.config)
+        handler_response = shooting_handlers.execute_action(self.game_state, None, action, self.config)
+        if isinstance(handler_response, tuple) and len(handler_response) == 2:
+            success, result = handler_response
+        else:
+            # Handler returned non-tuple or wrong tuple length
+            success = True
+            result = handler_response if isinstance(handler_response, dict) else {"error": "invalid_handler_response"}
+            print(f"🔍 ENGINE DEBUG: Handler returned non-tuple: {type(handler_response)}, value: {handler_response}")
         
         # Handle phase transitions signaled by handler
         print(f"DEBUG ENGINE: Checking phase transition - phase_complete={result.get('phase_complete')}, phase_transition={result.get('phase_transition')}")

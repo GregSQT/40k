@@ -7,6 +7,7 @@ Connects AI_TURN.md compliant engine to frontend board visualization
 import json
 import os
 import sys
+import time
 from typing import Dict, Any, Optional
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
@@ -435,31 +436,22 @@ def execute_ai_turn():
     
     try:
         # Step 1: Check if AI model exists
-        print("AI TURN DEBUG: Checking AI model availability...")
         if hasattr(engine, '_ai_model'):
-            print(f"AI TURN DEBUG: _ai_model attribute exists: {engine._ai_model}")
+            pass
         else:
             print("AI TURN DEBUG: _ai_model attribute missing")
         
         # Step 2: Try to load AI model if missing
         if not hasattr(engine, '_ai_model') or not engine._ai_model:
-            print("AI TURN DEBUG: Attempting to load AI model...")
             try:
-                from stable_baselines3 import DQN
-                print("AI TURN DEBUG: stable_baselines3 imported successfully")
-                
+                from stable_baselines3 import DQN                
                 # Determine model path
                 import os
                 # Use confirmed working model path
                 model_path = "ai/models/current/model_SpaceMarine_Infantry_Troop_RangedSwarm.zip"
                 
-                print(f"AI TURN DEBUG: Looking for model at: {model_path}")
-                
                 if os.path.exists(model_path):
-                    print(f"AI TURN DEBUG: Model file exists, loading...")
-                    print("AI TURN DEBUG: Model file exists, loading...")
                     engine._ai_model = DQN.load(model_path)
-                    print("AI TURN DEBUG: Model loaded successfully")
                 else:
                     print(f"AI TURN DEBUG: Model file not found at {model_path}")
                     available_files = os.listdir("ai/models/") if os.path.exists("ai/models/") else []
@@ -490,18 +482,20 @@ def execute_ai_turn():
                     "message": f"AI turn complete - phase {current_phase} has no processing"
                 })
             
-            # AI_TURN.md: Select first AI unit from activation pool
-            print(f"AI TURN DEBUG: Eligible pool contains: {eligible_pool}")
-            print(f"AI TURN DEBUG: Total units in game: {len(engine.game_state['units'])}")
+            # POOL STATE DEBUG: Track pool changes through AI processing
+            print(f"🔍 POOL DEBUG: Phase={current_phase}, Pool BEFORE action: {eligible_pool}")
+            print(f"🔍 POOL DEBUG: Game state pool reference: {id(engine.game_state.get(f'{current_phase}_activation_pool', []))}")
             
             ai_unit_id = None
             for unit_id in eligible_pool:
                 unit = engine._get_unit_by_id(str(unit_id))
-                print(f"AI TURN DEBUG: Checking unit {unit_id}: exists={unit is not None}, player={unit['player'] if unit else 'N/A'}")
                 if unit and unit["player"] == 1:
                     ai_unit_id = unit_id
-                    print(f"AI TURN DEBUG: Selected AI unit from activation pool: {ai_unit_id}")
+                    print(f"🔍 POOL DEBUG: Selected AI unit: {ai_unit_id}")
                     break
+            
+            if not ai_unit_id:
+                print(f"🔍 POOL DEBUG: No AI units found in pool {eligible_pool}")
             
             if not ai_unit_id:
                 print(f"AI TURN: Complete - no AI units eligible in phase {current_phase}")
@@ -532,32 +526,93 @@ def execute_ai_turn():
                 else:
                     action_int = int(prediction_result)
                 
-                print(f"AI TURN DEBUG: Raw prediction: {prediction_result}, extracted action: {action_int}")
-                
                 semantic_action = engine._convert_gym_action(action_int)
                 
-                print(f"AI TURN DEBUG: Unit {semantic_action.get('unitId')} action: {semantic_action.get('action')}")
-                
+                # CRITICAL: Ensure semantic action uses the selected unit ID
+                if semantic_action.get("unitId") != ai_unit_id:
+                    print(f"🔍 UNIT FIX: Correcting unitId from {semantic_action.get('unitId')} to {ai_unit_id}")
+                    semantic_action["unitId"] = ai_unit_id                
                 success, result = engine.execute_semantic_action(semantic_action)
+                
+                # POOL STATE DEBUG: Check pool after action execution
+                post_action_pool = engine.game_state.get(f"{current_phase}_activation_pool", [])
+                print(f"🔍 POOL DEBUG: Pool AFTER action: {post_action_pool}")
+                print(f"🔍 POOL DEBUG: Action success: {success}, Result keys: {list(result.keys()) if isinstance(result, dict) else 'not dict'}")
                 
                 if success:
                     processed_units = 1
                     print(f"AI TURN: Successfully processed unit {ai_unit_id}")
+                    
+                    # Log AI action to game_state action_logs (same as human actions)
+                    if "action_logs" not in engine.game_state:
+                        engine.game_state["action_logs"] = []
+                    
+                    # Create log entry matching human action format
+                    ai_unit = engine._get_unit_by_id(str(ai_unit_id))
+                    current_turn = engine.game_state.get("turn", 1)
+                    current_phase = engine.game_state.get("phase", "unknown")
+                    
+                    log_entry = {
+                        "type": semantic_action.get("action", "unknown"),
+                        "unitId": ai_unit_id,
+                        "player": 1,  # AI player
+                        "turnNumber": current_turn,
+                        "phase": current_phase,
+                        "timestamp": int(time.time() * 1000),
+                        "isAI": True
+                    }
+                    
+                    # Add action-specific details
+                    if semantic_action.get("action") == "move":
+                        # Get actual movement details from semantic action
+                        start_col = result.get('fromCol', semantic_action.get('startCol', ai_unit['col']))
+                        start_row = result.get('fromRow', semantic_action.get('startRow', ai_unit['row']))
+                        end_col = semantic_action.get('destCol', ai_unit['col'])
+                        end_row = semantic_action.get('destRow', ai_unit['row'])
+                        
+                        log_entry.update({
+                            "startHex": f"({start_col}, {start_row})",
+                            "endHex": f"({end_col}, {end_row})",
+                            "message": f"AI Unit {ai_unit_id} moved from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+                        })
+                    elif semantic_action.get("action") == "wait":
+                        log_entry.update({
+                            "message": f"AI Unit {ai_unit_id} waited in {current_phase} phase"
+                        })
+                    elif semantic_action.get("action") == "shoot":
+                        target_id = semantic_action.get("targetId", "unknown")
+                        log_entry.update({
+                            "targetId": target_id,
+                            "message": f"AI Unit {ai_unit_id} shot at Unit {target_id}"
+                        })
+                    
+                    engine.game_state["action_logs"].append(log_entry)
+                    print(f"AI ACTION LOGGED: {log_entry['message']}")
                 else:
-                    print(f"AI TURN: Action failed: {result}")
-                    # Fallback: skip the unit
-                    skip_action = {"action": "skip", "unitId": ai_unit_id}
-                    success, result = engine.execute_semantic_action(skip_action)
-                    processed_units = 1 if success else 0
+                    print(f"AI TURN WARNING: Action failed: {result}")
+                    # Handle unit_not_eligible as successful completion (unit already processed)
+                    if isinstance(result, dict) and result.get("error") == "unit_not_eligible":
+                        processed_units = 0  # Unit already processed, no work done
+                        print(f"AI TURN: Unit {ai_unit_id} already processed, continuing")
+                    else:
+                        # Real error - return 500
+                        return jsonify({
+                            "success": False,
+                            "error": f"AI action failed: {result}",
+                            "phase": current_phase,
+                            "unit_id": ai_unit_id
+                        }), 500
                         
             except Exception as pe:
-                print(f"AI TURN DEBUG: Prediction error: {pe}")
+                print(f"AI TURN ERROR: Prediction failed: {pe}")
                 import traceback
-                print(f"AI TURN DEBUG: Full traceback: {traceback.format_exc()}")
-                # Skip the unit as fallback
-                skip_action = {"action": "skip", "unitId": ai_unit_id}
-                success, result = engine.execute_semantic_action(skip_action)
-                processed_units = 1 if success else 0
+                print(f"AI TURN ERROR: Full traceback: {traceback.format_exc()}")
+                # NO FALLBACK - return error state
+                return jsonify({
+                    "success": False,
+                    "error": f"AI prediction failed: {str(pe)}",
+                    "error_type": type(pe).__name__
+                }), 500
             
             # Convert sets to lists for JSON serialization
             serializable_state = dict(engine.game_state)
@@ -573,25 +628,12 @@ def execute_ai_turn():
                 "message": f"AI turn executed - processed {processed_units} units"
             })
         
-        # Step 4: Fallback if no AI model - process all eligible units with skip
-        print("AI TURN DEBUG: No AI model - skipping all eligible units")
-        
-        processed_units = 0
-        current_phase = engine.game_state["phase"]
-        
-        if current_phase == "move":
-            eligible_pool = engine.game_state.get("move_activation_pool", [])
-        elif current_phase == "shoot":
-            eligible_pool = engine.game_state.get("shoot_activation_pool", [])
-        else:
-            eligible_pool = []
-        
-        # Skip all AI units
-        for unit_id in eligible_pool:
-            unit = engine._get_unit_by_id(str(unit_id))
-            if unit and unit["player"] == 1:
-                engine.execute_semantic_action({"action": "skip", "unitId": unit_id})
-                processed_units += 1
+        # No AI model available - return error
+        return jsonify({
+            "success": False,
+            "error": "AI model not available",
+            "phase": current_phase
+        }), 500
         
         serializable_state = dict(engine.game_state)
         for key, value in serializable_state.items():

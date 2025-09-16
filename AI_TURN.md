@@ -352,6 +352,34 @@ For each PLAYER unit
 │   └── ALL conditions met → ✅ Add to shoot_activation_pool → Highlight the unit with a green circle around its icon
 ├── STEP : UNIT_ACTIVABLE_CHECK → is shoot_activation_pool NOT empty ?
 │   ├── YES → Current player is an AI player ?
+│   │   ├── YES → pick one unit in shoot_activation_pool
+│   │   │   ├── Clear any unit remaining in valid_target_pool
+│   │   │   ├── Clear TOTAL_ATTACK log
+│   │   │   ├── SHOOT_LEFT = RNG_NB
+│   │   │   └── While SHOOT_LEFT > 0
+│   │   │       ├── Build valid_target_pool : All enemies within range AND in Line of Sight AND having HP_CUR > 0 → added to valid_target_pool
+│   │   │       └── valid_target_pool NOT empty ?
+│   │   │           ├── YES → SHOOTING PHASE ACTIONS AVAILABLE
+│   │   │           │   ├── Display the shooting preview (all the hexes with LoS and RNG_RNG are red)
+│   │   │           │   └── Display the HP bar blinking animation for every unit in valid_target_pool
+│   │   │           │   ├── 🎯 VALID ACTIONS: [shoot, wait]
+│   │   │           │   ├── ❌ INVALID ACTIONS: [move, charge, attack] → end_activation (ERROR, 0, PASS, SHOOTING)
+│   │   │           │   └── AGENT ACTION SELECTION → Choose shoot?
+│   │   │           │       ├── YES → ✅ VALID → Execute shoot
+│   │   │           │       ├── Agent choose a target in valid_target_pool
+│   │   │           │       │   ├── Execute attack_sequence(RNG)
+│   │   │           │       │   ├── SHOOT_LEFT -= 1
+│   │   │           │       │   ├── Concatenate Return to TOTAL_ACTION log
+│   │   │           │       │   ├── selected_target dies → Remove from valid_target_pool, continue
+│   │   │           │       │   ├── selected_target survives → Continue
+│   │   │           │       │   └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │   │           │       │   └── end_activation (ACTION, 1, SHOOTING, SHOOTING)
+│   │   │           │       └── NO → Agent chooses: wait?
+│   │   │           │           ├── YES → ✅ VALID → Execute wait action
+│   │   │           │           │   └── end_activation (WAIT, 1, PASS, SHOOTING)
+│   │   │           │           └── NO → Agent chooses invalid action (move/shoot/attack)?
+│   │   │           │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, SHOOTING)
+│   │   │           └── NO → end_activation (PASS, 0, PASS, SHOOTING)
 │   │   └── NO → Human player → STEP : UNIT_ACTIVATION → player activate one unit from shoot_activation_pool by left clicking on it
 │   │       ├── Clear any unit remaining in valid_target_pool
 │   │       ├── Clear TOTAL_ATTACK log

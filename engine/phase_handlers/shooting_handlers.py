@@ -364,9 +364,16 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     
     # Arg4 pool removal
     if arg4 == "SHOOTING":
+        pool_before = game_state.get("shoot_activation_pool", []).copy()
+        print(f"🔍 END_ACTIVATION DEBUG: Pool before removal: {pool_before}")
+        print(f"🔍 END_ACTIVATION DEBUG: Removing unit {unit['id']}, args: {arg1}, {arg2}, {arg3}, {arg4}")
         if "shoot_activation_pool" in game_state and unit["id"] in game_state["shoot_activation_pool"]:
             game_state["shoot_activation_pool"].remove(unit["id"])
-            print(f"SHOOTING POOL REMOVAL: Unit {unit['id']} removed. Remaining: {game_state['shoot_activation_pool']}")
+            pool_after = game_state["shoot_activation_pool"]
+            print(f"🔍 END_ACTIVATION DEBUG: Pool after removal: {pool_after}")
+            print(f"SHOOTING POOL REMOVAL: Unit {unit['id']} removed. Remaining: {pool_after}")
+        else:
+            print(f"🔍 END_ACTIVATION DEBUG: Unit {unit['id']} not found in pool {game_state.get('shoot_activation_pool', [])}")
     
     # Clean up unit activation state including position tracking
     if "valid_target_pool" in unit:
@@ -533,8 +540,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     elif action_type == "wait" or action_type == "skip":
         # Handle gym wait/skip actions - unit chooses not to shoot
-        if unit_id in game_state.get("shoot_activation_pool", []):
-            return _shooting_activation_end(game_state, unit, "SKIP", 1, "PASS", "SHOOTING")
+        current_pool = game_state.get("shoot_activation_pool", [])
+        print(f"🔍 SHOOT DEBUG: Unit {unit_id} wait action, pool before: {current_pool}")
+        if unit_id in current_pool:
+            result = _shooting_activation_end(game_state, unit, "SKIP", 1, "PASS", "SHOOTING")
+            post_pool = game_state.get("shoot_activation_pool", [])
+            print(f"🔍 SHOOT DEBUG: After end_activation, pool: {post_pool}")
+            return result
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
     elif action_type == "left_click":
