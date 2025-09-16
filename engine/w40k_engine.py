@@ -649,20 +649,9 @@ class W40KEngine(gym.Env):
         return False
     
     def _is_valid_shooting_target(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
-        """Validate shooting target using handler delegation."""
-        # For training: use silent validation to avoid debug output
-        if self.is_training or self.quiet:
-            # Simple validation without debug calls
-            if target["HP_CUR"] <= 0:
-                return False
-            if target["player"] == shooter["player"]:
-                return False
-            # Basic range check without debug
-            distance = abs(shooter["col"] - target["col"]) + abs(shooter["row"] - target["row"])
-            return distance <= shooter.get("RNG_RNG", 0)
-        else:
-            # For evaluation: use full handler with debug output
-            return shooting_handlers._is_valid_shooting_target(self.game_state, shooter, target)
+        """REMOVED: Redundant with handler. Use shooting_handlers._is_valid_shooting_target exclusively."""
+        # AI_IMPLEMENTATION.md: Complete delegation to handler for consistency
+        return shooting_handlers._is_valid_shooting_target(self.game_state, shooter, target)
     
     def _has_line_of_sight(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
         """Check line of sight between shooter and target using handler delegation."""
@@ -1116,11 +1105,10 @@ class W40KEngine(gym.Env):
         elif current_phase == "shoot":
             if action_int == 4:  # Shoot action
                 selected_unit = self._ai_select_unit(eligible_units, "shoot")
-                target = self._ai_select_shooting_target(selected_unit)
                 return {
                     "action": "shoot", 
-                    "unitId": selected_unit, 
-                    "targetId": target
+                    "unitId": selected_unit
+                    # Handler will build target pool and select target per AI_TURN.md
                 }
             elif action_int == 7:  # WAIT - agent chooses not to shoot
                 selected_unit = self._ai_select_unit(eligible_units, "wait")
@@ -1271,26 +1259,8 @@ class W40KEngine(gym.Env):
             return selected
     
     def _ai_select_shooting_target(self, unit_id: str) -> str:
-        """AI selects shooting target using tactical priorities."""
-        unit = self._get_unit_by_id(unit_id)
-        if not unit:
-            raise ValueError(f"Unit not found: {unit_id}")
-        
-        # Use shooting handler to get valid targets
-        valid_targets = shooting_handlers.shooting_build_valid_target_pool(self.game_state, unit_id)
-        
-        if not valid_targets:
-            raise ValueError(f"No valid targets for unit {unit_id}")
-        
-        # Strategy: Target lowest HP enemy first
-        target_units = [self._get_unit_by_id(tid) for tid in valid_targets]
-        target_units = [t for t in target_units if t]  # Filter None
-        
-        if not target_units:
-            raise ValueError(f"No valid target units found")
-        
-        lowest_hp_target = min(target_units, key=lambda t: t["HP_CUR"])
-        return lowest_hp_target["id"]
+        """REMOVED: Engine bypassed handler decision tree. Use handler's complete AI_TURN.md flow."""
+        raise NotImplementedError("AI shooting should use handler's decision tree, not engine shortcuts")
     
     def _ai_select_charge_target(self, unit_id: str) -> str:
         """AI selects charge target - placeholder implementation."""

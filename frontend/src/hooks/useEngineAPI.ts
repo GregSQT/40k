@@ -790,6 +790,26 @@ onLogChargeRoll: () => {},
           console.log(`AI_TURN.md Iteration ${iteration} RESPONSE:`, data);
           
           if (data.success) {
+            // Process AI action logs immediately (same as human actions)
+            if (data.action_logs && data.action_logs.length > 0) {
+              data.action_logs.forEach((logEntry: any) => {
+                console.log(`🎯 AI BACKEND LOG: ${logEntry.message}`);
+                
+                // Send AI log to GameLog component via custom event
+                window.dispatchEvent(new CustomEvent('backendLogEvent', {
+                  detail: {
+                    type: logEntry.type,
+                    message: logEntry.message,
+                    turn: logEntry.turn,
+                    phase: logEntry.phase,
+                    player: logEntry.player,
+                    unitId: parseInt(logEntry.unitId),
+                    timestamp: new Date()
+                  }
+                }));
+              });
+            }
+            
             // Update game state with backend response
             setGameState(data.game_state);
             

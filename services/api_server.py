@@ -543,51 +543,8 @@ def execute_ai_turn():
                     processed_units = 1
                     print(f"AI TURN: Successfully processed unit {ai_unit_id}")
                     
-                    # Log AI action to game_state action_logs (same as human actions)
-                    if "action_logs" not in engine.game_state:
-                        engine.game_state["action_logs"] = []
-                    
-                    # Create log entry matching human action format
-                    ai_unit = engine._get_unit_by_id(str(ai_unit_id))
-                    current_turn = engine.game_state.get("turn", 1)
-                    current_phase = engine.game_state.get("phase", "unknown")
-                    
-                    log_entry = {
-                        "type": semantic_action.get("action", "unknown"),
-                        "unitId": ai_unit_id,
-                        "player": 1,  # AI player
-                        "turnNumber": current_turn,
-                        "phase": current_phase,
-                        "timestamp": int(time.time() * 1000),
-                        "isAI": True
-                    }
-                    
-                    # Add action-specific details
-                    if semantic_action.get("action") == "move":
-                        # Get actual movement details from semantic action
-                        start_col = result.get('fromCol', semantic_action.get('startCol', ai_unit['col']))
-                        start_row = result.get('fromRow', semantic_action.get('startRow', ai_unit['row']))
-                        end_col = semantic_action.get('destCol', ai_unit['col'])
-                        end_row = semantic_action.get('destRow', ai_unit['row'])
-                        
-                        log_entry.update({
-                            "startHex": f"({start_col}, {start_row})",
-                            "endHex": f"({end_col}, {end_row})",
-                            "message": f"AI Unit {ai_unit_id} moved from ({start_col}, {start_row}) to ({end_col}, {end_row})"
-                        })
-                    elif semantic_action.get("action") == "wait":
-                        log_entry.update({
-                            "message": f"AI Unit {ai_unit_id} waited in {current_phase} phase"
-                        })
-                    elif semantic_action.get("action") == "shoot":
-                        target_id = semantic_action.get("targetId", "unknown")
-                        log_entry.update({
-                            "targetId": target_id,
-                            "message": f"AI Unit {ai_unit_id} shot at Unit {target_id}"
-                        })
-                    
-                    engine.game_state["action_logs"].append(log_entry)
-                    print(f"AI ACTION LOGGED: {log_entry['message']}")
+                    # Backend handlers already create proper logs - don't duplicate
+                    print(f"AI TURN: Successfully processed unit {ai_unit_id} - backend handlers created logs")
                 else:
                     print(f"AI TURN WARNING: Action failed: {result}")
                     # Handle unit_not_eligible as successful completion (unit already processed)
@@ -620,10 +577,18 @@ def execute_ai_turn():
                 if isinstance(value, set):
                     serializable_state[key] = list(value)
             
+            # Extract action logs like human endpoint does
+            action_logs = serializable_state.get("action_logs", [])
+            if action_logs:
+                # Clear logs from engine to prevent accumulation across AI iterations
+                engine.game_state["action_logs"] = []
+                serializable_state["action_logs"] = []
+            
             return jsonify({
                 "success": True,
                 "result": {"units_processed": processed_units},
                 "game_state": serializable_state,
+                "action_logs": action_logs,
                 "ai_action": {"processed_units": processed_units},
                 "message": f"AI turn executed - processed {processed_units} units"
             })
