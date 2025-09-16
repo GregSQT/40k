@@ -283,20 +283,18 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     
     valid_destinations = []
     move_range = unit["MOVE"]
+    start_col, start_row = unit["col"], unit["row"]
     
-    # Check all hexes within movement range
-    for col_offset in range(-move_range, move_range + 1):
-        for row_offset in range(-move_range, move_range + 1):
-            dest_col = unit["col"] + col_offset
-            dest_row = unit["row"] + row_offset
-            
+    # Check all hexes in a proper hex radius using cube coordinates
+    for dest_col in range(start_col - move_range, start_col + move_range + 1):
+        for dest_row in range(start_row - move_range, start_row + move_range + 1):
             # Skip current position
-            if col_offset == 0 and row_offset == 0:
+            if dest_col == start_col and dest_row == start_row:
                 continue
             
-            # Check Manhattan distance for hex movement
-            manhattan_distance = abs(col_offset) + abs(row_offset)
-            if manhattan_distance > move_range:
+            # Calculate actual hex distance using cube coordinates
+            hex_distance = _calculate_hex_distance(start_col, start_row, dest_col, dest_row)
+            if hex_distance > move_range:
                 continue
             
             # Validate destination
@@ -305,6 +303,21 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     
     game_state["valid_move_destinations_pool"] = valid_destinations
     return valid_destinations
+
+
+def _calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
+    """Calculate proper hex distance using cube coordinates"""
+    # Convert offset to cube coordinates
+    x1 = col1 - (row1 - (row1 & 1)) // 2
+    z1 = row1
+    y1 = -x1 - z1
+    
+    x2 = col2 - (row2 - (row2 & 1)) // 2
+    z2 = row2
+    y2 = -x2 - z2
+    
+    # Cube distance
+    return (abs(x1 - x2) + abs(y1 - y2) + abs(z1 - z2)) // 2
 
 
 def movement_preview(valid_destinations: List[Tuple[int, int]]) -> Dict[str, Any]:
