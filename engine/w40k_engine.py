@@ -1163,7 +1163,8 @@ class W40KEngine(gym.Env):
         current_phase = self.game_state["phase"]
         
         if current_phase == "move":
-            eligible_unit_ids = movement_handlers.get_eligible_units(self.game_state)
+            # CRITICAL: Use existing cleaned pool, don't rebuild and overwrite handler cleanup
+            eligible_unit_ids = self.game_state.get("move_activation_pool", [])
             return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
         elif current_phase == "shoot":
             # CRITICAL: Use existing cleaned pool, don't rebuild and overwrite handler cleanup
