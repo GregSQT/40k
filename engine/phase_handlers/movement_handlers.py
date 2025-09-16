@@ -352,6 +352,57 @@ def movement_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
         return True, {"action": "continue_selection"}
 
 
+def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str) -> List[Tuple[int, int]]:
+    """AI_MOVE.md: Build valid movement destinations using BFS pathfinding."""
+    unit = _get_unit_by_id(game_state, unit_id)
+    if not unit:
+        return []
+    
+    # Use hex distance calculation like shooting
+    valid_destinations = []
+    move_range = unit.get("MOVE", 0)
+    
+    # Simple pathfinding - check all hexes within movement range
+    for col_offset in range(-move_range, move_range + 1):
+        for row_offset in range(-move_range, move_range + 1):
+            dest_col = unit["col"] + col_offset
+            dest_row = unit["row"] + row_offset
+            
+            # Skip current position
+            if col_offset == 0 and row_offset == 0:
+                continue
+            
+            # Check hex distance using same calculation as shooting
+            distance = _calculate_hex_distance(unit["col"], unit["row"], dest_col, dest_row)
+            if distance <= move_range:
+                # Validate destination is valid
+                if _is_valid_movement_destination(game_state, dest_col, dest_row):
+                    valid_destinations.append((dest_col, dest_row))
+    
+    # Update game state
+    game_state["valid_move_destinations_pool"] = valid_destinations
+    return valid_destinations
+
+def _is_valid_movement_destination(game_state: Dict[str, Any], col: int, row: int) -> bool:
+    """Check if hex is valid for movement."""
+    # Check board bounds
+    board_cols = game_state.get("board_cols", 24)
+    board_rows = game_state.get("board_rows", 24)
+    if not (0 <= col < board_cols and 0 <= row < board_rows):
+        return False
+    
+    # Check for wall hexes
+    wall_hexes = game_state.get("wall_hexes", set())
+    if (col, row) in wall_hexes:
+        return False
+    
+    # Check for occupied hexes
+    for unit in game_state["units"]:
+        if unit["col"] == col and unit["row"] == row:
+            return False
+    
+    return True
+
 def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """AI_MOVE.md: Handle destination selection and execute movement"""
     dest_col = action.get("destCol")

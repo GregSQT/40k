@@ -853,15 +853,16 @@ def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[s
     return None
 
 def _calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
-    """Calculate accurate hex distance using cube coordinates."""
+    """Calculate hex distance using consistent cube coordinates."""
+    # Use same calculation across all handlers
     def offset_to_cube(col: int, row: int) -> Tuple[int, int, int]:
-        x = col - (row - (row & 1)) // 2
-        z = row
+        x = col
+        z = row - (col - (col & 1)) // 2
         y = -x - z
         return (x, y, z)
     
     def cube_distance(a: Tuple[int, int, int], b: Tuple[int, int, int]) -> int:
-        return (abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2])) // 2
+        return max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[2] - b[2]))
     
     cube1 = offset_to_cube(col1, row1)
     cube2 = offset_to_cube(col2, row2)
