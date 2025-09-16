@@ -11,6 +11,7 @@ Core Principles:
 - Single source of truth (one game_state object)
 """
 
+import os
 import torch
 import json
 import random
@@ -81,7 +82,11 @@ class W40KEngine(gym.Env):
         # Detect training context to suppress debug logs
         self.is_training = training_config_name in ["debug", "default", "conservative", "aggressive"]
         
-        # SINGLE SOURCE OF TRUTH - Only game_state object in entire system
+        # PvE mode configuration
+        self.is_pve_mode = config.get("pve_mode", False) if isinstance(config, dict) else False
+        self._ai_model = None
+        
+        # CRITICAL: Initialize game_state FIRST before any other operations
         self.game_state = {
             # Core game state
             "units": [],
@@ -121,6 +126,38 @@ class W40KEngine(gym.Env):
             "board_rows": self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"],
             "wall_hexes": set(map(tuple, self.config["board"]["default"]["wall_hexes"] if "default" in self.config["board"] else self.config["board"]["wall_hexes"]))
         }
+        
+        # Initialize units from config AFTER game_state exists
+        self._initialize_units()
+        
+        # Load AI model for PvE mode
+        if self.is_pve_mode:
+            self._load_ai_model_for_pve()
+    
+    def _load_ai_model_for_pve(self):
+        """Load trained AI model for PvE Player 2."""
+        try:
+            from stable_baselines3 import DQN
+            
+            # Determine AI model path
+            ai_model_key = "SpaceMarine"  # Default AI opponent
+            if self.unit_registry:
+                # Get model key for player 1 units
+                player1_units = [u for u in self.game_state["units"] if u["player"] == 1]
+                if player1_units:
+                    ai_model_key = self.unit_registry.get_model_key(player1_units[0]["unitType"])
+            
+            model_path = f"ai/models/default_model_{ai_model_key}.zip"
+            
+            if os.path.exists(model_path):
+                self._ai_model = DQN.load(model_path)
+                print(f"PvE: Loaded AI model for Player 2: {ai_model_key}")
+            else:
+                print(f"PvE: No AI model found at {model_path} - using fallback AI")
+                
+        except Exception as e:
+            print(f"PvE: Failed to load AI model: {e}")
+            self._ai_model = None
         
         # Initialize units from config
         self._initialize_units()
@@ -1137,22 +1174,45 @@ class W40KEngine(gym.Env):
             return []
     
     def _ai_select_unit(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:
-        """AI selects which unit to activate using reward-based priorities."""
+        """AI selects which unit to activate - NO MODEL CALLS to prevent recursion."""
         if not eligible_units:
             raise ValueError("No eligible units available for selection")
         
-        # Handle different selection strategies per action type
-        if action_type == "wait":
-            # For WAIT actions, select first eligible unit (agent chose not to act)
+        # CRITICAL: Never call AI model from here - causes recursion
+        # Model prediction happens at api_server.py level, this just selects from eligible units
+        
+        # For AI_TURN.md compliance: select first eligible unit deterministically
+        # The AI model determines the ACTION, not which unit to select
+        return eligible_units[0]["id"]
+    
+    def _ai_select_unit_with_model(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:
+        """Use trained DQN model to select best unit for AI player."""
+        if not hasattr(self, '_ai_model') or not self._ai_model:
+            # Fallback to round-robin if no model loaded
             return eligible_units[0]["id"]
         
-        # Strategy: Round-robin to ensure all units get training opportunities
-        if not hasattr(self, '_unit_selection_index'):
-            self._unit_selection_index = 0
+        # Get current observation
+        obs = self._build_observation()
         
-        unit_index = self._unit_selection_index % len(eligible_units)
-        self._unit_selection_index += 1
-        return eligible_units[unit_index]["id"]
+        # Get AI action from trained model
+        try:
+            action, _ = self._ai_model.predict(obs, deterministic=True)
+            semantic_action = self._convert_gym_action(action)
+            
+            # Extract unit selection from semantic action
+            suggested_unit_id = semantic_action.get("unitId")
+            
+            # Validate AI's unit choice is in eligible list
+            eligible_ids = [str(unit["id"]) for unit in eligible_units]
+            if suggested_unit_id in eligible_ids:
+                return suggested_unit_id
+            else:
+                # AI suggested invalid unit - use first eligible
+                return eligible_units[0]["id"]
+                
+        except Exception as e:
+            print(f"AI model error: {e}")
+            return eligible_units[0]["id"]
     
     def _ai_select_movement_destination(self, unit_id: str) -> Tuple[int, int]:
         """AI selects movement destination that actually moves the unit."""
@@ -1168,16 +1228,11 @@ class W40KEngine(gym.Env):
         # CRITICAL: Filter out current position to force actual movement
         actual_moves = [dest for dest in valid_destinations if dest != current_pos]
         
-        # DEBUG: Log destination selection process
-        print(f"DEBUG MOVEMENT: Unit {unit_id} at {current_pos}")
-        print(f"DEBUG MOVEMENT: Valid destinations from handler: {valid_destinations}")
-        print(f"DEBUG MOVEMENT: Actual moves (excluding current): {actual_moves}")
+        # CRITICAL: Filter out current position to force actual movement
+        actual_moves = [dest for dest in valid_destinations if dest != current_pos]
         
         # AI_TURN.md COMPLIANCE: No actual moves available → unit must WAIT, not attempt invalid move
         if not actual_moves:
-            print(f"DEBUG MOVEMENT: No valid moves for unit {unit_id} at {current_pos} - unit should WAIT")
-            # DO NOT return current position - this causes infinite loop
-            # Raise exception to signal calling code should use WAIT action instead
             raise ValueError(f"No valid movement destinations for unit {unit_id} - should use WAIT action")
         
         # Strategy: Move toward nearest enemy for aggressive positioning
@@ -1192,14 +1247,20 @@ class W40KEngine(gym.Env):
             best_move = min(actual_moves, 
                            key=lambda dest: abs(dest[0] - enemy_pos[0]) + abs(dest[1] - enemy_pos[1]))
             
-            print(f"DEBUG DESTINATION: Unit {unit_id} at {current_pos} selected destination {best_move} from {len(actual_moves)} options")
-            print(f"DEBUG DESTINATION: Nearest enemy at {enemy_pos}")
+            # Only log once per movement action
+            if not hasattr(self, '_logged_moves'):
+                self._logged_moves = set()
+            
+            move_key = f"{unit_id}_{current_pos}_{best_move}"
+            if move_key not in self._logged_moves:
+                print(f"AI ACTION: Unit {unit_id} moved from {current_pos} to {best_move} (targeting enemy at {enemy_pos})")
+                self._logged_moves.add(move_key)
             
             return best_move
         else:
             # No enemies - just take first available move
             selected = actual_moves[0]
-            print(f"DEBUG DESTINATION: Unit {unit_id} at {current_pos} selected destination {selected} (first of {len(actual_moves)} options)")
+            print(f"AI ACTION: Unit {unit_id} moved from {current_pos} to {selected}")
             return selected
     
     def _ai_select_shooting_target(self, unit_id: str) -> str:

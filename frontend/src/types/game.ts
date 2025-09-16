@@ -158,6 +158,7 @@ export interface GameState {
   fightSubPhase?: FightSubPhase;
   fightActivePlayer?: PlayerId;
   unitChargeRolls?: Record<UnitId, number>;
+  pve_mode?: boolean; // Add PvE mode flag
 }
 
 export interface SemanticAction {

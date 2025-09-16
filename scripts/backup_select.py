@@ -149,7 +149,7 @@ else:
 
         # Frontend/src/hooks
         
-        "frontend/src/hooks/useAITurn.ts",
+        #"frontend/src/hooks/useAITurn.ts",
         "frontend/src/hooks/useEngineAPI.ts",
         "frontend/src/hooks/useGameActions.ts",
         "frontend/src/hooks/useGameConfig.ts",

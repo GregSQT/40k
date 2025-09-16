@@ -18,7 +18,7 @@ const Navigation: React.FC = () => {
   return (
     <nav className="navigation">
       <button onClick={() => window.location.href = '/game'} className={getButtonClass('/game')}>PvP</button>
-      <button onClick={() => window.location.href = '/pve'} className={getButtonClass('/pve')}>PvE</button>
+      <button onClick={() => window.location.href = '/game?mode=pve'} className={getButtonClass('/game?mode=pve')}>PvE</button>
       <button onClick={() => window.location.href = '/replay'} className={getButtonClass('/replay')}>Replay</button>
     </nav>
   );

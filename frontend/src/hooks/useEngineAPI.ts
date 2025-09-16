@@ -21,6 +21,9 @@ const getMaxTurnsFromConfig = async (): Promise<number> => {
 
 const API_BASE = 'http://localhost:5000/api';
 
+// Prevent duplicate AI turn calls
+let aiTurnInProgress = false;
+
 interface APIGameState {
   units: Array<{
     id: string;
@@ -76,6 +79,7 @@ interface APIGameState {
   non_active_alternating_activation_pool: string[];
   // AI_TURN.md shooting phase state
   active_shooting_unit?: string;
+  pve_mode?: boolean; // Add PvE mode flag
 }
 
 export const useEngineAPI = () => {
@@ -122,9 +126,17 @@ export const useEngineAPI = () => {
       try {
         gameInitialized.current = true;
         setLoading(true);
+        
+        // Detect PvE mode from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const isPvE = urlParams.get('mode') === 'pve' || window.location.pathname.includes('/pve');
+        
+        console.log(`Starting game in ${isPvE ? 'PvE' : 'PvP'} mode`);
+        
         const response = await fetch(`${API_BASE}/game/start`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pve_mode: isPvE })
         });
         
         if (!response.ok) {
@@ -134,6 +146,7 @@ export const useEngineAPI = () => {
         const data = await response.json();
         if (data.success) {
           setGameState(data.game_state);
+          console.log(`Game started successfully in ${data.game_state.pve_mode ? 'PvE' : 'PvP'} mode`);
         } else {
           throw new Error(data.error || 'Failed to start game');
         }
@@ -660,6 +673,7 @@ export const useEngineAPI = () => {
       blinkingUnits: [],
       isBlinkingActive: false,
       blinkState: false,
+      executeAITurn: async () => {}, // Add missing executeAITurn function
     };
   }
 
@@ -695,6 +709,7 @@ export const useEngineAPI = () => {
       currentTurn: gameState.turn,
       maxTurns: maxTurnsFromConfig,
       unitChargeRolls: {},
+      pve_mode: gameState.pve_mode, // Add PvE mode flag
     },
     onSelectUnit: handleSelectUnit,
     onSkipUnit: handleSkipUnit,
@@ -722,6 +737,105 @@ onLogChargeRoll: () => {},
     blinkingUnits: blinkingUnits.unitIds,
     isBlinkingActive: blinkingUnits.blinkTimer !== null,
     blinkState: blinkingUnits.blinkState,
+    // Add AI turn execution for PvE mode
+    executeAITurn: async () => {
+      if (aiTurnInProgress) {
+        console.log('executeAITurn already running, skipping');
+        return;
+      }
+      aiTurnInProgress = true;
+      
+      const urlParams = new URLSearchParams(window.location.search);
+      const isPvEFromURL = urlParams.get('mode') === 'pve' || window.location.pathname.includes('/pve');
+      
+      console.log('executeAITurn check:', {
+        hasGameState: !!gameState,
+        gameStatePveMode: gameState?.pve_mode,
+        isPvEFromURL,
+        willProceed: !(!gameState || (!gameState.pve_mode && !isPvEFromURL))
+      });
+      
+      if (!gameState || (!gameState.pve_mode && !isPvEFromURL)) {
+        console.log('executeAITurn returning early');
+        aiTurnInProgress = false;
+        return;
+      }
+      
+      console.log('executeAITurn proceeding with AI_TURN.md compliant sequential processing');
+      
+      try {
+        let totalUnitsProcessed = 0;
+        let maxIterations = 10; // Safety limit to prevent infinite loops
+        let iteration = 0;
+        
+        // AI_TURN.md: Sequential processing - ONE unit per API call until no more eligible
+        while (iteration < maxIterations) {
+          iteration++;
+          
+          console.log(`AI_TURN.md Loop iteration ${iteration}: Calling backend for next AI unit`);
+          
+          // Call backend to process NEXT eligible AI unit
+          const aiResponse = await fetch(`${API_BASE}/game/ai-turn`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+          
+          if (!aiResponse.ok) {
+            throw new Error(`AI turn request failed: ${aiResponse.status}`);
+          }
+          
+          const data = await aiResponse.json();
+          console.log(`AI_TURN.md Iteration ${iteration} RESPONSE:`, data);
+          
+          if (data.success) {
+            // Update game state with backend response
+            setGameState(data.game_state);
+            
+            const unitsProcessed = data.result?.units_processed || 0;
+            totalUnitsProcessed += unitsProcessed;
+            
+            console.log(`AI_TURN.md Iteration ${iteration}: Processed ${unitsProcessed} units`);
+            
+            // Check if backend signals phase completion or no more units
+            if (data.result?.phase_complete || 
+                data.result?.units_processed === 0 ||
+                data.message?.includes('no units eligible')) {
+              console.log(`AI_TURN.md: Backend signals completion - ${data.message}`);
+              break;
+            }
+            
+            // CRITICAL FIX: Trust backend's authoritative response instead of frontend prediction
+            // Backend knows the real activation pools and eligibility rules
+            if (unitsProcessed === 0) {
+              console.log(`AI_TURN.md: Backend processed 0 units - phase complete`);
+              break;
+            }
+            
+            console.log(`AI_TURN.md: Backend processed ${unitsProcessed} units, checking for more...`);
+            
+          } else {
+            console.error(`AI_TURN.md: Backend error on iteration ${iteration}:`, data.error);
+            break;
+          }
+          
+          // Small delay between iterations for better UX and debugging
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        if (iteration >= maxIterations) {
+          console.warn(`AI_TURN.md: Reached maximum iterations (${maxIterations}) - stopping to prevent infinite loop`);
+        }
+        
+        console.log(`AI_TURN.md: Complete - processed ${totalUnitsProcessed} units in ${iteration} iterations`);
+        
+      } catch (err) {
+        console.error('AI_TURN.md: Loop error:', err);
+        setError(`AI turn failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      } finally {
+        aiTurnInProgress = false;
+      }
+    },
   };
   
   return returnObject;

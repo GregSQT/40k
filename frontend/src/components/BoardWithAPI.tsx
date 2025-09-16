@@ -1,11 +1,10 @@
 // frontend/src/components/BoardWithAPI.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import '../App.css';
 import BoardPvp from './BoardPvp';
 import { useEngineAPI } from '../hooks/useEngineAPI';
 import { useGameConfig } from '../hooks/useGameConfig';
-import { useAITurn } from '../hooks/useAITurn';
 import SharedLayout from './SharedLayout';
 import { ErrorBoundary } from './ErrorBoundary';
 import { UnitStatusTable } from './UnitStatusTable';
@@ -22,7 +21,7 @@ export const BoardWithAPI: React.FC = () => {
   const location = useLocation();
   const gameMode = location.pathname.includes('/pve') ? 'pve' : 
                    location.pathname.includes('/replay') ? 'training' : 'pvp';
-  const isPvE = gameMode === 'pve';
+  const isPvE = gameMode === 'pve' || window.location.search.includes('mode=pve') || apiProps.gameState?.pve_mode === true;
   
   // Get board configuration for line of sight calculations
   const { gameConfig } = useGameConfig();
@@ -37,65 +36,99 @@ export const BoardWithAPI: React.FC = () => {
   // Calculate available height for GameLog dynamically
   const [logAvailableHeight, setLogAvailableHeight] = useState(220);
   
-  // Initialize AI turn processing for PvE mode
-  const { isAIProcessing, processAITurn, aiError, clearAIError } = useAITurn({
-    gameState: apiProps.gameState!,
-    gameActions: {
-      confirmMove: (unitId: number, destCol: number, destRow: number) => {
-        // Map to engine API direct move action
-        apiProps.onDirectMove && apiProps.onDirectMove(unitId, destCol, destRow);
-      },
-      handleShoot: (shooterId: number, targetId: number) => {
-        // Engine API handles shooting through backend state - pass AI-selected targets
-        console.debug('AI shoot action:', { shooterId, targetId });
-        apiProps.onShoot && apiProps.onShoot(shooterId, targetId);
-      },
-      handleCharge: (unitId: number, targetId: number) => {
-        // Engine API handles charging through backend state - zero-parameter trigger
-        console.debug('AI charge action:', { unitId, targetId });
-        apiProps.onCharge && apiProps.onCharge();
-      },
-      handleFightAttack: (attackerId: number, targetId: number) => {
-        // Engine API handles fighting through backend state - zero-parameter trigger
-        console.debug('AI fight action:', { attackerId, targetId });
-        apiProps.onFightAttack && apiProps.onFightAttack();
-      },
-      addMovedUnit: (_unitId: number) => {
-        // Engine API handles unit tracking internally
-        console.debug('addMovedUnit: Engine API handles unit state tracking');
-      },
-      addChargedUnit: (_unitId: number) => {
-        // Engine API handles unit tracking internally
-        console.debug('addChargedUnit: Engine API handles unit state tracking');
-      },
-      addAttackedUnit: (_unitId: number) => {
-        // Engine API handles unit tracking internally
-        console.debug('addAttackedUnit: Engine API handles unit state tracking');
-      },
-    },
-    currentPlayer: apiProps.gameState?.currentPlayer ?? 0,
-    phase: apiProps.gameState?.phase ?? 'move',
-    units: apiProps.gameState?.units ?? []
-  });
+  // Track AI processing with ref to avoid re-render loops
+  const isAIProcessingRef = useRef(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [lastProcessedTurn, setLastProcessedTurn] = useState<string>('');
+  
+  const clearAIError = () => setAiError(null);
 
-  // AI Turn Processing Effect - Trigger AI when it's AI player's turn
+  // AI Turn Processing Effect - Trigger AI when it's AI player's turn and has eligible units
   useEffect(() => {
     if (!apiProps.gameState) return;
+    
+    // Check if in PvE mode
+    const isPvEMode = apiProps.gameState.pve_mode || isPvE;
     
     // Check if game is over by examining unit health
     const player0Alive = apiProps.gameState.units.some(u => u.player === 0 && (u.HP_CUR ?? u.HP_MAX) > 0);
     const player1Alive = apiProps.gameState.units.some(u => u.player === 1 && (u.HP_CUR ?? u.HP_MAX) > 0);
     const gameNotOver = player0Alive && player1Alive;
     
-    if (isPvE && apiProps.gameState.currentPlayer === 1 && !isAIProcessing && gameNotOver) {
-      // Small delay to ensure UI updates are complete
-      const timer = setTimeout(() => {
-        processAITurn();
-      }, 1000);
-      
-      return () => clearTimeout(timer);
+    // CRITICAL: Check if AI has eligible units in current phase
+    // Use simple heuristic instead of missing activation pools
+    const currentPhase = apiProps.gameState.phase;
+    let hasEligibleAIUnits = false;
+    
+    if (currentPhase === 'move') {
+      // Check if any AI units haven't moved yet
+      hasEligibleAIUnits = apiProps.gameState.units.some(unit => 
+        unit.player === 1 && 
+        (unit.HP_CUR ?? unit.HP_MAX) > 0 && 
+        !apiProps.unitsMoved.includes(typeof unit.id === 'string' ? parseInt(unit.id) : unit.id)
+      );
+    } else if (currentPhase === 'shoot') {
+      // Check if any AI units can shoot - must not be already shot and have shots remaining
+      hasEligibleAIUnits = apiProps.gameState.units.some(unit => {
+        const unitIdStr = typeof unit.id === 'string' ? unit.id : unit.id.toString();
+        const alreadyShot = apiProps.unitsMoved.some(id => id.toString() === unitIdStr);
+        const hasShots = (unit.SHOOT_LEFT ?? 0) > 0;
+        const isAlive = (unit.HP_CUR ?? unit.HP_MAX) > 0;
+        
+        return unit.player === 1 && isAlive && !alreadyShot && hasShots;
+      });
+    } else if (currentPhase === 'charge') {
+      // Check if any AI units can charge
+      hasEligibleAIUnits = apiProps.gameState.units.some(unit => 
+        unit.player === 1 && 
+        (unit.HP_CUR ?? unit.HP_MAX) > 0 && 
+        !apiProps.unitsCharged.includes(typeof unit.id === 'string' ? parseInt(unit.id) : unit.id)
+      );
+    } else if (currentPhase === 'fight') {
+      // Check if any AI units can fight
+      hasEligibleAIUnits = apiProps.gameState.units.some(unit => 
+        unit.player === 1 && 
+        (unit.HP_CUR ?? unit.HP_MAX) > 0 && 
+        !apiProps.unitsAttacked.includes(typeof unit.id === 'string' ? parseInt(unit.id) : unit.id)
+      );
     }
-  }, [isPvE, apiProps.gameState?.currentPlayer, apiProps.gameState?.phase, isAIProcessing, apiProps.gameState?.units, processAITurn]);
+    
+    const turnKey = `${apiProps.gameState.currentPlayer}-${currentPhase}-${apiProps.gameState.currentTurn || 1}`;
+    const shouldTriggerAI = isPvEMode && 
+                           apiProps.gameState.currentPlayer === 1 && 
+                           !isAIProcessingRef.current && 
+                           gameNotOver && 
+                           hasEligibleAIUnits &&
+                           lastProcessedTurn !== turnKey;
+    
+    if (shouldTriggerAI) {
+      console.log(`Triggering AI turn for Player 1 (AI) - Phase: ${currentPhase}, Eligible AI units: ${hasEligibleAIUnits}`);
+      isAIProcessingRef.current = true;
+      setLastProcessedTurn(turnKey);
+      
+      // Small delay to ensure UI updates are complete
+      setTimeout(async () => {
+        console.log('Timer fired, checking executeAITurn:', typeof apiProps.executeAITurn);
+        try {
+          if (apiProps.executeAITurn) {
+            console.log('Calling executeAITurn...');
+            await apiProps.executeAITurn();
+            console.log('AI turn completed');
+          } else {
+            console.error('executeAITurn function not available, type:', typeof apiProps.executeAITurn);
+            setAiError('AI function not available');
+          }
+        } catch (error) {
+          console.error('AI turn failed:', error);
+          setAiError(error instanceof Error ? error.message : 'AI turn failed');
+        } finally {
+          isAIProcessingRef.current = false;
+        }
+      }, 1500);
+    } else if (isPvEMode && apiProps.gameState.currentPlayer === 1 && !hasEligibleAIUnits) {
+      console.log(`AI turn skipped - Phase: ${currentPhase}, No eligible AI units in activation pool`);
+    }
+  }, [isPvE, apiProps.gameState?.currentPlayer, apiProps.gameState?.phase, apiProps.gameState?.pve_mode, apiProps.unitsMoved, apiProps.unitsCharged, apiProps.unitsAttacked, apiProps.gameState?.units, apiProps.executeAITurn]);
 
   // Calculate available height for GameLog dynamically
   useEffect(() => {
@@ -208,7 +241,7 @@ export const BoardWithAPI: React.FC = () => {
       {isPvE && (
         <div className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
           apiProps.gameState?.currentPlayer === 1 
-            ? isAIProcessing 
+            ? isAIProcessingRef.current 
               ? 'bg-purple-900 border border-purple-700' 
               : 'bg-purple-800 border border-purple-600'
             : 'bg-gray-800 border border-gray-600'
@@ -216,7 +249,7 @@ export const BoardWithAPI: React.FC = () => {
           <span className="text-sm font-medium text-white">
             {apiProps.gameState?.currentPlayer === 1 ? '🤖 AI Turn' : '👤 Your Turn'}
           </span>
-          {apiProps.gameState?.currentPlayer === 1 && isAIProcessing && (
+          {apiProps.gameState?.currentPlayer === 1 && isAIProcessingRef.current && (
             <>
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-300"></div>
               <span className="text-purple-200 text-sm">AI thinking...</span>
