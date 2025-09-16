@@ -197,6 +197,7 @@ export const useEngineAPI = () => {
               phase: logEntry.phase,
               shooterId: logEntry.shooterId,
               targetId: logEntry.targetId,
+              player: logEntry.player,
               damage: logEntry.damage,
               target_died: logEntry.target_died,
               hitRoll: logEntry.hitRoll,

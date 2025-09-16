@@ -660,6 +660,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "phase": "shoot",
         "shooterId": unit_id,
         "targetId": target_id,
+        "player": shooter["player"],
         "shooterCol": shooter["col"],  # Shooter current position
         "shooterRow": shooter["row"],
         "targetCol": target["col"],    # Target current position  

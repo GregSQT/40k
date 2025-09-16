@@ -379,6 +379,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         "turn": game_state.get("current_turn", 1),
         "phase": "move",
         "unitId": unit["id"],
+        "player": unit["player"],
         "fromCol": orig_col,
         "fromRow": orig_row,
         "toCol": dest_col,
@@ -416,6 +417,7 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any]) -> Tup
         "turn": game_state.get("current_turn", 1),
         "phase": "move",
         "unitId": unit["id"],
+        "player": unit["player"],
         "col": unit["col"],
         "row": unit["row"],
         "timestamp": "server_time"

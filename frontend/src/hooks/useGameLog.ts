@@ -39,6 +39,7 @@ export function useGameLog() {
         message: logData.message,  // Full detailed message from backend
         turnNumber: logData.turn,
         phase: logData.phase,
+        player: logData.player,
         unitId: parseInt(logData.shooterId),
         targetId: parseInt(logData.targetId),
         shootDetails: logData.hitRoll ? [{
