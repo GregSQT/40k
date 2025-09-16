@@ -130,6 +130,18 @@ class W40KEngine(gym.Env):
         # Initialize units from config AFTER game_state exists
         self._initialize_units()
         
+        # CRITICAL: Initialize Gym spaces BEFORE any other operations
+        # Gym interface properties - dynamic action space based on phase
+        self.action_space = gym.spaces.Discrete(8)  # Base action space
+        self._current_valid_actions = list(range(8))  # Will be masked dynamically
+        
+        # Observation space: match training system expectations (26 features)
+        # Old system used: 2 units * 11 features + 4 global = 26 total
+        obs_size = 26  # Fixed size for compatibility with existing models
+        self.observation_space = gym.spaces.Box(
+            low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32
+        )
+        
         # Load AI model for PvE mode
         if self.is_pve_mode:
             self._load_ai_model_for_pve()
@@ -158,20 +170,6 @@ class W40KEngine(gym.Env):
         except Exception as e:
             print(f"PvE: Failed to load AI model: {e}")
             self._ai_model = None
-        
-        # Initialize units from config
-        self._initialize_units()
-        
-        # Gym interface properties - dynamic action space based on phase
-        self.action_space = gym.spaces.Discrete(8)  # Base action space
-        self._current_valid_actions = list(range(8))  # Will be masked dynamically
-        
-        # Observation space: match training system expectations (26 features)
-        # Old system used: 2 units * 11 features + 4 global = 26 total
-        obs_size = 26  # Fixed size for compatibility with existing models
-        self.observation_space = gym.spaces.Box(
-            low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32
-        )
     
     def _initialize_units(self):
         """Initialize units with UPPERCASE field validation."""
@@ -1168,7 +1166,8 @@ class W40KEngine(gym.Env):
             eligible_unit_ids = movement_handlers.get_eligible_units(self.game_state)
             return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
         elif current_phase == "shoot":
-            eligible_unit_ids = shooting_handlers.shooting_build_activation_pool(self.game_state)
+            # CRITICAL: Use existing cleaned pool, don't rebuild and overwrite handler cleanup
+            eligible_unit_ids = self.game_state.get("shoot_activation_pool", [])
             return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
         else:
             return []
