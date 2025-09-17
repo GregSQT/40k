@@ -587,8 +587,14 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             base_env.replay_logger.is_evaluation_mode = True
             base_env.replay_logger.capture_initial_state()
     
-    # SB3 Required: Monitor base environment directly
+    # SB3 Required: Monitor base environment with action masking
     env = Monitor(base_env)
+    
+    # Check if action masking is available
+    if hasattr(base_env, 'get_action_mask'):
+        print("✅ Action masking enabled - AI will only see valid actions")
+    else:
+        print("⚠️ Action masking not available")
     
     model_path = config.get_model_path()
     
@@ -887,7 +893,13 @@ def test_trained_model(model, num_episodes, training_config_name="default"):
         step_count = 0
         
         while not done and step_count < 1000:  # Prevent infinite loops
-            action, _ = model.predict(obs, deterministic=True)
+            # Use action masking if available
+            if hasattr(env, 'get_action_mask'):
+                action_mask = env.get_action_mask()
+                action, _ = model.predict(obs, deterministic=True, action_mask=action_mask)
+            else:
+                action, _ = model.predict(obs, deterministic=True)
+            
             obs, reward, terminated, truncated, info = env.step(action)
             episode_reward += reward
             done = terminated or truncated

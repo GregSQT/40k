@@ -184,9 +184,12 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     
     Implements AI_TURN.md movement restrictions and flee detection.
     """
-    # Validate destination per AI_TURN.md rules
+    # Validate destination per AI_TURN.md rules - add debug
+    print(f"MOVE VALIDATION: Unit {unit['id']} trying to move to ({dest_col},{dest_row})")
     if not _is_valid_destination(game_state, dest_col, dest_row, unit, config):
+        print(f"MOVE BLOCKED: Destination ({dest_col},{dest_row}) failed validation")
         return False, {"error": "invalid_destination", "target": (dest_col, dest_row)}
+    print(f"MOVE ALLOWED: Destination ({dest_col},{dest_row}) passed validation")
     
     # AI_TURN.md flee detection: was adjacent to enemy before move
     was_adjacent = _is_adjacent_to_enemy(game_state, unit)
@@ -375,8 +378,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             # Check hex distance using same calculation as shooting
             distance = _calculate_hex_distance(unit["col"], unit["row"], dest_col, dest_row)
             if distance <= move_range:
-                # Validate destination is valid
-                if _is_valid_movement_destination(game_state, dest_col, dest_row):
+                # Validate destination is valid - use SAME validation as PVP
+                if _is_valid_destination(game_state, dest_col, dest_row, unit, {}):
                     valid_destinations.append((dest_col, dest_row))
     
     # Update game state

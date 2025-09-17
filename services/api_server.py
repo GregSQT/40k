@@ -515,9 +515,18 @@ def execute_ai_turn():
                 # Use AI model to get action for single unit
                 obs = engine._build_observation()
                 
-                # CRITICAL: stable-baselines3 DQN.predict() returns (action, _state)
-                # But _state is None for DQN, so we extract just the action
-                prediction_result = engine._ai_model.predict(obs, deterministic=True)
+                # CRITICAL: Use action masking to prevent invalid actions with error handling
+                try:
+                    if hasattr(engine, 'get_action_mask'):
+                        action_mask = engine.get_action_mask()
+                        print(f"🔍 ACTION MASK: {action_mask} for phase {engine.game_state['phase']}")
+                        prediction_result = engine._ai_model.predict(obs, deterministic=True, action_mask=action_mask)
+                    else:
+                        print("⚠️ ACTION MASK: get_action_mask not available")
+                        prediction_result = engine._ai_model.predict(obs, deterministic=True)
+                except Exception as mask_error:
+                    print(f"⚠️ ACTION MASK ERROR: {mask_error} - falling back to unmasked prediction")
+                    prediction_result = engine._ai_model.predict(obs, deterministic=True)
                 
                 if isinstance(prediction_result, tuple) and len(prediction_result) >= 1:
                     action_int = prediction_result[0]
@@ -525,6 +534,8 @@ def execute_ai_turn():
                     action_int = prediction_result.item()
                 else:
                     action_int = int(prediction_result)
+                
+                print(f"🔍 AI SELECTED ACTION: {action_int} for phase {engine.game_state['phase']}")
                 
                 semantic_action = engine._convert_gym_action(action_int)
                 

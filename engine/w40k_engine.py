@@ -315,15 +315,17 @@ class W40KEngine(gym.Env):
                 
                     # Add specific data for different action types
                     if semantic_action.get("action") == "move":
-                        # Use captured pre-action position for accurate start_pos
+                        # Use semantic action coordinates for accurate logging
                         start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
-                        end_pos = (updated_unit["col"], updated_unit["row"])  # Use unit's actual final position
-                        print(f"STEP LOGGER FIX: Unit {unit_id}, pre_positions={pre_action_positions}, start_pos={start_pos}, end_pos={end_pos}")
+                        # CRITICAL: Use semantic action destination, not unit's current position
+                        dest_col = semantic_action.get("destCol", updated_unit["col"])
+                        dest_row = semantic_action.get("destRow", updated_unit["row"])
+                        end_pos = (dest_col, dest_row)
                         action_details.update({
                             "start_pos": start_pos,
                             "end_pos": end_pos,
-                            "col": updated_unit["col"],  # Use actual final position
-                            "row": updated_unit["row"]   # Use actual final position
+                            "col": dest_col,  # Use semantic action destination
+                            "row": dest_row   # Use semantic action destination
                         })
                     elif semantic_action.get("action") == "shoot":
                         # Add shooting-specific data with correct field names
@@ -478,10 +480,8 @@ class W40KEngine(gym.Env):
             if unit_id:
                 unit = self._get_unit_by_id(unit_id)
                 if unit:
-                    print(f"DEBUG: Unit {unit_id} actual position after movement: ({unit['col']}, {unit['row']})")
                     expected_col = action.get("destCol", "unknown")
                     expected_row = action.get("destRow", "unknown") 
-                    print(f"DEBUG: Expected position: ({expected_col}, {expected_row})")
                     # Check if unit moved to its destination (this should always be true for valid moves)
                     if expected_col == unit["col"] and expected_row == unit["row"]:
                         # This is actually CORRECT behavior - unit reached its destination
@@ -1075,16 +1075,58 @@ class W40KEngine(gym.Env):
 
 # ===== GYM INTERFACE HELPER METHODS =====
     
+    def get_action_mask(self) -> np.ndarray:
+        """Return action mask for current game state - True = valid action."""
+        mask = np.zeros(8, dtype=bool)
+        current_phase = self.game_state["phase"]
+        eligible_units = self._get_eligible_units_for_current_phase()
+        
+        if not eligible_units:
+            # No units can act - only system actions allowed (handled internally)
+            return mask  # All False - no valid actions
+        
+        if current_phase == "move":
+            # Movement phase: actions 0-3 (movement types) + 7 (wait)
+            mask[[0, 1, 2, 3, 7]] = True
+        elif current_phase == "shoot":
+            # Shooting phase: action 4 (shoot) + 7 (wait)
+            mask[[4, 7]] = True
+        elif current_phase == "charge":
+            # Charge phase: action 5 (charge) + 7 (wait)
+            mask[[5, 7]] = True
+        elif current_phase == "fight":
+            # Fight phase: action 6 (fight) only - no wait in fight
+            mask[6] = True
+        
+        return mask
+    
     def _convert_gym_action(self, action: int) -> Dict[str, Any]:
         """Convert gym integer action to semantic action - AI selects units dynamically."""
         action_int = int(action.item()) if hasattr(action, 'item') else int(action)
         current_phase = self.game_state["phase"]
         
+        # Validate action against mask
+        action_mask = self.get_action_mask()
+        if not action_mask[action_int]:
+            return {"action": "invalid", "error": f"action_{action_int}_masked_in_{current_phase}_phase", "unitId": "none"}
+        
         # Get eligible units for current phase - AI_TURN.md sequential activation
         eligible_units = self._get_eligible_units_for_current_phase()
         
         if not eligible_units:
-            return {"action": "invalid", "error": "no_eligible_units"}
+            # CRITICAL: Force phase advancement when no units can act
+            current_phase = self.game_state["phase"]
+            print(f"PHASE ADVANCEMENT: No eligible units in {current_phase} phase - forcing advancement")
+            
+            if current_phase == "move":
+                self._shooting_phase_init()
+                return {"action": "advance_phase", "from": "move", "to": "shoot"}
+            elif current_phase == "shoot":
+                # CRITICAL: Advance to next player/turn, not same player movement
+                self._advance_to_next_player()
+                return {"action": "advance_phase", "from": "shoot", "to": "move"}
+            else:
+                return {"action": "invalid", "error": "no_eligible_units", "unitId": "none"}
         
         if current_phase == "move":
             if action_int == 0:  # Move action
@@ -1159,16 +1201,16 @@ class W40KEngine(gym.Env):
             return [7]  # Only wait for unknown phases
     
     def _get_eligible_units_for_current_phase(self) -> List[Dict[str, Any]]:
-        """Get eligible units for current phase using handler delegation."""
+        """Get eligible units for current phase using pure handler delegation."""
         current_phase = self.game_state["phase"]
         
         if current_phase == "move":
-            # CRITICAL: Use existing cleaned pool, don't rebuild and overwrite handler cleanup
-            eligible_unit_ids = self.game_state.get("move_activation_pool", [])
+            # PURE DELEGATION: Ask handler who can act
+            eligible_unit_ids = movement_handlers.get_eligible_units(self.game_state)
             return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
         elif current_phase == "shoot":
-            # CRITICAL: Use existing cleaned pool, don't rebuild and overwrite handler cleanup
-            eligible_unit_ids = self.game_state.get("shoot_activation_pool", [])
+            # PURE DELEGATION: Ask handler who can act  
+            eligible_unit_ids = shooting_handlers.shooting_build_activation_pool(self.game_state)
             return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
         else:
             return []

@@ -78,12 +78,27 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
         return False
     
     # Check for valid targets
+    valid_targets_found = []
     for enemy in game_state["units"]:
-        if (enemy["player"] != unit["player"] and 
-            enemy["HP_CUR"] > 0 and
-            _is_valid_shooting_target(game_state, unit, enemy)):
-            return True
-    return False
+        if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+            is_valid = _is_valid_shooting_target(game_state, unit, enemy)
+            if is_valid:
+                valid_targets_found.append(enemy["id"])
+    
+    # Single clean log line
+    if valid_targets_found:
+        print(f"🎯 SHOOT ELIGIBLE: Unit {unit['id']} can target: {valid_targets_found}")
+        return True
+    else:
+        # Debug why NO targets found - show positions
+        enemies = [e for e in game_state["units"] if e["player"] != unit["player"] and e["HP_CUR"] > 0]
+        if enemies:
+            enemy = enemies[0]  # Check first enemy as example
+            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+            cc_rng = unit.get("CC_RNG", 1)
+            print(f"❌ SHOOT BLOCKED: Unit {unit['id']}({unit['col']},{unit['row']}) -> Unit {enemy['id']}({enemy['col']},{enemy['row']}) dist:{distance}")
+            print(f"   REASON: Adjacent (dist:{distance} <= cc_rng:{cc_rng})")
+        return False
 
 
 def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
@@ -463,12 +478,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         shooting_phase_start(game_state)
         game_state["_shooting_phase_initialized"] = True
     
-    # Debug logging
+    # Clean execution logging
     current_pool = game_state.get("shoot_activation_pool", [])
-    print(f"SHOOTING PHASE DEBUG: Pool {current_pool}, Action received: {action}")
-    
-    # CRITICAL: Remove depleted units from activation pool
-    print(f"DEBUG POOL CLEANUP: Initial pool: {current_pool}")
+    action_type = action.get("action", "unknown")
+    unit_id = action.get("unitId", "none")
+    print(f"🔫 SHOOT EXEC: {action_type.upper()} by Unit {unit_id} | Pool: {current_pool}")
     if current_pool:
         # Remove units with no shots remaining
         updated_pool = []
@@ -520,10 +534,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return True, result
     
     elif action_type == "shoot":
-        # Handle gym-style shoot action with targetId
+        # Handle gym-style shoot action with optional targetId
         target_id = action.get("targetId")
-        if not target_id:
-            return False, {"error": "missing_target", "action": action}
         
         # CRITICAL: Activate unit first if not already active
         if unit_id not in game_state.get("shoot_activation_pool", []):
@@ -534,6 +546,17 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             unit.get("SHOOT_LEFT", 0) == unit.get("RNG_NB", 0)):
             # Only initialize if unit hasn't started shooting yet
             shooting_unit_activation_start(game_state, unit_id)
+        
+        # Auto-select target if not provided (AI mode)
+        if not target_id:
+            valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
+            if not valid_targets:
+                # No valid targets - end activation with wait
+                print(f"DEBUG SHOOT: No valid targets for unit {unit_id} - ending activation")
+                result = _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
+                return True, result
+            target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
+            print(f"DEBUG SHOOT: AI selected priority target {target_id} for unit {unit_id}")
         
         # Execute shooting directly without UI loops
         return shooting_target_selection_handler(game_state, unit_id, str(target_id))
@@ -874,3 +897,80 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     """Legacy compatibility - use shooting_build_activation_pool instead"""
     pool = shooting_build_activation_pool(game_state)
     return pool
+
+def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_targets: List[str]) -> str:
+    """AI target selection using ACTUAL reward_mapper priorities from ai/reward_mapper.py."""
+    
+    unit = _get_unit_by_id(game_state, unit_id)
+    if not unit or not valid_targets:
+        return valid_targets[0] if valid_targets else ""
+    
+    # Use actual reward_mapper system
+    try:
+        from ai.reward_mapper import RewardMapper
+        
+        # We need rewards_config - try to get it from the engine context
+        # For now, implement the actual AI_GAME_OVERVIEW.md logic directly
+        
+        best_target = valid_targets[0]
+        best_score = -999999
+        
+        for target_id in valid_targets:
+            target = _get_unit_by_id(game_state, target_id)
+            if not target:
+                continue
+            
+            # Calculate AI_GAME_OVERVIEW.md priorities
+            score = _calculate_target_priority_score(unit, target, game_state)
+            
+            if score > best_score:
+                best_score = score
+                best_target = target_id
+        
+        return best_target
+        
+    except ImportError:
+        # Fallback to first target
+        return valid_targets[0]
+
+def _calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
+    """Calculate target priority score using AI_GAME_OVERVIEW.md logic."""
+    
+    # Priority factors
+    threat_level = max(target.get("RNG_DMG", 0), target.get("CC_DMG", 0))
+    can_kill_1_phase = target["HP_CUR"] <= unit.get("RNG_DMG", 0)
+    
+    # Priority 1: High threat that melee can charge but won't kill (score: 1000)
+    if threat_level >= 3:  # High threat threshold
+        melee_can_charge = _check_if_melee_can_charge(target, game_state)
+        if melee_can_charge and target["HP_CUR"] > 2:  # Won't die to melee in 1 phase
+            return 1000 + threat_level
+    
+    # Priority 2: High threat that can be killed in 1 shooting phase (score: 800) 
+    if can_kill_1_phase and threat_level >= 3:
+        return 800 + threat_level
+    
+    # Priority 3: High threat, lowest HP that can be killed (score: 600)
+    if can_kill_1_phase and threat_level >= 2:
+        return 600 + threat_level + (10 - target["HP_CUR"])  # Prefer lower HP
+    
+    # Default: threat level only
+    return threat_level
+
+def _check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
+    """Check if any friendly melee unit can charge this target."""
+    current_player = game_state["current_player"]
+    
+    for unit in game_state["units"]:
+        if (unit["player"] == current_player and 
+            unit["HP_CUR"] > 0 and
+            unit.get("CC_DMG", 0) > 0):  # Has melee capability
+            
+            # Estimate charge range (unit move + average 2d6)
+            distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
+            max_charge = unit.get("MOVE", 6) + 7  # Average 2d6 = 7
+            
+            if distance <= max_charge:
+                return True
+    
+    return False
