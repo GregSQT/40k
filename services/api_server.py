@@ -95,7 +95,9 @@ def initialize_pve_engine():
         from ai.unit_registry import UnitRegistry
         unit_registry = UnitRegistry()
         
-        # Create engine with PvE configuration
+        # Create engine with PvE configuration - set pve_mode in config
+        config["pve_mode"] = True
+        
         engine = W40KEngine(
             config=config,
             rewards_config="default",
@@ -107,31 +109,9 @@ def initialize_pve_engine():
             quiet=True
         )
         
-        # Enable PvE mode
-        engine.is_pve_mode = True
-        
-        # Load AI model for Player 2
-        try:
-            from stable_baselines3 import DQN
-            
-            # Determine AI model based on Player 1 units
-            ai_model_key = "SpaceMarine_Infantry_Troop_RangedSwarm"  # Default
-            player1_units = [u for u in config.get("units", []) if u.get("player") == 1]
-            if player1_units and unit_registry:
-                ai_model_key = unit_registry.get_model_key(player1_units[0].get("unit_type", ""))
-            
-            model_path = os.path.join("ai", "models", f"default_model_{ai_model_key}.zip")
-            
-            if os.path.exists(model_path):
-                engine._ai_model = DQN.load(model_path)
-                print(f"✅ PvE: Loaded AI model for Player 2: {ai_model_key}")
-            else:
-                print(f"⚠️ PvE: No AI model found at {model_path} - using fallback AI")
-                engine._ai_model = None
-                
-        except Exception as ai_error:
-            print(f"⚠️ PvE: Failed to load AI model: {ai_error}")
-            engine._ai_model = None
+        # AI model loading handled by engine's _load_ai_model_for_pve() method
+        # No duplicate model loading logic needed in API layer
+        print(f"✅ PvE: Engine initialized with built-in AI model loading")
         
         # Restore original working directory
         os.chdir(original_cwd)
@@ -247,10 +227,6 @@ def start_game():
 def execute_action():
     """Execute a semantic action in the game."""
     global engine
-    
-    print(f"🔥 AI TURN DEBUG: engine = {engine}")
-    print(f"🔥 AI TURN DEBUG: engine type = {type(engine)}")
-    print(f"🔥 AI TURN DEBUG: has pve_mode = {getattr(engine, 'is_pve_mode', 'NO_ATTR')}")
     
     if not engine:
         print(f"🔥 AI TURN ERROR: Engine is None!")
@@ -428,216 +404,46 @@ def get_available_actions():
 
 @app.route('/api/game/ai-turn', methods=['POST'])
 def execute_ai_turn():
-    """Execute AI turn for Player 2 in PvE mode."""
+    """Execute AI turn - pure HTTP wrapper."""
     global engine
     
     if not engine:
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
     
     try:
-        # Step 1: Check if AI model exists
-        if hasattr(engine, '_ai_model'):
-            pass
-        else:
-            print("AI TURN DEBUG: _ai_model attribute missing")
+        # Debug: Check engine state before AI turn
+        print(f"DEBUG AI_TURN: AI model loaded = {hasattr(engine, '_ai_model') and engine._ai_model is not None}")
+        success, result = engine.execute_ai_turn()
+        print(f"DEBUG AI_TURN: execute_ai_turn returned success={success}, result={result}")
         
-        # Step 2: Try to load AI model if missing
-        if not hasattr(engine, '_ai_model') or not engine._ai_model:
-            try:
-                from stable_baselines3 import DQN                
-                # Determine model path
-                import os
-                # Use confirmed working model path
-                model_path = "ai/models/current/model_SpaceMarine_Infantry_Troop_RangedSwarm.zip"
-                
-                if os.path.exists(model_path):
-                    engine._ai_model = DQN.load(model_path)
-                else:
-                    print(f"AI TURN DEBUG: Model file not found at {model_path}")
-                    available_files = os.listdir("ai/models/") if os.path.exists("ai/models/") else []
-                    print(f"AI TURN DEBUG: Available model files: {available_files}")
-                    
-            except ImportError as ie:
-                print(f"AI TURN DEBUG: Import error: {ie}")
-            except Exception as me:
-                print(f"AI TURN DEBUG: Model loading error: {me}")
-        
-        # Step 3: Process ONE AI unit per request if model available
-        if hasattr(engine, '_ai_model') and engine._ai_model:
-            print("AI TURN DEBUG: Processing single AI unit...")
-            
-            # Check current phase and get eligible AI units
-            current_phase = engine.game_state["phase"]
-            
-            if current_phase == "move":
-                eligible_pool = engine.game_state.get("move_activation_pool", [])
-            elif current_phase == "shoot":
-                eligible_pool = engine.game_state.get("shoot_activation_pool", [])
+        if not success:
+            error_type = result.get("error", "unknown_error")
+            if error_type in ["not_pve_mode", "not_ai_player_turn"]:
+                return jsonify({"success": False, "error": result}), 400
             else:
-                print(f"AI TURN: No processing needed for phase {current_phase}")
-                return jsonify({
-                    "success": True,
-                    "result": {"units_processed": 0, "phase": current_phase},
-                    "game_state": dict(engine.game_state),
-                    "message": f"AI turn complete - phase {current_phase} has no processing"
-                })
-            
-            # POOL STATE DEBUG: Track pool changes through AI processing
-            print(f"🔍 POOL DEBUG: Phase={current_phase}, Pool BEFORE action: {eligible_pool}")
-            print(f"🔍 POOL DEBUG: Game state pool reference: {id(engine.game_state.get(f'{current_phase}_activation_pool', []))}")
-            
-            ai_unit_id = None
-            for unit_id in eligible_pool:
-                unit = engine._get_unit_by_id(str(unit_id))
-                if unit and unit["player"] == 1:
-                    ai_unit_id = unit_id
-                    print(f"🔍 POOL DEBUG: Selected AI unit: {ai_unit_id}")
-                    break
-            
-            if not ai_unit_id:
-                print(f"🔍 POOL DEBUG: No AI units found in pool {eligible_pool}")
-            
-            if not ai_unit_id:
-                print(f"AI TURN: Complete - no AI units eligible in phase {current_phase}")
-                serializable_state = dict(engine.game_state)
-                for key, value in serializable_state.items():
-                    if isinstance(value, set):
-                        serializable_state[key] = list(value)
-                
-                return jsonify({
-                    "success": True,
-                    "result": {"units_processed": 0, "phase_complete": True},
-                    "game_state": serializable_state,
-                    "message": f"AI turn complete - no units eligible"
-                })
-            
-            try:
-                # Use AI model to get action for single unit
-                obs = engine._build_observation()
-                
-                # Use AI model to get action - no action masking for standard DQN
-                prediction_result = engine._ai_model.predict(obs, deterministic=True)
-                print(f"🔍 AI MODEL: Generated prediction for phase {engine.game_state['phase']}")
-                
-                if isinstance(prediction_result, tuple) and len(prediction_result) >= 1:
-                    action_int = prediction_result[0]
-                elif hasattr(prediction_result, 'item'):
-                    action_int = prediction_result.item()
-                else:
-                    action_int = int(prediction_result)
-                
-                print(f"🔍 AI SELECTED ACTION: {action_int} for phase {engine.game_state['phase']}")
-                
-                semantic_action = engine._convert_gym_action(action_int)
-                
-                # CRITICAL: Ensure semantic action uses the selected unit ID
-                if semantic_action.get("unitId") != ai_unit_id:
-                    print(f"🔍 UNIT FIX: Correcting unitId from {semantic_action.get('unitId')} to {ai_unit_id}")
-                    semantic_action["unitId"] = ai_unit_id                
-                success, result = engine.execute_semantic_action(semantic_action)
-                
-                # POOL STATE DEBUG: Check pool after action execution
-                post_action_pool = engine.game_state.get(f"{current_phase}_activation_pool", [])
-                print(f"🔍 POOL DEBUG: Pool AFTER action: {post_action_pool}")
-                print(f"🔍 POOL DEBUG: Action success: {success}, Result keys: {list(result.keys()) if isinstance(result, dict) else 'not dict'}")
-                
-                if success:
-                    processed_units = 1
-                    print(f"AI TURN: Successfully processed unit {ai_unit_id}")
-                else:
-                    print(f"AI TURN: Action failed: {result}")
-                    # Handle different types of action failures
-                    if isinstance(result, dict):
-                        error_type = result.get("error", "")
-                        if error_type == "unit_not_eligible":
-                            processed_units = 0  # Unit already processed, no work done
-                            print(f"AI TURN: Unit {ai_unit_id} already processed, continuing")
-                        elif "masked_in" in error_type or "forbidden_in" in error_type:
-                            # Phase violation - treat as successful skip with penalty
-                            processed_units = 1
-                            print(f"AI PHASE VIOLATION: {error_type} - unit skipped with penalty")
-                        else:
-                            # Real error - return 500
-                            return jsonify({
-                                "success": False,
-                                "error": f"AI action failed: {result}",
-                                "phase": current_phase,
-                                "unit_id": ai_unit_id
-                            }), 500
-                    else:
-                        return jsonify({
-                            "success": False,
-                            "error": f"AI action failed: {result}",
-                            "phase": current_phase
-                        }), 500
-                        
-            except Exception as pe:
-                print(f"AI TURN ERROR: Prediction failed: {pe}")
-                import traceback
-                print(f"AI TURN ERROR: Full traceback: {traceback.format_exc()}")
-                # NO FALLBACK - return error state
-                return jsonify({
-                    "success": False,
-                    "error": f"AI prediction failed: {str(pe)}",
-                    "error_type": type(pe).__name__
-                }), 500
-            
-            # Convert sets to lists for JSON serialization
-            serializable_state = dict(engine.game_state)
-            for key, value in serializable_state.items():
-                if isinstance(value, set):
-                    serializable_state[key] = list(value)
-            
-            # Extract action logs like human endpoint does
-            action_logs = serializable_state.get("action_logs", [])
-            if action_logs:
-                # Clear logs from engine to prevent accumulation across AI iterations
-                engine.game_state["action_logs"] = []
-                serializable_state["action_logs"] = []
-            
-            return jsonify({
-                "success": True,
-                "result": {"units_processed": processed_units},
-                "game_state": serializable_state,
-                "action_logs": action_logs,
-                "ai_action": {"processed_units": processed_units},
-                "message": f"AI turn executed - processed {processed_units} units"
-            })
+                return jsonify({"success": False, "error": result}), 500
         
-        # No AI model available - return error
-        return jsonify({
-            "success": False,
-            "error": "AI model not available",
-            "phase": current_phase
-        }), 500
-        
+        # Convert sets to lists for JSON serialization
         serializable_state = dict(engine.game_state)
         for key, value in serializable_state.items():
             if isinstance(value, set):
                 serializable_state[key] = list(value)
         
+        # Extract action logs
+        action_logs = serializable_state.get("action_logs", [])
+        if action_logs:
+            engine.game_state["action_logs"] = []
+            serializable_state["action_logs"] = []
+        
         return jsonify({
             "success": True,
-            "result": {"units_processed": processed_units},
+            "result": result,
             "game_state": serializable_state,
-            "ai_action": {"action": "skip_all", "processed_units": processed_units},
-            "message": f"AI turn executed (fallback) - processed {processed_units} units"
+            "action_logs": action_logs
         })
             
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"🔥 AI TURN DETAILED ERROR:")
-        print(f"🔥 ERROR TYPE: {type(e).__name__}")
-        print(f"🔥 ERROR MESSAGE: {str(e)}")
-        print(f"🔥 FULL TRACEBACK:")
-        print(error_details)
-        return jsonify({
-            "success": False,
-            "error": f"AI turn failed: {str(e)}",
-            "error_type": type(e).__name__,
-            "traceback": error_details
-        }), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/', methods=['GET'])
 def serve_frontend():

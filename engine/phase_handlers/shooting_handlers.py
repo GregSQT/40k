@@ -482,14 +482,12 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     current_pool = game_state.get("shoot_activation_pool", [])
     action_type = action.get("action", "unknown")
     unit_id = action.get("unitId", "none")
-    print(f"🔫 SHOOT EXEC: {action_type.upper()} by Unit {unit_id} | Pool: {current_pool}")
     if current_pool:
         # Remove units with no shots remaining
         updated_pool = []
         for unit_id in current_pool:
             unit_check = _get_unit_by_id(game_state, unit_id)
             shots_left = unit_check.get("SHOOT_LEFT", 0) if unit_check else 0
-            print(f"DEBUG POOL CLEANUP: Unit {unit_id} has SHOOT_LEFT={shots_left}")
             if unit_check and shots_left > 0:
                 updated_pool.append(unit_id)
             else:
@@ -497,7 +495,6 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         
         game_state["shoot_activation_pool"] = updated_pool
         current_pool = updated_pool
-        print(f"SHOOTING POOL CLEANUP: Removed depleted units. Remaining: {current_pool}")
     
     # Check if shooting phase should complete after cleanup
     if not current_pool:
@@ -622,11 +619,8 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     if not unit or not target:
         return False, {"error": "unit_or_target_not_found"}
     
-    print(f"DEBUG SHOOT: Unit {unit_id} SHOOT_LEFT before: {unit['SHOOT_LEFT']}")
-    
     # CRITICAL: Validate unit has shots remaining
     if unit.get("SHOOT_LEFT", 0) <= 0:
-        print(f"DEBUG SHOOT: Unit {unit_id} has no shots remaining - rejecting shoot action")
         return False, {"error": "no_shots_remaining", "unitId": unit_id, "shootLeft": unit.get("SHOOT_LEFT", 0)}
     
     # Validate target is in valid pool
@@ -641,7 +635,6 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     
     # Update SHOOT_LEFT and continue loop per AI_TURN.md
     unit["SHOOT_LEFT"] -= 1
-    print(f"DEBUG SHOOT: Unit {unit_id} SHOOT_LEFT after: {unit['SHOOT_LEFT']}")
     
     # Continue execution loop to check for more shots or end activation
     result = _shooting_unit_execution_loop(game_state, unit_id)

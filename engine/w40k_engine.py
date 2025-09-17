@@ -147,29 +147,44 @@ class W40KEngine(gym.Env):
             self._load_ai_model_for_pve()
     
     def _load_ai_model_for_pve(self):
-        """Load trained AI model for PvE Player 2."""
+        """Load trained AI model for PvE Player 2 - with diagnostic logging."""
+        print(f"DEBUG: _load_ai_model_for_pve called")
+        
         try:
             from stable_baselines3 import DQN
+            print(f"DEBUG: DQN import successful")
             
-            # Determine AI model path
-            ai_model_key = "SpaceMarine"  # Default AI opponent
+            # Get AI model key from unit registry
+            ai_model_key = "SpaceMarine_Infantry_Troop_RangedSwarm"  # Default
+            print(f"DEBUG: Default AI model key: {ai_model_key}")
+            
             if self.unit_registry:
-                # Get model key for player 1 units
                 player1_units = [u for u in self.game_state["units"] if u["player"] == 1]
+                print(f"DEBUG: Found {len(player1_units)} Player 1 units")
                 if player1_units:
-                    ai_model_key = self.unit_registry.get_model_key(player1_units[0]["unitType"])
+                    unit_type = player1_units[0]["unitType"]
+                    print(f"DEBUG: First unit type: '{unit_type}'")
+                    ai_model_key = self.unit_registry.get_model_key(unit_type)
+                    print(f"DEBUG: Unit registry resolved to: '{ai_model_key}'")
             
-            model_path = f"ai/models/default_model_{ai_model_key}.zip"
+            model_path = f"ai/models/current/model_{ai_model_key}.zip"
+            print(f"DEBUG: Model path: {model_path}")
+            print(f"DEBUG: Model exists: {os.path.exists(model_path)}")
             
-            if os.path.exists(model_path):
-                self._ai_model = DQN.load(model_path)
-                print(f"PvE: Loaded AI model for Player 2: {ai_model_key}")
-            else:
-                print(f"PvE: No AI model found at {model_path} - using fallback AI")
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"AI model required for PvE mode not found: {model_path}")
+            
+            self._ai_model = DQN.load(model_path)
+            print(f"DEBUG: AI model loaded successfully")
+            if not self.quiet:
+                print(f"PvE: Loaded AI model: {ai_model_key}")
                 
         except Exception as e:
-            print(f"PvE: Failed to load AI model: {e}")
+            print(f"DEBUG: _load_ai_model_for_pve exception: {e}")
+            print(f"DEBUG: Exception type: {type(e).__name__}")
+            # Set _ai_model to None on any failure
             self._ai_model = None
+            raise  # Re-raise to see the full error
     
     def _initialize_units(self):
         """Initialize units with UPPERCASE field validation."""
@@ -379,6 +394,79 @@ class W40KEngine(gym.Env):
         """
         return self._process_semantic_action(action)
     
+    def execute_ai_turn(self) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Execute AI turn using same decision tree as humans.
+        AI_TURN.md compliant - only decision-making logic differs from humans.
+        """
+        # Validate PvE mode and AI player turn
+        if not self.is_pve_mode:
+            return False, {"error": "not_pve_mode"}
+        
+        current_player = self.game_state["current_player"]
+        if current_player != 1:  # AI is player 1
+            return False, {"error": "not_ai_player_turn", "current_player": current_player}
+        
+        # Check AI model availability
+        if not hasattr(self, '_ai_model') or not self._ai_model:
+            return False, {"error": "ai_model_not_loaded"}
+        
+        # Make AI decision - replaces human click
+        try:
+            ai_semantic_action = self._make_ai_decision()
+            
+            # Execute through SAME path as humans
+            return self._process_semantic_action(ai_semantic_action)
+            
+        except Exception as e:
+            return False, {"error": "ai_decision_failed", "message": str(e)}
+    
+    def _make_ai_decision(self) -> Dict[str, Any]:
+        """
+        AI decision logic - replaces human clicks with model predictions.
+        Uses SAME handler paths as humans after decision is made.
+        """
+        # Get observation for AI model
+        obs = self._build_observation()
+        
+        # Get AI model prediction
+        prediction_result = self._ai_model.predict(obs, deterministic=True)
+        
+        if isinstance(prediction_result, tuple) and len(prediction_result) >= 1:
+            action_int = prediction_result[0]
+        elif hasattr(prediction_result, 'item'):
+            action_int = prediction_result.item()
+        else:
+            action_int = int(prediction_result)
+        
+        # Convert to semantic action using existing method
+        semantic_action = self._convert_gym_action(action_int)
+        
+        # Ensure AI player context
+        current_player = self.game_state["current_player"]
+        if current_player == 1:  # AI player
+            # Get eligible units from current phase pool
+            current_phase = self.game_state["phase"]
+            if current_phase == "move":
+                eligible_pool = self.game_state.get("move_activation_pool", [])
+            elif current_phase == "shoot":
+                eligible_pool = self.game_state.get("shoot_activation_pool", [])
+            else:
+                eligible_pool = []
+            
+            # Find AI unit in pool
+            ai_unit_id = None
+            for unit_id in eligible_pool:
+                unit = self._get_unit_by_id(str(unit_id))
+                if unit and unit["player"] == 1:
+                    ai_unit_id = str(unit_id)
+                    break
+            
+            if ai_unit_id:
+                semantic_action["unitId"] = ai_unit_id
+            
+        return semantic_action
+    
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
         """Reset game state for new episode - gym.Env interface."""
         
@@ -552,18 +640,11 @@ class W40KEngine(gym.Env):
             print(f"🔍 ENGINE DEBUG: Handler returned non-tuple: {type(handler_response)}, value: {handler_response}")
         
         # Handle phase transitions signaled by handler
-        print(f"DEBUG ENGINE: Checking phase transition - phase_complete={result.get('phase_complete')}, phase_transition={result.get('phase_transition')}")
         if result.get("phase_complete") or result.get("phase_transition"):
             next_phase = result.get("next_phase")
-            print(f"DEBUG ENGINE: Phase transition triggered - next_phase={next_phase}")
+            print(f"Phase transition: {self.game_state['phase']} -> {next_phase}")
             if next_phase == "move":
-                print(f"DEBUG ENGINE: Calling _movement_phase_init()")
                 self._movement_phase_init()
-            else:
-                print(f"DEBUG ENGINE: Next phase is not 'move', ignoring transition")
-        else:
-            print(f"DEBUG ENGINE: No phase transition flags found in result")
-        
         return success, result
     
     def _charge_phase_init(self):
