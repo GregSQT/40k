@@ -105,10 +105,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         else:
             return True, movement_phase_end(game_state)
     
-    # Validate unit is eligible
+    # Validate unit is eligible (keep for validation, remove only after successful action)
     if unit_id not in game_state["move_activation_pool"]:
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
+    # Get unit object for processing
     active_unit = _get_unit_by_id(game_state, unit_id)
     if not active_unit:
         return False, {"error": "unit_not_found", "unitId": unit_id}
@@ -353,38 +354,6 @@ def movement_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
         return True, {"action": "no_effect"}
     else:
         return True, {"action": "continue_selection"}
-
-
-def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str) -> List[Tuple[int, int]]:
-    """AI_MOVE.md: Build valid movement destinations using BFS pathfinding."""
-    unit = _get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return []
-    
-    # Use hex distance calculation like shooting
-    valid_destinations = []
-    move_range = unit.get("MOVE", 0)
-    
-    # Simple pathfinding - check all hexes within movement range
-    for col_offset in range(-move_range, move_range + 1):
-        for row_offset in range(-move_range, move_range + 1):
-            dest_col = unit["col"] + col_offset
-            dest_row = unit["row"] + row_offset
-            
-            # Skip current position
-            if col_offset == 0 and row_offset == 0:
-                continue
-            
-            # Check hex distance using same calculation as shooting
-            distance = _calculate_hex_distance(unit["col"], unit["row"], dest_col, dest_row)
-            if distance <= move_range:
-                # Validate destination is valid - use SAME validation as PVP
-                if _is_valid_destination(game_state, dest_col, dest_row, unit, {}):
-                    valid_destinations.append((dest_col, dest_row))
-    
-    # Update game state
-    game_state["valid_move_destinations_pool"] = valid_destinations
-    return valid_destinations
 
 def _is_valid_movement_destination(game_state: Dict[str, Any], col: int, row: int) -> bool:
     """Check if hex is valid for movement."""

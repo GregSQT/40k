@@ -471,8 +471,14 @@ class W40KEngine(gym.Env):
             movement_handlers.movement_phase_start(self.game_state)
             self._movement_phase_initialized = True
         
-        # **FULL DELEGATION**: movement_handlers.execute_action(game_state, None, action, config)
-        success, result = movement_handlers.execute_action(self.game_state, None, action, self.config)
+        # Get current unit for handler (handler expects unit parameter)
+        unit_id = action.get("unitId")
+        current_unit = None
+        if unit_id:
+            current_unit = self._get_unit_by_id(unit_id)
+        
+        # **FULL DELEGATION**: movement_handlers.execute_action(game_state, unit, action, config)
+        success, result = movement_handlers.execute_action(self.game_state, current_unit, action, self.config)
         
         # DEBUG: Check if unit position actually changed
         if success and action.get("action") == "move":
@@ -482,18 +488,16 @@ class W40KEngine(gym.Env):
                 if unit:
                     expected_col = action.get("destCol", "unknown")
                     expected_row = action.get("destRow", "unknown") 
-                    # Check if unit moved to its destination (this should always be true for valid moves)
                     if expected_col == unit["col"] and expected_row == unit["row"]:
-                        # This is actually CORRECT behavior - unit reached its destination
                         pass
                     else:
                         print(f"DEBUG: ERROR - Unit {unit_id} failed to reach destination: expected ({expected_col}, {expected_row}) but at ({unit['col']}, {unit['row']})")
         
         # CRITICAL FIX: Handle failed actions to prevent infinite loops
         if not success and result.get("error") == "invalid_destination":
-            # Force unit to skip/wait when movement fails
             print(f"DEBUG: Movement failed, forcing unit to skip")
-            skip_result = movement_handlers.execute_action(self.game_state, None, {"action": "skip", "unitId": action.get("unitId")}, self.config)
+            skip_unit = self._get_unit_by_id(action.get("unitId")) if action.get("unitId") else None
+            skip_result = movement_handlers.execute_action(self.game_state, skip_unit, {"action": "skip", "unitId": action.get("unitId")}, self.config)
             print(f"DEBUG: Skip action result: {skip_result}")
             if isinstance(skip_result, tuple):
                 success, result = skip_result
@@ -812,10 +816,14 @@ class W40KEngine(gym.Env):
     def _calculate_reward(self, success: bool, result: Dict[str, Any]) -> float:
         """Calculate reward using actual acting unit with reward mapper integration."""
         if not success:
-            if isinstance(result, dict) and "forbidden_in" in result.get("error", ""):
-                return -0.5  # Heavy penalty for phase violations
+            if isinstance(result, dict):
+                error_msg = result.get("error", "")
+                if "forbidden_in" in error_msg or "masked_in" in error_msg:
+                    return -1.0  # Heavy penalty for phase violations to train proper behavior
+                else:
+                    return -0.1  # Small penalty for other invalid actions
             else:
-                return -0.1  # Small penalty for other invalid actions
+                return -0.1  # Default penalty for failures
         
         # Handle system responses (no unit-specific rewards)
         system_response_indicators = [
@@ -1105,16 +1113,22 @@ class W40KEngine(gym.Env):
         action_int = int(action.item()) if hasattr(action, 'item') else int(action)
         current_phase = self.game_state["phase"]
         
-        # Validate action against mask
+        # Validate action against mask - convert invalid actions to SKIP
         action_mask = self.get_action_mask()
         if not action_mask[action_int]:
-            return {"action": "invalid", "error": f"action_{action_int}_masked_in_{current_phase}_phase", "unitId": "none"}
+            # Get valid unit for skip action
+            eligible_units = self._get_eligible_units_for_current_phase()
+            if eligible_units:
+                selected_unit_id = eligible_units[0]["id"]
+                print(f"INVALID ACTION CONVERSION: Action {action_int} invalid in {current_phase} phase -> SKIP for unit {selected_unit_id}")
+                return {"action": "skip", "unitId": selected_unit_id, "reason": f"invalid_action_{action_int}_in_{current_phase}"}
+            else:
+                return {"action": "advance_phase", "from": current_phase, "reason": "no_eligible_units"}
         
         # Get eligible units for current phase - AI_TURN.md sequential activation
         eligible_units = self._get_eligible_units_for_current_phase()
         
         if not eligible_units:
-            # CRITICAL: Force phase advancement when no units can act
             current_phase = self.game_state["phase"]
             print(f"PHASE ADVANCEMENT: No eligible units in {current_phase} phase - forcing advancement")
             
@@ -1122,54 +1136,49 @@ class W40KEngine(gym.Env):
                 self._shooting_phase_init()
                 return {"action": "advance_phase", "from": "move", "to": "shoot"}
             elif current_phase == "shoot":
-                # CRITICAL: Advance to next player/turn, not same player movement
                 self._advance_to_next_player()
                 return {"action": "advance_phase", "from": "shoot", "to": "move"}
             else:
-                return {"action": "invalid", "error": "no_eligible_units", "unitId": "none"}
+                return {"action": "invalid", "error": "no_eligible_units", "unitId": "SYSTEM"}
+        
+        # GUARANTEED UNIT SELECTION - use first eligible unit directly
+        selected_unit_id = eligible_units[0]["id"]
+        print(f"AI UNIT SELECTION: Selected {selected_unit_id} from eligible units {[u['id'] for u in eligible_units]}")
         
         if current_phase == "move":
             if action_int == 0:  # Move action
-                selected_unit = self._ai_select_unit(eligible_units, "move")
                 try:
-                    destination = self._ai_select_movement_destination(selected_unit)
+                    destination = self._ai_select_movement_destination(selected_unit_id)
                     return {
                         "action": "move", 
-                        "unitId": selected_unit, 
+                        "unitId": selected_unit_id, 
                         "destCol": destination[0], 
                         "destRow": destination[1]
                     }
                 except ValueError:
-                    # No valid moves - convert to WAIT action
                     if not self.quiet:
-                        print(f"DEBUG: Converting move to wait for unit {selected_unit} - no valid destinations")
-                    return {"action": "wait", "unitId": selected_unit}
+                        print(f"DEBUG: Converting move to wait for unit {selected_unit_id} - no valid destinations")
+                    return {"action": "wait", "unitId": selected_unit_id}
             elif action_int == 7:  # WAIT - agent chooses not to move
-                selected_unit = self._ai_select_unit(eligible_units, "wait")
-                return {"action": "wait", "unitId": selected_unit}
+                return {"action": "wait", "unitId": selected_unit_id}
         elif current_phase == "shoot":
             if action_int == 4:  # Shoot action
-                selected_unit = self._ai_select_unit(eligible_units, "shoot")
                 return {
                     "action": "shoot", 
-                    "unitId": selected_unit
-                    # Handler will build target pool and select target per AI_TURN.md
+                    "unitId": selected_unit_id
                 }
             elif action_int == 7:  # WAIT - agent chooses not to shoot
-                selected_unit = self._ai_select_unit(eligible_units, "wait")
-                return {"action": "wait", "unitId": selected_unit}
+                return {"action": "wait", "unitId": selected_unit_id}
         elif current_phase == "charge":
             if action_int == 5:  # Charge action
-                selected_unit = self._ai_select_unit(eligible_units, "charge")
-                target = self._ai_select_charge_target(selected_unit)
+                target = self._ai_select_charge_target(selected_unit_id)
                 return {
                     "action": "charge", 
-                    "unitId": selected_unit, 
+                    "unitId": selected_unit_id, 
                     "targetId": target
                 }
             elif action_int == 7:  # WAIT - agent chooses not to charge
-                selected_unit = self._ai_select_unit(eligible_units, "wait")
-                return {"action": "wait", "unitId": selected_unit}
+                return {"action": "wait", "unitId": selected_unit_id}
         elif current_phase == "fight":
             if action_int == 6:  # Fight action - NO WAIT option in fight phase
                 selected_unit = self._ai_select_unit(eligible_units, "fight")

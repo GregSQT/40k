@@ -515,18 +515,9 @@ def execute_ai_turn():
                 # Use AI model to get action for single unit
                 obs = engine._build_observation()
                 
-                # CRITICAL: Use action masking to prevent invalid actions with error handling
-                try:
-                    if hasattr(engine, 'get_action_mask'):
-                        action_mask = engine.get_action_mask()
-                        print(f"🔍 ACTION MASK: {action_mask} for phase {engine.game_state['phase']}")
-                        prediction_result = engine._ai_model.predict(obs, deterministic=True, action_mask=action_mask)
-                    else:
-                        print("⚠️ ACTION MASK: get_action_mask not available")
-                        prediction_result = engine._ai_model.predict(obs, deterministic=True)
-                except Exception as mask_error:
-                    print(f"⚠️ ACTION MASK ERROR: {mask_error} - falling back to unmasked prediction")
-                    prediction_result = engine._ai_model.predict(obs, deterministic=True)
+                # Use AI model to get action - no action masking for standard DQN
+                prediction_result = engine._ai_model.predict(obs, deterministic=True)
+                print(f"🔍 AI MODEL: Generated prediction for phase {engine.game_state['phase']}")
                 
                 if isinstance(prediction_result, tuple) and len(prediction_result) >= 1:
                     action_int = prediction_result[0]
@@ -553,22 +544,31 @@ def execute_ai_turn():
                 if success:
                     processed_units = 1
                     print(f"AI TURN: Successfully processed unit {ai_unit_id}")
-                    
-                    # Backend handlers already create proper logs - don't duplicate
-                    print(f"AI TURN: Successfully processed unit {ai_unit_id} - backend handlers created logs")
                 else:
-                    print(f"AI TURN WARNING: Action failed: {result}")
-                    # Handle unit_not_eligible as successful completion (unit already processed)
-                    if isinstance(result, dict) and result.get("error") == "unit_not_eligible":
-                        processed_units = 0  # Unit already processed, no work done
-                        print(f"AI TURN: Unit {ai_unit_id} already processed, continuing")
+                    print(f"AI TURN: Action failed: {result}")
+                    # Handle different types of action failures
+                    if isinstance(result, dict):
+                        error_type = result.get("error", "")
+                        if error_type == "unit_not_eligible":
+                            processed_units = 0  # Unit already processed, no work done
+                            print(f"AI TURN: Unit {ai_unit_id} already processed, continuing")
+                        elif "masked_in" in error_type or "forbidden_in" in error_type:
+                            # Phase violation - treat as successful skip with penalty
+                            processed_units = 1
+                            print(f"AI PHASE VIOLATION: {error_type} - unit skipped with penalty")
+                        else:
+                            # Real error - return 500
+                            return jsonify({
+                                "success": False,
+                                "error": f"AI action failed: {result}",
+                                "phase": current_phase,
+                                "unit_id": ai_unit_id
+                            }), 500
                     else:
-                        # Real error - return 500
                         return jsonify({
                             "success": False,
                             "error": f"AI action failed: {result}",
-                            "phase": current_phase,
-                            "unit_id": ai_unit_id
+                            "phase": current_phase
                         }), 500
                         
             except Exception as pe:
