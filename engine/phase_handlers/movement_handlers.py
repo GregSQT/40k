@@ -54,7 +54,6 @@ def movement_build_activation_pool(game_state: Dict[str, Any]) -> None:
     """
     eligible_units = get_eligible_units(game_state)
     game_state["move_activation_pool"] = eligible_units
-    print(f"MOVEMENT POOL CREATED: Player {game_state['current_player']} -> {eligible_units}")
 
 
 def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
@@ -186,11 +185,10 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     Implements AI_TURN.md movement restrictions and flee detection.
     """
     # Validate destination per AI_TURN.md rules - add debug
-    print(f"MOVE VALIDATION: Unit {unit['id']} trying to move to ({dest_col},{dest_row})")
     if not _is_valid_destination(game_state, dest_col, dest_row, unit, config):
-        print(f"MOVE BLOCKED: Destination ({dest_col},{dest_row}) failed validation")
+        print(f"MOVE BLOCKED: Unit {unit['id']} trying to move to ({dest_col},{dest_row}) failed validation")
         return False, {"error": "invalid_destination", "target": (dest_col, dest_row)}
-    print(f"MOVE ALLOWED: Destination ({dest_col},{dest_row}) passed validation")
+    print(f"MOVE ALLOWED: Unit {unit['id']} moved to ({dest_col},{dest_row}) passed validation")
     
     # AI_TURN.md flee detection: was adjacent to enemy before move
     was_adjacent = _is_adjacent_to_enemy(game_state, unit)
@@ -402,8 +400,10 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     
     # Execute movement
     orig_col, orig_row = unit["col"], unit["row"]
+    print(f"MOVEMENT DEBUG: Unit {unit['id']} BEFORE move: ({orig_col}, {orig_row}) -> DESTINATION: ({dest_col}, {dest_row})")
     unit["col"] = dest_col
     unit["row"] = dest_row
+    print(f"MOVEMENT DEBUG: Unit {unit['id']} AFTER move: ({unit['col']}, {unit['row']})")
     
     # Generate movement log per requested format
     if "action_logs" not in game_state:

@@ -309,24 +309,36 @@ class W40KEngine(gym.Env):
                     print(f"STEP LOGGER DEBUG: Captured pre-action position for unit {unit_id}: {(pre_unit['col'], pre_unit['row'])}")
         
         # Log action ONLY if it's a real agent action with valid unit
+        # Log action ONLY if it's a real agent action with valid unit
         if (self.step_logger and self.step_logger.enabled and success):
-            
+           
             action_type = semantic_action.get("action")
             unit_id = semantic_action.get("unitId")
-            
+           
             # Filter out system actions and invalid entries
             if (action_type in ["move", "shoot", "charge", "combat"] and
                 unit_id != "none" and unit_id != "SYSTEM"):
-                
+               
                 # Get unit coordinates AFTER action execution using semantic action unitId
                 updated_unit = self._get_unit_by_id(str(unit_id)) if unit_id else None
                 if updated_unit:
-                    # Build complete action details for step logger with CURRENT coordinates
-                    action_details = {
-                        "current_turn": self.game_state["turn"],
-                        "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
-                        "semantic_action": semantic_action
-                    }
+                    # Use PRE-ACTION position from captured data for movement logging
+                    if str(unit_id) in pre_action_positions and action_type == "move":
+                        orig_col, orig_row = pre_action_positions[str(unit_id)]
+                        action_details = {
+                            "current_turn": self.game_state["turn"],
+                            "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
+                            "semantic_action": semantic_action,
+                            "start_pos": (orig_col, orig_row),
+                            "end_pos": (updated_unit["col"], updated_unit["row"])
+                        }
+                    else:
+                        # Build complete action details for step logger with CURRENT coordinates
+                        action_details = {
+                            "current_turn": self.game_state["turn"],
+                            "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
+                            "semantic_action": semantic_action
+                        }
                 
                     # Add specific data for different action types
                     if semantic_action.get("action") == "move":
@@ -1193,9 +1205,11 @@ class W40KEngine(gym.Env):
         """Convert gym integer action to semantic action - AI selects units dynamically."""
         action_int = int(action.item()) if hasattr(action, 'item') else int(action)
         current_phase = self.game_state["phase"]
+        print(f"GYM ACTION DEBUG: AI predicted action {action_int} in phase {current_phase}")
         
         # Validate action against mask - convert invalid actions to SKIP
         action_mask = self.get_action_mask()
+        print(f"GYM ACTION DEBUG: Action mask: {action_mask}, action {action_int} valid: {action_mask[action_int]}")
         if not action_mask[action_int]:
             # Get valid unit for skip action
             eligible_units = self._get_eligible_units_for_current_phase()
@@ -1204,6 +1218,7 @@ class W40KEngine(gym.Env):
                 print(f"INVALID ACTION CONVERSION: Action {action_int} invalid in {current_phase} phase -> SKIP for unit {selected_unit_id}")
                 return {"action": "skip", "unitId": selected_unit_id, "reason": f"invalid_action_{action_int}_in_{current_phase}"}
             else:
+                print(f"GYM ACTION DEBUG: No eligible units for skip, advancing phase")
                 return {"action": "advance_phase", "from": current_phase, "reason": "no_eligible_units"}
         
         # Get eligible units for current phase - AI_TURN.md sequential activation
@@ -1294,15 +1309,24 @@ class W40KEngine(gym.Env):
         """Get eligible units for current phase using pure handler delegation."""
         current_phase = self.game_state["phase"]
         
+        print(f"DEBUG ELIGIBLE UNITS: _get_eligible_units_for_current_phase() called for phase: {current_phase}")
+        
         if current_phase == "move":
             # PURE DELEGATION: Ask handler who can act
             eligible_unit_ids = movement_handlers.get_eligible_units(self.game_state)
+            print(f"DEBUG ELIGIBLE UNITS: Movement phase returned: {eligible_unit_ids}")
             return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
         elif current_phase == "shoot":
-            # PURE DELEGATION: Ask handler who can act  
-            eligible_unit_ids = shooting_handlers.shooting_build_activation_pool(self.game_state)
-            return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
+            # USE CACHED POOL: Don't rebuild, use existing activation pool
+            existing_pool = self.game_state.get('shoot_activation_pool', [])
+            if existing_pool:
+                return [self._get_unit_by_id(uid) for uid in existing_pool if self._get_unit_by_id(uid)]
+            else:
+                # Only build pool if it doesn't exist (phase start)
+                eligible_unit_ids = shooting_handlers.shooting_build_activation_pool(self.game_state)
+                return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
         else:
+            print(f"DEBUG ELIGIBLE UNITS: Unknown phase {current_phase}, returning empty list")
             return []
     
     def _ai_select_unit(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:

@@ -893,12 +893,8 @@ def test_trained_model(model, num_episodes, training_config_name="default"):
         step_count = 0
         
         while not done and step_count < 1000:  # Prevent infinite loops
-            # Use action masking if available
-            if hasattr(env, 'get_action_mask'):
-                action_mask = env.get_action_mask()
-                action, _ = model.predict(obs, deterministic=True, action_mask=action_mask)
-            else:
-                action, _ = model.predict(obs, deterministic=True)
+            # Standard DQN doesn't support action masking
+            action, _ = model.predict(obs, deterministic=True)
             
             obs, reward, terminated, truncated, info = env.step(action)
             episode_reward += reward
@@ -1191,11 +1187,9 @@ def generate_steplog_and_replay(config, args):
             step_count = 0
             
             while not done and step_count < 1000:
-                print(f"TEST DEBUG: Step {step_count}, about to predict action")
                 action, _ = model.predict(obs, deterministic=True)
-                print(f"TEST DEBUG: Step {step_count}, predicted action {action}, about to execute")
                 obs, reward, terminated, truncated, info = env.step(action)
-                print(f"TEST DEBUG: Step {step_count}, executed. terminated={terminated}, truncated={truncated}, reward={reward:.3f}")
+                print(f"TEST DEBUG: Step {step_count}, {action} executed. terminated={terminated}, truncated={truncated}, reward={reward:.3f}")
                 done = terminated or truncated
                 step_count += 1
         
