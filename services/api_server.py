@@ -229,7 +229,6 @@ def execute_action():
     global engine
     
     if not engine:
-        print(f"🔥 AI TURN ERROR: Engine is None!")
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
     
     try:
@@ -251,18 +250,6 @@ def execute_action():
         if not action:
             return jsonify({"success": False, "error": "No action provided"}), 400
         
-        # Check if this is AI Player 2's turn in PvE mode
-        if (getattr(engine, 'is_pve_mode', False) and 
-            engine.game_state["current_player"] == 1 and 
-            action.get("action") != "ai_turn_request"):
-            
-            # Human tried to act during AI turn - reject
-            return jsonify({
-                "success": False,
-                "error": "It's AI Player 2's turn",
-                "result": {"error": "ai_turn_active"}
-            }), 400
-        
         # AI_TURN.md: Route ALL actions through engine consistently
         success, result = engine.execute_semantic_action(action)
         
@@ -271,12 +258,6 @@ def execute_action():
         for key, value in serializable_state.items():
             if isinstance(value, set):
                 serializable_state[key] = list(value)
-        
-        # Include Flask middleware logs that occurred before engine initialization
-        global flask_request_logs
-        if flask_request_logs:
-            debug_logs = flask_request_logs + debug_logs
-            flask_request_logs = []  # Clear after forwarding
         
         # Extract and send detailed action logs to frontend
         action_logs = serializable_state.get("action_logs", [])
@@ -298,8 +279,6 @@ def execute_action():
         error_details = traceback.format_exc()
         print(f"🔥 FULL ERROR TRACEBACK:")
         print(error_details)
-        print(f"🔥 ERROR TYPE: {type(e).__name__}")
-        print(f"🔥 ERROR MESSAGE: {str(e)}")
         return jsonify({
             "success": False,
             "error": f"Action execution failed: {str(e)}",

@@ -238,8 +238,37 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
             print(f"GYM AUTO-SKIP: Unit {unit['id']} - no valid destinations")
             return True, {"action": "skip", "unitId": unit["id"], "reason": "no_valid_destinations"}
     
-    # Human players get normal waiting_for_player response - no auto-movement
+    # All non-gym players (humans AND PvE AI) get normal waiting_for_player response
     return execution_result
+
+
+def _ai_select_movement_destination_pve(game_state: Dict[str, Any], unit: Dict[str, Any], valid_destinations: List[Tuple[int, int]]) -> Tuple[int, int]:
+    """PvE AI selects movement destination using strategic logic."""
+    current_pos = (unit["col"], unit["row"])
+    
+    # Filter out current position to force actual movement
+    actual_moves = [dest for dest in valid_destinations if dest != current_pos]
+    
+    if not actual_moves:
+        # No valid moves available - return current position (will trigger skip)
+        return current_pos
+    
+    # Strategy: Move toward nearest enemy for aggressive positioning
+    enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+    
+    if enemies:
+        # Find nearest enemy
+        nearest_enemy = min(enemies, key=lambda e: abs(e["col"] - unit["col"]) + abs(e["row"] - unit["row"]))
+        enemy_pos = (nearest_enemy["col"], nearest_enemy["row"])
+        
+        # Select move that gets closest to nearest enemy
+        best_move = min(actual_moves, 
+                       key=lambda dest: abs(dest[0] - enemy_pos[0]) + abs(dest[1] - enemy_pos[1]))
+        
+        return best_move
+    else:
+        # No enemies - just take first available move
+        return actual_moves[0]
 
 
 def movement_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> None:
@@ -499,14 +528,54 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     # Build valid destinations if not already built
     # AI_TURN.md COMPLIANCE: Direct field access
     if "valid_move_destinations_pool" not in game_state or not game_state["valid_move_destinations_pool"]:
+        print(f"VALIDATION DEBUG: Rebuilding destinations pool for unit {unit_id}")
         movement_build_valid_destinations_pool(game_state, unit_id)
     
     if "valid_move_destinations_pool" not in game_state:
         raise KeyError("game_state missing required 'valid_move_destinations_pool' field")
     valid_pool = game_state["valid_move_destinations_pool"]
     
+    # COMPREHENSIVE DEBUGGING: Compare AI selection with validation pool
+    print(f"VALIDATION DEBUG: AI selected destination ({dest_col}, {dest_row})")
+    print(f"VALIDATION DEBUG: Unit {unit_id} current position: {_get_unit_by_id(game_state, unit_id)}")
+    print(f"VALIDATION DEBUG: Valid destinations pool size: {len(valid_pool)}")
+    print(f"VALIDATION DEBUG: First 10 valid destinations: {valid_pool[:10]}")
+    print(f"VALIDATION DEBUG: Is AI selection in pool? {(dest_col, dest_row) in valid_pool}")
+    
     # Validate destination in valid pool
     if (dest_col, dest_row) not in valid_pool:
+        print(f"VALIDATION DEBUG: VALIDATION FAILED - Investigating pathfinding consistency")
+        
+        # Get unit for detailed analysis
+        unit = _get_unit_by_id(game_state, unit_id)
+        if unit:
+            print(f"VALIDATION DEBUG: Unit position: ({unit['col']}, {unit['row']})")
+            print(f"VALIDATION DEBUG: Unit MOVE stat: {unit['MOVE']}")
+            
+            # Test if destination would be valid with fresh pathfinding
+            hex_distance = _calculate_hex_distance(unit["col"], unit["row"], dest_col, dest_row)
+            print(f"VALIDATION DEBUG: Hex distance to destination: {hex_distance} (max: {unit['MOVE']})")
+            
+            # Check basic validity
+            is_basic_valid = _is_valid_destination(game_state, dest_col, dest_row, unit, {})
+            print(f"VALIDATION DEBUG: Basic destination validity: {is_basic_valid}")
+            
+            # Rebuild fresh pool and compare
+            print(f"VALIDATION DEBUG: Rebuilding fresh destinations pool...")
+            movement_build_valid_destinations_pool(game_state, unit_id)
+            fresh_pool = game_state["valid_move_destinations_pool"]
+            print(f"VALIDATION DEBUG: Fresh pool size: {len(fresh_pool)}")
+            print(f"VALIDATION DEBUG: Is AI selection in fresh pool? {(dest_col, dest_row) in fresh_pool}")
+            
+            # Show pool differences
+            if len(valid_pool) != len(fresh_pool):
+                print(f"VALIDATION DEBUG: POOL SIZE MISMATCH - Original: {len(valid_pool)}, Fresh: {len(fresh_pool)}")
+            
+            if (dest_col, dest_row) in fresh_pool:
+                print(f"VALIDATION DEBUG: PATHFINDING BUG DETECTED - Destination valid in fresh pool but not original")
+            else:
+                print(f"VALIDATION DEBUG: AI SELECTION ERROR - Destination invalid in both pools")
+        
         return False, {"error": "invalid_destination", "destination": (dest_col, dest_row)}
     
     unit = _get_unit_by_id(game_state, unit_id)

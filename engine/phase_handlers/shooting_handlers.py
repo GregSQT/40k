@@ -492,7 +492,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         # Execute shooting directly and return result
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
     
-    # Human players get normal waiting_for_player response
+    # All non-gym players (humans AND PvE AI) get normal waiting_for_player response
     response = {
         "while_loop_active": True,
         "validTargets": valid_targets,

@@ -772,20 +772,120 @@ onLogChargeRoll: () => {},
         return;
       }
       
-      console.log('executeAITurn proceeding with AI_TURN.md compliant sequential processing');
+      console.log('executeAITurn proceeding with sequential AI processing');
+      
+      // Helper function to make AI movement decision
+      const makeMovementDecision = (validDestinations: number[][], unitId: string, currentGameState: any) => {
+        if (!validDestinations || validDestinations.length === 0) {
+          return { action: 'skip', unitId };
+        }
+        
+        // Strategy: Move toward nearest enemy using FRESH game state
+        const enemies = currentGameState?.units.filter((u: any) => u.player === 0 && u.HP_CUR > 0) || [];
+        
+        if (enemies.length === 0) {
+          // No enemies - just take first destination
+          const dest = validDestinations[0];
+          return {
+            action: 'move',
+            unitId,
+            destCol: dest[0],
+            destRow: dest[1]
+          };
+        }
+        
+        // Find nearest enemy using fresh unit positions
+        const currentUnit = currentGameState?.units.find((u: any) => u.id === unitId);
+        if (!currentUnit) {
+          console.log(`AI DECISION ERROR: Unit ${unitId} not found in current game state`);
+          const dest = validDestinations[0];
+          return {
+            action: 'move',
+            unitId,
+            destCol: dest[0],
+            destRow: dest[1]
+          };
+        }
+        
+        console.log(`AI DECISION DEBUG: Unit ${unitId} at (${currentUnit.col}, ${currentUnit.row})`);
+        console.log(`AI DECISION DEBUG: ${validDestinations.length} valid destinations:`, validDestinations.slice(0, 10));
+        console.log(`AI DECISION DEBUG: ${enemies.length} enemies found:`, enemies.map((e: any) => `Unit ${e.id} at (${e.col}, ${e.row})`));
+        
+        const nearestEnemy = enemies.reduce((nearest: any, enemy: any) => {
+          const distToCurrent = Math.abs(enemy.col - currentUnit.col) + Math.abs(enemy.row - currentUnit.row);
+          const distToNearest = Math.abs(nearest.col - currentUnit.col) + Math.abs(nearest.row - currentUnit.row);
+          return distToCurrent < distToNearest ? enemy : nearest;
+        });
+        
+        console.log(`AI DECISION DEBUG: Nearest enemy at (${nearestEnemy.col}, ${nearestEnemy.row})`);
+        
+        // Pick destination closest to nearest enemy FROM VALID DESTINATIONS ONLY
+        const bestDestination = validDestinations.reduce((best, dest) => {
+          const distToEnemy = Math.abs(dest[0] - nearestEnemy.col) + Math.abs(dest[1] - nearestEnemy.row);
+          const bestDistToEnemy = Math.abs(best[0] - nearestEnemy.col) + Math.abs(best[1] - nearestEnemy.row);
+          console.log(`AI DECISION CALC: Destination (${dest[0]}, ${dest[1]}) distance to enemy: ${distToEnemy}, current best: ${bestDistToEnemy}`);
+          return distToEnemy < bestDistToEnemy ? dest : best;
+        });
+        
+        console.log(`AI DECISION FINAL: Selected destination (${bestDestination[0]}, ${bestDestination[1]}) from ${validDestinations.length} valid options`);
+        console.log(`AI DECISION FINAL: Target enemy at (${nearestEnemy.col}, ${nearestEnemy.row})`);
+        console.log(`AI DECISION FINAL: Is selected destination in valid list?`, validDestinations.some(dest => dest[0] === bestDestination[0] && dest[1] === bestDestination[1]));
+        
+        return {
+          action: 'move',
+          unitId,
+          destCol: bestDestination[0],
+          destRow: bestDestination[1]
+        };
+      };
+      
+      // Helper function to make AI shooting decision
+      const makeShootingDecision = (validTargets: string[], unitId: string, currentGameState: any) => {
+        if (!validTargets || validTargets.length === 0) {
+          return { action: 'skip', unitId };
+        }
+        
+        // Strategy: Shoot nearest/most threatening target using fresh game state
+        const shooter = currentGameState?.units.find((u: any) => u.id === unitId);
+        if (!shooter) {
+          return {
+            action: 'shoot',
+            unitId,
+            targetId: validTargets[0]
+          };
+        }
+        
+        // Find nearest target
+        const nearestTarget = validTargets.reduce((nearest, targetId) => {
+          const target = currentGameState?.units.find((u: any) => u.id === targetId);
+          const nearestTargetUnit = currentGameState?.units.find((u: any) => u.id === nearest);
+          
+          if (!target || !nearestTargetUnit) return nearest;
+          
+          const distToCurrent = Math.abs(target.col - shooter.col) + Math.abs(target.row - shooter.row);
+          const distToNearest = Math.abs(nearestTargetUnit.col - shooter.col) + Math.abs(nearestTargetUnit.row - shooter.row);
+          
+          return distToCurrent < distToNearest ? targetId : nearest;
+        });
+        
+        return {
+          action: 'shoot',
+          unitId,
+          targetId: nearestTarget
+        };
+      };
       
       try {
         let totalUnitsProcessed = 0;
-        let maxIterations = 10; // Safety limit to prevent infinite loops
+        let maxIterations = 20;
         let iteration = 0;
         
-        // AI_TURN.md: Sequential processing - ONE unit per API call until no more eligible
         while (iteration < maxIterations) {
           iteration++;
           
-          console.log(`AI_TURN.md Loop iteration ${iteration}: Calling backend for next AI unit`);
+          console.log(`AI Sequential Step ${iteration}: Activating next AI unit`);
           
-          // Call backend to process NEXT eligible AI unit
+          // Step 1: Call backend to activate next AI unit
           const aiResponse = await fetch(`${API_BASE}/game/ai-turn`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -793,75 +893,121 @@ onLogChargeRoll: () => {},
           });
           
           if (!aiResponse.ok) {
-            throw new Error(`AI turn request failed: ${aiResponse.status}`);
+            throw new Error(`AI activation failed: ${aiResponse.status}`);
           }
           
-          const data = await aiResponse.json();
-          console.log(`AI_TURN.md Iteration ${iteration} RESPONSE:`, data);
+          const activationData = await aiResponse.json();
+          console.log(`AI Step ${iteration} ACTIVATION:`, activationData);
           
-          if (data.success) {
-            // Process AI action logs immediately (same as human actions)
-            if (data.action_logs && data.action_logs.length > 0) {
-              data.action_logs.forEach((logEntry: any) => {
-                console.log(`🎯 AI BACKEND LOG: ${logEntry.message}`);
-                
-                // Send AI log to GameLog component via custom event
-                window.dispatchEvent(new CustomEvent('backendLogEvent', {
-                  detail: {
-                    type: logEntry.type,
-                    message: logEntry.message,
-                    turn: logEntry.turn,
-                    phase: logEntry.phase,
-                    player: logEntry.player,
-                    unitId: parseInt(logEntry.unitId),
-                    timestamp: new Date()
-                  }
-                }));
-              });
-            }
-            
-            // Update game state with backend response
-            setGameState(data.game_state);
-            
-            const unitsProcessed = data.result?.units_processed || 0;
-            totalUnitsProcessed += unitsProcessed;
-            
-            console.log(`AI_TURN.md Iteration ${iteration}: Processed ${unitsProcessed} units`);
-            
-            // Check if backend signals phase completion or no more units
-            if (data.result?.phase_complete || 
-                data.result?.units_processed === 0 ||
-                data.message?.includes('no units eligible')) {
-              console.log(`AI_TURN.md: Backend signals completion - ${data.message}`);
-              break;
-            }
-            
-            // CRITICAL FIX: Trust backend's authoritative response instead of frontend prediction
-            // Backend knows the real activation pools and eligibility rules
-            if (unitsProcessed === 0) {
-              console.log(`AI_TURN.md: Backend processed 0 units - phase complete`);
-              break;
-            }
-            
-            console.log(`AI_TURN.md: Backend processed ${unitsProcessed} units, checking for more...`);
-            
-          } else {
-            console.error(`AI_TURN.md: Backend error on iteration ${iteration}:`, data.error);
+          if (!activationData.success) {
+            console.error(`AI activation failed:`, activationData.error);
             break;
           }
           
-          // Small delay between iterations for better UX and debugging
-          await new Promise(resolve => setTimeout(resolve, 100));
+          // Update game state from activation
+          setGameState(activationData.game_state);
+          
+          // Step 2: Check if we got a preview response requiring decision
+          if (activationData.result?.waiting_for_player) {
+            console.log(`AI Step ${iteration}: Preview received - making immediate decision`);
+            
+            let aiDecision;
+            const unitId = activationData.result?.unitId || 
+                          (activationData.game_state?.active_movement_unit) ||
+                          (activationData.game_state?.active_shooting_unit);
+            
+            // Step 3: Make AI decision based on preview data using FRESH game state
+            if (activationData.result.valid_destinations) {
+              // Movement phase - pick destination using fresh backend state
+              aiDecision = makeMovementDecision(
+                activationData.result.valid_destinations, 
+                unitId,
+                activationData.game_state
+              );
+            } else if (activationData.result.validTargets) {
+              // Shooting phase - pick target using fresh backend state
+              aiDecision = makeShootingDecision(
+                activationData.result.validTargets, 
+                unitId,
+                activationData.game_state
+              );
+            } else {
+              console.error('Unknown preview type:', activationData.result);
+              break;
+            }
+            
+            console.log(`AI Step ${iteration}: Decision made:`, aiDecision);
+            
+            // Step 4: Send AI decision immediately
+            const decisionResponse = await fetch(`${API_BASE}/game/action`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(aiDecision)
+            });
+            
+            if (!decisionResponse.ok) {
+              throw new Error(`AI decision failed: ${decisionResponse.status}`);
+            }
+            
+            const decisionData = await decisionResponse.json();
+            console.log(`AI Step ${iteration}: Decision executed:`, decisionData);
+            
+            if (decisionData.success) {
+              // Process action logs
+              if (decisionData.action_logs && decisionData.action_logs.length > 0) {
+                decisionData.action_logs.forEach((logEntry: any) => {
+                  console.log(`🎯 AI ACTION LOG: ${logEntry.message}`);
+                  
+                  window.dispatchEvent(new CustomEvent('backendLogEvent', {
+                    detail: {
+                      type: logEntry.type,
+                      message: logEntry.message,
+                      turn: logEntry.turn,
+                      phase: logEntry.phase,
+                      player: logEntry.player,
+                      timestamp: new Date()
+                    }
+                  }));
+                });
+              }
+              
+              // Update game state from decision
+              setGameState(decisionData.game_state);
+              totalUnitsProcessed++;
+              
+              // Check if phase complete
+              if (decisionData.result?.phase_complete) {
+                console.log(`AI Step ${iteration}: Phase complete`);
+                break;
+              }
+              
+            } else {
+              console.error('AI decision failed:', decisionData);
+              break;
+            }
+            
+          } else if (activationData.result?.phase_complete) {
+            // Phase already complete
+            console.log(`AI Step ${iteration}: Phase complete - no more units`);
+            break;
+            
+          } else {
+            // Unexpected response format
+            console.log(`AI Step ${iteration}: Unexpected response - continuing`);
+          }
+          
+          // Small delay for UX
+          await new Promise(resolve => setTimeout(resolve, 150));
         }
         
         if (iteration >= maxIterations) {
-          console.warn(`AI_TURN.md: Reached maximum iterations (${maxIterations}) - stopping to prevent infinite loop`);
+          console.warn(`AI reached maximum iterations (${maxIterations})`);
         }
         
-        console.log(`AI_TURN.md: Complete - processed ${totalUnitsProcessed} units in ${iteration} iterations`);
+        console.log(`AI Turn Complete: processed ${totalUnitsProcessed} units in ${iteration} steps`);
         
       } catch (err) {
-        console.error('AI_TURN.md: Loop error:', err);
+        console.error('AI turn error:', err);
         setError(`AI turn failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
       } finally {
         aiTurnInProgress = false;
