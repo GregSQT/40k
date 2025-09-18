@@ -69,14 +69,10 @@ export const BoardWithAPI: React.FC = () => {
         !apiProps.unitsMoved.includes(typeof unit.id === 'string' ? parseInt(unit.id) : unit.id)
       );
     } else if (currentPhase === 'shoot') {
-      // Check if any AI units can shoot - must not be already shot and have shots remaining
-      hasEligibleAIUnits = apiProps.gameState.units.some(unit => {
-        const unitIdStr = typeof unit.id === 'string' ? unit.id : unit.id.toString();
-        const alreadyShot = apiProps.unitsMoved.some(id => id.toString() === unitIdStr);
-        const hasShots = (unit.SHOOT_LEFT ?? 0) > 0;
-        const isAlive = (unit.HP_CUR ?? unit.HP_MAX) > 0;
-        
-        return unit.player === 1 && isAlive && !alreadyShot && hasShots;
+      // Trust the backend eligibility - if there are any AI units eligible, let the backend handle it
+      hasEligibleAIUnits = apiProps.eligibleUnitIds.some(unitId => {
+        const unit = apiProps.gameState.units.find(u => (typeof u.id === 'string' ? parseInt(u.id) : u.id) === unitId);
+        return unit && unit.player === 1;
       });
     } else if (currentPhase === 'charge') {
       // Check if any AI units can charge

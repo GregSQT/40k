@@ -94,8 +94,11 @@ class W40KEngine(gym.Env):
             # Use provided config directly and add gym_training_mode
             self.config = config.copy()
             self.config["gym_training_mode"] = gym_training_mode
+            # CRITICAL: Ensure pve_mode is in config for handler delegation
+            if "pve_mode" not in self.config:
+                self.config["pve_mode"] = config.get("pve_mode", False)
             print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} added to existing config")
-            print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config['gym_training_mode'] if 'gym_training_mode' in self.config else 'MISSING'}")
+            print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config.get('gym_training_mode', 'MISSING')}")
         
         # Store training system compatibility parameters
         self.quiet = quiet
@@ -676,6 +679,25 @@ class W40KEngine(gym.Env):
         
         return success, result
     
+    def _process_shooting_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """AI_SHOOT.md EXACT: Pure engine orchestration - handler manages everything"""
+        
+        # Get current unit for handler (handler expects unit parameter)
+        unit_id = action.get("unitId")
+        current_unit = None
+        if unit_id:
+            current_unit = self._get_unit_by_id(unit_id)
+        
+        # **FULL DELEGATION**: shooting_handlers.execute_action(game_state, unit, action, config)
+        success, result = shooting_handlers.execute_action(self.game_state, current_unit, action, self.config)
+        
+        # Check response for phase_complete flag
+        if result.get("phase_complete"):
+            print(f"DEBUG: Phase completion detected, transitioning to next phase")
+            result["phase_transition"] = True
+            
+        return success, result
+    
     # AI_IMPLEMENTATION.md: Movement logic delegated to movement_handlers.py
     # All movement validation and execution now handled by pure functions
     
@@ -821,32 +843,9 @@ class W40KEngine(gym.Env):
         return shooting_handlers._get_accurate_hex_line(start_col, start_row, end_col, end_row)
     
     def _execute_shooting_action(self, unit: Dict[str, Any], action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """Execute semantic shooting action with AI_TURN.md restrictions."""
-        
-        action_type = action.get("action")
-        
-        if action_type == "shoot":
-            target_id = action.get("targetId")
-            if not target_id:
-                return False, {"error": "missing_target", "action": action}
-            
-            target = self._get_unit_by_id(str(target_id))
-            if not target:
-                return False, {"error": "target_not_found", "targetId": target_id}
-            
-            return self._attempt_shooting(unit, target)
-            
-        elif action_type == "skip":
-            self.game_state["units_shot"].add(unit["id"])
-            return True, {"action": "skip", "unitId": unit["id"]}
-            
-        elif action_type == "advance_phase":
-            # Handle empty pool phase advancement
-            if action.get("phase") == "shoot":
-                return True, shooting_handlers._shooting_phase_complete(self.game_state)
-                
-        else:
-            return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "shoot"}
+        """DEPRECATED: Use _process_shooting_phase instead for full handler delegation."""
+        # Redirect to proper shooting phase handler
+        return self._process_shooting_phase(action)
     
     def _attempt_shooting(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Attempt shooting with AI_TURN.md damage resolution."""

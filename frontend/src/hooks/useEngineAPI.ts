@@ -763,14 +763,85 @@ onLogChargeRoll: () => {},
         hasGameState: !!gameState,
         gameStatePveMode: gameState?.pve_mode,
         isPvEFromURL,
+        currentPlayer: gameState?.current_player,
+        phase: gameState?.phase,
+        aiUnitsInPool: gameState?.phase === 'shoot' ? gameState?.shoot_activation_pool?.filter(id => {
+          const unit = gameState?.units.find(u => u.id === id);
+          return unit?.player === 1;
+        }).length : gameState?.phase === 'move' ? gameState?.move_activation_pool?.filter(id => {
+          const unit = gameState?.units.find(u => u.id === id);
+          return unit?.player === 1;
+        }).length : 0,
         willProceed: !(!gameState || (!gameState.pve_mode && !isPvEFromURL))
       });
       
       if (!gameState || (!gameState.pve_mode && !isPvEFromURL)) {
-        console.log('executeAITurn returning early');
+        console.log('executeAITurn returning early - not PvE mode');
         aiTurnInProgress = false;
         return;
       }
+      
+      // Check if it's AI player's turn (player 1)
+      if (gameState.current_player !== 1) {
+        console.log(`executeAITurn skipped - not AI player turn (current: ${gameState.current_player})`);
+        aiTurnInProgress = false;
+        return;
+      }
+      
+      // Check if AI has eligible units in current phase
+      const phaseCheck = gameState.phase;
+      let eligibleAICount = 0;
+      
+      if (phaseCheck === 'shoot' && gameState.shoot_activation_pool) {
+        eligibleAICount = gameState.shoot_activation_pool.filter(unitId => {
+          const unit = gameState.units.find(u => u.id === unitId);
+          return unit && unit.player === 1;
+        }).length;
+      } else if (phaseCheck === 'move' && gameState.move_activation_pool) {
+        eligibleAICount = gameState.move_activation_pool.filter(unitId => {
+          const unit = gameState.units.find(u => u.id === unitId);
+          return unit && unit.player === 1;
+        }).length;
+      }
+      
+      if (eligibleAICount === 0) {
+        console.log(`executeAITurn skipped - AI has no eligible units in ${phaseCheck} phase (total pool: ${phaseCheck === 'shoot' ? gameState.shoot_activation_pool?.length : gameState.move_activation_pool?.length})`);
+        aiTurnInProgress = false;
+        return;
+      }
+      
+      console.log(`executeAITurn proceeding - AI has ${eligibleAICount} eligible units in ${phaseCheck} phase`);
+      
+      // Check if it's AI player's turn (player 1)
+      if (gameState.current_player !== 1) {
+        console.log(`executeAITurn returning early - not AI player turn (current: ${gameState.current_player})`);
+        aiTurnInProgress = false;
+        return;
+      }
+      
+      // Check if AI has eligible units in current phase
+      const currentPhase = gameState.phase;
+      let aiEligibleUnits = 0;
+      
+      if (currentPhase === 'move' && gameState.move_activation_pool) {
+        aiEligibleUnits = gameState.move_activation_pool.filter(unitId => {
+          const unit = gameState.units.find(u => u.id === unitId);
+          return unit && unit.player === 1;
+        }).length;
+      } else if (currentPhase === 'shoot' && gameState.shoot_activation_pool) {
+        aiEligibleUnits = gameState.shoot_activation_pool.filter(unitId => {
+          const unit = gameState.units.find(u => u.id === unitId);
+          return unit && unit.player === 1;
+        }).length;
+      }
+      
+      if (aiEligibleUnits === 0) {
+        console.log(`executeAITurn returning early - no eligible AI units in ${currentPhase} phase (pool: ${currentPhase === 'move' ? gameState.move_activation_pool : gameState.shoot_activation_pool})`);
+        aiTurnInProgress = false;
+        return;
+      }
+      
+      console.log(`executeAITurn proceeding - AI has ${aiEligibleUnits} eligible units in ${currentPhase} phase`);
       
       console.log('executeAITurn proceeding with sequential AI processing');
       

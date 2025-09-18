@@ -37,18 +37,72 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
 def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     """
-    EXACT COPY from w40k_engine_save.py working validation logic
+    AI_TURN.md: Build activation pool with comprehensive debug logging
     """
     current_player = game_state["current_player"]
     shoot_activation_pool = []
+    
+    print(f"SHOOT POOL DEBUG: Building pool for player {current_player}")
+    print(f"SHOOT POOL DEBUG: Total units in game: {len(game_state['units'])}")
+    
     for unit in game_state["units"]:
+        print(f"SHOOT POOL DEBUG: Checking unit {unit['id']} (player {unit['player']}) at ({unit['col']},{unit['row']})")
         if _has_valid_shooting_targets(game_state, unit, current_player):
             shoot_activation_pool.append(unit["id"])
+            print(f"SHOOT POOL DEBUG: Unit {unit['id']} ADDED to pool")
+        else:
+            print(f"SHOOT POOL DEBUG: Unit {unit['id']} REJECTED from pool")
+    
+    print(f"SHOOT POOL DEBUG: Final pool: {shoot_activation_pool}")
     
     # Update game_state pool
     game_state["shoot_activation_pool"] = shoot_activation_pool
     return shoot_activation_pool
 
+def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_targets: List[str]) -> str:
+    """AI target selection using RewardMapper system"""
+    print(f"AI TARGET SELECTION CALLED: unit={unit_id}, targets={valid_targets}")
+    if not valid_targets:
+        return ""
+    
+    unit = _get_unit_by_id(game_state, unit_id)
+    if not unit:
+        return valid_targets[0]
+    
+    try:
+        from ai.reward_mapper import RewardMapper
+        
+        rewards_config = game_state.get("rewards_config")
+        if not rewards_config:
+            return valid_targets[0]
+        
+        reward_mapper = RewardMapper(rewards_config)
+        
+        # Build target list for reward mapper
+        all_targets = [_get_unit_by_id(game_state, tid) for tid in valid_targets if _get_unit_by_id(game_state, tid)]
+        
+        best_target = valid_targets[0]
+        best_reward = -999999
+        
+        for target_id in valid_targets:
+            target = _get_unit_by_id(game_state, target_id)
+            if not target:
+                continue
+            
+            can_melee_charge = False  # TODO: implement melee charge check
+            
+            reward = reward_mapper.get_shooting_priority_reward(unit, target, all_targets, can_melee_charge)
+            
+            if reward > best_reward:
+                best_reward = reward
+                best_target = target_id
+        
+        print(f"AI SHOOTING: Unit {unit_id} selected target {best_target} (reward: {best_reward})")
+        return best_target
+        
+    except Exception as e:
+        print(f"AI target selection error: {e}")
+        return valid_targets[0]
 
 def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any], current_player: int) -> bool:
     """
@@ -483,16 +537,18 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     
     # CLEAN FLAG DETECTION: Use config parameter like movement handlers
     is_gym_training = config.get("gym_training_mode", False)
+    is_pve_ai = config.get("pve_mode", False) and game_state.get("current_player") == 1
+    print(f"DEBUG PVE: config keys={list(config.keys())}, pve_mode={config.get('pve_mode')}, current_player={game_state.get('current_player')}, is_pve_ai={is_pve_ai}")
     
-    if is_gym_training and valid_targets:
-        # GYM AUTO-SHOOT: Select target and execute shooting automatically
+    if (is_gym_training or is_pve_ai) and valid_targets:
+        # AUTO-SHOOT: Select target and execute shooting automatically
         target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
-        print(f"GYM AUTO-SHOOT: Unit {unit_id} targeting {target_id}")
+        print(f"AUTO-SHOOT: Unit {unit_id} targeting {target_id}")
         
         # Execute shooting directly and return result
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
     
-    # All non-gym players (humans AND PvE AI) get normal waiting_for_player response
+    # Only humans get waiting_for_player response
     response = {
         "while_loop_active": True,
         "validTargets": valid_targets,
@@ -579,8 +635,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     # AI_SHOOT.md action routing
     if action_type == "activate_unit":
         result = shooting_unit_activation_start(game_state, unit_id)
+        print(f"ACTIVATION DEBUG: unit={unit_id}, result={result}")
         if result.get("success"):
+            print(f"ACTIVATION DEBUG: Calling execution loop for unit {unit_id}")
             return _shooting_unit_execution_loop(game_state, unit_id, config)
+        print(f"ACTIVATION DEBUG: Activation failed for unit {unit_id}, returning result")
         return True, result
     
     elif action_type == "shoot":
@@ -972,67 +1031,6 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     """Legacy compatibility - use shooting_build_activation_pool instead"""
     pool = shooting_build_activation_pool(game_state)
     return pool
-
-def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_targets: List[str]) -> str:
-    """AI target selection using ACTUAL reward_mapper priorities from ai/reward_mapper.py."""
-    
-    unit = _get_unit_by_id(game_state, unit_id)
-    if not unit or not valid_targets:
-        return valid_targets[0] if valid_targets else ""
-    
-    # Use actual reward_mapper system
-    try:
-        from ai.reward_mapper import RewardMapper
-        
-        # Get rewards config from game_state (passed from engine)
-        # AI_TURN.md COMPLIANCE: Direct field access
-        if "rewards_config" not in game_state:
-            return valid_targets[0]
-        rewards_config = game_state["rewards_config"]
-        if not rewards_config:
-            return valid_targets[0]
-        
-        reward_mapper = RewardMapper(rewards_config)
-        
-        # Enrich unit and targets for reward mapper (matching engine format)
-        enriched_unit = _enrich_unit_for_reward_mapper(unit, game_state)
-        enriched_targets = [_enrich_unit_for_reward_mapper(_get_unit_by_id(game_state, tid), game_state) 
-                          for tid in valid_targets if _get_unit_by_id(game_state, tid)]
-        
-        # Check if melee units can charge any target
-        can_melee_charge_targets = {}
-        for target_id in valid_targets:
-            target = _get_unit_by_id(game_state, target_id)
-            if target:
-                can_melee_charge_targets[target_id] = _check_if_melee_can_charge(target, game_state)
-        
-        best_target = valid_targets[0]
-        best_reward = -999999
-        
-        for target_id in valid_targets:
-            target = _get_unit_by_id(game_state, target_id)
-            if not target:
-                continue
-                
-            enriched_target = _enrich_unit_for_reward_mapper(target, game_state)
-            can_melee_charge = can_melee_charge_targets.get(target_id, False)
-            
-            # Use RewardMapper's shooting priority system
-            reward = reward_mapper.get_shooting_priority_reward(
-                enriched_unit, 
-                enriched_target, 
-                enriched_targets, 
-                can_melee_charge
-            )
-            
-            if reward > best_reward:
-                best_reward = reward
-                best_target = target_id
-        
-        return best_target
-        
-    except Exception as e:
-        return valid_targets[0]
 
 def _calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
     """Calculate target priority score using AI_GAME_OVERVIEW.md logic."""
