@@ -8,6 +8,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any
+from .generic_handlers import end_activation
 
 
 def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -552,8 +553,30 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     # Clear preview
     movement_clear_preview(game_state)
     
-    # End activation
-    return _end_activation(game_state, unit, was_adjacent)
+    # End activation with position data for reward calculation
+    # AI_TURN.md EXACT: end_activation(Arg1, Arg2, Arg3, Arg4, Arg5)
+    action_type = "FLED" if was_adjacent else "MOVE"
+    result = end_activation(
+        game_state, unit,
+        "ACTION",      # Arg1: Log the action (movement already logged)
+        1,             # Arg2: +1 step increment  
+        action_type,   # Arg3: MOVE or FLED tracking
+        "MOVE",        # Arg4: Remove from move_activation_pool
+        0              # Arg5: No error logging
+    )
+    
+    # Add position data for reward calculation
+    result.update({
+        "action": "flee" if was_adjacent else "move",
+        "unitId": unit["id"],
+        "fromCol": orig_col,
+        "fromRow": orig_row,
+        "toCol": dest_col,
+        "toRow": dest_row,
+        "activation_complete": True
+    })
+    
+    return True, result
 
 
 def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
@@ -568,56 +591,28 @@ def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any
 
 def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """AI_MOVE.md: Handle skip action"""
-    # Generate WAIT log for cancelled movement
-    if "action_logs" not in game_state:
-        game_state["action_logs"] = []
-    
-    game_state["action_logs"].append({
-        "type": "wait",
-        "message": f"Unit {unit['id']} ({unit['col']}, {unit['row']}) WAIT",
-        "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
-        "phase": "move",
-        "unitId": unit["id"],
-        "player": unit["player"],
-        "col": unit["col"],
-        "row": unit["row"],
-        "timestamp": "server_time"
-    })
+    # REMOVED: Duplicate logging - AI_TURN.md end_activation handles ALL logging
+    # AI_TURN.md PRINCIPLE: end_activation is SINGLE SOURCE for action logging
     
     movement_clear_preview(game_state)
-    return _end_activation(game_state, unit, False)
-
-
-def _end_activation(game_state: Dict[str, Any], unit: Dict[str, Any], was_adjacent: bool) -> Tuple[bool, Dict[str, Any]]:
-    """AI_MOVE.md: End unit activation"""
-    # Apply tracking
-    game_state["units_moved"].add(unit["id"])
-    if was_adjacent:
-        game_state["units_fled"].add(unit["id"])
     
-    # Remove from activation pool - CRITICAL: Ensure unit is only removed once
-    if unit["id"] in game_state["move_activation_pool"]:
-        game_state["move_activation_pool"].remove(unit["id"])
-        print(f"MOVEMENT POOL REMOVAL: Unit {unit['id']} removed. Remaining: {game_state['move_activation_pool']}")
+    # AI_TURN.md EXACT: end_activation for skip action
+    result = end_activation(
+        game_state, unit,
+        "WAIT",        # Arg1: Log wait action (SINGLE SOURCE)
+        1,             # Arg2: +1 step increment
+        "MOVE",        # Arg3: Mark as moved (even for skip)
+        "MOVE",        # Arg4: Remove from move_activation_pool
+        0              # Arg5: No error logging
+    )
     
-    # CRITICAL FIX: Clear active movement unit to prevent double processing
-    # AI_TURN.md COMPLIANCE: Direct field access
-    if "active_movement_unit" in game_state and game_state["active_movement_unit"] == unit["id"]:
-        game_state["active_movement_unit"] = None
-        print(f"MOVEMENT DEBUG: Cleared active_movement_unit for {unit['id']}")
-    
-    # Clear active unit
-    game_state["active_movement_unit"] = None
-    
-    # Check phase completion
-    if not game_state["move_activation_pool"]:
-        return True, movement_phase_end(game_state)
-    
-    return True, {
-        "action": "flee" if was_adjacent else "move",
+    result.update({
+        "action": "skip",
         "unitId": unit["id"],
         "activation_complete": True
-    }
+    })
+    
+    return True, result
 
 
 def movement_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:

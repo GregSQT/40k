@@ -118,6 +118,7 @@ class W40KEngine(gym.Env):
             # Core game state
             "units": [],
             "current_player": 0,
+            "gym_training_mode": self.config["gym_training_mode"],  # Embed for handler access
             "phase": "move",
             "turn": 1,
             "episode_steps": 0,

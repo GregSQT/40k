@@ -453,7 +453,7 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     
     return response
 
-def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool, Dict[str, Any]]:
+def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_TURN.md EXACT: Execute While SHOOT_LEFT > 0 loop automatically
     """
@@ -481,14 +481,8 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> T
             result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
             return True, result
     
-    # CLEAN FLAG DETECTION: Use explicit gym_training_mode from engine
-    # AI_TURN.md COMPLIANCE: Direct field access chain
-    if "config" not in game_state:
-        is_gym_training = False
-    elif "gym_training_mode" not in game_state["config"]:
-        is_gym_training = False
-    else:
-        is_gym_training = game_state["config"]["gym_training_mode"]
+    # CLEAN FLAG DETECTION: Use config parameter like movement handlers
+    is_gym_training = config.get("gym_training_mode", False)
     
     if is_gym_training and valid_targets:
         # GYM AUTO-SHOOT: Select target and execute shooting automatically
@@ -496,7 +490,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> T
         print(f"GYM AUTO-SHOOT: Unit {unit_id} targeting {target_id}")
         
         # Execute shooting directly and return result
-        return shooting_target_selection_handler(game_state, unit_id, str(target_id))
+        return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
     
     # Human players get normal waiting_for_player response
     response = {
@@ -586,7 +580,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if action_type == "activate_unit":
         result = shooting_unit_activation_start(game_state, unit_id)
         if result.get("success"):
-            return _shooting_unit_execution_loop(game_state, unit_id)
+            return _shooting_unit_execution_loop(game_state, unit_id, config)
         return True, result
     
     elif action_type == "shoot":
@@ -627,7 +621,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             print(f"EXECUTE DEBUG: AI selected target: {target_id}")
         
         # Execute shooting directly without UI loops
-        return shooting_target_selection_handler(game_state, unit_id, str(target_id))
+        return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
     
     elif action_type == "wait" or action_type == "skip":
         # Handle gym wait/skip actions - unit chooses not to shoot
@@ -642,7 +636,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     elif action_type == "left_click":
         target_id = action.get("targetId")
-        return shooting_click_handler(game_state, unit_id, action)
+        return shooting_click_handler(game_state, unit_id, action, config)
     
     elif action_type == "right_click":
         return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
@@ -654,7 +648,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "shoot"}
 
 
-def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_SHOOT.md: Route click actions to appropriate handlers
     """
@@ -670,26 +664,26 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
         click_target = action["clickTarget"]
     
     if click_target in ["target", "enemy"] and target_id:
-        return shooting_target_selection_handler(game_state, unit_id, target_id)
+        return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
     
     elif click_target == "friendly_unit" and target_id:
         # Left click on another unit in pool - switch units
         if "shoot_activation_pool" not in game_state:
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
         if target_id in game_state["shoot_activation_pool"]:
-            return _handle_unit_switch_with_context(game_state, unit_id, target_id)
+            return _handle_unit_switch_with_context(game_state, unit_id, target_id, config)
         return False, {"error": "unit_not_in_pool", "targetId": target_id}
     
     elif click_target == "active_unit":
         # Left click on active unit - no effect or show targets again
-        return _shooting_unit_execution_loop(game_state, unit_id)
+        return _shooting_unit_execution_loop(game_state, unit_id, config)
     
     else:
         # Left click elsewhere - continue selection
         return True, {"action": "continue_selection", "context": "elsewhere_clicked"}
 
 
-def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, target_id: str) -> Tuple[bool, Dict[str, Any]]:
+def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, target_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_SHOOT.md: Handle target selection and shooting execution
     """    
@@ -718,7 +712,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     unit["SHOOT_LEFT"] -= 1
     
     # Continue execution loop to check for more shots or end activation
-    result = _shooting_unit_execution_loop(game_state, unit_id)
+    result = _shooting_unit_execution_loop(game_state, unit_id, config)
     return result
 
 
@@ -899,7 +893,7 @@ def _calculate_wound_target(strength: int, toughness: int) -> int:
         return 5
 
 
-def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id: str, new_unit_id: str) -> Tuple[bool, Dict[str, Any]]:
+def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id: str, new_unit_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_SHOOT.md: Handle switching between units in activation pool
     """
@@ -913,7 +907,7 @@ def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id
     if new_unit:
         result = shooting_unit_activation_start(game_state, new_unit_id)
         if result.get("success"):
-            return _shooting_unit_execution_loop(game_state, new_unit_id)
+            return _shooting_unit_execution_loop(game_state, new_unit_id, config)
     
     return False, {"error": "unit_switch_failed"}
 
