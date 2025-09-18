@@ -89,6 +89,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     """
     AI_MOVE.md: Handler action routing with complete autonomy
     """
+    # Handler self-initialization on first action
+    if game_state.get("phase") != "move" or not game_state.get("move_activation_pool"):
+        movement_phase_start(game_state)
+    
     # Pool empty? → Phase complete
     if not game_state["move_activation_pool"]:
         return True, movement_phase_end(game_state)

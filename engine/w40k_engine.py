@@ -566,11 +566,6 @@ class W40KEngine(gym.Env):
     def _process_movement_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """AI_MOVE.md EXACT: Pure engine orchestration - handler manages everything"""
         
-        # First call to phase? → movement_phase_start(game_state)
-        if not hasattr(self, '_movement_phase_initialized') or not self._movement_phase_initialized:
-            movement_handlers.movement_phase_start(self.game_state)
-            self._movement_phase_initialized = True
-        
         # Get current unit for handler (handler expects unit parameter)
         unit_id = action.get("unitId")
         current_unit = None
