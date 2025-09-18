@@ -42,18 +42,9 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     current_player = game_state["current_player"]
     shoot_activation_pool = []
     
-    print(f"SHOOT POOL DEBUG: Building pool for player {current_player}")
-    print(f"SHOOT POOL DEBUG: Total units in game: {len(game_state['units'])}")
-    
     for unit in game_state["units"]:
-        print(f"SHOOT POOL DEBUG: Checking unit {unit['id']} (player {unit['player']}) at ({unit['col']},{unit['row']})")
         if _has_valid_shooting_targets(game_state, unit, current_player):
             shoot_activation_pool.append(unit["id"])
-            print(f"SHOOT POOL DEBUG: Unit {unit['id']} ADDED to pool")
-        else:
-            print(f"SHOOT POOL DEBUG: Unit {unit['id']} REJECTED from pool")
-    
-    print(f"SHOOT POOL DEBUG: Final pool: {shoot_activation_pool}")
     
     # Update game_state pool
     game_state["shoot_activation_pool"] = shoot_activation_pool
@@ -140,19 +131,19 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     if unit["RNG_NB"] <= 0:
         return False
     
-    # Check for valid targets
+    # Check for valid targets with detailed debugging
     valid_targets_found = []
+    print(f"SHOOT DEBUG: Unit {unit['id']} checking {len([u for u in game_state['units'] if u['player'] != unit['player'] and u['HP_CUR'] > 0])} potential targets")
+    
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             is_valid = _is_valid_shooting_target(game_state, unit, enemy)
+            print(f"SHOOT DEBUG: Unit {unit['id']} -> Target {enemy['id']} at ({enemy['col']},{enemy['row']}): {'VALID' if is_valid else 'INVALID'}")
             if is_valid:
                 valid_targets_found.append(enemy["id"])
     
-    # Debug logging for shooting eligibility
-    if valid_targets_found:
-        return True
-    else:
-        return False
+    print(f"SHOOT DEBUG: Unit {unit['id']} final valid targets: {valid_targets_found}")
+    return len(valid_targets_found) > 0
 
 
 def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
@@ -165,14 +156,17 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     if "RNG_RNG" not in shooter:
         raise KeyError(f"Shooter missing required 'RNG_RNG' field: {shooter}")
     if distance > shooter["RNG_RNG"]:
+        print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: RANGE FAIL (distance={distance}, max={shooter['RNG_RNG']})")
         return False
         
     # Dead target check
     if target["HP_CUR"] <= 0:
+        print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: DEAD TARGET (HP={target['HP_CUR']})")
         return False
         
     # Friendly fire check
     if target["player"] == shooter["player"]:
+        print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: FRIENDLY FIRE")
         return False
     
     # Adjacent check - can't shoot at adjacent enemies (melee range)
@@ -180,10 +174,17 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     if "CC_RNG" not in shooter:
         raise KeyError(f"Shooter missing required 'CC_RNG' field: {shooter}")
     if distance <= shooter["CC_RNG"]:
+        print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: TOO CLOSE (distance={distance}, CC_RNG={shooter['CC_RNG']})")
         return False
         
     # Line of sight check
-    return _has_line_of_sight(game_state, shooter, target)
+    has_los = _has_line_of_sight(game_state, shooter, target)
+    if not has_los:
+        print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: NO LINE OF SIGHT")
+        return False
+    
+    print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: VALID TARGET")
+    return True
 
 def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> Dict[str, Any]:
     """
@@ -441,6 +442,10 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     shooting_activation_end(Arg1, Arg2, Arg3, Arg4, Arg5)
     """
     
+    # DIAGNOSTIC: Log exactly why this unit is being ended
+    print(f"🔍 SHOOTING_ACTIVATION_END: Unit {unit['id']}, arg1={arg1}, arg3={arg3}, arg4={arg4}")
+    print(f"🔍 UNIT_STATE: SHOOT_LEFT={unit.get('SHOOT_LEFT', 'missing')}, valid_target_pool={unit.get('valid_target_pool', 'missing')}")
+    
     # Arg2 step increment
     # AI_TURN.md COMPLIANCE: Direct field access with validation
     if arg2 == 1:
@@ -537,10 +542,24 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     
     # CLEAN FLAG DETECTION: Use config parameter like movement handlers
     is_gym_training = config.get("gym_training_mode", False)
-    is_pve_ai = config.get("pve_mode", False) and game_state.get("current_player") == 1
-    print(f"DEBUG PVE: config keys={list(config.keys())}, pve_mode={config.get('pve_mode')}, current_player={game_state.get('current_player')}, is_pve_ai={is_pve_ai}")
+    # Fix: Check if unit belongs to AI player (player 1) instead of relying on current_player
+    unit = _get_unit_by_id(game_state, unit_id)
+    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
+    # CRITICAL FIX: Also trigger auto-shooting for AI units in training mode
+    is_training_ai = is_gym_training and unit is not None  # Proper boolean evaluation
+    print(f"DEBUG PVE: config pve_mode={config.get('pve_mode')}, unit_player={unit['player'] if unit else 'None'}, is_pve_ai={is_pve_ai}")
+    print(f"DEBUG PVE: valid_targets={valid_targets}, will_auto_shoot={(is_gym_training or is_pve_ai) and valid_targets}")
     
-    if (is_gym_training or is_pve_ai) and valid_targets:
+    print(f"AUTO-SHOOT CHECK: unit={unit_id}, is_gym_training={is_gym_training}, is_pve_ai={is_pve_ai}, is_training_ai={is_training_ai}, valid_targets={len(valid_targets) if valid_targets else 0}")
+    print(f"🔍 PVE_DETECTION_CHAIN:")
+    print(f"  config.pve_mode = {config.get('pve_mode', 'MISSING')}")
+    print(f"  game_state.pve_mode = {game_state.get('pve_mode', 'MISSING')}")
+    print(f"  unit.player = {unit['player'] if unit else 'NO_UNIT'}")
+    print(f"  is_pve_ai = {is_pve_ai}")
+    print(f"  is_training_ai = {is_training_ai}")
+    print(f"  auto_shoot_condition = {(is_gym_training or is_pve_ai or is_training_ai) and valid_targets}")
+    
+    if (is_gym_training or is_pve_ai or is_training_ai) and valid_targets:
         # AUTO-SHOOT: Select target and execute shooting automatically
         target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
         print(f"AUTO-SHOOT: Unit {unit_id} targeting {target_id}")
@@ -634,12 +653,16 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     # AI_SHOOT.md action routing
     if action_type == "activate_unit":
+        print(f"🔍 ACTIVATE_UNIT_ENTRY: unit={unit_id}, phase={game_state.get('phase')}, player={unit['player'] if unit else 'NO_UNIT'}")
         result = shooting_unit_activation_start(game_state, unit_id)
-        print(f"ACTIVATION DEBUG: unit={unit_id}, result={result}")
+        print(f"🔍 ACTIVATION_START_RESULT: {result}")
         if result.get("success"):
-            print(f"ACTIVATION DEBUG: Calling execution loop for unit {unit_id}")
-            return _shooting_unit_execution_loop(game_state, unit_id, config)
-        print(f"ACTIVATION DEBUG: Activation failed for unit {unit_id}, returning result")
+            print(f"🔍 CALLING_EXECUTION_LOOP: unit={unit_id}")
+            execution_result = _shooting_unit_execution_loop(game_state, unit_id, config)
+            print(f"🔍 EXECUTION_LOOP_RESULT: success={execution_result[0] if isinstance(execution_result, tuple) else 'NOT_TUPLE'}")
+            print(f"🔍 EXECUTION_LOOP_DATA: {execution_result[1] if isinstance(execution_result, tuple) and len(execution_result) > 1 else 'NO_DATA'}")
+            return execution_result
+        print(f"🔍 ACTIVATION_FAILED: unit={unit_id}, returning={result}")
         return True, result
     
     elif action_type == "shoot":

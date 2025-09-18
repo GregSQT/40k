@@ -77,6 +77,11 @@ class W40KEngine(gym.Env):
             # Load base configuration
             board_config = config_loader.get_board_config()
             
+            # CRITICAL FIX: Initialize PvE mode BEFORE config creation
+            # Training mode: no PvE mode needed
+            # PvE mode: will be set later in constructor
+            pve_mode_value = False  # Default for training
+            
             self.config = {
                 "board": board_config,
                 "units": self._load_units_from_scenario(scenario_file, unit_registry),
@@ -86,7 +91,8 @@ class W40KEngine(gym.Env):
                 "controlled_agent": controlled_agent,
                 "active_agents": active_agents,
                 "quiet": quiet,
-                "gym_training_mode": gym_training_mode  # CRITICAL: Pass flag to handlers
+                "gym_training_mode": gym_training_mode,  # CRITICAL: Pass flag to handlers
+                "pve_mode": pve_mode_value  # CRITICAL: Add PvE mode for handler detection
             }
             print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} stored in config")
             print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config['gym_training_mode'] if 'gym_training_mode' in self.config else 'MISSING'}")
@@ -114,6 +120,9 @@ class W40KEngine(gym.Env):
             self.is_pve_mode = config["pve_mode"]
         else:
             self.is_pve_mode = False
+        
+        # CRITICAL FIX: Update config with actual PvE mode value
+        self.config["pve_mode"] = self.is_pve_mode
         self._ai_model = None
         
         # CRITICAL: Initialize game_state FIRST before any other operations
@@ -458,6 +467,10 @@ class W40KEngine(gym.Env):
         if current_player != 1:  # AI is player 1
             return False, {"error": "not_ai_player_turn", "current_player": current_player}
         
+        current_phase = self.game_state["phase"]
+        print(f"EXECUTE_AI_TURN DEBUG: phase={current_phase}, current_player={current_player}")
+        print(f"EXECUTE_AI_TURN DEBUG: about to call _make_ai_decision()")
+        
         # Check AI model availability
         if not hasattr(self, '_ai_model') or not self._ai_model:
             return False, {"error": "ai_model_not_loaded"}
@@ -588,6 +601,9 @@ class W40KEngine(gym.Env):
         Process semantic action with detailed execution debugging.
         """
         current_phase = self.game_state["phase"]
+        
+        # DIAGNOSTIC: Log exact routing path
+        print(f"🔍 SEMANTIC_ACTION_ROUTING: action={action.get('action')}, phase={current_phase}, unitId={action.get('unitId')}")
         
         # CRITICAL: Handle invalid actions with proper end_activation call
         if action.get("action") == "invalid":
@@ -1343,8 +1359,9 @@ class W40KEngine(gym.Env):
                 return {"action": "skip", "unitId": selected_unit_id}
         elif current_phase == "shoot":
             if action_int == 4:  # Shoot action
+                print(f"🔍 AI_SHOOTING_ACTION: Creating activate_unit for unit {selected_unit_id}")
                 return {
-                    "action": "shoot", 
+                    "action": "activate_unit", 
                     "unitId": selected_unit_id
                 }
             elif action_int == 7:  # WAIT - agent chooses not to shoot

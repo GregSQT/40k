@@ -1057,6 +1057,17 @@ onLogChargeRoll: () => {},
               break;
             }
             
+          } else if (activationData.result?.activation_ended) {
+            // Unit completed activation immediately (SKIP, no valid targets, etc.)
+            console.log(`AI Step ${iteration}: Unit completed immediately - ${activationData.result.endType}`);
+            totalUnitsProcessed++;
+            
+            // Check if phase complete after unit completion
+            if (activationData.result?.phase_complete) {
+              console.log(`AI Step ${iteration}: Phase complete after unit completion`);
+              break;
+            }
+            
           } else if (activationData.result?.phase_complete) {
             // Phase already complete
             console.log(`AI Step ${iteration}: Phase complete - no more units`);

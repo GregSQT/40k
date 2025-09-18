@@ -394,6 +394,9 @@ def execute_ai_turn():
         print(f"DEBUG AI_TURN: AI model loaded = {hasattr(engine, '_ai_model') and engine._ai_model is not None}")
         success, result = engine.execute_ai_turn()
         print(f"DEBUG AI_TURN: execute_ai_turn returned success={success}, result={result}")
+        print(f"DEBUG AI_TURN: current_phase={engine.game_state.get('phase')}, current_player={engine.game_state.get('current_player')}")
+        if engine.game_state.get('phase') == 'shoot':
+            print(f"DEBUG AI_TURN: shoot_activation_pool={engine.game_state.get('shoot_activation_pool', [])}")
         
         if not success:
             error_type = result.get("error", "unknown_error")
