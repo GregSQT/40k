@@ -93,7 +93,18 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     print(f"MOVEMENT DEBUG: execute_action called - action={action.get('action')}, unitId={action.get('unitId')}")
     
     # Handler self-initialization on first action
-    if game_state.get("phase") != "move" or not game_state.get("move_activation_pool"):
+    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    if "phase" not in game_state:
+        game_state_phase = None
+    else:
+        game_state_phase = game_state["phase"]
+    
+    if "move_activation_pool" not in game_state:
+        move_pool_exists = False
+    else:
+        move_pool_exists = bool(game_state["move_activation_pool"])
+    
+    if game_state_phase != "move" or not move_pool_exists:
         print(f"MOVEMENT HANDLER DEBUG: Initializing movement phase")
         movement_phase_start(game_state)
     
@@ -103,8 +114,15 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return True, movement_phase_end(game_state)
     
     # Get unit from action (frontend specifies which unit to move)
-    action_type = action.get("action")
-    unit_id = action.get("unitId")
+    # AI_TURN.md COMPLIANCE: Direct field access - no defaults
+    if "action" not in action:
+        raise KeyError(f"Action missing required 'action' field: {action}")
+    if "unitId" not in action:
+        action_type = action["action"]
+        unit_id = None  # Allow None for gym training auto-selection
+    else:
+        action_type = action["action"]
+        unit_id = action["unitId"]
         
     # For gym training, if no unitId specified, use first eligible unit
     if not unit_id:
@@ -126,7 +144,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return False, {"error": "unit_not_found", "unitId": unit_id}
     
     # Flag detection for consistent behavior
-    is_gym_training = config.get("gym_training_mode", False)
+    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    if "gym_training_mode" not in config:
+        raise KeyError("Config missing required 'gym_training_mode' field")
+    is_gym_training = config["gym_training_mode"]
     print(f"MOVEMENT DEBUG: is_gym_training={is_gym_training}, action_type={action_type}")
     
     # Auto-activate unit if not already activated and preview not shown
@@ -168,10 +189,22 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
     execution_result = movement_unit_execution_loop(game_state, unit["id"])
     
     # Clean flag detection
-    is_gym_training = config.get("gym_training_mode", False)
+    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    if "gym_training_mode" not in config:
+        raise KeyError("Config missing required 'gym_training_mode' field")
+    is_gym_training = config["gym_training_mode"]
         
-    if is_gym_training and isinstance(execution_result, tuple) and execution_result[0] and execution_result[1].get("waiting_for_player"):
-        valid_destinations = execution_result[1].get("valid_destinations", [])
+    if is_gym_training and isinstance(execution_result, tuple) and execution_result[0]:
+        # AI_TURN.md COMPLIANCE: Direct field access
+        if "waiting_for_player" not in execution_result[1]:
+            waiting_for_player = False
+        else:
+            waiting_for_player = execution_result[1]["waiting_for_player"]
+        
+        if waiting_for_player:
+            if "valid_destinations" not in execution_result[1]:
+                raise KeyError("Execution result missing required 'valid_destinations' field")
+            valid_destinations = execution_result[1]["valid_destinations"]
         if valid_destinations:
             # DIAGNOSTIC: Log current position and all valid destinations
             current_pos = (unit["col"], unit["row"])
@@ -408,7 +441,11 @@ def movement_clear_preview(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
 def movement_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """AI_MOVE.md: Route click actions"""
-    click_target = action.get("clickTarget", "elsewhere")
+    # AI_TURN.md COMPLIANCE: Direct field access
+    if "clickTarget" not in action:
+        click_target = "elsewhere"  # Default behavior for missing field
+    else:
+        click_target = action["clickTarget"]
     
     if click_target == "destination_hex":
         return movement_destination_selection_handler(game_state, unit_id, action)
@@ -421,14 +458,20 @@ def movement_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
 
 def _is_valid_movement_destination(game_state: Dict[str, Any], col: int, row: int) -> bool:
     """Check if hex is valid for movement."""
-    # Check board bounds
-    board_cols = game_state.get("board_cols", 24)
-    board_rows = game_state.get("board_rows", 24)
+    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    if "board_cols" not in game_state:
+        raise KeyError("game_state missing required 'board_cols' field")
+    if "board_rows" not in game_state:
+        raise KeyError("game_state missing required 'board_rows' field")
+    board_cols = game_state["board_cols"]
+    board_rows = game_state["board_rows"]
     if not (0 <= col < board_cols and 0 <= row < board_rows):
         return False
     
     # Check for wall hexes
-    wall_hexes = game_state.get("wall_hexes", set())
+    if "wall_hexes" not in game_state:
+        raise KeyError("game_state missing required 'wall_hexes' field")
+    wall_hexes = game_state["wall_hexes"]
     if (col, row) in wall_hexes:
         return False
     
@@ -441,16 +484,24 @@ def _is_valid_movement_destination(game_state: Dict[str, Any], col: int, row: in
 
 def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """AI_MOVE.md: Handle destination selection and execute movement"""
-    dest_col = action.get("destCol")
-    dest_row = action.get("destRow")
+    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    if "destCol" not in action:
+        raise KeyError(f"Action missing required 'destCol' field: {action}")
+    if "destRow" not in action:
+        raise KeyError(f"Action missing required 'destRow' field: {action}")
+    dest_col = action["destCol"]
+    dest_row = action["destRow"]
     
     if dest_col is None or dest_row is None:
         return False, {"error": "missing_destination"}
     
     # Build valid destinations if not already built
-    if not game_state.get("valid_move_destinations_pool"):
+    # AI_TURN.md COMPLIANCE: Direct field access
+    if "valid_move_destinations_pool" not in game_state or not game_state["valid_move_destinations_pool"]:
         movement_build_valid_destinations_pool(game_state, unit_id)
     
+    if "valid_move_destinations_pool" not in game_state:
+        raise KeyError("game_state missing required 'valid_move_destinations_pool' field")
     valid_pool = game_state["valid_move_destinations_pool"]
     
     # Validate destination in valid pool
@@ -486,7 +537,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     game_state["action_logs"].append({
         "type": "move",
         "message": f"Unit {unit['id']} ({orig_col}, {orig_row}) MOVED to ({dest_col}, {dest_row})",
-        "turn": game_state.get("current_turn", 1),
+        "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
         "phase": "move",
         "unitId": unit["id"],
         "player": unit["player"],
@@ -524,7 +575,7 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any]) -> Tup
     game_state["action_logs"].append({
         "type": "wait",
         "message": f"Unit {unit['id']} ({unit['col']}, {unit['row']}) WAIT",
-        "turn": game_state.get("current_turn", 1),
+        "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
         "phase": "move",
         "unitId": unit["id"],
         "player": unit["player"],
@@ -550,7 +601,8 @@ def _end_activation(game_state: Dict[str, Any], unit: Dict[str, Any], was_adjace
         print(f"MOVEMENT POOL REMOVAL: Unit {unit['id']} removed. Remaining: {game_state['move_activation_pool']}")
     
     # CRITICAL FIX: Clear active movement unit to prevent double processing
-    if game_state.get("active_movement_unit") == unit["id"]:
+    # AI_TURN.md COMPLIANCE: Direct field access
+    if "active_movement_unit" in game_state and game_state["active_movement_unit"] == unit["id"]:
         game_state["active_movement_unit"] = None
         print(f"MOVEMENT DEBUG: Cleared active_movement_unit for {unit['id']}")
     

@@ -63,7 +63,10 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
         return False
         
     # units_fled.includes(unit.id)?
-    if unit["id"] in game_state.get("units_fled", set()):
+    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    if "units_fled" not in game_state:
+        raise KeyError("game_state missing required 'units_fled' field")
+    if unit["id"] in game_state["units_fled"]:
         return False
         
     # CRITICAL FIX: Add missing adjacency check - units in melee cannot shoot
@@ -71,11 +74,16 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
-            if distance <= unit.get("CC_RNG", 1):
+            if "CC_RNG" not in unit:
+                raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
+            if distance <= unit["CC_RNG"]:
                 return False
         
     # unit.RNG_NB > 0?
-    if unit.get("RNG_NB", 0) <= 0:
+    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+    if "RNG_NB" not in unit:
+        raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
+    if unit["RNG_NB"] <= 0:
         return False
     
     # Check for valid targets
@@ -99,7 +107,10 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     """
     # Range check using proper hex distance
     distance = _calculate_hex_distance(shooter["col"], shooter["row"], target["col"], target["row"])
-    if distance > shooter.get("RNG_RNG", 0):
+    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+    if "RNG_RNG" not in shooter:
+        raise KeyError(f"Shooter missing required 'RNG_RNG' field: {shooter}")
+    if distance > shooter["RNG_RNG"]:
         return False
         
     # Dead target check
@@ -111,7 +122,10 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
         return False
     
     # Adjacent check - can't shoot at adjacent enemies (melee range)
-    if distance <= shooter.get("CC_RNG", 1):
+    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+    if "CC_RNG" not in shooter:
+        raise KeyError(f"Shooter missing required 'CC_RNG' field: {shooter}")
+    if distance <= shooter["CC_RNG"]:
         return False
         
     # Line of sight check
@@ -127,6 +141,9 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         return {"error": "unit_not_found", "unitId": unit_id}
     
     # AI_TURN.md initialization
+    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+    if "RNG_NB" not in unit:
+        raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
     unit["valid_target_pool"] = []
     unit["TOTAL_ATTACK_LOG"] = ""
     unit["SHOOT_LEFT"] = unit["RNG_NB"]
@@ -190,7 +207,8 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         wall_hexes_data = game_state["board"]["wall_hexes"]
     
     # Source 3: Check if walls exist in board config (fallback pattern)
-    elif hasattr(game_state, 'get') and game_state.get("board_config", {}).get("wall_hexes"):
+    # AI_TURN.md COMPLIANCE: Direct field access chain
+    elif "board_config" in game_state and "wall_hexes" in game_state["board_config"]:
         wall_hexes_data = game_state["board_config"]["wall_hexes"]
     
     else:
@@ -322,7 +340,8 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "phase_transition": True,
             "next_phase": "move",
             "current_player": 1,
-            "units_processed": len(game_state.get("units_shot", set())),
+            # AI_TURN.md COMPLIANCE: Direct field access
+            "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
             # CRITICAL: Add missing frontend cleanup signals
             "clear_blinking_gentle": True,
             "reset_mode": "select",
@@ -340,7 +359,8 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "next_phase": "move",
             "current_player": 0,
             "new_turn": game_state["turn"],
-            "units_processed": len(game_state.get("units_shot", set())),
+            # AI_TURN.md COMPLIANCE: Direct field access
+            "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
             # CRITICAL: Add missing frontend cleanup signals
             "clear_blinking_gentle": True,
             "reset_mode": "select", 
@@ -354,7 +374,8 @@ def shooting_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
 def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> str:
     """Determine current shooting context for nested behavior."""
-    if unit.get("selected_target_id"):
+    # AI_TURN.md COMPLIANCE: Direct field access
+    if "selected_target_id" in unit and unit["selected_target_id"]:
         return "target_selected"
     else:
         return "no_target_selected"
@@ -367,8 +388,11 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     """
     
     # Arg2 step increment
+    # AI_TURN.md COMPLIANCE: Direct field access with validation
     if arg2 == 1:
-        game_state["episode_steps"] = game_state.get("episode_steps", 0) + 1
+        if "episode_steps" not in game_state:
+            game_state["episode_steps"] = 0
+        game_state["episode_steps"] += 1
     
     # Arg3 tracking
     if arg3 == "SHOOTING":
@@ -379,13 +403,17 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     
     # Arg4 pool removal
     if arg4 == "SHOOTING":
-        pool_before = game_state.get("shoot_activation_pool", []).copy()
+        # AI_TURN.md COMPLIANCE: Direct field access
+        if "shoot_activation_pool" not in game_state:
+            raise KeyError("game_state missing required 'shoot_activation_pool' field")
+        pool_before = game_state["shoot_activation_pool"].copy()
         if "shoot_activation_pool" in game_state and unit["id"] in game_state["shoot_activation_pool"]:
             game_state["shoot_activation_pool"].remove(unit["id"])
             pool_after = game_state["shoot_activation_pool"]
             print(f"SHOOTING POOL REMOVAL: Unit {unit['id']} removed. Remaining: {pool_after}")
         else:
-            print(f"🔍 END_ACTIVATION DEBUG: Unit {unit['id']} not found in pool {game_state.get('shoot_activation_pool', [])}")
+            current_pool = game_state["shoot_activation_pool"] if "shoot_activation_pool" in game_state else []
+            print(f"🔴 END_ACTIVATION DEBUG: Unit {unit['id']} not found in pool {current_pool}")
     
     # Clean up unit activation state including position tracking
     if "valid_target_pool" in unit:
@@ -403,7 +431,11 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         del game_state["active_shooting_unit"]
     
     # Check if shooting pool is now empty after removing this unit
-    pool_empty = len(game_state.get("shoot_activation_pool", [])) == 0
+    # AI_TURN.md COMPLIANCE: Direct field access
+    if "shoot_activation_pool" not in game_state:
+        pool_empty = True
+    else:
+        pool_empty = len(game_state["shoot_activation_pool"]) == 0
     
     response = {
         "activation_ended": True,
@@ -450,7 +482,13 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> T
             return True, result
     
     # CLEAN FLAG DETECTION: Use explicit gym_training_mode from engine
-    is_gym_training = game_state.get("config", {}).get("gym_training_mode", False)
+    # AI_TURN.md COMPLIANCE: Direct field access chain
+    if "config" not in game_state:
+        is_gym_training = False
+    elif "gym_training_mode" not in game_state["config"]:
+        is_gym_training = False
+    else:
+        is_gym_training = game_state["config"]["gym_training_mode"]
     
     if is_gym_training and valid_targets:
         # GYM AUTO-SHOOT: Select target and execute shooting automatically
@@ -478,20 +516,34 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     """
     
     # Phase initialization on first call
-    if not game_state.get("_shooting_phase_initialized"):
+    # AI_TURN.md COMPLIANCE: Direct field access
+    if "_shooting_phase_initialized" not in game_state or not game_state["_shooting_phase_initialized"]:
         shooting_phase_start(game_state)
         game_state["_shooting_phase_initialized"] = True
     
     # Clean execution logging
-    current_pool = game_state.get("shoot_activation_pool", [])
-    action_type = action.get("action", "unknown")
-    unit_id = action.get("unitId", "none")
+    if "shoot_activation_pool" not in game_state:
+        current_pool = []
+    else:
+        current_pool = game_state["shoot_activation_pool"]
+    
+    if "action" not in action:
+        raise KeyError(f"Action missing required 'action' field: {action}")
+    if "unitId" not in action:
+        action_type = action["action"]
+        unit_id = "none"  # Allow missing for some action types
+    else:
+        action_type = action["action"]
+        unit_id = action["unitId"]
     if current_pool:
         # Remove units with no shots remaining
         updated_pool = []
         for unit_id in current_pool:
             unit_check = _get_unit_by_id(game_state, unit_id)
-            shots_left = unit_check.get("SHOOT_LEFT", 0) if unit_check else 0
+            if unit_check and "SHOOT_LEFT" in unit_check:
+                shots_left = unit_check["SHOOT_LEFT"]
+            else:
+                shots_left = 0
             if unit_check and shots_left > 0:
                 updated_pool.append(unit_id)
         
@@ -514,7 +566,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         if not unit:
             return False, {"error": "unit_not_found", "unitId": unit_id}
     
-    action_type = action.get("action")
+    # AI_TURN.md COMPLIANCE: Direct field access
+    if "action" not in action:
+        raise KeyError(f"Action missing required 'action' field: {action}")
+    action_type = action["action"]
     unit_id = unit["id"]
     
     # CRITICAL FIX: Validate unit is current player's unit to prevent self-targeting
@@ -522,7 +577,9 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return False, {"error": "wrong_player_unit", "unitId": unit_id, "unit_player": unit["player"], "current_player": game_state["current_player"]}
     
     # Handler validates unit eligibility for all actions
-    if unit_id not in game_state.get("shoot_activation_pool", []):
+    if "shoot_activation_pool" not in game_state:
+        raise KeyError("game_state missing required 'shoot_activation_pool' field")
+    if unit_id not in game_state["shoot_activation_pool"]:
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
     # AI_SHOOT.md action routing
@@ -534,15 +591,26 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     elif action_type == "shoot":
         # Handle gym-style shoot action with optional targetId
-        target_id = action.get("targetId")
+        # AI_TURN.md COMPLIANCE: Direct field access
+        if "targetId" not in action:
+            target_id = None
+        else:
+            target_id = action["targetId"]
         
-        # CRITICAL: Activate unit first if not already active
-        if unit_id not in game_state.get("shoot_activation_pool", []):
+        # CRITICAL: Validate unit eligibility
+        if "shoot_activation_pool" not in game_state:
+            raise KeyError("game_state missing required 'shoot_activation_pool' field")
+        if unit_id not in game_state["shoot_activation_pool"]:
             return False, {"error": "unit_not_eligible", "unitId": unit_id}
         
         # Initialize unit for shooting if needed (only if not already activated)
-        if (game_state.get("active_shooting_unit") != unit_id and 
-            unit.get("SHOOT_LEFT", 0) == unit.get("RNG_NB", 0)):
+        active_shooting_unit = game_state["active_shooting_unit"] if "active_shooting_unit" in game_state else None
+        if "SHOOT_LEFT" not in unit:
+            raise KeyError(f"Unit missing required 'SHOOT_LEFT' field: {unit}")
+        if "RNG_NB" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
+        
+        if (active_shooting_unit != unit_id and unit["SHOOT_LEFT"] == unit["RNG_NB"]):
             # Only initialize if unit hasn't started shooting yet
             shooting_unit_activation_start(game_state, unit_id)
         
@@ -563,10 +631,12 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     elif action_type == "wait" or action_type == "skip":
         # Handle gym wait/skip actions - unit chooses not to shoot
-        current_pool = game_state.get("shoot_activation_pool", [])
+        if "shoot_activation_pool" not in game_state:
+            raise KeyError("game_state missing required 'shoot_activation_pool' field")
+        current_pool = game_state["shoot_activation_pool"]
         if unit_id in current_pool:
             result = _shooting_activation_end(game_state, unit, "SKIP", 1, "PASS", "SHOOTING")
-            post_pool = game_state.get("shoot_activation_pool", [])
+            post_pool = game_state["shoot_activation_pool"] if "shoot_activation_pool" in game_state else []
             return result
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
@@ -588,15 +658,25 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
     """
     AI_SHOOT.md: Route click actions to appropriate handlers
     """
-    target_id = action.get("targetId")
-    click_target = action.get("clickTarget", "target")
+    # AI_TURN.md COMPLIANCE: Direct field access
+    if "targetId" not in action:
+        target_id = None
+    else:
+        target_id = action["targetId"]
+    
+    if "clickTarget" not in action:
+        click_target = "target"
+    else:
+        click_target = action["clickTarget"]
     
     if click_target in ["target", "enemy"] and target_id:
         return shooting_target_selection_handler(game_state, unit_id, target_id)
     
     elif click_target == "friendly_unit" and target_id:
         # Left click on another unit in pool - switch units
-        if target_id in game_state.get("shoot_activation_pool", []):
+        if "shoot_activation_pool" not in game_state:
+            raise KeyError("game_state missing required 'shoot_activation_pool' field")
+        if target_id in game_state["shoot_activation_pool"]:
             return _handle_unit_switch_with_context(game_state, unit_id, target_id)
         return False, {"error": "unit_not_in_pool", "targetId": target_id}
     
@@ -620,8 +700,10 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         return False, {"error": "unit_or_target_not_found"}
     
     # CRITICAL: Validate unit has shots remaining
-    if unit.get("SHOOT_LEFT", 0) <= 0:
-        return False, {"error": "no_shots_remaining", "unitId": unit_id, "shootLeft": unit.get("SHOOT_LEFT", 0)}
+    if "SHOOT_LEFT" not in unit:
+        raise KeyError(f"Unit missing required 'SHOOT_LEFT' field: {unit}")
+    if unit["SHOOT_LEFT"] <= 0:
+        return False, {"error": "no_shots_remaining", "unitId": unit_id, "shootLeft": unit["SHOOT_LEFT"]}
     
     # Validate target is in valid pool
     valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
@@ -670,7 +752,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     game_state["action_logs"].append({
         "type": "shoot",
         "message": enhanced_message,  # Enhanced with position data
-        "turn": game_state.get("current_turn", 1),
+        "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
         "phase": "shoot",
         "shooterId": unit_id,
         "targetId": target_id,
@@ -782,8 +864,13 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
 
 def _calculate_save_target(target: Dict[str, Any], ap: int) -> int:
     """Calculate save target with AP modifier and invulnerable save"""
-    armor_save = target.get("ARMOR_SAVE")
-    invul_save = target.get("INVUL_SAVE", 0)
+    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+    if "ARMOR_SAVE" not in target:
+        raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target}")
+    if "INVUL_SAVE" not in target:
+        raise KeyError(f"Target missing required 'INVUL_SAVE' field: {target}")
+    armor_save = target["ARMOR_SAVE"]
+    invul_save = target["INVUL_SAVE"]
     
     # Apply AP to armor save (AP makes saves worse, so add to target number)
     modified_armor_save = armor_save + ap
@@ -835,8 +922,9 @@ def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id
 
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """Cube coordinate adjacency check"""
-    cc_range = unit.get("CC_RNG", 1)
-    
+    if "CC_RNG" not in unit:
+        raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
+    cc_range = unit["CC_RNG"]
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
@@ -847,7 +935,9 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
 
 def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """Cube coordinate range check"""
-    rng_rng = unit.get("RNG_RNG", 0)
+    if "RNG_RNG" not in unit:
+        raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
+    rng_rng = unit["RNG_RNG"]
     if rng_rng <= 0:
         return False
     
@@ -901,7 +991,10 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
         from ai.reward_mapper import RewardMapper
         
         # Get rewards config from game_state (passed from engine)
-        rewards_config = game_state.get("rewards_config")
+        # AI_TURN.md COMPLIANCE: Direct field access
+        if "rewards_config" not in game_state:
+            return valid_targets[0]
+        rewards_config = game_state["rewards_config"]
         if not rewards_config:
             return valid_targets[0]
         
@@ -950,9 +1043,16 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
 def _calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
     """Calculate target priority score using AI_GAME_OVERVIEW.md logic."""
     
-    # Priority factors
-    threat_level = max(target.get("RNG_DMG", 0), target.get("CC_DMG", 0))
-    can_kill_1_phase = target["HP_CUR"] <= unit.get("RNG_DMG", 0)
+    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+    if "RNG_DMG" not in target:
+        raise KeyError(f"Target missing required 'RNG_DMG' field: {target}")
+    if "CC_DMG" not in target:
+        raise KeyError(f"Target missing required 'CC_DMG' field: {target}")
+    if "RNG_DMG" not in unit:
+        raise KeyError(f"Unit missing required 'RNG_DMG' field: {unit}")
+    
+    threat_level = max(target["RNG_DMG"], target["CC_DMG"])
+    can_kill_1_phase = target["HP_CUR"] <= unit["RNG_DMG"]
     
     # Priority 1: High threat that melee can charge but won't kill (score: 1000)
     if threat_level >= 3:  # High threat threshold
@@ -976,19 +1076,39 @@ def _enrich_unit_for_reward_mapper(unit: Dict[str, Any], game_state: Dict[str, A
     if not unit:
         return {}
     
-    # Get controlled_agent from game_state agent mapping
-    agent_mapping = game_state.get("agent_mapping", {})
-    controlled_agent = agent_mapping.get(str(unit["id"]), unit.get("unitType", "default"))
+    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    if "agent_mapping" not in game_state:
+        agent_mapping = {}
+    else:
+        agent_mapping = game_state["agent_mapping"]
+    
+    unit_id_key = str(unit["id"])
+    if unit_id_key in agent_mapping:
+        controlled_agent = agent_mapping[unit_id_key]
+    elif "unitType" in unit:
+        controlled_agent = unit["unitType"]
+    elif "unit_type" in unit:
+        controlled_agent = unit["unit_type"]
+    else:
+        controlled_agent = "default"
     
     enriched = unit.copy()
+    
+    # AI_TURN.md COMPLIANCE: All required fields must be present
+    if "CC_DMG" not in unit:
+        raise KeyError(f"Unit missing required 'CC_DMG' field: {unit}")
+    if "RNG_DMG" not in unit:
+        raise KeyError(f"Unit missing required 'RNG_DMG' field: {unit}")
+    if "HP_CUR" not in unit:
+        raise KeyError(f"Unit missing required 'HP_CUR' field: {unit}")
+    
     enriched.update({
         "controlled_agent": controlled_agent,
-        "unitType": unit.get("unitType", unit.get("unit_type", "default")),
-        "name": unit.get("name", f"Unit_{unit['id']}"),
-        # Add any missing fields that reward_mapper expects
-        "cc_dmg": unit.get("CC_DMG", 0),
-        "rng_dmg": unit.get("RNG_DMG", 0),
-        "CUR_HP": unit.get("HP_CUR", unit.get("CUR_HP", 0))
+        "unitType": controlled_agent,  # Use controlled_agent as unitType
+        "name": unit["name"] if "name" in unit else f"Unit_{unit['id']}",
+        "cc_dmg": unit["CC_DMG"],
+        "rng_dmg": unit["RNG_DMG"],
+        "CUR_HP": unit["HP_CUR"]
     })
     
     return enriched
@@ -999,12 +1119,17 @@ def _check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any
     
     for unit in game_state["units"]:
         if (unit["player"] == current_player and 
-            unit["HP_CUR"] > 0 and
-            unit.get("CC_DMG", 0) > 0):  # Has melee capability
-            
-            # Estimate charge range (unit move + average 2d6)
-            distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
-            max_charge = unit.get("MOVE", 6) + 7  # Average 2d6 = 7
+            unit["HP_CUR"] > 0):
+            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+            if "CC_DMG" not in unit:
+                raise KeyError(f"Unit missing required 'CC_DMG' field: {unit}")
+            if unit["CC_DMG"] > 0:  # Has melee capability
+                
+                # Estimate charge range (unit move + average 2d6)
+                distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
+                if "MOVE" not in unit:
+                    raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
+                max_charge = unit["MOVE"] + 7  # Average 2d6 = 7
             
             if distance <= max_charge:
                 return True

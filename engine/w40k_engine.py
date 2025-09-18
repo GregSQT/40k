@@ -89,13 +89,13 @@ class W40KEngine(gym.Env):
                 "gym_training_mode": gym_training_mode  # CRITICAL: Pass flag to handlers
             }
             print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} stored in config")
-            print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config.get('gym_training_mode', 'MISSING')}")
+            print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config['gym_training_mode'] if 'gym_training_mode' in self.config else 'MISSING'}")
         else:
             # Use provided config directly and add gym_training_mode
             self.config = config.copy()
             self.config["gym_training_mode"] = gym_training_mode
             print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} added to existing config")
-            print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config.get('gym_training_mode', 'MISSING')}")
+            print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config['gym_training_mode'] if 'gym_training_mode' in self.config else 'MISSING'}")
         
         # Store training system compatibility parameters
         self.quiet = quiet
@@ -106,7 +106,11 @@ class W40KEngine(gym.Env):
         self.is_training = training_config_name in ["debug", "default", "conservative", "aggressive"]
         
         # PvE mode configuration
-        self.is_pve_mode = config.get("pve_mode", False) if isinstance(config, dict) else False
+        # AI_TURN.md COMPLIANCE: Direct access with validation
+        if isinstance(config, dict) and "pve_mode" in config:
+            self.is_pve_mode = config["pve_mode"]
+        else:
+            self.is_pve_mode = False
         self._ai_model = None
         
         # CRITICAL: Initialize game_state FIRST before any other operations
@@ -211,7 +215,10 @@ class W40KEngine(gym.Env):
     
     def _initialize_units(self):
         """Initialize units with UPPERCASE field validation."""
-        unit_configs = self.config.get("units", [])
+        # AI_TURN.md COMPLIANCE: Direct access - units must be provided
+        if "units" not in self.config:
+            raise KeyError("Config missing required 'units' field")
+        unit_configs = self.config["units"]
         
         for unit_config in unit_configs:
             unit = self._create_unit(unit_config)
@@ -224,7 +231,7 @@ class W40KEngine(gym.Env):
             # Identity
             "id": config["id"],
             "player": config["player"],
-            "unitType": config.get("unitType", "default"),
+            "unitType": config["unitType"],  # AI_TURN.md: NO DEFAULTS - must be provided
             
             # Position
             "col": config["col"],
@@ -323,7 +330,11 @@ class W40KEngine(gym.Env):
         pre_action_positions = {}
         # print(f"STEP LOGGER DETECTION: has_step_logger={hasattr(self, 'step_logger')}, step_logger={getattr(self, 'step_logger', 'None')}")
         if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-            unit_id = semantic_action.get("unitId")
+            # AI_TURN.md COMPLIANCE: Direct field access for semantic actions
+            if "unitId" not in semantic_action:
+                unit_id = None
+            else:
+                unit_id = semantic_action["unitId"]
             print(f"STEP LOGGER ACTIVE: Processing unit {unit_id}")
             if unit_id:
                 pre_unit = self._get_unit_by_id(str(unit_id))
@@ -335,8 +346,9 @@ class W40KEngine(gym.Env):
         # Log action ONLY if it's a real agent action with valid unit
         if (self.step_logger and self.step_logger.enabled and success):
            
-            action_type = semantic_action.get("action")
-            unit_id = semantic_action.get("unitId")
+            # AI_TURN.md COMPLIANCE: Direct field access
+            action_type = semantic_action["action"] if "action" in semantic_action else None
+            unit_id = semantic_action["unitId"] if "unitId" in semantic_action else None
            
             # Filter out system actions and invalid entries
             if (action_type in ["move", "shoot", "charge", "combat"] and
@@ -483,9 +495,13 @@ class W40KEngine(gym.Env):
             # Get eligible units from current phase pool
             current_phase = self.game_state["phase"]
             if current_phase == "move":
-                eligible_pool = self.game_state.get("move_activation_pool", [])
+                if "move_activation_pool" not in self.game_state:
+                    raise KeyError("game_state missing required 'move_activation_pool' field")
+                eligible_pool = self.game_state["move_activation_pool"]
             elif current_phase == "shoot":
-                eligible_pool = self.game_state.get("shoot_activation_pool", [])
+                if "shoot_activation_pool" not in self.game_state:
+                    raise KeyError("game_state missing required 'shoot_activation_pool' field")
+                eligible_pool = self.game_state["shoot_activation_pool"]
             else:
                 eligible_pool = []
             
@@ -530,7 +546,10 @@ class W40KEngine(gym.Env):
         })
         
         # Reset unit health and positions to original scenario values
-        unit_configs = self.config.get("units", [])
+        # AI_TURN.md COMPLIANCE: Direct access - units must be provided
+        if "units" not in self.config:
+            raise KeyError("Config missing required 'units' field during reset")
+        unit_configs = self.config["units"]
         for unit in self.game_state["units"]:
             unit["HP_CUR"] = unit["HP_MAX"]
             
@@ -922,8 +941,13 @@ class W40KEngine(gym.Env):
         enemy_units = [u for u in all_units if u["player"] == 0][:2]  # Max 2 enemy units
         
         # AI units (2 units * 11 features = 22 elements, positions 4-25)
-        board_width = self.game_state.get("board_cols")
-        board_height = self.game_state.get("board_rows")
+        # AI_TURN.md COMPLIANCE: Direct access with validation
+        if "board_cols" not in self.game_state:
+            raise KeyError("game_state missing required 'board_cols' field")
+        if "board_rows" not in self.game_state:
+            raise KeyError("game_state missing required 'board_rows' field")
+        board_width = self.game_state["board_cols"]
+        board_height = self.game_state["board_rows"]
         
         if board_width is None:
             raise RuntimeError("board_cols is None - config loading failed, check config/board_config.json")
@@ -941,9 +965,16 @@ class W40KEngine(gym.Env):
                 obs[base_idx + 4] = 1.0 if unit["id"] in self.game_state["units_shot"] else 0.0
                 obs[base_idx + 5] = 1.0 if unit["id"] in self.game_state["units_charged"] else 0.0
                 obs[base_idx + 6] = 1.0 if unit["id"] in self.game_state["units_attacked"] else 0.0
-                obs[base_idx + 7] = min(1.0, unit.get("RNG_RNG", 0) / 24.0)  # Normalized range
-                obs[base_idx + 8] = min(1.0, unit.get("RNG_DMG", 0) / 5.0)  # Normalized damage
-                obs[base_idx + 9] = min(1.0, unit.get("CC_DMG", 0) / 5.0)  # Normalized melee damage
+                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+                if "RNG_RNG" not in unit:
+                    raise KeyError(f"Unit missing required 'RNG_RNG' field for observation: {unit}")
+                if "RNG_DMG" not in unit:
+                    raise KeyError(f"Unit missing required 'RNG_DMG' field for observation: {unit}")
+                if "CC_DMG" not in unit:
+                    raise KeyError(f"Unit missing required 'CC_DMG' field for observation: {unit}")
+                obs[base_idx + 7] = min(1.0, unit["RNG_RNG"] / 24.0)  # Normalized range
+                obs[base_idx + 8] = min(1.0, unit["RNG_DMG"] / 5.0)  # Normalized damage
+                obs[base_idx + 9] = min(1.0, unit["CC_DMG"] / 5.0)  # Normalized melee damage
                 obs[base_idx + 10] = 1.0  # Alive flag
         
         return obs
@@ -991,9 +1022,16 @@ class W40KEngine(gym.Env):
         
         # Debug: Log agent assignment for rewards
         if not self.quiet:
-            original_type = acting_unit.get('unitType', 'unknown')
-            agent_type = enriched_unit.get('unitType', 'unknown')
-            controlled_agent = self.config.get('controlled_agent', 'none') if self.config else 'none'
+            # AI_TURN.md COMPLIANCE: Direct field access
+            if 'unitType' not in acting_unit:
+                raise KeyError(f"Acting unit missing required 'unitType' field: {acting_unit}")
+            if 'unitType' not in enriched_unit:
+                raise KeyError(f"Enriched unit missing required 'unitType' field: {enriched_unit}")
+            original_type = acting_unit['unitType']
+            agent_type = enriched_unit['unitType']
+            controlled_agent = self.config['controlled_agent'] if self.config and 'controlled_agent' in self.config else None
+            if controlled_agent is None:
+                raise ValueError("Missing controlled_agent in config - required for reward calculation")
             print(f"DEBUG: Unit {acting_unit['id']} ({original_type}) -> Using agent rewards: {agent_type} (controlled_agent: {controlled_agent})")
         
         if action_type == "shoot" and "targetId" in result:
@@ -1019,8 +1057,13 @@ class W40KEngine(gym.Env):
             
             return final_reward
         elif action_type == "move":
-            old_pos = (result.get("fromCol"), result.get("fromRow"))
-            new_pos = (result.get("toCol"), result.get("toRow"))
+            # AI_TURN.md COMPLIANCE: Direct access - movement results must provide coordinates
+            if "fromCol" not in result or "fromRow" not in result:
+                raise KeyError(f"Movement result missing required position fields: {result}")
+            if "toCol" not in result or "toRow" not in result:
+                raise KeyError(f"Movement result missing required destination fields: {result}")
+            old_pos = (result["fromCol"], result["fromRow"])
+            new_pos = (result["toCol"], result["toRow"])
             tactical_context = self._build_tactical_context(acting_unit, result)
             return reward_mapper.get_movement_reward(enriched_unit, old_pos, new_pos, tactical_context)
         elif action_type == "skip":
@@ -1090,7 +1133,10 @@ class W40KEngine(gym.Env):
         
         # Add win/lose bonuses from situational_modifiers
         if self.game_state["game_over"]:
-            modifiers = unit_rewards.get("situational_modifiers", {})
+            # AI_TURN.md COMPLIANCE: Direct access with validation
+            if "situational_modifiers" not in unit_rewards:
+                raise KeyError("Unit rewards missing required 'situational_modifiers' section")
+            modifiers = unit_rewards["situational_modifiers"]
             winner = self._determine_winner()
             
             if winner == 1:  # AI wins
@@ -1349,11 +1395,15 @@ class W40KEngine(gym.Env):
         
         if current_phase == "move":
             # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
-            pool_unit_ids = self.game_state.get("move_activation_pool", [])
+            if "move_activation_pool" not in self.game_state:
+                raise KeyError("game_state missing required 'move_activation_pool' field")
+            pool_unit_ids = self.game_state["move_activation_pool"]
             return [self._get_unit_by_id(uid) for uid in pool_unit_ids if self._get_unit_by_id(uid)]
         elif current_phase == "shoot":
             # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
-            pool_unit_ids = self.game_state.get('shoot_activation_pool', [])
+            if "shoot_activation_pool" not in self.game_state:
+                raise KeyError("game_state missing required 'shoot_activation_pool' field")
+            pool_unit_ids = self.game_state["shoot_activation_pool"]
             return [self._get_unit_by_id(uid) for uid in pool_unit_ids if self._get_unit_by_id(uid)]
         else:
             print(f"DEBUG ELIGIBLE UNITS: Unknown phase {current_phase}, returning empty list")
@@ -1473,10 +1523,19 @@ class W40KEngine(gym.Env):
         action_type = result.get("action")
         
         if action_type == "move":
-            old_col = result.get("fromCol", unit["col"])
-            old_row = result.get("fromRow", unit["row"])
-            new_col = result.get("toCol", unit["col"])
-            new_row = result.get("toRow", unit["row"])
+            # AI_TURN.md COMPLIANCE: Direct access - movement context must provide coordinates
+            if "fromCol" not in result:
+                raise KeyError(f"Movement context missing required 'fromCol' field: {result}")
+            if "fromRow" not in result:
+                raise KeyError(f"Movement context missing required 'fromRow' field: {result}")
+            if "toCol" not in result:
+                raise KeyError(f"Movement context missing required 'toCol' field: {result}")
+            if "toRow" not in result:
+                raise KeyError(f"Movement context missing required 'toRow' field: {result}")
+            old_col = result["fromCol"]
+            old_row = result["fromRow"]
+            new_col = result["toCol"]
+            new_row = result["toRow"]
             
             # Calculate movement context
             moved_closer = self._moved_closer_to_enemies(unit, (old_col, old_row), (new_col, new_row))
@@ -1525,10 +1584,12 @@ class W40KEngine(gym.Env):
         for unit in self.game_state["units"]:
             if (unit["player"] == current_player and 
                 unit["HP_CUR"] > 0 and
-                unit.get("CC_DMG", 0) > 0):  # Has melee capability
+                unit["CC_DMG"] > 0):  # AI_TURN.md: Direct field access
                 
                 # Simple charge range check (2d6 movement + unit MOVE)
                 distance = abs(unit["col"] - target["col"]) + abs(unit["row"] - target["row"])
+                if "MOVE" not in unit:
+                    raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
                 max_charge_range = unit["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
                 
                 if distance <= max_charge_range:
@@ -1560,11 +1621,16 @@ class W40KEngine(gym.Env):
     
     def _moved_to_optimal_range(self, unit: Dict[str, Any], new_pos: Tuple[int, int]) -> bool:
         """Check if unit moved to optimal shooting range per W40K shooting rules."""
-        if unit.get("RNG_RNG", 0) <= 0:
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+        if "RNG_RNG" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
+        if unit["RNG_RNG"] <= 0:
             return False
         
         max_range = unit["RNG_RNG"]
-        min_range = unit.get("CC_RNG", 1)  # Minimum engagement distance
+        if "CC_RNG" not in unit:
+            raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
+        min_range = unit["CC_RNG"]  # Minimum engagement distance
         enemies = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
         
         for enemy in enemies:
@@ -1584,8 +1650,13 @@ class W40KEngine(gym.Env):
         # Find the nearest threatening enemy (has weapons that can harm this unit)
         threatening_enemies = []
         for enemy in enemies:
+            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+            if "RNG_DMG" not in enemy:
+                raise KeyError(f"Enemy unit missing required 'RNG_DMG' field: {enemy}")
+            if "CC_DMG" not in enemy:
+                raise KeyError(f"Enemy unit missing required 'CC_DMG' field: {enemy}")
             # Enemy is threatening if it has ranged or melee weapons
-            if enemy.get("RNG_DMG", 0) > 0 or enemy.get("CC_DMG", 0) > 0:
+            if enemy["RNG_DMG"] > 0 or enemy["CC_DMG"] > 0:
                 old_distance = abs(old_pos[0] - enemy["col"]) + abs(old_pos[1] - enemy["row"])
                 new_distance = abs(new_pos[0] - enemy["col"]) + abs(new_pos[1] - enemy["row"])
                 threatening_enemies.append((enemy, old_distance, new_distance))
@@ -1601,10 +1672,15 @@ class W40KEngine(gym.Env):
     
     def _moved_to_charge_range(self, unit: Dict[str, Any], new_pos: Tuple[int, int]) -> bool:
         """Check if unit moved to charge range of enemies."""
-        if unit.get("CC_DMG", 0) <= 0:
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+        if "CC_DMG" not in unit:
+            raise KeyError(f"Unit missing required 'CC_DMG' field: {unit}")
+        if unit["CC_DMG"] <= 0:
             return False
         
         enemies = [u for u in self.game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        if "MOVE" not in unit:
+            raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
         max_charge_range = unit["MOVE"] + 12  # Average 2d6 charge distance
         
         for enemy in enemies:
@@ -1621,7 +1697,12 @@ class W40KEngine(gym.Env):
         for enemy in enemies:
             # Check if moved out of enemy threat range
             distance = abs(new_pos[0] - enemy["col"]) + abs(new_pos[1] - enemy["row"])
-            enemy_threat_range = max(enemy.get("RNG_RNG", 0), enemy.get("CC_RNG", 1))
+            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+            if "RNG_RNG" not in enemy:
+                raise KeyError(f"Enemy unit missing required 'RNG_RNG' field: {enemy}")
+            if "CC_RNG" not in enemy:
+                raise KeyError(f"Enemy unit missing required 'CC_RNG' field: {enemy}")
+            enemy_threat_range = max(enemy["RNG_RNG"], enemy["CC_RNG"])
             
             if distance > enemy_threat_range:
                 return True
@@ -1638,53 +1719,61 @@ class W40KEngine(gym.Env):
         """Enrich unit data with tactical flags required by reward_mapper."""
         enriched = unit.copy()
         
-        # Remove debug spam
-        pass
-        
-        # Use the training agent key directly from config
-        # The controlled_agent parameter specifies which agent reward config to use
+        # AI_TURN.md COMPLIANCE: NO FALLBACKS - proper error handling
         if self.config and self.config.get("controlled_agent"):
             agent_key = self.config["controlled_agent"]
         elif hasattr(self, 'unit_registry') and self.unit_registry:
-            # Get agent key from unit registry as fallback
-            scenario_unit_type = unit.get("unitType", "unknown")
-            try:
-                agent_key = self.unit_registry.get_model_key(scenario_unit_type)
-            except (ValueError, AttributeError):
-                # Final fallback based on unit stats
-                is_ranged = unit.get("RNG_RNG", 0) > unit.get("CC_RNG", 1)
-                agent_key = "SpaceMarine_Infantry_Troop_RangedSwarm" if is_ranged else "SpaceMarine_Infantry_Troop_MeleeTroop"
+            # AI_TURN.md: Direct access - NO DEFAULTS allowed
+            if "unitType" not in unit:
+                raise KeyError(f"Unit missing required 'unitType' field: {unit}")
+            scenario_unit_type = unit["unitType"]
+            # Let unit_registry.get_model_key() raise ValueError if unit type not found
+            agent_key = self.unit_registry.get_model_key(scenario_unit_type)
         else:
-            # Emergency fallback
-            is_ranged = unit.get("RNG_RNG", 0) > unit.get("CC_RNG", 1)
-            agent_key = "SpaceMarine_Infantry_Troop_RangedSwarm" if is_ranged else "SpaceMarine_Infantry_Troop_MeleeTroop"
+            raise ValueError("Missing both controlled_agent config and unit_registry - cannot determine agent key")
         
         # CRITICAL: Set the agent type as unitType for reward config lookup
         enriched["unitType"] = agent_key
         
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - NO DEFAULTS
+        if "RNG_RNG" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
+        if "CC_RNG" not in unit:
+            raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
+        
         # Add required tactical flags based on unit stats
-        enriched["is_ranged"] = unit.get("RNG_RNG", 0) > unit.get("CC_RNG", 1)
+        enriched["is_ranged"] = unit["RNG_RNG"] > unit["CC_RNG"]
         enriched["is_melee"] = not enriched["is_ranged"]
         
+        # AI_TURN.md COMPLIANCE: Direct field access for required fields
+        if "unitType" not in unit:
+            raise KeyError(f"Unit missing required 'unitType' field: {unit}")
+        if "RNG_DMG" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_DMG' field: {unit}")
+        if "CC_DMG" not in unit:
+            raise KeyError(f"Unit missing required 'CC_DMG' field: {unit}")
+        
         # Map UPPERCASE fields to lowercase for reward_mapper compatibility
-        enriched["name"] = unit.get("unitType", f"Unit_{unit['id']}")
-        enriched["rng_dmg"] = unit.get("RNG_DMG", 0)
-        enriched["cc_dmg"] = unit.get("CC_DMG", 0)
+        enriched["name"] = unit["unitType"]
+        enriched["rng_dmg"] = unit["RNG_DMG"]
+        enriched["cc_dmg"] = unit["CC_DMG"]
         
         return enriched
     
     def _get_reward_config_key_for_unit(self, unit: Dict[str, Any]) -> str:
         """Map unit type to reward config key using unit registry."""
-        unit_type = unit.get("unitType", "unknown")
+        # AI_TURN.md COMPLIANCE: Direct field access required
+        if "unitType" not in unit:
+            raise KeyError(f"Unit missing required 'unitType' field: {unit}")
+        unit_type = unit["unitType"]
         
         # Use unit registry to get agent key (matches rewards config)
         try:
             agent_key = self.unit_registry.get_model_key(unit_type)
             return agent_key
-        except ValueError:
-            # Fallback: determine from unit stats
-            is_ranged = unit.get("RNG_RNG", 0) > unit.get("CC_RNG", 1)
-            return "SpaceMarineRanged" if is_ranged else "SpaceMarineMelee"
+        except ValueError as e:
+            # AI_TURN.md COMPLIANCE: NO FALLBACKS - propagate the error
+            raise ValueError(f"Failed to get reward config key for unit type '{unit_type}': {e}")
 
     def _load_units_from_scenario(self, scenario_file, unit_registry):
             """Load units from scenario file - NO FALLBACKS ALLOWED."""
