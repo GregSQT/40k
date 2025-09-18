@@ -1022,7 +1022,7 @@ export default function Board({
       }, [
         // Essential dependencies only - prevent infinite re-renders
         units.length,
-        JSON.stringify(units.map(u => ({ id: u.id, col: u.col, row: u.row, HP_CUR: u.HP_CUR }))), // Track position & HP changes
+        JSON.stringify(units.map(u => ({ id: u.id, col: u.col, row: u.row, HP_CUR: u.HP_CUR, SHOOT_LEFT: u.SHOOT_LEFT }))), // Track position, HP & shooting changes
         selectedUnitId,
         mode,
         phase,
