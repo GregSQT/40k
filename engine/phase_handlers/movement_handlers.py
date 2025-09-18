@@ -173,9 +173,19 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
     if is_gym_training and isinstance(execution_result, tuple) and execution_result[0] and execution_result[1].get("waiting_for_player"):
         valid_destinations = execution_result[1].get("valid_destinations", [])
         if valid_destinations:
+            # DIAGNOSTIC: Log current position and all valid destinations
+            current_pos = (unit["col"], unit["row"])
+            print(f"GYM DEBUG: Unit {unit['id']} current position: {current_pos}")
+            print(f"GYM DEBUG: Valid destinations: {valid_destinations}")
+            print(f"GYM DEBUG: Current position in destinations? {current_pos in valid_destinations}")
+            
             # Auto-select first destination for gym training only
             dest_col, dest_row = valid_destinations[0]
             print(f"GYM AUTO-MOVE: Unit {unit['id']} to destination ({dest_col}, {dest_row})")
+            
+            # DIAGNOSTIC: Verify if this is actually the current position
+            if (dest_col, dest_row) == current_pos:
+                print(f"GYM ERROR: Selected destination IS current position! This should never happen!")
             
             auto_move_action = {
                 "action": "move",
@@ -354,7 +364,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             if hex_distance > move_range:
                 continue
             
-            # Validate destination
+            # Validate destinationw
             if _is_valid_destination(game_state, dest_col, dest_row, unit, {}):
                 valid_destinations.append((dest_col, dest_row))
     

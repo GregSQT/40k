@@ -1019,10 +1019,13 @@ class W40KEngine(gym.Env):
             
             return final_reward
         elif action_type == "move":
-            old_pos = (result.get("fromCol", 0), result.get("fromRow", 0))
-            new_pos = (result.get("toCol", 0), result.get("toRow", 0))
+            old_pos = (result.get("fromCol"), result.get("fromRow"))
+            new_pos = (result.get("toCol"), result.get("toRow"))
             tactical_context = self._build_tactical_context(acting_unit, result)
             return reward_mapper.get_movement_reward(enriched_unit, old_pos, new_pos, tactical_context)
+        elif action_type == "skip":
+            # SKIP: Agent CANNOT perform action - use wait penalty
+            return self._calculate_reward_from_config(acting_unit, {"type": "wait"}, success)
         elif action_type == "charge" and "targetId" in result:
             target = self._get_unit_by_id(str(result["targetId"]))
             enriched_target = self._enrich_unit_for_reward_mapper(target)

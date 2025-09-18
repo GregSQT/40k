@@ -40,7 +40,8 @@ BUGS
 ----------------------------------------------------------------------------
 
 WAIT is for when the agent DECIDES to NOT perform an action.
-SKIP is when the agent CANNOT perform an action !!!!!
+SKIP is when the agent CANNOT perform an action
+It the agent chooses a wrong action (charge during shooting phase), give it the -0.5 reward penalty and skip its action
 
 TRAIN:
 Quel fichier de reward ?
