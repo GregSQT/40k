@@ -42,18 +42,8 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     current_player = game_state["current_player"]
     shoot_activation_pool = []
     for unit in game_state["units"]:
-        # Basic eligibility only - target validation happens during activation
-        if unit["HP_CUR"] <= 0:
-            continue
-        if unit["player"] != current_player:
-            continue
-        if unit["id"] in game_state.get("units_fled", set()):
-            continue
-        if unit.get("RNG_NB", 0) <= 0:
-            continue
-            
-        # ALL conditions met → Add to shoot_activation_pool
-        shoot_activation_pool.append(unit["id"])
+        if _has_valid_shooting_targets(game_state, unit, current_player):
+            shoot_activation_pool.append(unit["id"])
     
     # Update game_state pool
     game_state["shoot_activation_pool"] = shoot_activation_pool
