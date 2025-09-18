@@ -3,16 +3,16 @@
   
   "SpaceMarine_Infantry_Troop_RangedSwarm": {
     "base_actions": {
-      "move_close": 0.1,
-      "move_away": 0.3,
-      "move_to_charge": 0.0,
-      "move_to_los": 0.4,
+      "move_close": 0.4,
+      "move_away": 0.5,
+      "move_to_charge": 0.2,
+      "move_to_los": 0.6,
       "ranged_attack": 0.5,
       "melee_attack": 0.1,
       "charge": 0.1,
       "charge_success": 0.1,
       "being_charged": -0.3,
-      "wait": -0.3
+      "wait": -0.5
     },
     "target_type_bonuses": {
       "vs_melee": 0.1,

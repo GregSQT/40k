@@ -543,8 +543,32 @@ class W40KEngine(gym.Env):
         """
         current_phase = self.game_state["phase"]
         
-        # CRITICAL: Reject invalid actions immediately for proper training
+        # CRITICAL: Handle invalid actions with proper end_activation call
         if action.get("action") == "invalid":
+            if action.get("end_activation_required"):
+                unit_id = action.get("unitId")
+                if unit_id:
+                    # Import and call the proper end_activation function
+                    from engine.phase_handlers.generic_handlers import end_activation
+                    
+                    unit = self._get_unit_by_id(unit_id)
+                    if unit:
+                        # AI_TURN.md compliant end_activation call
+                        result = end_activation(
+                            self.game_state, unit, 
+                            "NO",                    # Arg1: Don't log invalid action
+                            1,                       # Arg2: Consume activation step 
+                            "PASS",                  # Arg3: No tracking update
+                            current_phase.upper(),   # Arg4: Remove from phase pool
+                            1                        # Arg5: Log error
+                        )
+                        print(f"TRAINING: Unit {unit_id} end_activation called for invalid action")
+                        return False, {
+                            "error": action.get("error", "invalid_action"), 
+                            "phase": current_phase,
+                            "end_activation_result": result
+                        }
+            
             return False, {"error": action.get("error", "invalid_action"), "phase": current_phase}
         
         # Route to phase handlers with detailed logging
@@ -1206,12 +1230,18 @@ class W40KEngine(gym.Env):
         action_mask = self.get_action_mask()
         print(f"GYM ACTION DEBUG: Action mask: {action_mask}, action {action_int} valid: {action_mask[action_int]}")
         if not action_mask[action_int]:
-            # Get valid unit for skip action
+            # Return invalid action for training penalty and proper pool management
             eligible_units = self._get_eligible_units_for_current_phase()
             if eligible_units:
                 selected_unit_id = eligible_units[0]["id"]
-                print(f"INVALID ACTION CONVERSION: Action {action_int} invalid in {current_phase} phase -> SKIP for unit {selected_unit_id}")
-                return {"action": "skip", "unitId": selected_unit_id, "reason": f"invalid_action_{action_int}_in_{current_phase}"}
+                print(f"TRAINING PENALTY: Action {action_int} invalid in {current_phase} phase -> error + end_activation")
+                return {
+                    "action": "invalid", 
+                    "error": f"forbidden_in_{current_phase}_phase", 
+                    "unitId": selected_unit_id,
+                    "attempted_action": action_int,
+                    "end_activation_required": True
+                }
             else:
                 print(f"GYM ACTION DEBUG: No eligible units for skip, advancing phase")
                 return {"action": "advance_phase", "from": current_phase, "reason": "no_eligible_units"}
