@@ -58,13 +58,13 @@ This document provides the critical missing link between your AI_TURN.md complia
 
 ### Current Training Architecture
 ```
-DQN Model ↔ gym.Env Interface ↔ W40KEnv ↔ SequentialGameController ↔ TrainingGameController
+DQN Model ↔ gym.Env Interface ↔ W40KEngine ↔ SequentialGameController ↔ TrainingGameController
 ```
 
 **Key Components:**
 - **DQN (Deep Q-Network)**: Stable Baselines3 implementation learning optimal actions
 - **gym.Env Interface**: Standard reinforcement learning environment protocol
-- **W40KEnv**: Your custom environment wrapping the game controller
+- **W40KEngine**: Your custom environment wrapping the game controller
 - **Reward System**: Configuration-driven reward calculation from `rewards_config.json`
 - **Model Persistence**: Trained models saved as `.zip` files with embedded parameters
 
@@ -700,7 +700,7 @@ class W40KEngine:
 2. **Update Training Scripts**
 ```python
 # In ai/train.py, replace environment creation
-# OLD: base_env = W40KEnv(...)
+# OLD: base_env = W40KEngine(...)
 # NEW: base_env = W40KEngine(config, rewards_config_name)
 ```
 

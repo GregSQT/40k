@@ -38,8 +38,25 @@ class W40KEngine(gym.Env):
     
     def __init__(self, config=None, rewards_config=None, training_config_name=None, 
                 controlled_agent=None, active_agents=None, scenario_file=None, 
-                unit_registry=None, quiet=False, **kwargs):
+                unit_registry=None, quiet=False, gym_training_mode=False, **kwargs):
         """Initialize W40K engine with AI_TURN.md compliance - training system compatible."""
+        
+        # CRITICAL DEBUG: Log exact parameters at entry point
+        print(f"W40KEngine CONSTRUCTOR ENTRY DEBUG:")
+        print(f"  gym_training_mode PARAMETER: {gym_training_mode} (type: {type(gym_training_mode)})")
+        print(f"  config PARAMETER: {config}")
+        print(f"  Called from stack: {__import__('traceback').format_stack()[-2].strip()}")
+        
+        # DEBUG: Log all parameters received
+        print(f"W40KEngine CONSTRUCTOR DEBUG:")
+        print(f"  gym_training_mode={gym_training_mode}")
+        print(f"  rewards_config={rewards_config}")
+        print(f"  training_config_name={training_config_name}")
+        print(f"  kwargs={kwargs}")
+        print(f"  Called from: {__import__('traceback').format_stack()[-2].strip()}")
+        
+        # Store gym training mode for handler access
+        self.gym_training_mode = gym_training_mode
         
         # Handle both new engine format (single config) and old training system format
         if config is None:
@@ -68,11 +85,17 @@ class W40KEngine(gym.Env):
                 "training_config": self.training_config,
                 "controlled_agent": controlled_agent,
                 "active_agents": active_agents,
-                "quiet": quiet
+                "quiet": quiet,
+                "gym_training_mode": gym_training_mode  # CRITICAL: Pass flag to handlers
             }
+            print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} stored in config")
+            print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config.get('gym_training_mode', 'MISSING')}")
         else:
-            # Use provided config directly
-            self.config = config
+            # Use provided config directly and add gym_training_mode
+            self.config = config.copy()
+            self.config["gym_training_mode"] = gym_training_mode
+            print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} added to existing config")
+            print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config.get('gym_training_mode', 'MISSING')}")
         
         # Store training system compatibility parameters
         self.quiet = quiet
@@ -1224,17 +1247,14 @@ class W40KEngine(gym.Env):
         """Convert gym integer action to semantic action - AI selects units dynamically."""
         action_int = int(action.item()) if hasattr(action, 'item') else int(action)
         current_phase = self.game_state["phase"]
-        print(f"GYM ACTION DEBUG: AI predicted action {action_int} in phase {current_phase}")
         
         # Validate action against mask - convert invalid actions to SKIP
         action_mask = self.get_action_mask()
-        print(f"GYM ACTION DEBUG: Action mask: {action_mask}, action {action_int} valid: {action_mask[action_int]}")
         if not action_mask[action_int]:
             # Return invalid action for training penalty and proper pool management
             eligible_units = self._get_eligible_units_for_current_phase()
             if eligible_units:
                 selected_unit_id = eligible_units[0]["id"]
-                print(f"TRAINING PENALTY: Action {action_int} invalid in {current_phase} phase -> error + end_activation")
                 return {
                     "action": "invalid", 
                     "error": f"forbidden_in_{current_phase}_phase", 
@@ -1243,7 +1263,6 @@ class W40KEngine(gym.Env):
                     "end_activation_required": True
                 }
             else:
-                print(f"GYM ACTION DEBUG: No eligible units for skip, advancing phase")
                 return {"action": "advance_phase", "from": current_phase, "reason": "no_eligible_units"}
         
         # Get eligible units for current phase - AI_TURN.md sequential activation
@@ -1251,7 +1270,6 @@ class W40KEngine(gym.Env):
         
         if not eligible_units:
             current_phase = self.game_state["phase"]
-            print(f"PHASE ADVANCEMENT: No eligible units in {current_phase} phase - forcing advancement")
             
             if current_phase == "move":
                 self._shooting_phase_init()
@@ -1264,24 +1282,16 @@ class W40KEngine(gym.Env):
         
         # GUARANTEED UNIT SELECTION - use first eligible unit directly
         selected_unit_id = eligible_units[0]["id"]
-        print(f"AI UNIT SELECTION: Selected {selected_unit_id} from eligible units {[u['id'] for u in eligible_units]}")
         
         if current_phase == "move":
             if action_int == 0:  # Move action
-                try:
-                    destination = self._ai_select_movement_destination(selected_unit_id)
-                    return {
-                        "action": "move", 
-                        "unitId": selected_unit_id, 
-                        "destCol": destination[0], 
-                        "destRow": destination[1]
-                    }
-                except ValueError:
-                    if not self.quiet:
-                        print(f"DEBUG: Converting move to wait for unit {selected_unit_id} - no valid destinations")
-                    return {"action": "wait", "unitId": selected_unit_id}
+                # CRITICAL FIX: Use activate_unit instead of direct move
+                return {
+                    "action": "activate_unit", 
+                    "unitId": selected_unit_id
+                }
             elif action_int == 7:  # WAIT - agent chooses not to move
-                return {"action": "wait", "unitId": selected_unit_id}
+                return {"action": "skip", "unitId": selected_unit_id}
         elif current_phase == "shoot":
             if action_int == 4:  # Shoot action
                 return {
@@ -1331,25 +1341,17 @@ class W40KEngine(gym.Env):
             return [7]  # Only wait for unknown phases
     
     def _get_eligible_units_for_current_phase(self) -> List[Dict[str, Any]]:
-        """Get eligible units for current phase using pure handler delegation."""
+        """Get eligible units for current phase using handler's authoritative pools."""
         current_phase = self.game_state["phase"]
         
-        print(f"DEBUG ELIGIBLE UNITS: _get_eligible_units_for_current_phase() called for phase: {current_phase}")
-        
         if current_phase == "move":
-            # PURE DELEGATION: Ask handler who can act
-            eligible_unit_ids = movement_handlers.get_eligible_units(self.game_state)
-            print(f"DEBUG ELIGIBLE UNITS: Movement phase returned: {eligible_unit_ids}")
-            return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
+            # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
+            pool_unit_ids = self.game_state.get("move_activation_pool", [])
+            return [self._get_unit_by_id(uid) for uid in pool_unit_ids if self._get_unit_by_id(uid)]
         elif current_phase == "shoot":
-            # USE CACHED POOL: Don't rebuild, use existing activation pool
-            existing_pool = self.game_state.get('shoot_activation_pool', [])
-            if existing_pool:
-                return [self._get_unit_by_id(uid) for uid in existing_pool if self._get_unit_by_id(uid)]
-            else:
-                # Only build pool if it doesn't exist (phase start)
-                eligible_unit_ids = shooting_handlers.shooting_build_activation_pool(self.game_state)
-                return [self._get_unit_by_id(uid) for uid in eligible_unit_ids if self._get_unit_by_id(uid)]
+            # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
+            pool_unit_ids = self.game_state.get('shoot_activation_pool', [])
+            return [self._get_unit_by_id(uid) for uid in pool_unit_ids if self._get_unit_by_id(uid)]
         else:
             print(f"DEBUG ELIGIBLE UNITS: Unknown phase {current_phase}, returning empty list")
             return []
@@ -1493,17 +1495,13 @@ class W40KEngine(gym.Env):
                 print(f"DEBUG: Tactical context for unit {unit['id']}: {context}")
                 print(f"DEBUG: Movement from ({old_col}, {old_row}) to ({new_col}, {new_row})")
             
-            # Handle same-position movement (no actual movement)
+            # Handle same-position movement (no actual movement) - REMOVE DEBUG THAT TRIGGERS DOUBLE PROCESSING
             if old_col == new_col and old_row == new_row:
                 # Unit didn't actually move - this should be treated as a wait action
                 context = {"moved_to_safety": True}  # Conservative choice for no movement
-                if not self.quiet:
-                    print(f"DEBUG: No actual movement detected, setting moved_to_safety=True")
             elif not any(context.values()):
                 # If unit moved but no tactical benefit detected, default to moved_closer
                 context["moved_closer"] = True
-                if not self.quiet:
-                    print(f"DEBUG: Movement detected but no tactical context, defaulting to moved_closer=True")
             
             return context
         

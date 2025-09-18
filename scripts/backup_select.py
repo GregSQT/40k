@@ -62,6 +62,8 @@ else:
         "config/game_config.json",   # Game Rules & Mechanics
         "config/rewards_config.json",  # Reward System Definitions
         "config/scenario.json",        # Game Scenarios
+        "config/scenario_1_Fight_Position.json",
+        "config/scenario_2_Mixt_Positions.json",
         "config/scenario_templates.json",
         "config/training_config.json", # AI Training Parameters
         "config/unit_definitions.json", # Unit Stats & Abilities

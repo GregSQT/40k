@@ -545,7 +545,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     model_params = training_config["model_params"]
     
     # Import environment
-    W40KEnv, register_environment = setup_imports()
+    W40KEngine, register_environment = setup_imports()
     
     # Register environment
     register_environment()
@@ -560,14 +560,15 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
     
-    base_env = W40KEnv(
+    base_env = W40KEngine(
         rewards_config=rewards_config_name,
         training_config_name=training_config_name,
         controlled_agent=None,
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
-        quiet=False
+        quiet=False,
+        gym_training_mode=True
     )
     
     # Connect step logger after environment creation - compliant engine compatibility
@@ -641,7 +642,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     model_params = training_config["model_params"]
     
     # Import environment
-    W40KEnv, register_environment = setup_imports()
+    W40KEngine, register_environment = setup_imports()
     
     # Register environment
     register_environment()
@@ -655,14 +656,15 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
     
-    base_env = W40KEnv(
+    base_env = W40KEngine(
         rewards_config=rewards_config_name,
         training_config_name=training_config_name,
         controlled_agent=agent_key,
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
-        quiet=False
+        quiet=False,
+        gym_training_mode=True
     )
     
     # Connect step logger after environment creation - compliant engine compatibility
@@ -710,7 +712,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     return model, env, training_config, model_path
 
 def setup_callbacks(config, model_path, training_config, training_config_name="default"):
-    W40KEnv, _ = setup_imports()
+    W40KEngine, _ = setup_imports()
     callbacks = []
     
     # Add episode termination callback for debug AND step configs - NO FALLBACKS
@@ -735,14 +737,15 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     scenario_file = os.path.join(cfg.config_dir, "scenario.json")
     unit_registry = UnitRegistry()
     
-    base_eval_env = W40KEnv(
+    base_eval_env = W40KEngine(
         rewards_config="default",
         training_config_name=training_config_name,
         controlled_agent=None,
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
-        quiet=True
+        quiet=True,
+        gym_training_mode=True
     )
     
     # Enable logging ONLY for evaluation
@@ -867,14 +870,14 @@ def train_model(model, training_config, callbacks, model_path):
 def test_trained_model(model, num_episodes, training_config_name="default"):
     """Test the trained model."""
     
-    W40KEnv, _ = setup_imports()
+    W40KEngine, _ = setup_imports()
     # Load scenario and unit registry for testing
     from ai.unit_registry import UnitRegistry
     cfg = get_config_loader()
     scenario_file = os.path.join(cfg.config_dir, "scenario.json")
     unit_registry = UnitRegistry()
     
-    env = W40KEnv(
+    env = W40KEngine(
         rewards_config="default",
         training_config_name=training_config_name,
         controlled_agent=None,
@@ -1062,7 +1065,7 @@ def generate_steplog_and_replay(config, args):
                 else:
                     raise FileNotFoundError(f"Default model not found: {model_path}\nModels directory does not exist: {models_dir}")
         
-        W40KEnv, _ = setup_imports()
+        W40KEngine, _ = setup_imports()
         from ai.unit_registry import UnitRegistry
         from ai.scenario_manager import ScenarioManager
         unit_registry = UnitRegistry()
@@ -1157,7 +1160,7 @@ def generate_steplog_and_replay(config, args):
         config._cache['game_config']['game_rules']['max_turns'] = max_turns_override
         
         try:
-            env = W40KEnv(
+            env = W40KEngine(
                 rewards_config=args.rewards_config,
                 training_config_name=args.training_config,
                 controlled_agent=None,
@@ -1719,14 +1722,14 @@ def main():
                 print(f"❌ Model not found: {model_path}")
                 return 1
             
-            W40KEnv, _ = setup_imports()
+            W40KEngine, _ = setup_imports()
             # Load scenario and unit registry for testing
             from ai.unit_registry import UnitRegistry
             cfg = get_config_loader()
             scenario_file = os.path.join(cfg.config_dir, "scenario.json")
             unit_registry = UnitRegistry()
             
-            env = W40KEnv(
+            env = W40KEngine(
                 rewards_config=args.rewards_config,
                 training_config_name=args.training_config,
                 controlled_agent=None,

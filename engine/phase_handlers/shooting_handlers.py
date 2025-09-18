@@ -66,6 +66,14 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     if unit["id"] in game_state.get("units_fled", set()):
         return False
         
+    # CRITICAL FIX: Add missing adjacency check - units in melee cannot shoot
+    # This matches the frontend logic: hasAdjacentEnemyShoot check
+    for enemy in game_state["units"]:
+        if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+            if distance <= unit.get("CC_RNG", 1):
+                return False
+        
     # unit.RNG_NB > 0?
     if unit.get("RNG_NB", 0) <= 0:
         return False
@@ -78,7 +86,7 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
             if is_valid:
                 valid_targets_found.append(enemy["id"])
     
-    # Single clean log line
+    # Debug logging for shooting eligibility
     if valid_targets_found:
         return True
     else:
@@ -152,16 +160,8 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
             # Check if target is valid with detailed logging for training debug
             is_valid = _is_valid_shooting_target(game_state, unit, enemy)
             if not is_valid:
-                print(f"SHOOT TARGET BLOCKED: Unit {unit_id} cannot target {enemy['id']} - checking why...")
                 # Add specific failure reason debugging
                 distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
-                print(f"  Distance: {distance}, Range: {unit.get('RNG_RNG', 0)}")
-                if distance > unit.get("RNG_RNG", 0):
-                    print(f"  BLOCKED: Out of range")
-                elif distance <= unit.get("CC_RNG", 1):
-                    print(f"  BLOCKED: Too close (adjacent)")
-                else:
-                    print(f"  BLOCKED: Line of sight failed")
             else:
                 valid_target_pool.append(enemy["id"])
     
@@ -177,8 +177,6 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
     """
     start_col, start_row = shooter["col"], shooter["row"]
     end_col, end_row = target["col"], target["row"]
-    
-    print(f"LOS DEBUG: Unit {shooter['id']}({start_col},{start_row}) -> Unit {target['id']}({end_col},{end_row})")
     
     # Try multiple sources for wall hexes
     wall_hexes_data = []
@@ -210,11 +208,8 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         else:
             print(f"LOS DEBUG: Invalid wall hex format: {wall_hex}")
     
-    print(f"LOS DEBUG: Wall hexes: {sorted(list(wall_hexes))}")
-    
     try:
         hex_path = _get_accurate_hex_line(start_col, start_row, end_col, end_row)
-        print(f"LOS DEBUG: Path: {hex_path}")
         
         # Check if any hex in path is a wall (excluding start and end)
         blocked = False
@@ -228,11 +223,6 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
                 blocked = True
                 blocking_hex = (col, row)
                 break
-        
-        if blocked:
-            print(f"LOS DEBUG: BLOCKED by wall at {blocking_hex}")
-        else:
-            print(f"LOS DEBUG: CLEAR path")
         
         return not blocked
         
@@ -459,14 +449,26 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> T
             result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
             return True, result
     
-    # AI_TURN.md: SHOOTING PHASE ACTIONS AVAILABLE → PLAYER_ACTION_SELECTION
+    # CLEAN FLAG DETECTION: Use explicit gym_training_mode from engine
+    is_gym_training = game_state.get("config", {}).get("gym_training_mode", False)
+    
+    if is_gym_training and valid_targets:
+        # GYM AUTO-SHOOT: Select target and execute shooting automatically
+        target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
+        print(f"GYM AUTO-SHOOT: Unit {unit_id} targeting {target_id}")
+        
+        # Execute shooting directly and return result
+        return shooting_target_selection_handler(game_state, unit_id, str(target_id))
+    
+    # Human players get normal waiting_for_player response
     response = {
         "while_loop_active": True,
         "validTargets": valid_targets,
         "shootLeft": unit["SHOOT_LEFT"],
         "context": "player_action_selection",
         "blinking_units": valid_targets,
-        "start_blinking": True
+        "start_blinking": True,
+        "waiting_for_player": True
     }
     return True, response
 
@@ -610,45 +612,31 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
 def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, target_id: str) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_SHOOT.md: Handle target selection and shooting execution
-    """
-    print(f"TARGET SELECTION DEBUG: Starting handler for unit {unit_id} -> target {target_id}")
-    
+    """    
     unit = _get_unit_by_id(game_state, unit_id)
     target = _get_unit_by_id(game_state, target_id)
     
     if not unit or not target:
-        print(f"TARGET SELECTION DEBUG: Unit or target not found - unit: {unit is not None}, target: {target is not None}")
         return False, {"error": "unit_or_target_not_found"}
     
     # CRITICAL: Validate unit has shots remaining
     if unit.get("SHOOT_LEFT", 0) <= 0:
-        print(f"TARGET SELECTION DEBUG: No shots remaining - SHOOT_LEFT: {unit.get('SHOOT_LEFT', 0)}")
         return False, {"error": "no_shots_remaining", "unitId": unit_id, "shootLeft": unit.get("SHOOT_LEFT", 0)}
-    
-    print(f"TARGET SELECTION DEBUG: Unit has {unit.get('SHOOT_LEFT', 0)} shots remaining")
     
     # Validate target is in valid pool
     valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
-    print(f"TARGET SELECTION DEBUG: Valid targets: {valid_targets}, checking target: {target_id}")
     
     if target_id not in valid_targets:
-        print(f"TARGET SELECTION DEBUG: Target {target_id} not in valid targets {valid_targets}")
         return False, {"error": "target_not_valid", "targetId": target_id}
-    
-    print(f"TARGET SELECTION DEBUG: About to execute attack sequence")
     
     # Execute shooting attack
     attack_result = shooting_attack_controller(game_state, unit_id, target_id)
-    print(f"TARGET SELECTION DEBUG: Attack sequence completed: {attack_result}")
     
     # Update SHOOT_LEFT and continue loop per AI_TURN.md
     unit["SHOOT_LEFT"] -= 1
-    print(f"TARGET SELECTION DEBUG: Updated SHOOT_LEFT to {unit['SHOOT_LEFT']}")
     
     # Continue execution loop to check for more shots or end activation
-    print(f"TARGET SELECTION DEBUG: Calling execution loop")
     result = _shooting_unit_execution_loop(game_state, unit_id)
-    print(f"TARGET SELECTION DEBUG: Execution loop result: {result}")
     return result
 
 
@@ -912,28 +900,51 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
     try:
         from ai.reward_mapper import RewardMapper
         
-        # We need rewards_config - try to get it from the engine context
-        # For now, implement the actual AI_GAME_OVERVIEW.md logic directly
+        # Get rewards config from game_state (passed from engine)
+        rewards_config = game_state.get("rewards_config")
+        if not rewards_config:
+            return valid_targets[0]
+        
+        reward_mapper = RewardMapper(rewards_config)
+        
+        # Enrich unit and targets for reward mapper (matching engine format)
+        enriched_unit = _enrich_unit_for_reward_mapper(unit, game_state)
+        enriched_targets = [_enrich_unit_for_reward_mapper(_get_unit_by_id(game_state, tid), game_state) 
+                          for tid in valid_targets if _get_unit_by_id(game_state, tid)]
+        
+        # Check if melee units can charge any target
+        can_melee_charge_targets = {}
+        for target_id in valid_targets:
+            target = _get_unit_by_id(game_state, target_id)
+            if target:
+                can_melee_charge_targets[target_id] = _check_if_melee_can_charge(target, game_state)
         
         best_target = valid_targets[0]
-        best_score = -999999
+        best_reward = -999999
         
         for target_id in valid_targets:
             target = _get_unit_by_id(game_state, target_id)
             if not target:
                 continue
+                
+            enriched_target = _enrich_unit_for_reward_mapper(target, game_state)
+            can_melee_charge = can_melee_charge_targets.get(target_id, False)
             
-            # Calculate AI_GAME_OVERVIEW.md priorities
-            score = _calculate_target_priority_score(unit, target, game_state)
+            # Use RewardMapper's shooting priority system
+            reward = reward_mapper.get_shooting_priority_reward(
+                enriched_unit, 
+                enriched_target, 
+                enriched_targets, 
+                can_melee_charge
+            )
             
-            if score > best_score:
-                best_score = score
+            if reward > best_reward:
+                best_reward = reward
                 best_target = target_id
         
         return best_target
         
-    except ImportError:
-        # Fallback to first target
+    except Exception as e:
         return valid_targets[0]
 
 def _calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
@@ -959,6 +970,28 @@ def _calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any
     
     # Default: threat level only
     return threat_level
+
+def _enrich_unit_for_reward_mapper(unit: Dict[str, Any], game_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Enrich unit data for reward mapper compatibility (matches engine format)."""
+    if not unit:
+        return {}
+    
+    # Get controlled_agent from game_state agent mapping
+    agent_mapping = game_state.get("agent_mapping", {})
+    controlled_agent = agent_mapping.get(str(unit["id"]), unit.get("unitType", "default"))
+    
+    enriched = unit.copy()
+    enriched.update({
+        "controlled_agent": controlled_agent,
+        "unitType": unit.get("unitType", unit.get("unit_type", "default")),
+        "name": unit.get("name", f"Unit_{unit['id']}"),
+        # Add any missing fields that reward_mapper expects
+        "cc_dmg": unit.get("CC_DMG", 0),
+        "rng_dmg": unit.get("RNG_DMG", 0),
+        "CUR_HP": unit.get("HP_CUR", unit.get("CUR_HP", 0))
+    })
+    
+    return enriched
 
 def _check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
     """Check if any friendly melee unit can charge this target."""

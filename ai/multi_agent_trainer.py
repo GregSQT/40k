@@ -734,8 +734,8 @@ class MultiAgentTrainer:
                     print(f"⚠️ Failed to connect step logger for {agent_key}: {log_error}")
                     
             except Exception as env_error:
-                print(f"❌ W40KEnv creation failed for {agent_key}: {env_error}")
-                raise RuntimeError(f"Failed to create W40KEnv for agent {agent_key}: {env_error}")
+                print(f"❌ W40KEngine creation failed for {agent_key}: {env_error}")
+                raise RuntimeError(f"Failed to create W40KEngine for agent {agent_key}: {env_error}")
             
             # Enhance environment with clean game logger
             from ai.game_replay_logger import GameReplayIntegration

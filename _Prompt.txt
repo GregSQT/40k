@@ -25,32 +25,34 @@ Clear validation criteria for every decision
 Expert-level technical depth required
 Always use two code boxes for updates, indicate the path and name of the updated file, respect indentation, without ellipse, without workaround or defaut value
 
-POTENTIAL REFERENCE HELP:
-I have Added in the knowledge 40k_OLD
-It is the previous version of the application.
-Its main problem is the react conflicting with AI_TURN rules.
-But for other purposes, you may save time having a look at how it manages some features. Of course, the main priority is to maintain the 100% compliance with AI_TURN
-
 USER PREFERENCES:
 Extremely detail-oriented about AI_TURN.md compliance
 Wants exact specification implementation, not approximations
 Prefers systematic debugging with evidence before solutions
 Requires proper file paths and change tracking in format: FILE: path / CHANGE# / LINES / TYPE / BEFORE/AFTER / RESULT
 Uses specific error reporting format with TypeScript compiler output
+No workarounds or hacks - find and fix the root cause
+Do NOT rush coding.
+Check and tell me what files you need, make an EXPERT investigation, add debug logs if needed, and then, tell me the fix you'll apply
 
 ----------------------------------------------------------------------------
 BUGS
 ----------------------------------------------------------------------------
 
 WAIT is for when the agent DECIDES to NOT perform an action.
-SKIP is when the agent CANNO perform an action !!!!!
-
+SKIP is when the agent CANNOT perform an action !!!!!
 
 TRAIN:
 Quel fichier de reward ?
 
+MOVE :
+Preview green hex != valid hexes : sometimes, when I click on a green hex as a move destination, the move is cancelled and the unit is logged as wait.
+1 : why can I click on a invalid hex ?
+2 : why a green hex is considered as an invalid destination ?
+
 SHOOT
-If i select en enemy unit before selecting a activable unit, i see the enmy unit's preview and I am stuck
+
+HP preview screwed when unit has lost 1 HP. The back space for the lost HP blinks instead of remaining black
 Couleur de HP bar dans css (et couleur du blink preview aussi)
 Calcul different entre les hex rouges et les unit blink
 dead : noir et retirer icon

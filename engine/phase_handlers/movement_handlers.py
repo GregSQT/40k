@@ -89,37 +89,56 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     """
     AI_MOVE.md: Handler action routing with complete autonomy
     """
+    
+    print(f"MOVEMENT DEBUG: execute_action called - action={action.get('action')}, unitId={action.get('unitId')}")
+    
     # Handler self-initialization on first action
     if game_state.get("phase") != "move" or not game_state.get("move_activation_pool"):
+        print(f"MOVEMENT HANDLER DEBUG: Initializing movement phase")
         movement_phase_start(game_state)
     
     # Pool empty? → Phase complete
     if not game_state["move_activation_pool"]:
+        print(f"MOVEMENT HANDLER DEBUG: Pool empty, ending phase")
         return True, movement_phase_end(game_state)
     
     # Get unit from action (frontend specifies which unit to move)
     action_type = action.get("action")
     unit_id = action.get("unitId")
-    
+        
     # For gym training, if no unitId specified, use first eligible unit
     if not unit_id:
         if game_state["move_activation_pool"]:
             unit_id = game_state["move_activation_pool"][0]
+            print(f"MOVEMENT HANDLER DEBUG: Auto-selected unit {unit_id} from pool")
         else:
             return True, movement_phase_end(game_state)
     
     # Validate unit is eligible (keep for validation, remove only after successful action)
     if unit_id not in game_state["move_activation_pool"]:
+        print(f"MOVEMENT HANDLER DEBUG: Unit {unit_id} not eligible, pool={game_state['move_activation_pool']}")
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
     # Get unit object for processing
     active_unit = _get_unit_by_id(game_state, unit_id)
     if not active_unit:
+        print(f"MOVEMENT HANDLER DEBUG: Unit {unit_id} not found in game state")
         return False, {"error": "unit_not_found", "unitId": unit_id}
+    
+    # Flag detection for consistent behavior
+    is_gym_training = config.get("gym_training_mode", False)
+    print(f"MOVEMENT DEBUG: is_gym_training={is_gym_training}, action_type={action_type}")
     
     # Auto-activate unit if not already activated and preview not shown
     if not game_state.get("active_movement_unit") and action_type in ["move", "left_click"]:
-        _handle_unit_activation(game_state, active_unit, config)
+        print(f"MOVEMENT HANDLER DEBUG: Auto-activating unit for {action_type}")
+        if is_gym_training:
+            print(f"MOVEMENT DEBUG: Gym training mode - triggering handle_unit_activation")
+            # Gym training: return immediately to trigger auto-movement
+            return _handle_unit_activation(game_state, active_unit, config)
+        else:
+            # Human players: activate but don't return, continue to normal flow
+            _handle_unit_activation(game_state, active_unit, config)
     
     if action_type == "activate_unit":
         return _handle_unit_activation(game_state, active_unit, config)
@@ -141,12 +160,42 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
 
 def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """AI_MOVE.md: Unit activation start + execution loop"""
+    """AI_MOVE.md: Unit activation start + execution loop"""    
     # Unit activation start
     movement_unit_activation_start(game_state, unit["id"])
     
     # Unit execution loop (automatic)
-    return movement_unit_execution_loop(game_state, unit["id"])
+    execution_result = movement_unit_execution_loop(game_state, unit["id"])
+    
+    # Clean flag detection
+    is_gym_training = config.get("gym_training_mode", False)
+        
+    if is_gym_training and isinstance(execution_result, tuple) and execution_result[0] and execution_result[1].get("waiting_for_player"):
+        valid_destinations = execution_result[1].get("valid_destinations", [])
+        if valid_destinations:
+            # Auto-select first destination for gym training only
+            dest_col, dest_row = valid_destinations[0]
+            print(f"GYM AUTO-MOVE: Unit {unit['id']} to destination ({dest_col}, {dest_row})")
+            
+            auto_move_action = {
+                "action": "move",
+                "unitId": unit["id"],
+                "destCol": dest_col,
+                "destRow": dest_row
+            }
+            
+            # Execute movement and ensure proper gym result format
+            move_result = movement_destination_selection_handler(game_state, unit["id"], auto_move_action)
+            if isinstance(move_result, tuple) and move_result[0]:
+                move_result[1]["unitId"] = unit["id"]
+                move_result[1]["action"] = "move"
+            return move_result
+        else:
+            print(f"GYM AUTO-SKIP: Unit {unit['id']} - no valid destinations")
+            return True, {"action": "skip", "unitId": unit["id"], "reason": "no_valid_destinations"}
+    
+    # Human players get normal waiting_for_player response - no auto-movement
+    return execution_result
 
 
 def movement_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> None:
@@ -287,6 +336,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     if not unit:
         return []
     
+    print(f"MOVEMENT DEBUG: Building destinations for unit {unit_id} at ({unit['col']}, {unit['row']}) with MOVE={unit['MOVE']}")
+    
     valid_destinations = []
     move_range = unit["MOVE"]
     start_col, start_row = unit["col"], unit["row"]
@@ -308,6 +359,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 valid_destinations.append((dest_col, dest_row))
     
     game_state["valid_move_destinations_pool"] = valid_destinations
+    print(f"MOVEMENT DEBUG: Unit {unit_id} found {len(valid_destinations)} valid destinations: {valid_destinations[:5]}{'...' if len(valid_destinations) > 5 else ''}")
     return valid_destinations
 
 
@@ -402,12 +454,20 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     # Check flee condition (simplified - distance <= 1)
     was_adjacent = _is_adjacent_to_enemy_simple(game_state, unit)
     
-    # Execute movement
+    # Execute movement with validation
     orig_col, orig_row = unit["col"], unit["row"]
-    print(f"MOVEMENT DEBUG: Unit {unit['id']} BEFORE move: ({orig_col}, {orig_row}) -> DESTINATION: ({dest_col}, {dest_row})")
+    print(f"MOVEMENT EXECUTION: Unit {unit['id']} MOVING from ({orig_col}, {orig_row}) to ({dest_col}, {dest_row})")
+    
+    # CRITICAL: Actually update the unit position
     unit["col"] = dest_col
     unit["row"] = dest_row
-    print(f"MOVEMENT DEBUG: Unit {unit['id']} AFTER move: ({unit['col']}, {unit['row']})")
+    
+    # VALIDATION: Confirm position changed
+    if unit["col"] != dest_col or unit["row"] != dest_row:
+        print(f"MOVEMENT ERROR: Position update failed - expected ({dest_col}, {dest_row}), actual ({unit['col']}, {unit['row']})")
+        return False, {"error": "position_update_failed"}
+    
+    print(f"MOVEMENT SUCCESS: Unit {unit['id']} now at ({unit['col']}, {unit['row']})")
     
     # Generate movement log per requested format
     if "action_logs" not in game_state:
@@ -474,10 +534,15 @@ def _end_activation(game_state: Dict[str, Any], unit: Dict[str, Any], was_adjace
     if was_adjacent:
         game_state["units_fled"].add(unit["id"])
     
-    # Remove from activation pool
+    # Remove from activation pool - CRITICAL: Ensure unit is only removed once
     if unit["id"] in game_state["move_activation_pool"]:
         game_state["move_activation_pool"].remove(unit["id"])
         print(f"MOVEMENT POOL REMOVAL: Unit {unit['id']} removed. Remaining: {game_state['move_activation_pool']}")
+    
+    # CRITICAL FIX: Clear active movement unit to prevent double processing
+    if game_state.get("active_movement_unit") == unit["id"]:
+        game_state["active_movement_unit"] = None
+        print(f"MOVEMENT DEBUG: Cleared active_movement_unit for {unit['id']}")
     
     # Clear active unit
     game_state["active_movement_unit"] = None
