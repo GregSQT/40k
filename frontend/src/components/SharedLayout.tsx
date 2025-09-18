@@ -12,8 +12,23 @@ interface SharedLayoutProps {
 const Navigation: React.FC = () => {
   const location = useLocation();
   
-  const getButtonClass = (path: string) => 
-    `nav-button ${location.pathname === path ? 'nav-button--active' : 'nav-button--inactive'}`;
+  const getButtonClass = (path: string) => {
+    const isPvEMode = location.pathname === '/game' && location.search.includes('mode=pve');
+    
+    // Handle PvE mode detection via query parameter
+    if (path === '/game?mode=pve') {
+      return `nav-button ${isPvEMode ? 'nav-button--active' : 'nav-button--inactive'}`;
+    }
+    
+    // Handle PvP mode - only active when on /game WITHOUT PvE mode
+    if (path === '/game') {
+      const isPvPMode = location.pathname === '/game' && !isPvEMode;
+      return `nav-button ${isPvPMode ? 'nav-button--active' : 'nav-button--inactive'}`;
+    }
+    
+    // Handle standard path matching for Replay and other routes
+    return `nav-button ${location.pathname === path ? 'nav-button--active' : 'nav-button--inactive'}`;
+  };
 
   return (
     <nav className="navigation">

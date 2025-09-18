@@ -1,5 +1,5 @@
 // frontend/src/components/UnitStatusTable.tsx
-import React, { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { Unit, UnitId } from '../types';
 
 interface UnitStatusTableProps {

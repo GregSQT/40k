@@ -20,7 +20,8 @@ export const BoardWithAPI: React.FC = () => {
   // Detect game mode from URL
   const location = useLocation();
   const gameMode = location.pathname.includes('/pve') ? 'pve' : 
-                   location.pathname.includes('/replay') ? 'training' : 'pvp';
+                   location.pathname.includes('/replay') ? 'training' :
+                   (location.pathname === '/game' && location.search.includes('mode=pve')) ? 'pve' : 'pvp';
   const isPvE = gameMode === 'pve' || window.location.search.includes('mode=pve') || apiProps.gameState?.pve_mode === true;
   
   // Get board configuration for line of sight calculations
