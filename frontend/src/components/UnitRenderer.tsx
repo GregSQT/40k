@@ -84,6 +84,12 @@ export class UnitRenderer {
     this.cleanupExistingBlinkIntervals();
     
     const { unit } = this.props;
+    
+    // AI_TURN.md COMPLIANCE: Dead units don't render - return early
+    if (unit.HP_CUR <= 0) {
+      return;
+    }
+    
     const unitIconScale = unit.ICON_SCALE || this.props.ICON_SCALE;
     
     // ===== Z-INDEX CALCULATIONS =====
