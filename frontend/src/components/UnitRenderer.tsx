@@ -473,7 +473,7 @@ export class UnitRenderer {
           }
         }
         const wouldBeDamaged = i >= (currentHP - shooterDamage) && i < currentHP;
-        const highlightColor = wouldBeDamaged ? 0x222222 : (unit.player === 0 ? 0x4da6ff : 0xff4d4d);
+        const highlightColor = wouldBeDamaged ? 0x222222 : (i < currentHP ? (unit.player === 0 ? 0x4da6ff : 0xff4d4d) : 0x444444);
         highlightSlice.beginFill(highlightColor, 1);
         highlightSlice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
         highlightSlice.endFill();
