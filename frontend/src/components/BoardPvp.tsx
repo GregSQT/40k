@@ -19,6 +19,7 @@ type BoardProps = {
   units: Unit[];
   selectedUnitId: number | null;
   eligibleUnitIds: number[];
+  showHexCoordinates?: boolean;
   shootingActivationQueue?: Unit[];
   activeShootingUnit?: Unit | null;
   mode: Mode;
@@ -64,6 +65,7 @@ export default function Board({
   units,
   selectedUnitId,
   eligibleUnitIds,
+  showHexCoordinates = false,
   shootingActivationQueue,
   activeShootingUnit,
   mode,
@@ -805,7 +807,8 @@ export default function Board({
         coverTargets,
         phase,
         selectedUnitId,
-        mode
+        mode,
+        showHexCoordinates
       });
 
       // ✅ SETUP BOARD INTERACTIONS using shared BoardInteractions component
@@ -1031,7 +1034,9 @@ export default function Board({
         error,
         // Add blinking state to trigger re-render
         isBlinkingActive,
-        JSON.stringify(blinkingUnits)
+        JSON.stringify(blinkingUnits),
+        // Add showHexCoordinates to trigger re-render when toggle changes
+        showHexCoordinates
       ]);
 
       // Simple container return - loading/error handled inside useEffect

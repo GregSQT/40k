@@ -42,10 +42,9 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
     return () => clearTimeout(timer);
   }, [availableHeight]);
 
-  // Display limited events (newest first) - sort by timestamp descending and limit to calculated rows
+  // Display all events (newest first) - sort by timestamp descending, no limit
   const displayedEvents = [...events]
-    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-    .slice(0, visibleRowCount);
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
   const formatTime = (timestamp: Date, eventIndex?: number): string => {
     if (useStepNumbers && eventIndex !== undefined) {
@@ -53,6 +52,13 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
     }
     return getElapsedTime(timestamp);
   };
+
+  // Keep newest entry visible when new events arrive
+  React.useEffect(() => {
+    if (eventsContainerRef.current) {
+      eventsContainerRef.current.scrollTop = 0;
+    }
+  }, [events.length]);
 
   return (
     <div className="game-log">

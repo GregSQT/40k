@@ -62,6 +62,7 @@ interface DrawBoardOptions {
   phase?: "move" | "shoot" | "charge" | "fight";
   selectedUnitId?: number | null;
   mode?: string;
+  showHexCoordinates?: boolean;
 }
 
 // Helper functions from Board.tsx
@@ -116,7 +117,8 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
       coverTargets = new Set<string>(),
       phase = "move",
       selectedUnitId = null,
-      mode = "select"
+      mode = "select",
+      showHexCoordinates = false
     } = options || {};
 
     // ✅ OPTIMIZED: Create containers for hex batching - EXACT from Board.tsx
@@ -196,15 +198,17 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
         baseCell.endFill();
         baseHexContainer.addChild(baseCell);
         
-        // Add coordinate text for debugging
-        const coordText = new PIXI.Text(`${col},${row}`, {
-          fontSize: 8,
-          fill: 0xFFFFFF,
-          align: 'center'
-        });
-        coordText.anchor.set(0.5);
-        coordText.position.set(centerX, centerY);
-        baseHexContainer.addChild(coordText);
+        // Add coordinate text when toggle is enabled
+        if (showHexCoordinates) {
+          const coordText = new PIXI.Text(`${col},${row}`, {
+            fontSize: 8,
+            fill: 0xFFFFFF,
+            align: 'center'
+          });
+          coordText.anchor.set(0.5);
+          coordText.position.set(centerX, centerY);
+          baseHexContainer.addChild(coordText);
+        }
 
         // Create highlight hex (only if needed) - NO INTERACTIONS
         if (isChargeable || isAttackable || isInCover || isAvailable) {

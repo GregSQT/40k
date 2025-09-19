@@ -30,6 +30,9 @@ export const BoardWithAPI: React.FC = () => {
   // Track clicked (but not selected) units for blue highlighting
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
   
+  // Track hex coordinate display toggle
+  const [showHexCoordinates, setShowHexCoordinates] = useState<boolean>(false);
+  
   // Track UnitStatusTable collapse states
   const [player0Collapsed, setPlayer0Collapsed] = useState(false);
   const [player1Collapsed, setPlayer1Collapsed] = useState(false);
@@ -234,6 +237,7 @@ export const BoardWithAPI: React.FC = () => {
       ) : (
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
+      
       {/* AI Status Display */}
       {isPvE && (
         <div className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
@@ -314,10 +318,15 @@ export const BoardWithAPI: React.FC = () => {
   );
 
   return (
-    <SharedLayout rightColumnContent={rightColumnContent}>
+    <SharedLayout 
+      rightColumnContent={rightColumnContent}
+      showHexCoordinates={showHexCoordinates}
+      onToggleHexCoordinates={setShowHexCoordinates}
+    >
       <BoardPvp
         units={apiProps.units}
         selectedUnitId={apiProps.selectedUnitId}
+        showHexCoordinates={showHexCoordinates}
         eligibleUnitIds={apiProps.eligibleUnitIds}
         mode={apiProps.mode}
         movePreview={apiProps.movePreview}
