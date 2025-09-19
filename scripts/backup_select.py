@@ -130,6 +130,7 @@ else:
         #"frontend/src/components/DiceRollComponent.tsx",
         "frontend/src/components/ErrorBoundary.tsx",
         "frontend/src/components/GameBoard.tsx",
+        "frontend/src/components/GameController.tsx",
         "frontend/src/components/GameLog.tsx",
         "frontend/src/components/GamePageLayout.tsx",
         "frontend/src/components/GameStatus.tsx",

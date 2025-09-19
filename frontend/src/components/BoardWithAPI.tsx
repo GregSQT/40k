@@ -15,7 +15,7 @@ import type { PlayerId } from '../types';
 
 export const BoardWithAPI: React.FC = () => {
   const apiProps = useEngineAPI();
-  const gameLog = useGameLog();
+  const gameLog = useGameLog(apiProps.gameState?.currentTurn ?? 1);
   
   // Detect game mode from URL
   const location = useLocation();
@@ -307,6 +307,7 @@ export const BoardWithAPI: React.FC = () => {
           events={gameLog.events}
           getElapsedTime={gameLog.getElapsedTime}
           availableHeight={logAvailableHeight}
+          currentTurn={apiProps.gameState?.currentTurn ?? 1}
         />
       </ErrorBoundary>
     </>

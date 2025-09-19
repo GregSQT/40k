@@ -979,7 +979,7 @@ onLogChargeRoll: () => {},
                 detail: {
                   type: logEntry.type,
                   message: logEntry.message,
-                  turn: logEntry.turn,
+                  turn: gameState?.turn || logEntry.turn,  // Use live turn
                   phase: logEntry.phase,
                   shooterId: logEntry.shooterId,
                   targetId: logEntry.targetId,

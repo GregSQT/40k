@@ -1,6 +1,6 @@
 //frontend/src/components/GamePageLayout.tsx
 
-import { GameController } from "./GameController_test_pour_del";
+import { GameController } from "./GameController";
 import "../App.css";
 
 export default function GamePageLayout() {

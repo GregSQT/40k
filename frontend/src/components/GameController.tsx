@@ -11,12 +11,10 @@ import { GameLog } from "./GameLog";
 import { useGameState } from "../hooks/useGameState";
 import { useGameActions } from "../hooks/useGameActions";
 import { useGameConfig } from "../hooks/useGameConfig";
-import { useAITurn } from "../hooks/useAITurn";
-import { usePhaseTransition } from "../hooks/usePhaseTransition";
 import { useGameLog } from "../hooks/useGameLog";
 import type { Unit } from "../types/game";
 import { useState, useEffect } from "react";
-// import { createUnit, getAvailableUnitTypes } from "../data/UnitFactory";
+//import { createUnit, getAvailableUnitTypes } from "../data/UnitFactory";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 
 interface GameControllerProps {
@@ -28,7 +26,6 @@ export const GameController: React.FC<GameControllerProps> = ({
   initialUnits,
   className,
 }) => {
-  console.log("🔵 GAMECONTROLLER COMPONENT RENDERING");
   // Generate default units if none provided
   const [gameUnits, setGameUnits] = useState<Unit[]>(initialUnits || []);
   
@@ -44,19 +41,44 @@ export const GameController: React.FC<GameControllerProps> = ({
   
   useEffect(() => {
     if (!initialUnits || initialUnits.length === 0) {
-      // Load units from scenario.json
-      fetch('/config/scenario.json')
-        .then(response => response.json())
-        .then(scenarioData => {
+      // Initialize UnitFactory and load units from scenario.json
+      const loadUnits = async () => {
+        try {          
+          // Initialize the unit registry first
+          const { initializeUnitRegistry, createUnit } = await import('../data/UnitFactory');
+          await initializeUnitRegistry();
+          
+          // Load scenario data
+          const response = await fetch('/config/scenario.json');
+          const scenarioData = await response.json();
+          
           if (scenarioData.units) {
-            setGameUnits(scenarioData.units);
+            
+            // Transform scenario data using UnitFactory.createUnit()
+            const transformedUnits = scenarioData.units.map((unit: any, _index: number) => {
+              return createUnit({
+                id: unit.id,
+                name: `${unit.unit_type}-${unit.id}`,
+                type: unit.unit_type,
+                player: unit.player,
+                col: unit.col,
+                row: unit.row,
+                color: unit.player === 0 ? 0x244488 : 0xff3333
+              });
+            });
+            
+            setGameUnits(transformedUnits);
+          } else {
+            throw new Error('No units found in scenario.json');
           }
-        })
-        .catch(error => {
-          console.error('Failed to load scenario.json:', error);
-        });
+        } catch (error) {
+          throw new Error(`Failed to load units from scenario.json: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      };
+      
+      loadUnits();
     }
-  }, [initialUnits]);
+  }, [initialUnits, isPvE]);
 
   // Initialize game state with custom hook
   const { gameState, movePreview, attackPreview, shootingPhaseState, chargeRollPopup, actions } = useGameState(gameUnits);
@@ -64,47 +86,25 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Track clicked (but not selected) units for blue highlighting
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
 
-  // Get board configuration for line of sight calculations  
-  const { config, loading, error } = useGameConfig();
-  const configAny = config as any; // Bypass TypeScript restrictions
-  const maxTurns = configAny?.game_rules?.max_turns as number;
-  const phases = configAny?.gameplay?.phase_order || ["move", "shoot", "charge", "fight"];
-  
-  // AI_TURN.md: Get game configuration for turn limits and phases
-  // Handle loading and error states
-  if (loading) {
-    return <div>Loading configuration...</div>;
-  }
-  
-  if (error) {
-    throw new Error(`Configuration error: ${error}`);
-  }
-  
-  if (!config) {
-    throw new Error('Game configuration required but not loaded');
-  }
-  
-  if (!maxTurns) {
-    throw new Error(`maxTurns not found in game configuration. Required: config.game_rules.max_turns. Config structure: ${JSON.stringify(Object.keys(configAny || {}))}`);
-  }
-  if (!phases || phases.length === 0) {
-    throw new Error('phase_order not found in game configuration');
-  }
+  // Get board configuration for line of sight calculations
+  const { gameConfig } = useGameConfig();
+  const boardConfig = gameConfig;
 
-  // Initialize game log hook
-  const gameLog = useGameLog();
+  // Initialize game log hook with live turn tracking - AI_TURN.md compliance
+  const gameLog = useGameLog(gameState.currentTurn ?? 1);
 
-  /// Set up game actions with game log
+  // Set up game actions with game log
   const originalGameActions = useGameActions({
     gameState,
     movePreview,
     attackPreview,
     shootingPhaseState,
+    boardConfig,
     actions: {
       ...actions,
-      setMode: (mode: any) => actions.setMode(mode), // Type compatibility wrapper
+      setMode: (mode: any) => actions.setMode(mode || "select"),
     },
-    boardConfig: config,
+    gameLog,
   });
 
   // Use original game actions without modification
@@ -115,14 +115,15 @@ export const GameController: React.FC<GameControllerProps> = ({
   
   React.useEffect(() => {
     // Wait for DOM to be fully rendered before measuring
-    const timer = setTimeout(() => {
+    setTimeout(() => {
       const turnPhaseTracker = document.querySelector('.turn-phase-tracker-right');
       const allTables = document.querySelectorAll('.unit-status-table-container');
       const gameLogHeader = document.querySelector('.game-log__header') || document.querySelector('[class*="game-log"]');
       
-      if (!turnPhaseTracker) throw new Error('TurnPhaseTracker element not found');
-      if (allTables.length < 2) throw new Error(`Expected 2 unit status tables, found ${allTables.length}`);
-      if (!gameLogHeader) throw new Error('GameLog header element not found');
+      if (!turnPhaseTracker || allTables.length < 2 || !gameLogHeader) {
+        setLogAvailableHeight(220);
+        return;
+      }
       
       const player0Table = allTables[0];
       const player1Table = allTables[1];
@@ -141,79 +142,25 @@ export const GameController: React.FC<GameControllerProps> = ({
       const availableForLogEntries = viewportHeight - usedSpace - appMargins;
     
     const sampleLogEntry = document.querySelector('.game-log-entry');
-      if (!sampleLogEntry) throw new Error('No log entry found to measure height');
-      const logEntryHeight = sampleLogEntry.getBoundingClientRect().height;
+      if (!sampleLogEntry) {
+        setLogAvailableHeight(220);
+        return;
+      }
+      sampleLogEntry.getBoundingClientRect().height;
       setLogAvailableHeight(availableForLogEntries);
     }, 100); // Wait 100ms for DOM to render
   }, [player0Collapsed, player1Collapsed, gameState.units, gameState.phase]);
 
   // Calculate eligible units by calling the useGameActions.isUnitEligible function (no duplicate logic)
   const eligibleUnitIds = React.useMemo(() => {
-    if (!config) return [];
+    if (!boardConfig) return [];
     
     return gameState.units.filter(unit => {
       // Call the ACTUAL isUnitEligible function from useGameActions (single source of truth)
       return originalGameActions.isUnitEligible(unit);
     }).map(unit => unit.id);
-  }, [gameState.units, config, originalGameActions.isUnitEligible, gameState.phase, gameState.currentPlayer, gameState.unitsMoved, gameState.unitsCharged, gameState.unitsAttacked, gameState.unitsFled]);
+  }, [gameState.units, boardConfig, originalGameActions.isUnitEligible, gameState.phase, gameState.currentPlayer, gameState.unitsMoved, gameState.unitsCharged, gameState.unitsAttacked, gameState.unitsFled]);
 
-  // Initialize AI turn processing for PvE mode
-  const { isAIProcessing, processAITurn, aiError, clearAIError } = useAITurn({
-    gameState,
-    gameActions: {
-      ...originalGameActions,
-      addMovedUnit: actions.addMovedUnit,
-      addChargedUnit: actions.addChargedUnit,
-      addAttackedUnit: actions.addAttackedUnit,
-    },
-    currentPlayer: (() => {
-      if (gameState.currentPlayer === undefined) {
-        throw new Error('gameState.currentPlayer is undefined when initializing AI turn');
-      }
-      return gameState.currentPlayer;
-    })(),
-    phase: gameState.phase,
-    units: gameState.units
-  });
-
-  // AI Turn Processing Effect - Trigger AI when it's AI player's turn
-  React.useEffect(() => {
-    // Check if game is over by examining unit health
-    const player0Alive = gameState.units.some(u => u.player === 0 && (u.HP_CUR ?? u.HP_MAX) > 0);
-    const player1Alive = gameState.units.some(u => u.player === 1 && (u.HP_CUR ?? u.HP_MAX) > 0);
-    const gameNotOver = player0Alive && player1Alive;
-    
-    if (isPvE && gameState.currentPlayer === 1 && !isAIProcessing && gameNotOver) {
-      // Small delay to ensure UI updates are complete
-      const timer = setTimeout(() => {
-        processAITurn();
-      }, 1000);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [isPvE, gameState.currentPlayer, gameState.phase, isAIProcessing, gameState.units, processAITurn]);
-
-  // Manage phase transitions
-  usePhaseTransition({
-    gameState,
-    boardConfig: config,
-    isUnitEligible: (unit: Unit) => Boolean(originalGameActions.isUnitEligible(unit)), // Pass the authoritative eligibility function
-    actions: {
-      setPhase: actions.setPhase,
-      setCurrentPlayer: actions.setCurrentPlayer,
-      setSelectedUnitId: actions.setSelectedUnitId,
-      setMode: (mode: any) => actions.setMode(mode),
-      resetMovedUnits: actions.resetMovedUnits,
-      resetChargedUnits: actions.resetChargedUnits,
-      resetAttackedUnits: actions.resetAttackedUnits,
-      resetFledUnits: actions.resetFledUnits,
-      initializeFightPhase: actions.initializeFightPhase,
-      setCurrentTurn: actions.setCurrentTurn,
-      setFightSubPhase: actions.setFightSubPhase,
-      setFightActivePlayer: actions.setFightActivePlayer,
-      setUnits: actions.setUnits,
-    },
-  });
   // Initialize shooting phase when entering shoot phase
   React.useEffect(() => {
     if (gameState.phase === 'shoot') {
@@ -243,14 +190,12 @@ export const GameController: React.FC<GameControllerProps> = ({
   const lastLoggedPhase = React.useRef<string>('');
   
   React.useEffect(() => {
-    if ((gameState.currentTurn ?? 1) >= 1) { // Only log phases after game starts
-      const currentPhaseKey = `${gameState.currentTurn ?? 1}-${gameState.phase}-${gameState.currentPlayer}`;
+    const currentTurn = gameState.currentTurn ?? 1;
+    if (currentTurn >= 1) {
+      const currentPhaseKey = `${currentTurn}-${gameState.phase}-${gameState.currentPlayer}`;
       
       if (currentPhaseKey !== lastLoggedPhase.current) {
-        if (gameState.currentPlayer === undefined) {
-          throw new Error('gameState.currentPlayer is undefined when logging phase change');
-        }
-        gameLog.logPhaseChange(gameState.phase, gameState.currentPlayer, gameState.currentTurn ?? 1);
+        gameLog.logPhaseChange(gameState.phase, gameState.currentPlayer ?? 0, currentTurn);
         lastLoggedPhase.current = currentPhaseKey;
       }
     }
@@ -261,7 +206,7 @@ export const GameController: React.FC<GameControllerProps> = ({
     const deadUnits = gameState.units.filter(unit => (unit.HP_CUR ?? unit.HP_MAX) <= 0);
     deadUnits.forEach(unit => {
       // Check if we haven't already logged this death
-      const alreadyLogged = gameLog.events.some((event: any) => 
+      const alreadyLogged = gameLog.events.some(event => 
         event.type === 'death' && 
         event.unitId === unit.id
       );
@@ -281,58 +226,26 @@ export const GameController: React.FC<GameControllerProps> = ({
       // Check if there was a recent board click that didn't result in selection
       // This is a workaround since we can't easily intercept board clicks
     }
-    previousSelectedUnit.current = gameState.selectedUnitId ?? null;
+    previousSelectedUnit.current = (gameState.selectedUnitId ?? null) as number | null;
   }, [gameState.selectedUnitId]);
 
   const rightColumnContent = (
     <>
-      <TurnPhaseTracker 
-        currentTurn={(() => {
-          if (gameState.currentTurn === undefined) {
-            throw new Error('gameState.currentTurn is undefined when rendering TurnPhaseTracker');
+      {gameConfig ? (
+        <TurnPhaseTracker 
+          currentTurn={gameState.currentTurn ?? 1} 
+          currentPhase={gameState.phase}
+          phases={["move", "shoot", "charge", "fight"]}
+          maxTurns={(() => {
+          if (!gameConfig?.game_rules?.max_turns) {
+            throw new Error(`max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`);
           }
-          return gameState.currentTurn;
-        })()} 
-        currentPhase={gameState.phase}
-        phases={phases}
-        maxTurns={maxTurns}
-        className="turn-phase-tracker-right"
-      />
-      {/* AI Status Display */}
-      {isPvE && (
-        <div className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
-          gameState.currentPlayer === 1 
-            ? isAIProcessing 
-              ? 'bg-purple-900 border border-purple-700' 
-              : 'bg-purple-800 border border-purple-600'
-            : 'bg-gray-800 border border-gray-600'
-        }`}>
-          <span className="text-sm font-medium text-white">
-            {gameState.currentPlayer === 1 ? 'ðŸ¤– AI Turn' : 'ðŸ‘¤ Your Turn'}
-          </span>
-          {gameState.currentPlayer === 1 && isAIProcessing && (
-            <>
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-300"></div>
-              <span className="text-purple-200 text-sm">AI thinking...</span>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* AI Error Display */}
-      {aiError && (
-        <div className="bg-red-900 border border-red-700 rounded p-3 mb-2">
-          <div className="flex items-center justify-between">
-            <div className="text-red-100 text-sm">
-              <strong>ðŸ¤– AI Error:</strong> {aiError}
-            </div>
-            <button
-              onClick={clearAIError}
-              className="text-red-300 hover:text-red-100 ml-2"
-            >
-            </button>
-          </div>
-        </div>
+          return gameConfig.game_rules.max_turns;
+        })()}
+          className="turn-phase-tracker-right"
+        />
+      ) : (
+        <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
 
       <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
@@ -371,6 +284,7 @@ export const GameController: React.FC<GameControllerProps> = ({
           events={gameLog.events}
           getElapsedTime={gameLog.getElapsedTime}
           availableHeight={logAvailableHeight}
+          currentTurn={gameState.currentTurn ?? 1}
         />
       </ErrorBoundary>
     </>
@@ -383,45 +297,20 @@ export const GameController: React.FC<GameControllerProps> = ({
     >
       <GameBoard
         units={gameState.units}
-        selectedUnitId={gameState.selectedUnitId as number | null}
+        selectedUnitId={gameState.selectedUnitId ?? null}
         phase={gameState.phase}
         eligibleUnitIds={eligibleUnitIds}
         mode={gameState.mode}
         movePreview={movePreview}
         attackPreview={attackPreview}
         currentPlayer={gameState.currentPlayer}
-        unitsMoved={(() => {
-          if (!gameState.unitsMoved) {
-            throw new Error('gameState.unitsMoved is undefined when rendering GameBoard');
-          }
-          return gameState.unitsMoved;
-        })()}
-        unitsCharged={(() => {
-          if (!gameState.unitsCharged) {
-            throw new Error('gameState.unitsCharged is undefined when rendering GameBoard');
-          }
-          return gameState.unitsCharged;
-        })()}
-        unitsAttacked={(() => {
-          if (!gameState.unitsAttacked) {
-            throw new Error('gameState.unitsAttacked is undefined when rendering GameBoard');
-          }
-          return gameState.unitsAttacked;
-        })()}
-        unitsFled={(() => {
-          if (!gameState.unitsFled) {
-            throw new Error('gameState.unitsFled is undefined when rendering GameBoard');
-          }
-          return gameState.unitsFled;
-        })()}
+        unitsMoved={gameState.unitsMoved ?? []}
+        unitsCharged={gameState.unitsCharged ?? []}
+        unitsAttacked={gameState.unitsAttacked ?? []}
+        unitsFled={gameState.unitsFled ?? []}
         fightSubPhase={gameState.fightSubPhase}
         fightActivePlayer={gameState.fightActivePlayer}
-        currentTurn={(() => {
-          if (gameState.currentTurn === undefined) {
-            throw new Error('gameState.currentTurn is undefined when rendering GameBoard');
-          }
-          return gameState.currentTurn;
-        })()}
+        currentTurn={gameState.currentTurn ?? 1}
         gameState={gameState}
         getChargeDestinations={gameActions.getChargeDestinations}
         onSelectUnit={(unitId) => {

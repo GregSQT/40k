@@ -829,8 +829,8 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     
     game_state["action_logs"].append({
         "type": "shoot",
-        "message": enhanced_message,  # Enhanced with position data
-        "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
+        "message": enhanced_message,  # Enhanced with position data  
+        "turn": game_state["turn"],
         "phase": "shoot",
         "shooterId": unit_id,
         "targetId": target_id,

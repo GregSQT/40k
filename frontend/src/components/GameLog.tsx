@@ -15,9 +15,10 @@ interface GameLogProps {
   getElapsedTime: (timestamp: Date) => string;
   availableHeight?: number;
   useStepNumbers?: boolean;
+  currentTurn?: number;
 }
 
-export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availableHeight = 220, useStepNumbers = false }) => {
+export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availableHeight = 220, useStepNumbers = false, currentTurn }) => {
   const [visibleRowCount, setVisibleRowCount] = React.useState(4);
   const eventsContainerRef = React.useRef<HTMLDivElement>(null);
   
