@@ -713,17 +713,26 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
     
     elif action_type == "invalid":
-        # Handle invalid actions with training penalty - convert to skip behavior
+        # Handle invalid actions with training penalty - treat as miss but continue shooting sequence
         print(f"SHOOTING: Invalid action penalty for unit {unit_id}")
         if "shoot_activation_pool" not in game_state:
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
         current_pool = game_state["shoot_activation_pool"]
         if unit_id in current_pool:
-            # Process as skip but flag for penalty reward
-            result = _shooting_activation_end(game_state, unit, "SKIP", 1, "PASS", "SHOOTING")
-            result["invalid_action_penalty"] = True
-            result["attempted_action"] = action.get("attempted_action", "unknown")
-            return True, result
+            # Decrement SHOOT_LEFT as if shot was fired and missed
+            if "SHOOT_LEFT" not in unit:
+                raise KeyError(f"Unit missing required 'SHOOT_LEFT' field: {unit}")
+            unit["SHOOT_LEFT"] -= 1
+            
+            # Continue execution loop to check for more shots or end activation
+            result = _shooting_unit_execution_loop(game_state, unit_id, config)
+            if isinstance(result, tuple) and len(result) >= 2:
+                success, loop_result = result
+                loop_result["invalid_action_penalty"] = True
+                loop_result["attempted_action"] = action.get("attempted_action", "unknown")
+                return success, loop_result
+            else:
+                return True, {"invalid_action_penalty": True, "attempted_action": action.get("attempted_action", "unknown")}
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
     else:
