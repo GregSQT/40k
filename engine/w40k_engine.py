@@ -679,7 +679,11 @@ class W40KEngine(gym.Env):
     def _shooting_phase_init(self):
         """AI_SHOOT.md EXACT: Pure delegation to handler"""
         # Handler manages everything including phase setting and pool building
-        shooting_handlers.shooting_phase_start(self.game_state)
+        result = shooting_handlers.shooting_phase_start(self.game_state)
+        
+        # Check if phase should complete immediately (empty pool)
+        if result.get("phase_complete"):
+            self._advance_to_next_player()
     
     def _charge_phase_init(self):
         """Initialize charge phase and build activation pool."""
@@ -749,13 +753,13 @@ class W40KEngine(gym.Env):
             self.game_state["current_player"] = 0
             self.game_state["turn"] += 1
         
-        # Phase progression logic
+        # Phase progression logic - simplified to move -> shoot -> move
         if self.game_state["phase"] == "move":
             self._shooting_phase_init()
         elif self.game_state["phase"] == "shoot":
-            self._charge_phase_init()
+            self._movement_phase_init()
         elif self.game_state["phase"] == "charge":
-            self._fight_phase_init()
+            self._movement_phase_init()
         elif self.game_state["phase"] == "fight":
             self._movement_phase_init()
     

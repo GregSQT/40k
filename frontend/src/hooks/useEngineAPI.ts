@@ -627,8 +627,8 @@ export const useEngineAPI = () => {
       }
       return gameState.move_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
     } else if (gameState.phase === 'shoot') {
-      if (!gameState.shoot_activation_pool) {
-        throw new Error(`API ERROR: Missing shoot_activation_pool in shoot phase`);
+      if (!gameState.shoot_activation_pool || gameState.shoot_activation_pool.length === 0) {
+        return []; // Empty pool is valid - let backend handle phase advancement
       }
       return gameState.shoot_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
     }

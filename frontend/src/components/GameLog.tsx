@@ -18,29 +18,8 @@ interface GameLogProps {
   currentTurn?: number;
 }
 
-export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availableHeight = 220, useStepNumbers = false, currentTurn }) => {
-  const [visibleRowCount, setVisibleRowCount] = React.useState(4);
+export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availableHeight = 220, useStepNumbers = false }) => {
   const eventsContainerRef = React.useRef<HTMLDivElement>(null);
-  
-  // Calculate how many complete rows can fit dynamically
-  React.useEffect(() => {
-    // Wait for DOM to render, then measure actual log entry height
-    const timer = setTimeout(() => {
-      const sampleLogEntry = document.querySelector('.game-log-entry');
-      if (!sampleLogEntry) {
-        setVisibleRowCount(4); // Safe default
-        return;
-      }
-      
-      const actualRowHeight = sampleLogEntry.getBoundingClientRect().height;
-      const maxRows = Math.floor(availableHeight / actualRowHeight);
-      const finalRowCount = Math.max(1, maxRows); // Show at least 1 row
-      
-      setVisibleRowCount(finalRowCount);
-    }, 100);
-    
-    return () => clearTimeout(timer);
-  }, [availableHeight]);
 
   // Display all events (newest first) - sort by timestamp descending, no limit
   const displayedEvents = [...events]
