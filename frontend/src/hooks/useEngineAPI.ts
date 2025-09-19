@@ -970,6 +970,32 @@ onLogChargeRoll: () => {},
           const activationData = await aiResponse.json();
           console.log(`AI Step ${iteration} ACTIVATION:`, activationData);
           
+          // Process AI activation logs immediately
+          if (activationData.action_logs && activationData.action_logs.length > 0) {
+            activationData.action_logs.forEach((logEntry: any) => {
+              console.log(`🎯 AI ACTIVATION LOG: ${logEntry.message}`);
+              
+              window.dispatchEvent(new CustomEvent('backendLogEvent', {
+                detail: {
+                  type: logEntry.type,
+                  message: logEntry.message,
+                  turn: logEntry.turn,
+                  phase: logEntry.phase,
+                  shooterId: logEntry.shooterId,
+                  targetId: logEntry.targetId,
+                  player: logEntry.player,
+                  damage: logEntry.damage,
+                  target_died: logEntry.target_died,
+                  hitRoll: logEntry.hitRoll,
+                  woundRoll: logEntry.woundRoll,
+                  saveRoll: logEntry.saveRoll,
+                  saveTarget: logEntry.saveTarget,
+                  timestamp: new Date()
+                }
+              }));
+            });
+          }
+          
           if (!activationData.success) {
             console.error(`AI activation failed:`, activationData.error);
             break;
@@ -1035,7 +1061,15 @@ onLogChargeRoll: () => {},
                       message: logEntry.message,
                       turn: logEntry.turn,
                       phase: logEntry.phase,
+                      shooterId: logEntry.shooterId,
+                      targetId: logEntry.targetId,
                       player: logEntry.player,
+                      damage: logEntry.damage,
+                      target_died: logEntry.target_died,
+                      hitRoll: logEntry.hitRoll,
+                      woundRoll: logEntry.woundRoll,
+                      saveRoll: logEntry.saveRoll,
+                      saveTarget: logEntry.saveTarget,
                       timestamp: new Date()
                     }
                   }));

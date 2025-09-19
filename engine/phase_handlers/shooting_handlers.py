@@ -194,6 +194,9 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     if not unit:
         return {"error": "unit_not_found", "unitId": unit_id}
     
+    # CRITICAL: Clear accumulated action logs for fresh unit activation
+    game_state["action_logs"] = []
+    
     # AI_TURN.md initialization
     # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
     if "RNG_NB" not in unit:

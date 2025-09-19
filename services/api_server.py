@@ -261,10 +261,9 @@ def execute_action():
         
         # Extract and send detailed action logs to frontend
         action_logs = serializable_state.get("action_logs", [])
-        if action_logs:
-            # Clear logs from ORIGINAL engine.game_state to prevent duplication
-            engine.game_state["action_logs"] = []
-            serializable_state["action_logs"] = []
+        # CRITICAL: Always clear logs after each AI turn to prevent accumulation
+        engine.game_state["action_logs"] = []
+        serializable_state["action_logs"] = []
         
         return jsonify({
             "success": success,
