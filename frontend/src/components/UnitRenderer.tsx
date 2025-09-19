@@ -62,6 +62,15 @@ export class UnitRenderer {
     this.props = props;
   }
   
+  private getCSSColor(variableName: string): number {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+    if (value && value !== '') {
+      // Convert hex string like "#4da6ff" to number like 0x4da6ff
+      return parseInt(value.replace('#', ''), 16);
+    }
+    throw new Error(`CSS variable ${variableName} not found or empty`);
+  }
+  
   private cleanupExistingBlinkIntervals(): void {
     // Find any existing blink containers and clean them up
     const existingBlinkContainers = this.props.app.stage.children.filter(
@@ -450,7 +459,7 @@ export class UnitRenderer {
       for (let i = 0; i < unit.HP_MAX; i++) {
         // Normal HP slice
         const normalSlice = new PIXI.Graphics();
-        const normalColor = i < currentHP ? (unit.player === 0 ? 0x4da6ff : 0xff4d4d) : 0x444444;
+        const normalColor = i < currentHP ? (unit.player === 0 ? this.getCSSColor('--hp-bar-player0') : this.getCSSColor('--hp-bar-player1')) : this.getCSSColor('--hp-bar-lost');
         normalSlice.beginFill(normalColor, 1);
         normalSlice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
         normalSlice.endFill();
@@ -473,7 +482,7 @@ export class UnitRenderer {
           }
         }
         const wouldBeDamaged = i >= (currentHP - shooterDamage) && i < currentHP;
-        const highlightColor = wouldBeDamaged ? 0x222222 : (i < currentHP ? (unit.player === 0 ? 0x4da6ff : 0xff4d4d) : 0x444444);
+        const highlightColor = wouldBeDamaged ? this.getCSSColor('--hp-bar-damage-preview') : (i < currentHP ? (unit.player === 0 ? this.getCSSColor('--hp-bar-player0') : this.getCSSColor('--hp-bar-player1')) : this.getCSSColor('--hp-bar-lost'));
         highlightSlice.beginFill(highlightColor, 1);
         highlightSlice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
         highlightSlice.endFill();
@@ -520,7 +529,7 @@ export class UnitRenderer {
       // Normal non-blinking HP slices
       for (let i = 0; i < unit.HP_MAX; i++) {
         const slice = new PIXI.Graphics();
-        const color = i < displayHP ? (unit.player === 0 ? 0x4da6ff : 0xff4d4d) : parseColor(boardConfig.colors.hp_damaged);
+        const color = i < displayHP ? (unit.player === 0 ? this.getCSSColor('--hp-bar-player0') : this.getCSSColor('--hp-bar-player1')) : parseColor(boardConfig.colors.hp_damaged);
         slice.beginFill(color, 1);
         slice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
         slice.endFill();

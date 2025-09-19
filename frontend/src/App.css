@@ -9,6 +9,12 @@
   --color-success: #36e36b;
   --color-warning: #ff9900;
   
+  /* HP Bar Colors */
+  --hp-bar-player0: #4da6ff;
+  --hp-bar-player1: #ff4d4d;
+  --hp-bar-lost: #444444;
+  --hp-bar-damage-preview: #444444;
+  
   /* Background Colors */
   --bg-primary: #222;
   --bg-secondary: #444;

@@ -38,13 +38,13 @@ Check and tell me what files you need, make an EXPERT investigation, add debug l
 ----------------------------------------------------------------------------
 BUGS
 ----------------------------------------------------------------------------
+Phase transition: shoot -> move
 
 WAIT is for when the agent DECIDES to NOT perform an action.
 SKIP is when the agent CANNOT perform an action
-It the agent chooses a wrong action (charge during shooting phase), give it the -0.5 reward penalty and skip its action
-
-TRAIN:
-Quel fichier de reward ?
+----------------------------------------------------------------------------
+Display
+add rewards name and values at the right of the game logs
 
 MOVE :
 Preview green hex != valid hexes : sometimes, when I click on a green hex as a move destination, the move is cancelled and the unit is logged as wait.
@@ -53,8 +53,6 @@ Preview green hex != valid hexes : sometimes, when I click on a green hex as a m
 
 SHOOT
 
-HP preview screwed when unit has lost 1 HP. The back space for the lost HP blinks instead of remaining black
-Couleur de HP bar dans css (et couleur du blink preview aussi)
 Calcul different entre les hex rouges et les unit blink
 dead : noir et retirer icon
 Utilise App.css pour la log ?
