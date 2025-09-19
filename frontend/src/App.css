@@ -1295,3 +1295,74 @@ textarea:focus {
   margin-top: 0;
   justify-content: flex-end;
 }
+
+/* Hex Coordinates Toggle */
+.hex-toggle-container {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 6px 10px;
+  background-color: var(--bg-secondary);
+  border: 1px solid #4b5563;
+  border-radius: var(--radius-md);
+}
+
+.hex-toggle-label {
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.hex-toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.hex-toggle-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.hex-toggle-track {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  position: relative;
+  transition: background-color var(--transition-normal);
+}
+
+.hex-toggle-track--off {
+  background-color: #6b7280;
+}
+
+.hex-toggle-track--on {
+  background-color: var(--color-accent);
+}
+
+.hex-toggle-thumb {
+  width: 16px;
+  height: 16px;
+  background-color: white;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  transition: left var(--transition-normal);
+}
+
+.hex-toggle-thumb--off {
+  left: 2px;
+}
+
+.hex-toggle-thumb--on {
+  left: 18px;
+}

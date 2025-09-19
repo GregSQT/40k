@@ -46,33 +46,17 @@ const Navigation: React.FC<NavigationProps> = ({ showHexCoordinates, onToggleHex
       </nav>
       
       {onToggleHexCoordinates && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', backgroundColor: '#374151', border: '1px solid #4b5563', borderRadius: '6px' }}>
-          <span style={{ fontSize: '12px', fontWeight: '500', color: 'white', whiteSpace: 'nowrap' }}>Hex Coords</span>
-          <label style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
+        <div className="hex-toggle-container">
+          <span className="hex-toggle-label">Hex Coords</span>
+          <label className="hex-toggle-switch">
             <input
               type="checkbox"
-              style={{ position: 'absolute', width: '1px', height: '1px', padding: '0', margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: '0' }}
+              className="hex-toggle-input"
               checked={showHexCoordinates || false}
               onChange={(e) => onToggleHexCoordinates(e.target.checked)}
             />
-            <div style={{
-              width: '36px', 
-              height: '20px', 
-              backgroundColor: showHexCoordinates ? '#2563eb' : '#6b7280', 
-              borderRadius: '10px', 
-              position: 'relative',
-              transition: 'background-color 0.2s ease'
-            }}>
-              <div style={{
-                width: '16px',
-                height: '16px',
-                backgroundColor: 'white',
-                borderRadius: '50%',
-                position: 'absolute',
-                top: '2px',
-                left: showHexCoordinates ? '18px' : '2px',
-                transition: 'left 0.2s ease'
-              }} />
+            <div className={`hex-toggle-track ${showHexCoordinates ? 'hex-toggle-track--on' : 'hex-toggle-track--off'}`}>
+              <div className={`hex-toggle-thumb ${showHexCoordinates ? 'hex-toggle-thumb--on' : 'hex-toggle-thumb--off'}`} />
             </div>
           </label>
         </div>
