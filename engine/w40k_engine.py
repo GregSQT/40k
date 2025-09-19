@@ -125,6 +125,10 @@ class W40KEngine(gym.Env):
         self.config["pve_mode"] = self.is_pve_mode
         self._ai_model = None
         
+        # CRITICAL: Ensure PvE mode is properly propagated to handlers
+        if self.is_pve_mode:
+            self.config["pve_mode"] = True
+        
         # CRITICAL: Initialize game_state FIRST before any other operations
         self.game_state = {
             # Core game state
@@ -605,34 +609,6 @@ class W40KEngine(gym.Env):
         # DIAGNOSTIC: Log exact routing path
         print(f"🔍 SEMANTIC_ACTION_ROUTING: action={action.get('action')}, phase={current_phase}, unitId={action.get('unitId')}")
         
-        # CRITICAL: Handle invalid actions with proper end_activation call
-        if action.get("action") == "invalid":
-            if action.get("end_activation_required"):
-                unit_id = action.get("unitId")
-                if unit_id:
-                    # Import and call the proper end_activation function
-                    from engine.phase_handlers.generic_handlers import end_activation
-                    
-                    unit = self._get_unit_by_id(unit_id)
-                    if unit:
-                        # AI_TURN.md compliant end_activation call
-                        result = end_activation(
-                            self.game_state, unit, 
-                            "NO",                    # Arg1: Don't log invalid action
-                            1,                       # Arg2: Consume activation step 
-                            "PASS",                  # Arg3: No tracking update
-                            current_phase.upper(),   # Arg4: Remove from phase pool
-                            1                        # Arg5: Log error
-                        )
-                        print(f"TRAINING: Unit {unit_id} end_activation called for invalid action")
-                        return False, {
-                            "error": action.get("error", "invalid_action"), 
-                            "phase": current_phase,
-                            "end_activation_result": result
-                        }
-            
-            return False, {"error": action.get("error", "invalid_action"), "phase": current_phase}
-        
         # Route to phase handlers with detailed logging
         if current_phase == "move":
             success, result = self._process_movement_phase(action)
@@ -693,25 +669,6 @@ class W40KEngine(gym.Env):
             result["phase_transition"] = True
             result["next_phase"] = "shoot"
         
-        return success, result
-    
-    def _process_shooting_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """AI_SHOOT.md EXACT: Pure engine orchestration - handler manages everything"""
-        
-        # Get current unit for handler (handler expects unit parameter)
-        unit_id = action.get("unitId")
-        current_unit = None
-        if unit_id:
-            current_unit = self._get_unit_by_id(unit_id)
-        
-        # **FULL DELEGATION**: shooting_handlers.execute_action(game_state, unit, action, config)
-        success, result = shooting_handlers.execute_action(self.game_state, current_unit, action, self.config)
-        
-        # Check response for phase_complete flag
-        if result.get("phase_complete"):
-            print(f"DEBUG: Phase completion detected, transitioning to next phase")
-            result["phase_transition"] = True
-            
         return success, result
     
     # AI_IMPLEMENTATION.md: Movement logic delegated to movement_handlers.py
@@ -997,6 +954,11 @@ class W40KEngine(gym.Env):
     
     def _calculate_reward(self, success: bool, result: Dict[str, Any]) -> float:
         """Calculate reward using actual acting unit with reward mapper integration."""
+        # PRIORITY CHECK: Invalid action penalty (from handlers)
+        if isinstance(result, dict) and result.get("invalid_action_penalty"):
+            print(f"REWARD: Applying invalid action penalty for attempted action {result.get('attempted_action', 'unknown')}")
+            return -0.5  # Training penalty for wrong phase actions
+        
         if not success:
             if isinstance(result, dict):
                 error_msg = result.get("error", "")
@@ -1366,6 +1328,15 @@ class W40KEngine(gym.Env):
                 }
             elif action_int == 7:  # WAIT - agent chooses not to shoot
                 return {"action": "wait", "unitId": selected_unit_id}
+            else:
+                # AI chose invalid action - convert to wait with penalty flag
+                print(f"🔍 AI_SHOOTING_INVALID: Converting action {action_int} to wait with penalty")
+                return {
+                    "action": "wait", 
+                    "unitId": selected_unit_id,
+                    "invalid_action_penalty": True,
+                    "attempted_action": action_int
+                }
         elif current_phase == "charge":
             if action_int == 5:  # Charge action
                 target = self._ai_select_charge_target(selected_unit_id)

@@ -177,6 +177,27 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     elif action_type == "right_click":
         return _handle_skip_action(game_state, active_unit)
     
+    elif action_type == "invalid":
+        # Handle invalid actions with training penalty - same as shooting handler
+        print(f"MOVEMENT: Invalid action penalty for unit {unit_id}")
+        if unit_id in game_state["move_activation_pool"]:
+            # Clear preview first
+            movement_clear_preview(game_state)
+            
+            # Use same end_activation parameters as shooting handler
+            result = end_activation(
+                game_state, active_unit,
+                "SKIP",        # Arg1: Same as shooting (SKIP, not WAIT)
+                1,             # Arg2: Same step increment  
+                "PASS",        # Arg3: Same as shooting (no tracking)
+                "MOVE",        # Arg4: Remove from move pool
+                1              # Arg5: Same error logging as shooting
+            )
+            result["invalid_action_penalty"] = True
+            result["attempted_action"] = action.get("attempted_action", "unknown")
+            return True, result
+        return False, {"error": "unit_not_eligible", "unitId": unit_id}
+    
     else:
         return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "move"}
 

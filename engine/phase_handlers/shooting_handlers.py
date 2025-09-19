@@ -52,7 +52,6 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
 
 def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_targets: List[str]) -> str:
     """AI target selection using RewardMapper system"""
-    print(f"AI TARGET SELECTION CALLED: unit={unit_id}, targets={valid_targets}")
     if not valid_targets:
         return ""
     
@@ -442,10 +441,6 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     shooting_activation_end(Arg1, Arg2, Arg3, Arg4, Arg5)
     """
     
-    # DIAGNOSTIC: Log exactly why this unit is being ended
-    print(f"🔍 SHOOTING_ACTIVATION_END: Unit {unit['id']}, arg1={arg1}, arg3={arg3}, arg4={arg4}")
-    print(f"🔍 UNIT_STATE: SHOOT_LEFT={unit.get('SHOOT_LEFT', 'missing')}, valid_target_pool={unit.get('valid_target_pool', 'missing')}")
-    
     # Arg2 step increment
     # AI_TURN.md COMPLIANCE: Direct field access with validation
     if arg2 == 1:
@@ -547,22 +542,10 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
     # CRITICAL FIX: Also trigger auto-shooting for AI units in training mode
     is_training_ai = is_gym_training and unit is not None  # Proper boolean evaluation
-    print(f"DEBUG PVE: config pve_mode={config.get('pve_mode')}, unit_player={unit['player'] if unit else 'None'}, is_pve_ai={is_pve_ai}")
-    print(f"DEBUG PVE: valid_targets={valid_targets}, will_auto_shoot={(is_gym_training or is_pve_ai) and valid_targets}")
-    
-    print(f"AUTO-SHOOT CHECK: unit={unit_id}, is_gym_training={is_gym_training}, is_pve_ai={is_pve_ai}, is_training_ai={is_training_ai}, valid_targets={len(valid_targets) if valid_targets else 0}")
-    print(f"🔍 PVE_DETECTION_CHAIN:")
-    print(f"  config.pve_mode = {config.get('pve_mode', 'MISSING')}")
-    print(f"  game_state.pve_mode = {game_state.get('pve_mode', 'MISSING')}")
-    print(f"  unit.player = {unit['player'] if unit else 'NO_UNIT'}")
-    print(f"  is_pve_ai = {is_pve_ai}")
-    print(f"  is_training_ai = {is_training_ai}")
-    print(f"  auto_shoot_condition = {(is_gym_training or is_pve_ai or is_training_ai) and valid_targets}")
     
     if (is_gym_training or is_pve_ai or is_training_ai) and valid_targets:
         # AUTO-SHOOT: Select target and execute shooting automatically
         target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
-        print(f"AUTO-SHOOT: Unit {unit_id} targeting {target_id}")
         
         # Execute shooting directly and return result
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
@@ -726,6 +709,20 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     elif action_type == "skip":
         return _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
     
+    elif action_type == "invalid":
+        # Handle invalid actions with training penalty - convert to skip behavior
+        print(f"SHOOTING: Invalid action penalty for unit {unit_id}")
+        if "shoot_activation_pool" not in game_state:
+            raise KeyError("game_state missing required 'shoot_activation_pool' field")
+        current_pool = game_state["shoot_activation_pool"]
+        if unit_id in current_pool:
+            # Process as skip but flag for penalty reward
+            result = _shooting_activation_end(game_state, unit, "SKIP", 1, "PASS", "SHOOTING")
+            result["invalid_action_penalty"] = True
+            result["attempted_action"] = action.get("attempted_action", "unknown")
+            return True, result
+        return False, {"error": "unit_not_eligible", "unitId": unit_id}
+    
     else:
         return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "shoot"}
 
@@ -802,6 +799,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     """
     AI_TURN.md EXACT: attack_sequence(RNG) implementation with proper logging
     """
+    print(f"SHOOTING_ATTACK_CONTROLLER CALLED: Unit {unit_id} targeting {target_id}")
     shooter = _get_unit_by_id(game_state, unit_id)
     target = _get_unit_by_id(game_state, target_id)
     
@@ -821,6 +819,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # CRITICAL: Store detailed log for frontend display with location data
     if "action_logs" not in game_state:
         game_state["action_logs"] = []
+    print(f"SHOOTING_ATTACK_CONTROLLER: Creating action log for {unit_id} -> {target_id}")
     
     # Enhanced message format including shooter position per movement phase integration
     enhanced_message = f"Unit {unit_id} ({shooter['col']}, {shooter['row']}) SHOT Unit {target_id} ({target['col']}, {target['row']}) : {attack_result['attack_log'].split(' : ', 1)[1] if ' : ' in attack_result['attack_log'] else attack_result['attack_log']}"
@@ -845,6 +844,9 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "saveTarget": attack_result.get("save_target"),
         "timestamp": "server_time"
     })
+    
+    print(f"ACTION LOG CREATED: {enhanced_message}")
+    print(f"TOTAL ACTION LOGS IN GAME_STATE: {len(game_state['action_logs'])}")
     
     return {
         "action": "shot_executed",
