@@ -4,29 +4,29 @@
       "id": 1,
       "unit_type": "Intercessor",
       "player": 0,
-      "col": 14,
-      "row": 14
+      "col": 13,
+      "row": 13
     },
     {
       "id": 2,
       "unit_type": "Intercessor",
       "player": 0,
-      "col": 20,
-      "row": 7
+      "col": 19,
+      "row": 12
     },
     {
       "id": 3,
       "unit_type": "Intercessor",
       "player": 1,
-      "col": 10,
+      "col": 11,
       "row": 6
     },
     {
       "id": 4,
       "unit_type": "Intercessor",
       "player": 1,
-      "col": 4,
-      "row": 13
+      "col": 5,
+      "row": 7
     }
   ]
 }
