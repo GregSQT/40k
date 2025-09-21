@@ -87,11 +87,11 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
                 best_reward = reward
                 best_target = target_id
         
-        print(f"AI SHOOTING: Unit {unit_id} selected target {best_target} (reward: {best_reward})")
+        # print(f"AI SHOOTING: Unit {unit_id} selected target {best_target} (reward: {best_reward})")
         return best_target
         
     except Exception as e:
-        print(f"AI target selection error: {e}")
+        # print(f"AI target selection error: {e}")
         return valid_targets[0]
 
 def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any], current_player: int) -> bool:
@@ -132,16 +132,16 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     
     # Check for valid targets with detailed debugging
     valid_targets_found = []
-    print(f"SHOOT DEBUG: Unit {unit['id']} checking {len([u for u in game_state['units'] if u['player'] != unit['player'] and u['HP_CUR'] > 0])} potential targets")
+    # print(f"SHOOT DEBUG: Unit {unit['id']} checking {len([u for u in game_state['units'] if u['player'] != unit['player'] and u['HP_CUR'] > 0])} potential targets")
     
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             is_valid = _is_valid_shooting_target(game_state, unit, enemy)
-            print(f"SHOOT DEBUG: Unit {unit['id']} -> Target {enemy['id']} at ({enemy['col']},{enemy['row']}): {'VALID' if is_valid else 'INVALID'}")
+            # print(f"SHOOT DEBUG: Unit {unit['id']} -> Target {enemy['id']} at ({enemy['col']},{enemy['row']}): {'VALID' if is_valid else 'INVALID'}")
             if is_valid:
                 valid_targets_found.append(enemy["id"])
     
-    print(f"SHOOT DEBUG: Unit {unit['id']} final valid targets: {valid_targets_found}")
+    # print(f"SHOOT DEBUG: Unit {unit['id']} final valid targets: {valid_targets_found}")
     return len(valid_targets_found) > 0
 
 
@@ -155,17 +155,17 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     if "RNG_RNG" not in shooter:
         raise KeyError(f"Shooter missing required 'RNG_RNG' field: {shooter}")
     if distance > shooter["RNG_RNG"]:
-        print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: RANGE FAIL (distance={distance}, max={shooter['RNG_RNG']})")
+        # print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: RANGE FAIL (distance={distance}, max={shooter['RNG_RNG']})")
         return False
         
     # Dead target check
     if target["HP_CUR"] <= 0:
-        print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: DEAD TARGET (HP={target['HP_CUR']})")
+        # print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: DEAD TARGET (HP={target['HP_CUR']})")
         return False
         
     # Friendly fire check
     if target["player"] == shooter["player"]:
-        print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: FRIENDLY FIRE")
+        # print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: FRIENDLY FIRE")
         return False
     
     # Adjacent check - can't shoot at adjacent enemies (melee range)
@@ -173,16 +173,16 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     if "CC_RNG" not in shooter:
         raise KeyError(f"Shooter missing required 'CC_RNG' field: {shooter}")
     if distance <= shooter["CC_RNG"]:
-        print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: TOO CLOSE (distance={distance}, CC_RNG={shooter['CC_RNG']})")
+        # print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: TOO CLOSE (distance={distance}, CC_RNG={shooter['CC_RNG']})")
         return False
         
     # Line of sight check
     has_los = _has_line_of_sight(game_state, shooter, target)
     if not has_los:
-        print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: NO LINE OF SIGHT")
+        # print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: NO LINE OF SIGHT")
         return False
     
-    print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: VALID TARGET")
+    # print(f"TARGET DEBUG: {shooter['id']} -> {target['id']}: VALID TARGET")
     return True
 
 def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> Dict[str, Any]:
@@ -272,7 +272,7 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         return True  # No walls = clear line of sight
     
     if not wall_hexes_data:
-        print(f"LOS DEBUG: No wall data found - allowing shot")
+        # print(f"LOS DEBUG: No wall data found - allowing shot")
         return True
     
     # Convert wall_hexes to set for fast lookup
@@ -280,8 +280,8 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
     for wall_hex in wall_hexes_data:
         if isinstance(wall_hex, (list, tuple)) and len(wall_hex) >= 2:
             wall_hexes.add((wall_hex[0], wall_hex[1]))
-        else:
-            print(f"LOS DEBUG: Invalid wall hex format: {wall_hex}")
+        # else:
+            # print(f"LOS DEBUG: Invalid wall hex format: {wall_hex}")
     
     try:
         hex_path = _get_accurate_hex_line(start_col, start_row, end_col, end_row)
@@ -302,7 +302,7 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         return not blocked
         
     except Exception as e:
-        print(f"            LoS calculation error: {e}")
+        # print(f"            LoS calculation error: {e}")
         return False
     
     if not game_state["wall_hexes"]:
@@ -409,7 +409,6 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         # Player 1 complete → Increment turn, Player 0 movement phase
         game_state["turn"] += 1
         game_state["current_player"] = 0
-        print(f"SHOOTING COMPLETE: Player 1 -> Turn {game_state['turn']}, Player 0 movement phase")
         return {
             "phase_complete": True,
             "phase_transition": True,
@@ -467,10 +466,9 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "shoot_activation_pool" in game_state and unit["id"] in game_state["shoot_activation_pool"]:
             game_state["shoot_activation_pool"].remove(unit["id"])
             pool_after = game_state["shoot_activation_pool"]
-            print(f"SHOOTING POOL REMOVAL: Unit {unit['id']} removed. Remaining: {pool_after}")
         else:
             current_pool = game_state["shoot_activation_pool"] if "shoot_activation_pool" in game_state else []
-            print(f"🔴 END_ACTIVATION DEBUG: Unit {unit['id']} not found in pool {current_pool}")
+            # print(f"🔴 END_ACTIVATION DEBUG: Unit {unit['id']} not found in pool {current_pool}")
     
     # Clean up unit activation state including position tracking
     if "valid_target_pool" in unit:
@@ -608,7 +606,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     # Check if shooting phase should complete after cleanup
     if not current_pool:
         game_state["_shooting_phase_initialized"] = False
-        print(f"DEBUG: Pool empty after cleanup - ending shooting phase")
+        # print(f"DEBUG: Pool empty after cleanup - ending shooting phase")
         return True, _shooting_phase_complete(game_state)
     
     # Extract unit from action if not provided (engine passes None now)
@@ -639,16 +637,16 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     # AI_SHOOT.md action routing
     if action_type == "activate_unit":
-        print(f"🔍 ACTIVATE_UNIT_ENTRY: unit={unit_id}, phase={game_state.get('phase')}, player={unit['player'] if unit else 'NO_UNIT'}")
+        # print(f"🔍 ACTIVATE_UNIT_ENTRY: unit={unit_id}, phase={game_state.get('phase')}, player={unit['player'] if unit else 'NO_UNIT'}")
         result = shooting_unit_activation_start(game_state, unit_id)
-        print(f"🔍 ACTIVATION_START_RESULT: {result}")
+        # print(f"🔍 ACTIVATION_START_RESULT: {result}")
         if result.get("success"):
-            print(f"🔍 CALLING_EXECUTION_LOOP: unit={unit_id}")
+            # print(f"🔍 CALLING_EXECUTION_LOOP: unit={unit_id}")
             execution_result = _shooting_unit_execution_loop(game_state, unit_id, config)
-            print(f"🔍 EXECUTION_LOOP_RESULT: success={execution_result[0] if isinstance(execution_result, tuple) else 'NOT_TUPLE'}")
-            print(f"🔍 EXECUTION_LOOP_DATA: {execution_result[1] if isinstance(execution_result, tuple) and len(execution_result) > 1 else 'NO_DATA'}")
+            # print(f"🔍 EXECUTION_LOOP_RESULT: success={execution_result[0] if isinstance(execution_result, tuple) else 'NOT_TUPLE'}")
+            # print(f"🔍 EXECUTION_LOOP_DATA: {execution_result[1] if isinstance(execution_result, tuple) and len(execution_result) > 1 else 'NO_DATA'}")
             return execution_result
-        print(f"🔍 ACTIVATION_FAILED: unit={unit_id}, returning={result}")
+        # print(f"🔍 ACTIVATION_FAILED: unit={unit_id}, returning={result}")
         return True, result
     
     elif action_type == "shoot":
@@ -679,14 +677,14 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # Auto-select target if not provided (AI mode)
         if not target_id:
             valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
-            print(f"EXECUTE DEBUG: Auto-target selection found {len(valid_targets)} targets: {valid_targets}")
+            # print(f"EXECUTE DEBUG: Auto-target selection found {len(valid_targets)} targets: {valid_targets}")
             if not valid_targets:
                 # No valid targets - end activation with wait
-                print(f"EXECUTE DEBUG: No valid targets found, ending activation with PASS")
+                # print(f"EXECUTE DEBUG: No valid targets found, ending activation with PASS")
                 result = _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
                 return True, result
             target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
-            print(f"EXECUTE DEBUG: AI selected target: {target_id}")
+            # print(f"EXECUTE DEBUG: AI selected target: {target_id}")
         
         # Execute shooting directly without UI loops
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
@@ -714,7 +712,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     elif action_type == "invalid":
         # Handle invalid actions with training penalty - treat as miss but continue shooting sequence
-        print(f"SHOOTING: Invalid action penalty for unit {unit_id}")
+        # print(f"SHOOTING: Invalid action penalty for unit {unit_id}")
         if "shoot_activation_pool" not in game_state:
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
         current_pool = game_state["shoot_activation_pool"]
@@ -811,7 +809,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     """
     AI_TURN.md EXACT: attack_sequence(RNG) implementation with proper logging
     """
-    print(f"SHOOTING_ATTACK_CONTROLLER CALLED: Unit {unit_id} targeting {target_id}")
+    # print(f"SHOOTING_ATTACK_CONTROLLER CALLED: Unit {unit_id} targeting {target_id}")
     shooter = _get_unit_by_id(game_state, unit_id)
     target = _get_unit_by_id(game_state, target_id)
     
@@ -831,7 +829,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # CRITICAL: Store detailed log for frontend display with location data
     if "action_logs" not in game_state:
         game_state["action_logs"] = []
-    print(f"SHOOTING_ATTACK_CONTROLLER: Creating action log for {unit_id} -> {target_id}")
+    # print(f"SHOOTING_ATTACK_CONTROLLER: Creating action log for {unit_id} -> {target_id}")
     
     # Enhanced message format including shooter position per movement phase integration
     enhanced_message = f"Unit {unit_id} ({shooter['col']}, {shooter['row']}) SHOT Unit {target_id} ({target['col']}, {target['row']}) : {attack_result['attack_log'].split(' : ', 1)[1] if ' : ' in attack_result['attack_log'] else attack_result['attack_log']}"
@@ -857,8 +855,8 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "timestamp": "server_time"
     })
     
-    print(f"ACTION LOG CREATED: {enhanced_message}")
-    print(f"TOTAL ACTION LOGS IN GAME_STATE: {len(game_state['action_logs'])}")
+    # print(f"ACTION LOG CREATED: {enhanced_message}")
+    # print(f"TOTAL ACTION LOGS IN GAME_STATE: {len(game_state['action_logs'])}")
     
     return {
         "action": "shot_executed",

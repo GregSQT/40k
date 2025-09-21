@@ -42,6 +42,7 @@ else:
     
     ### ai/
         "ai/game_replay_logger.py",
+        "ai/metrics_tracker.py",
         "ai/multi_agent_trainer.py",
         "ai/scenario_manager.py",
         "ai/train.py",

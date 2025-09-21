@@ -91,7 +91,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     AI_MOVE.md: Handler action routing with complete autonomy
     """
     
-    print(f"MOVEMENT DEBUG: execute_action called - action={action.get('action')}, unitId={action.get('unitId')}")
+    # print(f"MOVEMENT DEBUG: execute_action called - action={action.get('action')}, unitId={action.get('unitId')}")
     
     # Handler self-initialization on first action
     # AI_TURN.md COMPLIANCE: Direct field access with validation
@@ -106,12 +106,12 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         move_pool_exists = bool(game_state["move_activation_pool"])
     
     if game_state_phase != "move" or not move_pool_exists:
-        print(f"MOVEMENT HANDLER DEBUG: Initializing movement phase")
+        # print(f"MOVEMENT HANDLER DEBUG: Initializing movement phase")
         movement_phase_start(game_state)
     
     # Pool empty? → Phase complete
     if not game_state["move_activation_pool"]:
-        print(f"MOVEMENT HANDLER DEBUG: Pool empty, ending phase")
+        # print(f"MOVEMENT HANDLER DEBUG: Pool empty, ending phase")
         return True, movement_phase_end(game_state)
     
     # Get unit from action (frontend specifies which unit to move)
@@ -129,19 +129,19 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if not unit_id:
         if game_state["move_activation_pool"]:
             unit_id = game_state["move_activation_pool"][0]
-            print(f"MOVEMENT HANDLER DEBUG: Auto-selected unit {unit_id} from pool")
+            # print(f"MOVEMENT HANDLER DEBUG: Auto-selected unit {unit_id} from pool")
         else:
             return True, movement_phase_end(game_state)
     
     # Validate unit is eligible (keep for validation, remove only after successful action)
     if unit_id not in game_state["move_activation_pool"]:
-        print(f"MOVEMENT HANDLER DEBUG: Unit {unit_id} not eligible, pool={game_state['move_activation_pool']}")
+        # print(f"MOVEMENT HANDLER DEBUG: Unit {unit_id} not eligible, pool={game_state['move_activation_pool']}")
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
     # Get unit object for processing
     active_unit = _get_unit_by_id(game_state, unit_id)
     if not active_unit:
-        print(f"MOVEMENT HANDLER DEBUG: Unit {unit_id} not found in game state")
+        # print(f"MOVEMENT HANDLER DEBUG: Unit {unit_id} not found in game state")
         return False, {"error": "unit_not_found", "unitId": unit_id}
     
     # Flag detection for consistent behavior
@@ -149,13 +149,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if "gym_training_mode" not in config:
         raise KeyError("Config missing required 'gym_training_mode' field")
     is_gym_training = config["gym_training_mode"]
-    print(f"MOVEMENT DEBUG: is_gym_training={is_gym_training}, action_type={action_type}")
+    # print(f"MOVEMENT DEBUG: is_gym_training={is_gym_training}, action_type={action_type}")
     
     # Auto-activate unit if not already activated and preview not shown
     if not game_state.get("active_movement_unit") and action_type in ["move", "left_click"]:
-        print(f"MOVEMENT HANDLER DEBUG: Auto-activating unit for {action_type}")
+        # print(f"MOVEMENT HANDLER DEBUG: Auto-activating unit for {action_type}")
         if is_gym_training:
-            print(f"MOVEMENT DEBUG: Gym training mode - triggering handle_unit_activation")
+            # print(f"MOVEMENT DEBUG: Gym training mode - triggering handle_unit_activation")
             # Gym training: return immediately to trigger auto-movement
             return _handle_unit_activation(game_state, active_unit, config)
         else:
@@ -179,7 +179,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     elif action_type == "invalid":
         # Handle invalid actions with training penalty - same as shooting handler
-        print(f"MOVEMENT: Invalid action penalty for unit {unit_id}")
+        # print(f"MOVEMENT: Invalid action penalty for unit {unit_id}")
         if unit_id in game_state["move_activation_pool"]:
             # Clear preview first
             movement_clear_preview(game_state)
@@ -230,17 +230,17 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
         if valid_destinations:
             # DIAGNOSTIC: Log current position and all valid destinations
             current_pos = (unit["col"], unit["row"])
-            print(f"GYM DEBUG: Unit {unit['id']} current position: {current_pos}")
-            print(f"GYM DEBUG: Valid destinations: {valid_destinations}")
-            print(f"GYM DEBUG: Current position in destinations? {current_pos in valid_destinations}")
+            # print(f"GYM DEBUG: Unit {unit['id']} current position: {current_pos}")
+            # print(f"GYM DEBUG: Valid destinations: {valid_destinations}")
+            # print(f"GYM DEBUG: Current position in destinations? {current_pos in valid_destinations}")
             
             # Auto-select first destination for gym training only
             dest_col, dest_row = valid_destinations[0]
-            print(f"GYM AUTO-MOVE: Unit {unit['id']} to destination ({dest_col}, {dest_row})")
+            # print(f"GYM AUTO-MOVE: Unit {unit['id']} to destination ({dest_col}, {dest_row})")
             
             # DIAGNOSTIC: Verify if this is actually the current position
-            if (dest_col, dest_row) == current_pos:
-                print(f"GYM ERROR: Selected destination IS current position! This should never happen!")
+            # if (dest_col, dest_row) == current_pos:
+                # print(f"GYM ERROR: Selected destination IS current position! This should never happen!")
             
             auto_move_action = {
                 "action": "move",
@@ -256,7 +256,7 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
                 move_result[1]["action"] = "move"
             return move_result
         else:
-            print(f"GYM AUTO-SKIP: Unit {unit['id']} - no valid destinations")
+            # print(f"GYM AUTO-SKIP: Unit {unit['id']} - no valid destinations")
             return True, {"action": "skip", "unitId": unit["id"], "reason": "no_valid_destinations"}
     
     # All non-gym players (humans AND PvE AI) get normal waiting_for_player response
@@ -333,9 +333,9 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     """
     # Validate destination per AI_TURN.md rules - add debug
     if not _is_valid_destination(game_state, dest_col, dest_row, unit, config):
-        print(f"MOVE BLOCKED: Unit {unit['id']} trying to move to ({dest_col},{dest_row}) failed validation")
+        # print(f"MOVE BLOCKED: Unit {unit['id']} trying to move to ({dest_col},{dest_row}) failed validation")
         return False, {"error": "invalid_destination", "target": (dest_col, dest_row)}
-    print(f"MOVE ALLOWED: Unit {unit['id']} moved to ({dest_col},{dest_row}) passed validation")
+    # print(f"MOVE ALLOWED: Unit {unit['id']} moved to ({dest_col},{dest_row}) passed validation")
     
     # AI_TURN.md flee detection: was adjacent to enemy before move
     was_adjacent = _is_adjacent_to_enemy(game_state, unit)
@@ -430,7 +430,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     if not unit:
         return []
     
-    print(f"MOVEMENT DEBUG: Building destinations for unit {unit_id} at ({unit['col']}, {unit['row']}) with MOVE={unit['MOVE']}")
+    # print(f"MOVEMENT DEBUG: Building destinations for unit {unit_id} at ({unit['col']}, {unit['row']}) with MOVE={unit['MOVE']}")
     
     valid_destinations = []
     move_range = unit["MOVE"]
@@ -453,7 +453,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 valid_destinations.append((dest_col, dest_row))
     
     game_state["valid_move_destinations_pool"] = valid_destinations
-    print(f"MOVEMENT DEBUG: Unit {unit_id} found {len(valid_destinations)} valid destinations: {valid_destinations[:5]}{'...' if len(valid_destinations) > 5 else ''}")
+    # print(f"MOVEMENT DEBUG: Unit {unit_id} found {len(valid_destinations)} valid destinations: {valid_destinations[:5]}{'...' if len(valid_destinations) > 5 else ''}")
     return valid_destinations
 
 
@@ -549,7 +549,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     # Build valid destinations if not already built
     # AI_TURN.md COMPLIANCE: Direct field access
     if "valid_move_destinations_pool" not in game_state or not game_state["valid_move_destinations_pool"]:
-        print(f"VALIDATION DEBUG: Rebuilding destinations pool for unit {unit_id}")
+        # print(f"VALIDATION DEBUG: Rebuilding destinations pool for unit {unit_id}")
         movement_build_valid_destinations_pool(game_state, unit_id)
     
     if "valid_move_destinations_pool" not in game_state:
@@ -557,45 +557,45 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     valid_pool = game_state["valid_move_destinations_pool"]
     
     # COMPREHENSIVE DEBUGGING: Compare AI selection with validation pool
-    print(f"VALIDATION DEBUG: AI selected destination ({dest_col}, {dest_row})")
-    print(f"VALIDATION DEBUG: Unit {unit_id} current position: {_get_unit_by_id(game_state, unit_id)}")
-    print(f"VALIDATION DEBUG: Valid destinations pool size: {len(valid_pool)}")
-    print(f"VALIDATION DEBUG: First 10 valid destinations: {valid_pool[:10]}")
-    print(f"VALIDATION DEBUG: Is AI selection in pool? {(dest_col, dest_row) in valid_pool}")
+    # print(f"VALIDATION DEBUG: AI selected destination ({dest_col}, {dest_row})")
+    # print(f"VALIDATION DEBUG: Unit {unit_id} current position: {_get_unit_by_id(game_state, unit_id)}")
+    # print(f"VALIDATION DEBUG: Valid destinations pool size: {len(valid_pool)}")
+    # print(f"VALIDATION DEBUG: First 10 valid destinations: {valid_pool[:10]}")
+    # print(f"VALIDATION DEBUG: Is AI selection in pool? {(dest_col, dest_row) in valid_pool}")
     
     # Validate destination in valid pool
     if (dest_col, dest_row) not in valid_pool:
-        print(f"VALIDATION DEBUG: VALIDATION FAILED - Investigating pathfinding consistency")
+        # print(f"VALIDATION DEBUG: VALIDATION FAILED - Investigating pathfinding consistency")
         
         # Get unit for detailed analysis
         unit = _get_unit_by_id(game_state, unit_id)
         if unit:
-            print(f"VALIDATION DEBUG: Unit position: ({unit['col']}, {unit['row']})")
-            print(f"VALIDATION DEBUG: Unit MOVE stat: {unit['MOVE']}")
+            # print(f"VALIDATION DEBUG: Unit position: ({unit['col']}, {unit['row']})")
+            # print(f"VALIDATION DEBUG: Unit MOVE stat: {unit['MOVE']}")
             
             # Test if destination would be valid with fresh pathfinding
             hex_distance = _calculate_hex_distance(unit["col"], unit["row"], dest_col, dest_row)
-            print(f"VALIDATION DEBUG: Hex distance to destination: {hex_distance} (max: {unit['MOVE']})")
+            # print(f"VALIDATION DEBUG: Hex distance to destination: {hex_distance} (max: {unit['MOVE']})")
             
             # Check basic validity
             is_basic_valid = _is_valid_destination(game_state, dest_col, dest_row, unit, {})
-            print(f"VALIDATION DEBUG: Basic destination validity: {is_basic_valid}")
+            # print(f"VALIDATION DEBUG: Basic destination validity: {is_basic_valid}")
             
             # Rebuild fresh pool and compare
-            print(f"VALIDATION DEBUG: Rebuilding fresh destinations pool...")
+            # print(f"VALIDATION DEBUG: Rebuilding fresh destinations pool...")
             movement_build_valid_destinations_pool(game_state, unit_id)
             fresh_pool = game_state["valid_move_destinations_pool"]
-            print(f"VALIDATION DEBUG: Fresh pool size: {len(fresh_pool)}")
-            print(f"VALIDATION DEBUG: Is AI selection in fresh pool? {(dest_col, dest_row) in fresh_pool}")
+            # print(f"VALIDATION DEBUG: Fresh pool size: {len(fresh_pool)}")
+            # print(f"VALIDATION DEBUG: Is AI selection in fresh pool? {(dest_col, dest_row) in fresh_pool}")
             
             # Show pool differences
-            if len(valid_pool) != len(fresh_pool):
-                print(f"VALIDATION DEBUG: POOL SIZE MISMATCH - Original: {len(valid_pool)}, Fresh: {len(fresh_pool)}")
+            # if len(valid_pool) != len(fresh_pool):
+                # print(f"VALIDATION DEBUG: POOL SIZE MISMATCH - Original: {len(valid_pool)}, Fresh: {len(fresh_pool)}")
             
-            if (dest_col, dest_row) in fresh_pool:
-                print(f"VALIDATION DEBUG: PATHFINDING BUG DETECTED - Destination valid in fresh pool but not original")
-            else:
-                print(f"VALIDATION DEBUG: AI SELECTION ERROR - Destination invalid in both pools")
+            # if (dest_col, dest_row) in fresh_pool:
+                # print(f"VALIDATION DEBUG: PATHFINDING BUG DETECTED - Destination valid in fresh pool but not original")
+            # else:
+                # print(f"VALIDATION DEBUG: AI SELECTION ERROR - Destination invalid in both pools")
         
         return False, {"error": "invalid_destination", "destination": (dest_col, dest_row)}
     
@@ -608,7 +608,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     
     # Execute movement with validation
     orig_col, orig_row = unit["col"], unit["row"]
-    print(f"MOVEMENT EXECUTION: Unit {unit['id']} MOVING from ({orig_col}, {orig_row}) to ({dest_col}, {dest_row})")
+    # print(f"MOVEMENT EXECUTION: Unit {unit['id']} MOVING from ({orig_col}, {orig_row}) to ({dest_col}, {dest_row})")
     
     # CRITICAL: Actually update the unit position
     unit["col"] = dest_col
@@ -616,10 +616,10 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     
     # VALIDATION: Confirm position changed
     if unit["col"] != dest_col or unit["row"] != dest_row:
-        print(f"MOVEMENT ERROR: Position update failed - expected ({dest_col}, {dest_row}), actual ({unit['col']}, {unit['row']})")
+        # print(f"MOVEMENT ERROR: Position update failed - expected ({dest_col}, {dest_row}), actual ({unit['col']}, {unit['row']})")
         return False, {"error": "position_update_failed"}
     
-    print(f"MOVEMENT SUCCESS: Unit {unit['id']} now at ({unit['col']}, {unit['row']})")
+    # print(f"MOVEMENT SUCCESS: Unit {unit['id']} now at ({unit['col']}, {unit['row']})")
     
     # Generate movement log per requested format
     if "action_logs" not in game_state:

@@ -42,18 +42,18 @@ class W40KEngine(gym.Env):
         """Initialize W40K engine with AI_TURN.md compliance - training system compatible."""
         
         # CRITICAL DEBUG: Log exact parameters at entry point
-        print(f"W40KEngine CONSTRUCTOR ENTRY DEBUG:")
-        print(f"  gym_training_mode PARAMETER: {gym_training_mode} (type: {type(gym_training_mode)})")
-        print(f"  config PARAMETER: {config}")
-        print(f"  Called from stack: {__import__('traceback').format_stack()[-2].strip()}")
+        # print(f"W40KEngine CONSTRUCTOR ENTRY DEBUG:")
+        # print(f"  gym_training_mode PARAMETER: {gym_training_mode} (type: {type(gym_training_mode)})")
+        # print(f"  config PARAMETER: {config}")
+        # print(f"  Called from stack: {__import__('traceback').format_stack()[-2].strip()}")
         
         # DEBUG: Log all parameters received
-        print(f"W40KEngine CONSTRUCTOR DEBUG:")
-        print(f"  gym_training_mode={gym_training_mode}")
-        print(f"  rewards_config={rewards_config}")
-        print(f"  training_config_name={training_config_name}")
-        print(f"  kwargs={kwargs}")
-        print(f"  Called from: {__import__('traceback').format_stack()[-2].strip()}")
+        # print(f"W40KEngine CONSTRUCTOR DEBUG:")
+        # print(f"  gym_training_mode={gym_training_mode}")
+        # print(f"  rewards_config={rewards_config}")
+        # print(f"  training_config_name={training_config_name}")
+        # print(f"  kwargs={kwargs}")
+        # print(f"  Called from: {__import__('traceback').format_stack()[-2].strip()}")
         
         # Store gym training mode for handler access
         self.gym_training_mode = gym_training_mode
@@ -94,8 +94,8 @@ class W40KEngine(gym.Env):
                 "gym_training_mode": gym_training_mode,  # CRITICAL: Pass flag to handlers
                 "pve_mode": pve_mode_value  # CRITICAL: Add PvE mode for handler detection
             }
-            print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} stored in config")
-            print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config['gym_training_mode'] if 'gym_training_mode' in self.config else 'MISSING'}")
+            # print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} stored in config")
+            # print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config['gym_training_mode'] if 'gym_training_mode' in self.config else 'MISSING'}")
         else:
             # Use provided config directly and add gym_training_mode
             self.config = config.copy()
@@ -103,8 +103,8 @@ class W40KEngine(gym.Env):
             # CRITICAL: Ensure pve_mode is in config for handler delegation
             if "pve_mode" not in self.config:
                 self.config["pve_mode"] = config.get("pve_mode", False)
-            print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} added to existing config")
-            print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config.get('gym_training_mode', 'MISSING')}")
+            # print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} added to existing config")
+            # print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config.get('gym_training_mode', 'MISSING')}")
         
         # Store training system compatibility parameters
         self.quiet = quiet
@@ -352,12 +352,12 @@ class W40KEngine(gym.Env):
                 unit_id = None
             else:
                 unit_id = semantic_action["unitId"]
-            print(f"STEP LOGGER ACTIVE: Processing unit {unit_id}")
+            # print(f"STEP LOGGER ACTIVE: Processing unit {unit_id}")
             if unit_id:
                 pre_unit = self._get_unit_by_id(str(unit_id))
                 if pre_unit:
                     pre_action_positions[str(unit_id)] = (pre_unit["col"], pre_unit["row"])
-                    print(f"STEP LOGGER DEBUG: Captured pre-action position for unit {unit_id}: {(pre_unit['col'], pre_unit['row'])}")
+                    # print(f"STEP LOGGER DEBUG: Captured pre-action position for unit {unit_id}: {(pre_unit['col'], pre_unit['row'])}")
         
         # Log action ONLY if it's a real agent action with valid unit
         # Log action ONLY if it's a real agent action with valid unit
@@ -472,8 +472,8 @@ class W40KEngine(gym.Env):
             return False, {"error": "not_ai_player_turn", "current_player": current_player}
         
         current_phase = self.game_state["phase"]
-        print(f"EXECUTE_AI_TURN DEBUG: phase={current_phase}, current_player={current_player}")
-        print(f"EXECUTE_AI_TURN DEBUG: about to call _make_ai_decision()")
+        # print(f"EXECUTE_AI_TURN DEBUG: phase={current_phase}, current_player={current_player}")
+        # print(f"EXECUTE_AI_TURN DEBUG: about to call _make_ai_decision()")
         
         # Check AI model availability
         if not hasattr(self, '_ai_model') or not self._ai_model:
@@ -605,10 +605,7 @@ class W40KEngine(gym.Env):
         Process semantic action with detailed execution debugging.
         """
         current_phase = self.game_state["phase"]
-        
-        # DIAGNOSTIC: Log exact routing path
-        print(f"🔍 SEMANTIC_ACTION_ROUTING: action={action.get('action')}, phase={current_phase}, unitId={action.get('unitId')}")
-        
+                
         # Route to phase handlers with detailed logging
         if current_phase == "move":
             success, result = self._process_movement_phase(action)
@@ -647,15 +644,15 @@ class W40KEngine(gym.Env):
                     expected_row = action.get("destRow", "unknown") 
                     if expected_col == unit["col"] and expected_row == unit["row"]:
                         pass
-                    else:
-                        print(f"DEBUG: ERROR - Unit {unit_id} failed to reach destination: expected ({expected_col}, {expected_row}) but at ({unit['col']}, {unit['row']})")
+                    # else:
+                        # print(f"DEBUG: ERROR - Unit {unit_id} failed to reach destination: expected ({expected_col}, {expected_row}) but at ({unit['col']}, {unit['row']})")
         
         # CRITICAL FIX: Handle failed actions to prevent infinite loops
         if not success and result.get("error") == "invalid_destination":
-            print(f"DEBUG: Movement failed, forcing unit to skip")
+            # print(f"DEBUG: Movement failed, forcing unit to skip")
             skip_unit = self._get_unit_by_id(action.get("unitId")) if action.get("unitId") else None
             skip_result = movement_handlers.execute_action(self.game_state, skip_unit, {"action": "skip", "unitId": action.get("unitId")}, self.config)
-            print(f"DEBUG: Skip action result: {skip_result}")
+            # print(f"DEBUG: Skip action result: {skip_result}")
             if isinstance(skip_result, tuple):
                 success, result = skip_result
             else:
@@ -663,7 +660,7 @@ class W40KEngine(gym.Env):
         
         # Check response for phase_complete flag
         if result.get("phase_complete"):
-            print(f"DEBUG: Phase completion detected, transitioning to shoot phase")
+            # print(f"DEBUG: Phase completion detected, transitioning to shoot phase")
             self._movement_phase_initialized = False
             self._shooting_phase_init()
             result["phase_transition"] = True
@@ -710,12 +707,11 @@ class W40KEngine(gym.Env):
             # Handler returned non-tuple or wrong tuple length
             success = True
             result = handler_response if isinstance(handler_response, dict) else {"error": "invalid_handler_response"}
-            print(f"🔍 ENGINE DEBUG: Handler returned non-tuple: {type(handler_response)}, value: {handler_response}")
         
         # Handle phase transitions signaled by handler
         if result.get("phase_complete") or result.get("phase_transition"):
             next_phase = result.get("next_phase")
-            print(f"Phase transition: {self.game_state['phase']} -> {next_phase}")
+            # print(f"Phase transition: {self.game_state['phase']} -> {next_phase}")
             if next_phase == "move":
                 self._movement_phase_init()
         return success, result
@@ -960,7 +956,7 @@ class W40KEngine(gym.Env):
         """Calculate reward using actual acting unit with reward mapper integration."""
         # PRIORITY CHECK: Invalid action penalty (from handlers)
         if isinstance(result, dict) and result.get("invalid_action_penalty"):
-            print(f"REWARD: Applying invalid action penalty for attempted action {result.get('attempted_action', 'unknown')}")
+            # print(f"REWARD: Applying invalid action penalty for attempted action {result.get('attempted_action', 'unknown')}")
             return -0.5  # Training penalty for wrong phase actions
         
         if not success:
@@ -1014,7 +1010,7 @@ class W40KEngine(gym.Env):
             controlled_agent = self.config['controlled_agent'] if self.config and 'controlled_agent' in self.config else None
             if controlled_agent is None:
                 raise ValueError("Missing controlled_agent in config - required for reward calculation")
-            print(f"DEBUG: Unit {acting_unit['id']} ({original_type}) -> Using agent rewards: {agent_type} (controlled_agent: {controlled_agent})")
+            # print(f"DEBUG: Unit {acting_unit['id']} ({original_type}) -> Using agent rewards: {agent_type} (controlled_agent: {controlled_agent})")
         
         if action_type == "shoot" and "targetId" in result:
             target = self._get_unit_by_id(str(result["targetId"]))
@@ -1034,8 +1030,8 @@ class W40KEngine(gym.Env):
             
             final_reward = base_reward + target_bonus + result_bonus
             
-            if not self.quiet:
-                print(f"DEBUG: Shooting reward - Base: {base_reward}, Target bonus: {target_bonus}, Result: {result_bonus}, Final: {final_reward}")
+            # if not self.quiet:
+                # print(f"DEBUG: Shooting reward - Base: {base_reward}, Target bonus: {target_bonus}, Result: {result_bonus}, Final: {final_reward}")
             
             return final_reward
         elif action_type == "move":
@@ -1325,7 +1321,7 @@ class W40KEngine(gym.Env):
                 return {"action": "skip", "unitId": selected_unit_id}
         elif current_phase == "shoot":
             if action_int == 4:  # Shoot action
-                print(f"🔍 AI_SHOOTING_ACTION: Creating activate_unit for unit {selected_unit_id}")
+                # print(f"🔍 AI_SHOOTING_ACTION: Creating activate_unit for unit {selected_unit_id}")
                 return {
                     "action": "activate_unit", 
                     "unitId": selected_unit_id
@@ -1334,7 +1330,7 @@ class W40KEngine(gym.Env):
                 return {"action": "wait", "unitId": selected_unit_id}
             else:
                 # AI chose invalid action - convert to wait with penalty flag
-                print(f"🔍 AI_SHOOTING_INVALID: Converting action {action_int} to wait with penalty")
+                # print(f"🔍 AI_SHOOTING_INVALID: Converting action {action_int} to wait with penalty")
                 return {
                     "action": "wait", 
                     "unitId": selected_unit_id,
@@ -1398,7 +1394,7 @@ class W40KEngine(gym.Env):
             pool_unit_ids = self.game_state["shoot_activation_pool"]
             return [self._get_unit_by_id(uid) for uid in pool_unit_ids if self._get_unit_by_id(uid)]
         else:
-            print(f"DEBUG ELIGIBLE UNITS: Unknown phase {current_phase}, returning empty list")
+            # print(f"DEBUG ELIGIBLE UNITS: Unknown phase {current_phase}, returning empty list")
             return []
     
     def _ai_select_unit(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:
@@ -1439,7 +1435,7 @@ class W40KEngine(gym.Env):
                 return eligible_units[0]["id"]
                 
         except Exception as e:
-            print(f"AI model error: {e}")
+            # print(f"AI model error: {e}")
             return eligible_units[0]["id"]
     
     def _ai_select_movement_destination(self, unit_id: str) -> Tuple[int, int]:
@@ -1481,14 +1477,14 @@ class W40KEngine(gym.Env):
             
             move_key = f"{unit_id}_{current_pos}_{best_move}"
             if move_key not in self._logged_moves:
-                print(f"AI ACTION: Unit {unit_id} moved from {current_pos} to {best_move} (targeting enemy at {enemy_pos})")
+                # print(f"AI ACTION: Unit {unit_id} moved from {current_pos} to {best_move} (targeting enemy at {enemy_pos})")
                 self._logged_moves.add(move_key)
             
             return best_move
         else:
             # No enemies - just take first available move
             selected = actual_moves[0]
-            print(f"AI ACTION: Unit {unit_id} moved from {current_pos} to {selected}")
+            # print(f"AI ACTION: Unit {unit_id} moved from {current_pos} to {selected}")
             return selected
     
     def _ai_select_shooting_target(self, unit_id: str) -> str:
@@ -1545,9 +1541,9 @@ class W40KEngine(gym.Env):
             }
             
             # Debug tactical context
-            if not self.quiet:
-                print(f"DEBUG: Tactical context for unit {unit['id']}: {context}")
-                print(f"DEBUG: Movement from ({old_col}, {old_row}) to ({new_col}, {new_row})")
+            # if not self.quiet:
+                # print(f"DEBUG: Tactical context for unit {unit['id']}: {context}")
+                # print(f"DEBUG: Movement from ({old_col}, {old_row}) to ({new_col}, {new_row})")
             
             # Handle same-position movement (no actual movement) - REMOVE DEBUG THAT TRIGGERS DOUBLE PROCESSING
             if old_col == new_col and old_row == new_row:

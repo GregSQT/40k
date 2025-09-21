@@ -75,14 +75,14 @@ class EpisodeTerminationCallback(BaseCallback):
         if hasattr(self, 'locals') and 'dones' in self.locals:
             if any(self.locals['dones']):
                 episode_ended = True
-                print(f"🎯 Episode end detected via locals.dones")
+                # print(f"🎯 Episode end detected via locals.dones")
         
         # Method 2: Check infos for episode termination  
         if hasattr(self, 'locals') and 'infos' in self.locals:
             for info in self.locals['infos']:
                 if info.get('episode', False):
                     episode_ended = True
-                    print(f"🎯 Episode end detected via infos")
+                    # print(f"🎯 Episode end detected via infos")
                     break
         
         # Method 3: Check training environment directly
@@ -92,14 +92,14 @@ class EpisodeTerminationCallback(BaseCallback):
                 env_episodes = self.training_env.get_attr('episode_count')
                 if env_episodes and env_episodes[0] > self.episode_count:
                     episode_ended = True
-                    print(f"🎯 Episode end detected via env.episode_count")
+                    # print(f"🎯 Episode end detected via env.episode_count")
             except:
                 pass
         
         if episode_ended:
             self.episode_count += 1
             episode_progress_pct = (self.episode_count / self.max_episodes) * 100
-            print(f"✅ Episode {self.episode_count}/{self.max_episodes} completed ({episode_progress_pct:.1f}%)")
+            # print(f"✅ Episode {self.episode_count}/{self.max_episodes} completed ({episode_progress_pct:.1f}%)")
             
             # Stop training if max episodes reached
             if self.episode_count >= self.max_episodes:
@@ -107,6 +107,101 @@ class EpisodeTerminationCallback(BaseCallback):
                 return False
                 
         return True
+
+
+class MetricsCollectionCallback(BaseCallback):
+    """Callback to collect training metrics and send to W40KMetricsTracker."""
+    
+    def __init__(self, metrics_tracker, model, verbose: int = 0):
+        super().__init__(verbose)
+        self.metrics_tracker = metrics_tracker
+        self.model = model
+        self.episode_count = 0
+        self.episode_reward = 0
+        self.episode_length = 0
+        self.episode_tactical_data = {
+            'shots_fired': 0, 'hits': 0, 'total_enemies': 0, 'killed_enemies': 0,
+            'invalid_actions': 0, 'total_actions': 0, 'phases_completed': 0, 'total_phases': 6
+        }
+    
+    def _on_step(self) -> bool:
+        # Collect step-level data
+        if hasattr(self, 'locals') and 'infos' in self.locals:
+            for info in self.locals['infos']:
+                # Track invalid actions
+                if info.get('invalid_action_penalty'):
+                    self.episode_tactical_data['invalid_actions'] += 1
+                
+                # Track total actions
+                self.episode_tactical_data['total_actions'] += 1
+                
+                # Track episode end
+                if info.get('episode', False):
+                    self._handle_episode_end(info)
+        
+        # Log training step data
+        step_data = {}
+        if hasattr(self.model, 'learning_rate'):
+            step_data['learning_rate'] = self.model.learning_rate
+        if hasattr(self.model, 'logger') and hasattr(self.model.logger, 'name_to_value'):
+            if 'train/loss' in self.model.logger.name_to_value:
+                step_data['loss'] = self.model.logger.name_to_value['train/loss']
+        if hasattr(self.model, 'exploration_rate'):
+            step_data['exploration_rate'] = self.model.exploration_rate
+        
+        if step_data:
+            self.metrics_tracker.log_training_step(step_data)
+        
+        return True
+    
+    def _handle_episode_end(self, info):
+        """Handle episode completion and log metrics."""
+        self.episode_count += 1
+        
+        # Extract episode data
+        episode_data = {
+            'total_reward': info.get('episode_reward', self.episode_reward),
+            'steps': info.get('episode_length', self.episode_length),
+            'winner': info.get('winner', None)
+        }
+        
+        # Try to extract tactical data from environment
+        if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
+            env = self.training_env.envs[0]
+            if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'game_state'):
+                game_state = env.unwrapped.game_state
+                
+                # Count total and killed enemies
+                units = game_state.get('units', [])
+                player_0_units = [u for u in units if u.get('player') == 0]
+                self.episode_tactical_data['total_enemies'] = len(player_0_units)
+                self.episode_tactical_data['killed_enemies'] = len([u for u in player_0_units if u.get('HP_CUR', 1) <= 0])
+                
+                # Count shooting actions from action logs
+                action_logs = game_state.get('action_logs', [])
+                shoot_logs = [log for log in action_logs if log.get('type') == 'shoot']
+                self.episode_tactical_data['shots_fired'] = len(shoot_logs)
+                self.episode_tactical_data['hits'] = len([log for log in shoot_logs if log.get('damage', 0) > 0])
+        
+        # Log to metrics tracker
+        self.metrics_tracker.log_episode_end(episode_data)
+        self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
+        
+        # Print progress every 100 episodes
+        if self.episode_count % 100 == 0:
+            summary = self.metrics_tracker.get_performance_summary()
+            if 'avg_reward_100ep' in summary:
+                print(f"Episode {self.episode_count}: Avg Reward = {summary['avg_reward_100ep']:.2f}")
+                if 'win_rate_100ep' in summary:
+                    print(f"                    Win Rate = {summary['win_rate_100ep']:.1%}")
+        
+        # Reset episode tracking
+        self.episode_reward = 0
+        self.episode_length = 0
+        self.episode_tactical_data = {
+            'shots_fired': 0, 'hits': 0, 'total_enemies': 0, 'killed_enemies': 0,
+            'invalid_actions': 0, 'total_actions': 0, 'phases_completed': 0, 'total_phases': 6
+        }
 
 
 class StepLogger:
@@ -537,6 +632,9 @@ def setup_imports():
 def create_model(config, training_config_name, rewards_config_name, new_model, append_training, args):
     """Create or load DQN model with configuration following AI_INSTRUCTIONS.md."""
     
+    # Import metrics tracker for training monitoring
+    from ai.metrics_tracker import W40KMetricsTracker
+    
     # Check GPU availability
     gpu_available = check_gpu_availability()
     
@@ -817,7 +915,18 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     return callbacks
 
 def train_model(model, training_config, callbacks, model_path):
-    """Execute the training process."""
+    """Execute the training process with metrics tracking."""
+    
+    # Import metrics tracker
+    from ai.metrics_tracker import W40KMetricsTracker
+    
+    # Extract agent name from model path for metrics
+    agent_name = "default_agent"
+    if "_" in os.path.basename(model_path):
+        agent_name = os.path.basename(model_path).replace('.zip', '').replace('model_', '')
+    
+    # Create metrics tracker
+    metrics_tracker = W40KMetricsTracker(agent_name, "./tensorboard/")
     
     try:
         # Start training
@@ -840,10 +949,14 @@ def train_model(model, training_config, callbacks, model_path):
             raise ValueError("Training config must have either 'total_timesteps' or 'total_episodes'")
         
         print(f"📊 Progress tracking: Episodes are primary metric (AI_TURN.md compliance)")
+        print(f"📈 Metrics tracking enabled for agent: {agent_name}")
+        
+        # Enhanced callbacks with metrics collection
+        enhanced_callbacks = callbacks + [MetricsCollectionCallback(metrics_tracker, model)]
         
         model.learn(
             total_timesteps=total_timesteps,
-            callback=callbacks,
+            callback=enhanced_callbacks,
             log_interval=100,
             progress_bar=True
         )
@@ -1192,7 +1305,6 @@ def generate_steplog_and_replay(config, args):
             while not done and step_count < 1000:
                 action, _ = model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(action)
-                print(f"TEST DEBUG: Step {step_count}, {action} executed. terminated={terminated}, truncated={truncated}, reward={reward:.3f}")
                 done = terminated or truncated
                 step_count += 1
         
