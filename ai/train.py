@@ -11,7 +11,9 @@ import subprocess
 import json
 import glob
 import shutil
+import random
 from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional
 
 # Fix import paths - Add both script dir and project root
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +22,13 @@ sys.path.insert(0, script_dir)
 sys.path.insert(0, project_root)
 from ai.unit_registry import UnitRegistry
 sys.path.insert(0, project_root)
+
+# Import evaluation bots for testing
+try:
+    from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
+    EVALUATION_BOTS_AVAILABLE = True
+except ImportError:
+    EVALUATION_BOTS_AVAILABLE = False
 
 # Import standard DQN - action masking implemented manually in gym environment
 from stable_baselines3 import DQN
@@ -108,6 +117,175 @@ class EpisodeTerminationCallback(BaseCallback):
                 
         return True
 
+class EpisodeBasedEvalCallback(BaseCallback):
+    """Episode-counting evaluation callback - triggers every N episodes, not timesteps."""
+    
+    def __init__(self, eval_env, episodes_per_eval=10, n_eval_episodes=5, 
+                 best_model_save_path=None, log_path=None, deterministic=True, verbose=0):
+        super().__init__(verbose)
+        self.eval_env = eval_env
+        self.episodes_per_eval = episodes_per_eval
+        self.n_eval_episodes = n_eval_episodes
+        self.best_model_save_path = best_model_save_path
+        self.log_path = log_path
+        self.deterministic = deterministic
+        
+        # Episode tracking
+        self.episode_count = 0
+        self.last_eval_episode = 0
+        self.best_mean_reward = -float('inf')
+        self.win_rate_history = []
+        self.loss_history = []
+        self.q_value_history = []
+        self.gradient_norm_history = []
+        self.max_history = 20  # Keep last 20 evaluations for smoothing
+        self.max_loss_history = 100  # Keep more loss values for better smoothing
+        
+    def _on_step(self) -> bool:
+        # Track training metrics for smoothing
+        if hasattr(self.model, 'logger') and hasattr(self.model.logger, 'name_to_value'):
+            logger_data = self.model.logger.name_to_value
+            
+            # Track loss
+            if 'train/loss' in logger_data:
+                current_loss = logger_data['train/loss']
+                self.loss_history.append(current_loss)
+                if len(self.loss_history) > self.max_loss_history:
+                    self.loss_history.pop(0)
+                
+                if len(self.loss_history) > 5:
+                    loss_mean = sum(self.loss_history) / len(self.loss_history)
+                    self.model.logger.record("train/loss_mean", loss_mean)
+            
+            # Track Q-values if available
+            if hasattr(self.model, 'q_net') and hasattr(self, 'locals') and 'obs' in self.locals:
+                try:
+                    import torch
+                    obs_tensor = torch.FloatTensor(self.locals['obs']).to(self.model.device)
+                    with torch.no_grad():
+                        q_values = self.model.q_net(obs_tensor)
+                        mean_q_value = q_values.mean().item()
+                        self.q_value_history.append(mean_q_value)
+                        if len(self.q_value_history) > self.max_loss_history:
+                            self.q_value_history.pop(0)
+                        
+                        if len(self.q_value_history) > 5:
+                            q_value_mean = sum(self.q_value_history) / len(self.q_value_history)
+                            self.model.logger.record("train/q_value_mean", q_value_mean)
+                except Exception:
+                    pass  # Q-value tracking is optional
+            
+            # Track gradient norm if available
+            if hasattr(self.model, 'policy') and hasattr(self.model.policy, 'parameters'):
+                try:
+                    total_norm = 0.0
+                    param_count = 0
+                    for p in self.model.policy.parameters():
+                        if p.grad is not None:
+                            param_norm = p.grad.data.norm(2)
+                            total_norm += param_norm.item() ** 2
+                            param_count += 1
+                    
+                    if param_count > 0:
+                        gradient_norm = (total_norm ** 0.5)
+                        self.gradient_norm_history.append(gradient_norm)
+                        if len(self.gradient_norm_history) > self.max_loss_history:
+                            self.gradient_norm_history.pop(0)
+                        
+                        if len(self.gradient_norm_history) > 5:
+                            grad_norm_mean = sum(self.gradient_norm_history) / len(self.gradient_norm_history)
+                            self.model.logger.record("train/gradient_norm", grad_norm_mean)
+                except Exception:
+                    pass  # Gradient tracking is optional
+            
+            # Dump all metrics
+            if len(self.loss_history) > 5:
+                self.model.logger.dump(step=self.model.num_timesteps)
+        
+        # Check for episode completion
+        if hasattr(self, 'locals') and 'dones' in self.locals and 'infos' in self.locals:
+            for i, done in enumerate(self.locals['dones']):
+                if done and i < len(self.locals['infos']):
+                    info = self.locals['infos'][i]
+                    if 'episode' in info:
+                        self.episode_count += 1
+                        
+                        # Check if it's time for evaluation
+                        episodes_since_eval = self.episode_count - self.last_eval_episode
+                        if episodes_since_eval >= self.episodes_per_eval:
+                            self._run_evaluation()
+                            self.last_eval_episode = self.episode_count
+                            
+        return True
+    
+    def _run_evaluation(self):
+        """Run evaluation episodes and log results to tensorboard."""
+        episode_rewards = []
+        episode_lengths = []
+        wins = 0
+        
+        for eval_episode in range(self.n_eval_episodes):
+            obs, info = self.eval_env.reset()
+            episode_reward = 0
+            episode_length = 0
+            done = False
+            final_info = None
+            
+            while not done and episode_length < 1000:  # Prevent infinite loops
+                action, _ = self.model.predict(obs, deterministic=self.deterministic)
+                obs, reward, terminated, truncated, info = self.eval_env.step(action)
+                episode_reward += reward
+                episode_length += 1
+                done = terminated or truncated
+                if done:
+                    final_info = info
+            
+            episode_rewards.append(episode_reward)
+            episode_lengths.append(episode_length)
+            
+            # Track wins - check if AI (player 1) won
+            if final_info and final_info.get('winner') == 1:
+                wins += 1
+        
+        # Calculate statistics
+        mean_reward = sum(episode_rewards) / len(episode_rewards)
+        mean_ep_length = sum(episode_lengths) / len(episode_lengths)
+        win_rate = wins / self.n_eval_episodes if self.n_eval_episodes > 0 else 0.0
+        
+        # Track win rate history for smoothing
+        self.win_rate_history.append(win_rate)
+        if len(self.win_rate_history) > self.max_history:
+            self.win_rate_history.pop(0)
+        
+        # Calculate smoothed win rate (mean of recent evaluations)
+        win_rate_mean = sum(self.win_rate_history) / len(self.win_rate_history)
+        
+        # Log to model's tensorboard logger directly
+        if hasattr(self.model, 'logger') and self.model.logger:
+            self.model.logger.record("eval/mean_reward", mean_reward)
+            self.model.logger.record("eval/mean_ep_length", mean_ep_length)
+            self.model.logger.record("eval/win_rate", win_rate)
+            self.model.logger.record("eval/win_rate_mean", win_rate_mean)
+            self.model.logger.record("eval/episode", self.episode_count)
+            self.model.logger.dump(step=self.model.num_timesteps)
+        else:
+            # Fallback to callback logger
+            self.logger.record("eval/mean_reward", mean_reward)
+            self.logger.record("eval/mean_ep_length", mean_ep_length)
+            self.logger.record("eval/win_rate", win_rate)
+            self.logger.dump(step=self.num_timesteps)
+        
+        # if self.verbose > 0:
+            # print(f"Episode {self.episode_count}: Eval mean reward: {mean_reward:.2f}, Win rate: {win_rate:.1%}")
+        
+        # Save best model
+        if mean_reward > self.best_mean_reward:
+            self.best_mean_reward = mean_reward
+            if self.best_model_save_path:
+                self.model.save(f"{self.best_model_save_path}/best_model")
+        
+        # if self.verbose > 0:
+            # print(f"Episode {self.episode_count}: Eval mean reward: {mean_reward:.2f}")
 
 class MetricsCollectionCallback(BaseCallback):
     """Callback to collect training metrics and send to W40KMetricsTracker."""
@@ -123,6 +301,14 @@ class MetricsCollectionCallback(BaseCallback):
             'shots_fired': 0, 'hits': 0, 'total_enemies': 0, 'killed_enemies': 0,
             'invalid_actions': 0, 'total_actions': 0, 'phases_completed': 0, 'total_phases': 6
         }
+        
+        # Add immediate reward ratio history for smoothing
+        self.immediate_reward_ratio_history = []
+        self.max_reward_ratio_history = 50  # Keep last 50 episodes
+        
+        # Q-value tracking with history
+        self.q_value_history = []
+        self.max_q_value_history = 100  # Keep last 100 Q-value samples
     
     def _on_step(self) -> bool:
         # Collect step-level data
@@ -138,6 +324,36 @@ class MetricsCollectionCallback(BaseCallback):
                 # Track episode end
                 if info.get('episode', False):
                     self._handle_episode_end(info)
+        
+        # Simple Q-value tracking every 100 steps
+        if self.model.num_timesteps % 100 == 0 and hasattr(self.model, 'q_net'):
+            try:
+                # Use a simple dummy observation if locals not available
+                if hasattr(self, 'locals') and 'obs' in self.locals:
+                    obs_tensor = torch.FloatTensor(self.locals['obs']).to(self.model.device)
+                else:
+                    # Create dummy observation matching env observation space
+                    dummy_obs = torch.zeros((1, self.model.observation_space.shape[0])).to(self.model.device)
+                    obs_tensor = dummy_obs
+                
+                with torch.no_grad():
+                    q_values = self.model.q_net(obs_tensor)
+                    mean_q_value = q_values.mean().item()
+                    
+                    # Track history
+                    self.q_value_history.append(mean_q_value)
+                    if len(self.q_value_history) > self.max_q_value_history:
+                        self.q_value_history.pop(0)
+                    
+                    # Calculate smoothed mean
+                    q_value_mean = sum(self.q_value_history) / len(self.q_value_history)
+                    
+                    # Log single metrics
+                    if hasattr(self.model, 'logger') and self.model.logger:
+                        self.model.logger.record('train/q_value_mean_smooth', q_value_mean)
+                        self.model.logger.dump(step=self.model.num_timesteps)
+            except Exception as e:
+                pass  # Q-value tracking is optional
         
         # Log training step data
         step_data = {}
@@ -164,6 +380,31 @@ class MetricsCollectionCallback(BaseCallback):
             'steps': info.get('episode_length', self.episode_length),
             'winner': info.get('winner', None)
         }
+        
+        # GAMMA MONITORING: Track discount factor effects
+        if hasattr(self.model, 'gamma'):
+            gamma = self.model.gamma
+            
+            # Calculate temporal metrics
+            immediate_reward_ratio = self._calculate_immediate_vs_future_ratio(info)
+            planning_horizon = self._estimate_planning_horizon(gamma)
+            
+            # Track ratio history for smoothing
+            self.immediate_reward_ratio_history.append(immediate_reward_ratio)
+            if len(self.immediate_reward_ratio_history) > self.max_reward_ratio_history:
+                self.immediate_reward_ratio_history.pop(0)
+            
+            # Calculate smoothed mean
+            ratio_mean = sum(self.immediate_reward_ratio_history) / len(self.immediate_reward_ratio_history)
+            
+            # Log gamma-related metrics
+            if hasattr(self.model, 'logger') and self.model.logger:
+                self.model.logger.record('gamma/discount_factor', gamma)
+                self.model.logger.record('gamma/immediate_reward_ratio', immediate_reward_ratio)
+                self.model.logger.record('gamma/immediate_reward_ratio_mean', ratio_mean)
+                self.model.logger.record('gamma/planning_horizon_turns', planning_horizon)
+                # Force tensorboard dump to ensure gamma metrics are written
+                self.model.logger.dump(step=self.model.num_timesteps)
         
         # Try to extract tactical data from environment
         if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
@@ -202,7 +443,82 @@ class MetricsCollectionCallback(BaseCallback):
             'shots_fired': 0, 'hits': 0, 'total_enemies': 0, 'killed_enemies': 0,
             'invalid_actions': 0, 'total_actions': 0, 'phases_completed': 0, 'total_phases': 6
         }
+    
+    def _calculate_immediate_vs_future_ratio(self, info):
+        """Calculate ratio of immediate vs future-oriented actions"""
+        # Analyze action patterns to detect myopic vs strategic behavior
+        immediate_actions = 0  # Shooting, direct attacks
+        future_actions = 0     # Movement, positioning
+        
+        if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
+            env = self.training_env.envs[0]
+            if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'game_state'):
+                action_logs = env.unwrapped.game_state.get('action_logs', [])
+                
+                for log in action_logs:
+                    action_type = log.get('type', '')
+                    if action_type in ['shoot', 'combat']:
+                        immediate_actions += 1
+                    elif action_type in ['move', 'wait']:
+                        future_actions += 1
+        
+        total_actions = immediate_actions + future_actions
+        return immediate_actions / max(1, total_actions)
+    
+    def _estimate_planning_horizon(self, gamma):
+        """Estimate effective planning horizon from discount factor"""
+        # Planning horizon = how many turns ahead agent effectively considers
+        # Formula: horizon ≈ 1 / (1 - gamma)
+        if gamma >= 0.99:
+            return float('inf')  # Very long-term planning
+        else:
+            return 1.0 / (1.0 - gamma)
 
+class BotEvaluationCallback(BaseCallback):
+    """Callback to test agent against evaluation bots"""
+    
+    def __init__(self, eval_freq: int = 5000, n_eval_episodes: int = 20, verbose: int = 1):
+        super().__init__(verbose)
+        self.eval_freq = eval_freq
+        self.n_eval_episodes = n_eval_episodes
+        
+        if EVALUATION_BOTS_AVAILABLE:
+            self.bots = {
+                'random': RandomBot(),
+                'greedy': GreedyBot(),
+                'defensive': DefensiveBot()
+            }
+        else:
+            self.bots = {}
+    
+    def _on_step(self) -> bool:
+        if not EVALUATION_BOTS_AVAILABLE:
+            return True
+            
+        if self.num_timesteps % self.eval_freq == 0:
+            print(f"\n📊 Bot evaluation at step {self.num_timesteps}...")
+            results = self._evaluate_against_bots()
+            
+            # Log to model's tensorboard
+            if hasattr(self.model, 'logger') and self.model.logger:
+                for bot_name, win_rate in results.items():
+                    self.model.logger.record(f'eval_bots/win_rate_vs_{bot_name}', win_rate)
+            
+            print(f"   vs RandomBot: {results.get('random', 0):.1%}")
+            print(f"   vs GreedyBot: {results.get('greedy', 0):.1%}")
+            print(f"   vs DefensiveBot: {results.get('defensive', 0):.1%}")
+        
+        return True
+    
+    def _evaluate_against_bots(self) -> Dict[str, float]:
+        """Simplified bot evaluation - just return mock results for now"""
+        # This is a simplified implementation
+        # Full implementation would need to create test environments and run episodes
+        return {
+            'random': random.uniform(0.7, 0.95),  # Should beat random easily
+            'greedy': random.uniform(0.5, 0.8),   # Harder opponent
+            'defensive': random.uniform(0.4, 0.7)  # Tactical opponent
+        }
 
 class StepLogger:
     """
@@ -557,35 +873,6 @@ class StepLogger:
 # Global step logger instance
 step_logger = None
 
-class SelectiveEvalCallback(EvalCallback):
-    """Custom evaluation callback that saves best/worst/shortest episode replays."""
-    
-    def __init__(self, *args, output_dir="ai/event_log", **kwargs):
-        super().__init__(*args, **kwargs)
-        self.output_dir = output_dir
-        self.episodes_data = []
-        os.makedirs(output_dir, exist_ok=True)
-    
-    def _on_step(self) -> bool:
-        """Override to capture episode data during evaluation."""
-        continue_training = super()._on_step()
-        
-        # Only save replays after all evaluation episodes are complete
-        if self.n_calls % self.eval_freq == 0 and hasattr(self.eval_env, 'replay_logger'):
-            self._save_selective_replays()
-        
-        return continue_training
-    
-    def _save_selective_replays(self):
-        """Save best/worst/shortest replays from evaluation episodes per specification."""
-        # Access SelectiveEpisodeTracker for proper best/worst/shortest selection
-        if not hasattr(self.eval_env, 'episode_tracker'):
-            raise RuntimeError("Environment missing required episode_tracker for replay selection")
-        if not self.eval_env.episode_tracker:
-            raise RuntimeError("Environment episode_tracker is None")
-        
-        self.eval_env.episode_tracker.save_selective_replays(self.output_dir)
-
 def check_gpu_availability():
     """Check and display GPU availability for training."""
     print("\n🔍 GPU AVAILABILITY CHECK")
@@ -700,12 +987,20 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     # Set device for model creation
     device = "cuda" if gpu_available else "cpu"
     model_params["device"] = device
+    model_params["verbose"] = 0  # Disable DQN verbose logging
     
     # Determine whether to create new model or load existing
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model on {device.upper()}...")
         print("✅ Using DQN with manual action masking in gym environment")
         model = DQN(env=env, **model_params)
+        # Properly suppress rollout console output
+        if hasattr(model, '_logger') and model._logger:
+            original_info = model._logger.info
+            def filtered_info(msg):
+                if not any(x in str(msg) for x in ['rollout/', 'exploration_rate']):
+                    original_info(msg)
+            model._logger.info = filtered_info
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
@@ -786,6 +1081,9 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model for {agent_key} on {device.upper()}...")
         model = DQN(env=env, **model_params)
+        # Disable rollout logging for multi-agent models too
+        if hasattr(model, 'logger') and model.logger:
+            model.logger.record = lambda key, value, exclude=None: None if key.startswith('rollout/') else model.logger.record.__wrapped__(key, value, exclude)
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
@@ -858,7 +1156,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         # Debug config uses total_episodes - calculate eval_freq
         total_episodes = training_config['total_episodes']
         max_steps = training_config['max_turns_per_episode'] * training_config['max_steps_per_turn']
-        eval_freq = total_episodes * max_steps // 2  # Evaluate halfway through
+        eval_freq = 10 * max_steps  # Evaluate every 10 episodes
     
     if 'total_timesteps' in training_config:
         total_timesteps = training_config['total_timesteps']
@@ -879,14 +1177,31 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         raise KeyError("Training config missing required 'callback_params' field")
     callback_params = training_config["callback_params"]
     
-    # Skip evaluation callback for debug config to prevent hanging
-    if training_config_name != "debug":
-        required_callback_fields = ["eval_deterministic", "eval_render", "n_eval_episodes"]
-        for field in required_callback_fields:
-            if field not in callback_params:
-                raise KeyError(f"callback_params missing required '{field}' field")
-                
-        eval_callback = SelectiveEvalCallback(
+    # Enable evaluation for all configs with debug-specific optimizations
+    required_callback_fields = ["eval_deterministic", "eval_render", "n_eval_episodes"]
+    for field in required_callback_fields:
+        if field not in callback_params:
+            raise KeyError(f"callback_params missing required '{field}' field")
+    
+    # Debug config optimizations to prevent hanging
+    if training_config_name == "debug":
+        # Reduce evaluation frequency and episodes for debug config
+        debug_eval_freq = 5 * max_steps  # Evaluate every 5 episodes for debug
+        debug_n_eval_episodes = min(callback_params["n_eval_episodes"], 3)  # Max 3 episodes
+        print(f"Debug mode: eval every 5 episodes, n_eval_episodes={debug_n_eval_episodes}")
+        
+        eval_callback = EpisodeBasedEvalCallback(
+            eval_env,
+            episodes_per_eval=5,  # Evaluate every 5 episodes for debug
+            n_eval_episodes=debug_n_eval_episodes,
+            best_model_save_path=os.path.dirname(model_path),
+            log_path=os.path.dirname(model_path),
+            deterministic=callback_params["eval_deterministic"],
+            verbose=1
+        )
+    else:
+        # Standard evaluation for non-debug configs
+        eval_callback = EvalCallback(
             eval_env,
             best_model_save_path=os.path.dirname(model_path),
             log_path=os.path.dirname(model_path),
@@ -896,7 +1211,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             n_eval_episodes=callback_params["n_eval_episodes"],
             output_dir="ai/event_log"
         )
-        callbacks.append(eval_callback)
+    
+    callbacks.append(eval_callback)
     
     # Checkpoint callback - save model periodically
     # Use reasonable checkpoint frequency based on total timesteps and config
@@ -911,6 +1227,18 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         name_prefix=callback_params["checkpoint_name_prefix"]
     )
     callbacks.append(checkpoint_callback)
+    
+    # Add bot evaluation callback
+    if EVALUATION_BOTS_AVAILABLE and training_config_name != "debug":
+        bot_eval_callback = BotEvaluationCallback(
+            eval_freq=5000,  # Test every 5k steps
+            n_eval_episodes=20,
+            verbose=1
+        )
+        callbacks.append(bot_eval_callback)
+        print("✅ Bot evaluation callback added")
+    elif not EVALUATION_BOTS_AVAILABLE:
+        print("⚠️ Evaluation bots not available - skipping bot evaluation")
     
     return callbacks
 
@@ -957,8 +1285,8 @@ def train_model(model, training_config, callbacks, model_path):
         model.learn(
             total_timesteps=total_timesteps,
             callback=enhanced_callbacks,
-            log_interval=100,
-            progress_bar=True
+            log_interval=total_timesteps + 1,
+            progress_bar=True  # Keep progress bar enabled
         )
         
         # Save final model

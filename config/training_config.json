@@ -188,7 +188,7 @@
 
   "debug": {
     "description": "Proportional training: number_of_turns_per_episode (10) × max_steps_per_episode (100) × total_episodes (100) = 100,000 timesteps",
-    "total_episodes": 300,
+    "total_episodes": 2000,
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 50,
     "eval_episodes": 1,
@@ -204,17 +204,24 @@
     "model_params": {
       "policy": "MlpPolicy",
       "verbose": 1,
-      "buffer_size": 10000,
-      "learning_rate": 0.0005,
-      "learning_starts": 1000,
+      "learning_rate": 0.0007,
+      "buffer_size": 50000,
+      "learning_starts": 5000,
       "batch_size": 64,
-      "train_freq": 1,
-      "target_update_interval": 500,
       "exploration_fraction": 0.3,
       "exploration_final_eps": 0.05,
+      "target_update_interval": 300,
+      "gamma": 0.95,   
+      "train_freq": 1,   
       "tensorboard_log": "./tensorboard/",
       "device": "cuda"
-      },
+     },
+    "_gamma_experiments": {
+      "balanced": {"gamma": 0.95, "behavior": "tactical balance"},
+      "strategic": {"gamma": 0.99, "behavior": "long-term planning"},
+      "short_term": {"gamma": 0.8, "behavior": "aggressive, immediate rewards"},
+      "myopic": {"gamma": 0.5, "behavior": "purely immediate"}
+    },
     "replay_config": {
       "default_file": "ai/event_log/train_best_game_replay.json",
       "backup_files": [

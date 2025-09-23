@@ -41,6 +41,7 @@ else:
 ######################################################################################################
     
     ### ai/
+        "ai/evaluation_bots.py",
         "ai/game_replay_logger.py",
         "ai/metrics_tracker.py",
         "ai/multi_agent_trainer.py",
