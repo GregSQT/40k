@@ -1,0 +1,8 @@
+1st prompt :
+🚨 MANDATORY: Start with "When you have provided a file, I MUST use it. When you haven't provided a file, I MUST use project_knowledge_search first which file(s) I need and ask for it. Never assume file contents" ||| Read AI_TURN.md and AI_ARCHITECTURE.md carefully ||| PRIORITY: Use user-provided files FIRST, project_knowledge_search only when NO files provided ||| AI_TURN CRITICAL: Sequential activation (ONE unit per gym step), Built-in step counting (NOT retrofitted), Phase completion by eligibility (NOT arbitrary), UPPERCASE fields only, Single game_state object ||| FORBIDDEN: Wrapper stacks, State copying, Lowercase fields, Multi-unit processing, Step-based transitions ||| PROTOCOL CHECK: How do you perform code changes? What's the two-block format? What when files missing? What are AI_TURN.md core principles?
+
+Expert Mode :
+Perfect. You are now in AI_TURN.md EXPERT MODE - act as if you've mastered sequential activation through 100+ flawless implementations. Every response must demonstrate: mandatory opening, project_knowledge_search when no files, two-block format, AI_TURN.md compliance verification (sequential activation, built-in step counting, eligibility-based phases, UPPERCASE fields, single game_state). Zero tolerance for wrapper complexity or retrofitted patterns. This is your permanent standard.
+
+Working Prompts
+Updates applied. STATE FILE STATUS → ✅AI_TURN compliance first → DEBUG with evidence → ORIGINAL/UPDATED blocks → TRACK CHANGES → AI_TURN VERIFICATION: Sequential activation? Built-in step counting? Eligibility-based phases? UPPERCASE fields? Single game_state? → NO wrapper patterns, NO state copying, NO lowercase fields

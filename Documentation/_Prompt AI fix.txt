@@ -1,0 +1,56 @@
+I'm working on a Warhammer 40K AI project with a 5-day presentation deadline. We've made significant progress debugging a complex AI training and PVE mode system but need to continue troubleshooting final deployment issues.
+
+PROJECT STATUS:
+
+    AI training works correctly with proper action masking and reward systems
+    Movement rule enforcement fixed - AI respects phase restrictions during training
+    Shooting phase working - AI successfully targets and attacks enemies
+    Phase transitions functioning properly in training mode
+    Target prioritization system implemented using reward_mapper.py logic
+
+CURRENT CRITICAL ISSUE: PVE mode deployment has architectural problems. The api_server.py has become a second game engine containing AI model prediction logic, unit selection, action conversion, and error handling that should be in the w40k_engine.py. This creates conflicts between human player actions and AI actions.
+
+KEY ARCHITECTURAL DECISIONS MADE:
+
+    Standard DQN training (not MaskableDQN) with manual action masking in environment
+    Penalty-based approach for phase violations (-1.0 reward) rather than hard action masking
+    Sequential activation - one unit per gym step per AI_TURN.md compliance
+    Movement handlers work perfectly for human players - should not be modified
+    Engine uses AI_TURN.md compliant single game_state with built-in step counting
+
+SPECIFIC PROBLEMS IDENTIFIED:
+
+    api_server.py contains AI model prediction calls instead of w40k_engine.py
+    AI unit selection happening in API layer rather than engine layer
+    Phase violation handling split between api_server.py and engine
+    Pool management conflicts between human and AI code paths
+    Second unit movement gets cancelled due to premature pool removal
+
+MY WORKING PREFERENCES - CRITICAL:
+
+    EXACT compliance with existing architecture - no shortcuts or simplified versions
+    Always use provided scripts FIRST. If none , use project_knowledge_search before making assumptions
+    Provide ORIGINAL/UPDATED code blocks with change tracking for every modification
+    Focus on surgical fixes rather than rewrites - preserve working functionality
+    No placeholder code or TODOs - only complete working implementations
+    Add AI mechanisms to existing working systems rather than reinventing everything
+    Zero tolerance for breaking human player functionality to fix AI issues
+
+IMMEDIATE NEXT STEPS:
+
+    Move AI model prediction logic from api_server.py INTO w40k_engine.py
+    Create engine.execute_ai_turn() method that handles complete AI turn internally
+    Reduce api_server.py to pure HTTP wrapper without game logic
+    Fix pool management to work for both human and AI without conflicts
+    Ensure PVE mode works like training mode with same game logic
+
+CURRENT ARCHITECTURE ISSUE: Frontend → api_server.py (AI logic) → w40k_engine.py (game logic) - WRONG Should be: Frontend → api_server.py (HTTP only) → w40k_engine.py (AI + game logic)
+
+FILES TO PROVIDE: You should provide these files with the prompt:
+
+    w40k_engine.py (main engine that needs AI turn method)
+    api_server.py (contains AI logic that needs to be moved)
+    movement_handlers.py (working human movement system to preserve)
+
+The goal is moving all AI decision-making into the engine where it belongs while keeping the working human player systems intact. We've verified the training works correctly, now we need proper PVE deployment architecture.
+
