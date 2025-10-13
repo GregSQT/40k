@@ -507,32 +507,6 @@ def movement_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
     else:
         return True, {"action": "continue_selection"}
 
-def _is_valid_movement_destination(game_state: Dict[str, Any], col: int, row: int) -> bool:
-    """Check if hex is valid for movement."""
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
-    if "board_cols" not in game_state:
-        raise KeyError("game_state missing required 'board_cols' field")
-    if "board_rows" not in game_state:
-        raise KeyError("game_state missing required 'board_rows' field")
-    board_cols = game_state["board_cols"]
-    board_rows = game_state["board_rows"]
-    if not (0 <= col < board_cols and 0 <= row < board_rows):
-        return False
-    
-    # Check for wall hexes
-    if "wall_hexes" not in game_state:
-        raise KeyError("game_state missing required 'wall_hexes' field")
-    wall_hexes = game_state["wall_hexes"]
-    if (col, row) in wall_hexes:
-        return False
-    
-    # Check for occupied hexes
-    for unit in game_state["units"]:
-        if unit["col"] == col and unit["row"] == row:
-            return False
-    
-    return True
-
 def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """AI_MOVE.md: Handle destination selection and execute movement"""
     # AI_TURN.md COMPLIANCE: Direct field access with validation

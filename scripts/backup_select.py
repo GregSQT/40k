@@ -28,10 +28,6 @@ else:
 ##### root files
 ######################################################################################################
 
-
-        "AI_IMPLEMENTATION.md",
-        "AI_TRAINING.md",
-        "AI_TURN.md",
         "config_loader.py",
         "main.py",
         "train_step.log",
@@ -91,6 +87,16 @@ else:
         #"config/roster/tyranid/units/Hormagaunt.ts",
         #"config/roster/tyranid/units/Carnifex.ts",
         
+        
+######################################################################################################
+##### Documentation files
+######################################################################################################
+    
+    ### Documentation    
+        "Documentation/AI_IMPLEMENTATION.md",
+        "Documentation/AI_TRAINING.md",
+        "Documentation/AI_TURN.md",
+
 ######################################################################################################
 ##### Engine files
 ######################################################################################################
