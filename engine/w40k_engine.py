@@ -1043,7 +1043,14 @@ class W40KEngine(gym.Env):
             old_pos = (result["fromCol"], result["fromRow"])
             new_pos = (result["toCol"], result["toRow"])
             tactical_context = self._build_tactical_context(acting_unit, result)
-            return reward_mapper.get_movement_reward(enriched_unit, old_pos, new_pos, tactical_context)
+            
+            # CRITICAL FIX: Unpack tuple returned by get_movement_reward
+            reward_result = reward_mapper.get_movement_reward(enriched_unit, old_pos, new_pos, tactical_context)
+            if isinstance(reward_result, tuple) and len(reward_result) == 2:
+                movement_reward, _ = reward_result  # Unpack: (reward_value, action_name)
+                return movement_reward
+            else:
+                return reward_result  # Backward compatibility: scalar return
         elif action_type == "skip":
             # SKIP: Agent CANNOT perform action - use wait penalty
             return self._calculate_reward_from_config(acting_unit, {"type": "wait"}, success)

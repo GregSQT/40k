@@ -1208,8 +1208,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             eval_freq=eval_freq,
             deterministic=callback_params["eval_deterministic"],
             render=callback_params["eval_render"],
-            n_eval_episodes=callback_params["n_eval_episodes"],
-            output_dir="ai/event_log"
+            n_eval_episodes=callback_params["n_eval_episodes"]
         )
     
     callbacks.append(eval_callback)

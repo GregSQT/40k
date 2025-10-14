@@ -65,128 +65,7 @@
       "tensorboard_log": "Directory to save training metrics for visualization"
     }
   },
-  
   "default": {
-    "description": "Episode-based training for AI_TURN.md compliance - 400 episodes × 10 turns × 25 steps = 100,000 timesteps",
-    "total_episodes": 500,
-    "max_turns_per_episode": 8,
-    "max_steps_per_turn": 80,
-    "eval_episodes": 1,
-    "max_concurrent_sessions": 4,
-    "log_interval": 1000,
-    "callback_params": {
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 10,
-      "checkpoint_save_freq": 5000,
-      "checkpoint_name_prefix": "default_model_checkpoint"
-    },
-    "model_params": {
-      "policy": "MlpPolicy",
-      "verbose": 1,
-      "buffer_size": 200000,
-      "learning_rate": 0.0003,
-      "learning_starts": 5000,
-      "batch_size": 512,
-      "train_freq": 1,
-      "target_update_interval": 1000,
-      "exploration_fraction": 0.3,
-      "exploration_final_eps": 0.02,
-      "tensorboard_log": "./tensorboard/",
-      "device": "cuda"
-      },
-    "replay_config": {
-      "default_file": "ai/event_log/train_best_game_replay.json",
-      "backup_files": [
-        "ai/event_log/phase_based_replay_latest.json",
-        "ai/event_log/web_replay_latest.json"
-      ]
-    }
-  },
-
-
-  "conservative": {
-    "description": "Conservative increase from original",
-    "total_timesteps": 100000,
-    "eval_episodes": 20,
-    "max_steps_per_episode": 1000,
-    "eval_freq": 9999,
-    "max_concurrent_sessions": 4,
-    "progress_update_interval": 10,
-    "scenario_generation_timeout": 10,
-    "log_interval": 1000,
-    "callback_params": {
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 5,
-      "checkpoint_save_freq": 25000,
-      "checkpoint_name_prefix": "phase_model_checkpoint"
-    },
-    "model_params": {
-      "policy": "MlpPolicy",
-      "verbose": 1,
-      "buffer_size": 50000,
-      "learning_rate": 0.0007,
-      "learning_starts": 2000,
-      "batch_size": 128,
-      "train_freq": 2,
-      "target_update_interval": 750,
-      "exploration_fraction": 0.4,
-      "exploration_final_eps": 0.03,
-      "tensorboard_log": "./tensorboard/",
-      "device": "cuda"
-      },
-    "replay_config": {
-      "default_file": "ai/event_log/train_best_game_replay.json",
-      "backup_files": [
-        "ai/event_log/phase_based_replay_latest.json",
-        "ai/event_log/web_replay_latest.json"
-      ]
-    }
-  },
-
-
-  "aggressive": {
-    "description": "Aggressive parameters for faster learning",
-    "total_timesteps": 2000000,
-    "eval_episodes": 50,
-    "max_steps_per_episode": 1000,
-    "eval_freq": 9999,
-    "max_concurrent_sessions": 4,
-    "progress_update_interval": 10,
-    "scenario_generation_timeout": 10,
-    "log_interval": 1000,
-    "callback_params": {
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 5,
-      "checkpoint_save_freq": 25000,
-      "checkpoint_name_prefix": "phase_model_checkpoint"
-    },
-    "model_params": {
-      "policy": "MlpPolicy",
-      "verbose": 1,
-      "buffer_size": 200000,
-      "learning_rate": 0.0003,
-      "learning_starts": 10000,
-      "batch_size": 256,
-      "train_freq": 1,
-      "target_update_interval": 1500,
-      "exploration_fraction": 0.2,
-      "exploration_final_eps": 0.01,
-      "tensorboard_log": "./tensorboard/",
-      "device": "cuda"
-      },
-    "replay_config": {
-      "default_file": "ai/event_log/train_best_game_replay.json",
-      "backup_files": [
-        "ai/event_log/phase_based_replay_latest.json",
-        "ai/event_log/web_replay_latest.json"
-      ]
-    }
-  },  
-
-  "debug": {
     "description": "Proportional training: number_of_turns_per_episode (10) × max_steps_per_episode (100) × total_episodes (100) = 100,000 timesteps",
     "total_episodes": 2000,
     "max_turns_per_episode": 5,
@@ -216,12 +95,44 @@
       "tensorboard_log": "./tensorboard/",
       "device": "cuda"
      },
-    "_gamma_experiments": {
-      "balanced": {"gamma": 0.95, "behavior": "tactical balance"},
-      "strategic": {"gamma": 0.99, "behavior": "long-term planning"},
-      "short_term": {"gamma": 0.8, "behavior": "aggressive, immediate rewards"},
-      "myopic": {"gamma": 0.5, "behavior": "purely immediate"}
+    "replay_config": {
+      "default_file": "ai/event_log/train_best_game_replay.json",
+      "backup_files": [
+        "ai/event_log/phase_based_replay_latest.json",
+        "ai/event_log/web_replay_latest.json"
+      ]
+    }
+  },
+  "debug": {
+    "description": "Proportional training: number_of_turns_per_episode (10) × max_steps_per_episode (100) × total_episodes (100) = 100,000 timesteps",
+    "total_episodes": 50,
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 50,
+    "eval_episodes": 1,
+    "max_concurrent_sessions": 4,
+    "log_interval": 10,
+    "callback_params": {
+      "eval_deterministic": false,
+      "eval_render": false,
+      "n_eval_episodes": 2,
+      "checkpoint_save_freq": 49,
+      "checkpoint_name_prefix": "debug_model_checkpoint"
     },
+    "model_params": {
+      "policy": "MlpPolicy",
+      "verbose": 1,
+      "learning_rate": 0.0007,
+      "buffer_size": 50000,
+      "learning_starts": 5000,
+      "batch_size": 64,
+      "exploration_fraction": 0.3,
+      "exploration_final_eps": 0.05,
+      "target_update_interval": 300,
+      "gamma": 0.95,   
+      "train_freq": 1,   
+      "tensorboard_log": "./tensorboard/",
+      "device": "cuda"
+     },
     "replay_config": {
       "default_file": "ai/event_log/train_best_game_replay.json",
       "backup_files": [
