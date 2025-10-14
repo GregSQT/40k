@@ -9,13 +9,13 @@ This implementation provides **concrete examples** of AI_TURN.md rule implementa
 
 ## ⚠️ CRITICAL DEPENDENCY WARNING
 
-**Before implementing this architecture, you MUST read [AI_TRAINING_INTEGRATION.md](AI_TRAINING_INTEGRATION.md)**
+**Before implementing this architecture, you MUST read [AI_TRAINING.md](../AI_TRAINING.md)**
 
 This document covers **game engine architecture compliance** only. The training integration document covers:
-- **DQN training compatibility requirements** - Maintaining gym.Env interface exactly
-- **Observation space preservation** - Ensuring existing trained models continue working  
+- **PPO training compatibility requirements** - Maintaining gym.Env interface exactly
+- **Observation space preservation** - Ensuring PPO model training from scratch (PPO models incompatible)
 - **Reward system integration** - Using rewards_config.json correctly
-- **Model loading strategy preservation** - Supporting all 3 loading approaches
+- **Model loading strategy preservation** - Supporting all 3 loading approaches with PPO
 - **Multi-agent training continuity** - Maintaining orchestration workflows
 
 **Without training integration, your compliant engine will be architecturally perfect but unusable for AI learning.**
@@ -32,8 +32,9 @@ This document covers **game engine architecture compliance** only. The training 
 
 - [Validation Strategy](#validation-strategy-proof-of-concept-first) - Proof-of-concept architecture validation
 - [Architecture Compliance](#architecture-compliance) - Single source of truth implementation
-- [AI Training Integration](AI_TRAINING_INTEGRATION.md) - DQN compatibility with compliant architecture
-- [Code Organization](#code-organization) - File structure and migration strategy  
+- [AI Training Integration](AI_TRAINING_INTEGRATION.md) - PPO compatibility with compliant architecture
+- [Code Organization](#code-organization) - File structure and migration strategy
+- [Code Update Format](#-code-update-format) - Mandatory two-block structure for all code changes
 - [Concrete Complex Rule Implementations](#concrete-complex-rule-implementations) - Fight phase examples
 - [Real Frontend Integration Challenges](#real-frontend-integration-challenges) - UI data mapping
 - [Integration Strategy](#integration-strategy) - Gym and HTTP API patterns
@@ -43,6 +44,7 @@ This document covers **game engine architecture compliance** only. The training 
 - [Enhanced Development Phases](#enhanced-development-phases-with-concrete-deliverables) - Implementation timeline
 - [Success Metrics](#success-metrics) - Validation criteria
 
+---
 
 ## VALIDATION STRATEGY: PROOF-OF-CONCEPT FIRST
 
@@ -715,7 +717,6 @@ def get_eligible_units(game_state):
 ### Configuration Dependency Pattern
 
 **Clean configuration access:**
-
 ```python
 # ✅ COMPLIANT: Configuration passed as parameter
 def validate_destination(game_state, col, row, config):
@@ -727,6 +728,117 @@ def validate_destination(game_state, col, row, config):
 GLOBAL_CONFIG = {...}  # Creates shared state
 def validate_destination(game_state, col, row):
     board_width = GLOBAL_CONFIG["board"]["width"]  # Global dependency
+```
+
+---
+
+## 📝 CODE UPDATE FORMAT
+
+### Mandatory Two-Block Structure
+
+Every code update MUST use this exact format to ensure changes are:
+- **Searchable**: ORIGINAL block is exact copy from current file (Ctrl+F findable)
+- **Contextual**: 3 lines before and after prevent ambiguity
+- **Traceable**: File path + line number eliminate confusion
+- **Precise**: Exact indentation preserved
+
+### Format Requirements
+
+**Structure:**
+1. **ORIGINAL block**: Exact copy from current file
+2. **UPDATE block**: Same code with changes applied
+3. **Context**: Include 3 existing lines before and after the changed lines
+4. **Content**: ONLY code - no comments explaining the format, no ellipses, no placeholders
+5. **Indentation**: Respect the current code's exact indentation
+
+### Example - TypeScript
+
+**ORIGINAL**: `frontend/src/components/UnitRenderer.tsx` line 45
+```typescript
+const renderUnits = () => {
+  units.forEach(unit => {
+    const sprite = new PIXI.Sprite();
+    sprite.position.set(unit.x, unit.y);
+    container.addChild(sprite);
+  });
+};
+```
+
+**UPDATE**
+```typescript
+const renderUnits = () => {
+  units.forEach(unit => {
+    const sprite = new PIXI.Sprite();
+    sprite.position.set(unit.position.x, unit.position.y);
+    container.addChild(sprite);
+  });
+};
+```
+
+### Example - Python
+
+**ORIGINAL**: `engine/phase_handlers/movement_handlers.py` line 78
+```python
+def _execute_movement(game_state, unit, col_diff, row_diff, config):
+    new_col = unit["col"] + col_diff
+    new_row = unit["row"] + row_diff
+    
+    if new_col < 0 or new_row < 0:
+        return False, {"error": "out_of_bounds"}
+    
+    unit["col"] = new_col
+```
+
+**UPDATE**
+```python
+def _execute_movement(game_state, unit, col_diff, row_diff, config):
+    new_col = unit["col"] + col_diff
+    new_row = unit["row"] + row_diff
+    
+    if new_col < 0 or new_row < 0 or new_col >= config["board"]["width"]:
+        return False, {"error": "out_of_bounds"}
+    
+    unit["col"] = new_col
+```
+
+### Why This Format Works
+
+- ✅ **Eliminates ambiguity** - Exact matches prevent wrong location updates
+- ✅ **Preserves context** - 3 lines before/after handle duplicate code patterns  
+- ✅ **Enables validation** - Can verify changes were applied correctly
+- ✅ **Maintains clarity** - Pure code blocks without narrative confusion
+- ✅ **Supports all languages** - Works for Python, TypeScript, JavaScript, etc.
+- ✅ **Respects indentation** - Exact spacing preserved for syntax correctness
+
+### Anti-Patterns to Avoid
+
+**❌ BAD - Comments inside code blocks:**
+```python
+# These are the 3 lines before
+def some_function():
+    old_code()  # This line changes
+# These are the 3 lines after
+```
+
+**✅ GOOD - Pure code only:**
+```python
+def some_function():
+    old_code()
+```
+
+**❌ BAD - Ellipses or truncation:**
+```python
+def some_function():
+    ...  # More code here
+    important_line()
+```
+
+**✅ GOOD - Complete code block:**
+```python
+def some_function():
+    existing_line_1()
+    existing_line_2()
+    important_line()
 ```
 
 ---

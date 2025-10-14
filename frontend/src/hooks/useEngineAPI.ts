@@ -878,10 +878,6 @@ onLogChargeRoll: () => {},
           };
         }
         
-        console.log(`AI DECISION DEBUG: Unit ${unitId} at (${currentUnit.col}, ${currentUnit.row})`);
-        console.log(`AI DECISION DEBUG: ${validDestinations.length} valid destinations:`, validDestinations.slice(0, 10));
-        console.log(`AI DECISION DEBUG: ${enemies.length} enemies found:`, enemies.map((e: any) => `Unit ${e.id} at (${e.col}, ${e.row})`));
-        
         const nearestEnemy = enemies.reduce((nearest: any, enemy: any) => {
           const distToCurrent = Math.abs(enemy.col - currentUnit.col) + Math.abs(enemy.row - currentUnit.row);
           const distToNearest = Math.abs(nearest.col - currentUnit.col) + Math.abs(nearest.row - currentUnit.row);

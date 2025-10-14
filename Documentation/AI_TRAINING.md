@@ -1,10 +1,15 @@
 # AI_TRAINING_INTEGRATION.md
-## Bridging Compliant Architecture with Deep Reinforcement Learning
+## Bridging Compliant Architecture with PPO Reinforcement Learning
+
+> **📁 File Location**: Save this as `AI_TRAINING.md` in your project root directory
+> 
+> **Status**: Updated for PPO implementation (replacing DQN)
 
 ### 📋 NAVIGATION MENU
 
 - [Executive Summary](#executive-summary)
 - [Training System Overview](#-training-system-overview)
+- [Why PPO for Tactical Combat](#why-ppo-for-tactical-combat)
 - [Environment Interface Requirements](#-environment-interface-requirements)
   - [Gym.Env Interface Compliance](#gymaenv-interface-compliance)
   - [Observation Space Compatibility](#observation-space-compatibility)
@@ -41,16 +46,17 @@
 
 ### EXECUTIVE SUMMARY
 
-This document provides the critical missing link between your AI_TURN.md compliant W40KEngine architecture and your existing DQN training infrastructure. Without proper integration, your architecturally perfect engine cannot leverage years of trained models or continue the learning process.
+This document provides the critical missing link between your AI_TURN.md compliant W40KEngine architecture and your PPO training infrastructure. Without proper integration, your architecturally perfect engine cannot leverage trained models or continue the learning process.
 
-**Core Challenge:** Maintain exact compatibility with existing training systems while transitioning to compliant architecture.
+**Core Challenge:** Maintain exact compatibility with existing training systems while transitioning to compliant architecture and PPO algorithm.
 
 **Critical Success Factors:**
 - Preserve existing model compatibility (observation/action spaces)
 - Maintain reward calculation consistency
-- Ensure training pipeline continuity
+- Ensure training pipeline continuity with PPO
 - Support multi-agent orchestration
 - Preserve performance characteristics
+- Leverage PPO advantages for tactical decision-making
 
 ---
 
@@ -58,25 +64,43 @@ This document provides the critical missing link between your AI_TURN.md complia
 
 ### Current Training Architecture
 ```
-DQN Model ↔ gym.Env Interface ↔ W40KEngine ↔ SequentialGameController ↔ TrainingGameController
+PPO Model ↔ gym.Env Interface ↔ W40KEngine ↔ SequentialGameController ↔ TrainingGameController
 ```
 
 **Key Components:**
-- **DQN (Deep Q-Network)**: Stable Baselines3 implementation learning optimal actions
+- **PPO (Proximal Policy Optimization)**: Stable Baselines3 implementation optimized for turn-based tactical games
 - **gym.Env Interface**: Standard reinforcement learning environment protocol
 - **W40KEngine**: Your custom environment wrapping the game controller
 - **Reward System**: Configuration-driven reward calculation from `rewards_config.json`
 - **Model Persistence**: Trained models saved as `.zip` files with embedded parameters
 
+### Why PPO for Tactical Combat
+
+PPO is superior to DQN for turn-based tactical games like Warhammer 40K:
+
+**PPO Advantages:**
+1. **Policy Gradient Method**: Directly optimizes the policy (action selection), better for complex tactical decisions
+2. **On-Policy Learning**: Learns from current policy, more stable for sequential turn-based gameplay
+3. **Clipped Updates**: Prevents destructive policy changes, crucial for maintaining learned tactics
+4. **Better Credit Assignment**: GAE (Generalized Advantage Estimation) handles delayed rewards from multi-turn strategies
+5. **Stable Convergence**: Less prone to catastrophic forgetting of successful tactics
+
+**Why Not DQN:**
+- Off-policy learning can be unstable with sparse rewards
+- Q-value estimation struggles with large action spaces
+- Exploration via epsilon-greedy is crude for tactical decisions
+- Harder to handle multi-step planning
+
 ### Training Flow Understanding
 ```python
-# Current training loop
+# PPO training loop
 for episode in range(episodes):
     obs = env.reset()  # Get initial game state
     while not done:
-        action = model.predict(obs)  # AI chooses action
+        action, _ = model.predict(obs)  # AI chooses action via policy
         obs, reward, done, info = env.step(action)  # Execute action
-        # Model learns from: obs -> action -> reward -> new_obs
+        # PPO learns from: trajectory of (obs, action, reward, value) tuples
+        # Updates policy after collecting n_steps experiences
 ```
 
 ---
@@ -85,10 +109,12 @@ for episode in range(episodes):
 
 ### Gym.Env Interface Compliance
 
-Your W40KEngine must satisfy the exact gym.Env interface that DQN expects:
+Your W40KEngine must satisfy the exact gym.Env interface that PPO expects:
 
 ```python
-class W40KEngine:
+class W40KEngine(gym.Env):
+    """AI_TURN.md compliant engine with gym interface for PPO"""
+    
     def step(self, action):
         """Execute one game action and return gym-compliant response"""
         # CRITICAL: Must return exactly 5 values
@@ -118,7 +144,7 @@ class W40KEngine:
 
 ```python
 def _build_observation(self):
-    """Convert game_state to observation vector for DQN"""
+    """Convert game_state to observation vector for PPO"""
     # MUST maintain exact same format as current system
     obs_vector = []
     
@@ -185,6 +211,8 @@ def _process_action(self, action):
     elif current_phase == "fight":
         return self._process_fight_phase(action)
 ```
+
+**PPO Note:** Unlike DQN's epsilon-greedy exploration, PPO uses stochastic policy sampling. The policy network outputs action probabilities, and PPO samples from this distribution during training.
 
 ---
 
@@ -276,12 +304,12 @@ Your training system supports three distinct model loading approaches:
 
 #### 1. Default Loading (Continue Training)
 ```python
-# Command: python ai/train.py --orchestrate
+# Command: python ai/train.py --training-config default --rewards-config default
 # Loads existing model with original parameters
 
 def load_existing_model(self, model_path):
     if os.path.exists(model_path):
-        model = DQN.load(model_path, env=self)
+        model = PPO.load(model_path, env=self)
         # Uses model's original saved parameters
         return model
     else:
@@ -290,11 +318,11 @@ def load_existing_model(self, model_path):
 
 #### 2. Append Training (Update Parameters)
 ```python
-# Command: python ai/train.py --orchestrate --append
+# Command: python ai/train.py --training-config default --rewards-config default --append
 # Loads existing model and updates with current config
 
 def load_model_with_updates(self, model_path, model_params):
-    model = DQN.load(model_path, env=self, device=device)
+    model = PPO.load(model_path, env=self, device=device)
     # Update specific parameters
     model.tensorboard_log = model_params["tensorboard_log"]
     model.verbose = model_params["verbose"]
@@ -303,11 +331,11 @@ def load_model_with_updates(self, model_path, model_params):
 
 #### 3. New Model Creation
 ```python
-# Command: python ai/train.py --orchestrate --new
+# Command: python ai/train.py --training-config default --rewards-config default --new
 # Creates fresh model from scratch
 
 def create_new_model(self, model_params):
-    model = DQN(env=self, **model_params)
+    model = PPO(env=self, **model_params)
     return model
 ```
 
@@ -318,25 +346,42 @@ def create_new_model(self, model_params):
 {
   "policy": "MlpPolicy",
   "learning_rate": 0.0003,
-  "buffer_size": 200000,
-  "batch_size": 512,
-  "learning_starts": 5000,
-  "train_freq": 1,
-  "target_update_interval": 1000,
-  "exploration_fraction": 0.3,
-  "exploration_final_eps": 0.02
+  "n_steps": 2048,
+  "batch_size": 64,
+  "n_epochs": 10,
+  "gamma": 0.99,
+  "gae_lambda": 0.95,
+  "clip_range": 0.2,
+  "ent_coef": 0.01,
+  "vf_coef": 0.5,
+  "max_grad_norm": 0.5,
+  "policy_kwargs": {
+    "net_arch": [256, 256]
+  }
 }
 ```
+
+**Critical PPO Parameters Explained:**
+- **n_steps**: Number of steps to collect before policy update (2048 = ~8 episodes)
+- **batch_size**: Mini-batch size for gradient updates (must divide n_steps evenly)
+- **n_epochs**: How many times to reuse collected data (10 is standard)
+- **gamma**: Discount factor (0.99 = plans ~100 steps ahead)
+- **gae_lambda**: GAE for advantage estimation (0.95 = smooth credit assignment)
+- **clip_range**: PPO policy clipping (0.2 prevents large policy changes)
+- **ent_coef**: Entropy bonus for exploration (0.01 = moderate exploration)
+- **vf_coef**: Value function loss weight (0.5 balances policy/value learning)
+- **max_grad_norm**: Gradient clipping for stability
 
 **Training Session Parameters (Not Saved):**
 ```json
 {
-  "total_timesteps": 100000,
-  "eval_episodes": 20,
-  "max_steps_per_episode": 500,
-  "eval_freq": 5000,
-  "checkpoint_save_freq": 25000,
-  "verbose": 1,
+  "total_episodes": 2000,
+  "max_turns_per_episode": 5,
+  "max_steps_per_turn": 50,
+  "checkpoint_save_freq": 50000,
+  "eval_deterministic": true,
+  "n_eval_episodes": 5,
+  "verbose": 0,
   "tensorboard_log": "./tensorboard/",
   "device": "cuda"
 }
@@ -351,7 +396,7 @@ def create_new_model(self, model_params):
 ```python
 def create_training_environment(config, rewards_config_name="default", 
                                training_config_name="default"):
-    """Create W40KEngine configured for training"""
+    """Create W40KEngine configured for PPO training"""
     
     # Load training configuration
     training_config = config.load_training_config(training_config_name)
@@ -373,21 +418,22 @@ def create_training_environment(config, rewards_config_name="default",
 
 ```python
 def train_model(engine, model_params, training_params):
-    """Main training loop with new engine"""
+    """Main training loop with PPO and new engine"""
     
     # Create or load model
     model_path = config.get_model_path()
     
     if os.path.exists(model_path):
-        model = DQN.load(model_path, env=engine)
+        model = PPO.load(model_path, env=engine)
     else:
-        model = DQN(env=engine, **model_params)
+        model = PPO(env=engine, **model_params)
     
-    # Training loop
+    # Training loop - PPO collects n_steps then updates
     model.learn(
         total_timesteps=training_params["total_timesteps"],
         callback=setup_callbacks(training_params),
-        tb_log_name="W40K_Training"
+        tb_log_name="W40K_PPO_Training",
+        progress_bar=True
     )
     
     # Save trained model
@@ -412,7 +458,7 @@ def create_multi_agent_environment(config, agent_key, rewards_config_name="defau
     return engine
 
 def train_multiple_agents(config, agent_keys, training_params):
-    """Orchestrate multi-agent training"""
+    """Orchestrate multi-agent training with PPO"""
     
     models = {}
     
@@ -423,9 +469,9 @@ def train_multiple_agents(config, agent_keys, training_params):
         # Load or create agent model
         model_path = env.model_path
         if os.path.exists(model_path):
-            model = DQN.load(model_path, env=env)
+            model = PPO.load(model_path, env=env)
         else:
-            model = DQN(env=env, **training_params["model_params"])
+            model = PPO(env=env, **training_params["model_params"])
         
         models[agent_key] = model
     
@@ -487,7 +533,7 @@ def optimize_training_memory(engine):
 
 ```python
 def setup_training_callbacks(training_params):
-    """Setup monitoring and callbacks for training"""
+    """Setup monitoring and callbacks for PPO training"""
     from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback, EvalCallback
     
     callbacks = []
@@ -496,7 +542,7 @@ def setup_training_callbacks(training_params):
     checkpoint_callback = CheckpointCallback(
         save_freq=training_params["checkpoint_save_freq"],
         save_path="./models/checkpoints/",
-        name_prefix="w40k_model"
+        name_prefix="w40k_ppo_model"
     )
     callbacks.append(checkpoint_callback)
     
@@ -505,7 +551,8 @@ def setup_training_callbacks(training_params):
         eval_env=engine,
         n_eval_episodes=training_params["eval_episodes"],
         eval_freq=training_params["eval_freq"],
-        best_model_save_path="./models/best/"
+        best_model_save_path="./models/best/",
+        deterministic=True  # Use deterministic policy for evaluation
     )
     callbacks.append(eval_callback)
     
@@ -523,23 +570,35 @@ def setup_training_callbacks(training_params):
   "model_params": {
     "policy": "MlpPolicy",
     "learning_rate": 0.0003,
-    "buffer_size": 200000,
-    "batch_size": 512,
-    "learning_starts": 5000,
-    "train_freq": 1,
-    "target_update_interval": 1000,
-    "exploration_fraction": 0.3,
-    "exploration_final_eps": 0.02,
-    "verbose": 1,
-    "tensorboard_log": "./tensorboard/"
+    "n_steps": 2048,
+    "batch_size": 64,
+    "n_epochs": 10,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "clip_range": 0.2,
+    "clip_range_vf": null,
+    "normalize_advantage": true,
+    "ent_coef": 0.01,
+    "vf_coef": 0.5,
+    "max_grad_norm": 0.5,
+    "use_sde": false,
+    "sde_sample_freq": -1,
+    "target_kl": null,
+    "tensorboard_log": "./tensorboard/",
+    "policy_kwargs": {
+      "net_arch": [256, 256]
+    },
+    "verbose": 0
   },
-  "training_params": {
-    "total_timesteps": 100000,
-    "eval_episodes": 20,
-    "max_steps_per_episode": 500,
-    "max_turns_per_episode": 5,
-    "eval_freq": 5000,
-    "checkpoint_save_freq": 25000
+  "total_episodes": 2000,
+  "max_turns_per_episode": 5,
+  "max_steps_per_turn": 50,
+  "callback_params": {
+    "checkpoint_save_freq": 50000,
+    "checkpoint_name_prefix": "ppo_checkpoint",
+    "eval_deterministic": true,
+    "eval_render": false,
+    "n_eval_episodes": 5
   },
   "environment_params": {
     "rewards_config": "default",
@@ -550,6 +609,31 @@ def setup_training_callbacks(training_params):
 }
 ```
 
+**PPO-Specific Configuration Notes:**
+
+1. **Learning Rate Schedule**: PPO supports linear learning rate decay
+   ```json
+   "learning_rate": 0.0003  // Can use function for decay
+   ```
+
+2. **Batch Size Constraint**: Must divide n_steps evenly
+   ```python
+   assert n_steps % batch_size == 0  // 2048 % 64 = 0 ✓
+   ```
+
+3. **Network Architecture**: Can use deeper networks for complex tactics
+   ```json
+   "policy_kwargs": {
+     "net_arch": [512, 512, 256]  // Aggressive config
+   }
+   ```
+
+4. **Entropy Coefficient**: Should decrease over time
+   ```json
+   "ent_coef": 0.01  // Start value
+   // Manually decrease to 0.005 after 50K steps
+   ```
+
 ### Configuration Loading
 
 ```python
@@ -559,13 +643,14 @@ class TrainingConfigManager:
         
     def load_training_config(self, config_name="default"):
         """Load training configuration"""
-        config_path = os.path.join(self.config_dir, f"training_config_{config_name}.json")
+        config_path = os.path.join(self.config_dir, f"training_config.json")
         with open(config_path, 'r') as f:
-            return json.load(f)
+            configs = json.load(f)
+            return configs.get(config_name, configs["default"])
     
     def load_rewards_config(self, config_name="default"):
         """Load rewards configuration"""
-        config_path = os.path.join(self.config_dir, f"rewards_config_{config_name}.json")
+        config_path = os.path.join(self.config_dir, f"rewards_config.json")
         with open(config_path, 'r') as f:
             return json.load(f)
     
@@ -585,7 +670,7 @@ class TrainingConfigManager:
 
 ```python
 def test_gym_interface_compliance():
-    """Test that W40KEngine satisfies gym.Env interface"""
+    """Test that W40KEngine satisfies gym.Env interface for PPO"""
     
     engine = W40KEngine(config)
     
@@ -621,6 +706,27 @@ def test_observation_space_compatibility():
     
     print("✅ Observation space compatibility verified")
 
+def test_ppo_policy_sampling():
+    """Test PPO stochastic policy sampling works correctly"""
+    
+    engine = W40KEngine(config)
+    model_params = config.load_training_config()["model_params"]
+    model = PPO(env=engine, **model_params)
+    
+    obs, _ = engine.reset()
+    
+    # Test stochastic sampling (training mode)
+    action1, _ = model.predict(obs, deterministic=False)
+    action2, _ = model.predict(obs, deterministic=False)
+    # Actions may differ due to stochastic policy
+    
+    # Test deterministic sampling (evaluation mode)
+    action3, _ = model.predict(obs, deterministic=True)
+    action4, _ = model.predict(obs, deterministic=True)
+    assert action3 == action4, "Deterministic predictions must be identical"
+    
+    print("✅ PPO policy sampling verified")
+
 def test_reward_calculation_consistency():
     """Test reward calculation produces expected values"""
     
@@ -644,30 +750,50 @@ def test_reward_calculation_consistency():
 
 ```python
 def test_model_loading_strategies():
-    """Test all model loading strategies work with new engine"""
+    """Test all model loading strategies work with PPO and new engine"""
     
     engine = W40KEngine(config)
     
     # Test new model creation
     model_params = config.load_training_config()["model_params"]
-    new_model = DQN(env=engine, **model_params)
+    new_model = PPO(env=engine, **model_params)
     
-    # Test model prediction
+    # Test model prediction (stochastic)
     obs, _ = engine.reset()
-    action, _ = new_model.predict(obs)
+    action, _ = new_model.predict(obs, deterministic=False)
     assert action in range(engine.action_space.n), f"Invalid action: {action}"
+    
+    # Test deterministic prediction (evaluation)
+    action_det, _ = new_model.predict(obs, deterministic=True)
+    assert action_det in range(engine.action_space.n), f"Invalid action: {action_det}"
     
     # Test model saving and loading
     temp_path = "test_model.zip"
     new_model.save(temp_path)
     
-    loaded_model = DQN.load(temp_path, env=engine)
-    action2, _ = loaded_model.predict(obs)
+    loaded_model = PPO.load(temp_path, env=engine)
+    action2, _ = loaded_model.predict(obs, deterministic=True)
     
     # Clean up
     os.remove(temp_path)
     
-    print("✅ Model loading strategies verified")
+    print("✅ PPO model loading strategies verified")
+
+def test_ppo_training_step():
+    """Test single PPO training step executes correctly"""
+    
+    engine = W40KEngine(config)
+    model_params = config.load_training_config()["model_params"]
+    model = PPO(env=engine, **model_params)
+    
+    # Collect one batch of experiences
+    initial_steps = model.num_timesteps
+    model.learn(total_timesteps=model_params["n_steps"])
+    
+    # Verify training occurred
+    assert model.num_timesteps > initial_steps, "Training should increment timesteps"
+    
+    print("✅ PPO training step verified")
 ```
 
 ---
@@ -679,48 +805,81 @@ def test_model_loading_strategies():
 1. **Create Training-Compatible Engine**
 ```python
 # In w40k_engine.py, add training methods
-class W40KEngine:
+class W40KEngine(gym.Env):
     def __init__(self, config, rewards_config_name="default"):
         # Initialize base engine with AI_TURN.md compliance
-        # Add training-specific initialization
+        # Add training-specific initialization for PPO
         
     def step(self, action):
         # Implement gym-compliant step method
+        # Returns: obs, reward, terminated, truncated, info
         
     def reset(self, seed=None, options=None):
         # Implement gym-compliant reset method
+        # Returns: obs, info
         
     def _build_observation(self):
         # Convert game_state to observation vector
+        # Must match PPO input expectations
         
     def _calculate_reward(self, success, result):
         # Calculate reward using rewards_config.json
+        # PPO learns from reward trajectories
 ```
 
-2. **Update Training Scripts**
+2. **Update Training Scripts for PPO**
 ```python
-# In ai/train.py, replace environment creation
-# OLD: base_env = W40KEngine(...)
-# NEW: base_env = W40KEngine(config, rewards_config_name)
+# In ai/train.py, replace DQN with PPO
+from stable_baselines3 import PPO
+
+# OLD: model = DQN(env=env, **model_params)
+# NEW: model = PPO(env=env, **model_params)
+
+# Update training loop
+model.learn(
+    total_timesteps=total_timesteps,
+    callback=callbacks,
+    progress_bar=True  # PPO supports progress bars
+)
+```
+
+3. **Update Configuration Files**
+```bash
+# Edit config/training_config.json to use PPO parameters
+{
+  "model_params": {
+    "policy": "MlpPolicy",
+    "learning_rate": 0.0003,
+    "n_steps": 2048,        # PPO-specific
+    "batch_size": 64,       # PPO-specific
+    "n_epochs": 10,         # PPO-specific
+    "gamma": 0.99,
+    "gae_lambda": 0.95,     # PPO-specific
+    "clip_range": 0.2,      # PPO-specific
+    // Remove DQN-specific params (buffer_size, exploration_*)
+  }
+}
 ```
 
 3. **Test Integration**
 ```bash
-# Run integration tests
+# Run integration tests for PPO
 python -c "
 from w40k_engine import W40KEngine
 from config_loader import get_config_loader
+from stable_baselines3 import PPO
 engine = W40KEngine(get_config_loader())
 obs, info = engine.reset()
 obs, reward, done, truncated, info = engine.step(7)
-print('Integration test passed')
+model = PPO('MlpPolicy', env=engine, n_steps=512, verbose=0)
+print('PPO integration test passed')
 "
 ```
 
 4. **Validate Training Pipeline**
 ```bash
-# Test training with new engine
-python ai/train.py --config debug --timesteps 1000 --new
+# Test training with new PPO engine
+python ai/train.py --training-config debug --rewards-config default --new --test-episodes 5
 ```
 
 ### Migration Checklist
@@ -729,12 +888,14 @@ python ai/train.py --config debug --timesteps 1000 --new
 - [ ] Observation space matches existing models exactly
 - [ ] Action space mapping preserved
 - [ ] Reward calculation uses rewards_config.json correctly
-- [ ] Model loading strategies work with new engine
+- [ ] PPO model loading strategies work with new engine
 - [ ] Multi-agent support maintained
-- [ ] Training performance acceptable
-- [ ] Existing models load and work correctly
-- [ ] Configuration management integrated
+- [ ] Training performance acceptable (PPO may be slower than DQN initially)
+- [ ] Configuration files updated to PPO parameters
+- [ ] Removed DQN-specific parameters (buffer_size, exploration_*)
+- [ ] Added PPO-specific parameters (n_steps, gae_lambda, clip_range)
 - [ ] Monitoring and callbacks functional
+- [ ] Deterministic evaluation mode works correctly
 
 ---
 
@@ -760,19 +921,38 @@ def _calculate_reward(self, success, result):
     # Ensure reward configuration loading works correctly
 ```
 
+**Issue: PPO n_steps Configuration Error**
+```python
+# Symptom: ValueError about n_steps and batch_size
+# Fix: Ensure batch_size divides n_steps evenly
+# Bad:  n_steps=2048, batch_size=100 (2048 % 100 != 0)
+# Good: n_steps=2048, batch_size=64  (2048 % 64 == 0)
+```
+
 **Issue: Model Loading Failure**
 ```python
-# Symptom: Existing models fail to load
-# Fix: Ensure environment interface exactly matches expectations
-# Check action_space and observation_space properties
+# Symptom: Existing DQN models fail to load with PPO
+# Fix: DQN and PPO models are NOT compatible - must retrain
+# DQN uses Q-values, PPO uses policy/value networks
+# Solution: Use --new flag to create fresh PPO models
 ```
 
 **Issue: Training Performance Degradation**
 ```python
-# Symptom: Training runs much slower than before
-# Fix: Disable unnecessary logging and optimize observation building
+# Symptom: PPO training runs slower than DQN
+# Fix: This is expected - PPO is on-policy and more computationally intensive
+# Optimization: Adjust n_steps and batch_size for your hardware
+# Consider: n_steps=1024, batch_size=32 for faster iterations
 engine.enable_replay_logging = False
 engine.enable_step_logging = False
+```
+
+**Issue: Stochastic Policy Confusion**
+```python
+# Symptom: Actions seem random during evaluation
+# Fix: Use deterministic=True for evaluation/testing
+# Training: action, _ = model.predict(obs, deterministic=False)
+# Testing:  action, _ = model.predict(obs, deterministic=True)
 ```
 
 ### Validation Commands
@@ -793,21 +973,47 @@ assert hasattr(engine, 'observation_space')
 print('Gym interface complete')
 "
 
+# Test PPO integration
+python -c "
+from stable_baselines3 import PPO
+from w40k_engine import W40KEngine
+from config_loader import get_config_loader
+engine = W40KEngine(get_config_loader())
+model = PPO('MlpPolicy', env=engine, n_steps=512, verbose=0)
+obs, _ = engine.reset()
+action, _ = model.predict(obs, deterministic=True)
+print('PPO integration successful')
+"
+
 # Test training integration
-python ai/train.py --config debug --timesteps 100 --new
+python ai/train.py --training-config debug --rewards-config default --new --test-episodes 2
 ```
 
 ---
 
 ## 📝 SUMMARY
 
-This integration guide bridges the gap between your AI_TURN.md compliant architecture and existing training infrastructure. Key integration points:
+This integration guide bridges the gap between your AI_TURN.md compliant architecture and PPO training infrastructure. Key integration points:
 
-1. **Environment Interface**: W40KEngine must implement exact gym.Env interface
-2. **Observation Compatibility**: Maintain identical observation vectors for model compatibility  
-3. **Reward Integration**: Use existing rewards_config.json system
-4. **Model Loading**: Support all existing model loading strategies
-5. **Training Pipeline**: Maintain training orchestration and multi-agent support
-6. **Performance**: Optimize for training speed while preserving functionality
+1. **Algorithm Transition**: Migrated from DQN to PPO for superior tactical decision-making
+2. **Environment Interface**: W40KEngine must implement exact gym.Env interface
+3. **Observation Compatibility**: Maintain identical observation vectors for model compatibility  
+4. **Reward Integration**: Use existing rewards_config.json system
+5. **Model Loading**: Support PPO model loading strategies (incompatible with old DQN models)
+6. **Training Pipeline**: Maintain training orchestration and multi-agent support
+7. **Performance**: PPO is more computationally intensive but provides better tactical learning
 
-Successful integration ensures your architecturally compliant engine can leverage existing trained models and continue the learning process without losing years of training investment.
+**Key Advantages of PPO:**
+- Better credit assignment for multi-turn strategies (GAE)
+- More stable learning with policy clipping
+- Direct policy optimization (no Q-value approximation)
+- Natural exploration via stochastic policy
+- Superior for complex tactical environments
+
+**Migration Notes:**
+- Existing DQN models cannot be loaded by PPO
+- Must retrain all agents from scratch with PPO
+- Configuration files need PPO-specific parameters
+- Training may be slower but converges to better policies
+
+Successful integration ensures your architecturally compliant engine can leverage PPO's advantages for learning complex tactical behaviors in the Warhammer 40K environment.

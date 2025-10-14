@@ -1,5 +1,0 @@
-| Phase | Activity | Test / Action | Expectation | Result | Note |
-|-------|----------|---------------|-------------|--------|------|
-| Shooting | Initialization | Eligible units display | Green circle | OK |  |
-| Shooting | Initialization | Non-eligible units | No green circle | KO | Has green circle |
-| Shooting | Unit Activation | Left click activable unit | Shooting preview display | KO | Preview blinks once, disappears |
