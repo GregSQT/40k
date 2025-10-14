@@ -1,4 +1,4 @@
-// src/components/GameController.tsx
+// frontend/src/components/GameController.tsx
 
 import React from "react";
 import { useLocation } from 'react-router-dom';
@@ -38,6 +38,12 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Track UnitStatusTable collapse states
   const [player0Collapsed, setPlayer0Collapsed] = useState(false);
   const [player1Collapsed, setPlayer1Collapsed] = useState(false);
+  
+  // NEW: Debug mode state (shared with hex coordinates toggle)
+  const [debugMode, setDebugMode] = useState(false);
+  
+  // Pass debug mode to child components
+  const showHexCoordinates = debugMode;
   
   useEffect(() => {
     if (!initialUnits || initialUnits.length === 0) {
@@ -232,18 +238,38 @@ export const GameController: React.FC<GameControllerProps> = ({
   const rightColumnContent = (
     <>
       {gameConfig ? (
-        <TurnPhaseTracker 
-          currentTurn={gameState.currentTurn ?? 1} 
-          currentPhase={gameState.phase}
-          phases={["move", "shoot", "charge", "fight"]}
-          maxTurns={(() => {
-          if (!gameConfig?.game_rules?.max_turns) {
-            throw new Error(`max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`);
-          }
-          return gameConfig.game_rules.max_turns;
-        })()}
-          className="turn-phase-tracker-right"
-        />
+        <div className="turn-phase-tracker-right">
+          <TurnPhaseTracker 
+            currentTurn={gameState.currentTurn ?? 1} 
+            currentPhase={gameState.phase}
+            phases={["move", "shoot", "charge", "fight"]}
+            maxTurns={(() => {
+            if (!gameConfig?.game_rules?.max_turns) {
+              throw new Error(`max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`);
+            }
+            return gameConfig.game_rules.max_turns;
+          })()}
+            className=""
+          />
+          
+          <div className="hex-toggle-container">
+            <label className="hex-toggle-label" htmlFor="debug-toggle">
+              Debug
+            </label>
+            <div className="hex-toggle-switch">
+              <input
+                type="checkbox"
+                id="debug-toggle"
+                className="hex-toggle-input"
+                checked={debugMode}
+                onChange={(e) => setDebugMode(e.target.checked)}
+              />
+              <div className={`hex-toggle-track ${debugMode ? 'hex-toggle-track--on' : 'hex-toggle-track--off'}`}>
+                <div className={`hex-toggle-thumb ${debugMode ? 'hex-toggle-thumb--on' : 'hex-toggle-thumb--off'}`} />
+              </div>
+            </div>
+          </div>
+        </div>
       ) : (
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
@@ -285,6 +311,7 @@ export const GameController: React.FC<GameControllerProps> = ({
           getElapsedTime={gameLog.getElapsedTime}
           availableHeight={logAvailableHeight}
           currentTurn={gameState.currentTurn ?? 1}
+          debugMode={debugMode}  // NEW: Pass debug mode
         />
       </ErrorBoundary>
     </>
@@ -301,6 +328,7 @@ export const GameController: React.FC<GameControllerProps> = ({
         phase={gameState.phase}
         eligibleUnitIds={eligibleUnitIds}
         mode={gameState.mode}
+        showHexCoordinates={showHexCoordinates}
         movePreview={movePreview}
         attackPreview={attackPreview}
         currentPlayer={gameState.currentPlayer}

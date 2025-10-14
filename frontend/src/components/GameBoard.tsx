@@ -27,6 +27,7 @@ interface GameBoardProps {
   currentTurn: number;
   gameState: GameState;
   maxTurns?: number;
+  showHexCoordinates?: boolean;
   getChargeDestinations: (unitId: UnitId) => { col: number; row: number }[];
   onSelectUnit: (id: UnitId | null) => void;
   onStartMovePreview: (unitId: UnitId, col: number, row: number) => void;
@@ -109,6 +110,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         fightSubPhase={props.fightSubPhase}
         fightActivePlayer={props.fightActivePlayer}
         gameState={props.gameState}
+        showHexCoordinates={props.showHexCoordinates}
         onSelectUnit={handleSelectUnit}
         onStartMovePreview={handleStartMovePreview}
         onDirectMove={handleDirectMove}

@@ -607,6 +607,55 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     if "action_logs" not in game_state:
         game_state["action_logs"] = []
     
+    # Calculate reward for this action using RewardMapper
+    action_reward = 0.0
+    action_name = "FLEE" if was_adjacent else "MOVE"
+    
+    try:
+        from ai.reward_mapper import RewardMapper
+        rewards_config = game_state.get("rewards_config")
+        
+        if rewards_config:
+            reward_mapper = RewardMapper(rewards_config)
+            
+            # Map scenario unit type to reward config key
+            from ai.unit_registry import UnitRegistry
+            unit_registry = UnitRegistry()
+            scenario_unit_type = unit["unitType"]
+            reward_config_key = unit_registry.get_model_key(scenario_unit_type)
+            
+            # Create enriched unit with correct key for reward lookup
+            enriched_unit = unit.copy()
+            enriched_unit["unitType"] = reward_config_key
+            
+            # Build tactical context for movement
+            tactical_context = {
+                "moved_closer": True,  # Default - improve with actual logic if needed
+                "moved_away": False,
+                "moved_to_optimal_range": False,
+                "moved_to_charge_range": False,
+                "moved_to_safety": False
+            }
+            
+            # CRITICAL FIX: get_movement_reward now returns (reward_value, action_name) tuple
+            reward_result = reward_mapper.get_movement_reward(
+                enriched_unit, 
+                (orig_col, orig_row), 
+                (dest_col, dest_row),
+                tactical_context
+            )
+            
+            # Unpack tuple: (reward_value, action_name)
+            if isinstance(reward_result, tuple) and len(reward_result) == 2:
+                action_reward, action_name = reward_result
+            else:
+                # Backward compatibility: if returns float only
+                action_reward = reward_result
+                action_name = "FLEE" if was_adjacent else "MOVE"
+    except Exception as e:
+        # Silent fallback - don't break game if reward calculation fails
+        pass
+    
     game_state["action_logs"].append({
         "type": "move",
         "message": f"Unit {unit['id']} ({orig_col}, {orig_row}) MOVED to ({dest_col}, {dest_row})",
@@ -619,7 +668,10 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         "toCol": dest_col,
         "toRow": dest_row,
         "was_flee": was_adjacent,
-        "timestamp": "server_time"
+        "timestamp": "server_time",
+        "action_name": action_name,  # NEW: For debug display
+        "reward": round(action_reward, 2),  # NEW: Calculated reward
+        "is_ai_action": unit["player"] == 1  # NEW: PvE AI detection
     })
     
     # Clear preview

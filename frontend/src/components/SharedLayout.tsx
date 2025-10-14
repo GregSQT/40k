@@ -47,7 +47,7 @@ const Navigation: React.FC<NavigationProps> = ({ showHexCoordinates, onToggleHex
       
       {onToggleHexCoordinates && (
         <div className="hex-toggle-container">
-          <span className="hex-toggle-label">Hex Coords</span>
+          <span className="hex-toggle-label">Debug</span>
           <label className="hex-toggle-switch">
             <input
               type="checkbox"

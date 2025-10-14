@@ -31,9 +31,10 @@ class RewardMapper:
            - can be killed by active unit in 1 shooting phase
         """
         unit_rewards = self._get_unit_rewards(unit)
-        if "ranged_attack" not in unit_rewards:
+        base_actions = unit_rewards.get("base_actions", {})
+        if "ranged_attack" not in base_actions:
             raise ValueError("ranged_attack reward not found in unit rewards config")
-        base_reward = unit_rewards["ranged_attack"]
+        base_reward = base_actions["ranged_attack"]
         
         # Calculate target threat score (highest RNG_DMG or CC_DMG)
         if "RNG_DMG" not in target:
@@ -82,9 +83,10 @@ class RewardMapper:
         1. Enemy with highest threat score, highest current HP, can be killed in 1 melee phase
         """
         unit_rewards = self._get_unit_rewards(unit)
-        if "charge_success" not in unit_rewards:
+        base_actions = unit_rewards.get("base_actions", {})
+        if "charge_success" not in base_actions:
             raise ValueError("charge_success reward not found in unit rewards config")
-        base_reward = unit_rewards["charge_success"]
+        base_reward = base_actions["charge_success"]
 
         if "RNG_DMG" not in target:
             raise ValueError(f"target.RNG_DMG is required for unit {target['unitType']}")
@@ -137,9 +139,10 @@ class RewardMapper:
         2. Enemy with highest threat score, if multiple then lowest current HP
         """
         unit_rewards = self._get_unit_rewards(unit)
-        if "attack" not in unit_rewards:
-            raise ValueError("attack reward not found in unit rewards config")
-        base_reward = unit_rewards["attack"]
+        base_actions = unit_rewards.get("base_actions", {})
+        if "melee_attack" not in base_actions:
+            raise ValueError("melee_attack reward not found in unit rewards config")
+        base_reward = base_actions["melee_attack"]
 
         if "CC_DMG" not in unit:
             raise ValueError(f"unit.CC_DMG is required for unit {unit.get('unitType', 'unknown')}")
@@ -167,14 +170,15 @@ class RewardMapper:
         if target["HP_CUR"] - damage_dealt <= 0:  # Target will be killed
             phase = self._get_current_phase()
             
+            result_bonuses = unit_rewards.get("result_bonuses", {})
             if phase == "shoot":
-                if "enemy_killed_r" not in unit_rewards:
-                    raise ValueError("enemy_killed_r reward not found in unit rewards config")
-                base_kill = unit_rewards["enemy_killed_r"]
+                if "kill_target" not in result_bonuses:
+                    raise ValueError("kill_target reward not found in unit rewards config")
+                base_kill = result_bonuses["kill_target"]
             else:  # melee combat
-                if "enemy_killed_m" not in unit_rewards:
-                    raise ValueError("enemy_killed_m reward not found in unit rewards config")
-                base_kill = unit_rewards["enemy_killed_m"]
+                if "kill_target" not in result_bonuses:
+                    raise ValueError("kill_target reward not found in unit rewards config")
+                base_kill = result_bonuses["kill_target"]
             
             # No overkill bonus
             if target["HP_CUR"] == damage_dealt:
@@ -211,32 +215,36 @@ class RewardMapper:
         raise ValueError("Target was not killed - no kill bonus applicable")
     
     def get_movement_reward(self, unit, old_pos, new_pos, tactical_context):
-        """Calculate movement rewards using existing rewards_config.json structure."""
+        """Calculate movement rewards using existing rewards_config.json structure.
+        
+        Returns:
+            tuple: (reward_value, action_name) where action_name is the reward config key
+        """
         unit_rewards = self._get_unit_rewards(unit)
         base_actions = unit_rewards["base_actions"]
         
         if unit.get("is_ranged", False):
             # Ranged unit movement priorities using existing config keys
             if tactical_context.get("moved_to_optimal_range"):
-                return base_actions["move_to_los"]  # Line of sight positioning
+                return (base_actions["move_to_los"], "move_to_los")
             elif tactical_context.get("moved_away"):
-                return base_actions["move_away"]    # Kiting behavior
+                return (base_actions["move_away"], "move_away")
             elif tactical_context.get("moved_closer"):
-                return base_actions["move_close"]   # Aggressive positioning
+                return (base_actions["move_close"], "move_close")
             elif tactical_context.get("moved_to_safety"):
-                return base_actions["move_away"]    # Use move_away for safety
+                return (base_actions["move_away"], "move_away")
             elif tactical_context.get("moved_to_charge_range"):
-                return base_actions["move_close"]   # Ranged units moving to charge range = aggressive positioning
+                return (base_actions["move_close"], "move_close")
             else:
                 raise ValueError("No valid ranged unit movement context found in tactical_context")
         else:
             # Melee unit movement priorities using existing config keys
             if tactical_context.get("moved_to_charge_range"):
-                return base_actions["move_to_charge"]  # Charge setup
+                return (base_actions["move_to_charge"], "move_to_charge")
             elif tactical_context.get("moved_closer"):
-                return base_actions["move_close"]      # Aggressive closing
+                return (base_actions["move_close"], "move_close")
             elif tactical_context.get("moved_away"):
-                return base_actions["move_away"]       # Tactical withdrawal
+                return (base_actions["move_away"], "move_away")
             else:
                 raise ValueError("No valid melee unit movement context found in tactical_context")
     

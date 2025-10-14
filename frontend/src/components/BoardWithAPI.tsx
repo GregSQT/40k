@@ -222,18 +222,20 @@ export const BoardWithAPI: React.FC = () => {
   const rightColumnContent = (
     <>
       {gameConfig ? (
-        <TurnPhaseTracker 
-          currentTurn={apiProps.gameState?.currentTurn ?? 1} 
-          currentPhase={apiProps.gameState?.phase ?? 'move'}
-          phases={["move", "shoot", "charge", "fight"]}
-          maxTurns={(() => {
-          if (!gameConfig?.game_rules?.max_turns) {
-            throw new Error(`max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`);
-          }
-          return gameConfig.game_rules.max_turns;
-        })()}
-          className="turn-phase-tracker-right"
-        />
+        <div className="turn-phase-tracker-right">
+          <TurnPhaseTracker 
+            currentTurn={apiProps.gameState?.currentTurn ?? 1} 
+            currentPhase={apiProps.gameState?.phase ?? 'move'}
+            phases={["move", "shoot", "charge", "fight"]}
+            maxTurns={(() => {
+            if (!gameConfig?.game_rules?.max_turns) {
+              throw new Error(`max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`);
+            }
+            return gameConfig.game_rules.max_turns;
+          })()}
+            className=""
+          />
+        </div>
       ) : (
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
@@ -312,6 +314,7 @@ export const BoardWithAPI: React.FC = () => {
           getElapsedTime={gameLog.getElapsedTime}
           availableHeight={logAvailableHeight}
           currentTurn={apiProps.gameState?.currentTurn ?? 1}
+          debugMode={showHexCoordinates}
         />
       </ErrorBoundary>
     </>

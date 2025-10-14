@@ -894,7 +894,7 @@ onLogChargeRoll: () => {},
         const bestDestination = validDestinations.reduce((best, dest) => {
           const distToEnemy = Math.abs(dest[0] - nearestEnemy.col) + Math.abs(dest[1] - nearestEnemy.row);
           const bestDistToEnemy = Math.abs(best[0] - nearestEnemy.col) + Math.abs(best[1] - nearestEnemy.row);
-          console.log(`AI DECISION CALC: Destination (${dest[0]}, ${dest[1]}) distance to enemy: ${distToEnemy}, current best: ${bestDistToEnemy}`);
+          // console.log(`AI DECISION CALC: Destination (${dest[0]}, ${dest[1]}) distance to enemy: ${distToEnemy}, current best: ${bestDistToEnemy}`);
           return distToEnemy < bestDistToEnemy ? dest : best;
         });
         
@@ -990,6 +990,9 @@ onLogChargeRoll: () => {},
                   woundRoll: logEntry.woundRoll,
                   saveRoll: logEntry.saveRoll,
                   saveTarget: logEntry.saveTarget,
+                  action_name: logEntry.action_name,
+                  reward: logEntry.reward,
+                  is_ai_action: logEntry.is_ai_action,
                   timestamp: new Date()
                 }
               }));
@@ -1054,6 +1057,7 @@ onLogChargeRoll: () => {},
               if (decisionData.action_logs && decisionData.action_logs.length > 0) {
                 decisionData.action_logs.forEach((logEntry: any) => {
                   console.log(`🎯 AI ACTION LOG: ${logEntry.message}`);
+                  console.log("🎯 ACTION LOG FULL DATA:", logEntry);
                   
                   window.dispatchEvent(new CustomEvent('backendLogEvent', {
                     detail: {
@@ -1070,6 +1074,9 @@ onLogChargeRoll: () => {},
                       woundRoll: logEntry.woundRoll,
                       saveRoll: logEntry.saveRoll,
                       saveTarget: logEntry.saveTarget,
+                      action_name: logEntry.action_name,
+                      reward: logEntry.reward,
+                      is_ai_action: logEntry.is_ai_action,
                       timestamp: new Date()
                     }
                   }));

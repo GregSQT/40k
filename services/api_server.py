@@ -51,6 +51,14 @@ def initialize_engine():
         from ai.unit_registry import UnitRegistry
         unit_registry = UnitRegistry()
         
+        # CRITICAL FIX: Load actual rewards config dictionary
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        rewards_config = config_loader.load_rewards_config("default")
+        
+        # Add rewards_config to config
+        config["rewards_config"] = rewards_config
+        
         # Create engine with proper parameters
         engine = W40KEngine(
             config=config,
@@ -62,6 +70,9 @@ def initialize_engine():
             unit_registry=unit_registry,
             quiet=True
         )
+        
+        # CRITICAL FIX: Add rewards_config to game_state after engine creation
+        engine.game_state["rewards_config"] = rewards_config
         
         # Restore original working directory
         os.chdir(original_cwd)
@@ -95,8 +106,14 @@ def initialize_pve_engine():
         from ai.unit_registry import UnitRegistry
         unit_registry = UnitRegistry()
         
+        # CRITICAL FIX: Load actual rewards config dictionary
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        rewards_config = config_loader.load_rewards_config("default")
+        
         # Create engine with PvE configuration - set pve_mode in config
         config["pve_mode"] = True
+        config["rewards_config"] = rewards_config
         
         engine = W40KEngine(
             config=config,
@@ -108,6 +125,9 @@ def initialize_pve_engine():
             unit_registry=unit_registry,
             quiet=True
         )
+        
+        # CRITICAL FIX: Add rewards_config to game_state after engine creation
+        engine.game_state["rewards_config"] = rewards_config
         
         # AI model loading handled by engine's _load_ai_model_for_pve() method
         # No duplicate model loading logic needed in API layer

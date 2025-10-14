@@ -16,10 +16,26 @@ interface GameLogProps {
   availableHeight?: number;
   useStepNumbers?: boolean;
   currentTurn?: number;
+  debugMode?: boolean;
 }
 
-export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availableHeight = 220, useStepNumbers = false }) => {
+export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availableHeight = 220, useStepNumbers = false, debugMode = false }) => {
   const eventsContainerRef = React.useRef<HTMLDivElement>(null);
+
+  // TEMPORARY DEBUG - Remove after verification
+  React.useEffect(() => {
+    console.log('🔍 GAMELOG DEBUG:', {
+      debugMode,
+      eventsCount: events.length,
+      firstEvent: events[0],
+      hasRewardInFirst: events[0] && 'reward' in events[0],
+      hasActionNameInFirst: events[0] && 'action_name' in events[0],
+      hasIsAiActionInFirst: events[0] && 'is_ai_action' in events[0],
+      rewardValue: events[0] && (events[0] as any).reward,
+      actionName: events[0] && (events[0] as any).action_name,
+      isAiAction: events[0] && (events[0] as any).is_ai_action
+    });
+  }, [debugMode, events.length]);
 
   // Display all events (newest first) - sort by timestamp descending, no limit
   const displayedEvents = [...events]
@@ -87,6 +103,21 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
                   <span className="game-log-entry__message">
                     {event.message}
                   </span>
+                  {/* NEW: Debug mode reward display for AI actions */}
+                  {debugMode && (event as any).is_ai_action && (event as any).reward !== undefined && (
+                    <span className="game-log-entry__reward">
+                      {' '}
+                      <span className="game-log-entry__reward-action">
+                        {((event as any).action_name || '').toLowerCase()}
+                      </span>
+                      {' '}
+                      <span className="game-log-entry__reward-value">
+                        {typeof (event as any).reward === 'number' 
+                          ? (event as any).reward.toFixed(2) 
+                          : (event as any).reward}
+                      </span>
+                    </span>
+                  )}
                 </div>
               </div>
             ))}

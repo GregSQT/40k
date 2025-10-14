@@ -6,6 +6,13 @@ export type GamePhase = "move" | "shoot" | "charge" | "fight";
 export type GameMode = "select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview";
 export type FightSubPhase = "charged_units" | "alternating_fight";
 
+// NEW: Debug reward display fields
+export interface ActionReward {
+  action_name: string;
+  reward: number;
+  is_ai_action: boolean;
+}
+
 export interface Position {
   col: number;
   row: number;

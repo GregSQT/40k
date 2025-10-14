@@ -834,6 +834,66 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # Enhanced message format including shooter position per movement phase integration
     enhanced_message = f"Unit {unit_id} ({shooter['col']}, {shooter['row']}) SHOT Unit {target_id} ({target['col']}, {target['row']}) : {attack_result['attack_log'].split(' : ', 1)[1] if ' : ' in attack_result['attack_log'] else attack_result['attack_log']}"
     
+    # Calculate reward for this action using progressive bonus system
+    action_reward = 0.0
+    action_name = "ranged_attack"
+   
+    try:
+        from ai.reward_mapper import RewardMapper
+        rewards_config = game_state.get("rewards_config")
+       
+        if rewards_config:
+            reward_mapper = RewardMapper(rewards_config)
+           
+            # CRITICAL FIX: Map scenario unit types to reward config keys
+            from ai.unit_registry import UnitRegistry
+            unit_registry = UnitRegistry()
+           
+            # Map shooter
+            shooter_scenario_type = shooter["unitType"]
+            shooter_reward_key = unit_registry.get_model_key(shooter_scenario_type)
+            enriched_shooter = shooter.copy()
+            enriched_shooter["unitType"] = shooter_reward_key
+           
+            # Get unit rewards config
+            unit_rewards = reward_mapper._get_unit_rewards(enriched_shooter)
+            base_actions = unit_rewards.get("base_actions", {})
+            result_bonuses = unit_rewards.get("result_bonuses", {})
+           
+            # Base shooting reward (always given for taking the shot)
+            if "ranged_attack" in base_actions:
+                action_reward = base_actions["ranged_attack"]
+           
+            # Progressive bonuses based on attack sequence results
+            if attack_result.get("hit_success", False):
+                if "hit_target" in result_bonuses:
+                    action_reward += result_bonuses["hit_target"]
+                    action_name = "hit_target"
+           
+            if attack_result.get("wound_success", False):
+                if "wound_target" in result_bonuses:
+                    action_reward += result_bonuses["wound_target"]
+                    action_name = "wound_target"
+           
+            if attack_result.get("damage", 0) > 0:
+                if "damage_target" in result_bonuses:
+                    action_reward += result_bonuses["damage_target"]
+                    action_name = "damage_target"
+           
+            if attack_result.get("target_died", False):
+                if "kill_target" in result_bonuses:
+                    action_reward += result_bonuses["kill_target"]
+                    action_name = "kill_target"
+               
+                # No overkill bonus (exact kill)
+                if target["HP_CUR"] == attack_result.get("damage", 0):
+                    if "no_overkill" in result_bonuses:
+                        action_reward += result_bonuses["no_overkill"]
+           
+    except Exception as e:
+        # Silent fallback - don't break game if reward calculation fails
+        pass
+    
     game_state["action_logs"].append({
         "type": "shoot",
         "message": enhanced_message,  # Enhanced with position data  
@@ -852,7 +912,10 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "woundRoll": attack_result.get("wound_roll"),
         "saveRoll": attack_result.get("save_roll"),
         "saveTarget": attack_result.get("save_target"),
-        "timestamp": "server_time"
+        "timestamp": "server_time",
+        "action_name": action_name,  # NEW: For debug display
+        "reward": round(action_reward, 2),  # NEW: Calculated reward
+        "is_ai_action": shooter["player"] == 1  # NEW: PvE AI detection
     })
     
     # print(f"ACTION LOG CREATED: {enhanced_message}")
@@ -904,6 +967,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
         return {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
+            "hit_success": True,  # Hit succeeded to reach wound roll
             "wound_roll": wound_roll,
             "wound_target": wound_target,
             "wound_success": False,
@@ -921,7 +985,11 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
         attack_log = f"Unit {attacker_id} SHOT Unit {target_id} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) : SAVED !"
         return {
             "hit_roll": hit_roll,
+            "hit_target": hit_target,
+            "hit_success": True,  # Hit succeeded
             "wound_roll": wound_roll,
+            "wound_target": wound_target,
+            "wound_success": True,  # Wound succeeded
             "save_roll": save_roll,
             "save_target": save_target,
             "save_success": True,
@@ -942,9 +1010,14 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
     
     return {
         "hit_roll": hit_roll,
+        "hit_target": hit_target,
+        "hit_success": True,  # Hit succeeded
         "wound_roll": wound_roll,
+        "wound_target": wound_target,
+        "wound_success": True,  # Wound succeeded
         "save_roll": save_roll,
         "save_target": save_target,
+        "save_success": False,  # Save failed
         "damage": damage_dealt,
         "attack_log": attack_log
     }

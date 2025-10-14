@@ -43,6 +43,9 @@ export function useGameLog(currentTurn?: number) {
         player: logData.player,
         unitId: parseInt(logData.shooterId),
         targetId: parseInt(logData.targetId),
+        reward: logData.reward,
+        action_name: logData.action_name,
+        is_ai_action: logData.is_ai_action,
         shootDetails: logData.hitRoll ? [{
           shotNumber: 1,
           attackRoll: logData.hitRoll,

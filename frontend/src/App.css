@@ -1372,3 +1372,31 @@ textarea:focus {
 .hex-toggle-thumb--on {
   left: 18px;
 }
+
+/* Debug mode reward display */
+.game-log-entry__reward {
+  color: #fbbf24;
+  font-weight: 500;
+  margin-left: 8px;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.game-log-entry__reward-action {
+  color: #60a5fa;
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.5px;
+}
+
+.game-log-entry__reward-value {
+  color: #34d399;
+  font-weight: 700;
+  padding: 2px 6px;
+  background: rgba(52, 211, 153, 0.1);
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: var(--font-size-sm);
+}
