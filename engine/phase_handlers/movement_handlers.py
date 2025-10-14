@@ -437,18 +437,19 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     start_col, start_row = unit["col"], unit["row"]
     
     # Check all hexes in a proper hex radius using cube coordinates
-    for dest_col in range(start_col - move_range, start_col + move_range + 1):
-        for dest_row in range(start_row - move_range, start_row + move_range + 1):
+    # CRITICAL: Use same iteration bounds as frontend BFS for consistency
+    for dest_col in range(max(0, start_col - move_range), min(game_state["board_cols"], start_col + move_range + 1)):
+        for dest_row in range(max(0, start_row - move_range), min(game_state["board_rows"], start_row + move_range + 1)):
             # Skip current position
             if dest_col == start_col and dest_row == start_row:
                 continue
             
-            # Calculate actual hex distance using cube coordinates
+            # Calculate actual hex distance using cube coordinates (NOW SYNCHRONIZED)
             hex_distance = _calculate_hex_distance(start_col, start_row, dest_col, dest_row)
             if hex_distance > move_range:
                 continue
             
-            # Validate destinationw
+            # Validate destination (board bounds, walls, units, enemy adjacency)
             if _is_valid_destination(game_state, dest_col, dest_row, unit, {}):
                 valid_destinations.append((dest_col, dest_row))
     
@@ -458,18 +459,21 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
 
 def _calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
-    """Calculate proper hex distance using cube coordinates"""
-    # Convert offset to cube coordinates
-    x1 = col1 - (row1 - (row1 & 1)) // 2
-    z1 = row1
+    """Calculate proper hex distance using cube coordinates - SYNCHRONIZED WITH FRONTEND"""
+    # CRITICAL FIX: Use EXACT same formula as frontend/src/utils/gameHelpers.ts offsetToCube()
+    # Frontend formula: x = col, z = row - ((col - (col & 1)) >> 1), y = -x - z
+    
+    # Convert offset to cube coordinates (FRONTEND-COMPATIBLE)
+    x1 = col1
+    z1 = row1 - ((col1 - (col1 & 1)) >> 1)
     y1 = -x1 - z1
     
-    x2 = col2 - (row2 - (row2 & 1)) // 2
-    z2 = row2
+    x2 = col2
+    z2 = row2 - ((col2 - (col2 & 1)) >> 1)
     y2 = -x2 - z2
     
-    # Cube distance
-    return (abs(x1 - x2) + abs(y1 - y2) + abs(z1 - z2)) // 2
+    # Cube distance (max of absolute differences)
+    return max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
 
 
 def movement_preview(valid_destinations: List[Tuple[int, int]]) -> Dict[str, Any]:
@@ -520,15 +524,19 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     if dest_col is None or dest_row is None:
         return False, {"error": "missing_destination"}
     
-    # Build valid destinations if not already built
-    # AI_TURN.md COMPLIANCE: Direct field access
-    if "valid_move_destinations_pool" not in game_state or not game_state["valid_move_destinations_pool"]:
-        # print(f"VALIDATION DEBUG: Rebuilding destinations pool for unit {unit_id}")
-        movement_build_valid_destinations_pool(game_state, unit_id)
+    # CRITICAL FIX: ALWAYS rebuild pool fresh on validation to prevent stale data
+    # This ensures frontend/backend pathfinding stay synchronized even if game state changed
+    print(f"VALIDATION SYNC: Rebuilding fresh pool for unit {unit_id} validation")
+    movement_build_valid_destinations_pool(game_state, unit_id)
     
     if "valid_move_destinations_pool" not in game_state:
         raise KeyError("game_state missing required 'valid_move_destinations_pool' field")
     valid_pool = game_state["valid_move_destinations_pool"]
+    
+    # DIAGNOSTIC: Log validation attempt
+    print(f"VALIDATION: Unit {unit_id} attempting move to ({dest_col}, {dest_row})")
+    print(f"VALIDATION: Pool has {len(valid_pool)} valid destinations")
+    print(f"VALIDATION: Destination in pool: {(dest_col, dest_row) in valid_pool}")
     
     # COMPREHENSIVE DEBUGGING: Compare AI selection with validation pool
     # print(f"VALIDATION DEBUG: AI selected destination ({dest_col}, {dest_row})")
