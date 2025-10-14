@@ -195,8 +195,8 @@ class W40KEngine(gym.Env):
         print(f"DEBUG: _load_ai_model_for_pve called")
         
         try:
-            from stable_baselines3 import DQN
-            print(f"DEBUG: DQN import successful")
+            from stable_baselines3 import PPO
+            print(f"DEBUG: PPO import successful")
             
             # Get AI model key from unit registry
             ai_model_key = "SpaceMarine_Infantry_Troop_RangedSwarm"  # Default
@@ -218,7 +218,7 @@ class W40KEngine(gym.Env):
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"AI model required for PvE mode not found: {model_path}")
             
-            self._ai_model = DQN.load(model_path)
+            self._ai_model = PPO.load(model_path)
             print(f"DEBUG: AI model loaded successfully")
             if not self.quiet:
                 print(f"PvE: Loaded AI model: {ai_model_key}")

@@ -526,24 +526,11 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     
     # CRITICAL FIX: ALWAYS rebuild pool fresh on validation to prevent stale data
     # This ensures frontend/backend pathfinding stay synchronized even if game state changed
-    print(f"VALIDATION SYNC: Rebuilding fresh pool for unit {unit_id} validation")
     movement_build_valid_destinations_pool(game_state, unit_id)
     
     if "valid_move_destinations_pool" not in game_state:
         raise KeyError("game_state missing required 'valid_move_destinations_pool' field")
     valid_pool = game_state["valid_move_destinations_pool"]
-    
-    # DIAGNOSTIC: Log validation attempt
-    print(f"VALIDATION: Unit {unit_id} attempting move to ({dest_col}, {dest_row})")
-    print(f"VALIDATION: Pool has {len(valid_pool)} valid destinations")
-    print(f"VALIDATION: Destination in pool: {(dest_col, dest_row) in valid_pool}")
-    
-    # COMPREHENSIVE DEBUGGING: Compare AI selection with validation pool
-    # print(f"VALIDATION DEBUG: AI selected destination ({dest_col}, {dest_row})")
-    # print(f"VALIDATION DEBUG: Unit {unit_id} current position: {_get_unit_by_id(game_state, unit_id)}")
-    # print(f"VALIDATION DEBUG: Valid destinations pool size: {len(valid_pool)}")
-    # print(f"VALIDATION DEBUG: First 10 valid destinations: {valid_pool[:10]}")
-    # print(f"VALIDATION DEBUG: Is AI selection in pool? {(dest_col, dest_row) in valid_pool}")
     
     # Validate destination in valid pool
     if (dest_col, dest_row) not in valid_pool:
