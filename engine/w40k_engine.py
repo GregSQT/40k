@@ -179,9 +179,22 @@ class W40KEngine(gym.Env):
         self.action_space = gym.spaces.Discrete(8)  # Base action space
         self._current_valid_actions = list(range(8))  # Will be masked dynamically
         
-        # Observation space: match training system expectations (26 features)
-        # Old system used: 2 units * 11 features + 4 global = 26 total
-        obs_size = 26  # Fixed size for compatibility with existing models
+        # Observation space: Egocentric perception with R=25 radius
+        # New system: 150 floats = 10 global + 8 unit_stats + 32 terrain + 70 nearby_units + 30 targets
+        # Covers MOVE(12) + MAX_CHARGE(12) + ENEMY_OFFSET(1) = 25 hex strategic reach
+        obs_size = 150  # Egocentric observation with full tactical awareness
+        
+        # Load perception parameters from training config if available
+        if hasattr(self, 'training_config') and self.training_config:
+            obs_params = self.training_config.get("observation_params", {})
+            self.perception_radius = obs_params.get("perception_radius", 25)
+            self.max_nearby_units = obs_params.get("max_nearby_units", 10)
+            self.max_valid_targets = obs_params.get("max_valid_targets", 5)
+        else:
+            self.perception_radius = 25
+            self.max_nearby_units = 10
+            self.max_valid_targets = 5
+        
         self.observation_space = gym.spaces.Box(
             low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32
         )
@@ -896,61 +909,518 @@ class W40KEngine(gym.Env):
         return None
     
     def _build_observation(self) -> np.ndarray:
-        """Build observation vector matching old system format (26 elements)."""
-        obs = np.zeros(26, dtype=np.float32)
+        """
+        Build egocentric observation vector with R=25 perception radius.
+        AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
         
-        # Minimal logging only for training issues
-        pass
+        Structure (150 floats):
+        - [0:10] Global context
+        - [10:18] Active unit capabilities  
+        - [18:50] Directional terrain (8 directions × 4 features)
+        - [50:120] Nearby units (7 units × 10 features)
+        - [120:150] Valid targets (5 targets × 6 features)
+        """
+        obs = np.zeros(150, dtype=np.float32)
         
-        # Global features (4 elements) - normalized to 0-1 range
-        obs[0] = self.game_state["current_player"]  # 0 or 1
+        # Get active unit (agent's current unit)
+        active_unit = self._get_active_unit_for_observation()
+        if not active_unit:
+            # No active unit - return zero observation
+            return obs
+        
+        # === SECTION 1: Global Context (10 floats) ===
+        obs[0] = float(self.game_state["current_player"])
         obs[1] = {"move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}[self.game_state["phase"]]
-        obs[2] = min(1.0, self.game_state["turn"] / 10.0)  # Normalize turn
-        obs[3] = min(1.0, self.game_state["episode_steps"] / 100.0)  # Normalize steps
+        obs[2] = min(1.0, self.game_state["turn"] / 10.0)
+        obs[3] = min(1.0, self.game_state["episode_steps"] / 100.0)
+        obs[4] = active_unit["HP_CUR"] / active_unit["HP_MAX"]
+        obs[5] = 1.0 if active_unit["id"] in self.game_state["units_moved"] else 0.0
+        obs[6] = 1.0 if active_unit["id"] in self.game_state["units_shot"] else 0.0
+        obs[7] = 1.0 if active_unit["id"] in self.game_state["units_attacked"] else 0.0
         
-        # Get units and separate by player
-        all_units = [u for u in self.game_state["units"] if u["HP_CUR"] > 0]
-        ai_units = [u for u in all_units if u["player"] == 1][:2]  # Max 2 AI units
-        enemy_units = [u for u in all_units if u["player"] == 0][:2]  # Max 2 enemy units
+        # Count alive units for strategic awareness
+        alive_friendlies = sum(1 for u in self.game_state["units"] 
+                              if u["player"] == active_unit["player"] and u["HP_CUR"] > 0)
+        alive_enemies = sum(1 for u in self.game_state["units"] 
+                           if u["player"] != active_unit["player"] and u["HP_CUR"] > 0)
+        obs[8] = alive_friendlies / max(1, self.max_nearby_units)
+        obs[9] = alive_enemies / max(1, self.max_nearby_units)
         
-        # AI units (2 units * 11 features = 22 elements, positions 4-25)
-        # AI_TURN.md COMPLIANCE: Direct access with validation
-        if "board_cols" not in self.game_state:
-            raise KeyError("game_state missing required 'board_cols' field")
-        if "board_rows" not in self.game_state:
-            raise KeyError("game_state missing required 'board_rows' field")
-        board_width = self.game_state["board_cols"]
-        board_height = self.game_state["board_rows"]
+        # === SECTION 2: Active Unit Capabilities (8 floats) ===
+        obs[10] = active_unit["MOVE"] / 12.0  # Normalize by max expected (bikes)
+        obs[11] = active_unit["RNG_RNG"] / 24.0
+        obs[12] = active_unit["RNG_DMG"] / 5.0
+        obs[13] = active_unit["RNG_NB"] / 10.0
+        obs[14] = active_unit["CC_RNG"] / 6.0
+        obs[15] = active_unit["CC_DMG"] / 5.0
+        obs[16] = active_unit["T"] / 10.0
+        obs[17] = active_unit["ARMOR_SAVE"] / 6.0
         
-        if board_width is None:
-            raise RuntimeError("board_cols is None - config loading failed, check config/board_config.json")
-        if board_height is None:
-            raise RuntimeError("board_rows is None - config loading failed, check config/board_config.json")
+        # === SECTION 3: Directional Terrain Awareness (32 floats) ===
+        self._encode_directional_terrain(obs, active_unit, base_idx=18)
         
-        for i in range(2):
-            base_idx = 4 + i * 11
-            if i < len(ai_units):
-                unit = ai_units[i]
-                obs[base_idx] = unit["col"] / board_width  # Normalized position
-                obs[base_idx + 1] = unit["row"] / board_height
-                obs[base_idx + 2] = unit["HP_CUR"] / unit["HP_MAX"]  # Health ratio
-                obs[base_idx + 3] = 1.0 if unit["id"] in self.game_state["units_moved"] else 0.0
-                obs[base_idx + 4] = 1.0 if unit["id"] in self.game_state["units_shot"] else 0.0
-                obs[base_idx + 5] = 1.0 if unit["id"] in self.game_state["units_charged"] else 0.0
-                obs[base_idx + 6] = 1.0 if unit["id"] in self.game_state["units_attacked"] else 0.0
-                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-                if "RNG_RNG" not in unit:
-                    raise KeyError(f"Unit missing required 'RNG_RNG' field for observation: {unit}")
-                if "RNG_DMG" not in unit:
-                    raise KeyError(f"Unit missing required 'RNG_DMG' field for observation: {unit}")
-                if "CC_DMG" not in unit:
-                    raise KeyError(f"Unit missing required 'CC_DMG' field for observation: {unit}")
-                obs[base_idx + 7] = min(1.0, unit["RNG_RNG"] / 24.0)  # Normalized range
-                obs[base_idx + 8] = min(1.0, unit["RNG_DMG"] / 5.0)  # Normalized damage
-                obs[base_idx + 9] = min(1.0, unit["CC_DMG"] / 5.0)  # Normalized melee damage
-                obs[base_idx + 10] = 1.0  # Alive flag
+        # === SECTION 4: Nearby Units (70 floats) ===
+        self._encode_nearby_units(obs, active_unit, base_idx=50)
+        
+        # === SECTION 5: Valid Targets (30 floats) ===
+        self._encode_valid_targets(obs, active_unit, base_idx=120)
         
         return obs
+    
+    def _get_active_unit_for_observation(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the active unit for observation encoding.
+        AI_TURN.md COMPLIANCE: Uses activation pools (single source of truth).
+        """
+        current_phase = self.game_state["phase"]
+        current_player = self.game_state["current_player"]
+        
+        # Get first eligible unit from current phase pool
+        if current_phase == "move":
+            pool = self.game_state.get("move_activation_pool", [])
+        elif current_phase == "shoot":
+            pool = self.game_state.get("shoot_activation_pool", [])
+        elif current_phase == "charge":
+            pool = self.game_state.get("charge_activation_pool", [])
+        elif current_phase == "fight":
+            pool = self.game_state.get("charging_activation_pool", [])
+        else:
+            pool = []
+        
+        # Get first unit from pool that belongs to current player
+        for unit_id in pool:
+            unit = self._get_unit_by_id(str(unit_id))
+            if unit and unit["player"] == current_player:
+                return unit
+        
+        # Fallback: return any alive unit from current player
+        for unit in self.game_state["units"]:
+            if unit["player"] == current_player and unit["HP_CUR"] > 0:
+                return unit
+        
+        return None
+    
+    def _encode_directional_terrain(self, obs: np.ndarray, active_unit: Dict[str, Any], base_idx: int):
+        """
+        Encode terrain awareness in 8 cardinal directions.
+        32 floats = 8 directions × 4 features per direction.
+        """
+        # 8 directions: N, NE, E, SE, S, SW, W, NW
+        directions = [
+            (0, -1),   # N
+            (1, -1),   # NE
+            (1, 0),    # E
+            (1, 1),    # SE
+            (0, 1),    # S
+            (-1, 1),   # SW
+            (-1, 0),   # W
+            (-1, -1)   # NW
+        ]
+        
+        for dir_idx, (dx, dy) in enumerate(directions):
+            feature_base = base_idx + dir_idx * 4
+            
+            # Find nearest wall, friendly, enemy, and edge in this direction
+            wall_dist = self._find_nearest_in_direction(active_unit, dx, dy, "wall")
+            friendly_dist = self._find_nearest_in_direction(active_unit, dx, dy, "friendly")
+            enemy_dist = self._find_nearest_in_direction(active_unit, dx, dy, "enemy")
+            edge_dist = self._find_edge_distance(active_unit, dx, dy)
+            
+            # Normalize by perception radius
+            obs[feature_base + 0] = min(1.0, wall_dist / self.perception_radius)
+            obs[feature_base + 1] = min(1.0, friendly_dist / self.perception_radius)
+            obs[feature_base + 2] = min(1.0, enemy_dist / self.perception_radius)
+            obs[feature_base + 3] = min(1.0, edge_dist / self.perception_radius)
+    
+    def _find_nearest_in_direction(self, unit: Dict[str, Any], dx: int, dy: int, 
+                                   search_type: str) -> float:
+        """Find nearest object (wall/friendly/enemy) in given direction."""
+        min_distance = 999.0
+        
+        if search_type == "wall":
+            # Search walls in direction
+            for wall_col, wall_row in self.game_state["wall_hexes"]:
+                if self._is_in_direction(unit, wall_col, wall_row, dx, dy):
+                    dist = self._calculate_hex_distance(unit["col"], unit["row"], wall_col, wall_row)
+                    if dist < min_distance and dist <= self.perception_radius:
+                        min_distance = dist
+        
+        elif search_type in ["friendly", "enemy"]:
+            target_player = unit["player"] if search_type == "friendly" else 1 - unit["player"]
+            for other_unit in self.game_state["units"]:
+                if other_unit["HP_CUR"] <= 0:
+                    continue
+                if other_unit["player"] != target_player:
+                    continue
+                if other_unit["id"] == unit["id"]:
+                    continue
+                    
+                if self._is_in_direction(unit, other_unit["col"], other_unit["row"], dx, dy):
+                    dist = self._calculate_hex_distance(unit["col"], unit["row"], 
+                                                        other_unit["col"], other_unit["row"])
+                    if dist < min_distance and dist <= self.perception_radius:
+                        min_distance = dist
+        
+        return min_distance if min_distance < 999.0 else self.perception_radius
+    
+    def _is_in_direction(self, unit: Dict[str, Any], target_col: int, target_row: int,
+                        dx: int, dy: int) -> bool:
+        """Check if target is roughly in the specified direction from unit."""
+        delta_col = target_col - unit["col"]
+        delta_row = target_row - unit["row"]
+        
+        # Rough directional check (within 45-degree cone)
+        if dx == 0:  # North/South
+            return abs(delta_col) <= abs(delta_row) and (delta_row * dy > 0)
+        elif dy == 0:  # East/West
+            return abs(delta_row) <= abs(delta_col) and (delta_col * dx > 0)
+        else:  # Diagonal
+            return (delta_col * dx > 0) and (delta_row * dy > 0)
+    
+    def _find_edge_distance(self, unit: Dict[str, Any], dx: int, dy: int) -> float:
+        """Calculate distance to board edge in given direction."""
+        if dx > 0:  # East
+            edge_dist = self.game_state["board_cols"] - unit["col"] - 1
+        elif dx < 0:  # West
+            edge_dist = unit["col"]
+        else:
+            edge_dist = self.perception_radius
+        
+        if dy > 0:  # South
+            edge_dist = min(edge_dist, self.game_state["board_rows"] - unit["row"] - 1)
+        elif dy < 0:  # North
+            edge_dist = min(edge_dist, unit["row"])
+        
+        return float(edge_dist)
+    
+    def _encode_nearby_units(self, obs: np.ndarray, active_unit: Dict[str, Any], base_idx: int):
+        """
+        Encode up to 7 nearby units within perception radius.
+        70 floats = 7 units × 10 features per unit.
+        AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
+        
+        Features per unit:
+        - relative_col, relative_row (egocentric position)
+        - distance (normalized by perception_radius)
+        - hp_ratio (HP_CUR / HP_MAX)
+        - is_enemy (1.0 = enemy, 0.0 = friendly)
+        - threat_score (max damage potential)
+        - defensive_type (Swarm/Troop/Elite/Leader encoding)
+        - offensive_type (Melee=0.0, Ranged=1.0)
+        - has_los (line of sight available)
+        - target_match (target preference score)
+        """
+        # Get all units within perception radius
+        nearby_units = []
+        for other_unit in self.game_state["units"]:
+            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+            if "HP_CUR" not in other_unit:
+                raise KeyError(f"Unit missing required 'HP_CUR' field: {other_unit}")
+            
+            if other_unit["HP_CUR"] <= 0:
+                continue
+            if other_unit["id"] == active_unit["id"]:
+                continue
+            
+            # AI_TURN.md COMPLIANCE: Direct field access
+            if "col" not in other_unit or "row" not in other_unit:
+                raise KeyError(f"Unit missing required position fields: {other_unit}")
+            
+            distance = self._calculate_hex_distance(
+                active_unit["col"], active_unit["row"],
+                other_unit["col"], other_unit["row"]
+            )
+            
+            if distance <= self.perception_radius:
+                nearby_units.append((distance, other_unit))
+        
+        # Sort by distance (prioritize closer units)
+        nearby_units.sort(key=lambda x: x[0])
+        
+        # Encode up to max_nearby_units (default 10, but use 7 for 70 floats)
+        max_encoded = 7  # 7 units × 10 features = 70 floats
+        for i in range(max_encoded):
+            feature_base = base_idx + i * 10
+            
+            if i < len(nearby_units):
+                distance, unit = nearby_units[i]
+                
+                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access with validation
+                if "col" not in unit:
+                    raise KeyError(f"Nearby unit missing required 'col' field: {unit}")
+                if "row" not in unit:
+                    raise KeyError(f"Nearby unit missing required 'row' field: {unit}")
+                if "HP_CUR" not in unit:
+                    raise KeyError(f"Nearby unit missing required 'HP_CUR' field: {unit}")
+                if "HP_MAX" not in unit:
+                    raise KeyError(f"Nearby unit missing required 'HP_MAX' field: {unit}")
+                if "player" not in unit:
+                    raise KeyError(f"Nearby unit missing required 'player' field: {unit}")
+                
+                # Relative position (egocentric)
+                rel_col = (unit["col"] - active_unit["col"]) / 24.0
+                rel_row = (unit["row"] - active_unit["row"]) / 24.0
+                dist_norm = distance / self.perception_radius
+                hp_ratio = unit["HP_CUR"] / unit["HP_MAX"]
+                is_enemy = 1.0 if unit["player"] != active_unit["player"] else 0.0
+                
+                # Threat calculation (potential damage to active unit)
+                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+                if "RNG_DMG" not in unit:
+                    raise KeyError(f"Nearby unit missing required 'RNG_DMG' field: {unit}")
+                if "CC_DMG" not in unit:
+                    raise KeyError(f"Nearby unit missing required 'CC_DMG' field: {unit}")
+                
+                if is_enemy > 0.5:
+                    threat = max(unit["RNG_DMG"], unit["CC_DMG"]) / 5.0
+                else:
+                    threat = 0.0
+                
+                # Defensive type encoding (Swarm=0.25, Troop=0.5, Elite=0.75, Leader=1.0)
+                defensive_type = self._encode_defensive_type(unit)
+                
+                # Offensive type encoding (Melee=0.0, Ranged=1.0)
+                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+                if "RNG_RNG" not in unit:
+                    raise KeyError(f"Nearby unit missing required 'RNG_RNG' field: {unit}")
+                if "CC_RNG" not in unit:
+                    raise KeyError(f"Nearby unit missing required 'CC_RNG' field: {unit}")
+                
+                offensive_type = 1.0 if unit["RNG_RNG"] > unit["CC_RNG"] else 0.0
+                
+                # LoS check using cache
+                has_los = self._check_los_cached(active_unit, unit)
+                
+                # Target preference match (placeholder - will enhance with unit registry)
+                target_match = 0.5
+                
+                # Store encoded features
+                obs[feature_base + 0] = np.clip(rel_col, -1.0, 1.0)
+                obs[feature_base + 1] = np.clip(rel_row, -1.0, 1.0)
+                obs[feature_base + 2] = dist_norm
+                obs[feature_base + 3] = hp_ratio
+                obs[feature_base + 4] = is_enemy
+                obs[feature_base + 5] = threat
+                obs[feature_base + 6] = defensive_type
+                obs[feature_base + 7] = offensive_type
+                obs[feature_base + 8] = has_los
+                obs[feature_base + 9] = target_match
+            else:
+                # Padding for empty slots
+                for j in range(10):
+                    obs[feature_base + j] = 0.0
+    
+    def _encode_defensive_type(self, unit: Dict[str, Any]) -> float:
+        """
+        Encode defensive type based on HP_MAX.
+        AI_TURN.md COMPLIANCE: Direct UPPERCASE field access.
+        
+        Returns:
+        - 0.25 = Swarm (HP_MAX <= 1)
+        - 0.5  = Troop (HP_MAX 2-3)
+        - 0.75 = Elite (HP_MAX 4-6)
+        - 1.0  = Leader (HP_MAX >= 7)
+        """
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+        if "HP_MAX" not in unit:
+            raise KeyError(f"Unit missing required 'HP_MAX' field: {unit}")
+        
+        hp_max = unit["HP_MAX"]
+        if hp_max <= 1:
+            return 0.25  # Swarm
+        elif hp_max <= 3:
+            return 0.5   # Troop
+        elif hp_max <= 6:
+            return 0.75  # Elite
+        else:
+            return 1.0   # Leader
+    
+    def _check_los_cached(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> float:
+        """
+        Check LoS using cache if available, fallback to calculation.
+        AI_TURN.md COMPLIANCE: Direct field access, uses game_state cache.
+        
+        Returns:
+        - 1.0 = Clear line of sight
+        - 0.0 = Blocked line of sight
+        """
+        # Use LoS cache if available (Phase 1 implementation)
+        if "los_cache" in self.game_state and self.game_state["los_cache"]:
+            cache_key = (shooter["id"], target["id"])
+            if cache_key in self.game_state["los_cache"]:
+                return 1.0 if self.game_state["los_cache"][cache_key] else 0.0
+        
+        # Fallback: calculate LoS (happens if cache not built yet)
+        from .phase_handlers import shooting_handlers
+        has_los = shooting_handlers._has_line_of_sight(self.game_state, shooter, target)
+        return 1.0 if has_los else 0.0
+    
+    def _encode_valid_targets(self, obs: np.ndarray, active_unit: Dict[str, Any], base_idx: int):
+        """
+        Encode up to 5 valid targets (shooting/charge targets).
+        30 floats = 5 targets × 6 features per target.
+        AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, phase-specific targeting.
+        
+        Features per target:
+        - distance (normalized by perception_radius)
+        - hp_ratio (HP_CUR / HP_MAX)
+        - threat_to_me (target's damage potential)
+        - my_damage_to_target (my damage potential)
+        - defensive_type (Swarm/Troop/Elite/Leader)
+        - kill_probability (estimated chance to kill)
+        """
+        # Get valid targets based on current phase
+        valid_targets = []
+        current_phase = self.game_state["phase"]
+        
+        if current_phase == "shoot":
+            # Get valid shooting targets using shooting handler
+            from .phase_handlers import shooting_handlers
+            
+            # Build target pool using handler's validation
+            target_ids = shooting_handlers.shooting_build_valid_target_pool(
+                self.game_state, active_unit["id"]
+            )
+            valid_targets = [
+                self._get_unit_by_id(tid) 
+                for tid in target_ids 
+                if self._get_unit_by_id(tid)
+            ]
+            
+        elif current_phase == "charge":
+            # Get valid charge targets (enemies within charge range)
+            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+            if "MOVE" not in active_unit:
+                raise KeyError(f"Active unit missing required 'MOVE' field: {active_unit}")
+            
+            for enemy in self.game_state["units"]:
+                # AI_TURN.md COMPLIANCE: Direct field access with validation
+                if "player" not in enemy:
+                    raise KeyError(f"Enemy unit missing required 'player' field: {enemy}")
+                if "HP_CUR" not in enemy:
+                    raise KeyError(f"Enemy unit missing required 'HP_CUR' field: {enemy}")
+                
+                if enemy["player"] != active_unit["player"] and enemy["HP_CUR"] > 0:
+                    if "col" not in enemy or "row" not in enemy:
+                        raise KeyError(f"Enemy unit missing required position fields: {enemy}")
+                    
+                    distance = self._calculate_hex_distance(
+                        active_unit["col"], active_unit["row"],
+                        enemy["col"], enemy["row"]
+                    )
+                    
+                    # Max charge = MOVE + 12 (maximum 2d6 roll)
+                    max_charge = active_unit["MOVE"] + 12
+                    if distance <= max_charge:
+                        valid_targets.append(enemy)
+        
+        elif current_phase == "fight":
+            # Get valid melee targets (enemies within CC_RNG)
+            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+            if "CC_RNG" not in active_unit:
+                raise KeyError(f"Active unit missing required 'CC_RNG' field: {active_unit}")
+            
+            for enemy in self.game_state["units"]:
+                if "player" not in enemy or "HP_CUR" not in enemy:
+                    raise KeyError(f"Enemy unit missing required fields: {enemy}")
+                
+                if enemy["player"] != active_unit["player"] and enemy["HP_CUR"] > 0:
+                    if "col" not in enemy or "row" not in enemy:
+                        raise KeyError(f"Enemy unit missing required position fields: {enemy}")
+                    
+                    distance = self._calculate_hex_distance(
+                        active_unit["col"], active_unit["row"],
+                        enemy["col"], enemy["row"]
+                    )
+                    
+                    if distance <= active_unit["CC_RNG"]:
+                        valid_targets.append(enemy)
+        
+        # Sort by distance (prioritize closer targets)
+        valid_targets.sort(key=lambda t: self._calculate_hex_distance(
+            active_unit["col"], active_unit["row"], t["col"], t["row"]
+        ))
+        
+        # Encode up to max_valid_targets (5 targets × 6 features = 30 floats)
+        max_encoded = 5
+        for i in range(max_encoded):
+            feature_base = base_idx + i * 6
+            
+            if i < len(valid_targets):
+                target = valid_targets[i]
+                
+                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access with validation
+                if "col" not in target or "row" not in target:
+                    raise KeyError(f"Target missing required position fields: {target}")
+                if "HP_CUR" not in target or "HP_MAX" not in target:
+                    raise KeyError(f"Target missing required HP fields: {target}")
+                
+                distance = self._calculate_hex_distance(
+                    active_unit["col"], active_unit["row"],
+                    target["col"], target["row"]
+                )
+                dist_norm = distance / self.perception_radius
+                hp_ratio = target["HP_CUR"] / target["HP_MAX"]
+                
+                # Threat from target to active unit
+                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+                if "RNG_DMG" not in target or "CC_DMG" not in target:
+                    raise KeyError(f"Target missing required damage fields: {target}")
+                
+                threat_to_me = max(target["RNG_DMG"], target["CC_DMG"]) / 5.0
+                
+                # My potential damage to target (phase-dependent)
+                if current_phase == "shoot":
+                    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+                    if "RNG_DMG" not in active_unit:
+                        raise KeyError(f"Active unit missing required 'RNG_DMG' field: {active_unit}")
+                    my_damage = active_unit["RNG_DMG"] / 5.0
+                else:
+                    # Charge or fight phase
+                    if "CC_DMG" not in active_unit:
+                        raise KeyError(f"Active unit missing required 'CC_DMG' field: {active_unit}")
+                    my_damage = active_unit["CC_DMG"] / 5.0
+                
+                # Defensive type encoding
+                defensive_type = self._encode_defensive_type(target)
+                
+                # Kill probability (simple estimate based on damage vs HP)
+                if current_phase == "shoot":
+                    if "RNG_DMG" not in active_unit:
+                        raise KeyError(f"Active unit missing required 'RNG_DMG' field: {active_unit}")
+                    damage_potential = active_unit["RNG_DMG"]
+                else:
+                    if "CC_DMG" not in active_unit:
+                        raise KeyError(f"Active unit missing required 'CC_DMG' field: {active_unit}")
+                    damage_potential = active_unit["CC_DMG"]
+                
+                kill_prob = min(1.0, damage_potential / max(1, target["HP_CUR"]))
+                
+                # Store encoded features
+                obs[feature_base + 0] = dist_norm
+                obs[feature_base + 1] = hp_ratio
+                obs[feature_base + 2] = threat_to_me
+                obs[feature_base + 3] = my_damage
+                obs[feature_base + 4] = defensive_type
+                obs[feature_base + 5] = kill_prob
+            else:
+                # Padding for empty slots
+                for j in range(6):
+                    obs[feature_base + j] = 0.0
+    
+    def _calculate_hex_distance(self, col1: int, row1: int, col2: int, row2: int) -> int:
+        """Calculate hex distance using cube coordinates (matching handlers)."""
+        # Convert offset to cube
+        x1 = col1
+        z1 = row1 - ((col1 - (col1 & 1)) >> 1)
+        y1 = -x1 - z1
+        
+        x2 = col2
+        z2 = row2 - ((col2 - (col2 & 1)) >> 1)
+        y2 = -x2 - z2
+        
+        # Cube distance
+        return max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
     
     def _calculate_reward(self, success: bool, result: Dict[str, Any]) -> float:
         """Calculate reward using actual acting unit with reward mapper integration."""

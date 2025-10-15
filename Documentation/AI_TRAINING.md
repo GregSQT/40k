@@ -140,46 +140,15 @@ class W40KEngine(gym.Env):
 
 ### Observation Space Compatibility
 
-**Critical Requirement:** Your new engine must produce identical observation vectors to existing system.
+⚠️ BREAKING CHANGE (October 2025): Observation system upgraded from 26 floats to 150 floats with egocentric encoding.
+Model Compatibility:
 
-```python
-def _build_observation(self):
-    """Convert game_state to observation vector for PPO"""
-    # MUST maintain exact same format as current system
-    obs_vector = []
-    
-    # Current player indicator
-    obs_vector.append(self.game_state["current_player"])
-    
-    # Phase encoding (move=0, shoot=1, charge=2, fight=3)
-    phase_map = {"move": 0, "shoot": 1, "charge": 2, "fight": 3}
-    obs_vector.append(phase_map[self.game_state["phase"]])
-    
-    # Turn number
-    obs_vector.append(self.game_state["turn"])
-    
-    # Episode steps
-    obs_vector.append(self.game_state["episode_steps"])
-    
-    # Unit states (for each unit position)
-    for i in range(max_units):
-        if i < len(self.game_state["units"]):
-            unit = self.game_state["units"][i]
-            obs_vector.extend([
-                unit["col"], unit["row"],
-                unit["HP_CUR"], unit["HP_MAX"],
-                unit["player"],
-                1 if unit["id"] in self.game_state["units_moved"] else 0,
-                1 if unit["id"] in self.game_state["units_shot"] else 0,
-                1 if unit["id"] in self.game_state["units_charged"] else 0,
-                1 if unit["id"] in self.game_state["units_attacked"] else 0,
-                1 if unit["id"] in self.game_state["units_fled"] else 0
-            ])
-        else:
-            obs_vector.extend([0] * 10)  # Padding for empty unit slots
-    
-    return np.array(obs_vector, dtype=np.float32)
-```
+Old models (26-float system) CANNOT be loaded
+All agents must be retrained from scratch
+Use --new flag to force new model creation
+
+For complete specification, see AI_OBSERVATION.md
+
 
 ### Action Space Mapping
 
@@ -727,6 +696,37 @@ def test_ppo_policy_sampling():
     
     print("✅ PPO policy sampling verified")
 
+def test_egocentric_observation_space():
+    """Test new 150-float egocentric observation system"""
+    
+    engine = W40KEngine(config)
+    obs, _ = engine.reset()
+    
+    # Check observation shape matches new system
+    expected_shape = (150,)  # NEW: 10 + 14×10
+    assert obs.shape == expected_shape, f"Observation shape mismatch: {obs.shape} vs {expected_shape}"
+    
+    # Check observation value ranges (normalized to [-1, 1])
+    assert np.all(obs >= -1.0) and np.all(obs <= 1.0), "Observation values outside [-1, 1] range"
+    
+    # Check observation is not all zeros (unless no units visible)
+    assert not np.all(obs == 0), "Observation is all zeros - check observation building"
+    
+    # Verify egocentric encoding: relative positions should be within radius
+    # First 10 floats are self (ignore), then 14 units * 10 floats each
+    for i in range(14):
+        unit_start = 10 + (i * 10)
+        rel_col = obs[unit_start]
+        rel_row = obs[unit_start + 1]
+        
+        # If unit exists (not padding), relative position should be meaningful
+        if not (rel_col == 0 and rel_row == 0):
+            # Relative positions normalized to [-1, 1] for R=25
+            assert -1.0 <= rel_col <= 1.0, f"Unit {i} rel_col out of range: {rel_col}"
+            assert -1.0 <= rel_row <= 1.0, f"Unit {i} rel_row out of range: {rel_row}"
+    
+    print("✅ Egocentric observation space (150 floats, R=25) verified")
+
 def test_reward_calculation_consistency():
     """Test reward calculation produces expected values"""
     
@@ -885,7 +885,8 @@ python ai/train.py --training-config debug --rewards-config default --new --test
 ### Migration Checklist
 
 - [ ] W40KEngine implements complete gym.Env interface
-- [ ] Observation space matches existing models exactly
+- [x] Observation space UPGRADED to egocentric 150-float system (October 2025)
+- [ ] All models retrained with new observation space (old 26-float models incompatible)
 - [ ] Action space mapping preserved
 - [ ] Reward calculation uses rewards_config.json correctly
 - [ ] PPO model loading strategies work with new engine
@@ -947,12 +948,19 @@ engine.enable_replay_logging = False
 engine.enable_step_logging = False
 ```
 
-**Issue: Stochastic Policy Confusion**
+**Issue: Old Models Fail to Load**
 ```python
-# Symptom: Actions seem random during evaluation
-# Fix: Use deterministic=True for evaluation/testing
-# Training: action, _ = model.predict(obs, deterministic=False)
-# Testing:  action, _ = model.predict(obs, deterministic=True)
+# Symptom: ValueError about observation space shape mismatch
+# "Expected observation shape (26,) but got (150,)"
+# Fix: Old 26-float models CANNOT be loaded with new 150-float system
+# Solution: Retrain all agents from scratch with --new flag
+python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm \
+                   --training-config default \
+                   --rewards-config default \
+                   --new  # Force new model creation
+
+# Migration: Archive old models, retrain with new egocentric system
+# See AI_OBSERVATION.md for complete specification
 ```
 
 ### Validation Commands

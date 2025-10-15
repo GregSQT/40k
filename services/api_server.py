@@ -222,6 +222,11 @@ def start_game():
         for key, value in serializable_state.items():
             if isinstance(value, set):
                 serializable_state[key] = list(value)
+            # Convert LoS cache (tuple keys) to JSON-serializable format
+            elif key == "los_cache" and isinstance(value, dict):
+                serializable_state[key] = {
+                    f"{k[0]},{k[1]}": v for k, v in value.items()
+                }
         
         # Add max_turns from game config
         from config_loader import get_config_loader
@@ -278,6 +283,11 @@ def execute_action():
         for key, value in serializable_state.items():
             if isinstance(value, set):
                 serializable_state[key] = list(value)
+            # Convert LoS cache (tuple keys) to JSON-serializable format
+            elif key == "los_cache" and isinstance(value, dict):
+                serializable_state[key] = {
+                    f"{k[0]},{k[1]}": v for k, v in value.items()
+                }
         
         # Extract and send detailed action logs to frontend
         action_logs = serializable_state.get("action_logs", [])
@@ -429,6 +439,11 @@ def execute_ai_turn():
         for key, value in serializable_state.items():
             if isinstance(value, set):
                 serializable_state[key] = list(value)
+            # Convert LoS cache (tuple keys) to JSON-serializable format
+            elif key == "los_cache" and isinstance(value, dict):
+                serializable_state[key] = {
+                    f"{k[0]},{k[1]}": v for k, v in value.items()
+                }
         
         # Extract action logs for this specific AI action
         action_logs = serializable_state.get("action_logs", [])
