@@ -430,14 +430,12 @@ def execute_ai_turn():
             if isinstance(value, set):
                 serializable_state[key] = list(value)
         
-        # CRITICAL: For AI turns, preserve action logs across multiple actions
-        # Only clear logs when AI turn sequence is complete (phase transitions)
+        # Extract action logs for this specific AI action
         action_logs = serializable_state.get("action_logs", [])
         
-        # Clear logs only when AI turn sequence completes (not per action)
-        if action_logs and result.get("phase_complete"):
-            engine.game_state["action_logs"] = []
-            serializable_state["action_logs"] = []
+        # CRITICAL: Always clear logs after extracting to prevent accumulation
+        engine.game_state["action_logs"] = []
+        serializable_state["action_logs"] = []
         
         return jsonify({
             "success": True,

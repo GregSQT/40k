@@ -99,18 +99,27 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     """
     # unit.HP_CUR > 0?
     if unit["HP_CUR"] <= 0:
+        print(f"🔍 ELIGIBILITY CHECK: Unit {unit['id']} - FAILED HP check (HP_CUR={unit['HP_CUR']})")
         return False
+    
+    print(f"🔍 ELIGIBILITY CHECK: Unit {unit['id']} - HP OK, checking player...")
         
     # unit.player === current_player?
     if unit["player"] != current_player:
+        print(f"🔍 ELIGIBILITY CHECK: Unit {unit['id']} - FAILED player check (unit player={unit['player']}, current={current_player})")
         return False
+    
+    print(f"🔍 ELIGIBILITY CHECK: Unit {unit['id']} - Player OK, checking fled status...")
         
     # units_fled.includes(unit.id)?
     # AI_TURN.md COMPLIANCE: Direct field access with validation
     if "units_fled" not in game_state:
         raise KeyError("game_state missing required 'units_fled' field")
     if unit["id"] in game_state["units_fled"]:
+        print(f"🔍 ELIGIBILITY CHECK: Unit {unit['id']} - FAILED fled check (unit has fled)")
         return False
+    
+    print(f"🔍 ELIGIBILITY CHECK: Unit {unit['id']} - Not fled, checking adjacency...")
         
     # CRITICAL FIX: Add missing adjacency check - units in melee cannot shoot
     # This matches the frontend logic: hasAdjacentEnemyShoot check
@@ -120,24 +129,31 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
             if "CC_RNG" not in unit:
                 raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
             if distance <= unit["CC_RNG"]:
+                print(f"🔍 ELIGIBILITY CHECK: Unit {unit['id']} - FAILED adjacency check (adjacent to enemy {enemy['id']} at distance {distance})")
                 return False
+    
+    print(f"🔍 ELIGIBILITY CHECK: Unit {unit['id']} - Not adjacent to enemies, checking RNG_NB...")
         
     # unit.RNG_NB > 0?
     # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
     if "RNG_NB" not in unit:
         raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
     if unit["RNG_NB"] <= 0:
+        print(f"🔍 ELIGIBILITY CHECK: Unit {unit['id']} - FAILED RNG_NB check (RNG_NB={unit['RNG_NB']})")
         return False
+    
+    print(f"🔍 ELIGIBILITY CHECK: Unit {unit['id']} - RNG_NB OK, checking valid targets...")
     
     # Check for valid targets with detailed debugging
     valid_targets_found = []
-    # print(f"SHOOT DEBUG: Unit {unit['id']} checking {len([u for u in game_state['units'] if u['player'] != unit['player'] and u['HP_CUR'] > 0])} potential targets")
     
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             is_valid = _is_valid_shooting_target(game_state, unit, enemy)
             if is_valid:
                 valid_targets_found.append(enemy["id"])
+    
+    print(f"🔍 ELIGIBILITY CHECK: Unit {unit['id']} - Found {len(valid_targets_found)} valid targets: {valid_targets_found}")
     
     return len(valid_targets_found) > 0
 
@@ -502,27 +518,40 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     """
     AI_TURN.md EXACT: Execute While SHOOT_LEFT > 0 loop automatically
     """
+    # 🔍 DEBUG: Entry point logging
+    print(f"🔍 EXECUTION_LOOP ENTRY: unit_id={unit_id}")
+    print(f"🔍 EXECUTION_LOOP: shoot_activation_pool={game_state.get('shoot_activation_pool', [])}")
+    print(f"🔍 EXECUTION_LOOP: active_shooting_unit={game_state.get('active_shooting_unit', 'None')}")
+    
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
+        print(f"🔍 EXECUTION_LOOP ERROR: unit_id={unit_id} not found in game_state!")
         return False, {"error": "unit_not_found"}
+    
+    print(f"🔍 EXECUTION_LOOP: Found unit={unit['id']}, player={unit['player']}, SHOOT_LEFT={unit.get('SHOOT_LEFT')}, RNG_NB={unit.get('RNG_NB')}")
     
     # AI_TURN.md: While SHOOT_LEFT > 0
     if unit["SHOOT_LEFT"] <= 0:
+        print(f"🔍 EXECUTION_LOOP: SHOOT_LEFT <= 0, ending activation")
         result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
         return True, result  # Ensure consistent (bool, dict) format
     
     # AI_TURN.md: Build valid_target_pool
     valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
+    print(f"🔍 EXECUTION_LOOP: valid_targets={valid_targets}, count={len(valid_targets)}")
     
     # AI_TURN.md: valid_target_pool NOT empty?
     if len(valid_targets) == 0:
+        print(f"🔍 EXECUTION_LOOP: No valid targets available")
         # SHOOT_LEFT = RNG_NB?
         if unit["SHOOT_LEFT"] == unit["RNG_NB"]:
             # No targets at activation
+            print(f"🔍 EXECUTION_LOOP: No targets at activation (SHOOT_LEFT == RNG_NB), ending with PASS")
             result = _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
             return True, result
         else:
             # Shot last target available
+            print(f"🔍 EXECUTION_LOOP: Shot last target available, ending with ACTION")
             result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
             return True, result
     
@@ -530,16 +559,21 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     unit = _get_unit_by_id(game_state, unit_id)
     is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
     
+    print(f"🔍 EXECUTION_LOOP: is_pve_ai={is_pve_ai} (pve_mode={config.get('pve_mode')}, unit_player={unit['player'] if unit else 'None'})")
+    
     # CRITICAL: Only auto-shoot for PvE AI, NOT for gym training
     # Gym training agents must make their own shoot/skip decisions to learn properly
     if is_pve_ai and valid_targets:
         # AUTO-SHOOT: PvE AI only
+        print(f"🔍 EXECUTION_LOOP: AUTO-SHOOT triggered for unit {unit_id}")
         target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
+        print(f"🔍 EXECUTION_LOOP: Selected target_id={target_id}")
         
         # Execute shooting directly and return result
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
     
     # Gym training AND humans get waiting_for_player response
+    print(f"🔍 EXECUTION_LOOP: Returning waiting_for_player response")
     response = {
         "while_loop_active": True,
         "validTargets": valid_targets,
@@ -578,14 +612,14 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if current_pool:
         # Remove units with no shots remaining
         updated_pool = []
-        for unit_id in current_pool:
-            unit_check = _get_unit_by_id(game_state, unit_id)
+        for pool_unit_id in current_pool:  # Changed: Use separate variable name
+            unit_check = _get_unit_by_id(game_state, pool_unit_id)
             if unit_check and "SHOOT_LEFT" in unit_check:
                 shots_left = unit_check["SHOOT_LEFT"]
             else:
                 shots_left = 0
             if unit_check and shots_left > 0:
-                updated_pool.append(unit_id)
+                updated_pool.append(pool_unit_id)  # Changed: Use pool_unit_id
         
         game_state["shoot_activation_pool"] = updated_pool
         current_pool = updated_pool
@@ -691,12 +725,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
         current_pool = game_state["shoot_activation_pool"]
         if unit_id in current_pool:
-            # Decrement SHOOT_LEFT as if shot was fired and missed
-            if "SHOOT_LEFT" not in unit:
-                raise KeyError(f"Unit missing required 'SHOOT_LEFT' field: {unit}")
-            unit["SHOOT_LEFT"] -= 1
+            # Initialize unit if not already activated (this was the missing piece)
+            active_shooting_unit = game_state.get("active_shooting_unit")
+            if active_shooting_unit != unit_id:
+                shooting_unit_activation_start(game_state, unit_id)
             
-            # Continue execution loop to check for more shots or end activation
+            # DO NOT decrement SHOOT_LEFT - invalid action doesn't consume a shot
+            # Just continue execution loop which will handle auto-shooting for PvE AI
             result = _shooting_unit_execution_loop(game_state, unit_id, config)
             if isinstance(result, tuple) and len(result) >= 2:
                 success, loop_result = result
@@ -759,6 +794,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     # CRITICAL: Validate unit has shots remaining
     if "SHOOT_LEFT" not in unit:
         raise KeyError(f"Unit missing required 'SHOOT_LEFT' field: {unit}")
+    print(f"🎯 TARGET_HANDLER ENTRY: Unit {unit_id} SHOOT_LEFT={unit['SHOOT_LEFT']} BEFORE validation")
     if unit["SHOOT_LEFT"] <= 0:
         return False, {"error": "no_shots_remaining", "unitId": unit_id, "shootLeft": unit["SHOOT_LEFT"]}
     
@@ -769,12 +805,16 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         return False, {"error": "target_not_valid", "targetId": target_id}
     
     # Execute shooting attack
+    print(f"🎯 TARGET_HANDLER: Unit {unit_id} SHOOT_LEFT={unit['SHOOT_LEFT']} BEFORE attack")
     attack_result = shooting_attack_controller(game_state, unit_id, target_id)
+    print(f"🎯 TARGET_HANDLER: Unit {unit_id} SHOOT_LEFT={unit['SHOOT_LEFT']} AFTER attack")
     
     # Update SHOOT_LEFT and continue loop per AI_TURN.md
     unit["SHOOT_LEFT"] -= 1
+    print(f"🎯 TARGET_HANDLER: Unit {unit_id} SHOOT_LEFT={unit['SHOOT_LEFT']} AFTER decrement")
     
     # Continue execution loop to check for more shots or end activation
+    print(f"🎯 TARGET_HANDLER: Calling recursive execution loop for unit {unit_id}")
     result = _shooting_unit_execution_loop(game_state, unit_id, config)
     return result
 
