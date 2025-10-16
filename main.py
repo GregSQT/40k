@@ -33,15 +33,8 @@ def load_config():
     if not os.path.exists(unit_registry_path):
         raise FileNotFoundError(f"Required config file missing: {unit_registry_path}")
     
-    # Debug file reading
-    print(f"DEBUG: Reading from {unit_registry_path}")
-    print(f"DEBUG: File exists: {os.path.exists(unit_registry_path)}")
-    print(f"DEBUG: File size: {os.path.getsize(unit_registry_path)} bytes")
-    
     with open(unit_registry_path, 'r', encoding='utf-8-sig') as f:
         content = f.read()
-        print(f"DEBUG: File content length: {len(content)}")
-        print(f"DEBUG: First 100 chars: {repr(content[:100])}")
         
         if not content.strip():
             raise ValueError(f"File {unit_registry_path} is empty")

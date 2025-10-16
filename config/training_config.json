@@ -5,7 +5,12 @@
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1) for bikes/vehicles"
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1)"
+    },
+    "exploration": {
+      "initial_epsilon": 0.3,
+      "final_epsilon": 0.05,
+      "exploration_fraction": 0.3 
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -13,7 +18,7 @@
       "n_steps": 2048,
       "batch_size": 64,
       "n_epochs": 10,
-      "gamma": 0.99,
+      "gamma": 0.95,
       "gae_lambda": 0.95,
       "clip_range": 0.2,
       "clip_range_vf": null,

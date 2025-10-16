@@ -94,6 +94,7 @@ else:
     
     ### Documentation    
         "Documentation/AI_IMPLEMENTATION.md",
+        "Documentation/AI_OBSERVATION.md",
         "Documentation/AI_TRAINING.md",
         "Documentation/AI_TURN.md",
 

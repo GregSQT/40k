@@ -1281,6 +1281,7 @@ class W40KEngine(gym.Env):
             target_ids = shooting_handlers.shooting_build_valid_target_pool(
                 self.game_state, active_unit["id"]
             )
+            
             valid_targets = [
                 self._get_unit_by_id(tid) 
                 for tid in target_ids 
