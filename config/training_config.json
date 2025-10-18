@@ -23,7 +23,7 @@
       "clip_range": 0.2,
       "clip_range_vf": null,
       "normalize_advantage": true,
-      "ent_coef": 0.01,
+      "ent_coef": 0.05,
       "vf_coef": 0.5,
       "max_grad_norm": 0.5,
       "use_sde": false,
@@ -35,7 +35,7 @@
       },
       "verbose": 0
     },
-    "total_episodes": 2000,
+    "total_episodes": 1000,
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 50,
     "callback_params": {
@@ -48,11 +48,11 @@
   },
   "debug": {
     "observation_params": {
-      "obs_size": 150,
+      "obs_size": 170,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1) for bikes/vehicles"
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1), 10 features per target for agent-controlled selection"
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -63,7 +63,7 @@
       "gamma": 0.95,
       "gae_lambda": 0.9,
       "clip_range": 0.2,
-      "ent_coef": 0.02,
+      "ent_coef": 0.1,
       "vf_coef": 0.5,
       "max_grad_norm": 0.5,
       "tensorboard_log": "./tensorboard/",
@@ -83,13 +83,124 @@
       "n_eval_episodes": 2
     }
   },
-  "aggressive": {
+  "curriculum_phase1": {
     "observation_params": {
-      "obs_size": 150,
+      "obs_size": 170,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1) for bikes/vehicles"
+      "justification": "Phase 1: Learn 'shooting is good' - any target, high exploration"
+    },
+    "model_params": {
+      "policy": "MlpPolicy",
+      "learning_rate": 0.001,
+      "n_steps": 512,
+      "batch_size": 32,
+      "n_epochs": 4,
+      "gamma": 0.95,
+      "gae_lambda": 0.9,
+      "clip_range": 0.2,
+      "ent_coef": 0.20,
+      "vf_coef": 0.5,
+      "max_grad_norm": 0.5,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [128, 128]
+      },
+      "verbose": 0
+    },
+    "total_episodes": 100,
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 250,
+    "callback_params": {
+      "checkpoint_save_freq": 2500,
+      "checkpoint_name_prefix": "ppo_curriculum_p1",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 5
+    }
+  },
+  "curriculum_phase2": {
+    "observation_params": {
+      "obs_size": 170,
+      "perception_radius": 25,
+      "max_nearby_units": 10,
+      "max_valid_targets": 5,
+      "justification": "Phase 2: Learn target priorities - kill weak targets first"
+    },
+    "model_params": {
+      "policy": "MlpPolicy",
+      "learning_rate": 0.0005,
+      "n_steps": 1024,
+      "batch_size": 64,
+      "n_epochs": 6,
+      "gamma": 0.95,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "ent_coef": 0.10,
+      "vf_coef": 0.5,
+      "max_grad_norm": 0.5,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [256, 256]
+      },
+      "verbose": 0
+    },
+    "total_episodes": 500,
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 250,
+    "callback_params": {
+      "checkpoint_save_freq": 10000,
+      "checkpoint_name_prefix": "ppo_curriculum_p2",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 10
+    }
+  },
+  "curriculum_phase3": {
+    "observation_params": {
+      "obs_size": 170,
+      "perception_radius": 25,
+      "max_nearby_units": 10,
+      "max_valid_targets": 5,
+      "justification": "Phase 3: Learn full tactical priorities with RewardMapper"
+    },
+    "model_params": {
+      "policy": "MlpPolicy",
+      "learning_rate": 0.0003,
+      "n_steps": 2048,
+      "batch_size": 64,
+      "n_epochs": 10,
+      "gamma": 0.95,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "ent_coef": 0.05,
+      "vf_coef": 0.5,
+      "max_grad_norm": 0.5,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [256, 256]
+      },
+      "verbose": 0
+    },
+    "total_episodes": 1000,
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 250,
+    "callback_params": {
+      "checkpoint_save_freq": 20000,
+      "checkpoint_name_prefix": "ppo_curriculum_p3",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 10
+    }
+  },
+  "aggressive": {
+    "observation_params": {
+      "obs_size": 170,
+      "perception_radius": 25,
+      "max_nearby_units": 10,
+      "max_valid_targets": 5,
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1), 10 features per target for agent-controlled selection"
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -122,11 +233,11 @@
   },
   "conservative": {
     "observation_params": {
-      "obs_size": 150,
+      "obs_size": 170,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1) for bikes/vehicles"
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1), 10 features per target for agent-controlled selection"
     },
     "model_params": {
       "policy": "MlpPolicy",

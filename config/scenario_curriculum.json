@@ -1,0 +1,46 @@
+{
+  "units": [
+    {
+      "id": 1,
+      "unit_type": "Intercessor",
+      "player": 0,
+      "col": 16,
+      "row": 19
+    },
+    {
+      "id": 2,
+      "unit_type": "Intercessor",
+      "player": 0,
+      "col": 12,
+      "row": 19
+    },
+    {
+      "id": 4,
+      "unit_type": "Genestealer",
+      "player": 1,
+      "col": 4,
+      "row": 3
+    },
+    {
+      "id": 5,
+      "unit_type": "Hormagaunt",
+      "player": 1,
+      "col": 6,
+      "row": 2
+    },
+    {
+      "id": 6,
+      "unit_type": "Hormagaunt",
+      "player": 1,
+      "col": 8,
+      "row": 1
+    },
+    {
+      "id": 7,
+      "unit_type": "Hormagaunt",
+      "player": 1,
+      "col": 10,
+      "row": 1
+    }
+  ]
+}

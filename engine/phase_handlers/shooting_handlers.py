@@ -818,38 +818,48 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
 
 def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, target_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_SHOOT.md: Handle target selection and shooting execution
+    AI_SHOOT.md: Handle target selection and shooting execution.
+    Supports both agent-selected targetId and auto-selection fallback for humans.
     """    
     unit = _get_unit_by_id(game_state, unit_id)
-    target = _get_unit_by_id(game_state, target_id)
     
-    if not unit or not target:
-        return False, {"error": "unit_or_target_not_found"}
+    if not unit:
+        return False, {"error": "unit_not_found"}
     
     # CRITICAL: Validate unit has shots remaining
     if "SHOOT_LEFT" not in unit:
         raise KeyError(f"Unit missing required 'SHOOT_LEFT' field: {unit}")
-    print(f"🎯 TARGET_HANDLER ENTRY: Unit {unit_id} SHOOT_LEFT={unit['SHOOT_LEFT']} BEFORE validation")
     if unit["SHOOT_LEFT"] <= 0:
         return False, {"error": "no_shots_remaining", "unitId": unit_id, "shootLeft": unit["SHOOT_LEFT"]}
     
-    # Validate target is in valid pool
+    # Build valid target pool
     valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
     
-    if target_id not in valid_targets:
+    if not valid_targets:
+        return False, {"error": "no_valid_targets", "unitId": unit_id}
+    
+    # Handle target selection: agent-provided or auto-select
+    if target_id and target_id in valid_targets:
+        # Agent provided valid target
+        selected_target_id = target_id
+    elif target_id:
+        # Agent provided invalid target
         return False, {"error": "target_not_valid", "targetId": target_id}
+    else:
+        # No target provided - auto-select first valid target (human player fallback)
+        selected_target_id = valid_targets[0]
+    
+    target = _get_unit_by_id(game_state, selected_target_id)
+    if not target:
+        return False, {"error": "target_not_found", "targetId": selected_target_id}
     
     # Execute shooting attack
-    print(f"🎯 TARGET_HANDLER: Unit {unit_id} SHOOT_LEFT={unit['SHOOT_LEFT']} BEFORE attack")
-    attack_result = shooting_attack_controller(game_state, unit_id, target_id)
-    print(f"🎯 TARGET_HANDLER: Unit {unit_id} SHOOT_LEFT={unit['SHOOT_LEFT']} AFTER attack")
+    attack_result = shooting_attack_controller(game_state, unit_id, selected_target_id)
     
     # Update SHOOT_LEFT and continue loop per AI_TURN.md
     unit["SHOOT_LEFT"] -= 1
-    print(f"🎯 TARGET_HANDLER: Unit {unit_id} SHOOT_LEFT={unit['SHOOT_LEFT']} AFTER decrement")
     
     # Continue execution loop to check for more shots or end activation
-    print(f"🎯 TARGET_HANDLER: Calling recursive execution loop for unit {unit_id}")
     result = _shooting_unit_execution_loop(game_state, unit_id, config)
     return result
 

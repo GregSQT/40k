@@ -42,6 +42,7 @@ else:
         "ai/metrics_tracker.py",
         "ai/multi_agent_trainer.py",
         "ai/scenario_manager.py",
+        "target_selection_monitor.py",
         "ai/train.py",
         "ai/unit_registry.py",
         "ai/reward_mapper.py",
@@ -187,9 +188,11 @@ else:
         "frontend/src/roster/tyranid/classes/TyranidInfantryEliteMeleeElite.ts",
         "frontend/src/roster/tyranid/classes/TyranidInfantrySwarmMeleeSwarm.ts",
         "frontend/src/roster/tyranid/classes/TyranidInfantrySwarmRangedSwarm.ts",
+        "frontend/src/roster/tyranid/classes/TyranidInfantryTroopMeleeTroop.ts",
         "frontend/src/roster/tyranid/units/Termagant.ts",
         "frontend/src/roster/tyranid/units/Hormagaunt.ts",
         "frontend/src/roster/tyranid/units/Carnifex.ts",
+        "frontend/src/roster/tyranid/units/Genestealer.ts",
                 
         # frontend/src/services
         "frontend/src/services/aiService.ts",

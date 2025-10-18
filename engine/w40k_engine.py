@@ -176,13 +176,13 @@ class W40KEngine(gym.Env):
         
         # CRITICAL: Initialize Gym spaces BEFORE any other operations
         # Gym interface properties - dynamic action space based on phase
-        self.action_space = gym.spaces.Discrete(8)  # Base action space
-        self._current_valid_actions = list(range(8))  # Will be masked dynamically
+        self.action_space = gym.spaces.Discrete(12)  # Expanded: 4 move + 5 shoot + charge + fight + wait
+        self._current_valid_actions = list(range(12))  # Will be masked dynamically
         
         # Observation space: Egocentric perception with R=25 radius
-        # New system: 150 floats = 10 global + 8 unit_stats + 32 terrain + 70 nearby_units + 30 targets
+        # New system: 170 floats = 10 global + 8 unit_stats + 32 terrain + 70 nearby_units + 50 targets
         # Covers MOVE(12) + MAX_CHARGE(12) + ENEMY_OFFSET(1) = 25 hex strategic reach
-        obs_size = 150  # Egocentric observation with full tactical awareness
+        obs_size = 170  # Egocentric observation with agent-controlled target selection
         
         # Load perception parameters from training config if available
         if hasattr(self, 'training_config') and self.training_config:
@@ -502,6 +502,8 @@ class W40KEngine(gym.Env):
         except Exception as e:
             return False, {"error": "ai_decision_failed", "message": str(e)}
     
+    
+    
     def _make_ai_decision(self) -> Dict[str, Any]:
         """
         AI decision logic - replaces human clicks with model predictions.
@@ -509,6 +511,10 @@ class W40KEngine(gym.Env):
         """
         # Get observation for AI model
         obs = self._build_observation()
+        
+        # CRITICAL DEBUG: Check action mask
+        action_mask = self.get_action_mask()
+        valid_actions = [i for i in range(12) if action_mask[i]]
         
         # Get AI model prediction
         prediction_result = self._ai_model.predict(obs, deterministic=True)
@@ -519,6 +525,10 @@ class W40KEngine(gym.Env):
             action_int = prediction_result.item()
         else:
             action_int = int(prediction_result)
+        
+        # CRITICAL DEBUG: Log AI decision
+        current_phase = self.game_state["phase"]
+        print(f"🤖 AI DECISION: phase={current_phase}, valid_actions={valid_actions}, model_chose={action_int}, is_valid={action_mask[action_int]}")
         
         # Convert to semantic action using existing method
         semantic_action = self._convert_gym_action(action_int)
@@ -913,14 +923,14 @@ class W40KEngine(gym.Env):
         Build egocentric observation vector with R=25 perception radius.
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
         
-        Structure (150 floats):
+        Structure (170 floats):  # CHANGE 1: Updated comment from 150 to 170
         - [0:10] Global context
         - [10:18] Active unit capabilities  
         - [18:50] Directional terrain (8 directions × 4 features)
         - [50:120] Nearby units (7 units × 10 features)
-        - [120:150] Valid targets (5 targets × 6 features)
+        - [120:170] Valid targets (5 targets × 10 features)  # CHANGE 2: Updated from 6 to 10 features, 150 to 170
         """
-        obs = np.zeros(150, dtype=np.float32)
+        obs = np.zeros(170, dtype=np.float32)  # CHANGE 3: Changed array size from 150 to 170
         
         # Get active unit (agent's current unit)
         active_unit = self._get_active_unit_for_observation()
@@ -962,7 +972,7 @@ class W40KEngine(gym.Env):
         # === SECTION 4: Nearby Units (70 floats) ===
         self._encode_nearby_units(obs, active_unit, base_idx=50)
         
-        # === SECTION 5: Valid Targets (30 floats) ===
+        # === SECTION 5: Valid Targets (50 floats) ===
         self._encode_valid_targets(obs, active_unit, base_idx=120)
         
         return obs
@@ -1234,6 +1244,31 @@ class W40KEngine(gym.Env):
             return 0.75  # Elite
         else:
             return 1.0   # Leader
+        
+    def _encode_defensive_type_detailed(self, unit: Dict[str, Any]) -> float:
+        """
+        Encode defensive type with 4-tier granularity for target selection.
+        AI_TURN.md COMPLIANCE: Direct UPPERCASE field access.
+        
+        Returns:
+        - 0.0  = Swarm (HP_MAX <= 1)
+        - 0.33 = Troop (HP_MAX 2-3)
+        - 0.66 = Elite (HP_MAX 4-6)
+        - 1.0  = Leader (HP_MAX >= 7)
+        """
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+        if "HP_MAX" not in unit:
+            raise KeyError(f"Unit missing required 'HP_MAX' field: {unit}")
+        
+        hp_max = unit["HP_MAX"]
+        if hp_max <= 1:
+            return 0.0  # Swarm
+        elif hp_max <= 3:
+            return 0.33  # Troop
+        elif hp_max <= 6:
+            return 0.66  # Elite
+        else:
+            return 1.0   # Leader
     
     def _check_los_cached(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> float:
         """
@@ -1257,17 +1292,28 @@ class W40KEngine(gym.Env):
     
     def _encode_valid_targets(self, obs: np.ndarray, active_unit: Dict[str, Any], base_idx: int):
         """
-        Encode up to 5 valid targets (shooting/charge targets).
-        30 floats = 5 targets × 6 features per target.
-        AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, phase-specific targeting.
+        Encode valid targets with EXPLICIT action-target correspondence and W40K probabilities.
+        50 floats = 5 actions × 10 features per action
         
-        Features per target:
-        - distance (normalized by perception_radius)
-        - hp_ratio (HP_CUR / HP_MAX)
-        - threat_to_me (target's damage potential)
-        - my_damage_to_target (my damage potential)
-        - defensive_type (Swarm/Troop/Elite/Leader)
-        - kill_probability (estimated chance to kill)
+        CRITICAL DESIGN: obs[120 + action_offset*10] directly corresponds to action (4 + action_offset)
+        Example: 
+        - obs[120:130] = features for what happens if agent presses action 4
+        - obs[130:140] = features for what happens if agent presses action 5
+        
+        This creates DIRECT causal relationship for RL learning:
+        "When obs[121]=1.0 (high kill_probability), pressing action 4 gives high reward"
+        
+        Features per action slot (10 floats):
+        0. is_valid (1.0 = target exists, 0.0 = no target in this slot)
+        1. kill_probability (0.0-1.0, probability to kill target this turn considering dice)
+        2. danger_to_me (0.0-1.0, probability target kills ME next turn)
+        3. hp_ratio (target HP_CUR / HP_MAX)
+        4. distance_normalized (hex_distance / perception_radius)
+        5. is_lowest_hp (1.0 if lowest HP among valid targets)
+        6. army_weighted_threat (0.0-1.0, strategic priority considering all friendlies by VALUE)
+        7. can_be_charged_by_melee (1.0 if friendly melee can reach this target)
+        8. optimal_target_score (RewardMapper priority calculation 0.0-1.0)
+        9. target_type_match (unit_registry compatibility 0.0-1.0)
         """
         # Get valid targets based on current phase
         valid_targets = []
@@ -1342,72 +1388,301 @@ class W40KEngine(gym.Env):
             active_unit["col"], active_unit["row"], t["col"], t["row"]
         ))
         
-        # Encode up to max_valid_targets (5 targets × 6 features = 30 floats)
+        # CRITICAL: Sort by distance for CONSISTENT ordering across episodes
+        # Agent needs same target in same slot each time for learning
+        valid_targets.sort(key=lambda t: self._calculate_hex_distance(
+            active_unit["col"], active_unit["row"], t["col"], t["row"]
+        ))
+        
+        # Encode up to max_valid_targets (5 targets × 10 features = 50 floats)
         max_encoded = 5
         for i in range(max_encoded):
-            feature_base = base_idx + i * 6
+            feature_base = base_idx + i * 10
             
             if i < len(valid_targets):
                 target = valid_targets[i]
                 
-                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access with validation
-                if "col" not in target or "row" not in target:
-                    raise KeyError(f"Target missing required position fields: {target}")
-                if "HP_CUR" not in target or "HP_MAX" not in target:
-                    raise KeyError(f"Target missing required HP fields: {target}")
+                # Feature 0: Action validity (CRITICAL - tells agent this action works)
+                obs[feature_base + 0] = 1.0
                 
+                # Feature 1: Kill probability (W40K dice mechanics)
+                kill_prob = self._calculate_kill_probability(active_unit, target)
+                obs[feature_base + 1] = kill_prob
+                
+                # Feature 2: Danger to me (probability target kills ME next turn)
+                danger_prob = self._calculate_danger_probability(active_unit, target)
+                obs[feature_base + 2] = danger_prob
+                
+                # Feature 3: HP ratio (efficiency metric)
+                obs[feature_base + 3] = target.get("HP_CUR", 1) / max(1, target.get("HP_MAX", 1))
+                
+                # Feature 4: Distance (accessibility)
                 distance = self._calculate_hex_distance(
                     active_unit["col"], active_unit["row"],
                     target["col"], target["row"]
                 )
-                dist_norm = distance / self.perception_radius
-                hp_ratio = target["HP_CUR"] / target["HP_MAX"]
+                obs[feature_base + 4] = distance / self.perception_radius
                 
-                # Threat from target to active unit
-                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-                if "RNG_DMG" not in target or "CC_DMG" not in target:
-                    raise KeyError(f"Target missing required damage fields: {target}")
+                # Feature 5: Is lowest HP (finish-off signal)
+                all_hps = [t.get("HP_CUR", 1) for t in valid_targets]
+                min_hp = min(all_hps) if all_hps else 1
+                is_lowest = 1.0 if target.get("HP_CUR", 999) == min_hp else 0.0
+                obs[feature_base + 5] = is_lowest
                 
-                threat_to_me = max(target["RNG_DMG"], target["CC_DMG"]) / 5.0
+                # Feature 6: Army-wide weighted threat (strategic priority by VALUE)
+                army_threat = self._calculate_army_weighted_threat(target, valid_targets)
+                obs[feature_base + 6] = army_threat
                 
-                # My potential damage to target (phase-dependent)
-                if current_phase == "shoot":
-                    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-                    if "RNG_DMG" not in active_unit:
-                        raise KeyError(f"Active unit missing required 'RNG_DMG' field: {active_unit}")
-                    my_damage = active_unit["RNG_DMG"] / 5.0
-                else:
-                    # Charge or fight phase
-                    if "CC_DMG" not in active_unit:
-                        raise KeyError(f"Active unit missing required 'CC_DMG' field: {active_unit}")
-                    my_damage = active_unit["CC_DMG"] / 5.0
+                # Feature 7: Can be charged by melee (coordination signal)
+                can_be_charged = 1.0 if self._can_melee_units_charge_target(target) else 0.0
+                obs[feature_base + 7] = can_be_charged
                 
-                # Defensive type encoding
-                defensive_type = self._encode_defensive_type(target)
+                # Feature 8: Optimal target score (RewardMapper-based)
+                optimal_score = self._calculate_target_optimality_score(active_unit, target, valid_targets)
+                obs[feature_base + 8] = optimal_score
                 
-                # Kill probability (simple estimate based on damage vs HP)
-                if current_phase == "shoot":
-                    if "RNG_DMG" not in active_unit:
-                        raise KeyError(f"Active unit missing required 'RNG_DMG' field: {active_unit}")
-                    damage_potential = active_unit["RNG_DMG"]
-                else:
-                    if "CC_DMG" not in active_unit:
-                        raise KeyError(f"Active unit missing required 'CC_DMG' field: {active_unit}")
-                    damage_potential = active_unit["CC_DMG"]
-                
-                kill_prob = min(1.0, damage_potential / max(1, target["HP_CUR"]))
-                
-                # Store encoded features
-                obs[feature_base + 0] = dist_norm
-                obs[feature_base + 1] = hp_ratio
-                obs[feature_base + 2] = threat_to_me
-                obs[feature_base + 3] = my_damage
-                obs[feature_base + 4] = defensive_type
-                obs[feature_base + 5] = kill_prob
+                # Feature 9: Target type match (unit_registry compatibility)
+                type_match = self._calculate_target_type_match(active_unit, target)
+                obs[feature_base + 9] = type_match
             else:
                 # Padding for empty slots
-                for j in range(6):
+                for j in range(10):
                     obs[feature_base + j] = 0.0
+    
+    def _calculate_kill_probability(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> float:
+        """
+        Calculate actual probability to kill target this turn considering W40K dice mechanics.
+        
+        Considers:
+        - Hit probability (RNG_ATK vs d6)
+        - Wound probability (RNG_STR vs target T)
+        - Save failure probability (target saves vs RNG_AP)
+        - Number of shots (RNG_NB)
+        - Damage per successful wound (RNG_DMG)
+        
+        Returns: 0.0-1.0 probability
+        """
+        current_phase = self.game_state["phase"]
+        
+        if current_phase == "shoot":
+            if "RNG_ATK" not in shooter or "RNG_STR" not in shooter or "RNG_DMG" not in shooter:
+                raise KeyError(f"Shooter missing required ranged stats: {shooter}")
+            if "RNG_NB" not in shooter:
+                raise KeyError(f"Shooter missing required 'RNG_NB' field: {shooter}")
+            
+            hit_target = shooter["RNG_ATK"]
+            strength = shooter["RNG_STR"]
+            damage = shooter["RNG_DMG"]
+            num_attacks = shooter["RNG_NB"]
+            ap = shooter.get("RNG_AP", 0)
+        else:
+            if "CC_ATK" not in shooter or "CC_STR" not in shooter or "CC_DMG" not in shooter:
+                raise KeyError(f"Shooter missing required melee stats: {shooter}")
+            if "CC_NB" not in shooter:
+                raise KeyError(f"Shooter missing required 'CC_NB' field: {shooter}")
+            
+            hit_target = shooter["CC_ATK"]
+            strength = shooter["CC_STR"]
+            damage = shooter["CC_DMG"]
+            num_attacks = shooter["CC_NB"]
+            ap = shooter.get("CC_AP", 0)
+        
+        p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
+        
+        if "T" not in target:
+            raise KeyError(f"Target missing required 'T' field: {target}")
+        wound_target = self._calculate_wound_target(strength, target["T"])
+        p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
+        
+        save_target = self._calculate_save_target(target, ap)
+        p_fail_save = max(0.0, min(1.0, (save_target - 1) / 6.0))
+        
+        p_damage_per_attack = p_hit * p_wound * p_fail_save
+        expected_damage = num_attacks * p_damage_per_attack * damage
+        
+        if expected_damage >= target["HP_CUR"]:
+            return 1.0
+        else:
+            return min(1.0, expected_damage / target["HP_CUR"])
+    
+    def _calculate_danger_probability(self, defender: Dict[str, Any], attacker: Dict[str, Any]) -> float:
+        """
+        Calculate probability that attacker will kill defender on its next turn.
+        Works for ANY unit pair (active unit vs enemy, VIP vs enemy, etc.)
+        
+        Considers:
+        - Distance (can they reach?)
+        - Hit/wound/save probabilities
+        - Number of attacks
+        - Damage output
+        
+        Returns: 0.0-1.0 probability
+        """
+        distance = self._calculate_hex_distance(
+            defender["col"], defender["row"],
+            attacker["col"], attacker["row"]
+        )
+        
+        can_use_ranged = distance <= attacker.get("RNG_RNG", 0)
+        can_use_melee = distance <= attacker.get("CC_RNG", 0)
+        
+        if not can_use_ranged and not can_use_melee:
+            return 0.0
+        
+        if can_use_ranged and not can_use_melee:
+            if "RNG_ATK" not in attacker or "RNG_STR" not in attacker:
+                return 0.0
+            
+            hit_target = attacker["RNG_ATK"]
+            strength = attacker["RNG_STR"]
+            damage = attacker["RNG_DMG"]
+            num_attacks = attacker.get("RNG_NB", 0)
+            ap = attacker.get("RNG_AP", 0)
+        else:
+            if "CC_ATK" not in attacker or "CC_STR" not in attacker:
+                return 0.0
+            
+            hit_target = attacker["CC_ATK"]
+            strength = attacker["CC_STR"]
+            damage = attacker["CC_DMG"]
+            num_attacks = attacker.get("CC_NB", 0)
+            ap = attacker.get("CC_AP", 0)
+        
+        if num_attacks == 0:
+            return 0.0
+        
+        p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
+        
+        if "T" not in defender:
+            return 0.0
+        wound_target = self._calculate_wound_target(strength, defender["T"])
+        p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
+        
+        save_target = self._calculate_save_target(defender, ap)
+        p_fail_save = max(0.0, min(1.0, (save_target - 1) / 6.0))
+        
+        p_damage_per_attack = p_hit * p_wound * p_fail_save
+        expected_damage = num_attacks * p_damage_per_attack * damage
+        
+        if expected_damage >= defender["HP_CUR"]:
+            return 1.0
+        else:
+            return min(1.0, expected_damage / defender["HP_CUR"])
+    
+    def _calculate_army_weighted_threat(self, target: Dict[str, Any], valid_targets: List[Dict[str, Any]]) -> float:
+        """
+        Calculate army-wide weighted threat score considering all friendly units by VALUE.
+        
+        This is the STRATEGIC PRIORITY feature that teaches the agent to:
+        - Protect high-VALUE units (Leaders, Elites)
+        - Consider threats to the entire team, not just personal survival
+        - Make sacrifices when strategically necessary
+        
+        Logic:
+        1. For each friendly unit, calculate danger from this target
+        2. Weight that danger by the friendly unit's VALUE (1-200)
+        3. Sum all weighted dangers
+        4. Normalize to 0.0-1.0 based on highest threat among all targets
+        
+        Returns: 0.0-1.0 (1.0 = highest strategic threat among all targets)
+        """
+        my_player = self.game_state["current_player"]
+        friendly_units = [
+            u for u in self.game_state["units"]
+            if u["player"] == my_player and u["HP_CUR"] > 0
+        ]
+        
+        if not friendly_units:
+            return 0.0
+        
+        total_weighted_threat = 0.0
+        for friendly in friendly_units:
+            danger = self._calculate_danger_probability(friendly, target)
+            unit_value = friendly.get("VALUE", 10.0)
+            weighted_threat = danger * unit_value
+            total_weighted_threat += weighted_threat
+        
+        all_weighted_threats = []
+        for t in valid_targets:
+            t_total = 0.0
+            for friendly in friendly_units:
+                danger = self._calculate_danger_probability(friendly, t)
+                unit_value = friendly.get("VALUE", 10.0)
+                t_total += danger * unit_value
+            all_weighted_threats.append(t_total)
+        
+        max_weighted_threat = max(all_weighted_threats) if all_weighted_threats else 1.0
+        
+        if max_weighted_threat > 0:
+            return min(1.0, total_weighted_threat / max_weighted_threat)
+        else:
+            return 0.0
+    
+    def _calculate_target_optimality_score(self, active_unit: Dict[str, Any], 
+                                          target: Dict[str, Any], 
+                                          all_targets: List[Dict[str, Any]]) -> float:
+        """
+        Calculate RewardMapper-based optimality score for target (0.0-1.0).
+        Uses shooting_priority_reward logic without actual reward calculation.
+        Higher score = better target according to tactical priorities.
+        """
+        try:
+            reward_mapper = self._get_reward_mapper()
+            enriched_unit = self._enrich_unit_for_reward_mapper(active_unit)
+            enriched_target = self._enrich_unit_for_reward_mapper(target)
+            enriched_all = [self._enrich_unit_for_reward_mapper(t) for t in all_targets]
+            
+            can_melee_charge = self._can_melee_units_charge_target(target)
+            priority_reward = reward_mapper.get_shooting_priority_reward(
+                enriched_unit, enriched_target, enriched_all, can_melee_charge
+            )
+            
+            normalized = (priority_reward + 1.0) / 4.0
+            return np.clip(normalized, 0.0, 1.0)
+            
+        except Exception as e:
+            threat = max(target.get("RNG_DMG", 0), target.get("CC_DMG", 0))
+            return min(1.0, threat / 5.0)
+    
+    def _calculate_target_type_match(self, active_unit: Dict[str, Any], 
+                                    target: Dict[str, Any]) -> float:
+        """
+        Calculate unit_registry-based type compatibility (0.0-1.0).
+        Higher = this unit is specialized against this target type.
+        
+        Example: RangedSwarm unit gets 1.0 against Swarm targets, 0.3 against others
+        """
+        try:
+            if not hasattr(self, 'unit_registry') or not self.unit_registry:
+                return 0.5
+            
+            unit_type = active_unit.get("unitType", "")
+            
+            if "Swarm" in unit_type:
+                preferred = "swarm"
+            elif "Troop" in unit_type:
+                preferred = "troop"
+            elif "Elite" in unit_type:
+                preferred = "elite"
+            elif "Leader" in unit_type:
+                preferred = "leader"
+            else:
+                return 0.5
+            
+            target_hp = target.get("HP_MAX", 1)
+            if target_hp <= 1:
+                target_type = "swarm"
+            elif target_hp <= 3:
+                target_type = "troop"
+            elif target_hp <= 6:
+                target_type = "elite"
+            else:
+                target_type = "leader"
+            
+            return 1.0 if preferred == target_type else 0.3
+            
+        except Exception:
+            return 0.5
     
     def _calculate_hex_distance(self, col1: int, row1: int, col2: int, row2: int) -> int:
         """Calculate hex distance using cube coordinates (matching handlers)."""
@@ -1724,8 +1999,8 @@ class W40KEngine(gym.Env):
 # ===== GYM INTERFACE HELPER METHODS =====
     
     def get_action_mask(self) -> np.ndarray:
-        """Return action mask for current game state - True = valid action."""
-        mask = np.zeros(8, dtype=bool)
+        """Return action mask with dynamic target slot masking - True = valid action."""
+        mask = np.zeros(12, dtype=bool)
         current_phase = self.game_state["phase"]
         eligible_units = self._get_eligible_units_for_current_phase()
         
@@ -1734,22 +2009,56 @@ class W40KEngine(gym.Env):
             return mask  # All False - no valid actions
         
         if current_phase == "move":
-            # Movement phase: actions 0-3 (movement types) + 7 (wait)
-            mask[[0, 1, 2, 3, 7]] = True
+            # Movement phase: actions 0-3 (movement types) + 11 (wait)
+            mask[[0, 1, 2, 3, 11]] = True
         elif current_phase == "shoot":
-            # Shooting phase: action 4 (shoot) + 7 (wait)
-            mask[[4, 7]] = True
+            # Shooting phase: actions 4-8 (target slots 0-4) + 11 (wait)
+            # CRITICAL FIX: Dynamically enable based on ACTUAL available targets
+            active_unit = eligible_units[0] if eligible_units else None
+            if active_unit:
+                from .phase_handlers import shooting_handlers
+                valid_targets = shooting_handlers.shooting_build_valid_target_pool(
+                    self.game_state, active_unit["id"]
+                )
+                num_targets = len(valid_targets)
+                
+                # CRITICAL: Only enable target slots if targets exist
+                if num_targets > 0:
+                    # Enable shoot actions for available targets only (up to 5 slots)
+                    for i in range(min(5, num_targets)):
+                        mask[4 + i] = True
+                    
+                    # CRITICAL DEBUG: Verify mask-observation alignment (first 3 episodes only)
+                    if self.game_state["turn"] <= 3 and self.game_state["episode_steps"] < 30:
+                        obs = self._build_observation()
+                        print(f"\n🔍 MASK-OBSERVATION ALIGNMENT CHECK:")
+                        print(f"   Turn {self.game_state['turn']}, Unit {active_unit['id']}, Targets: {num_targets}")
+                        print(f"   Mask enabled actions: {[i for i in range(12) if mask[i]]}")
+                        
+                        for i in range(min(5, num_targets)):
+                            obs_base = 120 + i * 10
+                            is_valid = obs[obs_base + 0]
+                            kill_prob = obs[obs_base + 1]
+                            danger = obs[obs_base + 2]
+                            army_threat = obs[obs_base + 6]
+                            print(f"   Action {4+i}: valid={is_valid:.1f}, kill_prob={kill_prob:.2f}, danger={danger:.2f}, army_threat={army_threat:.2f}")
+                        
+                        if not hasattr(self, '_alignment_verified'):
+                            self._alignment_verified = True
+                            print(f"   ✅ Alignment verified: {num_targets} targets = {num_targets} valid actions")
+            
+            mask[11] = True  # Wait always valid (can choose not to shoot)
         elif current_phase == "charge":
-            # Charge phase: action 5 (charge) + 7 (wait)
-            mask[[5, 7]] = True
+            # Charge phase: action 9 (charge) + 11 (wait)
+            mask[[9, 11]] = True
         elif current_phase == "fight":
-            # Fight phase: action 6 (fight) only - no wait in fight
-            mask[6] = True
+            # Fight phase: action 10 (fight) only - no wait in fight
+            mask[10] = True
         
         return mask
     
     def _convert_gym_action(self, action: int) -> Dict[str, Any]:
-        """Convert gym integer action to semantic action - AI selects units dynamically."""
+        """Convert gym integer action to semantic action with target selection support."""
         action_int = int(action.item()) if hasattr(action, 'item') else int(action)
         current_phase = self.game_state["phase"]
         
@@ -1789,44 +2098,64 @@ class W40KEngine(gym.Env):
         selected_unit_id = eligible_units[0]["id"]
         
         if current_phase == "move":
-            if action_int == 0:  # Move action
-                # CRITICAL FIX: Use activate_unit instead of direct move
+            if action_int in [0, 1, 2, 3]:  # Move actions
                 return {
                     "action": "activate_unit", 
                     "unitId": selected_unit_id
                 }
-            elif action_int == 7:  # WAIT - agent chooses not to move
+            elif action_int == 11:  # WAIT - agent chooses not to move
                 return {"action": "skip", "unitId": selected_unit_id}
+                
         elif current_phase == "shoot":
-            if action_int == 4:  # Shoot action
-                # print(f"🔍 AI_SHOOTING_ACTION: Creating activate_unit for unit {selected_unit_id}")
-                return {
-                    "action": "activate_unit", 
-                    "unitId": selected_unit_id
-                }
-            elif action_int == 7:  # WAIT - agent chooses not to shoot
+            if action_int in [4, 5, 6, 7, 8]:  # Shoot target slots 0-4
+                target_slot = action_int - 4  # Convert to slot index (0-4)
+                
+                # Get valid targets for this unit
+                from .phase_handlers import shooting_handlers
+                valid_targets = shooting_handlers.shooting_build_valid_target_pool(
+                    self.game_state, selected_unit_id
+                )
+                
+                # CRITICAL: Validate target slot is within valid range
+                if target_slot < len(valid_targets):
+                    target_id = valid_targets[target_slot]
+                    
+                    # Debug: Log first few target selections
+                    if self.game_state["turn"] == 1 and not hasattr(self, '_target_logged'):
+                        self._target_logged = True
+                        print(f"TARGET DEBUG: Unit {selected_unit_id} action={action_int} slot={target_slot} targeting {target_id} from {valid_targets}")
+                    
+                    return {
+                        "action": "shoot",
+                        "unitId": selected_unit_id,
+                        "targetId": target_id
+                    }
+                else:
+                    # Should not happen with proper masking, but handle gracefully
+                    print(f"WARNING: Invalid target slot {target_slot} for unit {selected_unit_id} with {len(valid_targets)} targets")
+                    return {
+                        "action": "wait",
+                        "unitId": selected_unit_id,
+                        "invalid_action_penalty": True,
+                        "attempted_action": action_int
+                    }
+                    
+            elif action_int == 11:  # WAIT - agent chooses not to shoot
                 return {"action": "wait", "unitId": selected_unit_id}
-            else:
-                # AI chose invalid action - convert to wait with penalty flag
-                # print(f"🔍 AI_SHOOTING_INVALID: Converting action {action_int} to wait with penalty")
-                return {
-                    "action": "wait", 
-                    "unitId": selected_unit_id,
-                    "invalid_action_penalty": True,
-                    "attempted_action": action_int
-                }
+                
         elif current_phase == "charge":
-            if action_int == 5:  # Charge action
+            if action_int == 9:  # Charge action
                 target = self._ai_select_charge_target(selected_unit_id)
                 return {
                     "action": "charge", 
                     "unitId": selected_unit_id, 
                     "targetId": target
                 }
-            elif action_int == 7:  # WAIT - agent chooses not to charge
+            elif action_int == 11:  # WAIT - agent chooses not to charge
                 return {"action": "wait", "unitId": selected_unit_id}
+                
         elif current_phase == "fight":
-            if action_int == 6:  # Fight action - NO WAIT option in fight phase
+            if action_int == 10:  # Fight action - NO WAIT option in fight phase
                 selected_unit = self._ai_select_unit(eligible_units, "fight")
                 target = self._ai_select_combat_target(selected_unit)
                 return {
@@ -1843,17 +2172,17 @@ class W40KEngine(gym.Env):
         return {"action": "skip", "reason": "no_valid_action_found"}
     
     def _get_valid_actions_for_phase(self, phase: str) -> List[int]:
-        """Get valid action types for current phase with correct WAIT vs FIGHT semantics."""
+        """Get valid action types for current phase with target selection support."""
         if phase == "move":
-            return [0, 7]  # Move + wait
+            return [0, 1, 2, 3, 11]  # Move directions + wait
         elif phase == "shoot":
-            return [4, 7]  # Shoot + wait
+            return [4, 5, 6, 7, 8, 11]  # Target slots 0-4 + wait
         elif phase == "charge":
-            return [5, 7]  # Charge + wait
+            return [9, 11]  # Charge + wait
         elif phase == "fight":
-            return [6]  # Fight only - NO WAIT in fight phase
+            return [10]  # Fight only - NO WAIT in fight phase
         else:
-            return [7]  # Only wait for unknown phases
+            return [11]  # Only wait for unknown phases
     
     def _get_eligible_units_for_current_phase(self) -> List[Dict[str, Any]]:
         """Get eligible units for current phase using handler's authoritative pools."""
