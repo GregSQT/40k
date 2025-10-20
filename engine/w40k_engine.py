@@ -22,6 +22,9 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 # AI_IMPLEMENTATION.md: Import phase handlers for delegation pattern
 from .phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers
 
+# Import combat calculation utilities from shooting_handlers (single source of truth)
+from .phase_handlers.shooting_handlers import _calculate_save_target, _calculate_wound_target
+
 
 class W40KEngine(gym.Env):
     """
@@ -40,20 +43,6 @@ class W40KEngine(gym.Env):
                 controlled_agent=None, active_agents=None, scenario_file=None, 
                 unit_registry=None, quiet=False, gym_training_mode=False, **kwargs):
         """Initialize W40K engine with AI_TURN.md compliance - training system compatible."""
-        
-        # CRITICAL DEBUG: Log exact parameters at entry point
-        # print(f"W40KEngine CONSTRUCTOR ENTRY DEBUG:")
-        # print(f"  gym_training_mode PARAMETER: {gym_training_mode} (type: {type(gym_training_mode)})")
-        # print(f"  config PARAMETER: {config}")
-        # print(f"  Called from stack: {__import__('traceback').format_stack()[-2].strip()}")
-        
-        # DEBUG: Log all parameters received
-        # print(f"W40KEngine CONSTRUCTOR DEBUG:")
-        # print(f"  gym_training_mode={gym_training_mode}")
-        # print(f"  rewards_config={rewards_config}")
-        # print(f"  training_config_name={training_config_name}")
-        # print(f"  kwargs={kwargs}")
-        # print(f"  Called from: {__import__('traceback').format_stack()[-2].strip()}")
         
         # Store gym training mode for handler access
         self.gym_training_mode = gym_training_mode
@@ -94,8 +83,6 @@ class W40KEngine(gym.Env):
                 "gym_training_mode": gym_training_mode,  # CRITICAL: Pass flag to handlers
                 "pve_mode": pve_mode_value  # CRITICAL: Add PvE mode for handler detection
             }
-            # print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} stored in config")
-            # print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config['gym_training_mode'] if 'gym_training_mode' in self.config else 'MISSING'}")
         else:
             # Use provided config directly and add gym_training_mode
             self.config = config.copy()
@@ -103,8 +90,6 @@ class W40KEngine(gym.Env):
             # CRITICAL: Ensure pve_mode is in config for handler delegation
             if "pve_mode" not in self.config:
                 self.config["pve_mode"] = config.get("pve_mode", False)
-            # print(f"CONFIG BUILD DEBUG: gym_training_mode={gym_training_mode} added to existing config")
-            # print(f"CONFIG VERIFICATION: self.config['gym_training_mode']={self.config.get('gym_training_mode', 'MISSING')}")
         
         # Store training system compatibility parameters
         self.quiet = quiet
@@ -180,9 +165,10 @@ class W40KEngine(gym.Env):
         self._current_valid_actions = list(range(12))  # Will be masked dynamically
         
         # Observation space: Egocentric perception with R=25 radius
-        # New system: 170 floats = 10 global + 8 unit_stats + 32 terrain + 70 nearby_units + 50 targets
+        # Pure RL system: 165 floats = 10 global + 8 unit_stats + 32 terrain + 70 nearby_units + 45 targets
         # Covers MOVE(12) + MAX_CHARGE(12) + ENEMY_OFFSET(1) = 25 hex strategic reach
-        obs_size = 170  # Egocentric observation with agent-controlled target selection
+        # Removed feature #8 (optimal_target_score) - agent discovers optimal combinations
+        obs_size = 165  # Egocentric observation - pure RL (no composite scores)
         
         # Load perception parameters from training config if available
         if hasattr(self, 'training_config') and self.training_config:
@@ -205,33 +191,46 @@ class W40KEngine(gym.Env):
     
     def _load_ai_model_for_pve(self):
         """Load trained AI model for PvE Player 2 - with diagnostic logging."""
-        print(f"DEBUG: _load_ai_model_for_pve called")
+        # Only show debug output in debug training mode
+        debug_mode = hasattr(self, 'training_config') and self.training_config and \
+                     self.config.get('training_config_name') == 'debug'
+        
+        if debug_mode:
+            print(f"DEBUG: _load_ai_model_for_pve called")
         
         try:
-            from stable_baselines3 import PPO
-            print(f"DEBUG: PPO import successful")
+            from sb3_contrib import MaskablePPO
+            from sb3_contrib.common.wrappers import ActionMasker
+            if debug_mode:
+                print(f"DEBUG: MaskablePPO import successful")
             
             # Get AI model key from unit registry
             ai_model_key = "SpaceMarine_Infantry_Troop_RangedSwarm"  # Default
-            print(f"DEBUG: Default AI model key: {ai_model_key}")
+            if debug_mode:
+                print(f"DEBUG: Default AI model key: {ai_model_key}")
             
             if self.unit_registry:
                 player1_units = [u for u in self.game_state["units"] if u["player"] == 1]
-                print(f"DEBUG: Found {len(player1_units)} Player 1 units")
                 if player1_units:
                     unit_type = player1_units[0]["unitType"]
-                    print(f"DEBUG: First unit type: '{unit_type}'")
                     ai_model_key = self.unit_registry.get_model_key(unit_type)
-                    print(f"DEBUG: Unit registry resolved to: '{ai_model_key}'")
             
             model_path = f"ai/models/current/model_{ai_model_key}.zip"
-            print(f"DEBUG: Model path: {model_path}")
-            print(f"DEBUG: Model exists: {os.path.exists(model_path)}")
+            if debug_mode:
+                print(f"DEBUG: Model path: {model_path}")
+                print(f"DEBUG: Model exists: {os.path.exists(model_path)}")
             
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"AI model required for PvE mode not found: {model_path}")
             
-            self._ai_model = PPO.load(model_path)
+            # Wrap self with ActionMasker for MaskablePPO compatibility
+            def mask_fn(env):
+                return env.get_action_mask()
+            
+            masked_self = ActionMasker(self, mask_fn)
+            
+            # Load model with masked environment
+            self._ai_model = MaskablePPO.load(model_path, env=masked_self)
             print(f"DEBUG: AI model loaded successfully")
             if not self.quiet:
                 print(f"PvE: Loaded AI model: {ai_model_key}")
@@ -326,14 +325,11 @@ class W40KEngine(gym.Env):
         # CRITICAL: Check turn limit BEFORE processing any action
         if hasattr(self, 'training_config'):
             max_turns = self.training_config.get("max_turns_per_episode")
-            # print(f"TERMINATION DEBUG: Turn {self.game_state['turn']}, max_turns={max_turns}, has_training_config=True")
             if max_turns and self.game_state["turn"] > max_turns:
                 # Turn limit exceeded - return terminated episode immediately
                 observation = self._build_observation()
                 info = {"turn_limit_exceeded": True, "winner": self._determine_winner()}
                 return observation, 0.0, True, False, info
-        # else:
-        #     print(f"TERMINATION DEBUG: Turn {self.game_state['turn']}, has_training_config=False")
         
         # Check for game termination before action
         self.game_state["game_over"] = self._check_game_over()
@@ -358,21 +354,17 @@ class W40KEngine(gym.Env):
         
         # Capture unit position BEFORE action execution for accurate logging
         pre_action_positions = {}
-        # print(f"STEP LOGGER DETECTION: has_step_logger={hasattr(self, 'step_logger')}, step_logger={getattr(self, 'step_logger', 'None')}")
         if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
             # AI_TURN.md COMPLIANCE: Direct field access for semantic actions
             if "unitId" not in semantic_action:
                 unit_id = None
             else:
                 unit_id = semantic_action["unitId"]
-            # print(f"STEP LOGGER ACTIVE: Processing unit {unit_id}")
             if unit_id:
                 pre_unit = self._get_unit_by_id(str(unit_id))
                 if pre_unit:
                     pre_action_positions[str(unit_id)] = (pre_unit["col"], pre_unit["row"])
-                    # print(f"STEP LOGGER DEBUG: Captured pre-action position for unit {unit_id}: {(pre_unit['col'], pre_unit['row'])}")
         
-        # Log action ONLY if it's a real agent action with valid unit
         # Log action ONLY if it's a real agent action with valid unit
         if (self.step_logger and self.step_logger.enabled and success):
            
@@ -485,8 +477,6 @@ class W40KEngine(gym.Env):
             return False, {"error": "not_ai_player_turn", "current_player": current_player}
         
         current_phase = self.game_state["phase"]
-        # print(f"EXECUTE_AI_TURN DEBUG: phase={current_phase}, current_player={current_player}")
-        # print(f"EXECUTE_AI_TURN DEBUG: about to call _make_ai_decision()")
         
         # Check AI model availability
         if not hasattr(self, '_ai_model') or not self._ai_model:
@@ -516,8 +506,8 @@ class W40KEngine(gym.Env):
         action_mask = self.get_action_mask()
         valid_actions = [i for i in range(12) if action_mask[i]]
         
-        # Get AI model prediction
-        prediction_result = self._ai_model.predict(obs, deterministic=True)
+        # Get AI model prediction WITH action mask
+        prediction_result = self._ai_model.predict(obs, action_masks=action_mask, deterministic=True)
         
         if isinstance(prediction_result, tuple) and len(prediction_result) >= 1:
             action_int = prediction_result[0]
@@ -528,7 +518,6 @@ class W40KEngine(gym.Env):
         
         # CRITICAL DEBUG: Log AI decision
         current_phase = self.game_state["phase"]
-        print(f"🤖 AI DECISION: phase={current_phase}, valid_actions={valid_actions}, model_chose={action_int}, is_valid={action_mask[action_int]}")
         
         # Convert to semantic action using existing method
         semantic_action = self._convert_gym_action(action_int)
@@ -667,15 +656,11 @@ class W40KEngine(gym.Env):
                     expected_row = action.get("destRow", "unknown") 
                     if expected_col == unit["col"] and expected_row == unit["row"]:
                         pass
-                    # else:
-                        # print(f"DEBUG: ERROR - Unit {unit_id} failed to reach destination: expected ({expected_col}, {expected_row}) but at ({unit['col']}, {unit['row']})")
         
         # CRITICAL FIX: Handle failed actions to prevent infinite loops
         if not success and result.get("error") == "invalid_destination":
-            # print(f"DEBUG: Movement failed, forcing unit to skip")
             skip_unit = self._get_unit_by_id(action.get("unitId")) if action.get("unitId") else None
             skip_result = movement_handlers.execute_action(self.game_state, skip_unit, {"action": "skip", "unitId": action.get("unitId")}, self.config)
-            # print(f"DEBUG: Skip action result: {skip_result}")
             if isinstance(skip_result, tuple):
                 success, result = skip_result
             else:
@@ -683,7 +668,6 @@ class W40KEngine(gym.Env):
         
         # Check response for phase_complete flag
         if result.get("phase_complete"):
-            # print(f"DEBUG: Phase completion detected, transitioning to shoot phase")
             self._movement_phase_initialized = False
             self._shooting_phase_init()
             result["phase_transition"] = True
@@ -734,7 +718,6 @@ class W40KEngine(gym.Env):
         # Handle phase transitions signaled by handler
         if result.get("phase_complete") or result.get("phase_transition"):
             next_phase = result.get("next_phase")
-            # print(f"Phase transition: {self.game_state['phase']} -> {next_phase}")
             if next_phase == "move":
                 self._movement_phase_init()
         return success, result
@@ -923,14 +906,17 @@ class W40KEngine(gym.Env):
         Build egocentric observation vector with R=25 perception radius.
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
         
-        Structure (170 floats):  # CHANGE 1: Updated comment from 150 to 170
-        - [0:10] Global context
-        - [10:18] Active unit capabilities  
-        - [18:50] Directional terrain (8 directions × 4 features)
-        - [50:120] Nearby units (7 units × 10 features)
-        - [120:170] Valid targets (5 targets × 10 features)  # CHANGE 2: Updated from 6 to 10 features, 150 to 170
+        Structure (165 floats):
+        - [0:10]    Global context (10 floats)
+        - [10:18]   Active unit capabilities (8 floats)
+        - [18:50]   Directional terrain (32 floats: 8 directions × 4 features)
+        - [50:120]  Nearby units (70 floats: 7 units × 10 features)
+        - [120:165] Valid targets (45 floats: 5 targets × 9 features)
+        
+        Note: Removed optimal_target_score (was feature #8) for pure RL approach.
+              Agent discovers optimal target combinations through training.
         """
-        obs = np.zeros(170, dtype=np.float32)  # CHANGE 3: Changed array size from 150 to 170
+        obs = np.zeros(165, dtype=np.float32)
         
         # Get active unit (agent's current unit)
         active_unit = self._get_active_unit_for_observation()
@@ -1293,17 +1279,17 @@ class W40KEngine(gym.Env):
     def _encode_valid_targets(self, obs: np.ndarray, active_unit: Dict[str, Any], base_idx: int):
         """
         Encode valid targets with EXPLICIT action-target correspondence and W40K probabilities.
-        50 floats = 5 actions × 10 features per action
+        45 floats = 5 actions × 9 features per action
         
-        CRITICAL DESIGN: obs[120 + action_offset*10] directly corresponds to action (4 + action_offset)
+        CRITICAL DESIGN: obs[120 + action_offset*9] directly corresponds to action (4 + action_offset)
         Example: 
-        - obs[120:130] = features for what happens if agent presses action 4
-        - obs[130:140] = features for what happens if agent presses action 5
+        - obs[120:129] = features for what happens if agent presses action 4
+        - obs[129:138] = features for what happens if agent presses action 5
         
         This creates DIRECT causal relationship for RL learning:
         "When obs[121]=1.0 (high kill_probability), pressing action 4 gives high reward"
         
-        Features per action slot (10 floats):
+        Features per action slot (9 floats) - PURE RL APPROACH:
         0. is_valid (1.0 = target exists, 0.0 = no target in this slot)
         1. kill_probability (0.0-1.0, probability to kill target this turn considering dice)
         2. danger_to_me (0.0-1.0, probability target kills ME next turn)
@@ -1312,8 +1298,11 @@ class W40KEngine(gym.Env):
         5. is_lowest_hp (1.0 if lowest HP among valid targets)
         6. army_weighted_threat (0.0-1.0, strategic priority considering all friendlies by VALUE)
         7. can_be_charged_by_melee (1.0 if friendly melee can reach this target)
-        8. optimal_target_score (RewardMapper priority calculation 0.0-1.0)
-        9. target_type_match (unit_registry compatibility 0.0-1.0)
+        8. target_type_match (unit_registry compatibility 0.0-1.0)
+        
+        REMOVED: optimal_target_score (was feature #8)
+        Reason: Agent should discover optimal target combinations, not be given pre-computed scores.
+                Network hidden layers (256×256) learn to combine these 9 features optimally.
         """
         # Get valid targets based on current phase
         valid_targets = []
@@ -1394,10 +1383,10 @@ class W40KEngine(gym.Env):
             active_unit["col"], active_unit["row"], t["col"], t["row"]
         ))
         
-        # Encode up to max_valid_targets (5 targets × 10 features = 50 floats)
+        # Encode up to max_valid_targets (5 targets × 9 features = 45 floats)
         max_encoded = 5
         for i in range(max_encoded):
-            feature_base = base_idx + i * 10
+            feature_base = base_idx + i * 9  # Changed from i * 10
             
             if i < len(valid_targets):
                 target = valid_targets[i]
@@ -1437,16 +1426,13 @@ class W40KEngine(gym.Env):
                 can_be_charged = 1.0 if self._can_melee_units_charge_target(target) else 0.0
                 obs[feature_base + 7] = can_be_charged
                 
-                # Feature 8: Optimal target score (RewardMapper-based)
-                optimal_score = self._calculate_target_optimality_score(active_unit, target, valid_targets)
-                obs[feature_base + 8] = optimal_score
-                
-                # Feature 9: Target type match (unit_registry compatibility)
+                # Feature 8: Target type match (unit_registry compatibility)
+                # Moved from feature #9 to #8 after removing optimal_target_score
                 type_match = self._calculate_target_type_match(active_unit, target)
-                obs[feature_base + 9] = type_match
+                obs[feature_base + 8] = type_match
             else:
                 # Padding for empty slots
-                for j in range(10):
+                for j in range(9):  # Changed from 10
                     obs[feature_base + j] = 0.0
     
     def _calculate_kill_probability(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> float:
@@ -1494,7 +1480,8 @@ class W40KEngine(gym.Env):
         wound_target = self._calculate_wound_target(strength, target["T"])
         p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
         
-        save_target = self._calculate_save_target(target, ap)
+        # Save failure probability (uses imported function from shooting_handlers)
+        save_target = _calculate_save_target(target, ap)
         p_fail_save = max(0.0, min(1.0, (save_target - 1) / 6.0))
         
         p_damage_per_attack = p_hit * p_wound * p_fail_save
@@ -1558,7 +1545,7 @@ class W40KEngine(gym.Env):
         wound_target = self._calculate_wound_target(strength, defender["T"])
         p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
         
-        save_target = self._calculate_save_target(defender, ap)
+        save_target = _calculate_save_target(defender, ap)
         p_fail_save = max(0.0, min(1.0, (save_target - 1) / 6.0))
         
         p_damage_per_attack = p_hit * p_wound * p_fail_save
@@ -1618,32 +1605,6 @@ class W40KEngine(gym.Env):
         else:
             return 0.0
     
-    def _calculate_target_optimality_score(self, active_unit: Dict[str, Any], 
-                                          target: Dict[str, Any], 
-                                          all_targets: List[Dict[str, Any]]) -> float:
-        """
-        Calculate RewardMapper-based optimality score for target (0.0-1.0).
-        Uses shooting_priority_reward logic without actual reward calculation.
-        Higher score = better target according to tactical priorities.
-        """
-        try:
-            reward_mapper = self._get_reward_mapper()
-            enriched_unit = self._enrich_unit_for_reward_mapper(active_unit)
-            enriched_target = self._enrich_unit_for_reward_mapper(target)
-            enriched_all = [self._enrich_unit_for_reward_mapper(t) for t in all_targets]
-            
-            can_melee_charge = self._can_melee_units_charge_target(target)
-            priority_reward = reward_mapper.get_shooting_priority_reward(
-                enriched_unit, enriched_target, enriched_all, can_melee_charge
-            )
-            
-            normalized = (priority_reward + 1.0) / 4.0
-            return np.clip(normalized, 0.0, 1.0)
-            
-        except Exception as e:
-            threat = max(target.get("RNG_DMG", 0), target.get("CC_DMG", 0))
-            return min(1.0, threat / 5.0)
-    
     def _calculate_target_type_match(self, active_unit: Dict[str, Any], 
                                     target: Dict[str, Any]) -> float:
         """
@@ -1702,8 +1663,7 @@ class W40KEngine(gym.Env):
         """Calculate reward using actual acting unit with reward mapper integration."""
         # PRIORITY CHECK: Invalid action penalty (from handlers)
         if isinstance(result, dict) and result.get("invalid_action_penalty"):
-            # print(f"REWARD: Applying invalid action penalty for attempted action {result.get('attempted_action', 'unknown')}")
-            return -0.5  # Training penalty for wrong phase actions
+            return -0.9  # Training penalty for wrong phase actions
         
         if not success:
             if isinstance(result, dict):
@@ -1756,7 +1716,6 @@ class W40KEngine(gym.Env):
             controlled_agent = self.config['controlled_agent'] if self.config and 'controlled_agent' in self.config else None
             if controlled_agent is None:
                 raise ValueError("Missing controlled_agent in config - required for reward calculation")
-            # print(f"DEBUG: Unit {acting_unit['id']} ({original_type}) -> Using agent rewards: {agent_type} (controlled_agent: {controlled_agent})")
         
         if action_type == "shoot" and "targetId" in result:
             target = self._get_unit_by_id(str(result["targetId"]))
@@ -1775,11 +1734,8 @@ class W40KEngine(gym.Env):
                 result_bonus += unit_rewards["result_bonuses"]["kill_target"]
             
             final_reward = base_reward + target_bonus + result_bonus
-            
-            # if not self.quiet:
-                # print(f"DEBUG: Shooting reward - Base: {base_reward}, Target bonus: {target_bonus}, Result: {result_bonus}, Final: {final_reward}")
-            
             return final_reward
+        
         elif action_type == "move":
             # AI_TURN.md COMPLIANCE: Direct access - movement results must provide coordinates
             if "fromCol" not in result or "fromRow" not in result:
@@ -2027,25 +1983,6 @@ class W40KEngine(gym.Env):
                     # Enable shoot actions for available targets only (up to 5 slots)
                     for i in range(min(5, num_targets)):
                         mask[4 + i] = True
-                    
-                    # CRITICAL DEBUG: Verify mask-observation alignment (first 3 episodes only)
-                    if self.game_state["turn"] <= 3 and self.game_state["episode_steps"] < 30:
-                        obs = self._build_observation()
-                        print(f"\n🔍 MASK-OBSERVATION ALIGNMENT CHECK:")
-                        print(f"   Turn {self.game_state['turn']}, Unit {active_unit['id']}, Targets: {num_targets}")
-                        print(f"   Mask enabled actions: {[i for i in range(12) if mask[i]]}")
-                        
-                        for i in range(min(5, num_targets)):
-                            obs_base = 120 + i * 10
-                            is_valid = obs[obs_base + 0]
-                            kill_prob = obs[obs_base + 1]
-                            danger = obs[obs_base + 2]
-                            army_threat = obs[obs_base + 6]
-                            print(f"   Action {4+i}: valid={is_valid:.1f}, kill_prob={kill_prob:.2f}, danger={danger:.2f}, army_threat={army_threat:.2f}")
-                        
-                        if not hasattr(self, '_alignment_verified'):
-                            self._alignment_verified = True
-                            print(f"   ✅ Alignment verified: {num_targets} targets = {num_targets} valid actions")
             
             mask[11] = True  # Wait always valid (can choose not to shoot)
         elif current_phase == "charge":
@@ -2063,7 +2000,7 @@ class W40KEngine(gym.Env):
         current_phase = self.game_state["phase"]
         
         # Validate action against mask - convert invalid actions to SKIP
-        action_mask = self.get_action_mask()
+        action_mask = self.get_action_mask()        
         if not action_mask[action_int]:
             # Return invalid action for training penalty and proper pool management
             eligible_units = self._get_eligible_units_for_current_phase()
@@ -2084,7 +2021,6 @@ class W40KEngine(gym.Env):
         
         if not eligible_units:
             current_phase = self.game_state["phase"]
-            
             if current_phase == "move":
                 self._shooting_phase_init()
                 return {"action": "advance_phase", "from": "move", "to": "shoot"}
@@ -2123,7 +2059,6 @@ class W40KEngine(gym.Env):
                     # Debug: Log first few target selections
                     if self.game_state["turn"] == 1 and not hasattr(self, '_target_logged'):
                         self._target_logged = True
-                        print(f"TARGET DEBUG: Unit {selected_unit_id} action={action_int} slot={target_slot} targeting {target_id} from {valid_targets}")
                     
                     return {
                         "action": "shoot",
@@ -2131,8 +2066,6 @@ class W40KEngine(gym.Env):
                         "targetId": target_id
                     }
                 else:
-                    # Should not happen with proper masking, but handle gracefully
-                    print(f"WARNING: Invalid target slot {target_slot} for unit {selected_unit_id} with {len(valid_targets)} targets")
                     return {
                         "action": "wait",
                         "unitId": selected_unit_id,
@@ -2201,7 +2134,6 @@ class W40KEngine(gym.Env):
             pool_unit_ids = self.game_state["shoot_activation_pool"]
             return [self._get_unit_by_id(uid) for uid in pool_unit_ids if self._get_unit_by_id(uid)]
         else:
-            # print(f"DEBUG ELIGIBLE UNITS: Unknown phase {current_phase}, returning empty list")
             return []
     
     def _ai_select_unit(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:
@@ -2242,7 +2174,6 @@ class W40KEngine(gym.Env):
                 return eligible_units[0]["id"]
                 
         except Exception as e:
-            # print(f"AI model error: {e}")
             return eligible_units[0]["id"]
     
     def _ai_select_movement_destination(self, unit_id: str) -> Tuple[int, int]:
@@ -2284,14 +2215,12 @@ class W40KEngine(gym.Env):
             
             move_key = f"{unit_id}_{current_pos}_{best_move}"
             if move_key not in self._logged_moves:
-                # print(f"AI ACTION: Unit {unit_id} moved from {current_pos} to {best_move} (targeting enemy at {enemy_pos})")
                 self._logged_moves.add(move_key)
             
             return best_move
         else:
             # No enemies - just take first available move
             selected = actual_moves[0]
-            # print(f"AI ACTION: Unit {unit_id} moved from {current_pos} to {selected}")
             return selected
     
     def _ai_select_shooting_target(self, unit_id: str) -> str:
@@ -2339,18 +2268,23 @@ class W40KEngine(gym.Env):
             moved_to_charge_range = self._moved_to_charge_range(unit, (new_col, new_row))
             moved_to_safety = self._moved_to_safety(unit, (new_col, new_row))
             
+            # CHANGE 1: Add advanced tactical movement flags
+            gained_los_on_priority_target = self._gained_los_on_priority_target(unit, (old_col, old_row), (new_col, new_row))
+            moved_to_cover_from_enemies = self._moved_to_cover_from_enemies(unit, (new_col, new_row))
+            safe_from_enemy_charges = self._safe_from_enemy_charges(unit, (new_col, new_row))
+            safe_from_enemy_ranged = self._safe_from_enemy_ranged(unit, (new_col, new_row))
+            
             context = {
                 "moved_closer": moved_closer,
                 "moved_away": moved_away,
                 "moved_to_optimal_range": moved_to_optimal_range,
                 "moved_to_charge_range": moved_to_charge_range,
-                "moved_to_safety": moved_to_safety
+                "moved_to_safety": moved_to_safety,
+                "gained_los_on_priority_target": gained_los_on_priority_target,
+                "moved_to_cover_from_enemies": moved_to_cover_from_enemies,
+                "safe_from_enemy_charges": safe_from_enemy_charges,
+                "safe_from_enemy_ranged": safe_from_enemy_ranged
             }
-            
-            # Debug tactical context
-            # if not self.quiet:
-                # print(f"DEBUG: Tactical context for unit {unit['id']}: {context}")
-                # print(f"DEBUG: Movement from ({old_col}, {old_row}) to ({new_col}, {new_row})")
             
             # Handle same-position movement (no actual movement) - REMOVE DEBUG THAT TRIGGERS DOUBLE PROCESSING
             if old_col == new_col and old_row == new_row:
@@ -2391,6 +2325,42 @@ class W40KEngine(gym.Env):
                     return True
         
         return False
+    
+    def _moved_to_cover_from_enemies(self, unit: Dict[str, Any], new_pos: Tuple[int, int]) -> bool:
+        """Check if unit is hidden from enemy RANGED units (melee LoS irrelevant)."""
+        enemies = [u for u in self.game_state["units"] 
+                  if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        
+        if not enemies:
+            return False
+        
+        # Count how many RANGED enemies have LoS to this position
+        ranged_enemies_with_los = 0
+        new_unit_state = unit.copy()
+        new_unit_state["col"] = new_pos[0]
+        new_unit_state["row"] = new_pos[1]
+        
+        for enemy in enemies:
+            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+            if "RNG_RNG" not in enemy:
+                raise KeyError(f"Enemy missing required 'RNG_RNG' field: {enemy}")
+            if "CC_RNG" not in enemy:
+                raise KeyError(f"Enemy missing required 'CC_RNG' field: {enemy}")
+            
+            # CRITICAL: Use same logic as observation encoding
+            # Ranged unit = RNG_RNG > CC_RNG (matches offensive_type calculation)
+            is_ranged_unit = enemy["RNG_RNG"] > enemy["CC_RNG"]
+            
+            if is_ranged_unit and enemy["RNG_RNG"] > 0:
+                distance = self._calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
+                
+                # Enemy in shooting range and has LoS?
+                if distance <= enemy["RNG_RNG"]:
+                    if self._check_los_cached(enemy, new_unit_state):
+                        ranged_enemies_with_los += 1
+        
+        # Good cover from ranged = 0 or 1 ranged enemy can see you
+        return ranged_enemies_with_los <= 1
     
     def _moved_closer_to_enemies(self, unit: Dict[str, Any], old_pos: Tuple[int, int], new_pos: Tuple[int, int]) -> bool:
         """Check if unit moved closer to enemies."""
@@ -2503,6 +2473,115 @@ class W40KEngine(gym.Env):
                 return True
         
         return False
+    
+    def _gained_los_on_priority_target(self, unit: Dict[str, Any], old_pos: Tuple[int, int], 
+                                       new_pos: Tuple[int, int]) -> bool:
+        """Check if unit gained LoS on its highest-priority target."""
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+        if "RNG_RNG" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
+        if unit["RNG_RNG"] <= 0:
+            return False
+        
+        # Get all enemies in shooting range
+        enemies_in_range = []
+        for enemy in self.game_state["units"]:
+            if "player" not in enemy or "HP_CUR" not in enemy:
+                raise KeyError(f"Enemy unit missing required fields: {enemy}")
+            
+            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+                if "col" not in enemy or "row" not in enemy:
+                    raise KeyError(f"Enemy unit missing required position fields: {enemy}")
+                
+                distance = self._calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
+                if distance <= unit["RNG_RNG"]:
+                    enemies_in_range.append(enemy)
+        
+        if not enemies_in_range:
+            return False
+        
+        # Find priority target (lowest HP for RangedSwarm units)
+        priority_target = min(enemies_in_range, key=lambda e: e.get("HP_CUR", 999))
+        
+        # Check LoS at old position
+        old_unit_state = unit.copy()
+        old_unit_state["col"] = old_pos[0]
+        old_unit_state["row"] = old_pos[1]
+        had_los_before = self._check_los_cached(old_unit_state, priority_target)
+        
+        # Check LoS at new position
+        new_unit_state = unit.copy()
+        new_unit_state["col"] = new_pos[0]
+        new_unit_state["row"] = new_pos[1]
+        has_los_now = self._check_los_cached(new_unit_state, priority_target)
+        
+        # Gained LoS if didn't have before but have now
+        return (not had_los_before) and has_los_now
+    
+    def _safe_from_enemy_charges(self, unit: Dict[str, Any], new_pos: Tuple[int, int]) -> bool:
+        """Check if unit is safe from enemy MELEE charges (ranged proximity irrelevant)."""
+        enemies = [u for u in self.game_state["units"] 
+                  if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        
+        for enemy in enemies:
+            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+            if "RNG_RNG" not in enemy:
+                raise KeyError(f"Enemy missing required 'RNG_RNG' field: {enemy}")
+            if "CC_RNG" not in enemy:
+                raise KeyError(f"Enemy missing required 'CC_RNG' field: {enemy}")
+            if "MOVE" not in enemy:
+                raise KeyError(f"Enemy missing required 'MOVE' field: {enemy}")
+            if "CC_DMG" not in enemy:
+                raise KeyError(f"Enemy missing required 'CC_DMG' field: {enemy}")
+            
+            # CRITICAL: Use same logic as observation encoding
+            # Melee unit = RNG_RNG <= CC_RNG (opposite of ranged)
+            is_melee_unit = enemy["RNG_RNG"] <= enemy["CC_RNG"]
+            
+            if is_melee_unit and enemy["CC_DMG"] > 0:
+                distance = self._calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
+                
+                # Max charge distance = MOVE + 9 (2d6 average charge roll)
+                max_charge_distance = enemy["MOVE"] + 9
+                
+                # Unsafe if any melee enemy can charge us
+                if distance <= max_charge_distance:
+                    return False
+        
+        # Safe - no melee enemies in charge range
+        return True
+    
+    def _safe_from_enemy_ranged(self, unit: Dict[str, Any], new_pos: Tuple[int, int]) -> bool:
+        """Check if unit is beyond range of enemy RANGED units."""
+        enemies = [u for u in self.game_state["units"] 
+                  if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        
+        safe_distance_count = 0
+        total_ranged_enemies = 0
+        
+        for enemy in enemies:
+            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+            if "RNG_RNG" not in enemy:
+                raise KeyError(f"Enemy missing required 'RNG_RNG' field: {enemy}")
+            if "CC_RNG" not in enemy:
+                raise KeyError(f"Enemy missing required 'CC_RNG' field: {enemy}")
+            
+            # Only consider ranged units (matches observation encoding)
+            is_ranged_unit = enemy["RNG_RNG"] > enemy["CC_RNG"]
+            
+            if is_ranged_unit and enemy["RNG_RNG"] > 0:
+                total_ranged_enemies += 1
+                distance = self._calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
+                
+                # Safe if beyond their shooting range
+                if distance > enemy["RNG_RNG"]:
+                    safe_distance_count += 1
+        
+        if total_ranged_enemies == 0:
+            return False  # No bonus if no ranged enemies
+        
+        # Consider safe if beyond range of 50%+ of ranged enemies
+        return safe_distance_count >= (total_ranged_enemies / 2.0)
     
     def _get_reward_mapper_unit_rewards(self, unit: Dict[str, Any]) -> Dict[str, Any]:
         """Get unit-specific rewards config for reward_mapper."""
@@ -2656,4 +2735,3 @@ class W40KEngine(gym.Env):
 
 if __name__ == "__main__":
     print("W40K Engine requires proper config from training system - no standalone execution")
-    #print(f"After movement - Success: {info['success']}, Phase: {info['phase']}")

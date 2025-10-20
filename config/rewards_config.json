@@ -12,7 +12,7 @@
       "charge": 0.1,
       "charge_success": 0.1,
       "being_charged": -0.3,
-      "wait": -0.5
+      "wait": -0.9
     },
     "target_type_bonuses": {
       "vs_melee": 0.1,
@@ -48,20 +48,24 @@
       "formation_cohesion": 0.1,
       "combined_arms_support": 0.1,
       "anti_swarm_specialist": 0.1,
-      "suppression_fire": 0.1
+      "suppression_fire": 0.1,
+      "gained_los_on_target": 0.25,
+      "moved_to_cover": 0.15,
+      "safe_from_charges": 0.1,
+      "safe_from_ranged": 0.05
     }
   },
 
   "SpaceMarine_Infantry_Troop_RangedSwarm_CURRICULUM_P1": {
     "base_actions": {
-      "move_close": 0.2,
-      "move_away": -0.1,
-      "move_to_charge": 0.3,
+      "move_close": 0.1,
+      "move_away": -0.2,
+      "move_to_charge": 0.05,
       "move_to_los": 0.3,
       "ranged_attack": 5.0,
       "charge_success": 0.5,
       "melee_attack": 0.5,
-      "wait": -1.0
+      "wait": -0.9
     },
     "result_bonuses": {
       "hit_target": 0.0,
@@ -95,7 +99,7 @@
       "ranged_attack": 2.0,
       "charge_success": 0.5,
       "melee_attack": 0.5,
-      "wait": -0.5
+      "wait": -0.9
     },
     "result_bonuses": {
       "hit_target": 1.0,
@@ -135,7 +139,7 @@
       "ranged_attack": 1.0,
       "charge_success": 0.8,
       "melee_attack": 0.6,
-      "wait": -0.3
+      "wait": -0.9
     },
     "result_bonuses": {
       "hit_target": 0.5,

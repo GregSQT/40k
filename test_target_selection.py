@@ -23,8 +23,8 @@ def test_observation_action_correspondence():
     
     obs, info = engine.reset()
     
-    print(f"✅ Observation shape: {obs.shape} (expected: (170,))")
-    assert obs.shape == (170,), "Observation size mismatch!"
+    print(f"✅ Observation shape: {obs.shape} (expected: (165,))")
+    assert obs.shape == (165,), "Observation size mismatch!"
     
     for i in range(5):
         obs_base = 120 + i * 10

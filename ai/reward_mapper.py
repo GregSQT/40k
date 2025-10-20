@@ -222,21 +222,48 @@ class RewardMapper:
         """
         unit_rewards = self._get_unit_rewards(unit)
         base_actions = unit_rewards["base_actions"]
+        tactical_bonuses = unit_rewards.get("tactical_bonuses", {})
         
         if unit.get("is_ranged", False):
-            # Ranged unit movement priorities using existing config keys
+            # CHANGE 3: Base movement reward (unchanged)
             if tactical_context.get("moved_to_optimal_range"):
-                return (base_actions["move_to_los"], "move_to_los")
+                base_reward = base_actions["move_to_los"]
+                action_name = "move_to_los"
             elif tactical_context.get("moved_away"):
-                return (base_actions["move_away"], "move_away")
+                base_reward = base_actions["move_away"]
+                action_name = "move_away"
             elif tactical_context.get("moved_closer"):
-                return (base_actions["move_close"], "move_close")
+                base_reward = base_actions["move_close"]
+                action_name = "move_close"
             elif tactical_context.get("moved_to_safety"):
-                return (base_actions["move_away"], "move_away")
+                base_reward = base_actions["move_away"]
+                action_name = "move_away"
             elif tactical_context.get("moved_to_charge_range"):
-                return (base_actions["move_close"], "move_close")
+                base_reward = base_actions["move_close"]
+                action_name = "move_close"
             else:
                 raise ValueError("No valid ranged unit movement context found in tactical_context")
+            
+            # CHANGE 3: Stack tactical bonuses on top of base reward
+            total_reward = base_reward
+            
+            # Bonus 1: Gained LoS on priority target (+0.2)
+            if tactical_context.get("gained_los_on_priority_target"):
+                total_reward += tactical_bonuses.get("gained_los_on_target", 0.2)
+            
+            # Bonus 2: Moved to cover from enemies (+0.15)
+            if tactical_context.get("moved_to_cover_from_enemies"):
+                total_reward += tactical_bonuses.get("moved_to_cover", 0.15)
+            
+            # Bonus 3: Safe from enemy charges (+0.1)
+            if tactical_context.get("safe_from_enemy_charges"):
+                total_reward += tactical_bonuses.get("safe_from_charges", 0.1)
+            
+            # Bonus 4: Safe from enemy ranged (+0.05 - secondary benefit)
+            if tactical_context.get("safe_from_enemy_ranged"):
+                total_reward += tactical_bonuses.get("safe_from_ranged", 0.05)
+            
+            return (total_reward, action_name)
         else:
             # Melee unit movement priorities using existing config keys
             if tactical_context.get("moved_to_charge_range"):

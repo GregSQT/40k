@@ -1,7 +1,18 @@
 {
   "default": {
+    "total_episodes": 1000,
+    "total_episodes_normal": "1000",
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 50,
+    "callback_params": {
+      "checkpoint_save_freq": 50000,
+      "checkpoint_name_prefix": "ppo_checkpoint",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 5
+    },
     "observation_params": {
-      "obs_size": 150,
+      "obs_size": 165,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
@@ -26,29 +37,27 @@
       "ent_coef": 0.05,
       "vf_coef": 0.5,
       "max_grad_norm": 0.5,
-      "use_sde": false,
-      "sde_sample_freq": -1,
       "target_kl": null,
       "tensorboard_log": "./tensorboard/",
       "policy_kwargs": {
         "net_arch": [256, 256]
       },
       "verbose": 0
-    },
-    "total_episodes": 1000,
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 50,
-    "callback_params": {
-      "checkpoint_save_freq": 50000,
-      "checkpoint_name_prefix": "ppo_checkpoint",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 5
     }
   },
   "debug": {
+    "total_episodes": 50,
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 50,
+    "callback_params": {
+      "checkpoint_save_freq": 5000,
+      "checkpoint_name_prefix": "ppo_debug_checkpoint",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 2
+    },
     "observation_params": {
-      "obs_size": 170,
+      "obs_size": 165,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
@@ -71,21 +80,11 @@
         "net_arch": [128, 128]
       },
       "verbose": 0
-    },
-    "total_episodes": 50,
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 250,
-    "callback_params": {
-      "checkpoint_save_freq": 5000,
-      "checkpoint_name_prefix": "ppo_debug_checkpoint",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 2
     }
   },
   "curriculum_phase1": {
     "observation_params": {
-      "obs_size": 170,
+      "obs_size": 165,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
@@ -109,9 +108,10 @@
       },
       "verbose": 0
     },
-    "total_episodes": 100,
+    "total_episodes": 50,
+    "total_episodes_normal_value": "100",
     "max_turns_per_episode": 5,
-    "max_steps_per_turn": 250,
+    "max_steps_per_turn": 50,
     "callback_params": {
       "checkpoint_save_freq": 2500,
       "checkpoint_name_prefix": "ppo_curriculum_p1",
@@ -122,7 +122,7 @@
   },
   "curriculum_phase2": {
     "observation_params": {
-      "obs_size": 170,
+      "obs_size": 165,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
@@ -159,7 +159,7 @@
   },
   "curriculum_phase3": {
     "observation_params": {
-      "obs_size": 170,
+      "obs_size": 165,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
@@ -196,7 +196,7 @@
   },
   "aggressive": {
     "observation_params": {
-      "obs_size": 170,
+      "obs_size": 165,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
@@ -233,7 +233,7 @@
   },
   "conservative": {
     "observation_params": {
-      "obs_size": 170,
+      "obs_size": 165,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,

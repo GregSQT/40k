@@ -151,12 +151,27 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     """
     EXACT COPY from w40k_engine_save.py _has_valid_shooting_targets logic
     """
+    # Enable debug ONLY in debug training config
+    training_config_name = game_state.get("config", {}).get("training_config_name", "")
+    debug_mode = training_config_name == "debug"
+    
+    if debug_mode:
+        print(f"\n🔍 ELIGIBILITY CHECK: Unit {unit['id']} @ ({unit['col']}, {unit['row']})")
+        print(f"   Player: {unit['player']}, Current Player: {current_player}")
+        print(f"   HP: {unit['HP_CUR']}/{unit['HP_MAX']}")
+        print(f"   RNG_NB: {unit.get('RNG_NB', 'MISSING')}, RNG_RNG: {unit.get('RNG_RNG', 'MISSING')}")
+        print(f"   CC_RNG: {unit.get('CC_RNG', 'MISSING')}")
+    
     # unit.HP_CUR > 0?
     if unit["HP_CUR"] <= 0:
+        if debug_mode:
+            print(f"   ❌ BLOCKED: Unit is dead (HP_CUR={unit['HP_CUR']})")
         return False
         
     # unit.player === current_player?
     if unit["player"] != current_player:
+        if debug_mode:
+            print(f"   ❌ BLOCKED: Wrong player (unit.player={unit['player']} != current_player={current_player})")
         return False
         
     # units_fled.includes(unit.id)?
@@ -164,24 +179,49 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     if "units_fled" not in game_state:
         raise KeyError("game_state missing required 'units_fled' field")
     if unit["id"] in game_state["units_fled"]:
+        if debug_mode:
+            print(f"   ❌ BLOCKED: Unit has fled")
         return False
-        
+    
     # CRITICAL FIX: Add missing adjacency check - units in melee cannot shoot
     # This matches the frontend logic: hasAdjacentEnemyShoot check
+    if debug_mode:
+        print(f"   Checking for adjacent enemies (CC_RNG={unit.get('CC_RNG', 'MISSING')})...")
+    
+    adjacent_enemies = []
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
             if "CC_RNG" not in unit:
                 raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
+            
+            if debug_mode and distance <= 5:
+                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): distance={distance}")
+            
             if distance <= unit["CC_RNG"]:
-                return False
+                adjacent_enemies.append(f"{enemy['id']}@dist={distance}")
+    
+    if adjacent_enemies:
+        if debug_mode:
+            print(f"   ❌ BLOCKED: Adjacent enemies found: {adjacent_enemies}")
+            print(f"   RESULT: Unit {unit['id']} CANNOT SHOOT (W40K rule: engaged in melee)")
+        return False
+    
+    if debug_mode:
+        print(f"   ✅ No adjacent enemies found")
         
     # unit.RNG_NB > 0?
     # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
     if "RNG_NB" not in unit:
         raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
     if unit["RNG_NB"] <= 0:
+        if debug_mode:
+            print(f"   ❌ BLOCKED: No ranged attacks (RNG_NB={unit['RNG_NB']})")
         return False
+    
+    if debug_mode:
+        print(f"   ✅ Unit has ranged attacks (RNG_NB={unit['RNG_NB']})")
+        print(f"   Checking for valid ranged targets...")
     
     # Check for valid targets with detailed debugging
     valid_targets_found = []
@@ -189,8 +229,19 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             is_valid = _is_valid_shooting_target(game_state, unit, enemy)
+            
+            if debug_mode:
+                distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): dist={distance}, valid={is_valid}")
+            
             if is_valid:
                 valid_targets_found.append(enemy["id"])
+    
+    if debug_mode:
+        if len(valid_targets_found) > 0:
+            print(f"   ✅ RESULT: {len(valid_targets_found)} valid targets found: {valid_targets_found}")
+        else:
+            print(f"   ❌ RESULT: NO valid targets found")
     
     return len(valid_targets_found) > 0
 
@@ -200,20 +251,30 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     EXACT COPY from w40k_engine_save.py working validation with proper LoS
     PERFORMANCE: Uses LoS cache for instant lookups (0.001ms vs 5-10ms)
     """
+    # Enable debug ONLY in debug training config
+    training_config_name = game_state.get("config", {}).get("training_config_name", "")
+    debug_mode = training_config_name == "debug"
+    
     # Range check using proper hex distance
     distance = _calculate_hex_distance(shooter["col"], shooter["row"], target["col"], target["row"])
     # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
     if "RNG_RNG" not in shooter:
         raise KeyError(f"Shooter missing required 'RNG_RNG' field: {shooter}")
     if distance > shooter["RNG_RNG"]:
+        if debug_mode:
+            print(f"         ❌ Out of range: dist={distance} > RNG_RNG={shooter['RNG_RNG']}")
         return False
         
     # Dead target check
     if target["HP_CUR"] <= 0:
+        if debug_mode:
+            print(f"         ❌ Target is dead: HP_CUR={target['HP_CUR']}")
         return False
         
     # Friendly fire check
     if target["player"] == shooter["player"]:
+        if debug_mode:
+            print(f"         ❌ Friendly fire: target.player={target['player']} == shooter.player={shooter['player']}")
         return False
     
     # Adjacent check - can't shoot at adjacent enemies (melee range)
@@ -221,23 +282,33 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     if "CC_RNG" not in shooter:
         raise KeyError(f"Shooter missing required 'CC_RNG' field: {shooter}")
     if distance <= shooter["CC_RNG"]:
+        if debug_mode:
+            print(f"         ❌ Too close: dist={distance} <= CC_RNG={shooter['CC_RNG']}")
         return False
-        
+    
     # PERFORMANCE: Use LoS cache if available (instant lookup)
     # Fallback to calculation if cache missing (phase not started yet)
+    has_los = False
     if "los_cache" in game_state and game_state["los_cache"]:
         cache_key = (shooter["id"], target["id"])
         if cache_key in game_state["los_cache"]:
             # Cache hit: instant lookup (0.001ms)
-            return game_state["los_cache"][cache_key]
+            has_los = game_state["los_cache"][cache_key]
         else:
             # Cache miss: calculate and store (first-time lookup)
             has_los = _has_line_of_sight(game_state, shooter, target)
             game_state["los_cache"][cache_key] = has_los
-            return has_los
     else:
         # No cache: fall back to direct calculation (pre-phase-start calls)
-        return _has_line_of_sight(game_state, shooter, target)
+        has_los = _has_line_of_sight(game_state, shooter, target)
+    
+    if debug_mode:
+        if has_los:
+            print(f"         ✅ VALID TARGET: dist={distance}, LoS=clear")
+        else:
+            print(f"         ❌ No LoS: blocked by terrain")
+    
+    return has_los
 
 def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> Dict[str, Any]:
     """
@@ -725,10 +796,22 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # Auto-select target if not provided (AI mode)
         if not target_id:
             valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
+            
+            # Debug output only in debug training mode
+            debug_mode = config.get('training_config_name') == 'debug'
+            if debug_mode:
+                print(f"EXECUTE DEBUG: Auto-target selection found {len(valid_targets)} targets: {valid_targets}")
+            
             if not valid_targets:
+                # No valid targets - end activation with wait
+                if debug_mode:
+                    print(f"EXECUTE DEBUG: No valid targets found, ending activation with PASS")
                 result = _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
                 return True, result
             target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
+            
+            if debug_mode:
+                print(f"EXECUTE DEBUG: AI selected target: {target_id}")
         
         # Execute shooting directly without UI loops
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)

@@ -30,9 +30,11 @@ try:
 except ImportError:
     EVALUATION_BOTS_AVAILABLE = False
 
-# Import PPO - superior for turn-based tactical games
+# Import MaskablePPO - enforces action masking during training
+from sb3_contrib import MaskablePPO
+from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3 import PPO
-MASKABLE_PPO_AVAILABLE = False
+MASKABLE_PPO_AVAILABLE = True
 
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
 from stable_baselines3.common.monitor import Monitor
@@ -43,6 +45,66 @@ from config_loader import get_config_loader
 from ai.game_replay_logger import GameReplayIntegration
 import torch
 import time  # Add time import for StepLogger timestamps
+
+
+class BotControlledEnv:
+    """Wrapper for bot-controlled Player 1 evaluation."""
+    
+    def __init__(self, base_env, bot, unit_registry):
+        self.base_env = base_env
+        self.bot = bot
+        self.unit_registry = unit_registry
+        self.episode_reward = 0.0
+        self.episode_length = 0
+    
+    def reset(self, seed=None, options=None):
+        obs, info = self.base_env.reset(seed=seed, options=options)
+        self.episode_reward = 0.0
+        self.episode_length = 0
+        return obs, info
+    
+    def step(self, agent_action):
+        current_player = self.base_env.game_state["current_player"]
+        
+        if current_player == 0:
+            obs, reward, terminated, truncated, info = self.base_env.step(agent_action)
+            self.episode_reward += reward
+            self.episode_length += 1
+            return obs, reward, terminated, truncated, info
+        else:
+            bot_action = self._get_bot_action()
+            obs, reward, terminated, truncated, info = self.base_env.step(bot_action)
+            self.episode_length += 1
+            return obs, 0.0, terminated, truncated, info
+    
+    def _get_bot_action(self) -> int:
+        game_state = self.base_env.game_state
+        action_mask = self.base_env.get_action_mask()
+        valid_actions = [i for i in range(12) if action_mask[i]]
+        
+        if not valid_actions:
+            return 11
+        
+        if hasattr(self.bot, 'select_action_with_state'):
+            bot_choice = self.bot.select_action_with_state(valid_actions, game_state)
+        else:
+            bot_choice = self.bot.select_action(valid_actions)
+        
+        if bot_choice not in valid_actions:
+            return valid_actions[0]
+        
+        return bot_choice
+    
+    def close(self):
+        self.base_env.close()
+    
+    @property
+    def observation_space(self):
+        return self.base_env.observation_space
+    
+    @property
+    def action_space(self):
+        return self.base_env.action_space
 
 
 class EpisodeTerminationCallback(BaseCallback):
@@ -533,14 +595,70 @@ class BotEvaluationCallback(BaseCallback):
         return True
     
     def _evaluate_against_bots(self) -> Dict[str, float]:
-        """Simplified bot evaluation - just return mock results for now"""
-        # This is a simplified implementation
-        # Full implementation would need to create test environments and run episodes
-        return {
-            'random': random.uniform(0.7, 0.95),  # Should beat random easily
-            'greedy': random.uniform(0.5, 0.8),   # Harder opponent
-            'defensive': random.uniform(0.4, 0.7)  # Tactical opponent
-        }
+        from ai.unit_registry import UnitRegistry
+        
+        results = {}
+        config = get_config_loader()
+        scenario_file = os.path.join(config.config_dir, "scenario.json")
+        unit_registry = UnitRegistry()
+        
+        for bot_name, bot in self.bots.items():
+            if self.verbose > 0:
+                print(f"   🤖 Testing vs {bot_name}...", end='', flush=True)
+            
+            wins = 0
+            
+            for episode in range(self.n_eval_episodes):
+                W40KEngine, _ = setup_imports()
+                
+                controlled_agent = None
+                if hasattr(self, 'training_env') and hasattr(self.training_env, 'envs'):
+                    if len(self.training_env.envs) > 0:
+                        train_env = self.training_env.envs[0]
+                        if hasattr(train_env, 'unwrapped'):
+                            train_env = train_env.unwrapped
+                        if hasattr(train_env, 'config'):
+                            controlled_agent = train_env.config.get('controlled_agent')
+                
+                base_env = W40KEngine(
+                    rewards_config="default",
+                    training_config_name="default",
+                    controlled_agent=controlled_agent,
+                    active_agents=None,
+                    scenario_file=scenario_file,
+                    unit_registry=unit_registry,
+                    quiet=True,
+                    gym_training_mode=True
+                )
+                
+                def mask_fn(env):
+                    return env.get_action_mask()
+                
+                masked_env = ActionMasker(base_env, mask_fn)
+                bot_env = BotControlledEnv(masked_env, bot, unit_registry)
+                
+                obs, info = bot_env.reset()
+                done = False
+                step_count = 0
+                
+                while not done and step_count < 1000:
+                    action, _ = self.model.predict(obs, deterministic=True)
+                    obs, reward, terminated, truncated, info = bot_env.step(action)
+                    done = terminated or truncated
+                    step_count += 1
+                
+                if info.get('winner') == 0:
+                    wins += 1
+                
+                bot_env.close()
+            
+            win_rate = wins / self.n_eval_episodes
+            results[bot_name] = win_rate
+            
+            if self.verbose > 0:
+                print(f" {win_rate:.1%} ({wins}/{self.n_eval_episodes})")
+        
+        return results
 
 class StepLogger:
     """
@@ -967,10 +1085,28 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
     
+    # CRITICAL FIX: Auto-detect controlled_agent from scenario's Player 0 units
+    # This allows curriculum training without --agent parameter
+    controlled_agent_key = None
+    try:
+        with open(scenario_file, 'r') as f:
+            scenario_data = json.load(f)
+        
+        # Get first Player 0 unit to determine agent type
+        player_0_units = [u for u in scenario_data.get("units", []) if u.get("player") == 0]
+        if player_0_units:
+            first_unit_type = player_0_units[0].get("unit_type")
+            if first_unit_type:
+                controlled_agent_key = unit_registry.get_model_key(first_unit_type)
+                print(f"ℹ️  Auto-detected controlled_agent from scenario: {controlled_agent_key}")
+    except Exception as e:
+        print(f"⚠️  Failed to auto-detect controlled_agent: {e}")
+        raise ValueError(f"Cannot proceed without controlled_agent - auto-detection failed: {e}")
+    
     base_env = W40KEngine(
         rewards_config=rewards_config_name,
         training_config_name=training_config_name,
-        controlled_agent=None,
+        controlled_agent=controlled_agent_key,  # Use auto-detected agent
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
@@ -995,8 +1131,14 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             base_env.replay_logger.is_evaluation_mode = True
             base_env.replay_logger.capture_initial_state()
     
-    # SB3 Required: Monitor base environment with action masking
-    env = Monitor(base_env)
+    # Wrap environment with ActionMasker for MaskablePPO compatibility
+    def mask_fn(env):
+        return env.get_action_mask()
+    
+    masked_env = ActionMasker(base_env, mask_fn)
+    
+    # SB3 Required: Monitor wrapped environment
+    env = Monitor(masked_env)
     
     # Check if action masking is available
     if hasattr(base_env, 'get_action_mask'):
@@ -1004,7 +1146,13 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     else:
         print("⚠️ Action masking not available")
     
-    model_path = config.get_model_path()
+    # Use auto-detected agent key for model path
+    if controlled_agent_key:
+        model_path = config.get_model_path().replace('.zip', f'_{controlled_agent_key}.zip')
+        print(f"📝 Using agent-specific model path: {model_path}")
+    else:
+        model_path = config.get_model_path()
+        print(f"📝 Using generic model path: {model_path}")
     
     # Set device for model creation
     # PPO optimization: MlpPolicy performs BETTER on CPU (proven by benchmarks)
@@ -1028,8 +1176,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     # Determine whether to create new model or load existing
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model on {device.upper()}...")
-        print("✅ Using PPO with policy gradient optimization for tactical combat")
-        model = PPO(env=env, **model_params)
+        print("✅ Using MaskablePPO with action masking for tactical combat")
+        model = MaskablePPO(env=env, **model_params)
         # Properly suppress rollout console output
         if hasattr(model, '_logger') and model._logger:
             original_info = model._logger.info
@@ -1040,24 +1188,24 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
-            model = PPO.load(model_path, env=env, device=device)
+            model = MaskablePPO.load(model_path, env=env, device=device)
             # Update any model parameters that might have changed
             model.tensorboard_log = model_params["tensorboard_log"]
             model.verbose = model_params["verbose"]
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
-            model = PPO(env=env, **model_params)
+            model = MaskablePPO(env=env, **model_params)
     else:
         print(f"📁 Loading existing model: {model_path}")
         try:
-            model = PPO.load(model_path, env=env, device=device)
+            model = MaskablePPO.load(model_path, env=env, device=device)
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
-            model = PPO(env=env, **model_params)
+            model = MaskablePPO(env=env, **model_params)
     
-    return model, env, training_config
+    return model, env, training_config, model_path
 
 def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default", 
                             agent_key=None, new_model=False, append_training=False):
@@ -1102,9 +1250,15 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         base_env.step_logger = step_logger
         print("✅ StepLogger connected to compliant W40KEngine")
     
+    # Wrap environment with ActionMasker for MaskablePPO compatibility
+    def mask_fn(env):
+        return env.get_action_mask()
+    
+    masked_env = ActionMasker(base_env, mask_fn)
+    
     # DISABLED: No logging during training for speed
     # Enhanced logging only during evaluation
-    env = Monitor(base_env)
+    env = Monitor(masked_env)
     
     # Agent-specific model path
     model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
@@ -1129,14 +1283,14 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # Determine whether to create new model or load existing
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model for {agent_key} on {device.upper()}...")
-        model = PPO(env=env, **model_params)
+        model = MaskablePPO(env=env, **model_params)
         # Disable rollout logging for multi-agent models too
         if hasattr(model, 'logger') and model.logger:
             model.logger.record = lambda key, value, exclude=None: None if key.startswith('rollout/') else model.logger.record.__wrapped__(key, value, exclude)
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
-            model = PPO.load(model_path, env=env, device=device)
+            model = MaskablePPO.load(model_path, env=env, device=device)
             if "tensorboard_log" not in model_params:
                 raise KeyError("model_params missing required 'tensorboard_log' field")
             model.tensorboard_log = model_params["tensorboard_log"]
@@ -1144,15 +1298,15 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
-            model = PPO(env=env, **model_params)
+            model = MaskablePPO(env=env, **model_params)
     else:
         print(f"📁 Loading existing model: {model_path}")
         try:
-            model = PPO.load(model_path, env=env, device=device)
+            model = MaskablePPO.load(model_path, env=env, device=device)
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
-            print("🆕 Creating new model instead...")
-            model = PPO(env=env, **model_params)
+            print("�' Creating new model instead...")
+            model = MaskablePPO(env=env, **model_params)
     
     return model, env, training_config, model_path
 
@@ -2182,7 +2336,7 @@ def main():
                 print(f"✅ StepLogger connected directly to W40KEngine: {env.step_logger}")
             else:
                 print("❌ No step logger available")
-            model = PPO.load(model_path, env=env)
+            model = MaskablePPO.load(model_path, env=env)
             if args.test_episodes is None:
                 raise ValueError("--test-episodes is required for test-only mode")
             test_trained_model(model, args.test_episodes, args.training_config)
@@ -2191,7 +2345,7 @@ def main():
         else:
             # Generic training mode
             # Create/load model
-            model, env, training_config = create_model(
+            model, env, training_config, model_path = create_model(
             config, 
             args.training_config,
             args.rewards_config, 
@@ -2199,9 +2353,6 @@ def main():
             args.append,
             args
         )
-
-        # Get model path for callbacks and training
-        model_path = config.get_model_path()
         
         # Setup callbacks
         callbacks = setup_callbacks(config, model_path, training_config, args.training_config)

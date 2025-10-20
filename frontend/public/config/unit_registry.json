@@ -1,10 +1,12 @@
 ﻿{
     "units": {
-        "Termagant": "Tyranid/Units/Termagant",
+        
         "CaptainGravis": "SpaceMarine/Units/CaptainGravis",
         "AssaultIntercessor": "SpaceMarine/Units/AssaultIntercessor",
-        "Hormagaunt": "Tyranid/Units/Hormagaunt",
         "Intercessor": "SpaceMarine/Units/Intercessor",
-        "Carnifex": "Tyranid/Units/Carnifex"
+        "Carnifex": "Tyranid/Units/Carnifex",
+        "Genestealer": "Tyranid/Units/Genestealer",
+        "Hormagaunt": "Tyranid/Units/Hormagaunt",  
+        "Termagant": "Tyranid/Units/Termagant"
     }  
 }
