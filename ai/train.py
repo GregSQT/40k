@@ -441,6 +441,35 @@ class MetricsCollectionCallback(BaseCallback):
                     if info.get('episode', False) or info.get('winner') is not None:
                         self._handle_episode_end(info)
         
+        # NEW: Collect reward decomposition from game_state
+        if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
+            env = self.training_env.envs[0]
+            if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'game_state'):
+                game_state = env.unwrapped.game_state
+                
+                # Collect reward breakdown if available
+                if 'last_reward_breakdown' in game_state:
+                    reward_breakdown = game_state['last_reward_breakdown']
+                    
+                    # Accumulate reward components for episode
+                    if not hasattr(self, 'episode_reward_components'):
+                        self.episode_reward_components = {
+                            'base_actions': 0.0,
+                            'result_bonuses': 0.0,
+                            'tactical_bonuses': 0.0,
+                            'situational': 0.0,
+                            'penalties': 0.0
+                        }
+                    
+                    self.episode_reward_components['base_actions'] += reward_breakdown.get('base_actions', 0.0)
+                    self.episode_reward_components['result_bonuses'] += reward_breakdown.get('result_bonuses', 0.0)
+                    self.episode_reward_components['tactical_bonuses'] += reward_breakdown.get('tactical_bonuses', 0.0)
+                    self.episode_reward_components['situational'] += reward_breakdown.get('situational', 0.0)
+                    self.episode_reward_components['penalties'] += reward_breakdown.get('penalties', 0.0)
+                    
+                    # Clear breakdown from game_state to avoid double-counting
+                    del game_state['last_reward_breakdown']
+        
         # Simple Q-value tracking every 100 steps
         if self.model.num_timesteps % 100 == 0 and hasattr(self.model, 'q_net'):
             try:
@@ -555,6 +584,31 @@ class MetricsCollectionCallback(BaseCallback):
                         damage_received += hp_loss
                 self.episode_tactical_data['damage_received'] = damage_received
                 
+                # NEW: Collect AI_TURN.md compliance data
+                if 'last_compliance_data' in game_state:
+                    compliance_data = game_state['last_compliance_data']
+                    self.metrics_tracker.log_aiturn_compliance(compliance_data)
+                
+                # NEW: Collect phase performance data from action logs
+                action_logs = game_state.get('action_logs', [])
+                for log in action_logs:
+                    phase_data = {
+                        'phase': log.get('phase', 'unknown'),
+                        'action': log.get('type', 'unknown'),
+                        'was_flee': log.get('was_flee', False)
+                    }
+                    self.metrics_tracker.log_phase_performance(phase_data)
+                
+                # NEW: Collect reward mapper effectiveness data
+                # Track if movement had tactical bonuses
+                for log in action_logs:
+                    if log.get('type') == 'move':
+                        mapper_data = {
+                            'movement_had_tactical_bonus': log.get('reward', 0.0) > 0.5,
+                            'movement_actions': 1
+                        }
+                        self.metrics_tracker.log_reward_mapper_effectiveness(mapper_data)
+                
                 # Count shooting actions from action logs (existing logic)
                 action_logs = game_state.get('action_logs', [])
                 shoot_logs = [log for log in action_logs if log.get('type') == 'shoot']
@@ -564,6 +618,18 @@ class MetricsCollectionCallback(BaseCallback):
         # Log to metrics tracker
         self.metrics_tracker.log_episode_end(episode_data)
         self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
+        
+        # NEW: Log reward decomposition
+        if hasattr(self, 'episode_reward_components'):
+            self.metrics_tracker.log_reward_decomposition(self.episode_reward_components)
+            # Reset for next episode
+            self.episode_reward_components = {
+                'base_actions': 0.0,
+                'result_bonuses': 0.0,
+                'tactical_bonuses': 0.0,
+                'situational': 0.0,
+                'penalties': 0.0
+            }
        
         # Print progress every 100 episodes
         if self.episode_count % 100 == 0:

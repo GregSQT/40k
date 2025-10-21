@@ -730,6 +730,11 @@ def movement_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """AI_MOVE.md: Clean up and end movement phase"""
     movement_clear_preview(game_state)
     
+    # NEW: Track phase completion reason (AI_TURN.md compliance)
+    if 'last_compliance_data' not in game_state:
+        game_state['last_compliance_data'] = {}
+    game_state['last_compliance_data']['phase_end_reason'] = 'eligibility'
+    
     if "console_logs" not in game_state:
         game_state["console_logs"] = []
     game_state["console_logs"].append("MOVEMENT PHASE COMPLETE")

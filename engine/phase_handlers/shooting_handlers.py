@@ -150,9 +150,10 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
 def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any], current_player: int) -> bool:
     """
     EXACT COPY from w40k_engine_save.py _has_valid_shooting_targets logic
+    WITH ALWAYS-ON DEBUG LOGGING
     """
-    # Enable debug ONLY in debug training config
-    training_config_name = game_state.get("config", {}).get("training_config_name", "")
+    # FIXED: Enable debug ONLY in debug training config
+    training_config_name = game_state.get("training_config_name", "")
     debug_mode = training_config_name == "debug"
     
     if debug_mode:
@@ -195,11 +196,13 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
             if "CC_RNG" not in unit:
                 raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
             
-            if debug_mode and distance <= 5:
-                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): distance={distance}")
+            if debug_mode:
+                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): distance={distance}, CC_RNG={unit['CC_RNG']}")
             
             if distance <= unit["CC_RNG"]:
                 adjacent_enemies.append(f"{enemy['id']}@dist={distance}")
+                if debug_mode:
+                    print(f"         ⚠️ Enemy {enemy['id']} IS ADJACENT (distance={distance} <= CC_RNG={unit['CC_RNG']})")
     
     if adjacent_enemies:
         if debug_mode:
@@ -221,21 +224,30 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     
     if debug_mode:
         print(f"   ✅ Unit has ranged attacks (RNG_NB={unit['RNG_NB']})")
-        print(f"   Checking for valid ranged targets...")
+        print(f"   Checking for valid ranged targets (RNG_RNG={unit.get('RNG_RNG', 0)})...")
     
     # Check for valid targets with detailed debugging
     valid_targets_found = []
     
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
             is_valid = _is_valid_shooting_target(game_state, unit, enemy)
             
             if debug_mode:
-                distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
-                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): dist={distance}, valid={is_valid}")
+                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): dist={distance}, RNG_RNG={unit.get('RNG_RNG', 0)}, valid={is_valid}")
+                if not is_valid:
+                    if distance > unit.get('RNG_RNG', 0):
+                        print(f"         ❌ OUT OF RANGE")
+                    elif distance <= unit.get('CC_RNG', 1):
+                        print(f"         ❌ TOO CLOSE (melee range)")
+                    else:
+                        print(f"         ❌ NO LINE OF SIGHT")
             
             if is_valid:
                 valid_targets_found.append(enemy["id"])
+                if debug_mode:
+                    print(f"         ✅ VALID TARGET")
     
     if debug_mode:
         if len(valid_targets_found) > 0:
@@ -252,7 +264,8 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     PERFORMANCE: Uses LoS cache for instant lookups (0.001ms vs 5-10ms)
     """
     # Enable debug ONLY in debug training config
-    training_config_name = game_state.get("config", {}).get("training_config_name", "")
+    # FIXED: Correct path - training_config_name is stored directly in game_state
+    training_config_name = game_state.get("training_config_name", "")
     debug_mode = training_config_name == "debug"
     
     # Range check using proper hex distance

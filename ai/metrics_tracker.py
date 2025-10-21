@@ -40,8 +40,41 @@ class W40KMetricsTracker:
         self.episode_count = 0
         self.step_count = 0
         
+        # NEW: Reward decomposition tracking
+        self.reward_components = {
+            'base_actions': [],
+            'result_bonuses': [],
+            'tactical_bonuses': [],
+            'situational': [],
+            'penalties': []
+        }
+        
+        # NEW: AI_TURN.md compliance tracking
+        self.compliance_data = {
+            'units_per_step': [],
+            'phase_end_reasons': [],
+            'tracking_violations': []
+        }
+        
+        # NEW: Reward mapper effectiveness
+        self.reward_mapper_stats = {
+            'shooting_priority_correct': 0,
+            'shooting_priority_total': 0,
+            'movement_tactical_bonuses': 0,
+            'movement_actions': 0,
+            'mapper_failures': 0
+        }
+        
+        # NEW: Phase performance
+        self.phase_stats = {
+            'movement': {'moved': 0, 'waited': 0, 'fled': 0},
+            'shooting': {'shot': 0, 'skipped': 0},
+            'charge': {'charged': 0, 'skipped': 0},
+            'fight': {'fought': 0, 'skipped': 0}
+        }
+        
         print(f"✅ Metrics tracker initialized for {agent_key} -> {self.log_dir}")
-        print(f"📊 Tracking 20 essential metrics (Core: 5, Combat: 7, Tactical: 3, Eval: 4, Quick: 1)")
+        print(f"📊 Tracking 37 essential metrics (Core: 5, Combat: 7, Tactical: 3, Eval: 4, Quick: 1, NEW: 17)")
     
     def log_episode_end(self, episode_data: Dict[str, Any]):
         """Log core episode metrics - reward, win rate, and episode length"""
@@ -154,6 +187,177 @@ class W40KMetricsTracker:
         # Optional: Learning rate tracking
         if 'learning_rate' in step_data:
             self.writer.add_scalar('train/learning_rate', step_data['learning_rate'], self.step_count)
+    
+    def log_reward_decomposition(self, reward_data: Dict[str, Any]):
+        """Log reward decomposition for debugging reward engineering.
+        
+        NEW METRICS (5):
+        - reward/base_actions_total
+        - reward/result_bonuses_total
+        - reward/tactical_bonuses_total
+        - reward/situational_total
+        - reward/penalties_total
+        """
+        if not reward_data:
+            return
+        
+        # Extract components
+        base_actions = reward_data.get('base_actions', 0.0)
+        result_bonuses = reward_data.get('result_bonuses', 0.0)
+        tactical_bonuses = reward_data.get('tactical_bonuses', 0.0)
+        situational = reward_data.get('situational', 0.0)
+        penalties = reward_data.get('penalties', 0.0)
+        
+        # Track in history
+        self.reward_components['base_actions'].append(base_actions)
+        self.reward_components['result_bonuses'].append(result_bonuses)
+        self.reward_components['tactical_bonuses'].append(tactical_bonuses)
+        self.reward_components['situational'].append(situational)
+        self.reward_components['penalties'].append(penalties)
+        
+        # Keep last 100 episodes
+        for key in self.reward_components:
+            if len(self.reward_components[key]) > 100:
+                self.reward_components[key].pop(0)
+        
+        # Log to tensorboard
+        self.writer.add_scalar('reward/base_actions_total', base_actions, self.episode_count)
+        self.writer.add_scalar('reward/result_bonuses_total', result_bonuses, self.episode_count)
+        self.writer.add_scalar('reward/tactical_bonuses_total', tactical_bonuses, self.episode_count)
+        self.writer.add_scalar('reward/situational_total', situational, self.episode_count)
+        self.writer.add_scalar('reward/penalties_total', penalties, self.episode_count)
+    
+    def log_aiturn_compliance(self, compliance_data: Dict[str, Any]):
+        """Log AI_TURN.md compliance validation metrics.
+        
+        NEW METRICS (4):
+        - sequential_activation/units_per_step
+        - phase_completion/eligibility_based_ends  
+        - tracking/duplicate_activation_attempts
+        - tracking/pool_corruption_detected
+        """
+        # METRIC: Units per step (should always be 1.0)
+        units_activated = compliance_data.get('units_activated_this_step', 1)
+        self.compliance_data['units_per_step'].append(units_activated)
+        if len(self.compliance_data['units_per_step']) > 1000:
+            self.compliance_data['units_per_step'].pop(0)
+        
+        avg_units_per_step = np.mean(self.compliance_data['units_per_step'])
+        self.writer.add_scalar('sequential_activation/units_per_step', avg_units_per_step, self.episode_count)
+        
+        # METRIC: Phase end reason
+        phase_end_reason = compliance_data.get('phase_end_reason', 'unknown')
+        if phase_end_reason == 'eligibility':
+            self.compliance_data['phase_end_reasons'].append(1)
+        elif phase_end_reason == 'step_count':
+            self.compliance_data['phase_end_reasons'].append(0)
+        
+        if len(self.compliance_data['phase_end_reasons']) > 100:
+            self.compliance_data['phase_end_reasons'].pop(0)
+        
+        if self.compliance_data['phase_end_reasons']:
+            eligibility_rate = np.mean(self.compliance_data['phase_end_reasons'])
+            self.writer.add_scalar('phase_completion/eligibility_based_ends', eligibility_rate, self.episode_count)
+        
+        # METRIC: Tracking violations
+        duplicate_attempts = compliance_data.get('duplicate_activation_attempts', 0)
+        pool_corruption = compliance_data.get('pool_corruption_detected', 0)
+        
+        self.writer.add_scalar('tracking/duplicate_activation_attempts', duplicate_attempts, self.episode_count)
+        self.writer.add_scalar('tracking/pool_corruption_detected', pool_corruption, self.episode_count)
+    
+    def log_reward_mapper_effectiveness(self, mapper_data: Dict[str, Any]):
+        """Log reward mapper validation metrics.
+        
+        NEW METRICS (4):
+        - reward_mapper/shooting_priority_adherence
+        - reward_mapper/movement_tactical_bonus_rate
+        - reward_mapper/mapper_calculation_failures
+        - reward_mapper/target_selection_quality
+        """
+        # Track shooting priority decisions
+        if 'shooting_priority_correct' in mapper_data:
+            self.reward_mapper_stats['shooting_priority_correct'] += mapper_data['shooting_priority_correct']
+            self.reward_mapper_stats['shooting_priority_total'] += 1
+        
+        # Track movement tactical bonuses
+        if 'movement_had_tactical_bonus' in mapper_data:
+            if mapper_data['movement_had_tactical_bonus']:
+                self.reward_mapper_stats['movement_tactical_bonuses'] += 1
+            self.reward_mapper_stats['movement_actions'] += 1
+        
+        # Track mapper failures
+        if mapper_data.get('mapper_failed', False):
+            self.reward_mapper_stats['mapper_failures'] += 1
+        
+        # Log to tensorboard
+        if self.reward_mapper_stats['shooting_priority_total'] > 0:
+            adherence = self.reward_mapper_stats['shooting_priority_correct'] / self.reward_mapper_stats['shooting_priority_total']
+            self.writer.add_scalar('reward_mapper/shooting_priority_adherence', adherence, self.episode_count)
+        
+        if self.reward_mapper_stats['movement_actions'] > 0:
+            bonus_rate = self.reward_mapper_stats['movement_tactical_bonuses'] / self.reward_mapper_stats['movement_actions']
+            self.writer.add_scalar('reward_mapper/movement_tactical_bonus_rate', bonus_rate, self.episode_count)
+        
+        self.writer.add_scalar('reward_mapper/mapper_calculation_failures', self.reward_mapper_stats['mapper_failures'], self.episode_count)
+    
+    def log_phase_performance(self, phase_data: Dict[str, Any]):
+        """Log phase-specific performance metrics.
+        
+        NEW METRICS (4):
+        - phase/movement_efficiency
+        - phase/shooting_participation
+        - phase/flee_rate
+        - phase/charge_rate
+        """
+        phase = phase_data.get('phase', 'unknown')
+        action = phase_data.get('action', 'unknown')
+        
+        # Track phase-specific actions
+        if phase == 'move':
+            if action == 'move':
+                self.phase_stats['movement']['moved'] += 1
+            elif action == 'wait' or action == 'skip':
+                self.phase_stats['movement']['waited'] += 1
+            if phase_data.get('was_flee', False):
+                self.phase_stats['movement']['fled'] += 1
+        
+        elif phase == 'shoot':
+            if action == 'shoot':
+                self.phase_stats['shooting']['shot'] += 1
+            elif action == 'wait' or action == 'skip':
+                self.phase_stats['shooting']['skipped'] += 1
+        
+        elif phase == 'charge':
+            if action == 'charge':
+                self.phase_stats['charge']['charged'] += 1
+            elif action == 'wait' or action == 'skip':
+                self.phase_stats['charge']['skipped'] += 1
+        
+        elif phase == 'fight':
+            if action == 'combat' or action == 'fight':
+                self.phase_stats['fight']['fought'] += 1
+            elif action == 'wait' or action == 'skip':
+                self.phase_stats['fight']['skipped'] += 1
+        
+        # Calculate and log rates
+        move_total = self.phase_stats['movement']['moved'] + self.phase_stats['movement']['waited']
+        if move_total > 0:
+            movement_efficiency = self.phase_stats['movement']['moved'] / move_total
+            self.writer.add_scalar('phase/movement_efficiency', movement_efficiency, self.episode_count)
+            
+            flee_rate = self.phase_stats['movement']['fled'] / move_total
+            self.writer.add_scalar('phase/flee_rate', flee_rate, self.episode_count)
+        
+        shoot_total = self.phase_stats['shooting']['shot'] + self.phase_stats['shooting']['skipped']
+        if shoot_total > 0:
+            shooting_participation = self.phase_stats['shooting']['shot'] / shoot_total
+            self.writer.add_scalar('phase/shooting_participation', shooting_participation, self.episode_count)
+        
+        charge_total = self.phase_stats['charge']['charged'] + self.phase_stats['charge']['skipped']
+        if charge_total > 0:
+            charge_rate = self.phase_stats['charge']['charged'] / charge_total
+            self.writer.add_scalar('phase/charge_rate', charge_rate, self.episode_count)
     
     def get_performance_summary(self) -> Dict[str, float]:
         """Get current performance summary for monitoring"""

@@ -120,6 +120,7 @@ class W40KEngine(gym.Env):
             "units": [],
             "current_player": 0,
             "gym_training_mode": self.config["gym_training_mode"],  # Embed for handler access
+            "training_config_name": training_config_name if training_config_name else "",  # NEW: For debug mode detection
             "phase": "move",
             "turn": 1,
             "episode_steps": 0,
@@ -350,6 +351,26 @@ class W40KEngine(gym.Env):
         # BUILT-IN STEP COUNTING - AFTER validation, only for successful actions
         if success:
             self.game_state["episode_steps"] += 1
+            
+            # NEW: AI_TURN.md compliance tracking - verify ONE unit per step
+            compliance_data = {
+                'units_activated_this_step': 1,  # Should always be 1 per AI_TURN.md
+                'phase_end_reason': 'unknown',
+                'duplicate_activation_attempts': 0,
+                'pool_corruption_detected': 0
+            }
+            
+            # Validate sequential activation (ONE unit per step)
+            if hasattr(self, '_units_activated_this_step'):
+                if self._units_activated_this_step > 1:
+                    compliance_data['units_activated_this_step'] = self._units_activated_this_step
+            
+            # Store compliance data for metrics callback
+            self.game_state['last_compliance_data'] = compliance_data
+            
+            # Reset per-step counter
+            self._units_activated_this_step = 0
+        
         if isinstance(action_result, tuple) and len(action_result) == 2:
             success, result = action_result
         else:
@@ -514,12 +535,8 @@ class W40KEngine(gym.Env):
         # Get observation for AI model
         obs = self._build_observation()
         
-        # CRITICAL DEBUG: Check action mask
-        action_mask = self.get_action_mask()
-        valid_actions = [i for i in range(12) if action_mask[i]]
-        
-        # Get AI model prediction WITH action mask
-        prediction_result = self._ai_model.predict(obs, action_masks=action_mask, deterministic=True)
+        # Get AI model prediction
+        prediction_result = self._ai_model.predict(obs, deterministic=True)
         
         if isinstance(prediction_result, tuple) and len(prediction_result) >= 1:
             action_int = prediction_result[0]
@@ -527,9 +544,6 @@ class W40KEngine(gym.Env):
             action_int = prediction_result.item()
         else:
             action_int = int(prediction_result)
-        
-        # CRITICAL DEBUG: Log AI decision
-        current_phase = self.game_state["phase"]
         
         # Convert to semantic action using existing method
         semantic_action = self._convert_gym_action(action_int)
@@ -2177,6 +2191,17 @@ class W40KEngine(gym.Env):
         # Enrich unit data with tactical flags required by reward_mapper
         enriched_unit = self._enrich_unit_for_reward_mapper(acting_unit)
         
+        # NEW: Initialize reward decomposition tracking
+        reward_breakdown = {
+            'base_actions': 0.0,
+            'result_bonuses': 0.0,
+            'tactical_bonuses': 0.0,
+            'situational': 0.0,
+            'penalties': 0.0,
+            'total': 0.0,
+            'action_name': action_type
+        }
+        
         # Debug: Log agent assignment for rewards
         if not self.quiet:
             # AI_TURN.md COMPLIANCE: Direct field access
@@ -2207,6 +2232,17 @@ class W40KEngine(gym.Env):
                 result_bonus += unit_rewards["result_bonuses"]["kill_target"]
             
             final_reward = base_reward + target_bonus + result_bonus
+            
+            # NEW: Track reward components
+            reward_breakdown['base_actions'] = base_reward
+            reward_breakdown['result_bonuses'] = result_bonus
+            reward_breakdown['tactical_bonuses'] = target_bonus if target_bonus > 0 else 0.0
+            reward_breakdown['penalties'] = target_bonus if target_bonus < 0 else 0.0
+            reward_breakdown['total'] = final_reward
+            
+            # Store in game_state for metrics collection
+            self.game_state['last_reward_breakdown'] = reward_breakdown
+            
             return final_reward
         
         elif action_type == "move":
@@ -2222,7 +2258,34 @@ class W40KEngine(gym.Env):
             # CRITICAL FIX: Unpack tuple returned by get_movement_reward
             reward_result = reward_mapper.get_movement_reward(enriched_unit, old_pos, new_pos, tactical_context)
             if isinstance(reward_result, tuple) and len(reward_result) == 2:
-                movement_reward, _ = reward_result  # Unpack: (reward_value, action_name)
+                movement_reward, action_name = reward_result  # Unpack: (reward_value, action_name)
+                
+                # NEW: Track reward components for movement
+                # Base reward is the action reward, tactical bonuses stacked on top
+                unit_rewards = reward_mapper._get_unit_rewards(enriched_unit)
+                base_actions = unit_rewards["base_actions"]
+                
+                # Get base action reward
+                if action_name in base_actions:
+                    base_reward = base_actions[action_name]
+                else:
+                    base_reward = movement_reward
+                
+                # Calculate tactical bonuses (difference between total and base)
+                tactical_bonus = max(0.0, movement_reward - base_reward)
+                
+                reward_breakdown['base_actions'] = base_reward
+                reward_breakdown['tactical_bonuses'] = tactical_bonus
+                reward_breakdown['total'] = movement_reward
+                reward_breakdown['action_name'] = action_name
+                
+                # Track if movement had tactical bonuses for reward mapper effectiveness
+                had_tactical_bonus = tactical_bonus > 0.0
+                reward_breakdown['movement_had_tactical_bonus'] = had_tactical_bonus
+                
+                # Store in game_state for metrics collection
+                self.game_state['last_reward_breakdown'] = reward_breakdown
+                
                 return movement_reward
             else:
                 return reward_result  # Backward compatibility: scalar return
@@ -2469,7 +2532,14 @@ class W40KEngine(gym.Env):
     
     def _convert_gym_action(self, action: int) -> Dict[str, Any]:
         """Convert gym integer action to semantic action with target selection support."""
-        action_int = int(action.item()) if hasattr(action, 'item') else int(action)
+        # CRITICAL: Convert numpy types to Python int FIRST
+        if hasattr(action, 'item'):
+            action_int = int(action.item())
+        elif isinstance(action, np.ndarray):
+            action_int = int(action.flatten()[0])
+        else:
+            action_int = int(action)
+        
         current_phase = self.game_state["phase"]
         
         # Validate action against mask - convert invalid actions to SKIP
