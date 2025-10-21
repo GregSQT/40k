@@ -164,11 +164,11 @@ class W40KEngine(gym.Env):
         self.action_space = gym.spaces.Discrete(12)  # Expanded: 4 move + 5 shoot + charge + fight + wait
         self._current_valid_actions = list(range(12))  # Will be masked dynamically
         
-        # Observation space: Egocentric perception with R=25 radius
-        # Pure RL system: 165 floats = 10 global + 8 unit_stats + 32 terrain + 70 nearby_units + 45 targets
+        # Observation space: Asymmetric egocentric perception with R=25 radius
+        # 295 floats = 10 global + 8 unit + 32 terrain + 72 allies + 138 enemies + 35 targets
+        # Asymmetric design: More complete information about enemies than allies
         # Covers MOVE(12) + MAX_CHARGE(12) + ENEMY_OFFSET(1) = 25 hex strategic reach
-        # Removed feature #8 (optimal_target_score) - agent discovers optimal combinations
-        obs_size = 165  # Egocentric observation - pure RL (no composite scores)
+        obs_size = 295  # Asymmetric observation - rich enemy intel for tactical decisions
         
         # Load perception parameters from training config if available
         if hasattr(self, 'training_config') and self.training_config:
@@ -184,6 +184,9 @@ class W40KEngine(gym.Env):
         self.observation_space = gym.spaces.Box(
             low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32
         )
+        
+        # Initialize position caching for movement_direction feature
+        self.last_unit_positions = {}  # {unit_id: (col, row)}
         
         # Load AI model for PvE mode
         if self.is_pve_mode:
@@ -453,6 +456,15 @@ class W40KEngine(gym.Env):
             info["winner"] = self._determine_winner()
         else:
             info["winner"] = None
+        
+        # Update position cache for movement_direction feature
+        for unit in self.game_state["units"]:
+            if "id" not in unit:
+                raise KeyError(f"Unit missing required 'id' field: {unit}")
+            if "col" not in unit or "row" not in unit:
+                raise KeyError(f"Unit missing required position fields: {unit}")
+            unit_id = str(unit["id"])
+            self.last_unit_positions[unit_id] = (unit["col"], unit["row"])
             
         return observation, reward, terminated, truncated, info
     
@@ -903,20 +915,21 @@ class W40KEngine(gym.Env):
     
     def _build_observation(self) -> np.ndarray:
         """
-        Build egocentric observation vector with R=25 perception radius.
+        Build asymmetric egocentric observation vector with R=25 perception radius.
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
         
-        Structure (165 floats):
+        Structure (295 floats):
         - [0:10]    Global context (10 floats)
         - [10:18]   Active unit capabilities (8 floats)
         - [18:50]   Directional terrain (32 floats: 8 directions × 4 features)
-        - [50:120]  Nearby units (70 floats: 7 units × 10 features)
-        - [120:165] Valid targets (45 floats: 5 targets × 9 features)
+        - [50:122]  Allied units (72 floats: 6 units × 12 features)
+        - [122:260] Enemy units (138 floats: 6 units × 23 features)
+        - [260:295] Valid targets (35 floats: 5 targets × 7 features)
         
-        Note: Removed optimal_target_score (was feature #8) for pure RL approach.
-              Agent discovers optimal target combinations through training.
+        Asymmetric design: More complete information about enemies than allies.
+        Agent discovers optimal tactical combinations through training.
         """
-        obs = np.zeros(165, dtype=np.float32)
+        obs = np.zeros(295, dtype=np.float32)
         
         # Get active unit (agent's current unit)
         active_unit = self._get_active_unit_for_observation()
@@ -955,11 +968,14 @@ class W40KEngine(gym.Env):
         # === SECTION 3: Directional Terrain Awareness (32 floats) ===
         self._encode_directional_terrain(obs, active_unit, base_idx=18)
         
-        # === SECTION 4: Nearby Units (70 floats) ===
-        self._encode_nearby_units(obs, active_unit, base_idx=50)
+        # === SECTION 4: Allied Units (72 floats) ===
+        self._encode_allied_units(obs, active_unit, base_idx=50)
         
-        # === SECTION 5: Valid Targets (50 floats) ===
-        self._encode_valid_targets(obs, active_unit, base_idx=120)
+        # === SECTION 5: Enemy Units (138 floats) ===
+        self._encode_enemy_units(obs, active_unit, base_idx=122)
+        
+        # === SECTION 6: Valid Targets (35 floats) ===
+        self._encode_valid_targets(obs, active_unit, base_idx=260)
         
         return obs
     
@@ -1089,23 +1105,261 @@ class W40KEngine(gym.Env):
         
         return float(edge_dist)
     
-    def _encode_nearby_units(self, obs: np.ndarray, active_unit: Dict[str, Any], base_idx: int):
+    def _encode_allied_units(self, obs: np.ndarray, active_unit: Dict[str, Any], base_idx: int):
         """
-        Encode up to 7 nearby units within perception radius.
-        70 floats = 7 units × 10 features per unit.
-        AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
+        Encode up to 6 allied units within perception radius.
+        72 floats = 6 units × 12 features per unit.
         
-        Features per unit:
-        - relative_col, relative_row (egocentric position)
-        - distance (normalized by perception_radius)
-        - hp_ratio (HP_CUR / HP_MAX)
-        - is_enemy (1.0 = enemy, 0.0 = friendly)
-        - threat_score (max damage potential)
-        - defensive_type (Swarm/Troop/Elite/Leader encoding)
-        - offensive_type (Melee=0.0, Ranged=1.0)
-        - has_los (line of sight available)
-        - target_match (target preference score)
+        Features per ally (12 floats):
+        0. relative_col, 1. relative_row (egocentric position)
+        2. hp_ratio (HP_CUR / HP_MAX)
+        3. hp_capacity (HP_MAX normalized)
+        4. has_moved (1.0 if unit moved this turn)
+        5. movement_direction (0.0-1.0: fled far → charged at me)
+        6. distance_normalized (distance / perception_radius)
+        7. combat_mix_score (0.1-0.9: melee → ranged specialist)
+        8. ranged_favorite_target (0.0-1.0: swarm → monster)
+        9. melee_favorite_target (0.0-1.0: swarm → monster)
+        10. can_shoot_my_target (1.0 if ally can shoot my current target)
+        11. danger_level (0.0-1.0: threat to my survival)
+        
+        AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
         """
+        # Get all allied units within perception radius
+        allies = []
+        for other_unit in self.game_state["units"]:
+            if "HP_CUR" not in other_unit:
+                raise KeyError(f"Unit missing required 'HP_CUR' field: {other_unit}")
+            
+            if other_unit["HP_CUR"] <= 0:
+                continue
+            if other_unit["id"] == active_unit["id"]:
+                continue
+            if "player" not in other_unit:
+                raise KeyError(f"Unit missing required 'player' field: {other_unit}")
+            if other_unit["player"] != active_unit["player"]:
+                continue  # Skip enemies
+            
+            if "col" not in other_unit or "row" not in other_unit:
+                raise KeyError(f"Unit missing required position fields: {other_unit}")
+            
+            distance = self._calculate_hex_distance(
+                active_unit["col"], active_unit["row"],
+                other_unit["col"], other_unit["row"]
+            )
+            
+            if distance <= self.perception_radius:
+                allies.append((distance, other_unit))
+        
+        # Sort by priority: closer > wounded > can_still_act
+        def ally_priority(item):
+            distance, unit = item
+            hp_ratio = unit["HP_CUR"] / max(1, unit["HP_MAX"])
+            has_acted = 1.0 if unit["id"] in self.game_state.get("units_moved", set()) else 0.0
+            
+            # Priority: closer units (higher), wounded (higher), not acted (higher)
+            return (
+                -distance * 10,  # Closer = higher priority
+                -(1.0 - hp_ratio) * 5,  # More wounded = higher priority
+                -has_acted  # Not acted = higher priority
+            )
+        
+        allies.sort(key=ally_priority, reverse=True)
+        
+        # Encode up to 6 allies
+        max_encoded = 6
+        for i in range(max_encoded):
+            feature_base = base_idx + i * 12
+            
+            if i < len(allies):
+                distance, ally = allies[i]
+                
+                # Feature 0-1: Relative position (egocentric)
+                rel_col = (ally["col"] - active_unit["col"]) / 24.0
+                rel_row = (ally["row"] - active_unit["row"]) / 24.0
+                obs[feature_base + 0] = np.clip(rel_col, -1.0, 1.0)
+                obs[feature_base + 1] = np.clip(rel_row, -1.0, 1.0)
+                
+                # Feature 2-3: Health status
+                obs[feature_base + 2] = ally["HP_CUR"] / max(1, ally["HP_MAX"])
+                obs[feature_base + 3] = ally["HP_MAX"] / 10.0
+                
+                # Feature 4: Has moved
+                obs[feature_base + 4] = 1.0 if ally["id"] in self.game_state.get("units_moved", set()) else 0.0
+                
+                # Feature 5: Movement direction (temporal behavior)
+                obs[feature_base + 5] = self._calculate_movement_direction(ally, active_unit)
+                
+                # Feature 6: Distance normalized
+                obs[feature_base + 6] = distance / self.perception_radius
+                
+                # Feature 7: Combat mix score
+                obs[feature_base + 7] = self._calculate_combat_mix_score(ally)
+                
+                # Feature 8-9: Favorite targets
+                obs[feature_base + 8] = self._calculate_favorite_target(ally)
+                obs[feature_base + 9] = self._calculate_favorite_target(ally)  # Same for both modes
+                
+                # Feature 10: Can shoot my target (placeholder - requires current target context)
+                obs[feature_base + 10] = 0.0
+                
+                # Feature 11: Danger level (threat to my survival)
+                danger = self._calculate_danger_probability(active_unit, ally)
+                obs[feature_base + 11] = danger
+            else:
+                # Padding for empty slots
+                for j in range(12):
+                    obs[feature_base + j] = 0.0
+    
+    def _encode_enemy_units(self, obs: np.ndarray, active_unit: Dict[str, Any], base_idx: int):
+        """
+        Encode up to 6 enemy units within perception radius.
+        138 floats = 6 units × 23 features per unit.
+        
+        Asymmetric design: MORE complete information about enemies for tactical decisions.
+        
+        Features per enemy (23 floats):
+        0. relative_col, 1. relative_row (egocentric position)
+        2. distance_normalized (distance / perception_radius)
+        3. hp_ratio (HP_CUR / HP_MAX)
+        4. hp_capacity (HP_MAX normalized)
+        5. has_moved, 6. movement_direction (temporal behavior)
+        7. has_shot, 8. has_charged, 9. has_attacked
+        10. is_valid_target (1.0 if can be shot/attacked now)
+        11. kill_probability (0.0-1.0: chance I kill them this turn)
+        12. danger_to_me (0.0-1.0: chance they kill ME next turn)
+        13. visibility_to_allies (how many allies can see this enemy)
+        14. combined_friendly_threat (total threat from all allies to this enemy)
+        15. can_be_charged_by_melee (1.0 if friendly melee can reach)
+        16. target_type_match (0.0-1.0: matchup quality)
+        17. can_be_meleed (1.0 if I can melee them now)
+        18. is_adjacent (1.0 if within melee range)
+        19. is_in_range (1.0 if within my weapon range)
+        20. combat_mix_score (enemy's ranged/melee preference)
+        21. ranged_favorite_target (enemy's preferred ranged target)
+        22. melee_favorite_target (enemy's preferred melee target)
+        
+        AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
+        """
+        # Get all enemy units within perception radius
+        enemies = []
+        for other_unit in self.game_state["units"]:
+            if "HP_CUR" not in other_unit:
+                raise KeyError(f"Unit missing required 'HP_CUR' field: {other_unit}")
+            
+            if other_unit["HP_CUR"] <= 0:
+                continue
+            if "player" not in other_unit:
+                raise KeyError(f"Unit missing required 'player' field: {other_unit}")
+            if other_unit["player"] == active_unit["player"]:
+                continue  # Skip allies
+            
+            if "col" not in other_unit or "row" not in other_unit:
+                raise KeyError(f"Unit missing required position fields: {other_unit}")
+            
+            distance = self._calculate_hex_distance(
+                active_unit["col"], active_unit["row"],
+                other_unit["col"], other_unit["row"]
+            )
+            
+            if distance <= self.perception_radius:
+                enemies.append((distance, other_unit))
+        
+        # Sort by priority: closer > can_attack_me > wounded
+        def enemy_priority(item):
+            distance, unit = item
+            hp_ratio = unit["HP_CUR"] / max(1, unit["HP_MAX"])
+            
+            # Check if enemy can attack me
+            can_attack = 0.0
+            if "RNG_RNG" in unit and distance <= unit["RNG_RNG"]:
+                can_attack = 1.0
+            elif "CC_RNG" in unit and distance <= unit["CC_RNG"]:
+                can_attack = 1.0
+            
+            # Priority: enemies (always), closer (higher), can attack (higher), wounded (higher)
+            return (
+                1000,  # Enemy weight
+                -distance * 10,  # Closer = higher priority
+                can_attack * 100,  # Can attack me = much higher priority
+                -(1.0 - hp_ratio) * 5  # More wounded = higher priority
+            )
+        
+        enemies.sort(key=enemy_priority, reverse=True)
+        
+        # Encode up to 6 enemies
+        max_encoded = 6
+        for i in range(max_encoded):
+            feature_base = base_idx + i * 23
+            
+            if i < len(enemies):
+                distance, enemy = enemies[i]
+                
+                # Feature 0-2: Position and distance
+                rel_col = (enemy["col"] - active_unit["col"]) / 24.0
+                rel_row = (enemy["row"] - active_unit["row"]) / 24.0
+                obs[feature_base + 0] = np.clip(rel_col, -1.0, 1.0)
+                obs[feature_base + 1] = np.clip(rel_row, -1.0, 1.0)
+                obs[feature_base + 2] = distance / self.perception_radius
+                
+                # Feature 3-4: Health status
+                obs[feature_base + 3] = enemy["HP_CUR"] / max(1, enemy["HP_MAX"])
+                obs[feature_base + 4] = enemy["HP_MAX"] / 10.0
+                
+                # Feature 5-6: Movement tracking
+                obs[feature_base + 5] = 1.0 if enemy["id"] in self.game_state.get("units_moved", set()) else 0.0
+                obs[feature_base + 6] = self._calculate_movement_direction(enemy, active_unit)
+                
+                # Feature 7-9: Action tracking
+                obs[feature_base + 7] = 1.0 if enemy["id"] in self.game_state.get("units_shot", set()) else 0.0
+                obs[feature_base + 8] = 1.0 if enemy["id"] in self.game_state.get("units_charged", set()) else 0.0
+                obs[feature_base + 9] = 1.0 if enemy["id"] in self.game_state.get("units_attacked", set()) else 0.0
+                
+                # Feature 10: Is valid target (basic check)
+                current_phase = self.game_state["phase"]
+                is_valid = 0.0
+                if current_phase == "shoot" and "RNG_RNG" in active_unit:
+                    is_valid = 1.0 if distance <= active_unit["RNG_RNG"] else 0.0
+                elif current_phase == "fight" and "CC_RNG" in active_unit:
+                    is_valid = 1.0 if distance <= active_unit["CC_RNG"] else 0.0
+                obs[feature_base + 10] = is_valid
+                
+                # Feature 11-12: Kill probability and danger
+                obs[feature_base + 11] = self._calculate_kill_probability(active_unit, enemy)
+                obs[feature_base + 12] = self._calculate_danger_probability(active_unit, enemy)
+                
+                # Feature 13-14: Allied coordination
+                visibility = 0.0
+                combined_threat = 0.0
+                for ally in self.game_state["units"]:
+                    if ally["player"] == active_unit["player"] and ally["HP_CUR"] > 0:
+                        if self._check_los_cached(ally, enemy) > 0.5:
+                            visibility += 1.0
+                        combined_threat += self._calculate_danger_probability(enemy, ally)
+                obs[feature_base + 13] = min(1.0, visibility / 6.0)
+                obs[feature_base + 14] = min(1.0, combined_threat / 5.0)
+                
+                # Feature 15-19: Tactical flags
+                obs[feature_base + 15] = 1.0 if self._can_melee_units_charge_target(enemy) else 0.0
+                obs[feature_base + 16] = self._calculate_target_type_match(active_unit, enemy)
+                obs[feature_base + 17] = 1.0 if ("CC_RNG" in active_unit and distance <= active_unit["CC_RNG"]) else 0.0
+                obs[feature_base + 18] = 1.0 if distance <= 1 else 0.0
+                
+                in_range = 0.0
+                if "RNG_RNG" in active_unit and distance <= active_unit["RNG_RNG"]:
+                    in_range = 1.0
+                elif "CC_RNG" in active_unit and distance <= active_unit["CC_RNG"]:
+                    in_range = 1.0
+                obs[feature_base + 19] = in_range
+                
+                # Feature 20-22: Enemy capabilities
+                obs[feature_base + 20] = self._calculate_combat_mix_score(enemy)
+                obs[feature_base + 21] = self._calculate_favorite_target(enemy)
+                obs[feature_base + 22] = self._calculate_favorite_target(enemy)
+            else:
+                # Padding for empty slots
+                for j in range(23):
+                    obs[feature_base + j] = 0.0
         # Get all units within perception radius
         nearby_units = []
         for other_unit in self.game_state["units"]:
@@ -1256,6 +1510,232 @@ class W40KEngine(gym.Env):
         else:
             return 1.0   # Leader
     
+    def _calculate_combat_mix_score(self, unit: Dict[str, Any]) -> float:
+        """
+        Calculate unit's combat preference based on ACTUAL expected damage
+        against their favorite target types (from unitType).
+        
+        Returns 0.1-0.9:
+        - 0.1-0.3: Melee specialist (CC damage >> RNG damage)
+        - 0.4-0.6: Balanced combatant
+        - 0.7-0.9: Ranged specialist (RNG damage >> CC damage)
+        
+        AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+        """
+        if "unitType" not in unit:
+            raise KeyError(f"Unit missing required 'unitType' field: {unit}")
+        
+        unit_type = unit["unitType"]
+        
+        # Determine favorite target stats based on specialization
+        if "Swarm" in unit_type:
+            target_T = 3
+            target_save = 5
+            target_invul = 7  # No invul (7+ = impossible)
+        elif "Troop" in unit_type:
+            target_T = 4
+            target_save = 3
+            target_invul = 7  # No invul
+        elif "Elite" in unit_type:
+            target_T = 5
+            target_save = 2
+            target_invul = 4  # 4+ invulnerable
+        else:  # Monster/Leader
+            target_T = 6
+            target_save = 3
+            target_invul = 7  # No invul
+        
+        # Validate required UPPERCASE fields
+        required_fields = ["RNG_NB", "RNG_ATK", "RNG_STR", "RNG_AP", "RNG_DMG",
+                          "CC_NB", "CC_ATK", "CC_STR", "CC_AP", "CC_DMG"]
+        for field in required_fields:
+            if field not in unit:
+                raise KeyError(f"Unit missing required '{field}' field: {unit}")
+        
+        # Calculate EXPECTED ranged damage per turn
+        ranged_expected = self._calculate_expected_damage(
+            num_attacks=unit["RNG_NB"],
+            to_hit_stat=unit["RNG_ATK"],
+            strength=unit["RNG_STR"],
+            target_toughness=target_T,
+            ap=unit["RNG_AP"],
+            target_save=target_save,
+            target_invul=target_invul,
+            damage_per_wound=unit["RNG_DMG"]
+        )
+        
+        # Calculate EXPECTED melee damage per turn
+        melee_expected = self._calculate_expected_damage(
+            num_attacks=unit["CC_NB"],
+            to_hit_stat=unit["CC_ATK"],
+            strength=unit["CC_STR"],
+            target_toughness=target_T,
+            ap=unit["CC_AP"],
+            target_save=target_save,
+            target_invul=target_invul,
+            damage_per_wound=unit["CC_DMG"]
+        )
+        
+        total_expected = ranged_expected + melee_expected
+        
+        if total_expected == 0:
+            return 0.5  # Neutral (no combat power)
+        
+        # Scale to 0.1-0.9 range
+        raw_ratio = ranged_expected / total_expected
+        return 0.1 + (raw_ratio * 0.8)
+    
+    def _calculate_expected_damage(self, num_attacks: int, to_hit_stat: int, 
+                                   strength: int, target_toughness: int, ap: int, 
+                                   target_save: int, target_invul: int, 
+                                   damage_per_wound: int) -> float:
+        """
+        Calculate expected damage using W40K dice mechanics with invulnerable saves.
+        
+        Expected damage = Attacks × P(hit) × P(wound) × P(fail_save) × Damage
+        """
+        # Hit probability
+        p_hit = max(0.0, min(1.0, (7 - to_hit_stat) / 6.0))
+        
+        # Wound probability
+        wound_target = self._calculate_wound_target_basic(strength, target_toughness)
+        p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
+        
+        # Save failure probability (use better of armor or invul)
+        modified_armor_save = target_save - ap
+        best_save = min(modified_armor_save, target_invul)
+        
+        if best_save > 6:
+            p_fail_save = 1.0  # Impossible to save
+        else:
+            p_fail_save = max(0.0, min(1.0, (best_save - 1) / 6.0))
+        
+        # Expected damage per turn
+        expected = num_attacks * p_hit * p_wound * p_fail_save * damage_per_wound
+        
+        return expected
+    
+    def _calculate_wound_target_basic(self, strength: int, toughness: int) -> int:
+        """W40K wound chart - basic calculation without external dependencies"""
+        if strength >= toughness * 2:
+            return 2  # 2+
+        elif strength > toughness:
+            return 3  # 3+
+        elif strength == toughness:
+            return 4  # 4+
+        elif strength * 2 <= toughness:
+            return 6  # 6+
+        else:
+            return 5  # 5+
+    
+    def _calculate_favorite_target(self, unit: Dict[str, Any]) -> float:
+        """
+        Extract favorite target type from unitType name.
+        
+        unitType format: "Faction_Movement_PowerLevel_AttackPreference"
+        Example: "SpaceMarine_Infantry_Troop_RangedSwarm"
+                                              ^^^^^^^^^^^^
+                                              Ranged + Swarm
+        
+        Returns 0.0-1.0 encoding:
+        - 0.0 = Swarm specialist (vs HP_MAX ≤ 1)
+        - 0.33 = Troop specialist (vs HP_MAX 2-3)
+        - 0.66 = Elite specialist (vs HP_MAX 4-6)
+        - 1.0 = Monster specialist (vs HP_MAX ≥ 7)
+        
+        AI_TURN.md COMPLIANCE: Direct field access
+        """
+        if "unitType" not in unit:
+            raise KeyError(f"Unit missing required 'unitType' field: {unit}")
+        
+        unit_type = unit["unitType"]
+        
+        # Parse attack preference component (last part after final underscore)
+        parts = unit_type.split("_")
+        if len(parts) < 4:
+            return 0.5  # Default neutral if format unexpected
+        
+        attack_pref = parts[3]  # e.g., "RangedSwarm", "MeleeElite"
+        
+        # Extract target preference from attack_pref
+        if "Swarm" in attack_pref:
+            return 0.0
+        elif "Troop" in attack_pref:
+            return 0.33
+        elif "Elite" in attack_pref:
+            return 0.66
+        elif "Monster" in attack_pref or "Leader" in attack_pref:
+            return 1.0
+        else:
+            return 0.5  # Default neutral
+    
+    def _calculate_movement_direction(self, unit: Dict[str, Any], 
+                                     active_unit: Dict[str, Any]) -> float:
+        """
+        Encode temporal behavior in single float - replaces frame stacking.
+        
+        Detects unit's movement pattern relative to active unit:
+        - 0.00-0.24: Fled far from me (>50% MOVE away)
+        - 0.25-0.49: Moved away slightly (<50% MOVE away)
+        - 0.50-0.74: Advanced slightly (<50% MOVE toward)
+        - 0.75-1.00: Charged at me (>50% MOVE toward)
+        
+        Critical for detecting threats before they strike!
+        AI_TURN.md COMPLIANCE: Direct field access
+        """
+        # Get last known position from cache
+        if not hasattr(self, 'last_unit_positions') or not self.last_unit_positions:
+            return 0.5  # Unknown/first turn
+        
+        if "id" not in unit:
+            raise KeyError(f"Unit missing required 'id' field: {unit}")
+        
+        unit_id = str(unit["id"])
+        if unit_id not in self.last_unit_positions:
+            return 0.5  # No previous position data
+        
+        # Validate required position fields
+        if "col" not in unit or "row" not in unit:
+            raise KeyError(f"Unit missing required position fields: {unit}")
+        if "col" not in active_unit or "row" not in active_unit:
+            raise KeyError(f"Active unit missing required position fields: {active_unit}")
+        
+        prev_col, prev_row = self.last_unit_positions[unit_id]
+        curr_col, curr_row = unit["col"], unit["row"]
+        
+        # Calculate movement toward/away from active unit
+        prev_dist = self._calculate_hex_distance(
+            prev_col, prev_row, 
+            active_unit["col"], active_unit["row"]
+        )
+        curr_dist = self._calculate_hex_distance(
+            curr_col, curr_row,
+            active_unit["col"], active_unit["row"]
+        )
+        
+        move_distance = self._calculate_hex_distance(prev_col, prev_row, curr_col, curr_row)
+        
+        if "MOVE" not in unit:
+            raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
+        max_move = unit["MOVE"]
+        
+        if move_distance == 0:
+            return 0.5  # No movement
+        
+        delta_dist = prev_dist - curr_dist  # Positive = moved closer
+        move_ratio = abs(delta_dist) / max(1, max_move)  # Prevent division by zero
+        
+        if delta_dist < 0:  # Moved away
+            if move_ratio > 0.5:
+                return 0.12  # Fled far (>50% MOVE away)
+            else:
+                return 0.37  # Moved away slightly
+        else:  # Moved closer
+            if move_ratio > 0.5:
+                return 0.87  # Charged (>50% MOVE toward)
+            else:
+                return 0.62  # Advanced slightly
+    
     def _check_los_cached(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> float:
         """
         Check LoS using cache if available, fallback to calculation.
@@ -1279,30 +1759,26 @@ class W40KEngine(gym.Env):
     def _encode_valid_targets(self, obs: np.ndarray, active_unit: Dict[str, Any], base_idx: int):
         """
         Encode valid targets with EXPLICIT action-target correspondence and W40K probabilities.
-        45 floats = 5 actions × 9 features per action
+        35 floats = 5 actions × 7 features per action
         
-        CRITICAL DESIGN: obs[120 + action_offset*9] directly corresponds to action (4 + action_offset)
+        SIMPLIFIED from 9 to 7 features (removed redundant features with enemy section).
+        
+        CRITICAL DESIGN: obs[260 + action_offset*7] directly corresponds to action (4 + action_offset)
         Example: 
-        - obs[120:129] = features for what happens if agent presses action 4
-        - obs[129:138] = features for what happens if agent presses action 5
+        - obs[260:267] = features for what happens if agent presses action 4
+        - obs[267:274] = features for what happens if agent presses action 5
         
         This creates DIRECT causal relationship for RL learning:
-        "When obs[121]=1.0 (high kill_probability), pressing action 4 gives high reward"
+        "When obs[261]=1.0 (high kill_probability), pressing action 4 gives high reward"
         
-        Features per action slot (9 floats) - PURE RL APPROACH:
+        Features per action slot (7 floats) - CORE TACTICAL ESSENTIALS:
         0. is_valid (1.0 = target exists, 0.0 = no target in this slot)
         1. kill_probability (0.0-1.0, probability to kill target this turn considering dice)
         2. danger_to_me (0.0-1.0, probability target kills ME next turn)
-        3. hp_ratio (target HP_CUR / HP_MAX)
+        3. enemy_index (0-5: which enemy in obs[122:260] this action targets)
         4. distance_normalized (hex_distance / perception_radius)
-        5. is_lowest_hp (1.0 if lowest HP among valid targets)
-        6. army_weighted_threat (0.0-1.0, strategic priority considering all friendlies by VALUE)
-        7. can_be_charged_by_melee (1.0 if friendly melee can reach this target)
-        8. target_type_match (unit_registry compatibility 0.0-1.0)
-        
-        REMOVED: optimal_target_score (was feature #8)
-        Reason: Agent should discover optimal target combinations, not be given pre-computed scores.
-                Network hidden layers (256×256) learn to combine these 9 features optimally.
+        5. is_priority_target (1.0 if moved toward me, high threat)
+        6. coordination_bonus (1.0 if friendly melee can charge after I shoot)
         """
         # Get valid targets based on current phase
         valid_targets = []
@@ -1377,16 +1853,20 @@ class W40KEngine(gym.Env):
             active_unit["col"], active_unit["row"], t["col"], t["row"]
         ))
         
-        # CRITICAL: Sort by distance for CONSISTENT ordering across episodes
-        # Agent needs same target in same slot each time for learning
-        valid_targets.sort(key=lambda t: self._calculate_hex_distance(
-            active_unit["col"], active_unit["row"], t["col"], t["row"]
+        # Build enemy index map for reference
+        enemy_index_map = {}
+        enemy_list = [u for u in self.game_state["units"] 
+                     if u["player"] != active_unit["player"] and u["HP_CUR"] > 0]
+        enemy_list.sort(key=lambda e: self._calculate_hex_distance(
+            active_unit["col"], active_unit["row"], e["col"], e["row"]
         ))
+        for idx, enemy in enumerate(enemy_list[:6]):
+            enemy_index_map[enemy["id"]] = idx
         
-        # Encode up to max_valid_targets (5 targets × 9 features = 45 floats)
+        # Encode up to max_valid_targets (5 targets × 7 features = 35 floats)
         max_encoded = 5
         for i in range(max_encoded):
-            feature_base = base_idx + i * 9  # Changed from i * 10
+            feature_base = base_idx + i * 7
             
             if i < len(valid_targets):
                 target = valid_targets[i]
@@ -1402,8 +1882,9 @@ class W40KEngine(gym.Env):
                 danger_prob = self._calculate_danger_probability(active_unit, target)
                 obs[feature_base + 2] = danger_prob
                 
-                # Feature 3: HP ratio (efficiency metric)
-                obs[feature_base + 3] = target.get("HP_CUR", 1) / max(1, target.get("HP_MAX", 1))
+                # Feature 3: Enemy index (reference to obs[122:260])
+                enemy_idx = enemy_index_map.get(target["id"], 0)
+                obs[feature_base + 3] = enemy_idx / 5.0
                 
                 # Feature 4: Distance (accessibility)
                 distance = self._calculate_hex_distance(
@@ -1412,27 +1893,19 @@ class W40KEngine(gym.Env):
                 )
                 obs[feature_base + 4] = distance / self.perception_radius
                 
-                # Feature 5: Is lowest HP (finish-off signal)
-                all_hps = [t.get("HP_CUR", 1) for t in valid_targets]
-                min_hp = min(all_hps) if all_hps else 1
-                is_lowest = 1.0 if target.get("HP_CUR", 999) == min_hp else 0.0
-                obs[feature_base + 5] = is_lowest
+                # Feature 5: Is priority target (moved toward me + high threat)
+                movement_dir = self._calculate_movement_direction(target, active_unit)
+                is_approaching = 1.0 if movement_dir > 0.75 else 0.0
+                danger = self._calculate_danger_probability(active_unit, target)
+                is_priority = 1.0 if (is_approaching > 0.5 and danger > 0.5) else 0.0
+                obs[feature_base + 5] = is_priority
                 
-                # Feature 6: Army-wide weighted threat (strategic priority by VALUE)
-                army_threat = self._calculate_army_weighted_threat(target, valid_targets)
-                obs[feature_base + 6] = army_threat
-                
-                # Feature 7: Can be charged by melee (coordination signal)
+                # Feature 6: Coordination bonus (can friendly melee charge after I shoot)
                 can_be_charged = 1.0 if self._can_melee_units_charge_target(target) else 0.0
-                obs[feature_base + 7] = can_be_charged
-                
-                # Feature 8: Target type match (unit_registry compatibility)
-                # Moved from feature #9 to #8 after removing optimal_target_score
-                type_match = self._calculate_target_type_match(active_unit, target)
-                obs[feature_base + 8] = type_match
+                obs[feature_base + 6] = can_be_charged
             else:
                 # Padding for empty slots
-                for j in range(9):  # Changed from 10
+                for j in range(7):
                     obs[feature_base + j] = 0.0
     
     def _calculate_kill_probability(self, shooter: Dict[str, Any], target: Dict[str, Any]) -> float:

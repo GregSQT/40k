@@ -6,7 +6,7 @@ from config_loader import get_config_loader
 from ai.unit_registry import UnitRegistry
 
 def main():
-    print("🧪 Testing Pure RL Observation System (165 floats)...")
+    print("🧪 Testing Pure RL Observation System (295 floats)...")
     
     config_loader = get_config_loader()
     unit_registry = UnitRegistry()
@@ -24,9 +24,9 @@ def main():
     obs, info = engine.reset()
     
     print(f'✅ Observation shape: {obs.shape}')
-    print(f'✅ Expected: (165,)')
+    print(f'✅ Expected: (295,)')
     
-    assert obs.shape == (165,), f'ERROR: Shape mismatch! Got {obs.shape}'
+    assert obs.shape == (295,), f'ERROR: Shape mismatch! Got {obs.shape}'
     
     print('✅ Pure RL observation system verified!')
     print(f'✅ Observation breakdown:')

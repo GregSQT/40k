@@ -1,6 +1,6 @@
 {
   "default": {
-    "total_episodes": 1000,
+    "total_episodes": 200,
     "total_episodes_normal": "1000",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 50,
@@ -12,11 +12,11 @@
       "n_eval_episodes": 5
     },
     "observation_params": {
-      "obs_size": 165,
+      "obs_size": 295,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1)"
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 295 floats = asymmetric obs (72 ally + 138 enemy + 35 targets)"
     },
     "exploration": {
       "initial_epsilon": 0.3,
@@ -57,11 +57,11 @@
       "n_eval_episodes": 2
     },
     "observation_params": {
-      "obs_size": 165,
+      "obs_size": 295,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1), 10 features per target for agent-controlled selection"
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 295 floats = asymmetric obs (72 ally + 138 enemy + 35 targets)"
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -84,11 +84,11 @@
   },
   "curriculum_phase1": {
     "observation_params": {
-      "obs_size": 165,
+      "obs_size": 295,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "Phase 1: Learn 'shooting is good' - any target, high exploration"
+      "justification": "Phase 1: Learn 'shooting is good' - any target, high exploration. 295 floats = asymmetric obs"
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -122,11 +122,11 @@
   },
   "curriculum_phase2": {
     "observation_params": {
-      "obs_size": 165,
+      "obs_size": 295,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "Phase 2: Learn target priorities - kill weak targets first"
+      "justification": "Phase 2: Learn target priorities - kill weak targets first. 295 floats = asymmetric obs"
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -159,11 +159,11 @@
   },
   "curriculum_phase3": {
     "observation_params": {
-      "obs_size": 165,
+      "obs_size": 295,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "Phase 3: Learn full tactical priorities with RewardMapper"
+      "justification": "Phase 3: Learn full tactical priorities with RewardMapper. 295 floats = asymmetric obs"
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -196,11 +196,11 @@
   },
   "aggressive": {
     "observation_params": {
-      "obs_size": 165,
+      "obs_size": 295,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1), 10 features per target for agent-controlled selection"
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 295 floats = asymmetric obs (72 ally + 138 enemy + 35 targets)"
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -233,11 +233,11 @@
   },
   "conservative": {
     "observation_params": {
-      "obs_size": 165,
+      "obs_size": 295,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1), 10 features per target for agent-controlled selection"
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 295 floats = asymmetric obs (72 ally + 138 enemy + 35 targets)"
     },
     "model_params": {
       "policy": "MlpPolicy",

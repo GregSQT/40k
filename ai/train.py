@@ -9,6 +9,7 @@ import sys
 import argparse
 import subprocess
 import json
+import numpy as np
 import glob
 import shutil
 import random
@@ -56,6 +57,12 @@ class BotControlledEnv:
         self.unit_registry = unit_registry
         self.episode_reward = 0.0
         self.episode_length = 0
+        
+        # Unwrap ActionMasker to get actual engine
+        self.engine = base_env
+        if hasattr(base_env, 'env'):
+            # ActionMasker wraps the actual engine in .env attribute
+            self.engine = base_env.env
     
     def reset(self, seed=None, options=None):
         obs, info = self.base_env.reset(seed=seed, options=options)
@@ -64,7 +71,7 @@ class BotControlledEnv:
         return obs, info
     
     def step(self, agent_action):
-        current_player = self.base_env.game_state["current_player"]
+        current_player = self.engine.game_state["current_player"]
         
         if current_player == 0:
             obs, reward, terminated, truncated, info = self.base_env.step(agent_action)
@@ -78,8 +85,8 @@ class BotControlledEnv:
             return obs, 0.0, terminated, truncated, info
     
     def _get_bot_action(self) -> int:
-        game_state = self.base_env.game_state
-        action_mask = self.base_env.get_action_mask()
+        game_state = self.engine.game_state
+        action_mask = self.engine.get_action_mask()
         valid_actions = [i for i in range(12) if action_mask[i]]
         
         if not valid_actions:
@@ -359,10 +366,37 @@ class MetricsCollectionCallback(BaseCallback):
         self.episode_count = 0
         self.episode_reward = 0
         self.episode_length = 0
+        
+        # Initialize episode tracking with ALL metrics
         self.episode_tactical_data = {
-            'shots_fired': 0, 'hits': 0, 'total_enemies': 0, 'killed_enemies': 0,
-            'invalid_actions': 0, 'total_actions': 0, 'phases_completed': 0, 'total_phases': 6
+            # Combat metrics
+            'shots_fired': 0,
+            'hits': 0,
+            'total_enemies': 0,
+            'killed_enemies': 0,
+            
+            # NEW: Damage tracking
+            'damage_dealt': 0,
+            'damage_received': 0,
+            
+            # NEW: Unit tracking
+            'units_lost': 0,
+            'units_killed': 0,
+            
+            # NEW: Action tracking
+            'valid_actions': 0,
+            'invalid_actions': 0,
+            'wait_actions': 0,
+            'total_actions': 0,
+            
+            # Phase tracking
+            'phases_completed': 0,
+            'total_phases': 6
         }
+        
+        # Track initial unit state for damage/loss calculations
+        self.initial_agent_units = []
+        self.initial_enemy_units = []
         
         # Add immediate reward ratio history for smoothing
         self.immediate_reward_ratio_history = []
@@ -373,19 +407,39 @@ class MetricsCollectionCallback(BaseCallback):
         self.max_q_value_history = 100  # Keep last 100 Q-value samples
     
     def _on_step(self) -> bool:
-        # Collect step-level data
-        if hasattr(self, 'locals') and 'infos' in self.locals:
-            for info in self.locals['infos']:
-                # Track invalid actions
-                if info.get('invalid_action_penalty'):
-                    self.episode_tactical_data['invalid_actions'] += 1
-                
-                # Track total actions
-                self.episode_tactical_data['total_actions'] += 1
-                
-                # Track episode end
-                if info.get('episode', False):
-                    self._handle_episode_end(info)
+        """Collect step-level data including actions, damage, and unit changes"""
+        # Track step-level reward and length
+        if hasattr(self, 'locals'):
+            if 'rewards' in self.locals:
+                reward = self.locals['rewards'][0] if isinstance(self.locals['rewards'], (list, np.ndarray)) else self.locals['rewards']
+                self.episode_reward += reward
+            
+            self.episode_length += 1
+            
+            # Process info dict for action tracking
+            if 'infos' in self.locals:
+                for info in self.locals['infos']:
+                    # Track action validity
+                    if 'success' in info:
+                        if info['success']:
+                            self.episode_tactical_data['valid_actions'] += 1
+                        else:
+                            self.episode_tactical_data['invalid_actions'] += 1
+                        
+                        self.episode_tactical_data['total_actions'] += 1
+                    
+                    # Track wait actions (action type in info)
+                    if info.get('action') == 'wait' or info.get('action') == 'skip':
+                        self.episode_tactical_data['wait_actions'] += 1
+                    
+                    # Track damage from combat results
+                    if 'totalDamage' in info:
+                        damage_dealt = info.get('totalDamage', 0)
+                        self.episode_tactical_data['damage_dealt'] += damage_dealt
+                    
+                    # Handle episode end
+                    if info.get('episode', False) or info.get('winner') is not None:
+                        self._handle_episode_end(info)
         
         # Simple Q-value tracking every 100 steps
         if self.model.num_timesteps % 100 == 0 and hasattr(self.model, 'q_net'):
@@ -435,30 +489,30 @@ class MetricsCollectionCallback(BaseCallback):
     def _handle_episode_end(self, info):
         """Handle episode completion and log metrics."""
         self.episode_count += 1
-        
+       
         # Extract episode data
         episode_data = {
             'total_reward': info.get('episode_reward', self.episode_reward),
-            'steps': info.get('episode_length', self.episode_length),
+            'episode_length': info.get('episode_length', self.episode_length),
             'winner': info.get('winner', None)
         }
-        
+       
         # GAMMA MONITORING: Track discount factor effects
         if hasattr(self.model, 'gamma'):
             gamma = self.model.gamma
-            
+           
             # Calculate temporal metrics
             immediate_reward_ratio = self._calculate_immediate_vs_future_ratio(info)
             planning_horizon = self._estimate_planning_horizon(gamma)
-            
+           
             # Track ratio history for smoothing
             self.immediate_reward_ratio_history.append(immediate_reward_ratio)
             if len(self.immediate_reward_ratio_history) > self.max_reward_ratio_history:
                 self.immediate_reward_ratio_history.pop(0)
-            
+           
             # Calculate smoothed mean
             ratio_mean = sum(self.immediate_reward_ratio_history) / len(self.immediate_reward_ratio_history)
-            
+           
             # Log gamma-related metrics
             if hasattr(self.model, 'logger') and self.model.logger:
                 self.model.logger.record('gamma/discount_factor', gamma)
@@ -467,43 +521,87 @@ class MetricsCollectionCallback(BaseCallback):
                 self.model.logger.record('gamma/planning_horizon_turns', planning_horizon)
                 # Force tensorboard dump to ensure gamma metrics are written
                 self.model.logger.dump(step=self.model.num_timesteps)
-        
+       
         # Try to extract tactical data from environment
         if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
             env = self.training_env.envs[0]
             if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'game_state'):
                 game_state = env.unwrapped.game_state
-                
-                # Count total and killed enemies
                 units = game_state.get('units', [])
-                player_0_units = [u for u in units if u.get('player') == 0]
-                self.episode_tactical_data['total_enemies'] = len(player_0_units)
-                self.episode_tactical_data['killed_enemies'] = len([u for u in player_0_units if u.get('HP_CUR', 1) <= 0])
                 
-                # Count shooting actions from action logs
+                # Identify agent player (controlled_agent is player 1)
+                agent_player = 1
+                enemy_player = 0
+                
+                # Count enemies (existing logic)
+                enemy_units = [u for u in units if u.get('player') == enemy_player]
+                self.episode_tactical_data['total_enemies'] = len(enemy_units)
+                self.episode_tactical_data['killed_enemies'] = len([u for u in enemy_units if u.get('HP_CUR', 1) <= 0])
+                
+                # NEW: Count units killed (enemy units that died this episode)
+                self.episode_tactical_data['units_killed'] = len([u for u in enemy_units if u.get('HP_CUR', 0) <= 0])
+                
+                # NEW: Count units lost (agent units that died this episode)
+                agent_units = [u for u in units if u.get('player') == agent_player]
+                self.episode_tactical_data['units_lost'] = len([u for u in agent_units if u.get('HP_CUR', 0) <= 0])
+                
+                # NEW: Calculate damage received (agent units' HP loss)
+                damage_received = 0
+                for unit in agent_units:
+                    hp_cur = unit.get('HP_CUR', 0)
+                    hp_max = unit.get('HP_MAX', 1)
+                    if hp_max > 0:
+                        hp_loss = max(0, hp_max - hp_cur)
+                        damage_received += hp_loss
+                self.episode_tactical_data['damage_received'] = damage_received
+                
+                # Count shooting actions from action logs (existing logic)
                 action_logs = game_state.get('action_logs', [])
                 shoot_logs = [log for log in action_logs if log.get('type') == 'shoot']
                 self.episode_tactical_data['shots_fired'] = len(shoot_logs)
                 self.episode_tactical_data['hits'] = len([log for log in shoot_logs if log.get('damage', 0) > 0])
-        
+       
         # Log to metrics tracker
         self.metrics_tracker.log_episode_end(episode_data)
         self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
-        
+       
         # Print progress every 100 episodes
         if self.episode_count % 100 == 0:
             summary = self.metrics_tracker.get_performance_summary()
-            if 'avg_reward_100ep' in summary:
-                print(f"Episode {self.episode_count}: Avg Reward = {summary['avg_reward_100ep']:.2f}")
-                if 'win_rate_100ep' in summary:
-                    print(f"                    Win Rate = {summary['win_rate_100ep']:.1%}")
-        
-        # Reset episode tracking
+            if 'avg_reward_overall' in summary:
+                print(f"Episode {self.episode_count}: Avg Reward = {summary['avg_reward_overall']:.2f}")
+            if 'win_rate_100ep' in summary:
+                print(f"                    Win Rate (100ep) = {summary['win_rate_100ep']:.1%}")
+            if 'win_rate_overall' in summary:
+                print(f"                    Win Rate (overall) = {summary['win_rate_overall']:.1%}")
+       
+        # Reset episode tracking with ALL fields
         self.episode_reward = 0
         self.episode_length = 0
         self.episode_tactical_data = {
-            'shots_fired': 0, 'hits': 0, 'total_enemies': 0, 'killed_enemies': 0,
-            'invalid_actions': 0, 'total_actions': 0, 'phases_completed': 0, 'total_phases': 6
+            # Combat metrics
+            'shots_fired': 0,
+            'hits': 0,
+            'total_enemies': 0,
+            'killed_enemies': 0,
+            
+            # Damage tracking
+            'damage_dealt': 0,
+            'damage_received': 0,
+            
+            # Unit tracking
+            'units_lost': 0,
+            'units_killed': 0,
+            
+            # Action tracking
+            'valid_actions': 0,
+            'invalid_actions': 0,
+            'wait_actions': 0,
+            'total_actions': 0,
+            
+            # Phase tracking
+            'phases_completed': 0,
+            'total_phases': 6
         }
     
     def _calculate_immediate_vs_future_ratio(self, info):
@@ -620,9 +718,19 @@ class BotEvaluationCallback(BaseCallback):
                         if hasattr(train_env, 'config'):
                             controlled_agent = train_env.config.get('controlled_agent')
                 
+                # DEBUG: Print player configuration (ONLY FIRST EPISODE)
+                if episode == 0:
+                    print(f"\n🔍 DEBUG INFO (Bot: {bot_name}):")
+                    print(f"   controlled_agent = {controlled_agent}")
+                    print(f"   Agent should be player: {0 if controlled_agent is None else 1}")
+                    print(f"   Bot should be player: {1 if controlled_agent is None else 0}")
+                    print(f"   Winner check looking for: player 0")
+                
+                # Create evaluation environment with LONGER turn limit
+                # Bot evaluation needs more turns to reach decisive victories
                 base_env = W40KEngine(
                     rewards_config="default",
-                    training_config_name="default",
+                    training_config_name="default",  # Will be overridden below
                     controlled_agent=controlled_agent,
                     active_agents=None,
                     scenario_file=scenario_file,
@@ -630,6 +738,11 @@ class BotEvaluationCallback(BaseCallback):
                     quiet=True,
                     gym_training_mode=True
                 )
+                
+                # CRITICAL FIX: Override max_turns for bot evaluation to allow decisive victories
+                # Training uses 5 turns, but bot evaluation needs 10-15 turns for proper assessment
+                if hasattr(base_env, 'training_config'):
+                    base_env.training_config['max_turns_per_episode'] = 15
                 
                 def mask_fn(env):
                     return env.get_action_mask()
@@ -641,13 +754,30 @@ class BotEvaluationCallback(BaseCallback):
                 done = False
                 step_count = 0
                 
-                while not done and step_count < 1000:
+                # Shorter step limit for faster evaluation
+                max_eval_steps = 500  # Reduced from 1000 for faster evaluation
+                
+                while not done and step_count < max_eval_steps:
                     action, _ = self.model.predict(obs, deterministic=True)
                     obs, reward, terminated, truncated, info = bot_env.step(action)
                     done = terminated or truncated
                     step_count += 1
                 
-                if info.get('winner') == 0:
+                # DEBUG: Print winner info (ONLY FIRST EPISODE)
+                if episode == 0:
+                    actual_winner = info.get('winner')
+                    timeout = step_count >= max_eval_steps
+                    print(f"   Episode ended: winner={actual_winner}, step_count={step_count}, timeout={timeout}")
+                    print(f"   Checking if winner == {1 if controlled_agent else 0} (agent's player)")
+                    
+                    # Additional diagnostics for timeouts
+                    if timeout:
+                        print(f"   ⚠️  TIMEOUT: Game didn't finish in {max_eval_steps} steps")
+                        print(f"   This suggests: slow combat, ineffective tactics, or game balance issues")
+                
+                # CRITICAL FIX: Agent is player 1 when controlled_agent is set, player 0 when None
+                agent_player = 1 if controlled_agent else 0
+                if info.get('winner') == agent_player:
                     wins += 1
                 
                 bot_env.close()
@@ -1372,10 +1502,10 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         # Adjust frequency and episodes based on config
         if training_config_name == "debug":
             bot_eval_freq = 2500  # More frequent for debug
-            bot_n_episodes = 10   # Fewer episodes for speed
+            bot_n_episodes = 3    # Minimal episodes for speed
         else:
-            bot_eval_freq = 5000   # Standard frequency
-            bot_n_episodes = 20    # Standard episodes
+            bot_eval_freq = 10000  # Less frequent (2x)
+            bot_n_episodes = 5     # Fewer episodes (4x faster)
         
         bot_eval_callback = BotEvaluationCallback(
             eval_freq=bot_eval_freq,
