@@ -615,6 +615,10 @@ class MetricsCollectionCallback(BaseCallback):
                 shoot_logs = [log for log in action_logs if log.get('type') == 'shoot']
                 self.episode_tactical_data['shots_fired'] = len(shoot_logs)
                 self.episode_tactical_data['hits'] = len([log for log in shoot_logs if log.get('damage', 0) > 0])
+                
+                # NEW: Calculate total damage dealt from all action logs
+                damage_dealt = sum(log.get('damage', 0) for log in action_logs if log.get('damage', 0) > 0)
+                self.episode_tactical_data['damage_dealt'] = damage_dealt
        
         # Log to metrics tracker
         self.metrics_tracker.log_episode_end(episode_data)

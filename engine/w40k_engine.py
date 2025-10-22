@@ -1086,8 +1086,9 @@ class W40KEngine(gym.Env):
             controlled_agent = self.config.get('controlled_agent') if self.config else None
         
         if action_type == "shoot":
-            if "targetId" in result:
-                target = self._get_unit_by_id(str(result["targetId"]))
+            if self.game_state.get("last_attack_result") is not None and self.game_state.get("last_target_id"):
+                target_id = self.game_state.get("last_target_id")
+                target = self._get_unit_by_id(str(target_id))
                 enriched_target = self._enrich_unit_for_reward_mapper(target)
                 unit_rewards = reward_mapper._get_unit_rewards(enriched_unit)
                 base_reward = unit_rewards["base_actions"]["ranged_attack"]
