@@ -444,6 +444,7 @@ class MetricsCollectionCallback(BaseCallback):
         # NEW: Collect reward decomposition from game_state
         if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
             env = self.training_env.envs[0]
+            
             if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'game_state'):
                 game_state = env.unwrapped.game_state
                 

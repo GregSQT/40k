@@ -993,6 +993,172 @@ class W40KEngine(gym.Env):
         
         return obs
     
+    def _calculate_reward(self, success: bool, result: Dict[str, Any]) -> float:
+        """Calculate reward using actual acting unit with reward mapper integration."""
+        # Initialize reward breakdown dictionary for metrics tracking
+        reward_breakdown = {
+            'base_actions': 0.0,
+            'result_bonuses': 0.0,
+            'tactical_bonuses': 0.0,
+            'situational': 0.0,
+            'penalties': 0.0,
+            'total': 0.0
+        }
+        
+        # PRIORITY CHECK: Invalid action penalty (from handlers)
+        if isinstance(result, dict) and result.get("invalid_action_penalty"):
+            penalty_reward = -0.9
+            reward_breakdown['penalties'] = penalty_reward
+            reward_breakdown['total'] = penalty_reward
+            self.game_state['last_reward_breakdown'] = reward_breakdown
+            return penalty_reward
+        
+        if not success:
+            if isinstance(result, dict):
+                error_msg = result.get("error", "")
+                if "forbidden_in" in error_msg or "masked_in" in error_msg:
+                    penalty_reward = -1.0
+                    reward_breakdown['penalties'] = penalty_reward
+                    reward_breakdown['total'] = penalty_reward
+                    self.game_state['last_reward_breakdown'] = reward_breakdown
+                    return penalty_reward
+                else:
+                    penalty_reward = -0.1
+                    reward_breakdown['penalties'] = penalty_reward
+                    reward_breakdown['total'] = penalty_reward
+                    self.game_state['last_reward_breakdown'] = reward_breakdown
+                    return penalty_reward
+            else:
+                penalty_reward = -0.1
+                reward_breakdown['penalties'] = penalty_reward
+                reward_breakdown['total'] = penalty_reward
+                self.game_state['last_reward_breakdown'] = reward_breakdown
+                return penalty_reward
+        
+        # Handle system responses (no unit-specific rewards)
+        system_response_indicators = [
+            "phase_complete", "phase_transition", "while_loop_active", 
+            "context", "blinking_units", "start_blinking", "validTargets",
+            "type", "next_phase", "current_player", "new_turn", "episode_complete"
+        ]
+        
+        if any(indicator in result for indicator in system_response_indicators):
+            reward_breakdown['total'] = 0.0
+            self.game_state['last_reward_breakdown'] = reward_breakdown
+            return 0.0
+        
+        # Get ACTUAL acting unit from result
+        acting_unit_id = result.get("unitId") or result.get("shooterId") or result.get("unit_id")
+        if not acting_unit_id:
+            raise ValueError(f"Action result missing acting unit ID: {result}")
+        
+        acting_unit = self._get_unit_by_id(str(acting_unit_id))
+        if not acting_unit:
+            raise ValueError(f"Acting unit not found: {acting_unit_id}")
+        
+        # Get action type from result
+        # Check both 'action' and 'endType' fields (handlers use different naming)
+        if isinstance(result, dict):
+            action_type = result.get("action") or result.get("endType", "").lower()
+            if not action_type:
+                action_type = "unknown"
+        else:
+            action_type = "unknown"
+        
+        # Full reward mapper integration
+        reward_mapper = self._get_reward_mapper()
+        enriched_unit = self._enrich_unit_for_reward_mapper(acting_unit)
+        
+        if not self.quiet:
+            original_type = acting_unit['unitType']
+            agent_type = enriched_unit['unitType']
+            controlled_agent = self.config.get('controlled_agent') if self.config else None
+        
+        if action_type == "shoot":
+            if "targetId" in result:
+                target = self._get_unit_by_id(str(result["targetId"]))
+                enriched_target = self._enrich_unit_for_reward_mapper(target)
+                unit_rewards = reward_mapper._get_unit_rewards(enriched_unit)
+                base_reward = unit_rewards["base_actions"]["ranged_attack"]
+                target_bonus = reward_mapper._get_target_type_bonus(enriched_unit, enriched_target)
+                result_bonus = 0.0
+                if result.get("target_died", False):
+                    result_bonus += unit_rewards["result_bonuses"]["kill_target"]
+                final_reward = base_reward + target_bonus + result_bonus
+                
+                reward_breakdown['base_actions'] = base_reward
+                reward_breakdown['result_bonuses'] = result_bonus
+                reward_breakdown['tactical_bonuses'] = target_bonus if target_bonus > 0 else 0.0
+                reward_breakdown['penalties'] = target_bonus if target_bonus < 0 else 0.0
+                reward_breakdown['total'] = final_reward
+                self.game_state['last_reward_breakdown'] = reward_breakdown
+                
+                if not self.quiet:
+                    print(f"DEBUG: Shooting reward - Base: {base_reward}, Target bonus: {target_bonus}, Result: {result_bonus}, Final: {final_reward}")
+                return final_reward
+            else:
+                skip_reward = self._calculate_reward_from_config(acting_unit, {"type": "wait"}, success)
+                reward_breakdown['base_actions'] = skip_reward
+                reward_breakdown['penalties'] = skip_reward
+                reward_breakdown['total'] = skip_reward
+                self.game_state['last_reward_breakdown'] = reward_breakdown
+                return skip_reward
+            
+        elif action_type == "move":
+            old_pos = (result["fromCol"], result["fromRow"])
+            new_pos = (result["toCol"], result["toRow"])
+            tactical_context = self._build_tactical_context(acting_unit, result)
+            movement_result = reward_mapper.get_movement_reward(enriched_unit, old_pos, new_pos, tactical_context)
+            if isinstance(movement_result, tuple):
+                movement_reward = movement_result[0]
+                reward_breakdown['base_actions'] = movement_reward
+                reward_breakdown['total'] = movement_reward
+                self.game_state['last_reward_breakdown'] = reward_breakdown
+                return movement_reward
+            reward_breakdown['base_actions'] = movement_result
+            reward_breakdown['total'] = movement_result
+            self.game_state['last_reward_breakdown'] = reward_breakdown
+            return movement_result
+            
+        elif action_type == "skip":
+            skip_reward = self._calculate_reward_from_config(acting_unit, {"type": "wait"}, success)
+            reward_breakdown['base_actions'] = skip_reward
+            reward_breakdown['penalties'] = skip_reward
+            reward_breakdown['total'] = skip_reward
+            self.game_state['last_reward_breakdown'] = reward_breakdown
+            return skip_reward
+            
+        elif action_type == "charge" and "targetId" in result:
+            target = self._get_unit_by_id(str(result["targetId"]))
+            enriched_target = self._enrich_unit_for_reward_mapper(target)
+            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit)]
+            charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets)
+            reward_breakdown['base_actions'] = charge_reward
+            reward_breakdown['total'] = charge_reward
+            self.game_state['last_reward_breakdown'] = reward_breakdown
+            return charge_reward
+            
+        elif action_type == "fight" and "targetId" in result:
+            target = self._get_unit_by_id(str(result["targetId"]))
+            enriched_target = self._enrich_unit_for_reward_mapper(target)
+            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit)]
+            fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets)
+            reward_breakdown['base_actions'] = fight_reward
+            reward_breakdown['total'] = fight_reward
+            self.game_state['last_reward_breakdown'] = reward_breakdown
+            return fight_reward
+            
+        elif action_type == "wait":
+            wait_reward = self._calculate_reward_from_config(acting_unit, {"type": "wait"}, success)
+            reward_breakdown['base_actions'] = wait_reward
+            reward_breakdown['penalties'] = wait_reward
+            reward_breakdown['total'] = wait_reward
+            self.game_state['last_reward_breakdown'] = reward_breakdown
+            return wait_reward
+        
+        # NO FALLBACK - Raise error to identify missing action types
+        raise ValueError(f"Unhandled action type '{action_type}' in _calculate_reward. Result: {result}")
+    
     def _get_active_unit_for_observation(self) -> Optional[Dict[str, Any]]:
         """
         Get the active unit for observation encoding.
@@ -2146,173 +2312,6 @@ class W40KEngine(gym.Env):
         # Cube distance
         return max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
     
-    def _calculate_reward(self, success: bool, result: Dict[str, Any]) -> float:
-        """Calculate reward using actual acting unit with reward mapper integration."""
-        # PRIORITY CHECK: Invalid action penalty (from handlers)
-        if isinstance(result, dict) and result.get("invalid_action_penalty"):
-            return -0.9  # Training penalty for wrong phase actions
-        
-        if not success:
-            if isinstance(result, dict):
-                error_msg = result.get("error", "")
-                if "forbidden_in" in error_msg or "masked_in" in error_msg:
-                    return -1.0  # Heavy penalty for phase violations to train proper behavior
-                else:
-                    return -0.1  # Small penalty for other invalid actions
-            else:
-                return -0.1  # Default penalty for failures
-        
-        # Handle system responses (no unit-specific rewards)
-        system_response_indicators = [
-            "phase_complete", "phase_transition", "while_loop_active", 
-            "context", "blinking_units", "start_blinking", "validTargets",
-            "type", "next_phase", "current_player", "new_turn", "episode_complete"
-        ]
-        
-        if any(indicator in result for indicator in system_response_indicators):
-            # System responses are not unit actions - no reward needed
-            return 0.0
-        
-        # Get ACTUAL acting unit from result, not pool[0]
-        acting_unit_id = result.get("unitId") or result.get("shooterId") or result.get("unit_id")
-        if not acting_unit_id:
-            raise ValueError(f"Action result missing acting unit ID: {result}")
-        
-        acting_unit = self._get_unit_by_id(str(acting_unit_id))
-        if not acting_unit:
-            raise ValueError(f"Acting unit not found: {acting_unit_id}")
-        
-        # Get action type from result
-        action_type = result.get("action", "unknown") if isinstance(result, dict) else "unknown"
-        
-        # Full reward mapper integration - use unit registry for proper config mapping
-        reward_mapper = self._get_reward_mapper()
-        
-        # Enrich unit data with tactical flags required by reward_mapper
-        enriched_unit = self._enrich_unit_for_reward_mapper(acting_unit)
-        
-        # NEW: Initialize reward decomposition tracking
-        reward_breakdown = {
-            'base_actions': 0.0,
-            'result_bonuses': 0.0,
-            'tactical_bonuses': 0.0,
-            'situational': 0.0,
-            'penalties': 0.0,
-            'total': 0.0,
-            'action_name': action_type
-        }
-        
-        # Debug: Log agent assignment for rewards
-        if not self.quiet:
-            # AI_TURN.md COMPLIANCE: Direct field access
-            if 'unitType' not in acting_unit:
-                raise KeyError(f"Acting unit missing required 'unitType' field: {acting_unit}")
-            if 'unitType' not in enriched_unit:
-                raise KeyError(f"Enriched unit missing required 'unitType' field: {enriched_unit}")
-            original_type = acting_unit['unitType']
-            agent_type = enriched_unit['unitType']
-            controlled_agent = self.config['controlled_agent'] if self.config and 'controlled_agent' in self.config else None
-            if controlled_agent is None:
-                raise ValueError("Missing controlled_agent in config - required for reward calculation")
-        
-        if action_type == "shoot" and "targetId" in result:
-            target = self._get_unit_by_id(str(result["targetId"]))
-            enriched_target = self._enrich_unit_for_reward_mapper(target)
-            
-            # Get base shooting reward
-            unit_rewards = reward_mapper._get_unit_rewards(enriched_unit)
-            base_reward = unit_rewards["base_actions"]["ranged_attack"]
-            
-            # Add target type bonus/penalty
-            target_bonus = reward_mapper._get_target_type_bonus(enriched_unit, enriched_target)
-            
-            # Add result bonuses if target was killed/wounded
-            result_bonus = 0.0
-            if result.get("target_died", False):
-                result_bonus += unit_rewards["result_bonuses"]["kill_target"]
-            
-            final_reward = base_reward + target_bonus + result_bonus
-            
-            # NEW: Track reward components
-            reward_breakdown['base_actions'] = base_reward
-            reward_breakdown['result_bonuses'] = result_bonus
-            reward_breakdown['tactical_bonuses'] = target_bonus if target_bonus > 0 else 0.0
-            reward_breakdown['penalties'] = target_bonus if target_bonus < 0 else 0.0
-            reward_breakdown['total'] = final_reward
-            
-            # Store in game_state for metrics collection
-            self.game_state['last_reward_breakdown'] = reward_breakdown
-            
-            return final_reward
-        
-        elif action_type == "move":
-            # AI_TURN.md COMPLIANCE: Direct access - movement results must provide coordinates
-            if "fromCol" not in result or "fromRow" not in result:
-                raise KeyError(f"Movement result missing required position fields: {result}")
-            if "toCol" not in result or "toRow" not in result:
-                raise KeyError(f"Movement result missing required destination fields: {result}")
-            old_pos = (result["fromCol"], result["fromRow"])
-            new_pos = (result["toCol"], result["toRow"])
-            tactical_context = self._build_tactical_context(acting_unit, result)
-            
-            # CRITICAL FIX: Unpack tuple returned by get_movement_reward
-            reward_result = reward_mapper.get_movement_reward(enriched_unit, old_pos, new_pos, tactical_context)
-            if isinstance(reward_result, tuple) and len(reward_result) == 2:
-                movement_reward, action_name = reward_result  # Unpack: (reward_value, action_name)
-                
-                # NEW: Track reward components for movement
-                # Base reward is the action reward, tactical bonuses stacked on top
-                unit_rewards = reward_mapper._get_unit_rewards(enriched_unit)
-                base_actions = unit_rewards["base_actions"]
-                
-                # Get base action reward
-                if action_name in base_actions:
-                    base_reward = base_actions[action_name]
-                else:
-                    base_reward = movement_reward
-                
-                # Calculate tactical bonuses (difference between total and base)
-                tactical_bonus = max(0.0, movement_reward - base_reward)
-                
-                reward_breakdown['base_actions'] = base_reward
-                reward_breakdown['tactical_bonuses'] = tactical_bonus
-                reward_breakdown['total'] = movement_reward
-                reward_breakdown['action_name'] = action_name
-                
-                # Track if movement had tactical bonuses for reward mapper effectiveness
-                had_tactical_bonus = tactical_bonus > 0.0
-                reward_breakdown['movement_had_tactical_bonus'] = had_tactical_bonus
-                
-                # Store in game_state for metrics collection
-                self.game_state['last_reward_breakdown'] = reward_breakdown
-                
-                return movement_reward
-            else:
-                return reward_result  # Backward compatibility: scalar return
-        elif action_type == "skip":
-            # SKIP: Agent CANNOT perform action - use wait penalty
-            return self._calculate_reward_from_config(acting_unit, {"type": "wait"}, success)
-        elif action_type == "charge" and "targetId" in result:
-            target = self._get_unit_by_id(str(result["targetId"]))
-            enriched_target = self._enrich_unit_for_reward_mapper(target)
-            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit)]
-            return reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets)
-        elif action_type == "fight" and "targetId" in result:
-            target = self._get_unit_by_id(str(result["targetId"]))
-            enriched_target = self._enrich_unit_for_reward_mapper(target)
-            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit)]
-            return reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets)
-        elif action_type == "wait":
-            # Use base wait penalty from config
-            return self._calculate_reward_from_config(acting_unit, {"type": "wait"}, success)
-        
-        # Use standard config-based reward for other actions
-        return self._calculate_reward_from_config(acting_unit, {"type": action_type}, success)
-        
-        # Use standard config-based reward calculation
-        action = {"type": action_type}
-        return self._calculate_reward_from_config(acting_unit, action, success)
-    
     def _calculate_reward_from_config(self, acting_unit: Dict[str, Any], action: Dict[str, Any], success: bool) -> float:
         """Exact reproduction of gym40k.py reward calculation."""
         unit_rewards = self._get_unit_reward_config(acting_unit)
@@ -2365,11 +2364,32 @@ class W40KEngine(gym.Env):
             if winner == 1:  # AI wins
                 if "win" not in modifiers:
                     raise KeyError(f"Situational modifiers missing required 'win' reward")
-                base_reward += modifiers["win"]
+                win_bonus = modifiers["win"]
+                base_reward += win_bonus
+                
+                # CRITICAL FIX: Track win bonus in game_state for metrics
+                self.game_state['last_reward_breakdown'] = {
+                    'base_actions': base_reward - win_bonus,
+                    'result_bonuses': 0.0,
+                    'tactical_bonuses': 0.0,
+                    'situational': win_bonus,
+                    'penalties': 0.0
+                }
+                
             elif winner == 0:  # AI loses
                 if "lose" not in modifiers:
                     raise KeyError(f"Situational modifiers missing required 'lose' reward")
-                base_reward += modifiers["lose"]
+                lose_penalty = modifiers["lose"]
+                base_reward += lose_penalty
+                
+                # CRITICAL FIX: Track lose penalty in game_state for metrics
+                self.game_state['last_reward_breakdown'] = {
+                    'base_actions': base_reward - lose_penalty,
+                    'result_bonuses': 0.0,
+                    'tactical_bonuses': 0.0,
+                    'situational': lose_penalty,
+                    'penalties': 0.0
+                }
         
         return base_reward
     

@@ -152,9 +152,8 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     EXACT COPY from w40k_engine_save.py _has_valid_shooting_targets logic
     WITH ALWAYS-ON DEBUG LOGGING
     """
-    # FIXED: Enable debug ONLY in debug training config
-    training_config_name = game_state.get("training_config_name", "")
-    debug_mode = training_config_name == "debug"
+    # FIXED: Disable debug output completely during training
+    debug_mode = False  # Set to True only for manual debugging
     
     if debug_mode:
         print(f"\n🔍 ELIGIBILITY CHECK: Unit {unit['id']} @ ({unit['col']}, {unit['row']})")
@@ -637,6 +636,7 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     response = {
         "activation_ended": True,
         "endType": arg1,
+        "action": "skip" if arg1 == "SKIP" or arg1 == "PASS" else "shoot",
         "unitId": unit["id"],
         "clear_blinking_gentle": True,
         "reset_mode": "select",
