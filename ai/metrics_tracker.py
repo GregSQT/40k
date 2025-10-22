@@ -201,12 +201,35 @@ class W40KMetricsTracker:
         if not reward_data:
             return
         
-        # Extract components
-        base_actions = reward_data.get('base_actions', 0.0)
-        result_bonuses = reward_data.get('result_bonuses', 0.0)
-        tactical_bonuses = reward_data.get('tactical_bonuses', 0.0)
-        situational = reward_data.get('situational', 0.0)
-        penalties = reward_data.get('penalties', 0.0)
+        # Validate required fields - raise errors for missing data, NO DEFAULTS
+        required_fields = ['base_actions', 'result_bonuses', 'tactical_bonuses', 'situational', 'penalties']
+        for field in required_fields:
+            if field not in reward_data:
+                raise KeyError(
+                    f"Missing required field '{field}' in reward_data. "
+                    f"Got keys: {list(reward_data.keys())}. "
+                    f"All reward calculations must provide complete breakdown."
+                )
+        
+        # Extract components - all fields validated above
+        base_actions = reward_data['base_actions']
+        result_bonuses = reward_data['result_bonuses']
+        tactical_bonuses = reward_data['tactical_bonuses']
+        situational = reward_data['situational']
+        penalties = reward_data['penalties']
+        
+        # Validate types - must be numeric
+        for field_name, field_value in [
+            ('base_actions', base_actions), 
+            ('result_bonuses', result_bonuses), 
+            ('tactical_bonuses', tactical_bonuses), 
+            ('situational', situational), 
+            ('penalties', penalties)
+        ]:
+            if not isinstance(field_value, (int, float)):
+                raise TypeError(
+                    f"Reward field '{field_name}' must be numeric, got {type(field_value)}: {field_value}"
+                )
         
         # Track in history
         self.reward_components['base_actions'].append(base_actions)

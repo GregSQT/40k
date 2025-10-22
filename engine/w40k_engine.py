@@ -1005,9 +1005,12 @@ class W40KEngine(gym.Env):
             'total': 0.0
         }
         
+        # Load system penalties from config
+        system_penalties = self._get_system_penalties()
+        
         # PRIORITY CHECK: Invalid action penalty (from handlers)
         if isinstance(result, dict) and result.get("invalid_action_penalty"):
-            penalty_reward = -0.9
+            penalty_reward = system_penalties['invalid_action']
             reward_breakdown['penalties'] = penalty_reward
             reward_breakdown['total'] = penalty_reward
             self.game_state['last_reward_breakdown'] = reward_breakdown
@@ -1017,19 +1020,19 @@ class W40KEngine(gym.Env):
             if isinstance(result, dict):
                 error_msg = result.get("error", "")
                 if "forbidden_in" in error_msg or "masked_in" in error_msg:
-                    penalty_reward = -1.0
+                    penalty_reward = system_penalties['forbidden_action']
                     reward_breakdown['penalties'] = penalty_reward
                     reward_breakdown['total'] = penalty_reward
                     self.game_state['last_reward_breakdown'] = reward_breakdown
                     return penalty_reward
                 else:
-                    penalty_reward = -0.1
+                    penalty_reward = system_penalties['generic_error']
                     reward_breakdown['penalties'] = penalty_reward
                     reward_breakdown['total'] = penalty_reward
                     self.game_state['last_reward_breakdown'] = reward_breakdown
                     return penalty_reward
             else:
-                penalty_reward = -0.1
+                penalty_reward = system_penalties['generic_error']
                 reward_breakdown['penalties'] = penalty_reward
                 reward_breakdown['total'] = penalty_reward
                 self.game_state['last_reward_breakdown'] = reward_breakdown
@@ -1043,9 +1046,17 @@ class W40KEngine(gym.Env):
         ]
         
         if any(indicator in result for indicator in system_response_indicators):
-            reward_breakdown['total'] = 0.0
+            system_response_reward = system_penalties['system_response']
+            reward_breakdown['total'] = system_response_reward
+            
+            # CRITICAL FIX: Check if game ended and add situational reward
+            if self.game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward()
+                reward_breakdown['situational'] = situational_reward
+                reward_breakdown['total'] += situational_reward
+            
             self.game_state['last_reward_breakdown'] = reward_breakdown
-            return 0.0
+            return reward_breakdown['total']
         
         # Get ACTUAL acting unit from result
         acting_unit_id = result.get("unitId") or result.get("shooterId") or result.get("unit_id")
@@ -1081,9 +1092,36 @@ class W40KEngine(gym.Env):
                 unit_rewards = reward_mapper._get_unit_rewards(enriched_unit)
                 base_reward = unit_rewards["base_actions"]["ranged_attack"]
                 target_bonus = reward_mapper._get_target_type_bonus(enriched_unit, enriched_target)
+                
+                # CRITICAL FIX: Award result bonuses for hit/wound/damage/kill
                 result_bonus = 0.0
+                
+                # Get attack_result from game_state (stored by shooting_attack_controller)
+                # The execution loop doesn't pass attack_result through, so we retrieve it from game_state
+                attack_result = self.game_state.get("last_attack_result", {})
+                
+                # Debug output to verify we're getting the attack_result
+                if not self.quiet and attack_result:
+                    print(f"🎯 REWARD DEBUG: Got attack_result from game_state")
+                    print(f"   hit_success={attack_result.get('hit_success')}, wound_success={attack_result.get('wound_success')}")
+                    print(f"   damage={attack_result.get('damage')}, target_died={result.get('target_died')}")
+                
+                # Check for hit (from shooting handler result)
+                if attack_result.get("hit_success", False):
+                    result_bonus += unit_rewards["result_bonuses"].get("hit_target", 0.0)
+                
+                # Check for wound (hit and wound both succeeded)
+                if attack_result.get("wound_success", False):
+                    result_bonus += unit_rewards["result_bonuses"].get("wound_target", 0.0)
+                
+                # Check for damage dealt (not saved)
+                if attack_result.get("damage", 0) > 0:
+                    result_bonus += unit_rewards["result_bonuses"].get("damage_target", 0.0)
+                
+                # Check for kill (target died)
                 if result.get("target_died", False):
-                    result_bonus += unit_rewards["result_bonuses"]["kill_target"]
+                    result_bonus += unit_rewards["result_bonuses"].get("kill_target", 0.0)
+                
                 final_reward = base_reward + target_bonus + result_bonus
                 
                 reward_breakdown['base_actions'] = base_reward
@@ -1091,6 +1129,14 @@ class W40KEngine(gym.Env):
                 reward_breakdown['tactical_bonuses'] = target_bonus if target_bonus > 0 else 0.0
                 reward_breakdown['penalties'] = target_bonus if target_bonus < 0 else 0.0
                 reward_breakdown['total'] = final_reward
+                
+                # CRITICAL FIX: Add situational reward if game ended
+                if self.game_state.get("game_over", False):
+                    situational_reward = self._get_situational_reward()
+                    reward_breakdown['situational'] = situational_reward
+                    final_reward += situational_reward
+                    reward_breakdown['total'] = final_reward
+                
                 self.game_state['last_reward_breakdown'] = reward_breakdown
                 
                 if not self.quiet:
@@ -1101,6 +1147,14 @@ class W40KEngine(gym.Env):
                 reward_breakdown['base_actions'] = skip_reward
                 reward_breakdown['penalties'] = skip_reward
                 reward_breakdown['total'] = skip_reward
+                
+                # CRITICAL FIX: Add situational reward if game ended
+                if self.game_state.get("game_over", False):
+                    situational_reward = self._get_situational_reward()
+                    reward_breakdown['situational'] = situational_reward
+                    skip_reward += situational_reward
+                    reward_breakdown['total'] = skip_reward
+                
                 self.game_state['last_reward_breakdown'] = reward_breakdown
                 return skip_reward
             
@@ -1113,10 +1167,26 @@ class W40KEngine(gym.Env):
                 movement_reward = movement_result[0]
                 reward_breakdown['base_actions'] = movement_reward
                 reward_breakdown['total'] = movement_reward
+                
+                # CRITICAL FIX: Add situational reward if game ended
+                if self.game_state.get("game_over", False):
+                    situational_reward = self._get_situational_reward()
+                    reward_breakdown['situational'] = situational_reward
+                    movement_reward += situational_reward
+                    reward_breakdown['total'] = movement_reward
+                
                 self.game_state['last_reward_breakdown'] = reward_breakdown
                 return movement_reward
             reward_breakdown['base_actions'] = movement_result
             reward_breakdown['total'] = movement_result
+            
+            # CRITICAL FIX: Add situational reward if game ended
+            if self.game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward()
+                reward_breakdown['situational'] = situational_reward
+                movement_result += situational_reward
+                reward_breakdown['total'] = movement_result
+            
             self.game_state['last_reward_breakdown'] = reward_breakdown
             return movement_result
             
@@ -1135,6 +1205,14 @@ class W40KEngine(gym.Env):
             charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets)
             reward_breakdown['base_actions'] = charge_reward
             reward_breakdown['total'] = charge_reward
+            
+            # CRITICAL FIX: Add situational reward if game ended
+            if self.game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward()
+                reward_breakdown['situational'] = situational_reward
+                charge_reward += situational_reward
+                reward_breakdown['total'] = charge_reward
+            
             self.game_state['last_reward_breakdown'] = reward_breakdown
             return charge_reward
             
@@ -1145,6 +1223,14 @@ class W40KEngine(gym.Env):
             fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets)
             reward_breakdown['base_actions'] = fight_reward
             reward_breakdown['total'] = fight_reward
+            
+            # CRITICAL FIX: Add situational reward if game ended
+            if self.game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward()
+                reward_breakdown['situational'] = situational_reward
+                fight_reward += situational_reward
+                reward_breakdown['total'] = fight_reward
+            
             self.game_state['last_reward_breakdown'] = reward_breakdown
             return fight_reward
             
@@ -1153,6 +1239,14 @@ class W40KEngine(gym.Env):
             reward_breakdown['base_actions'] = wait_reward
             reward_breakdown['penalties'] = wait_reward
             reward_breakdown['total'] = wait_reward
+            
+            # CRITICAL FIX: Add situational reward if game ended
+            if self.game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward()
+                reward_breakdown['situational'] = situational_reward
+                wait_reward += situational_reward
+                reward_breakdown['total'] = wait_reward
+            
             self.game_state['last_reward_breakdown'] = reward_breakdown
             return wait_reward
         
@@ -2390,6 +2484,21 @@ class W40KEngine(gym.Env):
                     'situational': lose_penalty,
                     'penalties': 0.0
                 }
+                
+            elif winner == -1:  # Draw
+                if "draw" not in modifiers:
+                    raise KeyError(f"Situational modifiers missing required 'draw' reward")
+                draw_reward = modifiers["draw"]
+                base_reward += draw_reward
+                
+                # Track draw reward in game_state for metrics
+                self.game_state['last_reward_breakdown'] = {
+                    'base_actions': base_reward - draw_reward,
+                    'result_bonuses': 0.0,
+                    'tactical_bonuses': 0.0,
+                    'situational': draw_reward,
+                    'penalties': 0.0
+                }
         
         return base_reward
     
@@ -2413,10 +2522,48 @@ class W40KEngine(gym.Env):
         except ValueError as e:
             raise ValueError(f"Failed to get reward config for unit type '{unit['unitType']}': {e}")
     
+    def _get_situational_reward(self) -> float:
+        """
+        Get situational reward (win/lose/draw) for current game state.
+        Called when game ends to add final outcome bonus/penalty.
+        """
+        if not self.game_state.get("game_over", False):
+            return 0.0
+        
+        # Get any AI unit to access reward config (all units share situational modifiers)
+        acting_unit = None
+        for unit in self.game_state["units"]:
+            if unit["player"] == 1:  # AI player
+                acting_unit = unit
+                break
+        
+        if not acting_unit:
+            return 0.0
+        
+        try:
+            unit_rewards = self._get_unit_reward_config(acting_unit)
+            if "situational_modifiers" not in unit_rewards:
+                return 0.0
+            
+            modifiers = unit_rewards["situational_modifiers"]
+            winner = self._determine_winner()
+            
+            if winner == 1:  # AI wins
+                return modifiers.get("win", 0.0)
+            elif winner == 0:  # AI loses
+                return modifiers.get("lose", 0.0)
+            elif winner == -1:  # Draw
+                return modifiers.get("draw", 0.0)
+            
+            return 0.0
+        except (KeyError, ValueError) as e:
+            # Silently return 0 if reward config unavailable
+            return 0.0
+    
     # ===== VALIDATION METHODS =====
     
     def _determine_winner(self) -> Optional[int]:
-        """Determine winner based on remaining living units or turn limit."""
+        """Determine winner based on remaining living units or turn limit. Returns -1 for draw."""
         living_units_by_player = {}
         
         for unit in self.game_state["units"]:
@@ -2426,6 +2573,19 @@ class W40KEngine(gym.Env):
                     living_units_by_player[player] = 0
                 living_units_by_player[player] += 1
         
+        # DEBUG: Log winner determination details
+        current_turn = self.game_state["turn"]
+        max_turns = self.training_config.get("max_turns_per_episode") if hasattr(self, 'training_config') else None
+        
+        if not self.quiet:
+            print(f"\n🔍 WINNER DETERMINATION DEBUG:")
+            print(f"   Current turn: {current_turn}")
+            print(f"   Max turns: {max_turns}")
+            print(f"   Living units: {living_units_by_player}")
+            print(f"   Has training_config: {hasattr(self, 'training_config')}")
+            if hasattr(self, 'training_config'):
+                print(f"   Turn > max_turns? {current_turn > max_turns if max_turns else 'N/A'}")
+        
         # Check if game ended due to turn limit
         if hasattr(self, 'training_config'):
             max_turns = self.training_config.get("max_turns_per_episode")
@@ -2433,25 +2593,41 @@ class W40KEngine(gym.Env):
                 # Turn limit reached - determine winner by remaining units
                 living_players = list(living_units_by_player.keys())
                 if len(living_players) == 1:
+                    if not self.quiet:
+                        print(f"   → Winner: Player {living_players[0]} (elimination after turn limit)")
                     return living_players[0]
                 elif len(living_players) == 2:
                     # Both players have units - compare counts
                     if living_units_by_player[0] > living_units_by_player[1]:
+                        if not self.quiet:
+                            print(f"   → Winner: Player 0 ({living_units_by_player[0]} > {living_units_by_player[1]} units)")
                         return 0
                     elif living_units_by_player[1] > living_units_by_player[0]:
+                        if not self.quiet:
+                            print(f"   → Winner: Player 1 ({living_units_by_player[1]} > {living_units_by_player[0]} units)")
                         return 1
                     else:
-                        return None  # Draw - equal units
+                        if not self.quiet:
+                            print(f"   → Draw: Equal units ({living_units_by_player[0]} == {living_units_by_player[1]}) - returning -1")
+                        return -1  # Draw - equal units (use -1 to distinguish from None/ongoing)
                 else:
-                    return None  # Draw - no units or other scenario
+                    if not self.quiet:
+                        print(f"   → Draw: Unexpected player count ({len(living_players)} players) - returning -1")
+                    return -1  # Draw - no units or other scenario
         
         # Normal elimination rules
         living_players = list(living_units_by_player.keys())
         if len(living_players) == 1:
+            if not self.quiet:
+                print(f"   → Winner: Player {living_players[0]} (elimination)")
             return living_players[0]
         elif len(living_players) == 0:
-            return None  # Draw/no winner
+            if not self.quiet:
+                print(f"   → Draw: No survivors - returning -1")
+            return -1  # Draw/no winner
         else:
+            if not self.quiet:
+                print(f"   → Game ongoing: {len(living_players)} players with units")
             return None  # Game still ongoing
     
     def _check_game_over(self) -> bool:
@@ -2804,6 +2980,38 @@ class W40KEngine(gym.Env):
         """Get reward mapper instance with current rewards config."""
         from ai.reward_mapper import RewardMapper
         return RewardMapper(self.rewards_config)
+    
+    def _get_system_penalties(self) -> Dict[str, float]:
+        """Load system penalties from rewards config - NO FALLBACKS."""
+        if not self.rewards_config:
+            raise ValueError("rewards_config not loaded - cannot get system penalties")
+        
+        if 'system_penalties' not in self.rewards_config:
+            raise KeyError(
+                "Missing required 'system_penalties' section in rewards_config.json. "
+                "Required structure: {'system_penalties': {'forbidden_action': -1.0, "
+                "'invalid_action': -0.9, 'generic_error': -0.1, 'system_response': 0.0}}"
+            )
+        
+        penalties = self.rewards_config['system_penalties']
+        
+        # Validate all required penalty types exist
+        required_penalties = ['forbidden_action', 'invalid_action', 'generic_error', 'system_response']
+        for penalty_type in required_penalties:
+            if penalty_type not in penalties:
+                raise KeyError(
+                    f"Missing required penalty type '{penalty_type}' in system_penalties. "
+                    f"Got keys: {list(penalties.keys())}"
+                )
+            
+            # Validate penalty is numeric
+            penalty_value = penalties[penalty_type]
+            if not isinstance(penalty_value, (int, float)):
+                raise TypeError(
+                    f"Penalty '{penalty_type}' must be numeric, got {type(penalty_value)}: {penalty_value}"
+                )
+        
+        return penalties
     
     def _build_tactical_context(self, unit: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         """Build tactical context for reward mapper."""

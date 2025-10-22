@@ -1073,6 +1073,10 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "is_ai_action": shooter["player"] == 1  # NEW: PvE AI detection
     })
     
+    # CRITICAL FIX: Store attack_result in game_state so engine can access it for reward calculation
+    # The execution loop returns a different structure, so we need to store this separately
+    game_state["last_attack_result"] = attack_result
+    
     return {
         "action": "shot_executed",
         "shooterId": unit_id,

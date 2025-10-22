@@ -802,7 +802,7 @@ class BotEvaluationCallback(BaseCallback):
                     active_agents=None,
                     scenario_file=scenario_file,
                     unit_registry=unit_registry,
-                    quiet=True,
+                    quiet=False,
                     gym_training_mode=True
                 )
                 
@@ -1672,7 +1672,7 @@ def test_trained_model(model, num_episodes, training_config_name="default"):
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
-        quiet=True
+        quiet=False
     )
     wins = 0
     total_rewards = []
@@ -1955,7 +1955,7 @@ def generate_steplog_and_replay(config, args):
                 active_agents=None,
                 scenario_file=temp_scenario_file,
                 unit_registry=unit_registry,
-                quiet=True
+                quiet=False
             )
         finally:
             # Restore original max_turns after environment creation
@@ -2523,7 +2523,7 @@ def main():
                 active_agents=None,
                 scenario_file=scenario_file,
                 unit_registry=unit_registry,
-                quiet=True
+                quiet=False
             )
             
             # Connect step logger after environment creation

@@ -434,5 +434,11 @@
       "instinctive_behavior": 0.1,
       "bio_weapon_synergy": 0.1
     }
+  },
+  "system_penalties": {
+    "forbidden_action": -1.0,
+    "invalid_action": -0.9,
+    "generic_error": -0.1,
+    "system_response": 0.0
   }
 }
