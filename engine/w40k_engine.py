@@ -41,7 +41,7 @@ class W40KEngine(gym.Env):
     
     def __init__(self, config=None, rewards_config=None, training_config_name=None, 
                 controlled_agent=None, active_agents=None, scenario_file=None, 
-                unit_registry=None, quiet=False, gym_training_mode=False, **kwargs):
+                unit_registry=None, quiet=True, gym_training_mode=False, **kwargs):
         """Initialize W40K engine with AI_TURN.md compliance - training system compatible."""
         
         # Store gym training mode for handler access

@@ -1,6 +1,6 @@
 {
   "default": {
-    "total_episodes": 100,
+    "total_episodes": 10000,
     "total_episodes_normal": "1000",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 50,

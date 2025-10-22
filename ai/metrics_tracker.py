@@ -99,10 +99,10 @@ class W40KMetricsTracker:
             cumulative_win_rate = np.mean(self.all_episode_wins)
             self.writer.add_scalar('episode/win_rate', cumulative_win_rate, self.episode_count)
             
-            # METRIC 20: Rolling/Win_Rate_100ep - Quick reference (recent 100 episodes)
+            # METRIC 20: episode/win_rate_recent_100 - Quick reference (recent 100 episodes)
             if len(self.win_rate_window) >= 10:
                 rolling_win_rate = np.mean(self.win_rate_window)
-                self.writer.add_scalar('Rolling/Win_Rate_100ep', rolling_win_rate, self.episode_count)
+                self.writer.add_scalar('episode/win_rate_recent_100', rolling_win_rate, self.episode_count)
         
         # METRIC 13: episode/length - Episode duration
         if episode_length > 0:
@@ -111,27 +111,27 @@ class W40KMetricsTracker:
     def log_tactical_metrics(self, tactical_data: Dict[str, Any]):
         """Log tactical performance metrics - combat effectiveness and decision quality"""
         
-        # METRIC 6: Combat/Shooting_Accuracy - Hit rate
+        # METRIC 6: combat/shooting_accuracy - Hit rate
         if 'shots_fired' in tactical_data and tactical_data['shots_fired'] > 0:
             hits = tactical_data.get('hits', 0)
             accuracy = hits / tactical_data['shots_fired']
-            self.writer.add_scalar('Combat/Shooting_Accuracy', accuracy, self.episode_count)
+            self.writer.add_scalar('combat/shooting_accuracy', accuracy, self.episode_count)
         
-        # METRIC 7: Combat/Slaughter_Efficiency - Kill rate
+        # METRIC 7: combat/kill_efficiency - Kill rate
         if 'total_enemies' in tactical_data and tactical_data['total_enemies'] > 0:
             killed_enemies = tactical_data.get('killed_enemies', 0)
             slaughter_efficiency = killed_enemies / tactical_data['total_enemies']
-            self.writer.add_scalar('Combat/Slaughter_Efficiency', slaughter_efficiency, self.episode_count)
+            self.writer.add_scalar('combat/kill_efficiency', slaughter_efficiency, self.episode_count)
         
-        # METRIC 8: Combat/Damage_Dealt - Offensive power
+        # METRIC 8: combat/damage_dealt - Offensive power
         damage_dealt = tactical_data.get('damage_dealt', 0)
         if damage_dealt > 0:
-            self.writer.add_scalar('Combat/Damage_Dealt', damage_dealt, self.episode_count)
+            self.writer.add_scalar('combat/damage_dealt', damage_dealt, self.episode_count)
         
-        # METRIC 9: Combat/Damage_Received - Defensive capability
+        # METRIC 9: combat/damage_received - Defensive capability
         damage_received = tactical_data.get('damage_received', 0)
         if damage_received > 0:
-            self.writer.add_scalar('Combat/Damage_Received', damage_received, self.episode_count)
+            self.writer.add_scalar('combat/damage_received', damage_received, self.episode_count)
         
         # METRIC 10: combat/damage_efficiency - Trade effectiveness
         if damage_received > 0 and damage_dealt > 0:
@@ -160,17 +160,17 @@ class W40KMetricsTracker:
         
         if total_actions > 0:
             invalid_rate = invalid_actions / total_actions
-            self.writer.add_scalar('ai_turn/invalid_action_rate', invalid_rate, self.episode_count)
+            self.writer.add_scalar('architecture/invalid_action_rate', invalid_rate, self.episode_count)
             
-            # METRIC 15: AI_Quality/Action_Efficiency - Valid action rate
+            # METRIC 15: tactical/action_efficiency - Valid action rate
             action_efficiency = valid_actions / total_actions
-            self.writer.add_scalar('AI_Quality/Action_Efficiency', action_efficiency, self.episode_count)
+            self.writer.add_scalar('tactical/action_efficiency', action_efficiency, self.episode_count)
         
-        # METRIC 14: actions/wait_frequency - Decision confidence
+        # METRIC 14: tactical/wait_frequency - Decision confidence
         wait_actions = tactical_data.get('wait_actions', 0)
         if total_actions > 0:
             wait_frequency = wait_actions / total_actions
-            self.writer.add_scalar('actions/wait_frequency', wait_frequency, self.episode_count)
+            self.writer.add_scalar('tactical/wait_frequency', wait_frequency, self.episode_count)
     
     def log_training_step(self, step_data: Dict[str, Any]):
         """Log training step metrics - exploration rate and loss"""

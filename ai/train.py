@@ -545,10 +545,10 @@ class MetricsCollectionCallback(BaseCallback):
            
             # Log gamma-related metrics
             if hasattr(self.model, 'logger') and self.model.logger:
-                self.model.logger.record('gamma/discount_factor', gamma)
-                self.model.logger.record('gamma/immediate_reward_ratio', immediate_reward_ratio)
-                self.model.logger.record('gamma/immediate_reward_ratio_mean', ratio_mean)
-                self.model.logger.record('gamma/planning_horizon_turns', planning_horizon)
+                self.model.logger.record('config/discount_factor', gamma)
+                self.model.logger.record('config/immediate_reward_ratio', immediate_reward_ratio)
+                self.model.logger.record('config/immediate_reward_ratio_mean', ratio_mean)
+                self.model.logger.record('config/planning_horizon', planning_horizon)
                 # Force tensorboard dump to ensure gamma metrics are written
                 self.model.logger.dump(step=self.model.num_timesteps)
        
@@ -806,7 +806,7 @@ class BotEvaluationCallback(BaseCallback):
                     active_agents=None,
                     scenario_file=scenario_file,
                     unit_registry=unit_registry,
-                    quiet=False,
+                    quiet=True,
                     gym_training_mode=True
                 )
                 
@@ -1311,7 +1311,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
-        quiet=False,
+        quiet=True,
         gym_training_mode=True
     )
     
@@ -1441,7 +1441,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
-        quiet=False,
+        quiet=True,
         gym_training_mode=True
     )
     
@@ -1676,7 +1676,7 @@ def test_trained_model(model, num_episodes, training_config_name="default"):
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
-        quiet=False
+        quiet=True
     )
     wins = 0
     total_rewards = []
@@ -1959,7 +1959,7 @@ def generate_steplog_and_replay(config, args):
                 active_agents=None,
                 scenario_file=temp_scenario_file,
                 unit_registry=unit_registry,
-                quiet=False
+                quiet=True
             )
         finally:
             # Restore original max_turns after environment creation
@@ -2527,7 +2527,7 @@ def main():
                 active_agents=None,
                 scenario_file=scenario_file,
                 unit_registry=unit_registry,
-                quiet=False
+                quiet=True
             )
             
             # Connect step logger after environment creation
