@@ -606,8 +606,10 @@ class MetricsCollectionCallback(BaseCallback):
                     compliance_data = game_state['last_compliance_data']
                     self.metrics_tracker.log_aiturn_compliance(compliance_data)
                 
+                # CRITICAL: Read action_logs from info dict (before env reset clears it)
+                action_logs = info.get('action_logs', [])
+                
                 # NEW: Collect phase performance data from action logs
-                action_logs = game_state.get('action_logs', [])
                 for log in action_logs:
                     phase_data = {
                         'phase': log.get('phase', 'unknown'),
@@ -627,7 +629,6 @@ class MetricsCollectionCallback(BaseCallback):
                         self.metrics_tracker.log_reward_mapper_effectiveness(mapper_data)
                 
                 # Count shooting actions from action logs (existing logic)
-                action_logs = game_state.get('action_logs', [])
                 shoot_logs = [log for log in action_logs if log.get('type') == 'shoot']
                 self.episode_tactical_data['shots_fired'] = len(shoot_logs)
                 self.episode_tactical_data['hits'] = len([log for log in shoot_logs if log.get('damage', 0) > 0])
@@ -635,6 +636,47 @@ class MetricsCollectionCallback(BaseCallback):
                 # NEW: Calculate total damage dealt from all action logs
                 damage_dealt = sum(log.get('damage', 0) for log in action_logs if log.get('damage', 0) > 0)
                 self.episode_tactical_data['damage_dealt'] = damage_dealt
+                
+                # DEBUG: Verify shooting behavior every 10 episodes
+                if self.episode_count % 10 == 0:
+                    print(f"\n🔍 DEBUG Episode {self.episode_count}:")
+                    
+                    # Check action_logs population
+                    print(f"   📋 Total action_logs entries: {len(action_logs)}")
+                    
+                    # Count by action type
+                    shoot_count = len([log for log in action_logs if log.get('type') == 'shoot'])
+                    move_count = len([log for log in action_logs if log.get('type') == 'move'])
+                    wait_count = len([log for log in action_logs if log.get('type') == 'wait'])
+                    
+                    print(f"   🎯 Shoot actions: {shoot_count}")
+                    print(f"   🚶 Move actions: {move_count}")
+                    print(f"   ⏸️  Wait actions: {wait_count}")
+                    
+                    # Check tactical_data metrics
+                    print(f"   📊 shots_fired in tactical_data: {self.episode_tactical_data.get('shots_fired', 0)}")
+                    print(f"   🎯 hits in tactical_data: {self.episode_tactical_data.get('hits', 0)}")
+                    print(f"   💥 damage_dealt: {self.episode_tactical_data.get('damage_dealt', 0)}")
+                    
+                    # Check phase_stats accumulation
+                    if hasattr(self.metrics_tracker, 'phase_stats'):
+                        shot = self.metrics_tracker.phase_stats['shooting']['shot']
+                        skipped = self.metrics_tracker.phase_stats['shooting']['skipped']
+                        moved = self.metrics_tracker.phase_stats['movement']['moved']
+                        waited = self.metrics_tracker.phase_stats['movement']['waited']
+                        print(f"   📈 phase_stats.shooting: shot={shot}, skipped={skipped}")
+                        print(f"   📈 phase_stats.movement: moved={moved}, waited={waited}")
+                    
+                    # Show sample shoot log if available
+                    if shoot_logs:
+                        sample = shoot_logs[0]
+                        print(f"   📝 Sample shoot log:")
+                        print(f"      - shooter: {sample.get('shooterId', 'N/A')}")
+                        print(f"      - target: {sample.get('targetId', 'N/A')}")
+                        print(f"      - damage: {sample.get('damage', 0)}")
+                        print(f"      - phase: {sample.get('phase', 'N/A')}")
+                    else:
+                        print(f"   ⚠️  WARNING: NO SHOOT LOGS FOUND IN ACTION_LOGS!")
        
         # Log to metrics tracker
         self.metrics_tracker.log_episode_end(episode_data)

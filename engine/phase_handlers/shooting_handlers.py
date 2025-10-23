@@ -331,8 +331,8 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     if not unit:
         return {"error": "unit_not_found", "unitId": unit_id}
     
-    # CRITICAL: Clear accumulated action logs for fresh unit activation
-    game_state["action_logs"] = []
+    # REMOVED: Line 335 was clearing action_logs between unit activations, destroying cross-phase data
+    # action_logs must accumulate for entire episode, only cleared in __init__ and reset()
     
     # AI_TURN.md initialization
     # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
@@ -683,16 +683,20 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     unit = _get_unit_by_id(game_state, unit_id)
     is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
     
-    # CRITICAL: Only auto-shoot for PvE AI, NOT for gym training
-    # Gym training agents must make their own shoot/skip decisions to learn properly
-    if is_pve_ai and valid_targets:
-        # AUTO-SHOOT: PvE AI only
+    # CHANGE 1: Add gym_training_mode detection
+    # Gym agents have already made shoot/skip decisions via action selection (actions 4-8 or 11)
+    # The execution loop reaches here when SHOOT_LEFT > 0 after a shot, so we need to auto-execute
+    is_gym_training = config.get("gym_training_mode", False) and unit and unit["player"] == 1
+    
+    # CHANGE 2: Auto-execute for BOTH PvE AI and gym training
+    if (is_pve_ai or is_gym_training) and valid_targets:
+        # AUTO-SHOOT: PvE AI and gym training
         target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
         
         # Execute shooting directly and return result
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
     
-    # Gym training AND humans get waiting_for_player response
+    # Only humans get waiting_for_player response
     response = {
         "while_loop_active": True,
         "validTargets": valid_targets,
@@ -1000,15 +1004,24 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         if rewards_config:
             reward_mapper = RewardMapper(rewards_config)
            
-            # CRITICAL FIX: Map scenario unit types to reward config keys
-            from ai.unit_registry import UnitRegistry
-            unit_registry = UnitRegistry()
-           
-            # Map shooter
-            shooter_scenario_type = shooter["unitType"]
-            shooter_reward_key = unit_registry.get_model_key(shooter_scenario_type)
-            enriched_shooter = shooter.copy()
-            enriched_shooter["unitType"] = shooter_reward_key
+            # CHANGE 1: Use controlled_agent from config (includes phase suffix) instead of unit_registry
+            # train.py sets controlled_agent = "SpaceMarine_Infantry_Troop_RangedSwarm_phase1"
+            # unit_registry.get_model_key() returns "SpaceMarine_Infantry_Troop_RangedSwarm" (no phase!)
+            config = game_state.get("config", {})
+            controlled_agent = config.get("controlled_agent")
+            
+            if controlled_agent:
+                # Use controlled_agent directly (includes phase suffix for curriculum training)
+                enriched_shooter = shooter.copy()
+                enriched_shooter["unitType"] = controlled_agent
+            else:
+                # Fallback to unit_registry for non-training scenarios
+                from ai.unit_registry import UnitRegistry
+                unit_registry = UnitRegistry()
+                shooter_scenario_type = shooter["unitType"]
+                shooter_reward_key = unit_registry.get_model_key(shooter_scenario_type)
+                enriched_shooter = shooter.copy()
+                enriched_shooter["unitType"] = shooter_reward_key
            
             # Get unit rewards config
             unit_rewards = reward_mapper._get_unit_rewards(enriched_shooter)

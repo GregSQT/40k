@@ -140,6 +140,9 @@ class W40KMetricsTracker:
         # GAME CRITICAL: Episode length - Episode duration stability
         if episode_length > 0:
             self.writer.add_scalar('game_critical/episode_length', episode_length, self.episode_count)
+        
+        # CRITICAL: Compute and log phase performance metrics at episode end
+        self.compute_and_log_phase_metrics()
     
     def log_tactical_metrics(self, tactical_data: Dict[str, Any]):
         """Log tactical performance metrics - combat effectiveness and decision quality"""
@@ -356,18 +359,21 @@ class W40KMetricsTracker:
         self.writer.add_scalar('game_detailed/reward_mapper_calculation_failures', self.reward_mapper_stats['mapper_failures'], self.episode_count)
     
     def log_phase_performance(self, phase_data: Dict[str, Any]):
-        """Log phase-specific performance metrics.
+        """Accumulate phase-specific performance metrics during episode.
         
-        GAME TACTICAL METRICS (4):
-        - game_tactical/movement_efficiency
-        - game_tactical/shooting_participation
-        - game_detailed/flee_rate
-        - game_tactical/charge_rate
+        This method only ACCUMULATES stats. Call compute_and_log_phase_metrics() 
+        at episode end to calculate and log the actual metrics.
+        
+        ACCUMULATED METRICS:
+        - movement: moved, waited, fled counts
+        - shooting: shot, skipped counts
+        - charge: charged, skipped counts
+        - fight: fought, skipped counts
         """
         phase = phase_data.get('phase', 'unknown')
         action = phase_data.get('action', 'unknown')
         
-        # Track phase-specific actions
+        # Track phase-specific actions (accumulate only)
         if phase == 'move':
             if action == 'move':
                 self.phase_stats['movement']['moved'] += 1
@@ -393,8 +399,19 @@ class W40KMetricsTracker:
                 self.phase_stats['fight']['fought'] += 1
             elif action == 'wait' or action == 'skip':
                 self.phase_stats['fight']['skipped'] += 1
+    
+    def compute_and_log_phase_metrics(self):
+        """Compute and log phase performance metrics at episode end.
         
-        # GAME TACTICAL: Calculate and log rates
+        GAME TACTICAL METRICS (4):
+        - game_tactical/movement_efficiency
+        - game_tactical/shooting_participation
+        - game_detailed/flee_rate
+        - game_tactical/charge_rate
+        
+        Called once per episode after all actions are accumulated.
+        """
+        # GAME TACTICAL: Movement efficiency
         move_total = self.phase_stats['movement']['moved'] + self.phase_stats['movement']['waited']
         if move_total > 0:
             movement_efficiency = self.phase_stats['movement']['moved'] / move_total
@@ -403,15 +420,25 @@ class W40KMetricsTracker:
             flee_rate = self.phase_stats['movement']['fled'] / move_total
             self.writer.add_scalar('game_detailed/flee_rate', flee_rate, self.episode_count)
         
+        # GAME TACTICAL: Shooting participation
         shoot_total = self.phase_stats['shooting']['shot'] + self.phase_stats['shooting']['skipped']
         if shoot_total > 0:
             shooting_participation = self.phase_stats['shooting']['shot'] / shoot_total
             self.writer.add_scalar('game_tactical/shooting_participation', shooting_participation, self.episode_count)
         
+        # GAME TACTICAL: Charge rate
         charge_total = self.phase_stats['charge']['charged'] + self.phase_stats['charge']['skipped']
         if charge_total > 0:
             charge_rate = self.phase_stats['charge']['charged'] / charge_total
             self.writer.add_scalar('game_tactical/charge_rate', charge_rate, self.episode_count)
+        
+        # Reset phase stats for next episode
+        self.phase_stats = {
+            'movement': {'moved': 0, 'waited': 0, 'fled': 0},
+            'shooting': {'shot': 0, 'skipped': 0},
+            'charge': {'charged': 0, 'skipped': 0},
+            'fight': {'fought': 0, 'skipped': 0}
+        }
     
     def log_training_metrics(self, model_stats: Dict[str, Any]):
         """

@@ -151,6 +151,9 @@ class W40KEngine(gym.Env):
             "fight_subphase": None,
             "charge_range_rolls": {},
             
+            # Metrics tracking
+            "action_logs": [],  # CRITICAL: For metrics collection - tracks all actions per episode
+            
             # Board state - handle both config formats
             "board_cols": self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"],
             "board_rows": self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"],
@@ -478,6 +481,10 @@ class W40KEngine(gym.Env):
         else:
             info["winner"] = None
         
+        # CRITICAL: Add action_logs to info dict so metrics can access it
+        # This must happen BEFORE reset clears action_logs
+        info["action_logs"] = self.game_state.get("action_logs", []).copy()
+        
         # Update position cache for movement_direction feature
         for unit in self.game_state["units"]:
             if "id" not in unit:
@@ -601,7 +608,8 @@ class W40KEngine(gym.Env):
             "units_attacked": set(),
             "move_activation_pool": [],
             "fight_subphase": None,
-            "charge_range_rolls": {}
+            "charge_range_rolls": {},
+            "action_logs": []  # CRITICAL: Reset action logs for new episode metrics
         })
         
         # Reset unit health and positions to original scenario values
