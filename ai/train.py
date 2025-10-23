@@ -1308,14 +1308,25 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     try:
         with open(scenario_file, 'r') as f:
             scenario_data = json.load(f)
-        
+    
         # Get first Player 0 unit to determine agent type
         player_0_units = [u for u in scenario_data.get("units", []) if u.get("player") == 0]
         if player_0_units:
             first_unit_type = player_0_units[0].get("unit_type")
             if first_unit_type:
-                controlled_agent_key = unit_registry.get_model_key(first_unit_type)
-                print(f"ℹ️  Auto-detected controlled_agent from scenario: {controlled_agent_key}")
+                base_agent_key = unit_registry.get_model_key(first_unit_type)
+                
+                # CRITICAL FIX: Append rewards_config suffix to match rewards_config.json keys
+                # rewards_config.json has keys like "SpaceMarine_Infantry_Troop_RangedSwarm_phase1"
+                # NOT just "SpaceMarine_Infantry_Troop_RangedSwarm"
+                if rewards_config_name not in ["default", "test"]:
+                    controlled_agent_key = f"{base_agent_key}_{rewards_config_name}"
+                    print(f"ℹ️  Auto-detected base agent: {base_agent_key}")
+                    print(f"✅ Using phase-specific rewards: {controlled_agent_key}")
+                else:
+                    controlled_agent_key = base_agent_key
+                    print(f"ℹ️  Auto-detected controlled_agent: {controlled_agent_key}")
+                
     except Exception as e:
         print(f"⚠️  Failed to auto-detect controlled_agent: {e}")
         raise ValueError(f"Cannot proceed without controlled_agent - auto-detection failed: {e}")
