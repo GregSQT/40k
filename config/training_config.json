@@ -1,6 +1,6 @@
 {
   "default": {
-    "total_episodes": 10000,
+    "total_episodes": 1000,
     "total_episodes_normal": "1000",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 50,
@@ -25,7 +25,7 @@
     },
     "model_params": {
       "policy": "MlpPolicy",
-      "learning_rate": 0.0003,
+      "learning_rate": 0.001,
       "n_steps": 2048,
       "batch_size": 64,
       "n_epochs": 10,
@@ -82,7 +82,7 @@
       "verbose": 0
     }
   },
-  "curriculum_phase1": {
+  "phase1": {
     "observation_params": {
       "obs_size": 295,
       "perception_radius": 25,
@@ -120,7 +120,7 @@
       "n_eval_episodes": 5
     }
   },
-  "curriculum_phase2": {
+  "phase2": {
     "observation_params": {
       "obs_size": 295,
       "perception_radius": 25,
@@ -157,7 +157,7 @@
       "n_eval_episodes": 10
     }
   },
-  "curriculum_phase3": {
+  "phase3": {
     "observation_params": {
       "obs_size": 295,
       "perception_radius": 25,

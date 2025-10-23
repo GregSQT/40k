@@ -514,6 +514,22 @@ class MetricsCollectionCallback(BaseCallback):
         if step_data:
             self.metrics_tracker.log_training_step(step_data)
         
+        # NEW: Log PPO hyperparameter metrics from stable-baselines3
+        # Extract all available training metrics for hyperparameter tuning
+        if hasattr(self.model, 'logger') and hasattr(self.model.logger, 'name_to_value'):
+            model_stats = self.model.logger.name_to_value
+            
+            # Only log if there are actual training metrics available
+            # SB3 updates these after each policy update (every n_steps)
+            if any(key.startswith('train/') for key in model_stats.keys()):
+                # Pass complete model stats to metrics tracker
+                # This includes: learning_rate, policy_loss, value_loss, entropy_loss,
+                # clip_fraction, approx_kl, explained_variance, n_updates, fps
+                self.metrics_tracker.log_training_metrics(model_stats)
+                
+                # Update step count for proper metric indexing
+                self.metrics_tracker.step_count = self.model.num_timesteps
+        
         return True
     
     def _handle_episode_end(self, info):
