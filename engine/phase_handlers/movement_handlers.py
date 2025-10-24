@@ -145,10 +145,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return False, {"error": "unit_not_found", "unitId": unit_id}
     
     # Flag detection for consistent behavior
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
-    if "gym_training_mode" not in config:
-        raise KeyError("Config missing required 'gym_training_mode' field")
-    is_gym_training = config["gym_training_mode"]
+    # AI_TURN.md COMPLIANCE: Check both config and game_state for gym_training_mode
+    is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
     # print(f"MOVEMENT DEBUG: is_gym_training={is_gym_training}, action_type={action_type}")
     
     # Auto-activate unit if not already activated and preview not shown
@@ -211,10 +209,8 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
     execution_result = movement_unit_execution_loop(game_state, unit["id"])
     
     # Clean flag detection
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
-    if "gym_training_mode" not in config:
-        raise KeyError("Config missing required 'gym_training_mode' field")
-    is_gym_training = config["gym_training_mode"]
+    # AI_TURN.md COMPLIANCE: Check both config and game_state for gym_training_mode
+    is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
         
     if is_gym_training and isinstance(execution_result, tuple) and execution_result[0]:
         # AI_TURN.md COMPLIANCE: Direct field access
@@ -227,37 +223,38 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
             if "valid_destinations" not in execution_result[1]:
                 raise KeyError("Execution result missing required 'valid_destinations' field")
             valid_destinations = execution_result[1]["valid_destinations"]
-        if valid_destinations:
-            # DIAGNOSTIC: Log current position and all valid destinations
-            current_pos = (unit["col"], unit["row"])
-            # print(f"GYM DEBUG: Unit {unit['id']} current position: {current_pos}")
-            # print(f"GYM DEBUG: Valid destinations: {valid_destinations}")
-            # print(f"GYM DEBUG: Current position in destinations? {current_pos in valid_destinations}")
             
-            # Auto-select first destination for gym training only
-            dest_col, dest_row = valid_destinations[0]
-            # print(f"GYM AUTO-MOVE: Unit {unit['id']} to destination ({dest_col}, {dest_row})")
-            
-            # DIAGNOSTIC: Verify if this is actually the current position
-            # if (dest_col, dest_row) == current_pos:
-                # print(f"GYM ERROR: Selected destination IS current position! This should never happen!")
-            
-            auto_move_action = {
-                "action": "move",
-                "unitId": unit["id"],
-                "destCol": dest_col,
-                "destRow": dest_row
-            }
-            
-            # Execute movement and ensure proper gym result format
-            move_result = movement_destination_selection_handler(game_state, unit["id"], auto_move_action)
-            if isinstance(move_result, tuple) and move_result[0]:
-                move_result[1]["unitId"] = unit["id"]
-                move_result[1]["action"] = "move"
-            return move_result
-        else:
-            # print(f"GYM AUTO-SKIP: Unit {unit['id']} - no valid destinations")
-            return True, {"action": "skip", "unitId": unit["id"], "reason": "no_valid_destinations"}
+            if valid_destinations:
+                # DIAGNOSTIC: Log current position and all valid destinations
+                current_pos = (unit["col"], unit["row"])
+                # print(f"GYM DEBUG: Unit {unit['id']} current position: {current_pos}")
+                # print(f"GYM DEBUG: Valid destinations: {valid_destinations}")
+                # print(f"GYM DEBUG: Current position in destinations? {current_pos in valid_destinations}")
+                
+                # Auto-select first destination for gym training only
+                dest_col, dest_row = valid_destinations[0]
+                # print(f"GYM AUTO-MOVE: Unit {unit['id']} to destination ({dest_col}, {dest_row})")
+                
+                # DIAGNOSTIC: Verify if this is actually the current position
+                # if (dest_col, dest_row) == current_pos:
+                    # print(f"GYM ERROR: Selected destination IS current position! This should never happen!")
+                
+                auto_move_action = {
+                    "action": "move",
+                    "unitId": unit["id"],
+                    "destCol": dest_col,
+                    "destRow": dest_row
+                }
+                
+                # Execute movement and ensure proper gym result format
+                move_result = movement_destination_selection_handler(game_state, unit["id"], auto_move_action)
+                if isinstance(move_result, tuple) and move_result[0]:
+                    move_result[1]["unitId"] = unit["id"]
+                    move_result[1]["action"] = "move"
+                return move_result
+            else:
+                # print(f"GYM AUTO-SKIP: Unit {unit['id']} - no valid destinations")
+                return True, {"action": "skip", "unitId": unit["id"], "reason": "no_valid_destinations"}
     
     # All non-gym players (humans AND PvE AI) get normal waiting_for_player response
     return execution_result
@@ -319,6 +316,7 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
     
     return True, {
         "unit_activated": True,
+        "unitId": unit_id,  # ADDED: Required for reward calculation
         "valid_destinations": game_state["valid_move_destinations_pool"],
         "preview_data": preview_data,
         "waiting_for_player": True

@@ -55,6 +55,7 @@ class W40KMetricsTracker:
         # FULL TRAINING DURATION TRACKING
         self.all_episode_rewards = []    # Complete reward history
         self.all_episode_wins = []       # Complete win/loss history
+        self.all_episode_lengths = []    # Complete episode length history
         
         # Episode tracking
         self.episode_count = 0
@@ -100,7 +101,8 @@ class W40KMetricsTracker:
             'policy_losses': [],
             'value_losses': [],
             'clip_fractions': [],
-            'approx_kls': []
+            'approx_kls': [],
+            'explained_variances': []  # For tuning dashboard
         }
         
         print(f"✅ Metrics tracker initialized for {agent_key} -> {self.log_dir}")
@@ -140,9 +142,13 @@ class W40KMetricsTracker:
         # GAME CRITICAL: Episode length - Episode duration stability
         if episode_length > 0:
             self.writer.add_scalar('game_critical/episode_length', episode_length, self.episode_count)
+            self.all_episode_lengths.append(episode_length)  # Track for tuning dashboard
         
         # CRITICAL: Compute and log phase performance metrics at episode end
         self.compute_and_log_phase_metrics()
+        
+        # NEW: Log tuning dashboard metrics
+        self.log_tuning_dashboard()
     
     def log_tactical_metrics(self, tactical_data: Dict[str, Any]):
         """Log tactical performance metrics - combat effectiveness and decision quality"""
@@ -507,6 +513,7 @@ class W40KMetricsTracker:
         # TRAINING CRITICAL: Explained variance (value function quality)
         if 'train/explained_variance' in model_stats:
             explained_var = model_stats['train/explained_variance']
+            self.hyperparameter_tracking['explained_variances'].append(explained_var)
             self.writer.add_scalar('training_critical/explained_variance', explained_var, self.step_count)
         
         # TRAINING DIAGNOSTIC: Total policy updates count
@@ -528,6 +535,158 @@ class W40KMetricsTracker:
         
         # Update step count for next logging
         self.step_count += 1
+    
+    def log_tuning_dashboard(self):
+        """
+        Log essential SMOOTHED metrics to dedicated tuning/ namespace for hyperparameter validation.
+        
+        TUNING DASHBOARD (10 Smoothed Metrics ONLY):
+        ============================================
+        
+        All metrics use 20-episode rolling averages for clear trend visualization.
+        Raw data available in game_critical/, training_critical/, etc.
+        
+        PRIMARY SUCCESS METRICS (4):
+        - tuning/win_rate              - 20-ep smoothed win rate
+        - tuning/explained_variance    - 20-ep smoothed value function quality
+        - tuning/episode_length        - 20-ep smoothed episode duration
+        - tuning/episode_reward        - 20-ep smoothed episode reward
+        
+        LEARNING HEALTH METRICS (3):
+        - tuning/value_loss            - 20-ep smoothed critic loss
+        - tuning/policy_kl             - 20-ep smoothed policy updates
+        - tuning/clip_fraction         - 20-ep smoothed PPO clipping
+        
+        REWARD SIGNAL METRICS (3):
+        - tuning/reward_strength       - 20-ep smoothed reward magnitude
+        - tuning/win_loss_dominance    - 20-ep smoothed situational/tactical ratio
+        - tuning/reward_balance        - 20-ep smoothed component entropy
+        
+        Called automatically at episode end to maintain synchronized dashboard.
+        """
+        
+        # ========================================
+        # PRIMARY SUCCESS METRICS (Smoothed Only)
+        # ========================================
+        
+        # 1. Win Rate (20-episode rolling average)
+        if len(self.all_episode_wins) >= 20:
+            win_rate_smooth = self._calculate_smoothed_metric(self.all_episode_wins, window_size=20)
+            self.writer.add_scalar('tuning/win_rate', win_rate_smooth, self.episode_count)
+        
+        # 2. Explained Variance (20-episode rolling average)
+        if len(self.hyperparameter_tracking.get('explained_variances', [])) >= 20:
+            explained_var_smooth = self._calculate_smoothed_metric(
+                self.hyperparameter_tracking['explained_variances'], window_size=20
+            )
+            self.writer.add_scalar('tuning/explained_variance', explained_var_smooth, self.episode_count)
+        
+        # 3. Episode Length (20-episode rolling average)
+        if len(self.all_episode_lengths) >= 20:
+            length_smooth = self._calculate_smoothed_metric(self.all_episode_lengths, window_size=20)
+            self.writer.add_scalar('tuning/episode_length', length_smooth, self.episode_count)
+        
+        # 4. Episode Reward (20-episode rolling average)
+        if len(self.all_episode_rewards) >= 20:
+            reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=20)
+            self.writer.add_scalar('tuning/episode_reward', reward_smooth, self.episode_count)
+        
+        # ========================================
+        # LEARNING HEALTH METRICS (Smoothed Only)
+        # ========================================
+        
+        # 5. Value Loss (20-step rolling average)
+        if len(self.hyperparameter_tracking['value_losses']) >= 20:
+            value_loss_smooth = self._calculate_smoothed_metric(
+                self.hyperparameter_tracking['value_losses'], window_size=20
+            )
+            self.writer.add_scalar('tuning/value_loss', value_loss_smooth, self.episode_count)
+        
+        # 6. Policy KL Divergence (20-step rolling average)
+        if len(self.hyperparameter_tracking['approx_kls']) >= 20:
+            kl_smooth = self._calculate_smoothed_metric(self.hyperparameter_tracking['approx_kls'], window_size=20)
+            self.writer.add_scalar('tuning/policy_kl', kl_smooth, self.episode_count)
+        
+        # 7. Clip Fraction (20-step rolling average)
+        if len(self.hyperparameter_tracking['clip_fractions']) >= 20:
+            clip_smooth = self._calculate_smoothed_metric(
+                self.hyperparameter_tracking['clip_fractions'], window_size=20
+            )
+            self.writer.add_scalar('tuning/clip_fraction', clip_smooth, self.episode_count)
+        
+        # ========================================
+        # REWARD SIGNAL METRICS (Smoothed Only)
+        # ========================================
+        
+        # 8. Reward Signal Strength (20-episode rolling average)
+        if len(self.all_episode_rewards) >= 30:
+            reward_magnitudes = [
+                np.mean(np.abs(self.all_episode_rewards[max(0, i-10):i+1])) 
+                for i in range(10, len(self.all_episode_rewards))
+            ]
+            if len(reward_magnitudes) >= 20:
+                reward_strength_smooth = self._calculate_smoothed_metric(reward_magnitudes, window_size=20)
+                self.writer.add_scalar('tuning/reward_strength', reward_strength_smooth, self.episode_count)
+        
+        # 9. Win/Loss Dominance (20-episode rolling average)
+        if len(self.reward_components['situational']) >= 30:
+            dominance_history = []
+            for i in range(10, len(self.reward_components['situational'])):
+                sit = np.mean(self.reward_components['situational'][max(0, i-10):i+1])
+                tac = (
+                    np.mean(self.reward_components['base_actions'][max(0, i-10):i+1]) +
+                    np.mean(self.reward_components['result_bonuses'][max(0, i-10):i+1]) +
+                    np.mean(self.reward_components['tactical_bonuses'][max(0, i-10):i+1])
+                )
+                if abs(tac) > 0.01:
+                    dominance_history.append(abs(sit) / abs(tac))
+            
+            if len(dominance_history) >= 20:
+                dominance_smooth = self._calculate_smoothed_metric(dominance_history, window_size=20)
+                self.writer.add_scalar('tuning/win_loss_dominance', dominance_smooth, self.episode_count)
+        
+        # 10. Reward Component Balance (20-episode rolling average)
+        if len(self.reward_components['base_actions']) >= 30:
+            balance_history = []
+            for i in range(10, len(self.reward_components['base_actions'])):
+                base = abs(np.mean(self.reward_components['base_actions'][max(0, i-10):i+1]))
+                result = abs(np.mean(self.reward_components['result_bonuses'][max(0, i-10):i+1]))
+                tactical = abs(np.mean(self.reward_components['tactical_bonuses'][max(0, i-10):i+1]))
+                situational = abs(np.mean(self.reward_components['situational'][max(0, i-10):i+1]))
+                penalties = abs(np.mean(self.reward_components['penalties'][max(0, i-10):i+1]))
+                
+                comp_total = base + result + tactical + situational + penalties
+                if comp_total > 0:
+                    comps = [base, result, tactical, situational, penalties]
+                    comp_probs = [c / comp_total for c in comps if c > 0]
+                    comp_entropy = -sum(p * np.log(p + 1e-10) for p in comp_probs if p > 0)
+                    balance_history.append(comp_entropy)
+            
+            if len(balance_history) >= 20:
+                balance_smooth = self._calculate_smoothed_metric(balance_history, window_size=20)
+                self.writer.add_scalar('tuning/reward_balance', balance_smooth, self.episode_count)
+    
+    def _calculate_smoothed_metric(self, values: List[float], window_size: int = 20) -> float:
+        """
+        Calculate exponentially weighted moving average (EWMA) for smooth trend visualization.
+        
+        Args:
+            values: List of raw metric values
+            window_size: Window size for smoothing (default: 20 episodes)
+        
+        Returns:
+            Smoothed value using EWMA
+        """
+        if not values or len(values) == 0:
+            return 0.0
+        
+        if len(values) < window_size:
+            # Not enough data - return simple mean
+            return np.mean(values)
+        
+        # Use last N values for rolling mean
+        recent_values = values[-window_size:]
+        return np.mean(recent_values)
     
     def get_performance_summary(self) -> Dict[str, float]:
         """Get current performance summary for monitoring"""

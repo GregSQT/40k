@@ -609,7 +609,8 @@ class W40KEngine(gym.Env):
             "move_activation_pool": [],
             "fight_subphase": None,
             "charge_range_rolls": {},
-            "action_logs": []  # CRITICAL: Reset action logs for new episode metrics
+            "action_logs": [],  # CRITICAL: Reset action logs for new episode metrics
+            "gym_training_mode": self.gym_training_mode  # ADDED: For handler access
         })
         
         # Reset unit health and positions to original scenario values

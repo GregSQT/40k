@@ -27,7 +27,7 @@
       "policy": "MlpPolicy",
       "learning_rate": 0.001,
       "n_steps": 2048,
-      "batch_size": 64,
+      "batch_size": 128,
       "n_epochs": 10,
       "gamma": 0.95,
       "gae_lambda": 0.95,
@@ -65,9 +65,9 @@
     },
     "model_params": {
       "policy": "MlpPolicy",
-      "learning_rate": 0.001,
+      "learning_rate": 0.0001,
       "n_steps": 512,
-      "batch_size": 32,
+      "batch_size": 128,
       "n_epochs": 4,
       "gamma": 0.95,
       "gae_lambda": 0.9,
@@ -92,14 +92,14 @@
     },
     "model_params": {
       "policy": "MlpPolicy",
-      "learning_rate": 0.001,
+      "learning_rate": 0.0001,
       "n_steps": 512,
-      "batch_size": 32,
+      "batch_size": 128,
       "n_epochs": 4,
       "gamma": 0.95,
       "gae_lambda": 0.9,
       "clip_range": 0.2,
-      "ent_coef": 0.20,
+      "ent_coef": 0.10,
       "vf_coef": 0.5,
       "max_grad_norm": 0.5,
       "tensorboard_log": "./tensorboard/",
@@ -130,14 +130,14 @@
     },
     "model_params": {
       "policy": "MlpPolicy",
-      "learning_rate": 0.0005,
+      "learning_rate": 0.0001,
       "n_steps": 1024,
-      "batch_size": 64,
+      "batch_size": 128,
       "n_epochs": 6,
       "gamma": 0.95,
       "gae_lambda": 0.95,
       "clip_range": 0.2,
-      "ent_coef": 0.10,
+      "ent_coef": 0.05,
       "vf_coef": 0.5,
       "max_grad_norm": 0.5,
       "tensorboard_log": "./tensorboard/",
@@ -167,14 +167,14 @@
     },
     "model_params": {
       "policy": "MlpPolicy",
-      "learning_rate": 0.0003,
+      "learning_rate": 0.0001,
       "n_steps": 2048,
-      "batch_size": 64,
+      "batch_size": 128,
       "n_epochs": 10,
       "gamma": 0.95,
       "gae_lambda": 0.95,
       "clip_range": 0.2,
-      "ent_coef": 0.05,
+      "ent_coef": 0.03,
       "vf_coef": 0.5,
       "max_grad_norm": 0.5,
       "tensorboard_log": "./tensorboard/",
@@ -183,7 +183,7 @@
       },
       "verbose": 0
     },
-    "total_episodes": 1000,
+    "total_episodes": 5000,
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 250,
     "callback_params": {
@@ -192,80 +192,6 @@
       "eval_deterministic": true,
       "eval_render": false,
       "n_eval_episodes": 10
-    }
-  },
-  "aggressive": {
-    "observation_params": {
-      "obs_size": 295,
-      "perception_radius": 25,
-      "max_nearby_units": 10,
-      "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 295 floats = asymmetric obs (72 ally + 138 enemy + 35 targets)"
-    },
-    "model_params": {
-      "policy": "MlpPolicy",
-      "learning_rate": 0.001,
-      "n_steps": 4096,
-      "batch_size": 128,
-      "n_epochs": 15,
-      "gamma": 0.99,
-      "gae_lambda": 0.95,
-      "clip_range": 0.2,
-      "ent_coef": 0.02,
-      "vf_coef": 0.5,
-      "max_grad_norm": 0.5,
-      "tensorboard_log": "./tensorboard/",
-      "policy_kwargs": {
-        "net_arch": [512, 512, 256]
-      },
-      "verbose": 0
-    },
-    "total_episodes": 4000,
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 50,
-    "callback_params": {
-      "checkpoint_save_freq": 100000,
-      "checkpoint_name_prefix": "ppo_aggressive_checkpoint",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 10
-    }
-  },
-  "conservative": {
-    "observation_params": {
-      "obs_size": 295,
-      "perception_radius": 25,
-      "max_nearby_units": 10,
-      "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 295 floats = asymmetric obs (72 ally + 138 enemy + 35 targets)"
-    },
-    "model_params": {
-      "policy": "MlpPolicy",
-      "learning_rate": 0.0001,
-      "n_steps": 1024,
-      "batch_size": 32,
-      "n_epochs": 5,
-      "gamma": 0.99,
-      "gae_lambda": 0.95,
-      "clip_range": 0.15,
-      "ent_coef": 0.005,
-      "vf_coef": 0.5,
-      "max_grad_norm": 0.5,
-      "tensorboard_log": "./tensorboard/",
-      "policy_kwargs": {
-        "net_arch": [256, 256]
-      },
-      "verbose": 0
-    },
-    "total_episodes": 1200,
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 50,
-    "callback_params": {
-      "checkpoint_save_freq": 50000,
-      "checkpoint_name_prefix": "ppo_conservative_checkpoint",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 5
     }
   }
 }
