@@ -63,6 +63,20 @@ class BotControlledEnv:
         if hasattr(base_env, 'env'):
             # ActionMasker wraps the actual engine in .env attribute
             self.engine = base_env.env
+            
+    def _on_training_start(self) -> None:
+        """Called when training starts - update metrics_tracker to use model's logger directory."""
+        # CRITICAL FIX: Update metrics_tracker writer to use SB3's actual tensorboard directory
+        # The model's logger is now initialized, so we can get the real directory
+        if hasattr(self.model, 'logger') and self.model.logger:
+            actual_log_dir = self.model.logger.get_dir()
+            print(f"📊 UPDATING metrics_tracker to use SB3 directory: {actual_log_dir}")
+            
+            # Close old writer and create new one in correct directory
+            self.metrics_tracker.writer.close()
+            from torch.utils.tensorboard import SummaryWriter
+            self.metrics_tracker.writer = SummaryWriter(actual_log_dir)
+            self.metrics_tracker.log_dir = actual_log_dir
     
     def reset(self, seed=None, options=None):
         obs, info = self.base_env.reset(seed=seed, options=options)
@@ -568,119 +582,54 @@ class MetricsCollectionCallback(BaseCallback):
                 # Force tensorboard dump to ensure gamma metrics are written
                 self.model.logger.dump(step=self.model.num_timesteps)
        
-        # Try to extract tactical data from environment
-        if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
-            env = self.training_env.envs[0]
-            if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'game_state'):
-                game_state = env.unwrapped.game_state
-                units = game_state.get('units', [])
-                
-                # Identify agent player (controlled_agent is player 1)
-                agent_player = 1
-                enemy_player = 0
-                
-                # Count enemies (existing logic)
-                enemy_units = [u for u in units if u.get('player') == enemy_player]
-                self.episode_tactical_data['total_enemies'] = len(enemy_units)
-                self.episode_tactical_data['killed_enemies'] = len([u for u in enemy_units if u.get('HP_CUR', 1) <= 0])
-                
-                # NEW: Count units killed (enemy units that died this episode)
-                self.episode_tactical_data['units_killed'] = len([u for u in enemy_units if u.get('HP_CUR', 0) <= 0])
-                
-                # NEW: Count units lost (agent units that died this episode)
-                agent_units = [u for u in units if u.get('player') == agent_player]
-                self.episode_tactical_data['units_lost'] = len([u for u in agent_units if u.get('HP_CUR', 0) <= 0])
-                
-                # NEW: Calculate damage received (agent units' HP loss)
-                damage_received = 0
-                for unit in agent_units:
-                    hp_cur = unit.get('HP_CUR', 0)
-                    hp_max = unit.get('HP_MAX', 1)
-                    if hp_max > 0:
-                        hp_loss = max(0, hp_max - hp_cur)
-                        damage_received += hp_loss
-                self.episode_tactical_data['damage_received'] = damage_received
-                
-                # NEW: Collect AI_TURN.md compliance data
-                if 'last_compliance_data' in game_state:
-                    compliance_data = game_state['last_compliance_data']
-                    self.metrics_tracker.log_aiturn_compliance(compliance_data)
-                
-                # CRITICAL: Read action_logs from info dict (before env reset clears it)
-                action_logs = info.get('action_logs', [])
-                
-                # NEW: Collect phase performance data from action logs
-                for log in action_logs:
-                    phase_data = {
-                        'phase': log.get('phase', 'unknown'),
-                        'action': log.get('type', 'unknown'),
-                        'was_flee': log.get('was_flee', False)
-                    }
-                    self.metrics_tracker.log_phase_performance(phase_data)
-                
-                # NEW: Collect reward mapper effectiveness data
-                # Track if movement had tactical bonuses
-                for log in action_logs:
-                    if log.get('type') == 'move':
-                        mapper_data = {
-                            'movement_had_tactical_bonus': log.get('reward', 0.0) > 0.5,
-                            'movement_actions': 1
-                        }
-                        self.metrics_tracker.log_reward_mapper_effectiveness(mapper_data)
-                
-                # Count shooting actions from action logs (existing logic)
-                shoot_logs = [log for log in action_logs if log.get('type') == 'shoot']
-                self.episode_tactical_data['shots_fired'] = len(shoot_logs)
-                self.episode_tactical_data['hits'] = len([log for log in shoot_logs if log.get('damage', 0) > 0])
-                
-                # NEW: Calculate total damage dealt from all action logs
-                damage_dealt = sum(log.get('damage', 0) for log in action_logs if log.get('damage', 0) > 0)
-                self.episode_tactical_data['damage_dealt'] = damage_dealt
-                
-                # DEBUG: Verify shooting behavior every 10 episodes
-                if self.episode_count % 10 == 0:
-                    print(f"\n🔍 DEBUG Episode {self.episode_count}:")
-                    
-                    # Check action_logs population
-                    print(f"   📋 Total action_logs entries: {len(action_logs)}")
-                    
-                    # Count by action type
-                    shoot_count = len([log for log in action_logs if log.get('type') == 'shoot'])
-                    move_count = len([log for log in action_logs if log.get('type') == 'move'])
-                    wait_count = len([log for log in action_logs if log.get('type') == 'wait'])
-                    
-                    print(f"   🎯 Shoot actions: {shoot_count}")
-                    print(f"   🚶 Move actions: {move_count}")
-                    print(f"   ⏸️  Wait actions: {wait_count}")
-                    
-                    # Check tactical_data metrics
-                    print(f"   📊 shots_fired in tactical_data: {self.episode_tactical_data.get('shots_fired', 0)}")
-                    print(f"   🎯 hits in tactical_data: {self.episode_tactical_data.get('hits', 0)}")
-                    print(f"   💥 damage_dealt: {self.episode_tactical_data.get('damage_dealt', 0)}")
-                    
-                    # Check phase_stats accumulation
-                    if hasattr(self.metrics_tracker, 'phase_stats'):
-                        shot = self.metrics_tracker.phase_stats['shooting']['shot']
-                        skipped = self.metrics_tracker.phase_stats['shooting']['skipped']
-                        moved = self.metrics_tracker.phase_stats['movement']['moved']
-                        waited = self.metrics_tracker.phase_stats['movement']['waited']
-                        print(f"   📈 phase_stats.shooting: shot={shot}, skipped={skipped}")
-                        print(f"   📈 phase_stats.movement: moved={moved}, waited={waited}")
-                    
-                    # Show sample shoot log if available
-                    if shoot_logs:
-                        sample = shoot_logs[0]
-                        print(f"   📝 Sample shoot log:")
-                        print(f"      - shooter: {sample.get('shooterId', 'N/A')}")
-                        print(f"      - target: {sample.get('targetId', 'N/A')}")
-                        print(f"      - damage: {sample.get('damage', 0)}")
-                        print(f"      - phase: {sample.get('phase', 'N/A')}")
-                    else:
-                        print(f"   ⚠️  WARNING: NO SHOOT LOGS FOUND IN ACTION_LOGS!")
+        # CRITICAL: Use tactical_data from engine (populated during episode)
+        if 'tactical_data' in info:
+            # Engine provides complete tactical data - use it directly
+            self.episode_tactical_data.update(info['tactical_data'])
        
-        # Log to metrics tracker
+        # Log to metrics tracker (KEEP for state tracking)
         self.metrics_tracker.log_episode_end(episode_data)
         self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
+        
+        # CRITICAL FIX: Write game_critical metrics directly to model.logger
+        # This ensures metrics appear in same TensorBoard directory as train/ metrics
+        if hasattr(self.model, 'logger') and self.model.logger:
+            total_reward = episode_data.get('total_reward', 0)
+            episode_length = episode_data.get('episode_length', 0)
+            winner = episode_data.get('winner', None)
+            
+            # Game critical metrics
+            self.model.logger.record('game_critical/episode_reward', total_reward)
+            self.model.logger.record('game_critical/episode_length', episode_length)
+            
+            # Win rate calculation (need rolling window)
+            if not hasattr(self, 'win_rate_window'):
+                from collections import deque
+                self.win_rate_window = deque(maxlen=100)
+            
+            if winner is not None:
+                agent_won = 1.0 if winner == 1 else 0.0
+                self.win_rate_window.append(agent_won)
+                
+                if len(self.win_rate_window) >= 10:
+                    import numpy as np
+                    rolling_win_rate = np.mean(self.win_rate_window)
+                    self.model.logger.record('game_critical/win_rate_100ep', rolling_win_rate)
+            
+            # Tactical metrics
+            units_killed = self.episode_tactical_data.get('units_killed', 0)
+            units_lost = max(self.episode_tactical_data.get('units_lost', 0), 1)  # Avoid division by zero
+            kill_loss_ratio = units_killed / units_lost
+            self.model.logger.record('game_critical/units_killed_vs_lost_ratio', kill_loss_ratio)
+            
+            # Invalid action rate
+            total_actions = self.episode_tactical_data.get('total_actions', 0)
+            if total_actions > 0:
+                invalid_rate = self.episode_tactical_data.get('invalid_actions', 0) / total_actions
+                self.model.logger.record('game_critical/invalid_action_rate', invalid_rate)
+            
+            # Dump metrics to TensorBoard
+            self.model.logger.dump(step=self.model.num_timesteps)
         
         # NEW: Log reward decomposition
         if hasattr(self, 'episode_reward_components'):
@@ -1673,8 +1622,19 @@ def train_model(model, training_config, callbacks, model_path):
     if "_" in os.path.basename(model_path):
         agent_name = os.path.basename(model_path).replace('.zip', '').replace('model_', '')
     
-    # Create metrics tracker
-    metrics_tracker = W40KMetricsTracker(agent_name, "./tensorboard/")
+    # CRITICAL FIX: Use model's TensorBoard directory for metrics_tracker
+    # SB3 creates subdirectories like ./tensorboard/PPO_1/
+    # metrics_tracker MUST write to the SAME directory to appear in TensorBoard
+    # Access tensorboard_log from model parameters (logger not initialized until learn() is called)
+    if hasattr(model, 'tensorboard_log') and model.tensorboard_log:
+        model_tensorboard_dir = model.tensorboard_log
+        print(f"📊 Metrics will be logged to: {model_tensorboard_dir}")
+    else:
+        model_tensorboard_dir = "./tensorboard/"
+        print(f"⚠️  No tensorboard_log found, using default: {model_tensorboard_dir}")
+   
+    # Create metrics tracker using model's directory
+    metrics_tracker = W40KMetricsTracker(agent_name, model_tensorboard_dir)
     
     try:
         # Start training

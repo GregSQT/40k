@@ -149,6 +149,9 @@ class W40KMetricsTracker:
         
         # NEW: Log tuning dashboard metrics
         self.log_tuning_dashboard()
+        
+        # Flush metrics to disk
+        self.writer.flush()
     
     def log_tactical_metrics(self, tactical_data: Dict[str, Any]):
         """Log tactical performance metrics - combat effectiveness and decision quality"""

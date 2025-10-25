@@ -192,6 +192,22 @@ class W40KEngine(gym.Env):
         # Initialize position caching for movement_direction feature
         self.last_unit_positions = {}  # {unit_id: (col, row)}
         
+        # Episode-level metrics accumulation for MetricsCollectionCallback
+        self.episode_reward_accumulator = 0.0
+        self.episode_length_accumulator = 0
+        self.episode_tactical_data = {
+            'shots_fired': 0,
+            'hits': 0,
+            'damage_dealt': 0,
+            'damage_received': 0,
+            'units_killed': 0,
+            'units_lost': 0,
+            'valid_actions': 0,
+            'invalid_actions': 0,
+            'wait_actions': 0,
+            'total_enemies': 0
+        }
+        
         # Load AI model for PvE mode
         if self.is_pve_mode:
             self._load_ai_model_for_pve()
@@ -475,9 +491,47 @@ class W40KEngine(gym.Env):
         info = result.copy() if isinstance(result, dict) else {}
         info["success"] = success
         
+        # Accumulate episode-level metrics
+        self.episode_reward_accumulator += reward
+        self.episode_length_accumulator += 1
+        
+        # Track action validity
+        if success:
+            self.episode_tactical_data['valid_actions'] += 1
+        else:
+            self.episode_tactical_data['invalid_actions'] += 1
+        
         # Add winner info when game ends
         if terminated:
             info["winner"] = self._determine_winner()
+            
+            # CRITICAL: Populate info["episode"] for Stable-Baselines3 MetricsCollectionCallback
+            info["episode"] = {
+                "r": float(self.episode_reward_accumulator),
+                "l": int(self.episode_length_accumulator),
+                "t": int(self.episode_length_accumulator),
+            }
+            
+            # Calculate units killed/lost
+            # Controlled agent is always player 0 in training
+            controlled_player = 0
+            
+            surviving_ally_units = sum(1 for u in self.game_state["units"] 
+                                      if u["player"] == controlled_player and u["HP_CUR"] > 0)
+            surviving_enemy_units = sum(1 for u in self.game_state["units"] 
+                                       if u["player"] != controlled_player and u["HP_CUR"] > 0)
+            
+            total_ally_units = sum(1 for u in self.game_state["units"] 
+                                  if u["player"] == controlled_player)
+            total_enemy_units = sum(1 for u in self.game_state["units"] 
+                                   if u["player"] != controlled_player)
+            
+            self.episode_tactical_data['units_lost'] = total_ally_units - surviving_ally_units
+            self.episode_tactical_data['units_killed'] = total_enemy_units - surviving_enemy_units
+            self.episode_tactical_data['total_enemies'] = total_enemy_units
+            
+            # Add tactical data to info
+            info["tactical_data"] = self.episode_tactical_data.copy()   
         else:
             info["winner"] = None
         
@@ -641,6 +695,22 @@ class W40KEngine(gym.Env):
         
         # Initialize movement phase for game start using handler delegation
         movement_handlers.movement_phase_start(self.game_state)
+        
+        # Reset episode-level metric accumulators
+        self.episode_reward_accumulator = 0.0
+        self.episode_length_accumulator = 0
+        self.episode_tactical_data = {
+            'shots_fired': 0,
+            'hits': 0,
+            'damage_dealt': 0,
+            'damage_received': 0,
+            'units_killed': 0,
+            'units_lost': 0,
+            'valid_actions': 0,
+            'invalid_actions': 0,
+            'wait_actions': 0,
+            'total_enemies': 0
+        }
         
         observation = self._build_observation()
         info = {"phase": self.game_state["phase"]}
@@ -1051,7 +1121,8 @@ class W40KEngine(gym.Env):
         system_response_indicators = [
             "phase_complete", "phase_transition", "while_loop_active", 
             "context", "blinking_units", "start_blinking", "validTargets",
-            "type", "next_phase", "current_player", "new_turn", "episode_complete"
+            "type", "next_phase", "current_player", "new_turn", "episode_complete",
+            "unit_activated", "valid_destinations", "preview_data", "waiting_for_player"
         ]
         
         if any(indicator in result for indicator in system_response_indicators):

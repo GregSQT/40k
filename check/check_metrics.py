@@ -60,11 +60,11 @@ expected_critical = [
     'game_critical/episode_length',
     'game_critical/units_killed_vs_lost_ratio',
     'game_critical/invalid_action_rate',
-    'training_critical/policy_loss',
-    'training_critical/value_loss',
-    'training_critical/explained_variance',
-    'training_critical/clip_fraction',
-    'training_critical/approx_kl',
+    'train/policy_gradient_loss',
+    'train/value_loss',
+    'train/explained_variance',
+    'train/clip_fraction',
+    'train/approx_kl',
 ]
 
 missing = [metric for metric in expected_critical if metric not in all_tags]
