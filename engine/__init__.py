@@ -12,7 +12,7 @@ Core Principles:
 - Single source of truth (one game_state object)
 """
 
-from .w40k_engine import W40KEngine
+from engine.w40k_core import W40KEngine
 
 __version__ = "0.1.0"
 __author__ = "W40K Study Project"

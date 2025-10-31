@@ -798,11 +798,13 @@ class BotEvaluationCallback(BaseCallback):
                 
                 # DEBUG: Print player configuration (ONLY FIRST EPISODE)
                 if episode == 0:
+                    agent_player_debug = 1 if controlled_agent else 0
+                    bot_player_debug = 0 if controlled_agent else 1
                     print(f"\n🔍 DEBUG INFO (Bot: {bot_name}):")
                     print(f"   controlled_agent = {controlled_agent}")
-                    print(f"   Agent should be player: {0 if controlled_agent is None else 1}")
-                    print(f"   Bot should be player: {1 if controlled_agent is None else 0}")
-                    print(f"   Winner check looking for: player 0")
+                    print(f"   Agent should be player: {agent_player_debug}")
+                    print(f"   Bot should be player: {bot_player_debug}")
+                    print(f"   Winner check looking for: player {agent_player_debug}")
                 
                 # Create evaluation environment with LONGER turn limit
                 # Bot evaluation needs more turns to reach decisive victories
@@ -1253,7 +1255,7 @@ def setup_imports():
     """Set up import paths and return required modules."""
     try:
         # AI_TURN.md COMPLIANCE: Use compliant engine with gym interface
-        from engine.w40k_engine import W40KEngine
+        from engine.w40k_core import W40KEngine
         
         # Compatibility function for training system
         def register_environment():

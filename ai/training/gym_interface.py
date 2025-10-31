@@ -17,10 +17,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(script_dir))
 sys.path.insert(0, project_root)
 
-from engine.w40k_engine import W40KEngine
-
-from engine.w40k_engine import W40KEngine
-
+from engine.w40k_core import W40KEngine
 
 class W40KGymEnv(gym.Env):
     """Minimal gym interface for W40KEngine - translation layer only."""

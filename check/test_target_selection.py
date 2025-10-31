@@ -4,7 +4,7 @@ Test script to verify target selection is working correctly.
 """
 
 import numpy as np
-from engine.w40k_engine import W40KEngine
+from engine.w40k_core import W40KEngine
 from stable_baselines3 import PPO
 
 def test_observation_action_correspondence():

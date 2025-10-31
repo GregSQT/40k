@@ -21,7 +21,7 @@ sys.path.insert(0, abs_parent)
 engine_dir = os.path.join(abs_parent, 'engine')
 sys.path.insert(0, engine_dir)
 
-from engine.w40k_engine import W40KEngine
+from engine.w40k_core import W40KEngine
 from main import load_config
 
 # Initialize Flask app
@@ -420,7 +420,7 @@ def execute_ai_turn():
     
     try:
         # Debug: Check engine state before AI turn
-        print(f"DEBUG AI_TURN: AI model loaded = {hasattr(engine, '_ai_model') and engine._ai_model is not None}")
+        print(f"DEBUG AI_TURN: AI model loaded = {hasattr(engine.pve_controller, 'ai_model') and engine.pve_controller.ai_model is not None}")
         success, result = engine.execute_ai_turn()
         print(f"DEBUG AI_TURN: execute_ai_turn returned success={success}, result={result}")
         print(f"DEBUG AI_TURN: current_phase={engine.game_state.get('phase')}, current_player={engine.game_state.get('current_player')}")

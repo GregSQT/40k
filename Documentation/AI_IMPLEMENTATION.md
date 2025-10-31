@@ -692,7 +692,7 @@ def detect_flee_action(game_state, unit, old_pos, new_pos):
 
 ```python
 # w40k_engine.py - Delegation to pure functions
-from phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers
+from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers
 
 class W40KEngine:
     def _execute_movement_action(self, unit, action):

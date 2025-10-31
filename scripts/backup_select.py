@@ -42,7 +42,7 @@ else:
         "ai/metrics_tracker.py",
         "ai/multi_agent_trainer.py",
         "ai/scenario_manager.py",
-        "target_selection_monitor.py",
+        "ai/target_selection_monitor.py",
         "ai/train.py",
         "ai/unit_registry.py",
         "ai/reward_mapper.py",
@@ -103,7 +103,17 @@ else:
 ##### Engine files
 ######################################################################################################
         "engine/__init__.py",
-        "engine/w40k_engine.py",
+        "engine/w40k_engine_old.py", # Old engine file for reference
+    
+    ### Engine
+        "engine/w40k_core.py",
+        "engine/action_decoder.py",
+        "engine/combat_utils.py",
+        "engine/game_state.py",
+        "engine/game_utils.py",
+        "engine/observation_builder.py",
+        "engine/pve_controller.py",
+        "engine/reward_calculator.py",
         
     ### Phase Handlers
         "engine/phase_handlers/__init__.py",

@@ -697,7 +697,8 @@ class MultiAgentTrainer:
         """Create or load DQN model for specific agent."""
         try:
             # AI_TURN.md COMPLIANCE: Use compliant engine directly
-            from engine.w40k_engine import W40KEngine
+            # from engine.w40k_engine import W40KEngine
+            from engine.w40k_core import W40KEngine
             
             # Load training configuration
             training_config = self.config.load_training_config(training_config_name)
@@ -812,7 +813,7 @@ class MultiAgentTrainer:
     def _create_eval_env_for_session(self, session: TrainingSession):
         """Create evaluation environment for session callbacks."""
         # Import environment - AI_TURN.md compliant
-        from engine.w40k_engine import W40KEngine
+        from engine.w40k_engine_old import W40KEngine
         
         # Create evaluation environment identical to training environment
         scenario = self.scenario_manager.generate_training_scenario(

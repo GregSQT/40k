@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Quick test to verify observation shape after removing feature #8"""
 
-from engine.w40k_engine import W40KEngine
+from engine.w40k_core import W40KEngine
 from config_loader import get_config_loader
 from ai.unit_registry import UnitRegistry
 

@@ -72,7 +72,7 @@ def _encode_valid_targets(self, obs: np.ndarray, active_unit: Dict[str, Any], ba
                 if "col" not in enemy or "row" not in enemy:
                     raise KeyError(f"Enemy unit missing required position fields: {enemy}")
                 
-                distance = self._calculate_hex_distance(
+                distance = calculate_hex_distance(
                     active_unit["col"], active_unit["row"],
                     enemy["col"], enemy["row"]
                 )
@@ -95,7 +95,7 @@ def _encode_valid_targets(self, obs: np.ndarray, active_unit: Dict[str, Any], ba
                 if "col" not in enemy or "row" not in enemy:
                     raise KeyError(f"Enemy unit missing required position fields: {enemy}")
                 
-                distance = self._calculate_hex_distance(
+                distance = calculate_hex_distance(
                     active_unit["col"], active_unit["row"],
                     enemy["col"], enemy["row"]
                 )
@@ -105,7 +105,7 @@ def _encode_valid_targets(self, obs: np.ndarray, active_unit: Dict[str, Any], ba
     
     # CRITICAL: Sort by distance for CONSISTENT ordering across episodes
     # Agent needs same target in same slot each time for learning
-    valid_targets.sort(key=lambda t: self._calculate_hex_distance(
+    valid_targets.sort(key=lambda t: calculate_hex_distance(
         active_unit["col"], active_unit["row"], t["col"], t["row"]
     ))
     
@@ -135,7 +135,7 @@ def _encode_valid_targets(self, obs: np.ndarray, active_unit: Dict[str, Any], ba
             obs[feature_base + 3] = target.get("HP_CUR", 1) / max(1, target.get("HP_MAX", 1))
             
             # Feature 4: Distance (accessibility)
-            distance = self._calculate_hex_distance(
+            distance = calculate_hex_distance(
                 active_unit["col"], active_unit["row"],
                 target["col"], target["row"]
             )
@@ -249,7 +249,7 @@ def _calculate_danger_probability(self, defender: Dict[str, Any], attacker: Dict
     
     Returns: 0.0-1.0 probability
     """
-    distance = self._calculate_hex_distance(
+    distance = calculate_hex_distance(
         defender["col"], defender["row"],
         attacker["col"], attacker["row"]
     )
