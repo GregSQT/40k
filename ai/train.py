@@ -37,7 +37,7 @@ from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3 import PPO
 MASKABLE_PPO_AVAILABLE = True
 
-from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
+from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback, CallbackList
 from stable_baselines3.common.monitor import Monitor
 # Multi-agent orchestration imports
 from ai.scenario_manager import ScenarioManager
@@ -63,20 +63,6 @@ class BotControlledEnv:
         if hasattr(base_env, 'env'):
             # ActionMasker wraps the actual engine in .env attribute
             self.engine = base_env.env
-            
-    def _on_training_start(self) -> None:
-        """Called when training starts - update metrics_tracker to use model's logger directory."""
-        # CRITICAL FIX: Update metrics_tracker writer to use SB3's actual tensorboard directory
-        # The model's logger is now initialized, so we can get the real directory
-        if hasattr(self.model, 'logger') and self.model.logger:
-            actual_log_dir = self.model.logger.get_dir()
-            print(f"📊 UPDATING metrics_tracker to use SB3 directory: {actual_log_dir}")
-            
-            # Close old writer and create new one in correct directory
-            self.metrics_tracker.writer.close()
-            from torch.utils.tensorboard import SummaryWriter
-            self.metrics_tracker.writer = SummaryWriter(actual_log_dir)
-            self.metrics_tracker.log_dir = actual_log_dir
     
     def reset(self, seed=None, options=None):
         obs, info = self.base_env.reset(seed=seed, options=options)
@@ -141,63 +127,84 @@ class EpisodeTerminationCallback(BaseCallback):
         self.expected_timesteps = expected_timesteps
         self.episode_count = 0
         self.step_count = 0
-        
+        self.start_time = None
+    
+    def _on_training_start(self) -> None:
+        """Initialize timing when training starts."""
+        import time
+        self.start_time = time.time()
+                
     def _on_step(self) -> bool:
         self.step_count += 1
         
-        # Episode-based progress display for AI_TURN.md compliance
-        if self.step_count % 10 == 0:
-            episode_progress_pct = min(100, (self.episode_count / self.max_episodes) * 100)
-            print(f"🎮 Episode Progress: {episode_progress_pct:.1f}% ({self.episode_count}/{self.max_episodes} episodes)")
-            if hasattr(self, 'model') and hasattr(self.model, 'num_timesteps'):
-                step_progress_pct = min(100, (self.model.num_timesteps / self.expected_timesteps) * 100)
-                print(f"🔍 Step Progress: {step_progress_pct:.1f}% ({self.model.num_timesteps}/{self.expected_timesteps} steps)")
-        
-    def _on_step(self) -> bool:
-        self.step_count += 1
-        
-        # Debug: Print every 100 steps to see if callback is working
-        if self.step_count % 1000 == 0:
-            print(f"🔍 Callback alive: Step {self.step_count}")
-        
-        # Try multiple ways to detect episode end for DummyVecEnv
+        # CRITICAL FIX: Detect episodes using MULTIPLE methods
         episode_ended = False
         
-        # Method 1: Check self.locals for dones
-        if hasattr(self, 'locals') and 'dones' in self.locals:
-            if any(self.locals['dones']):
-                episode_ended = True
-                # print(f"🎯 Episode end detected via locals.dones")
-        
-        # Method 2: Check infos for episode termination  
+        # Method 1: Check info dicts for 'episode' key (SB3 standard)
         if hasattr(self, 'locals') and 'infos' in self.locals:
             for info in self.locals['infos']:
-                if info.get('episode', False):
+                if 'episode' in info:
                     episode_ended = True
-                    # print(f"🎯 Episode end detected via infos")
+                    self.episode_count += 1
                     break
         
-        # Method 3: Check training environment directly
-        if hasattr(self, 'training_env') and hasattr(self.training_env, 'get_attr'):
+        # Method 2: Check dones array (backup)
+        if not episode_ended and hasattr(self, 'locals') and 'dones' in self.locals:
+            if any(self.locals['dones']):
+                episode_ended = True
+                self.episode_count += 1
+        
+        # Method 3: Try to get episode count from environment directly (most reliable)
+        if not episode_ended and hasattr(self, 'training_env'):
             try:
-                # Get episode count from environment if available
-                env_episodes = self.training_env.get_attr('episode_count')
-                if env_episodes and env_episodes[0] > self.episode_count:
-                    episode_ended = True
-                    # print(f"🎯 Episode end detected via env.episode_count")
-            except:
+                if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
+                    env = self.training_env.envs[0]
+                    # Unwrap ActionMasker/Monitor wrappers
+                    while hasattr(env, 'env'):
+                        env = env.env
+                    
+                    if hasattr(env, 'episode_count'):
+                        env_episodes = env.episode_count
+                        if env_episodes > self.episode_count:
+                            self.episode_count = env_episodes
+                            episode_ended = True
+            except Exception as e:
+                if self.step_count <= 100:
+                    print(f"   ⚠️  DEBUG: Method 3 exception: {e}")
                 pass
         
-        if episode_ended:
-            self.episode_count += 1
-            episode_progress_pct = (self.episode_count / self.max_episodes) * 100
-            # print(f"✅ Episode {self.episode_count}/{self.max_episodes} completed ({episode_progress_pct:.1f}%)")
+        # Log progress every 10 episodes with visual bar
+        if episode_ended and self.episode_count % 10 == 0:
+            import time
             
-            # Stop training if max episodes reached
-            if self.episode_count >= self.max_episodes:
-                print(f"🛑 TRAINING STOPPED: {self.max_episodes} episodes completed (100%)")
-                return False
+            progress_pct = (self.episode_count / self.max_episodes) * 100
+            bar_length = 50
+            filled = int(bar_length * self.episode_count / self.max_episodes)
+            bar = '█' * filled + '░' * (bar_length - filled)
+            
+            # Calculate time
+            time_info = ""
+            if self.start_time is not None and self.episode_count > 0:
+                elapsed = time.time() - self.start_time
+                avg_time_per_episode = elapsed / self.episode_count
+                remaining_episodes = self.max_episodes - self.episode_count
+                eta = avg_time_per_episode * remaining_episodes
                 
+                # Format times as MM:SS
+                elapsed_str = f"{int(elapsed//60):02d}:{int(elapsed%60):02d}"
+                eta_str = f"{int(eta//60):02d}:{int(eta%60):02d}"
+                time_info = f" [ {elapsed_str} < {eta_str} ]"
+            
+            print(f"\r{progress_pct:3.0f}% {bar} {self.episode_count}/{self.max_episodes} episodes{time_info}", end='', flush=True)
+            if self.episode_count == self.max_episodes or self.episode_count % 100 == 0:
+                print()  # New line at milestones
+        
+        # CRITICAL: Stop when max episodes reached
+        if self.episode_count >= self.max_episodes:
+            print(f"🛑 STOPPING: Reached {self.max_episodes} episodes")
+            print(f"   Total timesteps: {self.model.num_timesteps if hasattr(self, 'model') else 'N/A'}")
+            return False
+        
         return True
 
 class EpisodeBasedEvalCallback(BaseCallback):
@@ -419,6 +426,20 @@ class MetricsCollectionCallback(BaseCallback):
         # Q-value tracking with history
         self.q_value_history = []
         self.max_q_value_history = 100  # Keep last 100 Q-value samples
+    
+    def _on_training_start(self) -> None:
+        """Called when training starts - update metrics_tracker to use model's logger directory."""
+        # CRITICAL FIX: Update metrics_tracker writer to use SB3's actual tensorboard directory
+        # The model's logger is now initialized, so we can get the real directory
+        if hasattr(self.model, 'logger') and self.model.logger:
+            actual_log_dir = self.model.logger.get_dir()
+            print(f"📊 UPDATING metrics_tracker to use SB3 directory: {actual_log_dir}")
+            
+            # Close old writer and create new one in correct directory
+            self.metrics_tracker.writer.close()
+            from torch.utils.tensorboard import SummaryWriter
+            self.metrics_tracker.writer = SummaryWriter(actual_log_dir)
+            self.metrics_tracker.log_dir = actual_log_dir
     
     def _on_step(self) -> bool:
         """Collect step-level data including actions, damage, and unit changes"""
@@ -772,6 +793,7 @@ class BotEvaluationCallback(BaseCallback):
     
     def _evaluate_against_bots(self) -> Dict[str, float]:
         from ai.unit_registry import UnitRegistry
+        from config_loader import get_config_loader
         
         results = {}
         config = get_config_loader()
@@ -806,23 +828,41 @@ class BotEvaluationCallback(BaseCallback):
                     print(f"   Bot should be player: {bot_player_debug}")
                     print(f"   Winner check looking for: player {agent_player_debug}")
                 
-                # Create evaluation environment with LONGER turn limit
-                # Bot evaluation needs more turns to reach decisive victories
-                base_env = W40KEngine(
-                    rewards_config="default",
-                    training_config_name="default",  # Will be overridden below
-                    controlled_agent=controlled_agent,
-                    active_agents=None,
-                    scenario_file=scenario_file,
-                    unit_registry=unit_registry,
-                    quiet=True,
-                    gym_training_mode=True
-                )
+                # Create evaluation environment with proper turn limit
+                from config_loader import get_config_loader
+                config = get_config_loader()
                 
-                # CRITICAL FIX: Override max_turns for bot evaluation to allow decisive victories
-                # Training uses 5 turns, but bot evaluation needs 10-15 turns for proper assessment
-                if hasattr(base_env, 'training_config'):
-                    base_env.training_config['max_turns_per_episode'] = 15
+                # Temporarily override game_config max_turns for evaluation
+                original_max_turns = config.get_max_turns()
+                config._cache['game_config']['game_rules']['max_turns'] = 10
+                
+                try:
+                    base_env = W40KEngine(
+                        rewards_config="default",
+                        training_config_name="default",
+                        controlled_agent=controlled_agent,
+                        active_agents=None,
+                        scenario_file=scenario_file,
+                        unit_registry=unit_registry,
+                        quiet=True,
+                        gym_training_mode=True
+                    )
+                    
+                    # CRITICAL: Override max_turns in the CREATED environment's config
+                    if hasattr(base_env, 'unwrapped') and hasattr(base_env.unwrapped, 'config'):
+                        env_config = base_env.unwrapped.config
+                        if isinstance(env_config, dict) and 'training_config' in env_config:
+                            env_config['training_config']['max_turns_per_episode'] = 10
+                    
+                    if hasattr(base_env, 'unwrapped') and hasattr(base_env.unwrapped, 'config'):
+                        env_config = base_env.unwrapped.config
+                        
+                        if isinstance(env_config, dict):
+                            if 'game_rules' in env_config:
+                                env_config['game_rules']['max_turns'] = 10
+                finally:
+                    # Restore original max_turns after environment creation
+                    config._cache['game_config']['game_rules']['max_turns'] = original_max_turns
                 
                 def mask_fn(env):
                     return env.get_action_mask()
@@ -834,14 +874,29 @@ class BotEvaluationCallback(BaseCallback):
                 done = False
                 step_count = 0
                 
-                # Shorter step limit for faster evaluation
-                max_eval_steps = 500  # Reduced from 1000 for faster evaluation
+                # Calculate max_eval_steps from training_config
+                env_config = base_env.unwrapped.config
+                training_cfg = env_config.get('training_config', {})
+                max_turns = training_cfg.get('max_turns_per_episode', 5)
+                
+                # Calculate expected steps per episode
+                # 4 units × 2 actions/unit = 8 steps per turn
+                steps_per_turn = 8
+                expected_max_steps = max_turns * steps_per_turn
+                
+                # Add 100% buffer for slow/suboptimal play
+                max_eval_steps = expected_max_steps * 2
                 
                 while not done and step_count < max_eval_steps:
                     action, _ = self.model.predict(obs, deterministic=True)
                     obs, reward, terminated, truncated, info = bot_env.step(action)
                     done = terminated or truncated
                     step_count += 1
+                    
+                    # Debug turn counting every 40 steps (5 turns)
+                    if step_count % 40 == 0:
+                        if hasattr(base_env, 'unwrapped') and hasattr(base_env.unwrapped, 'current_turn'):
+                            print(f"   🔧 Step {step_count}: Turn {base_env.unwrapped.current_turn}")
                 
                 # DEBUG: Print winner info (ONLY FIRST EPISODE)
                 if episode == 0:
@@ -1536,7 +1591,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     callbacks = []
     
     # Add episode termination callback for debug AND step configs - NO FALLBACKS
-    if training_config_name in ["debug", "step"]:
+    if "total_episodes" in training_config:
         if "total_episodes" not in training_config:
             raise KeyError(f"{training_config_name} training config missing required 'total_episodes'")
         if "max_turns_per_episode" not in training_config:
@@ -1643,6 +1698,7 @@ def train_model(model, training_config, callbacks, model_path):
         # AI_TURN COMPLIANCE: Use episode-based training
         if 'total_timesteps' in training_config:
             total_timesteps = training_config['total_timesteps']
+            safety_timesteps = total_timesteps
             print(f"🎯 Training Mode: Step-based ({total_timesteps:,} steps)")
         elif 'total_episodes' in training_config:
             total_episodes = training_config['total_episodes']
@@ -1654,7 +1710,17 @@ def train_model(model, training_config, callbacks, model_path):
             max_turns_per_episode = training_config["max_turns_per_episode"]
             max_steps_per_turn = training_config["max_steps_per_turn"]
             total_timesteps = total_episodes * max_turns_per_episode * max_steps_per_turn
-            print(f"🎮 Training Mode: Episode-based ({total_episodes:,} episodes = {total_timesteps:,} steps)")
+            
+            # CRITICAL FIX: Add safety margin to prevent infinite training
+            # Allow 50% buffer for episode completion, but cap at 2x to prevent runaway
+            safety_timesteps = min(
+                int(total_timesteps * 1.5),
+                total_timesteps * 2
+            )
+            
+            print(f"🎮 Training Mode: Episode-based ({total_episodes:,} episodes)")
+            print(f"📊 Expected timesteps: {total_timesteps:,}")
+            print(f"🛡️ Safety limit: {safety_timesteps:,} (prevents overtraining)")
         else:
             raise ValueError("Training config must have either 'total_timesteps' or 'total_episodes'")
         
@@ -1662,13 +1728,14 @@ def train_model(model, training_config, callbacks, model_path):
         print(f"📈 Metrics tracking enabled for agent: {agent_name}")
         
         # Enhanced callbacks with metrics collection
-        enhanced_callbacks = callbacks + [MetricsCollectionCallback(metrics_tracker, model)]
+        all_callbacks = callbacks + [MetricsCollectionCallback(metrics_tracker, model)]
+        enhanced_callbacks = CallbackList(all_callbacks)
         
         model.learn(
             total_timesteps=total_timesteps,
             callback=enhanced_callbacks,
             log_interval=total_timesteps + 1,
-            progress_bar=True  # Keep progress bar enabled
+            progress_bar=False  # Disable step-based progress bar (using episode-based instead)
         )
         
         # Save final model

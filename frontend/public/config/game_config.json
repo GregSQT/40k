@@ -1,6 +1,6 @@
 {
   "game_rules": {
-    "max_turns": 8,
+    "max_turns": 5,
     "turn_limit_penalty": -1,
     "charge_max_distance": 13
   },
