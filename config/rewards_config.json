@@ -2,6 +2,7 @@
   "description": "4-part agent reward system with faction-specific behaviors - fully migrated from legacy 2-part system",
   
   "SpaceMarine_Infantry_Troop_RangedSwarm": {
+    "Unit": "######################################## SpaceMarine_Infantry_Troop_RangedSwarm ########################################",
     "base_actions": {
       "move_close": 0.4,
       "move_away": 0.5,
@@ -12,7 +13,8 @@
       "charge": 0.1,
       "charge_success": 0.1,
       "being_charged": -0.3,
-      "wait": -0.9
+      "move_wait": -0.3,
+      "shoot_wait": -0.9
     },
     "target_type_bonuses": {
       "vs_melee": 0.1,
@@ -57,21 +59,24 @@
   },
 
   "SpaceMarine_Infantry_Troop_RangedSwarm_phase1": {
+    "Unit": "######################################## SpaceMarine_Infantry_Troop_RangedSwarm ########################################",
+    "Info": "######################################## PHASE 1                                ########################################",
     "base_actions": {
       "move_close": 0.2,
       "move_away": -0.3,
       "move_to_charge": 0.1,
       "move_to_los": 0.8,
-      "ranged_attack": 2.0,
+      "ranged_attack": 5.0,
       "charge_success": 0.5,
       "melee_attack": 0.5,
-      "wait": -5.0
+      "move_wait": -0.5,
+      "shoot_wait": -15.0
     },
     "result_bonuses": {
-      "hit_target": 1.0,
-      "wound_target": 3.0,
-      "damage_target": 6.0,
-      "kill_target": 25.0,
+      "hit_target": 2.0,
+      "wound_target": 5.0,
+      "damage_target": 10.0,
+      "kill_target": 40.0,
       "no_overkill": 0.0,
       "target_lowest_hp": 0.0
     },
@@ -91,6 +96,8 @@
   },
 
   "SpaceMarine_Infantry_Troop_RangedSwarm_phase2": {
+    "Unit": "######################################## SpaceMarine_Infantry_Troop_RangedSwarm ########################################",
+    "Info": "######################################## PHASE 2                                ########################################",
     "base_actions": {
       "move_close": 0.3,
       "move_away": -0.2,
@@ -99,7 +106,8 @@
       "ranged_attack": 2.0,
       "charge_success": 0.5,
       "melee_attack": 0.5,
-      "wait": -3.0
+      "move_wait": -0.5,
+      "shoot_wait": -5.0
     },
     "result_bonuses": {
       "hit_target": 0.5,
@@ -131,6 +139,8 @@
   },
 
   "SpaceMarine_Infantry_Troop_RangedSwarm_phase3": {
+    "Unit": "######################################## SpaceMarine_Infantry_Troop_RangedSwarm ########################################",
+    "Info": "######################################## PHASE 3                                ########################################",
     "base_actions": {
       "move_close": 0.4,
       "move_away": -0.2,
@@ -139,7 +149,8 @@
       "ranged_attack": 1.5,
       "charge_success": 0.8,
       "melee_attack": 0.6,
-      "wait": -2.0
+      "move_wait": -0.3,
+      "shoot_wait": -3.0
     },
     "result_bonuses": {
       "hit_target": 0.5,
@@ -181,6 +192,7 @@
   },
 
   "SpaceMarine_Infantry_Troop_MeleeTroop": {
+    "Unit": "######################################## SpaceMarine_Infantry_Troop_MeleeTroop ########################################",
     "base_actions": {
       "move_close": 0.3,
       "move_away": -0.1,
@@ -191,7 +203,8 @@
       "charge": 0.3,
       "charge_success": 0.6,
       "being_charged": -0.2,
-      "wait": -0.3
+      "move_wait": -0.2,
+      "shoot_wait": -0.5
     },
     "target_type_bonuses": {
       "vs_melee": 0.0,
@@ -232,6 +245,7 @@
   },
 
   "SpaceMarine_Infantry_LeaderElite_MeleeElite": {
+    "Unit": "######################################## SpaceMarine_Infantry_LeaderElite_MeleeElite ########################################",
     "base_actions": {
       "move_close": 0.2,
       "move_away": 0.1,
@@ -242,7 +256,8 @@
       "charge": 0.4,
       "charge_success": 0.4,
       "being_charged": 0.0,
-      "wait": -0.3
+      "move_wait": -0.2,
+      "shoot_wait": -0.5
     },
     "target_type_bonuses": {
       "vs_melee": 0.0,
@@ -284,6 +299,7 @@
   },
 
   "Tyranid_Infantry_Swarm_RangedSwarm": {
+    "Unit": "######################################## Tyranid_Infantry_Swarm_RangedSwarm ########################################",
     "base_actions": {
       "move_close": 0.2,
       "move_away": 0.2,
@@ -294,7 +310,8 @@
       "charge": 0.2,
       "charge_success": 0.2,
       "being_charged": -0.2,
-      "wait": -0.3
+      "move_wait": -0.2,
+      "shoot_wait": -0.5
     },
     "target_type_bonuses": {
       "vs_melee": 0.1,
@@ -335,6 +352,7 @@
   },
 
   "Tyranid_Infantry_Swarm_MeleeSwarm": {
+    "Unit": "######################################## Tyranid_Infantry_Swarm_MeleeSwarm ########################################",
     "base_actions": {
       "move_close": 0.4,
       "move_away": -0.3,
@@ -345,7 +363,8 @@
       "charge": 0.4,
       "charge_success": 0.4,
       "being_charged": -0.1,
-      "wait": -0.4
+      "move_wait": -0.3,
+      "shoot_wait": -0.6
     },
     "target_type_bonuses": {
       "vs_melee": 0.0,
@@ -386,6 +405,7 @@
   },
 
   "Tyranid_Infantry_Elite_MeleeElite": {
+    "Unit": "######################################## Tyranid_Infantry_Elite_MeleeElite ########################################",
     "base_actions": {
       "move_close": 0.3,
       "move_away": -0.1,
@@ -396,7 +416,8 @@
       "charge": 0.4,
       "charge_success": 0.4,
       "being_charged": 0.0,
-      "wait": -0.2
+      "move_wait": -0.1,
+      "shoot_wait": -0.3
     },
     "target_type_bonuses": {
       "vs_melee": 0.0,

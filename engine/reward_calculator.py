@@ -110,84 +110,63 @@ class RewardCalculator:
         reward_mapper = self._get_reward_mapper()
         enriched_unit = self._enrich_unit_for_reward_mapper(acting_unit)
         
-        if not self.quiet:
-            original_type = acting_unit['unitType']
-            agent_type = enriched_unit['unitType']
-            controlled_agent = self.config.get('controlled_agent') if self.config else None
-        
         if action_type == "shoot":
-            if game_state.get("last_attack_result") is not None and game_state.get("last_target_id"):
-                target_id = game_state.get("last_target_id")
-                target = get_unit_by_id(str(target_id), game_state)
-                enriched_target = self._enrich_unit_for_reward_mapper(target)
-                unit_rewards = reward_mapper._get_unit_rewards(enriched_unit)
-                base_reward = unit_rewards["base_actions"]["ranged_attack"]
-                target_bonus = reward_mapper._get_target_type_bonus(enriched_unit, enriched_target)
+            # Sum all shoot rewards from current activation (handles RNG_NB > 1)
+            action_logs = game_state.get("action_logs", [])
+            
+            # Validate action_logs exists and is not empty
+            if not action_logs or len(action_logs) == 0:
+                raise RuntimeError(
+                    f"CRITICAL: action_logs is empty for shoot action! "
+                    f"Unit {acting_unit.get('id')}, Player {acting_unit.get('player')}"
+                )
+            
+            # Find all shoot logs from the most recent activation
+            # Work backwards until we hit a different action type or different shooter
+            current_turn = game_state.get("turn", 0)
+            shooter_id = acting_unit.get("id")
+            shoot_rewards = []
+            
+            for log in reversed(action_logs):
+                # Stop if we hit a different turn
+                if log.get("turn") != current_turn:
+                    break
                 
-                # CRITICAL FIX: Award result bonuses for hit/wound/damage/kill
-                result_bonus = 0.0
-                
-                # Get attack_result from game_state (stored by shooting_attack_controller)
-                # The execution loop doesn't pass attack_result through, so we retrieve it from game_state
-                attack_result = game_state.get("last_attack_result", {})
-                
-                # Debug output to verify we're getting the attack_result
-                if not self.quiet and attack_result:
-                    print(f"🎯 REWARD DEBUG: Got attack_result from game_state")
-                    print(f"   hit_success={attack_result.get('hit_success')}, wound_success={attack_result.get('wound_success')}")
-                    print(f"   damage={attack_result.get('damage')}, target_died={result.get('target_died')}")
-                
-                # Check for hit (from shooting handler result)
-                if attack_result.get("hit_success", False):
-                    result_bonus += unit_rewards["result_bonuses"].get("hit_target", 0.0)
-                
-                # Check for wound (hit and wound both succeeded)
-                if attack_result.get("wound_success", False):
-                    result_bonus += unit_rewards["result_bonuses"].get("wound_target", 0.0)
-                
-                # Check for damage dealt (not saved)
-                if attack_result.get("damage", 0) > 0:
-                    result_bonus += unit_rewards["result_bonuses"].get("damage_target", 0.0)
-                
-                # Check for kill (target died)
-                if result.get("target_died", False):
-                    result_bonus += unit_rewards["result_bonuses"].get("kill_target", 0.0)
-                
-                final_reward = base_reward + target_bonus + result_bonus
-                
-                reward_breakdown['base_actions'] = base_reward
-                reward_breakdown['result_bonuses'] = result_bonus
-                reward_breakdown['tactical_bonuses'] = target_bonus if target_bonus > 0 else 0.0
-                reward_breakdown['penalties'] = target_bonus if target_bonus < 0 else 0.0
-                reward_breakdown['total'] = final_reward
-                
-                # CRITICAL FIX: Add situational reward if game ended
-                if game_state.get("game_over", False):
-                    situational_reward = self._get_situational_reward(game_state)
-                    reward_breakdown['situational'] = situational_reward
-                    final_reward += situational_reward
-                    reward_breakdown['total'] = final_reward
-                
-                game_state['last_reward_breakdown'] = reward_breakdown
-                
-                if not self.quiet:
-                    print(f"DEBUG: Shooting reward - Base: {base_reward}, Target bonus: {target_bonus}, Result: {result_bonus}, Final: {final_reward}")
-                return final_reward
-            else:
-                skip_reward = self.calculate_reward_from_config(acting_unit, {"type": "wait"}, success, game_state)
-                reward_breakdown['base_actions'] = skip_reward
-                reward_breakdown['penalties'] = skip_reward
-                reward_breakdown['total'] = skip_reward
-                
-                # CRITICAL FIX: Add situational reward if game ended
-                if game_state.get("game_over", False):
-                    situational_reward = self._get_situational_reward(game_state)
-                    reward_breakdown['situational'] = situational_reward
-                    skip_reward += situational_reward
-                    reward_breakdown['total'] = skip_reward
-                
-                game_state['last_reward_breakdown'] = reward_breakdown
-                return skip_reward
+                # If it's a shoot action from the same shooter, collect the reward
+                if log.get("type") == "shoot" and log.get("shooterId") == shooter_id:
+                    if "reward" not in log:
+                        raise RuntimeError(
+                            f"CRITICAL: action_log missing reward field! "
+                            f"Unit {shooter_id}, Player {acting_unit.get('player')}. "
+                            f"Log keys: {list(log.keys())}"
+                        )
+                    shoot_rewards.append(log["reward"])
+                # Stop if we hit a different action type
+                elif log.get("type") != "shoot":
+                    break
+            
+            # Validate we found at least one shoot action
+            if not shoot_rewards:
+                raise RuntimeError(
+                    f"CRITICAL: No shoot actions found in action_logs! "
+                    f"Unit {shooter_id}, Player {acting_unit.get('player')}"
+                )
+            
+            # Sum all rewards from this activation
+            calculated_reward = sum(shoot_rewards)
+            
+            reward_breakdown['total'] = calculated_reward
+            reward_breakdown['base_actions'] = calculated_reward
+            
+            # Add situational reward if game ended
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                calculated_reward += situational_reward
+                reward_breakdown['total'] = calculated_reward
+            
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return calculated_reward
             
         elif action_type == "move":
             old_pos = (result["fromCol"], result["fromRow"])
@@ -199,7 +178,6 @@ class RewardCalculator:
                 reward_breakdown['base_actions'] = movement_reward
                 reward_breakdown['total'] = movement_reward
                 
-                # CRITICAL FIX: Add situational reward if game ended
                 if game_state.get("game_over", False):
                     situational_reward = self._get_situational_reward(game_state)
                     reward_breakdown['situational'] = situational_reward
@@ -211,7 +189,6 @@ class RewardCalculator:
             reward_breakdown['base_actions'] = movement_result
             reward_breakdown['total'] = movement_result
             
-            # CRITICAL FIX: Add situational reward if game ended
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
                 reward_breakdown['situational'] = situational_reward
@@ -222,7 +199,7 @@ class RewardCalculator:
             return movement_result
             
         elif action_type == "skip":
-            skip_reward = self.calculate_reward_from_config(acting_unit, {"type": "wait"}, success, game_state)
+            skip_reward = self.calculate_reward_from_config(acting_unit, {"type": "move_wait"}, success, game_state)
             reward_breakdown['base_actions'] = skip_reward
             reward_breakdown['penalties'] = skip_reward
             reward_breakdown['total'] = skip_reward
@@ -266,7 +243,11 @@ class RewardCalculator:
             return fight_reward
             
         elif action_type == "wait":
-            wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "wait"}, success, game_state)
+            current_phase = game_state.get("phase", "shoot")
+            if current_phase == "move":
+                wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "move_wait"}, success, game_state)
+            else:
+                wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "shoot_wait"}, success, game_state)
             reward_breakdown['base_actions'] = wait_reward
             reward_breakdown['penalties'] = wait_reward
             reward_breakdown['total'] = wait_reward
@@ -301,29 +282,37 @@ class RewardCalculator:
             if success:
                 if "ranged_attack" not in base_actions:
                     raise KeyError(f"Base actions missing required 'ranged_attack' reward")
-                base_reward = base_actions["ranged_attack"]  # 0.5 for RangedSwarm
+                base_reward = base_actions["ranged_attack"]
             else:
-                if "wait" not in base_actions:
-                    raise KeyError(f"Base actions missing required 'wait' reward")
-                base_reward = base_actions["wait"]  # -0.3 penalty
+                if "shoot_wait" not in base_actions:
+                    raise KeyError(f"Base actions missing required 'shoot_wait' reward")
+                base_reward = base_actions["shoot_wait"]
         elif action_type == "move":
             if success:
-                move_key = "move_close" if "move_close" in base_actions else "wait"
+                move_key = "move_close" if "move_close" in base_actions else "move_wait"
                 if move_key not in base_actions:
                     raise KeyError(f"Base actions missing required '{move_key}' reward")
                 base_reward = base_actions[move_key]
             else:
-                if "wait" not in base_actions:
-                    raise KeyError(f"Base actions missing required 'wait' reward")
-                base_reward = base_actions["wait"]
+                if "move_wait" not in base_actions:
+                    raise KeyError(f"Base actions missing required 'move_wait' reward")
+                base_reward = base_actions["move_wait"]
         elif action_type == "skip":
-            if "wait" not in base_actions:
-                raise KeyError(f"Base actions missing required 'wait' reward")
-            base_reward = base_actions["wait"]  # -0.3 penalty for skipping
+            if "move_wait" not in base_actions:
+                raise KeyError(f"Base actions missing required 'move_wait' reward")
+            base_reward = base_actions["move_wait"]
+        elif action_type == "move_wait":
+            if "move_wait" not in base_actions:
+                raise KeyError(f"Base actions missing required 'move_wait' reward")
+            base_reward = base_actions["move_wait"]
+        elif action_type == "shoot_wait":
+            if "shoot_wait" not in base_actions:
+                raise KeyError(f"Base actions missing required 'shoot_wait' reward")
+            base_reward = base_actions["shoot_wait"]
         else:
-            if "wait" not in base_actions:
-                raise KeyError(f"Base actions missing required 'wait' reward")
-            base_reward = base_actions["wait"]
+            if "move_wait" not in base_actions:
+                raise KeyError(f"Base actions missing required 'move_wait' reward")
+            base_reward = base_actions["move_wait"]
         
         # Add win/lose bonuses from situational_modifiers
         if game_state["game_over"]:
@@ -1238,7 +1227,7 @@ class RewardCalculator:
         """Enrich unit data with tactical flags required by reward_mapper."""
         enriched = unit.copy()
         
-        # AI_TURN.md COMPLIANCE: NO FALLBACKS - proper error handling
+        # AI_TURN.md COMPLIANCE: NO FALLBACKS - proper error handling        
         if self.config and self.config.get("controlled_agent"):
             agent_key = self.config["controlled_agent"]
         elif hasattr(self, 'unit_registry') and self.unit_registry:

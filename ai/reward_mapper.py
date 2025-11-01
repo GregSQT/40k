@@ -288,8 +288,14 @@ class RewardMapper:
         raise ValueError(f"Unit type '{unit_type}' not found in rewards_config. Available keys: {available_keys}")
     
     def _parse_unit_type(self, unit_type: str) -> Dict[str, str]:
-        """Parse unit type into components: Faction_Movement_PowerLevel_AttackPreference"""
+        """Parse unit type into components: Faction_Movement_PowerLevel_AttackPreference
+        Also handles phase-specific suffixes like _phase1, _phase2, etc."""
         parts = unit_type.split("_")
+        
+        # Strip phase suffix if present (e.g., "phase1", "phase2", "phase3")
+        if len(parts) > 4 and parts[-1].startswith("phase"):
+            parts = parts[:-1]
+        
         if len(parts) != 4:
             raise ValueError(f"Invalid unit type format: {unit_type}. Expected: Faction_Movement_PowerLevel_AttackPreference")
         

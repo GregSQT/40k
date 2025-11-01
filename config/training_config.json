@@ -1,5 +1,6 @@
 {
   "default": {
+    "type": "################################################### Default ###################################################",
     "total_episodes": 1000,
     "total_episodes_normal": "1000",
     "max_turns_per_episode": 5,
@@ -46,6 +47,7 @@
     }
   },
   "debug": {
+    "type": "################################################### Debug ###################################################",
     "total_episodes": 50,
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 8,
@@ -83,12 +85,17 @@
     }
   },
   "phase1": {
-    "observation_params": {
-      "obs_size": 295,
-      "perception_radius": 25,
-      "max_nearby_units": 10,
-      "max_valid_targets": 5,
-      "justification": "Phase 1: Learn 'shooting is good' - any target, high exploration. 295 floats = asymmetric obs"
+    "type": "################################################### Phase 1 ###################################################",
+    "total_episodes": 200,
+    "total_episodes_normal_value": "2000",
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 8,
+    "callback_params": {
+      "checkpoint_save_freq": 2500,
+      "checkpoint_name_prefix": "ppo_curriculum_p1",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 5
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -108,25 +115,26 @@
       },
       "verbose": 0
     },
-    "total_episodes": 300,
-    "total_episodes_normal_value": "300",
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 8,
-    "callback_params": {
-      "checkpoint_save_freq": 2500,
-      "checkpoint_name_prefix": "ppo_curriculum_p1",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 5
-    }
-  },
-  "phase2": {
     "observation_params": {
       "obs_size": 295,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "Phase 2: Learn target priorities - kill weak targets first. 295 floats = asymmetric obs"
+      "justification": "Phase 1: Learn 'shooting is good' - any target, high exploration. 295 floats = asymmetric obs"
+    }
+        
+  },
+  "phase2": {
+    "type": "################################################### Phase 2 ###################################################",
+    "total_episodes": 4000,
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 8,
+    "callback_params": {
+      "checkpoint_save_freq": 10000,
+      "checkpoint_name_prefix": "ppo_curriculum_p2",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 10
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -146,24 +154,27 @@
       },
       "verbose": 0
     },
-    "total_episodes": 500,
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 8,
-    "callback_params": {
-      "checkpoint_save_freq": 10000,
-      "checkpoint_name_prefix": "ppo_curriculum_p2",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 10
-    }
-  },
-  "phase3": {
     "observation_params": {
       "obs_size": 295,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "Phase 3: Learn full tactical priorities with RewardMapper. 295 floats = asymmetric obs"
+      "justification": "Phase 2: Learn target priorities - kill weak targets first. 295 floats = asymmetric obs"
+    }
+        
+  },
+  "phase3": {
+    "type": "################################################### Phase 3 ###################################################",
+    "total_episodes": 6000,
+    "total_episodes_normal_value": "1000",
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 8,
+    "callback_params": {
+      "checkpoint_save_freq": 20000,
+      "checkpoint_name_prefix": "ppo_curriculum_p3",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 10
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -183,16 +194,12 @@
       },
       "verbose": 0
     },
-    "total_episodes": 2000,
-    "total_episodes_normal_value": "1000",
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 8,
-    "callback_params": {
-      "checkpoint_save_freq": 20000,
-      "checkpoint_name_prefix": "ppo_curriculum_p3",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 10
+    "observation_params": {
+      "obs_size": 295,
+      "perception_radius": 25,
+      "max_nearby_units": 10,
+      "max_valid_targets": 5,
+      "justification": "Phase 3: Learn full tactical priorities with RewardMapper. 295 floats = asymmetric obs"
     }
   }
 }

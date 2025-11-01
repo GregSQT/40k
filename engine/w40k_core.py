@@ -87,7 +87,8 @@ class W40KEngine(gym.Env):
                 "active_agents": active_agents,
                 "quiet": quiet,
                 "gym_training_mode": gym_training_mode,  # CRITICAL: Pass flag to handlers
-                "pve_mode": pve_mode_value  # CRITICAL: Add PvE mode for handler detection
+                "pve_mode": pve_mode_value,  # CRITICAL: Add PvE mode for handler detection
+                "controlled_player": 1  # CHANGE 4: Agent always controls player 1
             }
         else:
             # Use provided config directly and add gym_training_mode
@@ -96,6 +97,9 @@ class W40KEngine(gym.Env):
             # CRITICAL: Ensure pve_mode is in config for handler delegation
             if "pve_mode" not in self.config:
                 self.config["pve_mode"] = config.get("pve_mode", False)
+            # CHANGE 5: Ensure controlled_player is set
+            if "controlled_player" not in self.config:
+                self.config["controlled_player"] = 1  # Agent always controls player 1
             
             # CRITICAL: Extract rewards_config from config dict for module initialization
             self.rewards_config = config.get("rewards_config", {})
@@ -162,6 +166,10 @@ class W40KEngine(gym.Env):
             
             # Metrics tracking
             "action_logs": [],  # CRITICAL: For metrics collection - tracks all actions per episode
+            
+            # CHANGE 11: Add rewards_config to game_state for handler access
+            "rewards_config": self.rewards_config,
+            "config": self.config,
             
             # Board state - handle both config formats
             "board_cols": self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"],
@@ -451,9 +459,42 @@ class W40KEngine(gym.Env):
                             "wound_target": 4,
                             "save_target": 4
                         })
+                        
+                        # CRITICAL FIX: Populate with actual attack results from game_state
+                        if "last_attack_result" in self.game_state and self.game_state["last_attack_result"]:
+                            attack_result = self.game_state["last_attack_result"]
+                            action_details.update({
+                                "hit_roll": attack_result.get("hit_roll", 0),
+                                "wound_roll": attack_result.get("wound_roll", 0),
+                                "save_roll": attack_result.get("save_roll", 0),
+                                "damage_dealt": attack_result.get("damage", 0),
+                                "hit_result": "HIT" if attack_result.get("hit_success") else "MISS",
+                                "wound_result": "WOUND" if attack_result.get("wound_success") else "FAIL",
+                                "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
+                                "hit_target": attack_result.get("hit_target", 4),
+                                "wound_target": attack_result.get("wound_target", 4),
+                                "save_target": attack_result.get("save_target", 4)
+                            })
                     
                     # Capture phase AFTER action execution for accurate logging
                     post_action_phase = self._get_action_phase_for_logging(semantic_action.get("action"))
+                    
+                    # CHANGE 37: For shoot actions, read reward from the action_log entry just created
+                    if semantic_action.get("action") == "shoot":
+                        # Find the most recent shoot log for this unit
+                        action_logs = self.game_state.get("action_logs", [])
+                        step_reward = 0.0
+                        for log in reversed(action_logs):
+                            if (log.get("type") == "shoot" and 
+                                log.get("shooterId") == str(unit_id) and 
+                                "reward" in log):
+                                step_reward = log["reward"]
+                                break
+                        action_details["reward"] = step_reward
+                    else:
+                        # For non-shoot actions, calculate normally
+                        step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+                        action_details["reward"] = step_reward
                     
                     self.step_logger.log_action(
                         unit_id=updated_unit["id"],
@@ -467,6 +508,7 @@ class W40KEngine(gym.Env):
         
         # Convert to gym format
         observation = self.obs_builder.build_observation(self.game_state)
+        # Calculate reward (independent of step_logger)
         reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
         terminated = self.game_state["game_over"]
         truncated = False

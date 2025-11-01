@@ -1077,6 +1077,12 @@ class StepLogger:
             
             base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}"
             detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+            
+            # Add reward if available
+            reward = details.get("reward")
+            if reward is not None:
+                detail_msg += f" [R:{reward:+.1f}]"
+            
             return base_msg + detail_msg
             
         elif action_type == "shoot_individual":
@@ -1364,11 +1370,11 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             if first_unit_type:
                 base_agent_key = unit_registry.get_model_key(first_unit_type)
                 
-                # CRITICAL FIX: Append rewards_config suffix to match rewards_config.json keys
+                # CRITICAL FIX: Use rewards_config_name directly as controlled_agent_key
                 # rewards_config.json has keys like "SpaceMarine_Infantry_Troop_RangedSwarm_phase1"
-                # NOT just "SpaceMarine_Infantry_Troop_RangedSwarm"
+                # The rewards_config_name parameter already contains the full key
                 if rewards_config_name not in ["default", "test"]:
-                    controlled_agent_key = f"{base_agent_key}_{rewards_config_name}"
+                    controlled_agent_key = rewards_config_name
                     print(f"ℹ️  Auto-detected base agent: {base_agent_key}")
                     print(f"✅ Using phase-specific rewards: {controlled_agent_key}")
                 else:
@@ -1509,10 +1515,17 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
     
+    # CRITICAL FIX: Use rewards_config_name for phase-specific training
+    # When rewards_config is phase-specific (e.g., "..._phase1"), use it as controlled_agent
+    if rewards_config_name not in ["default", "test"]:
+        effective_agent_key = rewards_config_name
+    else:
+        effective_agent_key = agent_key
+    
     base_env = W40KEngine(
         rewards_config=rewards_config_name,
         training_config_name=training_config_name,
-        controlled_agent=agent_key,
+        controlled_agent=effective_agent_key,
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
