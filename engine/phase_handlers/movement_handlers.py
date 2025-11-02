@@ -675,8 +675,19 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     )
     
     # Add position data for reward calculation
+    # CHANGE 8: Detect same-position moves (unit didn't actually move)
+    actually_moved = (orig_col != dest_col) or (orig_row != dest_row)
+    
+    if not actually_moved:
+        # Unit stayed in same position - treat as wait, not move
+        action_name = "wait"
+    elif was_adjacent:
+        action_name = "flee"
+    else:
+        action_name = "move"
+    
     result.update({
-        "action": "flee" if was_adjacent else "move",
+        "action": action_name,
         "unitId": unit["id"],
         "fromCol": orig_col,
         "fromRow": orig_row,
@@ -716,7 +727,7 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any]) -> Tup
     )
     
     result.update({
-        "action": "skip",
+        "action": "wait",  # CHANGE 7: Return 'wait' not 'skip' for StepLogger whitelist
         "unitId": unit["id"],
         "activation_complete": True
     })

@@ -326,6 +326,11 @@ class W40KEngine(gym.Env):
             'total_enemies': 0
         }
         
+        # Log episode start with all unit positions
+        if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
+            scenario_name = self.config.get("name", "Unknown Scenario")
+            self.step_logger.log_episode_start(self.game_state["units"], scenario_name)
+        
         observation = self.obs_builder.build_observation(self.game_state)
         info = {"phase": self.game_state["phase"]}
         
@@ -349,6 +354,20 @@ class W40KEngine(gym.Env):
         
         # Convert gym integer action to semantic action
         semantic_action = self.action_decoder.convert_gym_action(action, self.game_state)
+        
+        # CRITICAL: Capture phase and positions BEFORE action execution for accurate logging
+        pre_action_phase = self.game_state["phase"]
+        pre_action_positions = {}
+        if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
+            # AI_TURN.md COMPLIANCE: Direct field access for semantic actions
+            if "unitId" not in semantic_action:
+                unit_id = None
+            else:
+                unit_id = semantic_action["unitId"]
+            if unit_id:
+                pre_unit = self._get_unit_by_id(str(unit_id))
+                if pre_unit:
+                    pre_action_positions[str(unit_id)] = (pre_unit["col"], pre_unit["row"])
         
         # Process semantic action with AI_TURN.md compliance
         action_result = self._process_semantic_action(semantic_action)
@@ -385,29 +404,26 @@ class W40KEngine(gym.Env):
         else:
             success, result = True, action_result
         
-        # Capture unit position BEFORE action execution for accurate logging
-        pre_action_positions = {}
-        if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-            # AI_TURN.md COMPLIANCE: Direct field access for semantic actions
-            if "unitId" not in semantic_action:
-                unit_id = None
-            else:
-                unit_id = semantic_action["unitId"]
-            if unit_id:
-                pre_unit = self._get_unit_by_id(str(unit_id))
-                if pre_unit:
-                    pre_action_positions[str(unit_id)] = (pre_unit["col"], pre_unit["row"])
-        
         # Log action ONLY if it's a real agent action with valid unit
         if (self.step_logger and self.step_logger.enabled and success):
            
-            # AI_TURN.md COMPLIANCE: Direct field access
-            action_type = semantic_action["action"] if "action" in semantic_action else None
-            unit_id = semantic_action["unitId"] if "unitId" in semantic_action else None
+            # CHANGE 1: Read action from result dict FIRST (handlers populate actual executed action)
+            # Diagnostic proved: result.get('action')='move' but semantic_action.get('action')='activate_unit'
+            action_type = result.get("action") if isinstance(result, dict) else None
+            if not action_type:
+                # Fall back to semantic_action only if result has no action
+                action_type = semantic_action.get("action") if isinstance(semantic_action, dict) else None
+            
+            # CHANGE 2: Get unitId from result first (handlers populate this field)
+            unit_id = result.get("unitId") if isinstance(result, dict) else None
+            if not unit_id:
+                unit_id = semantic_action.get("unitId") if isinstance(semantic_action, dict) else None
            
-            # Filter out system actions and invalid entries
-            if (action_type in ["move", "shoot", "charge", "combat"] and
-                unit_id != "none" and unit_id != "SYSTEM"):
+            # CHANGE 3: STRICT validation - only log if action_type in StepLogger whitelist
+            # Prevents "Unknown action_type 'activate_unit'" errors
+            valid_action_types = ["move", "shoot", "charge", "combat", "wait"]
+            if (action_type in valid_action_types and
+                unit_id and unit_id != "none" and unit_id != "SYSTEM"):
                
                 # Get unit coordinates AFTER action execution using semantic action unitId
                 updated_unit = self._get_unit_by_id(str(unit_id)) if unit_id else None
@@ -431,7 +447,7 @@ class W40KEngine(gym.Env):
                         }
                 
                     # Add specific data for different action types
-                    if semantic_action.get("action") == "move":
+                    if action_type == "move":  # CHANGE 5: Use action_type variable instead of semantic_action
                         # Use semantic action coordinates for accurate logging
                         start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
                         # CRITICAL: Use semantic action destination, not unit's current position
@@ -444,7 +460,7 @@ class W40KEngine(gym.Env):
                             "col": dest_col,  # Use semantic action destination
                             "row": dest_row   # Use semantic action destination
                         })
-                    elif semantic_action.get("action") == "shoot":
+                    elif action_type == "shoot":  # CHANGE 6: Use action_type variable instead of semantic_action
                         # Add shooting-specific data with correct field names
                         action_details.update({
                             "target_id": semantic_action.get("targetId"),  # StepLogger expects target_id
@@ -476,8 +492,8 @@ class W40KEngine(gym.Env):
                                 "save_target": attack_result.get("save_target", 4)
                             })
                     
-                    # Capture phase AFTER action execution for accurate logging
-                    post_action_phase = self._get_action_phase_for_logging(semantic_action.get("action"))
+                    # Use pre-captured phase for accurate logging (phase may have changed during action)
+                    # Don't use _get_action_phase_for_logging() as it reads current phase which may be wrong
                     
                     # CHANGE 37: For shoot actions, read reward from the action_log entry just created
                     if semantic_action.get("action") == "shoot":
@@ -498,8 +514,8 @@ class W40KEngine(gym.Env):
                     
                     self.step_logger.log_action(
                         unit_id=updated_unit["id"],
-                        action_type=semantic_action.get("action"), 
-                        phase=post_action_phase,
+                        action_type=action_type,  # CHANGE 4: Use validated action_type variable from line 406
+                        phase=pre_action_phase,  # Use phase captured before action executed
                         player=self.game_state["current_player"],
                         success=success,
                         step_increment=True,
@@ -527,7 +543,8 @@ class W40KEngine(gym.Env):
         
         # Add winner info when game ends
         if terminated:
-            info["winner"] = self._determine_winner()
+            winner = self._determine_winner()
+            info["winner"] = winner
             
             # CRITICAL: Populate info["episode"] for Stable-Baselines3 MetricsCollectionCallback
             info["episode"] = {
@@ -555,7 +572,11 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['total_enemies'] = total_enemy_units
             
             # Add tactical data to info
-            info["tactical_data"] = self.episode_tactical_data.copy()   
+            info["tactical_data"] = self.episode_tactical_data.copy()
+            
+            # Log episode end with final stats
+            if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
+                self.step_logger.log_episode_end(self.game_state["episode_steps"], winner)
         else:
             info["winner"] = None
         
@@ -741,11 +762,6 @@ class W40KEngine(gym.Env):
         elif self.game_state["phase"] == "fight":
             self._movement_phase_init()
     
-    def _movement_phase_init(self):
-        """Initialize movement phase using AI_MOVE.md delegation."""
-        # AI_MOVE.md: Handler manages phase initialization
-        movement_handlers.movement_phase_start(self.game_state)  
-    
     def _tracking_cleanup(self):
         """Clear tracking sets at the VERY BEGINNING of movement phase."""
         self.game_state["units_moved"] = set()
@@ -770,8 +786,7 @@ class W40KEngine(gym.Env):
     def _movement_phase_init(self):
         """Initialize movement phase using AI_MOVE.md delegation."""
         # AI_MOVE.md: Handler manages phase initialization
-        movement_handlers.movement_phase_start(self.game_state)  
-    
+        movement_handlers.movement_phase_start(self.game_state)
     
     def _shooting_phase_init(self):
         """AI_SHOOT.md EXACT: Pure delegation to handler"""
@@ -938,7 +953,8 @@ class W40KEngine(gym.Env):
             "charge": "charge",
             "combat": "fight",
             "fight": "fight",
-            "skip": self.game_state["phase"]  # Use current phase for skip
+            "wait": "move",  # CHANGE 10: Wait actions happen during move phase
+            "skip": self.game_state["phase"]  # Use current phase for skip (legacy)
         }
         return action_phase_map.get(action_type, self.game_state["phase"])
     

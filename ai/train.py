@@ -936,6 +936,9 @@ class StepLogger:
         self.enabled = enabled
         self.step_count = 0
         self.action_count = 0
+        # Per-episode counters
+        self.episode_step_count = 0
+        self.episode_action_count = 0
         
         if self.enabled:
             # Clear existing log file
@@ -954,8 +957,10 @@ class StepLogger:
             return
             
         self.action_count += 1
+        self.episode_action_count += 1
         if step_increment:
             self.step_count += 1
+            self.episode_step_count += 1
             
         try:
             with open(self.output_file, 'a') as f:
@@ -985,6 +990,10 @@ class StepLogger:
         """Log episode start with all unit starting positions"""
         if not self.enabled:
             return
+        
+        # Reset per-episode counters
+        self.episode_step_count = 0
+        self.episode_action_count = 0
             
         try:
             with open(self.output_file, 'a') as f:
@@ -1004,11 +1013,11 @@ class StepLogger:
                         raise KeyError(f"Unit {unit['id']} missing required 'row' field")
                     if "player" not in unit:
                         raise KeyError(f"Unit {unit['id']} missing required 'player' field")
-                    if "name" not in unit:
-                        raise KeyError(f"Unit {unit['id']} missing required 'name' field")
-                        
+                    
+                    # Use unitType instead of name (name field doesn't exist)
+                    unit_type = unit.get("unitType", "Unknown")
                     player_name = f"P{unit['player']}"
-                    f.write(f"[{timestamp}] Unit {unit['id']} ({unit['name']}) {player_name}: Starting position ({unit['col']}, {unit['row']})\n")
+                    f.write(f"[{timestamp}] Unit {unit['id']} ({unit_type}) {player_name}: Starting position ({unit['col']}, {unit['row']})\n")
                 
                 f.write(f"[{timestamp}] === ACTIONS START ===\n")
                 
@@ -1275,7 +1284,7 @@ class StepLogger:
         try:
             with open(self.output_file, 'a') as f:
                 timestamp = time.strftime("%H:%M:%S", time.localtime())
-                f.write(f"[{timestamp}] EPISODE END: Winner={winner}, Actions={self.action_count}, Steps={self.step_count}, Total={total_episodes_steps}\n")
+                f.write(f"[{timestamp}] EPISODE END: Winner={winner}, Actions={self.episode_action_count}, Steps={self.episode_step_count}, Total={total_episodes_steps}\n")
                 f.write("=" * 80 + "\n")
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
