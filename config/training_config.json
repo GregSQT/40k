@@ -140,14 +140,15 @@
     "model_params": {
       "policy": "MlpPolicy",
       "learning_rate": 0.0005,
-      "n_steps": 1024,
+      "n_steps": 2048,
       "batch_size": 128,
       "n_epochs": 6,
       "gamma": 0.95,
       "gae_lambda": 0.95,
       "clip_range": 0.2,
-      "ent_coef": 0.05,
-      "vf_coef": 0.5,
+      "ent_coef": 0.1,
+      "vf_coef": 1.0,
+      "target_kl": 0.03,
       "max_grad_norm": 0.5,
       "tensorboard_log": "./tensorboard/",
       "policy_kwargs": {
