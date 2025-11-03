@@ -71,20 +71,21 @@ class BotControlledEnv:
         return obs, info
     
     def step(self, agent_action):
-        current_player = self.engine.game_state["current_player"]
+        # Execute agent action
+        obs, reward, terminated, truncated, info = self.base_env.step(agent_action)
+        self.episode_reward += reward
+        self.episode_length += 1
         
-        if current_player == 0:
-            obs, reward, terminated, truncated, info = self.base_env.step(agent_action)
-            self.episode_reward += reward
-            self.episode_length += 1
-            return obs, reward, terminated, truncated, info
-        else:
-            bot_action = self._get_bot_action()
+        # CRITICAL FIX: Loop through ALL bot turns until control returns to agent
+        while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
+            debug_bot = self.episode_length < 10
+            bot_action = self._get_bot_action(debug=debug_bot)
             obs, reward, terminated, truncated, info = self.base_env.step(bot_action)
             self.episode_length += 1
-            return obs, 0.0, terminated, truncated, info
+        
+        return obs, reward, terminated, truncated, info
     
-    def _get_bot_action(self) -> int:
+    def _get_bot_action(self, debug=False) -> int:
         game_state = self.engine.game_state
         action_mask = self.engine.get_action_mask()
         valid_actions = [i for i in range(12) if action_mask[i]]
@@ -98,8 +99,7 @@ class BotControlledEnv:
             bot_choice = self.bot.select_action(valid_actions)
         
         if bot_choice not in valid_actions:
-            return valid_actions[0]
-        
+            return valid_actions[0]        
         return bot_choice
     
     def close(self):
@@ -196,8 +196,8 @@ class EpisodeTerminationCallback(BaseCallback):
                 time_info = f" [ {elapsed_str} < {eta_str} ]"
             
             print(f"\r{progress_pct:3.0f}% {bar} {self.episode_count}/{self.max_episodes} episodes{time_info}", end='', flush=True)
-            if self.episode_count == self.max_episodes or self.episode_count % 100 == 0:
-                print()  # New line at milestones
+            if self.episode_count == self.max_episodes:
+                print()  # New line only at completion
         
         # CRITICAL: Stop when max episodes reached
         if self.episode_count >= self.max_episodes:
@@ -441,6 +441,67 @@ class MetricsCollectionCallback(BaseCallback):
             self.metrics_tracker.writer = SummaryWriter(actual_log_dir)
             self.metrics_tracker.log_dir = actual_log_dir
     
+    def print_final_training_summary(self):
+        """Print comprehensive training summary at end of training only"""
+        summary = self.metrics_tracker.get_performance_summary()
+        
+        print("\n" + "="*80)
+        print("🎯 TRAINING COMPLETE - FINAL RESULTS")
+        print("="*80)
+        
+        # Basic stats
+        if 'avg_reward_overall' in summary:
+            print(f"\nFinal Avg Reward:      {summary['avg_reward_overall']:.2f}")
+        if 'win_rate_100ep' in summary:
+            win_rate = summary['win_rate_100ep']
+            status = "✅" if win_rate >= 0.5 else ("⚠️ " if win_rate >= 0.4 else "❌")
+            print(f"Win Rate (last 100ep): {win_rate:.1%} {status}")
+        if 'win_rate_overall' in summary:
+            print(f"Win Rate (overall):    {summary['win_rate_overall']:.1%}")
+        
+        # Critical metrics check
+        print(f"\n📊 CRITICAL METRICS:")
+        
+        # Check clip_fraction
+        if len(self.metrics_tracker.hyperparameter_tracking['clip_fractions']) >= 20:
+            recent_clip = np.mean(self.metrics_tracker.hyperparameter_tracking['clip_fractions'][-20:])
+            clip_status = "✅" if 0.1 <= recent_clip <= 0.3 else "⚠️ "
+            print(f"   Clip Fraction:      {recent_clip:.3f} {clip_status} (target: 0.1-0.3)")
+            if recent_clip < 0.1:
+                print(f"      → Increase learning_rate (policy not updating enough)")
+            elif recent_clip > 0.3:
+                print(f"      → Decrease learning_rate (too aggressive updates)")
+        
+        # Check explained_variance
+        if len(self.metrics_tracker.hyperparameter_tracking['explained_variances']) >= 20:
+            recent_ev = np.mean(self.metrics_tracker.hyperparameter_tracking['explained_variances'][-20:])
+            ev_status = "✅" if recent_ev > 0.3 else "⚠️ "
+            print(f"   Explained Variance: {recent_ev:.3f} {ev_status} (target: >0.3)")
+            if recent_ev < 0.3:
+                print(f"      → Value function struggling - check reward signal")
+        
+        # Check entropy
+        if len(self.metrics_tracker.hyperparameter_tracking['entropy_losses']) >= 20:
+            recent_entropy = np.mean(self.metrics_tracker.hyperparameter_tracking['entropy_losses'][-20:])
+            entropy_status = "✅" if 0.5 <= recent_entropy <= 2.0 else "⚠️ "
+            print(f"   Entropy Loss:       {recent_entropy:.3f} {entropy_status} (target: 0.5-2.0)")
+            if recent_entropy < 0.5:
+                print(f"      → Increase ent_coef (exploration too low)")
+            elif recent_entropy > 2.0:
+                print(f"      → Decrease ent_coef (exploration too high)")
+        
+        # Check gradient_norm
+        if hasattr(self.metrics_tracker, 'latest_gradient_norm') and self.metrics_tracker.latest_gradient_norm:
+            grad_norm = self.metrics_tracker.latest_gradient_norm
+            grad_status = "✅" if grad_norm < 10 else "⚠️ "
+            print(f"   Gradient Norm:      {grad_norm:.3f} {grad_status} (target: <10)")
+            if grad_norm > 10:
+                print(f"      → Reduce max_grad_norm or learning_rate")
+        
+        print(f"\n💡 TensorBoard: {self.metrics_tracker.log_dir}")
+        print(f"   → Focus on 0_critical/ namespace for hyperparameter tuning")
+        print("="*80 + "\n")
+    
     def _on_step(self) -> bool:
         """Collect step-level data including actions, damage, and unit changes"""
         # Track step-level reward and length
@@ -664,16 +725,6 @@ class MetricsCollectionCallback(BaseCallback):
                 'penalties': 0.0
             }
        
-        # Print progress every 100 episodes
-        if self.episode_count % 100 == 0:
-            summary = self.metrics_tracker.get_performance_summary()
-            if 'avg_reward_overall' in summary:
-                print(f"Episode {self.episode_count}: Avg Reward = {summary['avg_reward_overall']:.2f}")
-            if 'win_rate_100ep' in summary:
-                print(f"                    Win Rate (100ep) = {summary['win_rate_100ep']:.1%}")
-            if 'win_rate_overall' in summary:
-                print(f"                    Win Rate (overall) = {summary['win_rate_overall']:.1%}")
-       
         # Reset episode tracking with ALL fields
         self.episode_reward = 0
         self.episode_length = 0
@@ -737,11 +788,12 @@ class BotEvaluationCallback(BaseCallback):
     """Callback to test agent against evaluation bots with best model saving"""
     
     def __init__(self, eval_freq: int = 5000, n_eval_episodes: int = 20, 
-                 best_model_save_path: str = None, verbose: int = 1):
+                 best_model_save_path: str = None, metrics_tracker=None, verbose: int = 1):
         super().__init__(verbose)
         self.eval_freq = eval_freq
         self.n_eval_episodes = n_eval_episodes
         self.best_model_save_path = best_model_save_path
+        self.metrics_tracker = metrics_tracker  # Store metrics_tracker reference
         self.best_combined_win_rate = 0.0  # Track best performance
         
         if EVALUATION_BOTS_AVAILABLE:
@@ -758,37 +810,35 @@ class BotEvaluationCallback(BaseCallback):
             return True
             
         if self.num_timesteps % self.eval_freq == 0:
-            print(f"\n📊 Bot evaluation at step {self.num_timesteps}...")
             results = self._evaluate_against_bots()
-            
-            # Log to model's tensorboard
-            if hasattr(self.model, 'logger') and self.model.logger:
-                for bot_name, win_rate in results.items():
-                    self.model.logger.record(f'eval_bots/win_rate_vs_{bot_name}', win_rate)
             
             # Calculate combined performance (weighted average)
             combined_win_rate = (
-                results.get('random', 0) * 0.2 +      # 20% weight (easy)
-                results.get('greedy', 0) * 0.4 +       # 40% weight (medium)
-                results.get('defensive', 0) * 0.4      # 40% weight (hard)
+                results.get('random', 0) * 0.2 +
+                results.get('greedy', 0) * 0.4 +
+                results.get('defensive', 0) * 0.4
             )
             
+            # Log to metrics_tracker (0_critical/ and bot_eval/ namespaces)
+            if self.metrics_tracker:
+                bot_results = {
+                    'random': results.get('random', 0),
+                    'greedy': results.get('greedy', 0),
+                    'defensive': results.get('defensive', 0),
+                    'combined': combined_win_rate
+                }
+                self.metrics_tracker.log_bot_evaluations(bot_results)
+            
+            # Also log to model's logger (backup)
             if hasattr(self.model, 'logger') and self.model.logger:
                 self.model.logger.record('eval_bots/combined_win_rate', combined_win_rate)
-            
-            print(f"   vs RandomBot: {results.get('random', 0):.1%}")
-            print(f"   vs GreedyBot: {results.get('greedy', 0):.1%}")
-            print(f"   vs DefensiveBot: {results.get('defensive', 0):.1%}")
-            print(f"   📊 Combined Score: {combined_win_rate:.1%}")
             
             # Save best model based on combined performance
             if combined_win_rate > self.best_combined_win_rate:
                 self.best_combined_win_rate = combined_win_rate
                 if self.best_model_save_path:
                     save_path = f"{self.best_model_save_path}/best_model"
-                    self.model.save(save_path)
-                    print(f"   💾 New best model saved! (Combined: {combined_win_rate:.1%})")
-        
+                    self.model.save(save_path)        
         return True
     
     def _evaluate_against_bots(self) -> Dict[str, float]:
@@ -801,11 +851,7 @@ class BotEvaluationCallback(BaseCallback):
         unit_registry = UnitRegistry()
         
         for bot_name, bot in self.bots.items():
-            if self.verbose > 0:
-                print(f"   🤖 Testing vs {bot_name}...", end='', flush=True)
-            
-            wins = 0
-            
+            wins = 0            
             for episode in range(self.n_eval_episodes):
                 W40KEngine, _ = setup_imports()
                 
@@ -817,16 +863,6 @@ class BotEvaluationCallback(BaseCallback):
                             train_env = train_env.unwrapped
                         if hasattr(train_env, 'config'):
                             controlled_agent = train_env.config.get('controlled_agent')
-                
-                # DEBUG: Print player configuration (ONLY FIRST EPISODE)
-                if episode == 0:
-                    agent_player_debug = 1 if controlled_agent else 0
-                    bot_player_debug = 0 if controlled_agent else 1
-                    print(f"\n🔍 DEBUG INFO (Bot: {bot_name}):")
-                    print(f"   controlled_agent = {controlled_agent}")
-                    print(f"   Agent should be player: {agent_player_debug}")
-                    print(f"   Bot should be player: {bot_player_debug}")
-                    print(f"   Winner check looking for: player {agent_player_debug}")
                 
                 # Create evaluation environment with proper turn limit
                 from config_loader import get_config_loader
@@ -887,28 +923,30 @@ class BotEvaluationCallback(BaseCallback):
                 # Add 100% buffer for slow/suboptimal play
                 max_eval_steps = expected_max_steps * 2
                 
+                # Track game progress for debugging
+                turn_start_step = step_count
+                actions_per_turn = []
+                current_turn = 0
+                
                 while not done and step_count < max_eval_steps:
-                    action, _ = self.model.predict(obs, deterministic=True)
+                    action_masks = bot_env.engine.get_action_mask()
+                    action, _ = self.model.predict(obs, action_masks=action_masks, deterministic=True)
+                    
+                    # Log who's playing
+                    current_player = bot_env.engine.game_state.get("current_player", -1)
+                    
                     obs, reward, terminated, truncated, info = bot_env.step(action)
                     done = terminated or truncated
                     step_count += 1
                     
-                    # Debug turn counting every 40 steps (5 turns)
-                    if step_count % 40 == 0:
-                        if hasattr(base_env, 'unwrapped') and hasattr(base_env.unwrapped, 'current_turn'):
-                            print(f"   🔧 Step {step_count}: Turn {base_env.unwrapped.current_turn}")
-                
-                # DEBUG: Print winner info (ONLY FIRST EPISODE)
-                if episode == 0:
-                    actual_winner = info.get('winner')
-                    timeout = step_count >= max_eval_steps
-                    print(f"   Episode ended: winner={actual_winner}, step_count={step_count}, timeout={timeout}")
-                    print(f"   Checking if winner == {1 if controlled_agent else 0} (agent's player)")
-                    
-                    # Additional diagnostics for timeouts
-                    if timeout:
-                        print(f"   ⚠️  TIMEOUT: Game didn't finish in {max_eval_steps} steps")
-                        print(f"   This suggests: slow combat, ineffective tactics, or game balance issues")
+                    # Track turn changes
+                    new_turn = bot_env.engine.game_state.get("turn", 0)
+                    if new_turn != current_turn:
+                        if current_turn > 0:
+                            actions_this_turn = step_count - turn_start_step
+                            actions_per_turn.append(actions_this_turn)
+                        current_turn = new_turn
+                        turn_start_step = step_count
                 
                 # CRITICAL FIX: Agent is player 1 when controlled_agent is set, player 0 when None
                 agent_player = 1 if controlled_agent else 0
@@ -919,9 +957,6 @@ class BotEvaluationCallback(BaseCallback):
             
             win_rate = wins / self.n_eval_episodes
             results[bot_name] = win_rate
-            
-            if self.verbose > 0:
-                print(f" {win_rate:.1%} ({wins}/{self.n_eval_episodes})")
         
         return results
 
@@ -1340,7 +1375,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     """Create or load PPO model with configuration following AI_INSTRUCTIONS.md."""
     
     # Import metrics tracker for training monitoring
-    from ai.metrics_tracker import W40KMetricsTracker
+    from metrics_tracker import W40KMetricsTracker
     
     # Check GPU availability
     gpu_available = check_gpu_availability()
@@ -1608,7 +1643,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     
     return model, env, training_config, model_path
 
-def setup_callbacks(config, model_path, training_config, training_config_name="default"):
+def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None):
     W40KEngine, _ = setup_imports()
     callbacks = []
     
@@ -1678,7 +1713,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         bot_eval_callback = BotEvaluationCallback(
             eval_freq=bot_eval_freq,
             n_eval_episodes=bot_n_episodes,
-            best_model_save_path=os.path.dirname(model_path),  # Add model saving
+            best_model_save_path=os.path.dirname(model_path),
+            metrics_tracker=metrics_tracker,  # Pass metrics_tracker for TensorBoard logging
             verbose=1
         )
         callbacks.append(bot_eval_callback)
@@ -1694,7 +1730,7 @@ def train_model(model, training_config, callbacks, model_path):
     """Execute the training process with metrics tracking."""
     
     # Import metrics tracker
-    from ai.metrics_tracker import W40KMetricsTracker
+    from metrics_tracker import W40KMetricsTracker
     
     # Extract agent name from model path for metrics
     agent_name = "default_agent"
@@ -1750,7 +1786,15 @@ def train_model(model, training_config, callbacks, model_path):
         print(f"📈 Metrics tracking enabled for agent: {agent_name}")
         
         # Enhanced callbacks with metrics collection
-        all_callbacks = callbacks + [MetricsCollectionCallback(metrics_tracker, model)]
+        metrics_callback = MetricsCollectionCallback(metrics_tracker, model)
+        
+        # Attach metrics_tracker to bot_eval_callback if it exists
+        for callback in callbacks:
+            if isinstance(callback, BotEvaluationCallback):
+                callback.metrics_tracker = metrics_tracker
+                print(f"✅ Linked BotEvaluationCallback to metrics_tracker")
+        
+        all_callbacks = callbacks + [metrics_callback]
         enhanced_callbacks = CallbackList(all_callbacks)
         
         model.learn(
@@ -1760,9 +1804,38 @@ def train_model(model, training_config, callbacks, model_path):
             progress_bar=False  # Disable step-based progress bar (using episode-based instead)
         )
         
+        # Print final training summary with critical metrics
+        metrics_callback.print_final_training_summary()
+        
         # Save final model
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         model.save(model_path)
+        
+        # Clean up checkpoint files after successful training
+        model_dir = os.path.dirname(model_path)
+        checkpoint_pattern = os.path.join(model_dir, "ppo_*_steps.zip")
+        checkpoint_files = glob.glob(checkpoint_pattern)
+        
+        if checkpoint_files:
+            print(f"\n🧹 Cleaning up {len(checkpoint_files)} checkpoint files...")
+            for checkpoint_file in checkpoint_files:
+                try:
+                    os.remove(checkpoint_file)
+                    if verbose := 0:  # Only log if verbose
+                        print(f"   Removed: {os.path.basename(checkpoint_file)}")
+                except Exception as e:
+                    print(f"   ⚠️  Could not remove {os.path.basename(checkpoint_file)}: {e}")
+            print(f"✅ Checkpoint cleanup complete")
+        
+        # Also remove interrupted file if it exists
+        interrupted_path = model_path.replace('.zip', '_interrupted.zip')
+        if os.path.exists(interrupted_path):
+            try:
+                os.remove(interrupted_path)
+                print(f"🧹 Removed old interrupted file")
+            except Exception as e:
+                print(f"   ⚠️  Could not remove interrupted file: {e}")
+        
         return True
         
     except KeyboardInterrupt:

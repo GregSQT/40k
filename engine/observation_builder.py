@@ -19,8 +19,15 @@ class ObservationBuilder:
         self.last_unit_positions = {}
         
         # Load perception parameters from config
-        obs_params = config.get("observation_params", {})
-        self.perception_radius = obs_params.get("perception_radius", 25)
+        obs_params = config.get("observation_params")
+        if not obs_params:
+            raise KeyError("Config missing required 'observation_params' field - check w40k_core.py config dict creation")  # ✓ CHANGE 3: Enforce required config
+        
+        # AI_OBSERVATION.md COMPLIANCE: No defaults - force explicit configuration
+        # Cache as instance variables (read config ONCE, not 8 times)
+        self.perception_radius = obs_params["perception_radius"]  # ✓ CHANGE 3: No default fallback
+        self.max_nearby_units = obs_params.get("max_nearby_units", 10)  # ✓ CHANGE 3: Cache for line 553
+        self.max_valid_targets = obs_params.get("max_valid_targets", 5)  # ✓ CHANGE 3: Cache for future use
         
     # ============================================================================
     # MAIN OBSERVATION
@@ -550,7 +557,7 @@ class ObservationBuilder:
                               if u["player"] == active_unit["player"] and u["HP_CUR"] > 0)
         alive_enemies = sum(1 for u in game_state["units"] 
                            if u["player"] != active_unit["player"] and u["HP_CUR"] > 0)
-        max_nearby = self.config.get("observation_params", {}).get("max_nearby_units", 10)
+        max_nearby = self.max_nearby_units
         obs[8] = alive_friendlies / max(1, max_nearby)
         obs[9] = alive_enemies / max(1, max_nearby)
         
@@ -620,7 +627,7 @@ class ObservationBuilder:
         Encode terrain awareness in 8 cardinal directions.
         32 floats = 8 directions × 4 features per direction.
         """
-        perception_radius = self.config.get("observation_params", {}).get("perception_radius", 25)
+        perception_radius = self.perception_radius
         # 8 directions: N, NE, E, SE, S, SW, W, NW
         directions = [
             (0, -1),   # N
@@ -668,7 +675,7 @@ class ObservationBuilder:
         
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
         """
-        perception_radius = self.config.get("observation_params", {}).get("perception_radius", 25)
+        perception_radius = self.perception_radius
         # Get all allied units within perception radius
         allies = []
         for other_unit in game_state["units"]:
@@ -785,7 +792,7 @@ class ObservationBuilder:
         
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
         """
-        perception_radius = self.config.get("observation_params", {}).get("perception_radius", 25)
+        perception_radius = self.perception_radius
         # Get all enemy units within perception radius
         enemies = []
         for other_unit in game_state["units"]:
@@ -1029,7 +1036,7 @@ class ObservationBuilder:
         5. is_priority_target (1.0 if moved toward me, high threat)
         6. coordination_bonus (1.0 if friendly melee can charge after I shoot)
         """
-        perception_radius = self.config.get("observation_params", {}).get("perception_radius", 25)
+        perception_radius = self.perception_radius
         
         # Get valid targets based on current phase
         valid_targets = []
@@ -1216,7 +1223,7 @@ class ObservationBuilder:
     def _find_nearest_in_direction(self, unit: Dict[str, Any], dx: int, dy: int, game_state: Dict[str, Any], 
                                    search_type: str) -> float:
         """Find nearest object (wall/friendly/enemy) in given direction."""
-        perception_radius = self.config.get("observation_params", {}).get("perception_radius", 25)
+        perception_radius = self.perception_radius
         min_distance = 999.0
         
         if search_type == "wall":
@@ -1261,7 +1268,7 @@ class ObservationBuilder:
     
     def _find_edge_distance(self, unit: Dict[str, Any], dx: int, dy: int, game_state: Dict[str, Any]) -> float:
         """Calculate distance to board edge in given direction."""
-        perception_radius = self.config.get("observation_params", {}).get("perception_radius", 25)
+        perception_radius = self.perception_radius
         if dx > 0:  # East
             edge_dist = game_state["board_cols"] - unit["col"] - 1
         elif dx < 0:  # West

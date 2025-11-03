@@ -77,12 +77,21 @@ class W40KEngine(gym.Env):
             # PvE mode: will be set later in constructor
             pve_mode_value = False  # Default for training
             
+            # Extract observation_params for module access
+            obs_params = self.training_config.get("observation_params", {
+                "obs_size": 295,
+                "perception_radius": 25,
+                "max_nearby_units": 10,
+                "max_valid_targets": 5
+            })  # ✓ CHANGE 1: Extract observation_params from training_config
+            
             self.config = {
                 "board": board_config,
                 "units": self._load_units_from_scenario(scenario_file, unit_registry),
                 "rewards_config_name": self.rewards_config_name,
                 "training_config_name": training_config_name,
                 "training_config": self.training_config,
+                "observation_params": obs_params,  # ✓ CHANGE 1: Add to config root for ObservationBuilder
                 "controlled_agent": controlled_agent,
                 "active_agents": active_agents,
                 "quiet": quiet,
@@ -238,10 +247,7 @@ class W40KEngine(gym.Env):
         if self.is_pve_mode:
             self.pve_controller.load_ai_model_for_pve(self.game_state, self)
         
-        self.obs_builder = ObservationBuilder(self.config)
-        self.action_decoder = ActionDecoder(self.config)
-        self.reward_calculator = RewardCalculator(self.config, self.rewards_config, self.unit_registry)
-        self.state_manager = GameStateManager(self.config, self.unit_registry)
+        # ✓ CHANGE 2: Removed duplicate module instantiations (already done at line 181-187)
         
         if self.is_pve_mode:
             self.pve_controller = PvEController(self.config, self.unit_registry)
