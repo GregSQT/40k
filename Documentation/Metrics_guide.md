@@ -8,19 +8,19 @@
 
 ### Game Performance Metrics
 1. [🎮 a_bot_eval_combined - Primary Goal Metric](#1-a_bot_eval_combined)
-2. [🎮 b_win_rate_100ep - Training Performance](#2-b_win_rate_100ep---training-performance)
-3. [🎮 c_episode_reward_smooth - Learning Progress](#3-c_episode_reward_smooth---learning-progress)
+2. [🎮 b_win_rate_100ep - Training Performance](#2-b_win_rate_100ep)
+3. [🎮 c_episode_reward_smooth - Learning Progress](#3-c_episode_reward_smooth)
 
 ### PPO Health Metrics
-4. [⚙️ d_loss_mean - Overall Training Health](#4-d_loss_mean---overall-training-health)
-5. [⚙️ e_explained_variance - Value Function Quality](#5-e_explained_variance---value-function-quality)
-6. [⚙️ f_clip_fraction - Policy Update Scale](#6-f_clip_fraction---policy-update-scale)
-7. [⚙️ g_approx_kl - Policy Stability](#7-g_approx_kl---policy-stability)
-8. [⚙️ h_entropy_loss - Exploration Health](#8-h_entropy_loss---exploration-health)
+4. [⚙️ d_loss_mean - Overall Training Health](#4-d_loss_mean)
+5. [⚙️ e_explained_variance - Value Function Quality](#5-e_explained_variance)
+6. [⚙️ f_clip_fraction - Policy Update Scale](#6-f_clip_fraction)
+7. [⚙️ g_approx_kl - Policy Stability](#7-g_approx_kl)
+8. [⚙️ h_entropy_loss - Exploration Health](#8-h_entropy_loss)
 
 ### Technical Health Metrics
-9. [🔧 i_gradient_norm - Gradient Explosion Detector](#9-i_gradient_norm---gradient-explosion-detector)
-10. [🔧 j_immediate_reward_ratio - Reward Composition](#10-j_immediate_reward_ratio---reward-composition)
+9. [🔧 i_gradient_norm - Gradient Explosion Detector](#9-i_gradient_norm)
+10. [🔧 j_immediate_reward_ratio - Reward Composition](#10-j_immediate_reward_ratio)
 
 ### Troubleshooting & Tools
 - [🚨 Common Problem Patterns](#-common-problem-patterns)
