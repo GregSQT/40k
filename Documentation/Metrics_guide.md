@@ -7,7 +7,7 @@
 - [📈 Metric Organization](#-metric-organization)
 
 ### Game Performance Metrics
-1. [🎮 a_bot_eval_combined - Primary Goal Metric](#1-a_bot_eval_combined---primary-goal-metric-)
+1. [🎮 a_bot_eval_combined - Primary Goal Metric](#1-a_bot_eval_combined)
 2. [🎮 b_win_rate_100ep - Training Performance](#2-b_win_rate_100ep---training-performance)
 3. [🎮 c_episode_reward_smooth - Learning Progress](#3-c_episode_reward_smooth---learning-progress)
 
