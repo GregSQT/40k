@@ -60,7 +60,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 ## 🎮 GAME PERFORMANCE METRICS
 
 <details>
-<summary><h3>1. `a_bot_eval_combined` - Primary Goal Metric 🎯</h3></summary>
+<summary><h3>1. a_bot_eval_combined</h3> - Primary Goal Metric 🎯</summary>
 
 **What it measures:** Win rate against evaluation bots (RandomBot, GreedyBot, DefensiveBot)
 
@@ -95,7 +95,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 </details>
 
 <details>
-<summary><h3>2. `b_win_rate_100ep` - Training Performance</h3></summary>
+<summary><h3>2. b_win_rate_100ep - Training Performance</h3></summary>
 
 **What it measures:** Win rate against training opponent over last 100 episodes
 
@@ -130,7 +130,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 </details>
 
 <details>
-<summary><h3>3. `c_episode_reward_smooth` - Learning Progress</h3></summary>
+<summary><h3>3. c_episode_reward_smooth - Learning Progress</h3></summary>
 
 **What it measures:** Average reward per episode (smoothed over 20 episodes)
 
@@ -165,7 +165,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 ## ⚙️ PPO HEALTH METRICS
 
 <details>
-<summary><h3>4. `d_loss_mean` - Overall Training Health</h3></summary>
+<summary><h3>4. d_loss_mean - Overall Training Health</h3></summary>
 
 **What it measures:** Combined policy loss + value loss (absolute values)
 
@@ -197,7 +197,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 </details>
 
 <details>
-<summary><h3>5. `e_explained_variance` - Value Function Quality</h3></summary>
+<summary><h3>5. e_explained_variance - Value Function Quality</h3></summary>
 
 **What it measures:** How well the value function predicts actual returns
 
@@ -235,7 +235,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 </details>
 
 <details>
-<summary><h3>6. `f_clip_fraction` - Policy Update Scale</h3></summary>
+<summary><h3>6. f_clip_fraction - Policy Update Scale</h3></summary>
 
 **What it measures:** Fraction of policy updates that hit the PPO clipping limit
 
@@ -283,7 +283,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 </details>
 
 <details>
-<summary><h3>7. `g_approx_kl` - Policy Stability</h3></summary>
+<summary><h3>7. g_approx_kl - Policy Stability</h3></summary>
 
 **What it measures:** KL divergence between old and new policy (how much policy changed)
 
@@ -324,7 +324,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 </details>
 
 <details>
-<summary><h3>8. `h_entropy_loss` - Exploration Health</h3></summary>
+<summary><h3>8. h_entropy_loss - Exploration Health</h3></summary>
 
 **What it measures:** Negative entropy of the policy distribution (higher = more deterministic)
 
@@ -370,7 +370,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 ## 🔧 TECHNICAL HEALTH METRICS
 
 <details>
-<summary><h3>9. `i_gradient_norm` - Gradient Explosion Detector</h3></summary>
+<summary><h3>9. i_gradient_norm - Gradient Explosion Detector</h3></summary>
 
 **What it measures:** L2 norm of the gradients during backpropagation
 
@@ -410,7 +410,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 </details>
 
 <details>
-<summary><h3>10. `j_immediate_reward_ratio` - Reward Composition</h3></summary>
+<summary><h3>10. j_immediate_reward_ratio - Reward Composition</h3></summary>
 
 **What it measures:** Ratio of immediate (base action) rewards to total episode reward
 
