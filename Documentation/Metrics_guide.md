@@ -71,9 +71,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 ### 1. `a_bot_eval_combined` - Primary Goal Metric 🎯
 
 <details>
-<summary>📊 <b>Click to expand: a_bot_eval_combined - Primary Goal Metric 🎯</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it measures:** Win rate against evaluation bots (RandomBot, GreedyBot, DefensiveBot)
 
@@ -105,17 +103,12 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 
 ---
 
----
-
 </details>
-
 
 ### 2. `b_win_rate_100ep` - Training Performance
 
 <details>
-<summary>📊 <b>Click to expand: b_win_rate_100ep - Training Performance</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it measures:** Win rate against training opponent over last 100 episodes
 
@@ -147,17 +140,12 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 
 ---
 
----
-
 </details>
-
 
 ### 3. `c_episode_reward_smooth` - Learning Progress
 
 <details>
-<summary>📊 <b>Click to expand: c_episode_reward_smooth - Learning Progress</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it measures:** Average reward per episode (smoothed over 20 episodes)
 
@@ -187,19 +175,14 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 
 ---
 
----
-
 </details>
-
 ## ⚙️ PPO HEALTH METRICS
 
 
 ### 4. `d_loss_mean` - Overall Training Health
 
 <details>
-<summary>📊 <b>Click to expand: d_loss_mean - Overall Training Health</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it measures:** Combined policy loss + value loss (absolute values)
 
@@ -228,17 +211,12 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 
 ---
 
----
-
 </details>
-
 
 ### 5. `e_explained_variance` - Value Function Quality
 
 <details>
-<summary>📊 <b>Click to expand: e_explained_variance - Value Function Quality</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it measures:** How well the value function predicts actual returns
 
@@ -273,17 +251,12 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 
 ---
 
----
-
 </details>
-
 
 ### 6. `f_clip_fraction` - Policy Update Scale
 
 <details>
-<summary>📊 <b>Click to expand: f_clip_fraction - Policy Update Scale</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it measures:** Fraction of policy updates that hit the PPO clipping limit
 
@@ -328,17 +301,12 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 
 ---
 
----
-
 </details>
-
 
 ### 7. `g_approx_kl` - Policy Stability
 
 <details>
-<summary>📊 <b>Click to expand: g_approx_kl - Policy Stability</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it measures:** KL divergence between old and new policy (how much policy changed)
 
@@ -376,17 +344,12 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 
 ---
 
----
-
 </details>
-
 
 ### 8. `h_entropy_loss` - Exploration Health
 
 <details>
-<summary>📊 <b>Click to expand: h_entropy_loss - Exploration Health</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it measures:** Negative entropy of the policy distribution (higher = more deterministic)
 
@@ -427,19 +390,14 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 
 ---
 
----
-
 </details>
-
 ## 🔧 TECHNICAL HEALTH METRICS
 
 
 ### 9. `i_gradient_norm` - Gradient Explosion Detector
 
 <details>
-<summary>📊 <b>Click to expand: i_gradient_norm - Gradient Explosion Detector</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it measures:** L2 norm of the gradients during backpropagation
 
@@ -476,17 +434,12 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 
 ---
 
----
-
 </details>
-
 
 ### 10. `j_immediate_reward_ratio` - Reward Composition
 
 <details>
-<summary>📊 <b>Click to expand: j_immediate_reward_ratio - Reward Composition</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it measures:** Ratio of immediate (base action) rewards to total episode reward
 
@@ -530,10 +483,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 
 # 🎛️ PPO HYPERPARAMETERS COMPLETE GUIDE
 
----
-
 </details>
-
 ## 📑 Table of Contents
 1. [Learning & Optimization](#learning--optimization)
    - learning_rate
@@ -561,9 +511,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 ### `learning_rate` - How Fast the Agent Learns
 
 <details>
-<summary>⚙️ <b>Click to expand: learning_rate - How Fast the Agent Learns</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** Step size for gradient descent updates to the neural network
 
@@ -620,17 +568,12 @@ new_weights = old_weights - learning_rate × gradient
 
 ---
 
----
-
 </details>
-
 
 ### `n_steps` - Rollout Length Before Update
 
 <details>
-<summary>⚙️ <b>Click to expand: n_steps - Rollout Length Before Update</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** Number of environment steps to collect before performing a policy update
 
@@ -696,17 +639,12 @@ Clip fraction 0.099 means ~10% of updates are clipped (reasonable)
 
 ---
 
----
-
 </details>
-
 
 ### `batch_size` - Minibatch Size for Updates
 
 <details>
-<summary>⚙️ <b>Click to expand: batch_size - Minibatch Size for Updates</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** Number of samples used in each gradient update during an epoch
 
@@ -773,17 +711,12 @@ batch_size × observation_size × network_size determines GPU memory
 
 ---
 
----
-
 </details>
-
 
 ### `n_epochs` - Gradient Update Passes Per Rollout
 
 <details>
-<summary>⚙️ <b>Click to expand: n_epochs - Gradient Update Passes Per Rollout</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** Number of times to iterate over the collected rollout data
 
@@ -857,19 +790,14 @@ n_steps=2048, batch_size=256, n_epochs=6
 
 ---
 
----
-
 </details>
-
 ## 🛡️ POLICY CONSTRAINTS
 
 
 ### `clip_range` - PPO Clipping Threshold
 
 <details>
-<summary>⚙️ <b>Click to expand: clip_range - PPO Clipping Threshold</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** Maximum allowed ratio change between old and new policy
 
@@ -939,17 +867,12 @@ clipped_ratio = clip(ratio, 1-0.2, 1+0.2) = clip(ratio, 0.8, 1.2)
 
 ---
 
----
-
 </details>
-
 
 ### `target_kl` - Early Stopping for Policy Updates
 
 <details>
-<summary>⚙️ <b>Click to expand: target_kl - Early Stopping for Policy Updates</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** KL divergence threshold that stops further epochs if exceeded
 
@@ -1021,17 +944,12 @@ For epoch 1 to n_epochs:
 
 ---
 
----
-
 </details>
-
 
 ### `max_grad_norm` - Gradient Clipping Threshold
 
 <details>
-<summary>⚙️ <b>Click to expand: max_grad_norm - Gradient Clipping Threshold</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** Maximum allowed L2 norm of gradients (prevents gradient explosion)
 
@@ -1102,19 +1020,14 @@ If gradient_norm > max_grad_norm:
 
 ---
 
----
-
 </details>
-
 ## ⏰ REWARD DISCOUNTING
 
 
 ### `gamma` - Future Reward Discount Factor
 
 <details>
-<summary>⚙️ <b>Click to expand: gamma - Future Reward Discount Factor</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** How much future rewards are worth compared to immediate rewards
 
@@ -1213,17 +1126,12 @@ Reward decay:
 
 ---
 
----
-
 </details>
-
 
 ### `gae_lambda` - GAE Smoothing Parameter
 
 <details>
-<summary>⚙️ <b>Click to expand: gae_lambda - GAE Smoothing Parameter</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** Smoothing factor for Generalized Advantage Estimation (GAE)
 
@@ -1315,19 +1223,14 @@ lambda = 0.9 (GAE):
 
 ---
 
----
-
 </details>
-
 ## ⚖️ LOSS WEIGHTING
 
 
 ### `ent_coef` - Entropy Coefficient (Exploration Bonus)
 
 <details>
-<summary>⚙️ <b>Click to expand: ent_coef - Entropy Coefficient (Exploration Bonus)</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** Weight of entropy bonus in the total loss function
 
@@ -1422,17 +1325,12 @@ Despite ent_coef=0.75 (high exploration pressure), agent converged to determinis
 
 ---
 
----
-
 </details>
-
 
 ### `vf_coef` - Value Function Coefficient
 
 <details>
-<summary>⚙️ <b>Click to expand: vf_coef - Value Function Coefficient</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** Weight of value function loss in the total loss function
 
@@ -1505,19 +1403,14 @@ Conservative: vf_coef = 2.0 (prioritize critic)
 
 ---
 
----
-
 </details>
-
 ## 🧠 NETWORK ARCHITECTURE
 
 
 ### `policy_kwargs: { net_arch: [320, 320] }` - Neural Network Structure
 
 <details>
-<summary>⚙️ <b>Click to expand: policy_kwargs: { net_arch: [320, 320] } - Neural Network Structure</b></summary>
-
----
+<summary>📖 <i>Click to expand/collapse</i></summary>
 
 **What it is:** Size and depth of the neural network layers
 
@@ -1627,10 +1520,7 @@ Network is NOT causing memory issues ✅
 
 ---
 
----
-
 </details>
-
 ## 🎯 QUICK REFERENCE: YOUR CONFIG ANALYSIS
 
 ### Current Phase 1 Settings
