@@ -125,14 +125,17 @@ class RewardCalculator:
             # Work backwards until we hit a different action type or different shooter
             current_turn = game_state.get("turn", 0)
             shooter_id = acting_unit.get("id")
-            shoot_rewards = []
+            
+            # Track rewards by category using action_name field
+            base_action_reward = 0.0
+            result_bonus_reward = 0.0
             
             for log in reversed(action_logs):
                 # Stop if we hit a different turn
                 if log.get("turn") != current_turn:
                     break
                 
-                # If it's a shoot action from the same shooter, collect the reward
+                # If it's a shoot action from the same shooter, categorize the reward
                 if log.get("type") == "shoot" and log.get("shooterId") == shooter_id:
                     if "reward" not in log:
                         raise RuntimeError(
@@ -140,23 +143,46 @@ class RewardCalculator:
                             f"Unit {shooter_id}, Player {acting_unit.get('player')}. "
                             f"Log keys: {list(log.keys())}"
                         )
-                    shoot_rewards.append(log["reward"])
+                    if "action_name" not in log:
+                        raise RuntimeError(
+                            f"CRITICAL: action_log missing action_name field! "
+                            f"Unit {shooter_id}, Player {acting_unit.get('player')}. "
+                            f"Log keys: {list(log.keys())}"
+                        )
+                    
+                    reward_value = log["reward"]
+                    action_name = log["action_name"]
+                    
+                    # Classify reward based on action_name
+                    if action_name == "ranged_attack":
+                        # Base shooting action reward
+                        base_action_reward += reward_value
+                    elif action_name in ["hit_target", "wound_target", "damage_target", "kill_target"]:
+                        # Combat result bonuses
+                        result_bonus_reward += reward_value
+                    else:
+                        # Unknown action_name - log warning and count as base
+                        print(f"⚠️ Unknown action_name '{action_name}' in shoot log, counting as base_action")
+                        base_action_reward += reward_value
+                        
                 # Stop if we hit a different action type
                 elif log.get("type") != "shoot":
                     break
             
             # Validate we found at least one shoot action
-            if not shoot_rewards:
+            if base_action_reward == 0.0 and result_bonus_reward == 0.0:
                 raise RuntimeError(
                     f"CRITICAL: No shoot actions found in action_logs! "
                     f"Unit {shooter_id}, Player {acting_unit.get('player')}"
                 )
             
-            # Sum all rewards from this activation
-            calculated_reward = sum(shoot_rewards)
+            # Calculate total reward
+            calculated_reward = base_action_reward + result_bonus_reward
             
+            # Properly populate reward_breakdown
+            reward_breakdown['base_actions'] = base_action_reward
+            reward_breakdown['result_bonuses'] = result_bonus_reward
             reward_breakdown['total'] = calculated_reward
-            reward_breakdown['base_actions'] = calculated_reward
             
             # Add situational reward if game ended
             if game_state.get("game_over", False):

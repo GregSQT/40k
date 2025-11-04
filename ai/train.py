@@ -449,19 +449,6 @@ class MetricsCollectionCallback(BaseCallback):
         print("🎯 TRAINING COMPLETE - RUNNING FINAL EVALUATION")
         print("="*80)
         
-        # Run comprehensive bot evaluation if available
-        if EVALUATION_BOTS_AVAILABLE and model and training_config and training_config_name and rewards_config_name:
-            bot_results = self._run_final_bot_eval(model, training_config, training_config_name, rewards_config_name)
-            
-            if bot_results:
-                # Log to metrics_tracker for TensorBoard
-                if hasattr(self, 'metrics_tracker') and self.metrics_tracker:
-                    self.metrics_tracker.log_bot_evaluations(bot_results)
-                    # Flush to ensure metrics are written immediately
-                    self.metrics_tracker.writer.flush()
-                
-                # Print results
-                # Run comprehensive bot evaluation if available
         if EVALUATION_BOTS_AVAILABLE and model and training_config and training_config_name and rewards_config_name:
             # Extract n_episodes from config
             if 'callback_params' not in training_config:
@@ -483,7 +470,6 @@ class MetricsCollectionCallback(BaseCallback):
                 print(f"vs RandomBot:     {bot_results['random']:.2f} ({bot_results['random_wins']}/{n_final} wins)")
                 print(f"vs GreedyBot:     {bot_results['greedy']:.2f} ({bot_results['greedy_wins']}/{n_final} wins)")
                 print(f"vs DefensiveBot:  {bot_results['defensive']:.2f} ({bot_results['defensive_wins']}/{n_final} wins)")
-                print(f"\nCombined Score:   {bot_results['combined']:.2f} {'✅' if bot_results['combined'] >= 0.70 else '⚠️'}")
                 print(f"\nCombined Score:   {bot_results['combined']:.2f} {'✅' if bot_results['combined'] >= 0.70 else '⚠️'}")
         
         # Critical metrics check
@@ -951,7 +937,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         results[f'{bot_name}_wins'] = wins
     
     if show_progress:
-        print()  # New line after progress bar
+        print("\r" + " " * 120)  # Clear the progress bar line
+        print()  # New line after clearing
     
     # Combined score with standard weighting: RandomBot 20%, GreedyBot 30%, DefensiveBot 50%
     results['combined'] = 0.2 * results['random'] + 0.3 * results['greedy'] + 0.5 * results['defensive']

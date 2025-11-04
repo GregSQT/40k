@@ -1,4 +1,136 @@
 {
+  "phase1": {
+    "type": "################################################### Phase 1 ###################################################",
+    "total_episodes": 2000,
+    "total_episodes_normal_value": "2000 inital, but diminishing return after 1500",
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 8,
+    "model_params": {
+      "policy": "MlpPolicy",
+      "learning_rate": 0.0015,
+      "n_steps": 2048,
+      "batch_size": 256,
+      "n_epochs": 8,
+      "gamma": 0.95,
+      "gae_lambda": 0.9,
+      "clip_range": 0.2,
+      "ent_coef": 0.75,
+      "vf_coef": 1.0,
+      "max_grad_norm": 0.5,
+      "target_kl": 0.03,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [320, 320]
+      },
+      "verbose": 0
+    },
+    "callback_params": {
+      "checkpoint_save_freq": 5000,
+      "checkpoint_name_prefix": "ppo_curriculum_p1",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 0,
+      "bot_eval_freq": 100,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 5,
+      "bot_eval_final": 50
+    },
+    "observation_params": {
+      "obs_size": 295,
+      "perception_radius": 25,
+      "max_nearby_units": 10,
+      "max_valid_targets": 5,
+      "justification": "Phase 1: Learn 'shooting is good' - any target, high exploration. 295 floats = asymmetric obs"
+    }
+        
+  },
+  "phase2": {
+    "type": "################################################### Phase 2 ###################################################",
+    "total_episodes": 4000,
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 8,
+    "model_params": {
+      "policy": "MlpPolicy",
+      "learning_rate": 0.0005,
+      "n_steps": 512,
+      "batch_size": 128,
+      "n_epochs": 6,
+      "gamma": 0.95,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "ent_coef": 0.3,
+      "vf_coef": 1.0,
+      "target_kl": 0.03,
+      "max_grad_norm": 0.5,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [320, 320]
+      },
+      "verbose": 0
+    },
+    "callback_params": {
+      "checkpoint_save_freq": 10000,
+      "checkpoint_name_prefix": "ppo_curriculum_p2",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 0,
+      "bot_eval_freq": 100,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 5,
+      "bot_eval_final": 50
+    },
+    "observation_params": {
+      "obs_size": 295,
+      "perception_radius": 25,
+      "max_nearby_units": 10,
+      "max_valid_targets": 5,
+      "justification": "Phase 2: Learn target priorities - kill weak targets first. 295 floats = asymmetric obs"
+    }
+        
+  },
+  "phase3": {
+    "type": "################################################### Phase 3 ###################################################",
+    "total_episodes": 6000,
+    "total_episodes_normal_value": "1000",
+    "max_turns_per_episode": 5,
+    "max_steps_per_turn": 8,    
+    "model_params": {
+      "policy": "MlpPolicy",
+      "learning_rate": 0.0003,
+      "n_steps": 512,
+      "batch_size": 128,
+      "n_epochs": 10,
+      "gamma": 0.95,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "ent_coef": 0.10,
+      "vf_coef": 1.0,
+      "max_grad_norm": 0.5,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [320, 320]
+      },
+      "verbose": 0
+    },
+    "callback_params": {
+      "checkpoint_save_freq": 20000,
+      "checkpoint_name_prefix": "ppo_curriculum_p3",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 0,
+      "bot_eval_freq": 100,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 5,
+      "bot_eval_final": 50
+    },
+    "observation_params": {
+      "obs_size": 295,
+      "perception_radius": 25,
+      "max_nearby_units": 10,
+      "max_valid_targets": 5,
+      "justification": "Phase 3: Learn full tactical priorities with RewardMapper. 295 floats = asymmetric obs"
+    }
+  },
   "default": {
     "type": "################################################### Default ###################################################",
     "total_episodes": 1000,
@@ -90,138 +222,6 @@
         "net_arch": [320, 320]
       },
       "verbose": 0
-    }
-  },
-  "phase1": {
-    "type": "################################################### Phase 1 ###################################################",
-    "total_episodes": 2000,
-    "total_episodes_normal_value": "2000",
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 8,
-    "callback_params": {
-      "checkpoint_save_freq": 5000,
-      "checkpoint_name_prefix": "ppo_curriculum_p1",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 0,
-      "bot_eval_freq": 100,
-      "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 5,
-      "bot_eval_final": 50
-    },
-    "model_params": {
-      "policy": "MlpPolicy",
-      "learning_rate": 0.0005,
-      "n_steps": 2048,
-      "batch_size": 128,
-      "n_epochs": 6,
-      "gamma": 0.95,
-      "gae_lambda": 0.9,
-      "clip_range": 0.2,
-      "ent_coef": 0.3,
-      "vf_coef": 1.0,
-      "max_grad_norm": 0.5,
-      "target_kl": 0.03,
-      "tensorboard_log": "./tensorboard/",
-      "policy_kwargs": {
-        "net_arch": [320, 320]
-      },
-      "verbose": 0
-    },
-    "observation_params": {
-      "obs_size": 295,
-      "perception_radius": 25,
-      "max_nearby_units": 10,
-      "max_valid_targets": 5,
-      "justification": "Phase 1: Learn 'shooting is good' - any target, high exploration. 295 floats = asymmetric obs"
-    }
-        
-  },
-  "phase2": {
-    "type": "################################################### Phase 2 ###################################################",
-    "total_episodes": 4000,
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 8,
-    "callback_params": {
-      "checkpoint_save_freq": 10000,
-      "checkpoint_name_prefix": "ppo_curriculum_p2",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 0,
-      "bot_eval_freq": 100,
-      "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 5,
-      "bot_eval_final": 50
-    },
-    "model_params": {
-      "policy": "MlpPolicy",
-      "learning_rate": 0.0005,
-      "n_steps": 512,
-      "batch_size": 128,
-      "n_epochs": 6,
-      "gamma": 0.95,
-      "gae_lambda": 0.95,
-      "clip_range": 0.2,
-      "ent_coef": 0.1,
-      "vf_coef": 1.0,
-      "target_kl": 0.03,
-      "max_grad_norm": 0.5,
-      "tensorboard_log": "./tensorboard/",
-      "policy_kwargs": {
-        "net_arch": [320, 320]
-      },
-      "verbose": 0
-    },
-    "observation_params": {
-      "obs_size": 295,
-      "perception_radius": 25,
-      "max_nearby_units": 10,
-      "max_valid_targets": 5,
-      "justification": "Phase 2: Learn target priorities - kill weak targets first. 295 floats = asymmetric obs"
-    }
-        
-  },
-  "phase3": {
-    "type": "################################################### Phase 3 ###################################################",
-    "total_episodes": 6000,
-    "total_episodes_normal_value": "1000",
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 8,
-    "callback_params": {
-      "checkpoint_save_freq": 20000,
-      "checkpoint_name_prefix": "ppo_curriculum_p3",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 0,
-      "bot_eval_freq": 100,
-      "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 5,
-      "bot_eval_final": 50
-    },
-    "model_params": {
-      "policy": "MlpPolicy",
-      "learning_rate": 0.0003,
-      "n_steps": 512,
-      "batch_size": 128,
-      "n_epochs": 10,
-      "gamma": 0.95,
-      "gae_lambda": 0.95,
-      "clip_range": 0.2,
-      "ent_coef": 0.10,
-      "vf_coef": 1.0,
-      "max_grad_norm": 0.5,
-      "tensorboard_log": "./tensorboard/",
-      "policy_kwargs": {
-        "net_arch": [320, 320]
-      },
-      "verbose": 0
-    },
-    "observation_params": {
-      "obs_size": 295,
-      "perception_radius": 25,
-      "max_nearby_units": 10,
-      "max_valid_targets": 5,
-      "justification": "Phase 3: Learn full tactical priorities with RewardMapper. 295 floats = asymmetric obs"
     }
   }
 }

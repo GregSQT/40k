@@ -81,9 +81,9 @@
       "target_lowest_hp": 0.0
     },
     "situational_modifiers": {
-      "win": 75.0,
-      "lose": -75.0,
-      "draw": -50.0,
+      "win": 35.0,
+      "lose": -35.0,
+      "draw": -25.0,
       "friendly_fire_penalty": -10.0,
       "attack_wasted": -3.0,
       "target_in_cover_penalty": 0.0,
