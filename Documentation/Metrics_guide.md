@@ -71,7 +71,7 @@ All metrics are **smoothed** using 20-episode rolling averages for clear trend v
 ### 1. `a_bot_eval_combined` - Primary Goal Metric 🎯
 
 <details>
-<summary>📖 <i>Click to expand/collapse</i></summary>
+### 1. <summary>`a_bot_eval_combined` - Primary Goal Metric 🎯</summary>
 
 **What it measures:** Win rate against evaluation bots (RandomBot, GreedyBot, DefensiveBot)
 
