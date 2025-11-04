@@ -567,7 +567,8 @@ class W40KMetricsTracker:
         All metrics are smoothed (20-episode rolling average) for clear trends.
         
         GAME PERFORMANCE (2 metrics):
-        - 0_critical/a_win_rate_100ep       - Primary goal [0-1] (sorts first)
+        - 0_critical/a_bot_eval_combined    - Primary goal [0-1] (sorts first)
+        - 0_critical/b_win_rate_100ep       - Training opponent performance
         - 0_critical/episode_reward_smooth  - Learning progress
         
         PPO HEALTH (5 metrics):
@@ -596,7 +597,7 @@ class W40KMetricsTracker:
         # 1. Win Rate (100-episode rolling window) - SORTS FIRST alphabetically
         if len(self.win_rate_window) >= 10:
             win_rate = np.mean(self.win_rate_window)
-            self.writer.add_scalar('0_critical/a_win_rate_100ep', win_rate, self.episode_count)
+            self.writer.add_scalar('0_critical/b_win_rate_100ep', win_rate, self.episode_count)
         
         # 2. Episode Reward (20-episode smooth) - Training signal strength
         if len(self.all_episode_rewards) >= 20:
@@ -667,9 +668,9 @@ class W40KMetricsTracker:
                 immediate_ratio = abs(recent_base) / abs(recent_total)
                 self.writer.add_scalar('0_critical/j_immediate_reward_ratio', immediate_ratio, self.episode_count)
         
-        # 10. Bot Evaluation Combined Score (if available from callback) - Real opponent performance
-        if hasattr(self, 'bot_eval_combined') and self.bot_eval_combined is not None:
-            self.writer.add_scalar('0_critical/b_bot_eval_combined', self.bot_eval_combined, self.episode_count)
+        # 10. Bot Evaluation Combined Score (logged immediately in log_bot_evaluations())
+        # NOTE: This metric is logged in log_bot_evaluations() to avoid duplicate/stale values
+        # Do not log here - let log_bot_evaluations() handle it
         
         # Invalid Action Rate - Moved to game_critical (game-specific, not training-critical)
         if hasattr(self, 'episode_tactical_data') and self.episode_tactical_data:
@@ -697,10 +698,13 @@ class W40KMetricsTracker:
         if 'defensive' in bot_results:
             self.writer.add_scalar('bot_eval/vs_defensive', bot_results['defensive'], self.episode_count)
         
-        # Store combined score for 0_critical/ (logged by log_critical_dashboard with b_ prefix)
+        # Store combined score and log immediately to both namespaces
         if 'combined' in bot_results:
-            self.bot_eval_combined = bot_results['combined']  # Store for 0_critical/b_bot_eval_combined
+            self.bot_eval_combined = bot_results['combined']
+            # Log to bot_eval/ namespace
             self.writer.add_scalar('bot_eval/combined', bot_results['combined'], self.episode_count)
+            # Log IMMEDIATELY to 0_critical/ namespace (don't wait for next episode)
+            self.writer.add_scalar('0_critical/a_bot_eval_combined', bot_results['combined'], self.episode_count)
     
     def _calculate_smoothed_metric(self, values: List[float], window_size: int = 20) -> float:
         """

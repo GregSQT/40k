@@ -776,15 +776,7 @@ class W40KEngine(gym.Env):
         self.game_state["units_charged"] = set()
         self.game_state["units_attacked"] = set()
         self.game_state["move_activation_pool"] = []
-    
-    
-    def _process_fight_phase(self, action: int) -> Tuple[bool, Dict[str, Any]]:
-        """Placeholder for fight phase - implements AI_TURN.md sub-phases."""
-        # TODO: Implement fight phase logic
-        self._advance_to_next_player()
-        return True, {"type": "phase_complete", "next_player": self.game_state["current_player"]}
-    
-    
+ 
     # ============================================================================
     # PHASE INITIALIZATION - KEEP THESE (Handler delegation)
     # ============================================================================

@@ -10,7 +10,11 @@
       "checkpoint_name_prefix": "ppo_checkpoint",
       "eval_deterministic": true,
       "eval_render": false,
-      "n_eval_episodes": 5
+      "n_eval_episodes": 5,
+      "bot_eval_freq": 100,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 5,
+      "bot_eval_final": 50
     },
     "observation_params": {
       "obs_size": 295,
@@ -56,7 +60,11 @@
       "checkpoint_name_prefix": "ppo_debug_checkpoint",
       "eval_deterministic": true,
       "eval_render": false,
-      "n_eval_episodes": 2
+      "n_eval_episodes": 2,
+      "bot_eval_freq": 20,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 3,
+      "bot_eval_final": 20
     },
     "observation_params": {
       "obs_size": 295,
@@ -95,7 +103,11 @@
       "checkpoint_name_prefix": "ppo_curriculum_p1",
       "eval_deterministic": true,
       "eval_render": false,
-      "n_eval_episodes": 0
+      "n_eval_episodes": 0,
+      "bot_eval_freq": 100,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 5,
+      "bot_eval_final": 50
     },
     "model_params": {
       "policy": "MlpPolicy",
@@ -106,7 +118,7 @@
       "gamma": 0.95,
       "gae_lambda": 0.9,
       "clip_range": 0.2,
-      "ent_coef": 0.20,
+      "ent_coef": 0.3,
       "vf_coef": 1.0,
       "max_grad_norm": 0.5,
       "target_kl": 0.03,
@@ -135,12 +147,16 @@
       "checkpoint_name_prefix": "ppo_curriculum_p2",
       "eval_deterministic": true,
       "eval_render": false,
-      "n_eval_episodes": 10
+      "n_eval_episodes": 0,
+      "bot_eval_freq": 100,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 5,
+      "bot_eval_final": 50
     },
     "model_params": {
       "policy": "MlpPolicy",
       "learning_rate": 0.0005,
-      "n_steps": 2048,
+      "n_steps": 512,
       "batch_size": 128,
       "n_epochs": 6,
       "gamma": 0.95,
@@ -176,12 +192,16 @@
       "checkpoint_name_prefix": "ppo_curriculum_p3",
       "eval_deterministic": true,
       "eval_render": false,
-      "n_eval_episodes": 10
+      "n_eval_episodes": 0,
+      "bot_eval_freq": 100,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 5,
+      "bot_eval_final": 50
     },
     "model_params": {
       "policy": "MlpPolicy",
       "learning_rate": 0.0003,
-      "n_steps": 2048,
+      "n_steps": 512,
       "batch_size": 128,
       "n_epochs": 10,
       "gamma": 0.95,
