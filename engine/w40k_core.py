@@ -635,7 +635,7 @@ class W40KEngine(gym.Env):
         
         # Make AI decision - replaces human click
         try:
-            ai_semantic_action = self._make_ai_decision()
+            ai_semantic_action = self.pve_controller.make_ai_decision(self.game_state, self)
             
             # Execute through SAME path as humans
             return self._process_semantic_action(ai_semantic_action)

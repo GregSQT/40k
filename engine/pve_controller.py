@@ -63,31 +63,33 @@ class PvEController:
             
             # Load model with masked environment
             self.ai_model = MaskablePPO.load(model_path, env=masked_env)
-            print(f"DEBUG: AI model loaded successfully")
+            # CRITICAL: Set model on engine for execute_ai_turn() check
+            engine._ai_model = self.ai_model
+            print(f"DEBUG: AI model loaded successfully and set on engine")
             if not self.quiet:
                 print(f"PvE: Loaded AI model: {ai_model_key}")
                 
         except Exception as e:
             print(f"DEBUG: _load_ai_model_for_pve exception: {e}")
             print(f"DEBUG: Exception type: {type(e).__name__}")
-            # Set _ai_model to None on any failure
-            self._ai_model = None
+            # Set ai_model to None on any failure
+            self.ai_model = None
             raise  # Re-raise to see the full error
     
     # ============================================================================
     # AI DECISION MAKING
     # ============================================================================
     
-    def make_ai_decision(self, game_state: Dict[str, Any]) -> Dict[str, Any]:
+    def make_ai_decision(self, game_state: Dict[str, Any], engine) -> Dict[str, Any]:
         """
         AI decision logic - replaces human clicks with model predictions.
         Uses SAME handler paths as humans after decision is made.
         """
-        # Get observation for AI model
-        obs = self._build_observation()
+        # Get observation for AI model from engine
+        obs = engine.obs_builder.build_observation(game_state)
         
         # Get AI model prediction
-        prediction_result = self._ai_model.predict(obs, deterministic=True)
+        prediction_result = self.ai_model.predict(obs, deterministic=True)
         
         if isinstance(prediction_result, tuple) and len(prediction_result) >= 1:
             action_int = prediction_result[0]
@@ -96,8 +98,8 @@ class PvEController:
         else:
             action_int = int(prediction_result)
         
-        # Convert to semantic action using existing method
-        semantic_action = self._convert_gym_action(action_int)
+        # Convert to semantic action using engine's method
+        semantic_action = engine.action_decoder.convert_gym_action(action_int, game_state)
         
         # Ensure AI player context
         current_player = game_state["current_player"]
@@ -118,7 +120,7 @@ class PvEController:
             # Find AI unit in pool
             ai_unit_id = None
             for unit_id in eligible_pool:
-                unit = self._get_unit_by_id(str(unit_id))
+                unit = engine._get_unit_by_id(str(unit_id))
                 if unit and unit["player"] == 1:
                     ai_unit_id = str(unit_id)
                     break

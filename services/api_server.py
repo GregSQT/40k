@@ -55,9 +55,19 @@ def initialize_engine():
         from config_loader import get_config_loader
         config_loader = get_config_loader()
         rewards_config = config_loader.load_rewards_config("default")
+        training_config = config_loader.load_training_config("default")
         
         # Add rewards_config to config
         config["rewards_config"] = rewards_config
+        
+        # CRITICAL FIX: Add observation_params from training_config (same as w40k_core.py line 81-94)
+        obs_params = training_config.get("observation_params", {
+            "obs_size": 295,
+            "perception_radius": 25,
+            "max_nearby_units": 10,
+            "max_valid_targets": 5
+        })
+        config["observation_params"] = obs_params
         
         # Create engine with proper parameters
         engine = W40KEngine(
@@ -110,10 +120,20 @@ def initialize_pve_engine():
         from config_loader import get_config_loader
         config_loader = get_config_loader()
         rewards_config = config_loader.load_rewards_config("default")
+        training_config = config_loader.load_training_config("default")
         
         # Create engine with PvE configuration - set pve_mode in config
         config["pve_mode"] = True
         config["rewards_config"] = rewards_config
+        
+        # CRITICAL FIX: Add observation_params from training_config (same as w40k_core.py line 81-94)
+        obs_params = training_config.get("observation_params", {
+            "obs_size": 295,
+            "perception_radius": 25,
+            "max_nearby_units": 10,
+            "max_valid_targets": 5
+        })
+        config["observation_params"] = obs_params
         
         engine = W40KEngine(
             config=config,
@@ -129,9 +149,16 @@ def initialize_pve_engine():
         # CRITICAL FIX: Add rewards_config to game_state after engine creation
         engine.game_state["rewards_config"] = rewards_config
         
-        # AI model loading handled by engine's _load_ai_model_for_pve() method
-        # No duplicate model loading logic needed in API layer
-        print(f"✅ PvE: Engine initialized with built-in AI model loading")
+        # CRITICAL FIX: Load AI model for PvE mode after engine initialization
+        print("DEBUG: Loading AI model for PvE mode...")
+        try:
+            engine.pve_controller.load_ai_model_for_pve(engine.game_state, engine)
+            print(f"✅ PvE: AI model loaded successfully")
+        except Exception as model_error:
+            print(f"❌ Failed to load AI model: {model_error}")
+            import traceback
+            print(f"❌ Model loading traceback: {traceback.format_exc()}")
+            raise
         
         # Restore original working directory
         os.chdir(original_cwd)

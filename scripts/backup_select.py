@@ -68,6 +68,15 @@ else:
         "config/unit_definitions.json", # Unit Stats & Abilities
         "config/unit_registry.json", # Unit Registry
         
+    ### agent : SpaceMarine_Infantry_Troop_RangedSwarm
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/rewards_config.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/training_config.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/scenario_phase1.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/scenario_phase2-1.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/scenario_phase2-2.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/scenario_phase2-3.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/scenario_phase3-1.json",
+        
     ### Units
         #"config/units/space_marines.json", # Unit Definitions
         #"config/units/tyranids.json", # Unit Definitions   
@@ -95,7 +104,9 @@ else:
     
     ### Documentation    
         "Documentation/AI_IMPLEMENTATION.md",
+        "Documentation/AI_METRICS.md",
         "Documentation/AI_OBSERVATION.md",
+        "Documentation/AI_TARGET_SELECTION.md",
         "Documentation/AI_TRAINING.md",
         "Documentation/AI_TURN.md",
 
@@ -103,7 +114,7 @@ else:
 ##### Engine files
 ######################################################################################################
         "engine/__init__.py",
-        "engine/w40k_engine_old.py", # Old engine file for reference
+        #"engine/w40k_engine_old.py", # Old engine file for reference
     
     ### Engine
         "engine/w40k_core.py",
@@ -120,8 +131,8 @@ else:
         "engine/phase_handlers/generic_handlers.py",
         "engine/phase_handlers/movement_handlers.py",
         "engine/phase_handlers/shooting_handlers.py",
-        #"engine/phase_handlers/charging_handlers.py",
-        #"engine/phase_handlers/fighting_handlers.py",
+        "engine/phase_handlers/charge_handlers.py",
+        "engine/phase_handlers/fight_handlers.py",
 
 ######################################################################################################
 ##### Frontend files

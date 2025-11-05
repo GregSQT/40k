@@ -1,0 +1,8 @@
+{
+  "units": [
+    {"id": 1, "unit_type": "Intercessor", "player": 0, "col": 6, "row": 8},
+    {"id": 2, "unit_type": "Intercessor", "player": 0, "col": 18, "row": 8},
+    {"id": 3, "unit_type": "Intercessor", "player": 1, "col": 9, "row": 13},
+    {"id": 4, "unit_type": "Intercessor", "player": 1, "col": 20, "row": 13}
+  ]
+}
