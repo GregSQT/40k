@@ -160,6 +160,101 @@ class ConfigLoader:
     def get_unit_definitions(self) -> Dict[str, Any]:
         """Get unit definitions."""
         return self.load_config("unit_definitions", force_reload=False)
+    
+    # ─── Agent-specific config loading ──────────────────────────────────
+    def load_agent_training_config(self, agent_key: str, phase: str = None) -> Dict[str, Any]:
+        """Load agent-specific training configuration.
+        
+        Args:
+            agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
+            phase: Optional phase name (e.g., 'phase1', 'phase2'). If provided, returns 
+                   only that phase's config. If None, returns entire config file.
+        
+        Returns:
+            Training configuration dictionary or phase-specific config
+            
+        Raises:
+            FileNotFoundError: If agent config file doesn't exist
+            KeyError: If phase specified but not found in config
+        """
+        agent_config_path = self.config_dir / "agents" / agent_key / f"{agent_key}_training_config.json"
+        
+        if not agent_config_path.exists():
+            raise FileNotFoundError(
+                f"Agent training config not found: {agent_config_path}\n"
+                f"Expected path: config/agents/{agent_key}/{agent_key}_training_config.json"
+            )
+        
+        try:
+            with open(agent_config_path, 'r', encoding='utf-8-sig') as f:
+                config = json.load(f)
+                
+                if phase is not None:
+                    if phase not in config:
+                        available_phases = [k for k in config.keys() if not k.startswith('_')]
+                        raise KeyError(
+                            f"Phase '{phase}' not found in {agent_key}_training_config.json. "
+                            f"Available phases: {available_phases}"
+                        )
+                    return config[phase]
+                
+                return config
+                
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON in {agent_config_path}: {e}")
+    
+    def load_agent_rewards_config(self, agent_key: str) -> Dict[str, Any]:
+        """Load agent-specific rewards configuration.
+        
+        Args:
+            agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
+        
+        Returns:
+            Rewards configuration dictionary
+            
+        Raises:
+            FileNotFoundError: If agent rewards config file doesn't exist
+        """
+        agent_config_path = self.config_dir / "agents" / agent_key / f"{agent_key}_rewards_config.json"
+        
+        if not agent_config_path.exists():
+            raise FileNotFoundError(
+                f"Agent rewards config not found: {agent_config_path}\n"
+                f"Expected path: config/agents/{agent_key}/{agent_key}_rewards_config.json"
+            )
+        
+        try:
+            with open(agent_config_path, 'r', encoding='utf-8-sig') as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON in {agent_config_path}: {e}")
+    
+    def load_agent_scenario(self, agent_key: str, scenario_name: str) -> Dict[str, Any]:
+        """Load agent-specific scenario file.
+        
+        Args:
+            agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
+            scenario_name: Scenario name (e.g., 'phase1', 'phase2-1', 'phase2-2')
+        
+        Returns:
+            Scenario configuration dictionary with 'units' array
+            
+        Raises:
+            FileNotFoundError: If scenario file doesn't exist
+        """
+        scenario_path = self.config_dir / "agents" / agent_key / "scenarios" / f"{agent_key}_scenario_{scenario_name}.json"
+        
+        if not scenario_path.exists():
+            raise FileNotFoundError(
+                f"Agent scenario not found: {scenario_path}\n"
+                f"Expected path: config/agents/{agent_key}/scenarios/{agent_key}_scenario_{scenario_name}.json"
+            )
+        
+        try:
+            with open(scenario_path, 'r', encoding='utf-8-sig') as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON in {scenario_path}: {e}")
 
 # Global instance for easy access
 _config_loader = None

@@ -118,7 +118,8 @@ class BotControlledEnv:
 class EpisodeTerminationCallback(BaseCallback):
     """Callback to terminate training after exact episode count."""
     
-    def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0):
+    def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0, 
+                 total_episodes: int = None, scenario_info: str = None):
         super().__init__(verbose)
         if max_episodes <= 0:
             raise ValueError("max_episodes must be positive - no defaults allowed")
@@ -129,6 +130,10 @@ class EpisodeTerminationCallback(BaseCallback):
         self.episode_count = 0
         self.step_count = 0
         self.start_time = None
+        # For global progress tracking in rotation mode
+        self.total_episodes = total_episodes if total_episodes else max_episodes
+        self.scenario_info = scenario_info  # e.g., "Cycle 8 | Scenario: phase2-1"
+        self.global_episode_offset = 0  # Set by rotation code to track overall progress
     
     def _on_training_start(self) -> None:
         """Initialize timing when training starts."""
@@ -174,34 +179,45 @@ class EpisodeTerminationCallback(BaseCallback):
                     print(f"   ⚠️  DEBUG: Method 3 exception: {e}")
                 pass
         
-        # Log progress every 10 episodes with visual bar
+        # Log progress every 10 episodes with single-line compact display
         if episode_ended and self.episode_count % 10 == 0:
             import time
             
-            progress_pct = (self.episode_count / self.max_episodes) * 100
-            bar_length = 50
-            filled = int(bar_length * self.episode_count / self.max_episodes)
+            # Calculate global progress (across all rotations)
+            global_episode_count = self.global_episode_offset + self.episode_count
+            global_progress_pct = (global_episode_count / self.total_episodes) * 100
+            
+            # Global progress bar (full width)
+            bar_length = 40
+            filled = int(bar_length * global_episode_count / self.total_episodes)
             bar = '█' * filled + '░' * (bar_length - filled)
             
             # Calculate time
             time_info = ""
-            if self.start_time is not None and self.episode_count > 0:
+            if self.start_time is not None and global_episode_count > 0:
                 elapsed = time.time() - self.start_time
-                avg_time_per_episode = elapsed / self.episode_count
-                remaining_episodes = self.max_episodes - self.episode_count
+                avg_time_per_episode = elapsed / global_episode_count
+                remaining_episodes = self.total_episodes - global_episode_count
                 eta = avg_time_per_episode * remaining_episodes
                 
                 # Format times as MM:SS
                 elapsed_str = f"{int(elapsed//60):02d}:{int(elapsed%60):02d}"
                 eta_str = f"{int(eta//60):02d}:{int(eta%60):02d}"
-                time_info = f" [ {elapsed_str} < {eta_str} ]"
+                time_info = f" [{elapsed_str}<{eta_str}]"
             
-            print(f"\r{progress_pct:3.0f}% {bar} {self.episode_count}/{self.max_episodes} episodes{time_info}", end='', flush=True)
-            if self.episode_count == self.max_episodes:
-                print()  # New line only at completion
+            # Build detailed scenario display with episode range
+            if self.scenario_info:
+                # Calculate cycle episode range (e.g., "0-100", "100-200")
+                cycle_start = self.global_episode_offset
+                cycle_end = self.global_episode_offset + self.max_episodes
+                scenario_display = f" | {self.scenario_info} | Episodes {cycle_start}-{cycle_end}/{self.total_episodes}"
+            else:
+                scenario_display = ""
+            print(f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{scenario_display}", end='\r', flush=True)
         
         # CRITICAL: Stop when max episodes reached
         if self.episode_count >= self.max_episodes:
+            print()  # Newline after final progress update
             print(f"🛑 STOPPING: Reached {self.max_episodes} episodes")
             print(f"   Total timesteps: {self.model.num_timesteps if hasattr(self, 'model') else 'N/A'}")
             return False
@@ -434,7 +450,6 @@ class MetricsCollectionCallback(BaseCallback):
         # The model's logger is now initialized, so we can get the real directory
         if hasattr(self.model, 'logger') and self.model.logger:
             actual_log_dir = self.model.logger.get_dir()
-            print(f"📊 UPDATING metrics_tracker to use SB3 directory: {actual_log_dir}")
             
             # Close old writer and create new one in correct directory
             self.metrics_tracker.writer.close()
@@ -1724,6 +1739,191 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     
     return model, env, training_config, model_path
 
+def get_agent_scenario_file(config, agent_key, training_config_name):
+    """Get scenario file path for agent-specific training.
+    
+    Args:
+        config: ConfigLoader instance
+        agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
+        training_config_name: Phase name (e.g., 'phase1', 'phase2')
+    
+    Returns:
+        Path to scenario file
+        
+    Raises:
+        FileNotFoundError: If no valid scenario file found
+    """
+    # Try agent-specific scenario first
+    if agent_key:
+        agent_scenario_path = os.path.join(
+            config.config_dir, "agents", agent_key, "scenarios",
+            f"{agent_key}_scenario_{training_config_name}.json"
+        )
+        if os.path.isfile(agent_scenario_path):
+            return agent_scenario_path
+        
+        # For Phase 2, try numbered variants (phase2-1, phase2-2, etc.)
+        if training_config_name.startswith("phase2"):
+            for i in range(1, 5):  # Check phase2-1 through phase2-4
+                variant_path = os.path.join(
+                    config.config_dir, "agents", agent_key, "scenarios",
+                    f"{agent_key}_scenario_phase2-{i}.json"
+                )
+                if os.path.isfile(variant_path):
+                    print(f"ℹ️  Phase 2 has multiple scenarios. Using first variant: phase2-{i}")
+                    return variant_path
+    
+    # Fall back to global scenario.json
+    global_scenario = os.path.join(config.config_dir, "scenario.json")
+    if os.path.isfile(global_scenario):
+        return global_scenario
+    
+    raise FileNotFoundError(
+        f"No scenario file found for agent '{agent_key}' phase '{training_config_name}'"
+    )
+
+def get_scenario_list_for_phase(config, agent_key, training_config_name):
+    """Get list of all available scenarios for a training phase.
+    
+    Args:
+        config: ConfigLoader instance
+        agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
+        training_config_name: Phase name (e.g., 'phase1', 'phase2')
+    
+    Returns:
+        List of scenario file paths
+    """
+    scenario_files = []
+    
+    if not agent_key:
+        # No agent specified, return global scenario
+        global_scenario = os.path.join(config.config_dir, "scenario.json")
+        if os.path.isfile(global_scenario):
+            return [global_scenario]
+        return []
+    
+    # Check for agent-specific scenarios
+    scenarios_dir = os.path.join(config.config_dir, "agents", agent_key, "scenarios")
+    
+    if not os.path.isdir(scenarios_dir):
+        # No agent-specific scenarios directory
+        return []
+    
+    # For phase1, look for single scenario
+    if training_config_name == "phase1":
+        phase1_scenario = os.path.join(scenarios_dir, f"{agent_key}_scenario_phase1.json")
+        if os.path.isfile(phase1_scenario):
+            return [phase1_scenario]
+    
+    # For phase2, look for numbered variants (phase2-1, phase2-2, etc.)
+    elif training_config_name.startswith("phase2"):
+        for i in range(1, 10):  # Check phase2-1 through phase2-9
+            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_phase2-{i}.json")
+            if os.path.isfile(scenario_file):
+                scenario_files.append(scenario_file)
+        if scenario_files:
+            return scenario_files
+    
+    # For phase3, look for numbered variants
+    elif training_config_name.startswith("phase3"):
+        for i in range(1, 10):  # Check phase3-1 through phase3-9
+            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_phase3-{i}.json")
+            if os.path.isfile(scenario_file):
+                scenario_files.append(scenario_file)
+        if scenario_files:
+            return scenario_files
+    
+    # Default: try to find exact match
+    default_scenario = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}.json")
+    if os.path.isfile(default_scenario):
+        return [default_scenario]
+    
+    return []
+
+
+def get_agent_scenario_file(config, agent_key, training_config_name, scenario_override=None):
+    """Get scenario file path for agent-specific training.
+    
+    Args:
+        config: ConfigLoader instance
+        agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
+        training_config_name: Phase name (e.g., 'phase1', 'phase2')
+        scenario_override: Optional specific scenario name (e.g., 'phase2-3')
+    
+    Returns:
+        Path to scenario file
+        
+    Raises:
+        FileNotFoundError: If no valid scenario file found
+    """
+    # If specific scenario requested, try to find it
+    if scenario_override and scenario_override != "all":
+        if agent_key:
+            # Agent-specific scenario
+            scenario_path = os.path.join(
+                config.config_dir, "agents", agent_key, "scenarios",
+                f"{agent_key}_scenario_{scenario_override}.json"
+            )
+            if os.path.isfile(scenario_path):
+                return scenario_path
+            
+            # Try without agent prefix (e.g., user passed "phase2-3" instead of full name)
+            scenario_path = os.path.join(
+                config.config_dir, "agents", agent_key, "scenarios",
+                f"{agent_key}_scenario_{training_config_name}-{scenario_override}.json"
+            )
+            if os.path.isfile(scenario_path):
+                return scenario_path
+        
+        # Try global scenario
+        global_scenario = os.path.join(config.config_dir, f"scenario_{scenario_override}.json")
+        if os.path.isfile(global_scenario):
+            return global_scenario
+        
+        raise FileNotFoundError(
+            f"Scenario '{scenario_override}' not found for agent '{agent_key}' phase '{training_config_name}'"
+        )
+    
+    # Get list of scenarios for this phase
+    scenario_list = get_scenario_list_for_phase(config, agent_key, training_config_name)
+    
+    if scenario_list:
+        # Return first scenario (rotation will handle the rest)
+        return scenario_list[0]
+    
+    # Fall back to global scenario.json
+    global_scenario = os.path.join(config.config_dir, "scenario.json")
+    if os.path.isfile(global_scenario):
+        return global_scenario
+    
+    raise FileNotFoundError(
+        f"No scenario file found for agent '{agent_key}' phase '{training_config_name}'"
+    )
+
+
+def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None):
+    """Calculate rotation interval for scenario rotation.
+    
+    Args:
+        total_episodes: Total number of episodes for training
+        num_scenarios: Number of scenarios to rotate through
+        config_value: Optional value from config file
+    
+    Returns:
+        Number of episodes per scenario before rotation
+    """
+    if config_value and config_value > 0:
+        return config_value
+    
+    # Formula: total_episodes / (num_scenarios * 10) for ~10 complete cycles
+    if num_scenarios > 0:
+        calculated = total_episodes // (num_scenarios * 10)
+        # Ensure at least 10 episodes per rotation
+        return max(10, calculated)
+    
+    # Fallback
+    return 100
+
 def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default", 
                             agent_key=None, new_model=False, append_training=False):
     """Create or load PPO model for specific agent with configuration following AI_INSTRUCTIONS.md."""
@@ -1731,8 +1931,23 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # Check GPU availability
     gpu_available = check_gpu_availability()
     
-    # Load training configuration from config files (not script parameters)
-    training_config = config.load_training_config(training_config_name)
+    # Load training configuration - agent-specific if available, otherwise global
+    if agent_key:
+        # Try to load agent-specific config first
+        try:
+            training_config = config.load_agent_training_config(agent_key, training_config_name)
+            print(f"✅ Loaded agent-specific training config: config/agents/{agent_key}/{agent_key}_training_config.json [{training_config_name}]")
+            agent_specific_mode = True
+        except FileNotFoundError:
+            # Fall back to global config if agent-specific doesn't exist
+            print(f"ℹ️  No agent-specific config found, using global: config/training_config.json [{training_config_name}]")
+            training_config = config.load_training_config(training_config_name)
+            agent_specific_mode = False
+    else:
+        # No agent specified, use global config
+        training_config = config.load_training_config(training_config_name)
+        agent_specific_mode = False
+    
     model_params = training_config["model_params"]
     
     # Import environment
@@ -1743,9 +1958,10 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     
     # Create agent-specific environment
     cfg = get_config_loader()
-    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
-    if not os.path.isfile(scenario_file):
-        raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
+    
+    # Get scenario file (agent-specific or global)
+    scenario_file = get_agent_scenario_file(cfg, agent_key if agent_specific_mode else None, training_config_name)
+    print(f"✅ Using scenario: {scenario_file}")
     # Load unit registry for multi-agent environment
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
@@ -1859,7 +2075,213 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     
     return model, env, training_config, model_path
 
-def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None):
+def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
+                                 scenario_list, rotation_interval, total_episodes,
+                                 new_model=False, append_training=False):
+    """Train model with automatic scenario rotation for curriculum learning.
+    
+    Args:
+        config: ConfigLoader instance
+        agent_key: Agent identifier
+        training_config_name: Phase name (e.g., 'phase2')
+        rewards_config_name: Rewards config name
+        scenario_list: List of scenario file paths to rotate through
+        rotation_interval: Episodes per scenario before rotation
+        total_episodes: Total episodes for entire training
+        new_model: Whether to create new model
+        append_training: Whether to continue from existing model
+    
+    Returns:
+        Tuple of (success: bool, final_model, final_env)
+    """
+    print(f"\n{'='*80}")
+    print(f"🔄 SCENARIO ROTATION TRAINING")
+    print(f"{'='*80}")
+    print(f"Total episodes: {total_episodes}")
+    print(f"Scenarios: {len(scenario_list)}")
+    for i, scenario in enumerate(scenario_list, 1):
+        scenario_name = os.path.basename(scenario)
+        print(f"  {i}. {scenario_name}")
+    print(f"Rotation interval: {rotation_interval} episodes per scenario")
+    total_cycles = total_episodes // (rotation_interval * len(scenario_list))
+    print(f"Total cycles: ~{total_cycles} complete rotations through all scenarios")
+    print(f"{'='*80}\n")
+    
+    # Load training config to get model parameters
+    training_config = config.load_training_config(training_config_name)
+    
+    # Calculate average steps per episode for timestep conversion
+    max_turns = training_config.get("max_turns_per_episode", 5)
+    max_steps = training_config.get("max_steps_per_turn", 8)
+    avg_steps_per_episode = max_turns * max_steps * 0.6  # Estimate: 60% of max
+    
+    # Get model path
+    model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
+    
+    # Create initial model with first scenario (or load if append_training)
+    print(f"📦 {'Loading existing model' if append_training else 'Creating initial model'} with first scenario...")
+    
+    # Import environment
+    W40KEngine, register_environment = setup_imports()
+    register_environment()
+    
+    # Create initial environment with first scenario
+    from ai.unit_registry import UnitRegistry
+    unit_registry = UnitRegistry()
+    
+    # Determine effective agent key for rewards
+    if rewards_config_name not in ["default", "test"]:
+        effective_agent_key = rewards_config_name
+    else:
+        effective_agent_key = agent_key
+    
+    current_scenario = scenario_list[0]
+    base_env = W40KEngine(
+        rewards_config=rewards_config_name,
+        training_config_name=training_config_name,
+        controlled_agent=effective_agent_key,
+        active_agents=None,
+        scenario_file=current_scenario,
+        unit_registry=unit_registry,
+        quiet=True,
+        gym_training_mode=True
+    )
+    
+    # Wrap environment
+    def mask_fn(env):
+        return env.get_action_mask()
+    
+    masked_env = ActionMasker(base_env, mask_fn)
+    env = Monitor(masked_env)
+    
+    # Create or load model
+    model_params = training_config["model_params"]
+    
+    if new_model or not os.path.exists(model_path):
+        print(f"🆕 Creating new model: {model_path}")
+        model = MaskablePPO(env=env, **model_params)
+    elif append_training:
+        print(f"📁 Loading existing model for continued training: {model_path}")
+        try:
+            model = MaskablePPO.load(model_path, env=env)
+        except Exception as e:
+            print(f"⚠️ Failed to load model: {e}")
+            print("🆕 Creating new model instead...")
+            model = MaskablePPO(env=env, **model_params)
+    else:
+        print(f"⚠️ Model exists but neither --new nor --append specified. Creating new model.")
+        model = MaskablePPO(env=env, **model_params)
+    
+    # Import metrics tracker
+    from metrics_tracker import W40KMetricsTracker
+    
+    # Determine tensorboard log name for continuous logging
+    tb_log_name = f"{training_config_name}_{agent_key}"
+    
+    # Get TensorBoard directory for metrics
+    model_tensorboard_dir = f"./tensorboard/{tb_log_name}"
+    
+    # Create metrics tracker for entire rotation training
+    metrics_tracker = W40KMetricsTracker(agent_key, model_tensorboard_dir)
+    print(f"📈 Metrics tracking enabled for agent: {agent_key}")
+    
+    # Training loop with scenario rotation
+    episodes_trained = 0
+    cycle = 0
+    scenario_idx = 0
+    
+    while episodes_trained < total_episodes:
+        current_scenario = scenario_list[scenario_idx]
+        scenario_name = os.path.basename(current_scenario).replace(f"{agent_key}_scenario_", "").replace(".json", "")
+        
+        # Calculate episodes for this iteration
+        episodes_remaining = total_episodes - episodes_trained
+        episodes_this_iteration = min(rotation_interval, episodes_remaining)
+        timesteps_this_iteration = int(episodes_this_iteration * avg_steps_per_episode)
+        
+        # Create new environment with current scenario
+        base_env = W40KEngine(
+            rewards_config=rewards_config_name,
+            training_config_name=training_config_name,
+            controlled_agent=effective_agent_key,
+            active_agents=None,
+            scenario_file=current_scenario,
+            unit_registry=unit_registry,
+            quiet=True,
+            gym_training_mode=True
+        )
+        
+        # Wrap environment
+        masked_env = ActionMasker(base_env, mask_fn)
+        env = Monitor(masked_env)
+        
+        # Update model's environment
+        model.set_env(env)
+        
+        # Create fresh callbacks for this rotation with updated scenario info
+        scenario_display = f"Cycle {cycle + 1} | Scenario: {scenario_name}"
+        rotation_callbacks = setup_callbacks(
+            config=config,
+            model_path=model_path,
+            training_config=training_config,
+            training_config_name=training_config_name,
+            metrics_tracker=metrics_tracker,  # ← ADD THIS
+            total_episodes_override=total_episodes,
+            scenario_info=scenario_display,
+            global_episode_offset=episodes_trained
+        )
+        
+        # Add metrics collection callback
+        from stable_baselines3.common.callbacks import CallbackList
+        metrics_callback = MetricsCollectionCallback(metrics_tracker, model)
+        
+        # Link metrics_tracker to bot evaluation callback
+        for callback in rotation_callbacks:
+            if hasattr(callback, '__class__') and callback.__class__.__name__ == 'BotEvaluationCallback':
+                callback.metrics_tracker = metrics_tracker
+        
+        # Combine all callbacks
+        enhanced_callbacks = CallbackList(rotation_callbacks + [metrics_callback])
+        
+        # Train on this scenario
+        # CRITICAL: reset_num_timesteps=False keeps TensorBoard graph continuous
+        model.learn(
+            total_timesteps=timesteps_this_iteration,
+            reset_num_timesteps=(episodes_trained == 0),  # Only reset on first iteration
+            tb_log_name=tb_log_name,  # Same name = continuous graph
+            callback=enhanced_callbacks,  # ← CHANGE FROM rotation_callbacks
+            progress_bar=False
+        )
+        
+        # Update counters
+        episodes_trained += episodes_this_iteration
+        scenario_idx = (scenario_idx + 1) % len(scenario_list)
+        
+        # Check if we completed a full cycle
+        if scenario_idx == 0:
+            cycle += 1
+            print(f"\n✅ Completed cycle {cycle} - All {len(scenario_list)} scenarios trained")
+        
+        # Save checkpoint
+        checkpoint_path = model_path.replace('.zip', f'_ep{episodes_trained}.zip')
+        model.save(checkpoint_path)
+        
+        # Clean up old environment
+        env.close()
+    
+    # Final save
+    model.save(model_path)
+    print(f"\n{'='*80}")
+    print(f"✅ ROTATION TRAINING COMPLETE")
+    print(f"   Total episodes trained: {episodes_trained}")
+    print(f"   Complete cycles: {cycle}")
+    print(f"   Final model: {model_path}")
+    print(f"{'='*80}\n")
+    
+    return True, model, env
+
+def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
+                   total_episodes_override=None, scenario_info=None, global_episode_offset=0):
     W40KEngine, _ = setup_imports()
     callbacks = []
     
@@ -1875,22 +2297,24 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         max_episodes = training_config["total_episodes"]
         max_steps_per_episode = training_config["max_turns_per_episode"] * training_config["max_steps_per_turn"]
         expected_timesteps = max_episodes * max_steps_per_episode
-        episode_callback = EpisodeTerminationCallback(max_episodes, expected_timesteps, verbose=1)
+        
+        # Use override for rotation mode (total across all cycles)
+        total_eps = total_episodes_override if total_episodes_override else max_episodes
+        
+        episode_callback = EpisodeTerminationCallback(
+            max_episodes, 
+            expected_timesteps, 
+            verbose=1,
+            total_episodes=total_eps,
+            scenario_info=scenario_info
+        )
+        episode_callback.global_episode_offset = global_episode_offset
         callbacks.append(episode_callback)
     
     # Evaluation callback - test model periodically with logging enabled
     # Load scenario and unit registry for evaluation callback
     from ai.unit_registry import UnitRegistry
     cfg = get_config_loader()
-    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
-    unit_registry = UnitRegistry()
-    
-    # REMOVED: Standard EvalCallback - redundant with BotEvaluationCallback
-    # BotEvaluationCallback provides better metrics (3 difficulty levels vs 1)
-    # This saves 20-30% training time by eliminating duplicate evaluation
-    
-    print("ℹ️  Using BotEvaluationCallback for multi-difficulty evaluation")
-    print("    (RandomBot, GreedyBot, DefensiveBot)")
     
     # Load callback parameters for CheckpointCallback
     if "callback_params" not in training_config:
@@ -1937,8 +2361,6 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         callbacks.append(bot_eval_callback)
         
         freq_unit = "episodes" if bot_eval_use_episodes else "timesteps"
-        print(f"✅ Bot evaluation callback added (every {bot_eval_freq} {freq_unit}, {bot_n_episodes_intermediate} episodes per bot)")
-        print("   📊 Testing against: RandomBot, GreedyBot, DefensiveBot")
     else:
         print("⚠️ Evaluation bots not available - no evaluation metrics")
         print("   Install evaluation_bots.py to enable progress tracking")
@@ -2809,6 +3231,10 @@ def main():
                        help="Specific model file to use for replay generation")
     parser.add_argument("--scenario-template", type=str, default=None,
                        help="Scenario template name from scenario_templates.json for replay generation")
+    parser.add_argument("--scenario", type=str, default=None,
+                       help="Specific scenario to use (e.g., 'phase2-3') or 'all' for rotation through all scenarios")
+    parser.add_argument("--rotation-interval", type=int, default=None,
+                       help="Episodes per scenario before rotation (overrides config file value)")
     
     args = parser.parse_args()
     
@@ -2888,6 +3314,52 @@ def main():
 
         # Single agent training mode
         elif args.agent:
+            # Check if scenario rotation is requested
+            if args.scenario == "all":
+                # Get list of all scenarios for this phase
+                scenario_list = get_scenario_list_for_phase(config, args.agent, args.training_config)
+                
+                if len(scenario_list) <= 1:
+                    print(f"⚠️  Only {len(scenario_list)} scenario found for {args.training_config}. Rotation not needed.")
+                    print(f"ℹ️  Falling back to standard training...")
+                    args.scenario = None  # Clear to use standard path
+                else:
+                    # Load training config to get total episodes
+                    training_config = config.load_training_config(args.training_config)
+                    total_episodes = training_config.get("total_episodes", 1000)
+                    
+                    # Determine rotation interval
+                    config_rotation = training_config.get("rotation_interval", None)
+                    if args.rotation_interval:
+                        rotation_interval = args.rotation_interval
+                        print(f"🔧 Using CLI rotation interval: {rotation_interval}")
+                    else:
+                        rotation_interval = calculate_rotation_interval(
+                            total_episodes, 
+                            len(scenario_list), 
+                            config_rotation
+                        )
+                        print(f"📊 Calculated rotation interval: {rotation_interval}")
+                    
+                    # Use rotation training
+                    success, model, env = train_with_scenario_rotation(
+                        config=config,
+                        agent_key=args.agent,
+                        training_config_name=args.training_config,
+                        rewards_config_name=args.rewards_config,
+                        scenario_list=scenario_list,
+                        rotation_interval=rotation_interval,
+                        total_episodes=total_episodes,
+                        new_model=args.new,
+                        append_training=args.append
+                    )
+                    
+                    if success and args.test_episodes > 0:
+                        test_trained_model(model, args.test_episodes, args.training_config)
+                    
+                    return 0 if success else 1
+            
+            # Standard single-scenario training (no rotation)
             model, env, training_config, model_path = create_multi_agent_model(
                 config,
                 args.training_config,

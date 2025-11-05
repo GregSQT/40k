@@ -69,13 +69,14 @@ else:
         "config/unit_registry.json", # Unit Registry
         
     ### agent : SpaceMarine_Infantry_Troop_RangedSwarm
-        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/rewards_config.json",
-        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/training_config.json",
-        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/scenario_phase1.json",
-        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/scenario_phase2-1.json",
-        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/scenario_phase2-2.json",
-        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/scenario_phase2-3.json",
-        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/scenario_phase3-1.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/SpaceMarine_Infantry_Troop_RangedSwarm_rewards_config.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/SpaceMarine_Infantry_Troop_RangedSwarm_training_config.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase1.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase2-1.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase2-2.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase2-3.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase2-4.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase3-1.json",
         
     ### Units
         #"config/units/space_marines.json", # Unit Definitions
