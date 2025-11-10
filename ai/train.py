@@ -134,13 +134,18 @@ class EpisodeTerminationCallback(BaseCallback):
         self.total_episodes = total_episodes if total_episodes else max_episodes
         self.scenario_info = scenario_info  # e.g., "Cycle 8 | Scenario: phase2-1"
         self.global_episode_offset = 0  # Set by rotation code to track overall progress
+        # NEW: Better time tracking
+        self.last_episode_time = None  # Track per-episode time
+        self.episode_times = []  # Store recent episode times for moving average
     
     def _on_training_start(self) -> None:
-        """Initialize timing when training starts."""
+        """Initialize timing on training start."""
         import time
         self.start_time = time.time()
-                
+        self.last_episode_time = time.time()
+    
     def _on_step(self) -> bool:
+        """Track episodes and display progress."""
         self.step_count += 1
         
         # CRITICAL FIX: Detect episodes using MULTIPLE methods
@@ -174,46 +179,59 @@ class EpisodeTerminationCallback(BaseCallback):
                         if env_episodes > self.episode_count:
                             self.episode_count = env_episodes
                             episode_ended = True
-            except Exception as e:
-                if self.step_count <= 100:
-                    print(f"   ⚠️  DEBUG: Method 3 exception: {e}")
+            except Exception:
                 pass
         
-        # Log progress every 10 episodes with single-line compact display
-        if episode_ended and self.episode_count % 10 == 0:
+        # Track episode timing for better ETA calculation
+        if episode_ended:
             import time
+            current_time = time.time()
             
-            # Calculate global progress (across all rotations)
-            global_episode_count = self.global_episode_offset + self.episode_count
-            global_progress_pct = (global_episode_count / self.total_episodes) * 100
+            # Track episode timing for better ETA
+            if self.last_episode_time is not None:
+                episode_duration = current_time - self.last_episode_time
+                self.episode_times.append(episode_duration)
+                # Keep last 50 episodes for moving average (ignores scenario switch overhead)
+                if len(self.episode_times) > 50:
+                    self.episode_times.pop(0)
+            self.last_episode_time = current_time
             
-            # Global progress bar (full width)
-            bar_length = 40
-            filled = int(bar_length * global_episode_count / self.total_episodes)
-            bar = '█' * filled + '░' * (bar_length - filled)
-            
-            # Calculate time
-            time_info = ""
-            if self.start_time is not None and global_episode_count > 0:
-                elapsed = time.time() - self.start_time
-                avg_time_per_episode = elapsed / global_episode_count
-                remaining_episodes = self.total_episodes - global_episode_count
-                eta = avg_time_per_episode * remaining_episodes
+            # Update progress every 10 episodes
+            if self.episode_count % 10 == 0:
+                # Calculate global progress (across all rotations)
+                global_episode_count = self.global_episode_offset + self.episode_count
+                global_progress_pct = (global_episode_count / self.total_episodes) * 100
                 
-                # Format times as MM:SS
-                elapsed_str = f"{int(elapsed//60):02d}:{int(elapsed%60):02d}"
-                eta_str = f"{int(eta//60):02d}:{int(eta%60):02d}"
-                time_info = f" [{elapsed_str}<{eta_str}]"
-            
-            # Build detailed scenario display with episode range
-            if self.scenario_info:
-                # Calculate cycle episode range (e.g., "0-100", "100-200")
-                cycle_start = self.global_episode_offset
-                cycle_end = self.global_episode_offset + self.max_episodes
-                scenario_display = f" | {self.scenario_info} | Episodes {cycle_start}-{cycle_end}/{self.total_episodes}"
-            else:
-                scenario_display = ""
-            print(f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{scenario_display}", end='\r', flush=True)
+                # Global progress bar (full width)
+                bar_length = 40
+                filled = int(bar_length * global_episode_count / self.total_episodes)
+                bar = '█' * filled + '░' * (bar_length - filled)
+                
+                # Calculate time with moving average for better accuracy
+                time_info = ""
+                if self.start_time is not None and len(self.episode_times) > 5:
+                    # Use moving average of recent episodes for ETA (ignores scenario switches)
+                    avg_episode_time = sum(self.episode_times) / len(self.episode_times)
+                    remaining_episodes = self.total_episodes - global_episode_count
+                    eta = avg_episode_time * remaining_episodes
+                    
+                    # Total elapsed time from start
+                    elapsed = current_time - self.start_time
+                    
+                    # Format times as MM:SS
+                    elapsed_str = f"{int(elapsed//60):02d}:{int(elapsed%60):02d}"
+                    eta_str = f"{int(eta//60):02d}:{int(eta%60):02d}"
+                    time_info = f" [{elapsed_str}<{eta_str}]"
+                
+                # Build detailed scenario display with episode range
+                if self.scenario_info:
+                    # Calculate cycle episode range (e.g., "0-100", "100-200")
+                    cycle_start = self.global_episode_offset
+                    cycle_end = self.global_episode_offset + self.max_episodes
+                    scenario_display = f" | {self.scenario_info} | Episodes {cycle_start}-{cycle_end}/{self.total_episodes}"
+                else:
+                    scenario_display = ""
+                print(f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{scenario_display}", end='\r', flush=True)
         
         # CRITICAL: Stop when max episodes reached
         if self.episode_count >= self.max_episodes:
@@ -1891,13 +1909,10 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
         # Return first scenario (rotation will handle the rest)
         return scenario_list[0]
     
-    # Fall back to global scenario.json
-    global_scenario = os.path.join(config.config_dir, "scenario.json")
-    if os.path.isfile(global_scenario):
-        return global_scenario
-    
+    # No fallback - agent-specific scenarios are required
     raise FileNotFoundError(
-        f"No scenario file found for agent '{agent_key}' phase '{training_config_name}'"
+        f"No scenario file found for agent '{agent_key}' phase '{training_config_name}'. "
+        f"Expected: config/agents/{agent_key}/scenarios/{agent_key}_scenario_{training_config_name}.json"
     )
 
 
@@ -1931,18 +1946,12 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # Check GPU availability
     gpu_available = check_gpu_availability()
     
-    # Load training configuration - agent-specific if available, otherwise global
+    # Load training configuration - agent-specific REQUIRED when agent_key provided
     if agent_key:
-        # Try to load agent-specific config first
-        try:
-            training_config = config.load_agent_training_config(agent_key, training_config_name)
-            print(f"✅ Loaded agent-specific training config: config/agents/{agent_key}/{agent_key}_training_config.json [{training_config_name}]")
-            agent_specific_mode = True
-        except FileNotFoundError:
-            # Fall back to global config if agent-specific doesn't exist
-            print(f"ℹ️  No agent-specific config found, using global: config/training_config.json [{training_config_name}]")
-            training_config = config.load_training_config(training_config_name)
-            agent_specific_mode = False
+        # CRITICAL: NO FALLBACK - agent-specific config MUST exist
+        training_config = config.load_agent_training_config(agent_key, training_config_name)
+        print(f"✅ Loaded agent-specific training config: config/agents/{agent_key}/{agent_key}_training_config.json [{training_config_name}]")
+        agent_specific_mode = True
     else:
         # No agent specified, use global config
         training_config = config.load_training_config(training_config_name)
@@ -2225,8 +2234,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             model_path=model_path,
             training_config=training_config,
             training_config_name=training_config_name,
-            metrics_tracker=metrics_tracker,  # ← ADD THIS
+            metrics_tracker=metrics_tracker,
             total_episodes_override=total_episodes,
+            max_episodes_override=episodes_this_iteration,
             scenario_info=scenario_display,
             global_episode_offset=episodes_trained
         )
@@ -2253,6 +2263,20 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             progress_bar=False
         )
         
+        # Log per-scenario performance after training on this scenario
+        if hasattr(metrics_tracker, 'all_episode_rewards') and len(metrics_tracker.all_episode_rewards) > 0:
+            # Get rewards from this cycle (last episodes_this_iteration episodes)
+            recent_rewards = metrics_tracker.all_episode_rewards[-episodes_this_iteration:] if len(metrics_tracker.all_episode_rewards) >= episodes_this_iteration else metrics_tracker.all_episode_rewards
+            avg_reward = np.mean(recent_rewards) if len(recent_rewards) > 0 else 0
+            
+            # Get win rate from this cycle
+            recent_wins = metrics_tracker.all_episode_wins[-episodes_this_iteration:] if len(metrics_tracker.all_episode_wins) >= episodes_this_iteration else metrics_tracker.all_episode_wins
+            win_rate = np.mean(recent_wins) if len(recent_wins) > 0 else 0
+            
+            # Log per-scenario metrics
+            metrics_tracker.writer.add_scalar(f"scenario_performance/{scenario_name}_avg_reward", avg_reward, episodes_trained)
+            metrics_tracker.writer.add_scalar(f"scenario_performance/{scenario_name}_win_rate", win_rate, episodes_trained)
+        
         # Update counters
         episodes_trained += episodes_this_iteration
         scenario_idx = (scenario_idx + 1) % len(scenario_list)
@@ -2260,7 +2284,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # Check if we completed a full cycle
         if scenario_idx == 0:
             cycle += 1
-            print(f"\n✅ Completed cycle {cycle} - All {len(scenario_list)} scenarios trained")
         
         # Save checkpoint
         checkpoint_path = model_path.replace('.zip', f'_ep{episodes_trained}.zip')
@@ -2281,7 +2304,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     return True, model, env
 
 def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
-                   total_episodes_override=None, scenario_info=None, global_episode_offset=0):
+                   total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0):
     W40KEngine, _ = setup_imports()
     callbacks = []
     
@@ -2298,11 +2321,16 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         max_steps_per_episode = training_config["max_turns_per_episode"] * training_config["max_steps_per_turn"]
         expected_timesteps = max_episodes * max_steps_per_episode
         
-        # Use override for rotation mode (total across all cycles)
+        # Use overrides for rotation mode
         total_eps = total_episodes_override if total_episodes_override else max_episodes
+        cycle_max_eps = max_episodes_override if max_episodes_override else max_episodes
+        
+        # Recalculate expected_timesteps for the actual cycle length
+        if max_episodes_override:
+            expected_timesteps = max_episodes_override * max_steps_per_episode
         
         episode_callback = EpisodeTerminationCallback(
-            max_episodes, 
+            cycle_max_eps,  # Use cycle length, not total
             expected_timesteps, 
             verbose=1,
             total_episodes=total_eps,
@@ -2438,8 +2466,12 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         all_callbacks = callbacks + [metrics_callback]
         enhanced_callbacks = CallbackList(all_callbacks)
         
+        # Use consistent naming: training_config_agent_key
+        tb_log_name = f"{training_config_name}_{agent_name}"
+        
         model.learn(
             total_timesteps=total_timesteps,
+            tb_log_name=tb_log_name,
             callback=enhanced_callbacks,
             log_interval=total_timesteps + 1,
             progress_bar=False  # Disable step-based progress bar (using episode-based instead)

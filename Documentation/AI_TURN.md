@@ -239,13 +239,15 @@ For each unit
 ├── ❌ Remove Mark units_fled
 ├── ❌ Remove Mark units_shot
 ├── ❌ Remove Mark units_charged
-└── ❌ Remove Mark units_fought
+├── ❌ Remove Mark units_fought
+│
 ├── ELIGIBILITY CHECK (move_activation_pool Building Phase)
 │   ├── unit.HP_CUR > 0?
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
 │   └── ALL conditions met → ✅ Add to move_activation_pool
+│
 ├── STEP : UNIT_ACTIVABLE_CHECK → is move_activation_pool NOT empty ?
 │   ├── YES → Current player is an AI player ?
 │   │   ├── YES → pick one unit in move_activation_pool
@@ -264,6 +266,7 @@ For each unit
 │   │   │       │           └── NO → Agent chooses invalid action (shoot/charge/attack)?
 │   │   │       │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, MOVE)
 │   │   │       └── NO → end_activation (PASS, 0, PASS, MOVE)
+│   │   │
 │   │   └── NO → Human player → STEP : UNIT_ACTIVATION
 │   │       ├── If any, cancel the Highlight of the hexes in valid_move_destinations_pool
 │   │       ├── Player activate one unit by left clicking on it
@@ -350,6 +353,7 @@ For each PLAYER unit
 │   ├── Has LOS to enemies within RNG_RNG?
 │   │   └── NO → ❌ No valid targets (Skip, no log)
 │   └── ALL conditions met → ✅ Add to shoot_activation_pool → Highlight the unit with a green circle around its icon
+│
 ├── STEP : UNIT_ACTIVABLE_CHECK → is shoot_activation_pool NOT empty ?
 │   ├── YES → Current player is an AI player ?
 │   │   ├── YES → pick one unit in shoot_activation_pool
@@ -380,6 +384,7 @@ For each PLAYER unit
 │   │   │           │           └── NO → Agent chooses invalid action (move/shoot/attack)?
 │   │   │           │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, SHOOTING)
 │   │   │           └── NO → end_activation (PASS, 0, PASS, SHOOTING)
+│   │   │
 │   │   └── NO → Human player → STEP : UNIT_ACTIVATION → player activate one unit from shoot_activation_pool by left clicking on it
 │   │       ├── Clear any unit remaining in valid_target_pool
 │   │       ├── Clear TOTAL_ATTACK log
@@ -490,11 +495,12 @@ For each unit
 │   ├── Enemies exist within charge_max_distance hexes?
 │   │   └── NO → ❌ No charge targets (Skip, no log)
 │   └── ALL conditions met → ✅ Add to charge_activation_pool
+│
 ├── STEP : UNIT_ACTIVABLE_CHECK → Is charge_activation_pool NOT empty ?
 │   ├── YES → Current player is an AI player ?
 │   │   ├── YES → pick one unit in charge_activation_pool → Roll 2d6 charge dice at START of activation
 │   │   │   ├── Roll 2d6 to define charge_range value at START of activation
-│   │   │   ├── Build valid_charge_destinations_pool (reacheable hexes adjacent to enemy unit using BFS pathfinding AND within charge_range distance)
+│   │   │   ├── Build valid_charge_destinations_pool : reacheable hexes adjacent to enemy unit using BFS pathfinding AND within charge_range distance
 │   │   │   │   └── valid_charge_destinations_pool NOT empty ?
 │   │   │   │       ├── YES → CHARGE PHASE ACTIONS AVAILABLE
 │   │   │   │       │   ├── 🎯 VALID ACTIONS: [charge, wait]
@@ -511,11 +517,12 @@ For each unit
 │   │   │   │       │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, CHARGE)
 │   │   │   │       └── NO → end_activation (PASS, 0, PASS, CHARGE)
 │   │   │   └── Discard charge_range roll (whether used or not)
+│   │   │
 │   │   └── NO → Human player → STEP : UNIT_ACTIVATION → player activate one unit by left clicking on it
 │   │       ├── If any, cancel the Highlight of the hexes in valid_charge_destinations_pool
 │   │       ├── Player activate one unit by left clicking on it
 │   │       ├── Roll 2d6 to define charge_range value at START of activation
-│   │       ├── Build valid_charge_destinations_pool (hexes adjacent to enemy, reacheable using BFS pathfinding within charge_range distance)
+│   │       ├── Build valid_charge_destinations_pool : hexes adjacent to enemy, reacheable using BFS pathfinding within charge_range distance
 │   │       │   └── valid_charge_destinations_pool not empty ?
 │   │       │       ├── YES → STEP : PLAYER_ACTION_SELECTION
 │   │       │       │   ├── Highlight the valid_charge_destinations_pool hexes by making them orange

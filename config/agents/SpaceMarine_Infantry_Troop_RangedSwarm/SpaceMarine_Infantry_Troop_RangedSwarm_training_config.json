@@ -46,7 +46,8 @@
   },
   "phase2": {
     "type": "################################################### Phase 2 ###################################################",
-    "total_episodes": 4000,
+    "total_episodes": 8000,
+    "total_episodes_normal_value": "4000",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 8,
     "rotation_interval": 100,
