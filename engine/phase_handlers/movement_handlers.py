@@ -598,13 +598,21 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     
     try:
         from ai.reward_mapper import RewardMapper
-        rewards_config = game_state.get("rewards_config")
+        reward_configs = game_state.get("reward_configs", {})
         
-        if rewards_config:
-            reward_mapper = RewardMapper(rewards_config)
-            
+        if reward_configs:
             # Map scenario unit type to reward config key
             from ai.unit_registry import UnitRegistry
+            unit_registry = UnitRegistry()
+            scenario_unit_type = unit["unitType"]
+            reward_config_key = unit_registry.get_model_key(scenario_unit_type)
+            
+            # Get unit-specific config or fallback to default
+            unit_reward_config = reward_configs.get(reward_config_key)
+            if not unit_reward_config:
+                raise ValueError(f"No reward config found for unit type '{reward_config_key}' in reward_configs")
+
+            reward_mapper = RewardMapper(unit_reward_config)
             unit_registry = UnitRegistry()
             scenario_unit_type = unit["unitType"]
             reward_config_key = unit_registry.get_model_key(scenario_unit_type)

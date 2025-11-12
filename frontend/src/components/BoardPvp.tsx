@@ -836,36 +836,17 @@ export default function Board({
         if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;
         if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
 
-        // Calculate if this unit is shootable for UnitRenderer (works regardless of phase prop issues)
+        // AI_TURN.md: Use backend's blinkingUnits list for shootability (authoritative LoS calculation)
+        // Backend has already calculated valid targets with proper LoS checks
         let isShootable = true;
-        if (unit.player !== currentPlayer && selectedUnit && selectedUnit.RNG_RNG !== undefined) {
-          // Check range first
-          const cube1 = offsetToCube(selectedUnit.col, selectedUnit.row);
-          const cube2 = offsetToCube(unit.col, unit.row);
-          const distance = cubeDistance(cube1, cube2);
-          if (distance > selectedUnit.RNG_RNG) {
-            isShootable = false;
+        if (phase === "shoot" && unit.player !== currentPlayer) {
+          // During shooting phase, ONLY units in blinkingUnits are shootable
+          // blinkingUnits comes from backend's validTargets list
+          if (blinkingUnits && blinkingUnits.length > 0) {
+            isShootable = blinkingUnits.includes(unit.id);
           } else {
-            // Check for adjacent friendly units blocking
-            const friendlyUnits = units.filter(u => u.player === currentPlayer && u.id !== selectedUnit.id);
-            const isAdjacentToFriendly = friendlyUnits.some(friendly => {
-              const cube1 = offsetToCube(friendly.col, friendly.row);
-              const cube2 = offsetToCube(unit.col, unit.row);
-              return cubeDistance(cube1, cube2) === 1;
-            });
-            if (isAdjacentToFriendly) {
-              isShootable = false;
-            } else {
-              // Check line of sight
-              const lineOfSight = hasLineOfSight(
-                { col: selectedUnit.col, row: selectedUnit.row },
-                { col: unit.col, row: unit.row },
-                (boardConfig.wall_hexes || []) as [number, number][]
-              );
-              if (!lineOfSight.canSee) {
-                isShootable = false;
-              }
-            }
+            // No blinking units = no valid targets
+            isShootable = false;
           }
         }
         

@@ -115,11 +115,22 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
     try:
         from ai.reward_mapper import RewardMapper
         
-        rewards_config = game_state.get("rewards_config")
-        if not rewards_config:
+        reward_configs = game_state.get("reward_configs", {})
+        if not reward_configs:
             return valid_targets[0]
         
-        reward_mapper = RewardMapper(rewards_config)
+        # Get unit type for config lookup
+        from ai.unit_registry import UnitRegistry
+        unit_registry = UnitRegistry()
+        shooter_unit_type = unit["unitType"]
+        shooter_agent_key = unit_registry.get_model_key(shooter_unit_type)
+        
+        # Get unit-specific config or fallback to default
+        unit_reward_config = reward_configs.get(shooter_agent_key)
+        if not unit_reward_config:
+            raise ValueError(f"No reward config found for unit type '{shooter_agent_key}' in reward_configs")
+        
+        reward_mapper = RewardMapper(unit_reward_config)
         
         # Build target list for reward mapper
         all_targets = [_get_unit_by_id(game_state, tid) for tid in valid_targets if _get_unit_by_id(game_state, tid)]
@@ -548,23 +559,39 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "clear_attack_preview": True
         }
     elif game_state["current_player"] == 1:
-        # Player 1 complete → Increment turn, Player 0 movement phase
-        game_state["turn"] += 1
-        game_state["current_player"] = 0
-        return {
-            "phase_complete": True,
-            "phase_transition": True,
-            "next_phase": "move",
-            "current_player": 0,
-            "new_turn": game_state["turn"],
-            # AI_TURN.md COMPLIANCE: Direct field access
-            "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
-            # CRITICAL: Add missing frontend cleanup signals
-            "clear_blinking_gentle": True,
-            "reset_mode": "select", 
-            "clear_selected_unit": True,
-            "clear_attack_preview": True
-        }
+        # Player 1 complete → Check if incrementing turn would exceed limit
+        max_turns = game_state.get("config", {}).get("training_config", {}).get("max_turns_per_episode")
+        if max_turns and (game_state["turn"] + 1) > max_turns:
+            # Incrementing would exceed turn limit - end game without incrementing
+            game_state["game_over"] = True
+            return {
+                "phase_complete": True,
+                "game_over": True,
+                "turn_limit_reached": True,
+                "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
+                "clear_blinking_gentle": True,
+                "reset_mode": "select",
+                "clear_selected_unit": True,
+                "clear_attack_preview": True
+            }
+        else:
+            # Safe to increment turn and continue to P0's movement phase
+            game_state["turn"] += 1
+            game_state["current_player"] = 0
+            return {
+                "phase_complete": True,
+                "phase_transition": True,
+                "next_phase": "move",
+                "current_player": 0,
+                "new_turn": game_state["turn"],
+                # AI_TURN.md COMPLIANCE: Direct field access
+                "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
+                # CRITICAL: Add missing frontend cleanup signals
+                "clear_blinking_gentle": True,
+                "reset_mode": "select", 
+                "clear_selected_unit": True,
+                "clear_attack_preview": True
+            }
 
 def shooting_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """Legacy function - redirects to new complete function"""
@@ -637,7 +664,7 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     response = {
         "activation_ended": True,
         "endType": arg1,
-        "action": "skip" if arg1 == "SKIP" or arg1 == "PASS" else "shoot",
+        "action": "skip" if arg1 == "PASS" else ("wait" if arg1 == "SKIP" else "shoot"),
         "unitId": unit["id"],
         "clear_blinking_gentle": True,
         "reset_mode": "select",
@@ -836,6 +863,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     elif action_type == "wait" or action_type == "skip":
         # Handle gym wait/skip actions - unit chooses not to shoot
+        
+        # DIAGNOSTIC: Verify no cross-player contamination
+        if unit["player"] != game_state["current_player"]:
+            print(f"🚨 BUG DETECTED: Unit {unit_id} (player {unit['player']}) trying to wait during player {game_state['current_player']}'s turn!")
+            print(f"   Current pool: {game_state.get('shoot_activation_pool', [])}")
+            return False, {"error": "wrong_player_unit_wait", "unitId": unit_id, "unit_player": unit["player"], "current_player": game_state["current_player"]}
+        
         if "shoot_activation_pool" not in game_state:
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
         current_pool = game_state["shoot_activation_pool"]
@@ -1000,13 +1034,22 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
    
     try:
         from ai.reward_mapper import RewardMapper
-        rewards_config = game_state.get("rewards_config")
-       
-        # CHANGE 9: Raise error if rewards_config missing
-        if not rewards_config:
-            raise ValueError(f"rewards_config is missing from game_state for shooter {shooter.get('id', 'unknown')}")
+        rewards_configs = game_state.get("rewards_configs")
+        if not rewards_configs:
+            raise ValueError(f"rewards_configs is missing from game_state for shooter {shooter.get('id', 'unknown')}")
         
-        reward_mapper = RewardMapper(rewards_config)
+        # Get unit type for config lookup using UnitRegistry
+        from ai.unit_registry import UnitRegistry
+        unit_registry = UnitRegistry()
+        shooter_unit_type = shooter["unitType"]
+        shooter_agent_key = unit_registry.get_model_key(shooter_unit_type)
+        
+        # Get unit-specific config - RAISE ERROR if not found
+        unit_reward_config = rewards_configs.get(shooter_agent_key)
+        if not unit_reward_config:
+            raise ValueError(f"No reward config found for unit type '{shooter_agent_key}' in rewards_configs")
+        
+        reward_mapper = RewardMapper(unit_reward_config)
        
         # CHANGE 1: Use unit_registry to map scenario type to reward config key
         # This ensures EACH unit gets its correct reward configuration

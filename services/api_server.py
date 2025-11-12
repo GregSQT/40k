@@ -34,6 +34,55 @@ flask_request_logs = []
 # Global engine instance
 engine: Optional[W40KEngine] = None
 
+def get_agents_from_scenario(scenario_file: str, unit_registry) -> set:
+    """Extract unique agent keys from scenario units.
+    
+    Args:
+        scenario_file: Path to scenario.json
+        unit_registry: UnitRegistry instance for unit_type → agent_key mapping
+        
+    Returns:
+        Set of unique agent keys found in scenario
+        
+    Raises:
+        FileNotFoundError: If scenario file doesn't exist
+        ValueError: If scenario format invalid or unit type not found in registry
+    """
+    import json
+    
+    if not os.path.exists(scenario_file):
+        raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
+    
+    try:
+        with open(scenario_file, 'r') as f:
+            scenario_data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in scenario file: {e}")
+    
+    if not isinstance(scenario_data, dict) or "units" not in scenario_data:
+        raise ValueError(f"Invalid scenario format: must have 'units' array")
+    
+    units = scenario_data["units"]
+    if not units:
+        raise ValueError("Scenario contains no units")
+    
+    agent_keys = set()
+    for unit in units:
+        if "unit_type" not in unit:
+            raise ValueError(f"Unit missing 'unit_type' field: {unit}")
+        
+        unit_type = unit["unit_type"]
+        try:
+            agent_key = unit_registry.get_model_key(unit_type)
+            agent_keys.add(agent_key)
+        except ValueError as e:
+            raise ValueError(
+                f"Failed to determine agent for unit type '{unit_type}': {e}\n"
+                f"Ensure unit is defined in frontend/src/roster/ with proper agent properties"
+            )
+    
+    return agent_keys
+
 def initialize_engine():
     """Initialize the W40K engine with configuration."""
     global engine
@@ -51,14 +100,48 @@ def initialize_engine():
         from ai.unit_registry import UnitRegistry
         unit_registry = UnitRegistry()
         
-        # CRITICAL FIX: Load actual rewards config dictionary
+        # Load agent-specific configs based on scenario units
         from config_loader import get_config_loader
         config_loader = get_config_loader()
-        rewards_config = config_loader.load_rewards_config("default")
-        training_config = config_loader.load_training_config("default")
         
-        # Add rewards_config to config
-        config["rewards_config"] = rewards_config
+        # Determine which agents are in the scenario
+        agent_keys = get_agents_from_scenario(scenario_file, unit_registry)
+        if not agent_keys:
+            raise ValueError("No agents found in scenario")
+        
+        print(f"DEBUG: Found {len(agent_keys)} unique agent(s) in scenario: {agent_keys}")
+        
+        # For PvP mode, we need configs for all agents
+        # Load configs for each agent and merge them
+        all_rewards_configs = {}
+        all_training_configs = {}
+        
+        for agent_key in agent_keys:
+            try:
+                agent_rewards = config_loader.load_agent_rewards_config(agent_key)
+                agent_training = config_loader.load_agent_training_config(agent_key)
+                
+                # Store agent-specific configs
+                all_rewards_configs[agent_key] = agent_rewards
+                all_training_configs[agent_key] = agent_training
+                
+                print(f"✅ Loaded configs for agent: {agent_key}")
+            except FileNotFoundError as e:
+                raise FileNotFoundError(
+                    f"Missing config for agent '{agent_key}' found in scenario.\n{e}\n"
+                    f"Create required files:\n"
+                    f"  - config/agents/{agent_key}/{agent_key}_rewards_config.json\n"
+                    f"  - config/agents/{agent_key}/{agent_key}_training_config.json"
+                )
+        
+        # Use first agent's training config for observation params (all agents should match)
+        first_agent = list(agent_keys)[0]
+        training_config = all_training_configs[first_agent]
+        
+        # Add configs to main config
+        config["rewards_configs"] = all_rewards_configs  # Multi-agent support
+        config["training_configs"] = all_training_configs  # Multi-agent support
+        config["agent_keys"] = list(agent_keys)  # Track which agents are active
         
         # CRITICAL FIX: Add observation_params from training_config (same as w40k_core.py line 81-94)
         obs_params = training_config.get("observation_params", {
@@ -81,8 +164,9 @@ def initialize_engine():
             quiet=True
         )
         
-        # CRITICAL FIX: Add rewards_config to game_state after engine creation
-        engine.game_state["rewards_config"] = rewards_config
+        # CRITICAL FIX: Add rewards_configs to game_state after engine creation
+        engine.game_state["rewards_configs"] = all_rewards_configs
+        engine.game_state["agent_keys"] = list(agent_keys)
         
         # Restore original working directory
         os.chdir(original_cwd)
@@ -116,15 +200,48 @@ def initialize_pve_engine():
         from ai.unit_registry import UnitRegistry
         unit_registry = UnitRegistry()
         
-        # CRITICAL FIX: Load actual rewards config dictionary
+        # Load agent-specific configs based on scenario units
         from config_loader import get_config_loader
         config_loader = get_config_loader()
-        rewards_config = config_loader.load_rewards_config("default")
-        training_config = config_loader.load_training_config("default")
+        
+        # Determine which agents are in the scenario
+        agent_keys = get_agents_from_scenario(scenario_file, unit_registry)
+        if not agent_keys:
+            raise ValueError("No agents found in scenario")
+        
+        print(f"DEBUG: Found {len(agent_keys)} unique agent(s) in scenario: {agent_keys}")
+        
+        # For PvE mode, load configs for all agents
+        all_rewards_configs = {}
+        all_training_configs = {}
+        
+        for agent_key in agent_keys:
+            try:
+                agent_rewards = config_loader.load_agent_rewards_config(agent_key)
+                agent_training = config_loader.load_agent_training_config(agent_key)
+                
+                # Store agent-specific configs
+                all_rewards_configs[agent_key] = agent_rewards
+                all_training_configs[agent_key] = agent_training
+                
+                print(f"✅ Loaded configs for agent: {agent_key}")
+            except FileNotFoundError as e:
+                raise FileNotFoundError(
+                    f"Missing config for agent '{agent_key}' found in scenario.\n{e}\n"
+                    f"Create required files:\n"
+                    f"  - config/agents/{agent_key}/{agent_key}_rewards_config.json\n"
+                    f"  - config/agents/{agent_key}/{agent_key}_training_config.json"
+                )
+        
+        # Use first agent's training config for observation params
+        first_agent = list(agent_keys)[0]
+        training_config = all_training_configs[first_agent]
         
         # Create engine with PvE configuration - set pve_mode in config
         config["pve_mode"] = True
-        config["rewards_config"] = rewards_config
+        config["rewards_configs"] = all_rewards_configs  # Multi-agent support
+        config["training_configs"] = all_training_configs  # Multi-agent support
+        config["agent_keys"] = list(agent_keys)  # Track which agents are active
         
         # CRITICAL FIX: Add observation_params from training_config (same as w40k_core.py line 81-94)
         obs_params = training_config.get("observation_params", {
@@ -146,8 +263,9 @@ def initialize_pve_engine():
             quiet=True
         )
         
-        # CRITICAL FIX: Add rewards_config to game_state after engine creation
-        engine.game_state["rewards_config"] = rewards_config
+        # CRITICAL FIX: Add rewards_configs to game_state after engine creation
+        engine.game_state["rewards_configs"] = all_rewards_configs
+        engine.game_state["agent_keys"] = list(agent_keys)
         
         # CRITICAL FIX: Load AI model for PvE mode after engine initialization
         print("DEBUG: Loading AI model for PvE mode...")

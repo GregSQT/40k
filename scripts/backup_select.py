@@ -54,21 +54,26 @@ else:
         "ai/training/train_w40k.py",
 
 ######################################################################################################
+##### check files
+######################################################################################################
+
+        "check/analyze_step_log.py",
+        
+######################################################################################################
 ##### config files
 ######################################################################################################
         "config/board_config.json",    # Board Layout & Visualization
         #"config/config.json",        # Master Configuration & Paths
         "config/game_config.json",   # Game Rules & Mechanics
-        "config/rewards_config.json",  # Reward System Definitions
         "config/scenario.json",        # Game Scenarios
         "config/scenario_1_Fight_Position.json",
         "config/scenario_2_Mixt_Positions.json",
         "config/scenario_templates.json",
-        "config/training_config.json", # AI Training Parameters
         "config/unit_definitions.json", # Unit Stats & Abilities
         "config/unit_registry.json", # Unit Registry
         
-    ### agent : SpaceMarine_Infantry_Troop_RangedSwarm
+    ### agents : 
+        # SpaceMarine_Infantry_Troop_RangedSwarm
         "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/SpaceMarine_Infantry_Troop_RangedSwarm_rewards_config.json",
         "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/SpaceMarine_Infantry_Troop_RangedSwarm_training_config.json",
         "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase1.json",
@@ -77,6 +82,21 @@ else:
         "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase2-3.json",
         "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase2-4.json",
         "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase3-1.json",
+        # SpaceMarine_Infantry_LeaderElite_MeleeElite
+        "config/agents/SpaceMarine_Infantry_LeaderElite_MeleeElite/SpaceMarine_Infantry_LeaderElite_MeleeElite_rewards_config.json",
+        "config/agents/SpaceMarine_Infantry_LeaderElite_MeleeElite/SpaceMarine_Infantry_LeaderElite_MeleeElite_training_config.json",
+        # SpaceMarine_Infantry_Troop_MeleeTroop
+        "config/agents/SpaceMarine_Infantry_Troop_MeleeTroop/SpaceMarine_Infantry_Troop_MeleeTroop_rewards_config.json",
+        "config/agents/SpaceMarine_Infantry_Troop_MeleeTroop/SpaceMarine_Infantry_Troop_MeleeTroop_training_config.json",
+        # Tyranid_Infantry_Elite_MeleeElite
+        "config/agents/Tyranid_Infantry_Elite_MeleeElite/Tyranid_Infantry_Elite_MeleeElite_rewards_config.json",
+        "config/agents/Tyranid_Infantry_Elite_MeleeElite/Tyranid_Infantry_Elite_MeleeElite_training_config.json",
+        # Tyranid_Infantry_Swarm_MeleeSwarm
+        "config/agents/Tyranid_Infantry_Swarm_MeleeSwarm/Tyranid_Infantry_Swarm_MeleeSwarm_rewards_config.json",
+        "config/agents/Tyranid_Infantry_Swarm_MeleeSwarm/Tyranid_Infantry_Swarm_MeleeSwarm_training_config.json",
+        # Tyranid_Infantry_Swarm_RangedSwarm
+        "config/agents/Tyranid_Infantry_Swarm_RangedSwarm/Tyranid_Infantry_Swarm_RangedSwarm_rewards_config.json",
+        "config/agents/Tyranid_Infantry_Swarm_RangedSwarm/Tyranid_Infantry_Swarm_RangedSwarm_training_config.json",
         
     ### Units
         #"config/units/space_marines.json", # Unit Definitions

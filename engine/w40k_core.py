@@ -53,21 +53,26 @@ class W40KEngine(gym.Env):
             from config_loader import get_config_loader
             config_loader = get_config_loader()
             
-            # Load rewards configuration like gym40k.py
-            # Load FULL rewards config file (not just agent section)
-            self.rewards_config = config_loader.load_config("rewards_config", force_reload=False)
+            # Load agent-specific rewards configuration
+            if not controlled_agent:
+                raise ValueError("controlled_agent parameter required when config is None - cannot load agent-specific rewards")
+            
+            self.rewards_config = config_loader.load_agent_rewards_config(controlled_agent)
             if not self.rewards_config:
-                raise RuntimeError("Failed to load rewards configuration from config_loader - check config/rewards_config.json")
+                raise RuntimeError(f"Failed to load rewards configuration for agent: {controlled_agent}")
             
             # Store the agent-specific config name for reference
             self.rewards_config_name = rewards_config
-            if not self.rewards_config:
-                raise RuntimeError("Failed to load rewards configuration from config_loader - check config/rewards_config.json")
+            if not self.rewards_config_name:
+                raise ValueError("rewards_config parameter required - specifies which reward section to use")
             
-            # Load training configuration for turn limits
-            self.training_config = config_loader.load_training_config(training_config_name)
+            # Load agent-specific training configuration for turn limits
+            if not training_config_name:
+                raise ValueError("training_config_name parameter required when config is None - cannot load agent-specific training config")
+            
+            self.training_config = config_loader.load_agent_training_config(controlled_agent, training_config_name)
             if not self.training_config:
-                raise RuntimeError(f"Failed to load training configuration: {training_config_name}")
+                raise RuntimeError(f"Failed to load training configuration for agent {controlled_agent}, phase {training_config_name}")
             
             # Load base configuration
             board_config = config_loader.get_board_config()
@@ -77,13 +82,10 @@ class W40KEngine(gym.Env):
             # PvE mode: will be set later in constructor
             pve_mode_value = False  # Default for training
             
-            # Extract observation_params for module access
-            obs_params = self.training_config.get("observation_params", {
-                "obs_size": 295,
-                "perception_radius": 25,
-                "max_nearby_units": 10,
-                "max_valid_targets": 5
-            })  # ✓ CHANGE 1: Extract observation_params from training_config
+            # Extract observation_params for module access - NO FALLBACKS
+            if "observation_params" not in self.training_config:
+                raise KeyError(f"observation_params missing from {controlled_agent} training config phase {training_config_name}")
+            obs_params = self.training_config["observation_params"]
             
             self.config = {
                 "board": board_config,
@@ -176,8 +178,10 @@ class W40KEngine(gym.Env):
             # Metrics tracking
             "action_logs": [],  # CRITICAL: For metrics collection - tracks all actions per episode
             
-            # CHANGE 11: Add rewards_config to game_state for handler access
-            "rewards_config": self.rewards_config,
+            # CHANGE 11: Add rewards_configs (plural) to game_state for handler access
+            "rewards_configs": {
+                self.config.get("controlled_agent", "default"): self.rewards_config
+            },
             "config": self.config,
             
             # Board state - handle both config formats
@@ -361,8 +365,9 @@ class W40KEngine(gym.Env):
         # Convert gym integer action to semantic action
         semantic_action = self.action_decoder.convert_gym_action(action, self.game_state)
         
-        # CRITICAL: Capture phase and positions BEFORE action execution for accurate logging
+        # CRITICAL: Capture phase, player, and positions BEFORE action execution for accurate logging
         pre_action_phase = self.game_state["phase"]
+        pre_action_player = self.game_state["current_player"]
         pre_action_positions = {}
         if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
             # AI_TURN.md COMPLIANCE: Direct field access for semantic actions
@@ -522,7 +527,7 @@ class W40KEngine(gym.Env):
                         unit_id=updated_unit["id"],
                         action_type=action_type,  # CHANGE 4: Use validated action_type variable from line 406
                         phase=pre_action_phase,  # Use phase captured before action executed
-                        player=self.game_state["current_player"],
+                        player=pre_action_player,  # Use player captured before action executed
                         success=success,
                         step_increment=True,
                         action_details=action_details
@@ -749,34 +754,6 @@ class W40KEngine(gym.Env):
         self._advance_to_next_player()
         return True, {"type": "phase_complete", "next_player": self.game_state["current_player"]}
     
-    def _advance_to_next_player(self):
-        """Advance to next player per AI_TURN.md turn progression."""
-        # Player switching logic
-        if self.game_state["current_player"] == 0:
-            self.game_state["current_player"] = 1
-        elif self.game_state["current_player"] == 1:
-            self.game_state["current_player"] = 0
-            self.game_state["turn"] += 1
-        
-        # Phase progression logic - simplified to move -> shoot -> move
-        if self.game_state["phase"] == "move":
-            self._shooting_phase_init()
-        elif self.game_state["phase"] == "shoot":
-            self._movement_phase_init()
-        elif self.game_state["phase"] == "charge":
-            self._movement_phase_init()
-        elif self.game_state["phase"] == "fight":
-            self._movement_phase_init()
-    
-    def _tracking_cleanup(self):
-        """Clear tracking sets at the VERY BEGINNING of movement phase."""
-        self.game_state["units_moved"] = set()
-        self.game_state["units_fled"] = set()
-        self.game_state["units_shot"] = set()
-        self.game_state["units_charged"] = set()
-        self.game_state["units_attacked"] = set()
-        self.game_state["move_activation_pool"] = []
- 
     # ============================================================================
     # PHASE INITIALIZATION - KEEP THESE (Handler delegation)
     # ============================================================================
@@ -807,12 +784,6 @@ class W40KEngine(gym.Env):
             self._charge_phase_init()
     
     
-    def _advance_to_fight_phase(self):
-        """Advance to fight phase per AI_TURN.md progression."""
-        self.game_state["phase"] = "fight"
-        self.game_state["fight_subphase"] = "charging_units"
-    
-    
     def _advance_to_next_player(self):
         """Advance to next player per AI_TURN.md turn progression."""
         # Player switching logic
@@ -821,6 +792,14 @@ class W40KEngine(gym.Env):
         elif self.game_state["current_player"] == 1:
             self.game_state["current_player"] = 0
             self.game_state["turn"] += 1
+            
+            # Check turn limit immediately after P1 completes turn
+            if hasattr(self, 'training_config'):
+                max_turns = self.training_config.get("max_turns_per_episode")
+                if max_turns and self.game_state["turn"] > max_turns:
+                    # Turn limit reached - mark game over and stop phase progression
+                    self.game_state["game_over"] = True
+                    return
         
         # Phase progression logic - simplified to move -> shoot -> move
         if self.game_state["phase"] == "move":
@@ -893,39 +872,32 @@ class W40KEngine(gym.Env):
             print(f"\n🔍 WINNER DETERMINATION DEBUG:")
             print(f"   Current turn: {current_turn}")
             print(f"   Max turns: {max_turns}")
+            print(f"   Game over: {self.game_state.get('game_over')}")
             print(f"   Living units: {living_units_by_player}")
             print(f"   Has training_config: {hasattr(self, 'training_config')}")
-            if hasattr(self, 'training_config'):
-                print(f"   Turn > max_turns? {current_turn > max_turns if max_turns else 'N/A'}")
         
-        # Check if game ended due to turn limit
-        if hasattr(self, 'training_config'):
-            max_turns = self.training_config.get("max_turns_per_episode")
-            if max_turns and self.game_state["turn"] > max_turns:
-                # Turn limit reached - determine winner by remaining units
-                living_players = list(living_units_by_player.keys())
-                if len(living_players) == 1:
-                    if not self.quiet:
-                        print(f"   → Winner: Player {living_players[0]} (elimination after turn limit)")
-                    return living_players[0]
-                elif len(living_players) == 2:
-                    # Both players have units - compare counts
-                    if living_units_by_player[0] > living_units_by_player[1]:
+        # PRIORITY CHECK: If game_over is True and we're at turn limit, determine winner
+        if self.game_state.get("game_over"):
+            if hasattr(self, 'training_config'):
+                max_turns = self.training_config.get("max_turns_per_episode")
+                if max_turns and self.game_state["turn"] == max_turns:
+                    # Game ended at exactly turn limit
+                    living_players = list(living_units_by_player.keys())
+                    if len(living_players) == 2:
+                        # Both players alive at turn limit - DRAW
                         if not self.quiet:
-                            print(f"   → Winner: Player 0 ({living_units_by_player[0]} > {living_units_by_player[1]} units)")
-                        return 0
-                    elif living_units_by_player[1] > living_units_by_player[0]:
+                            print(f"   → Draw: Turn limit reached with both players alive (P0: {living_units_by_player.get(0, 0)} units, P1: {living_units_by_player.get(1, 0)} units)")
+                        return -1
+                    elif len(living_players) == 1:
+                        # One player eliminated at turn limit
                         if not self.quiet:
-                            print(f"   → Winner: Player 1 ({living_units_by_player[1]} > {living_units_by_player[0]} units)")
-                        return 1
+                            print(f"   → Winner: Player {living_players[0]} (elimination at turn limit)")
+                        return living_players[0]
                     else:
+                        # No survivors at turn limit
                         if not self.quiet:
-                            print(f"   → Draw: Equal units ({living_units_by_player[0]} == {living_units_by_player[1]}) - returning -1")
-                        return -1  # Draw - equal units (use -1 to distinguish from None/ongoing)
-                else:
-                    if not self.quiet:
-                        print(f"   → Draw: Unexpected player count ({len(living_players)} players) - returning -1")
-                    return -1  # Draw - no units or other scenario
+                            print(f"   → Draw: No survivors at turn limit")
+                        return -1
         
         # Normal elimination rules
         living_players = list(living_units_by_player.keys())

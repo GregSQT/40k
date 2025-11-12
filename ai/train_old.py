@@ -1,4 +1,4 @@
-﻿# ai/train.py
+# ai/train.py
 #!/usr/bin/env python3
 """
 ai/train.py - Main training script following AI_INSTRUCTIONS.md exactly
@@ -64,47 +64,14 @@ class BotControlledEnv:
         if hasattr(base_env, 'env'):
             # ActionMasker wraps the actual engine in .env attribute
             self.engine = base_env.env
-        
-        # DIAGNOSTIC: Track shoot phase decisions FOR BOT
-        self.shoot_opportunities = 0  # Times shoot was available
-        self.shoot_actions = 0        # Times bot actually shot
-        self.wait_actions = 0          # Times bot waited in shoot phase
-        
-        # DIAGNOSTIC: Track shoot phase decisions FOR AI AGENT
-        self.ai_shoot_opportunities = 0
-        self.ai_shoot_actions = 0
-        self.ai_wait_actions = 0
     
     def reset(self, seed=None, options=None):
         obs, info = self.base_env.reset(seed=seed, options=options)
         self.episode_reward = 0.0
         self.episode_length = 0
-        
-        # DIAGNOSTIC: Reset shoot tracking for new episode
-        self.shoot_opportunities = 0
-        self.shoot_actions = 0
-        self.wait_actions = 0
-        
-        # DIAGNOSTIC: Reset AI shoot tracking
-        self.ai_shoot_opportunities = 0
-        self.ai_shoot_actions = 0
-        self.ai_wait_actions = 0
-        
         return obs, info
     
     def step(self, agent_action):
-        # DIAGNOSTIC: Track AI shoot phase decisions BEFORE executing action
-        game_state = self.engine.game_state
-        current_phase = game_state.get("phase", "")
-        action_mask = self.engine.get_action_mask()
-        
-        if current_phase == "shoot" and 4 in [i for i in range(12) if action_mask[i]]:
-            self.ai_shoot_opportunities += 1
-            if agent_action == 4:
-                self.ai_shoot_actions += 1
-            elif agent_action in [7, 11]:  # Wait actions
-                self.ai_wait_actions += 1
-        
         # Execute agent action
         obs, reward, terminated, truncated, info = self.base_env.step(agent_action)
         self.episode_reward += reward
@@ -127,51 +94,17 @@ class BotControlledEnv:
         if not valid_actions:
             return 11
         
-        # DIAGNOSTIC: Track shoot phase opportunities
-        current_phase = game_state.get("phase", "")
-        if current_phase == "shoot" and 4 in valid_actions:
-            self.shoot_opportunities += 1
-        
         if hasattr(self.bot, 'select_action_with_state'):
             bot_choice = self.bot.select_action_with_state(valid_actions, game_state)
         else:
             bot_choice = self.bot.select_action(valid_actions)
         
         if bot_choice not in valid_actions:
-            return valid_actions[0]
-        
-        # DIAGNOSTIC: Track actual shoot/wait decisions in shoot phase
-        if current_phase == "shoot":
-            if bot_choice == 4:
-                self.shoot_actions += 1
-            elif bot_choice == 7:  # Wait
-                self.wait_actions += 1
-        
+            return valid_actions[0]        
         return bot_choice
     
     def close(self):
         self.base_env.close()
-    
-    def get_shoot_stats(self) -> dict:
-        """Return shooting statistics for diagnostic analysis."""
-        shoot_rate = (self.shoot_actions / self.shoot_opportunities * 100) if self.shoot_opportunities > 0 else 0
-        wait_rate = (self.wait_actions / self.shoot_opportunities * 100) if self.shoot_opportunities > 0 else 0
-        
-        ai_shoot_rate = (self.ai_shoot_actions / self.ai_shoot_opportunities * 100) if self.ai_shoot_opportunities > 0 else 0
-        ai_wait_rate = (self.ai_wait_actions / self.ai_shoot_opportunities * 100) if self.ai_shoot_opportunities > 0 else 0
-        
-        return {
-            'shoot_opportunities': self.shoot_opportunities,
-            'shoot_actions': self.shoot_actions,
-            'wait_actions': self.wait_actions,
-            'shoot_rate': shoot_rate,
-            'wait_rate': wait_rate,
-            'ai_shoot_opportunities': self.ai_shoot_opportunities,
-            'ai_shoot_actions': self.ai_shoot_actions,
-            'ai_wait_actions': self.ai_wait_actions,
-            'ai_shoot_rate': ai_shoot_rate,
-            'ai_wait_rate': ai_wait_rate
-        }
     
     @property
     def observation_space(self):
@@ -482,11 +415,10 @@ class EpisodeBasedEvalCallback(BaseCallback):
 class MetricsCollectionCallback(BaseCallback):
     """Callback to collect training metrics and send to W40KMetricsTracker."""
     
-    def __init__(self, metrics_tracker, model, controlled_agent=None, verbose: int = 0):
+    def __init__(self, metrics_tracker, model, verbose: int = 0):
         super().__init__(verbose)
         self.metrics_tracker = metrics_tracker
         self.model = model
-        self.controlled_agent = controlled_agent  # CRITICAL FIX: Store controlled_agent for bot evaluation
         self.episode_count = 0
         self.episode_reward = 0
         self.episode_length = 0
@@ -618,7 +550,7 @@ class MetricsCollectionCallback(BaseCallback):
     
     def _run_final_bot_eval(self, model, training_config, training_config_name, rewards_config_name):
         """Run final comprehensive bot evaluation using standalone function"""
-        controlled_agent = self.controlled_agent  # CRITICAL FIX: Use stored controlled_agent instead of looking in training_config
+        controlled_agent = training_config.get('controlled_agent')
         
         # Extract n_episodes from callback_params in training_config
         if 'callback_params' not in training_config:
@@ -753,7 +685,7 @@ class MetricsCollectionCallback(BaseCallback):
             
             # Only log if there are actual training metrics available
             # SB3 updates these after each policy update (every n_steps)
-            if len(model_stats) > 0:
+            if any(key.startswith('train/') for key in model_stats.keys()):
                 # Pass complete model stats to metrics tracker
                 # This includes: learning_rate, policy_loss, value_loss, entropy_loss,
                 # clip_fraction, approx_kl, explained_variance, n_updates, fps
@@ -957,8 +889,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     
     for bot_name, bot in bots.items():
         wins = 0
-        losses = 0
-        draws = 0
         for episode_num in range(n_episodes):
             completed_episodes += 1
             
@@ -983,7 +913,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 
                 # Create base environment with specified training config
                 base_env = W40KEngine(
-                    rewards_config=rewards_config_name,
+                    rewards_config=training_config_name,
                     training_config_name=training_config_name,
                     controlled_agent=controlled_agent,
                     active_agents=None,
@@ -992,10 +922,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     quiet=True,
                     gym_training_mode=True
                 )
-                
-                # Connect step logger if enabled
-                if 'step_logger' in globals() and step_logger and step_logger.enabled:
-                    base_env.step_logger = step_logger
                 
                 # Wrap with ActionMasker (CRITICAL for proper action masking)
                 def mask_fn(env):
@@ -1028,23 +954,10 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     done = terminated or truncated
                     step_count += 1
                 
-                # Determine winner - track wins/losses/draws
+                # Determine winner - handle both controlled_agent cases
                 agent_player = 1 if controlled_agent else 0
-                winner = info.get('winner')
-                
-                if winner == agent_player:
+                if info.get('winner') == agent_player:
                     wins += 1
-                elif winner == -1:
-                    draws += 1
-                else:
-                    losses += 1
-                
-                # DIAGNOSTIC: Collect shoot stats from last 5 episodes
-                if episode_num >= n_episodes - 5:
-                    bot_stats = bot_env.get_shoot_stats()
-                    if f'{bot_name}_shoot_stats' not in results:
-                        results[f'{bot_name}_shoot_stats'] = []
-                    results[f'{bot_name}_shoot_stats'].append(bot_stats)
                 
                 bot_env.close()
             except Exception as e:
@@ -1055,21 +968,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         win_rate = wins / n_episodes
         results[bot_name] = win_rate
         results[f'{bot_name}_wins'] = wins
-        results[f'{bot_name}_losses'] = losses
-        results[f'{bot_name}_draws'] = draws
-        
-        # DIAGNOSTIC: Print average shoot stats for this bot
-        if f'{bot_name}_shoot_stats' in results and results[f'{bot_name}_shoot_stats']:
-            stats_list = results[f'{bot_name}_shoot_stats']
-            avg_opportunities = sum(s['shoot_opportunities'] for s in stats_list) / len(stats_list)
-            avg_shoot_rate = sum(s['shoot_rate'] for s in stats_list) / len(stats_list)
-            
-            avg_ai_opportunities = sum(s['ai_shoot_opportunities'] for s in stats_list) / len(stats_list)
-            avg_ai_shoot_rate = sum(s['ai_shoot_rate'] for s in stats_list) / len(stats_list)
-            
-            if show_progress:
-                print(f"\n   📊 {bot_name.capitalize()}Bot: {avg_shoot_rate:.1f}% shoot rate ({avg_opportunities:.1f} opportunities/game)")
-                print(f"   🤖 AI Agent:  {avg_ai_shoot_rate:.1f}% shoot rate ({avg_ai_opportunities:.1f} opportunities/game)")
     
     if show_progress:
         print("\r" + " " * 120)  # Clear the progress bar line
@@ -1077,14 +975,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     
     # Combined score with standard weighting: RandomBot 20%, GreedyBot 30%, DefensiveBot 50%
     results['combined'] = 0.2 * results['random'] + 0.3 * results['greedy'] + 0.5 * results['defensive']
-    
-    # DIAGNOSTIC: Print shoot statistics (sample from last episode of each bot)
-    if show_progress:
-        print("\n" + "="*80)
-        print("📊 DIAGNOSTIC: Shoot Phase Behavior")
-        print("="*80)
-        print("Bot behavior analysis completed - check logs for detailed stats")
-        print("="*80 + "\n")
     
     return results
 
@@ -1852,14 +1742,6 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             # Update any model parameters that might have changed
             model.tensorboard_log = model_params["tensorboard_log"]
             model.verbose = model_params["verbose"]
-            
-            # CRITICAL FIX: Reinitialize logger after loading from checkpoint
-            # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
-            # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
-            from stable_baselines3.common.logger import configure
-            new_logger = configure(model.tensorboard_log, ["tensorboard"])
-            model.set_logger(new_logger)
-            print(f"✅ Logger reinitialized for TensorBoard: {model.tensorboard_log}")
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
@@ -2093,9 +1975,12 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
     
-    # Use agent_key directly - it's the directory name for config loading
-    # rewards_config_name is the SECTION NAME within the rewards file
-    effective_agent_key = agent_key
+    # CRITICAL FIX: Use rewards_config_name for phase-specific training
+    # When rewards_config is phase-specific (e.g., "..._phase1"), use it as controlled_agent
+    if rewards_config_name not in ["default", "test"]:
+        effective_agent_key = rewards_config_name
+    else:
+        effective_agent_key = agent_key
     
     # ✓ CHANGE 8: Check if vectorization is enabled in config
     n_envs = training_config.get("n_envs", 1)
@@ -2184,14 +2069,6 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                 raise KeyError("model_params missing required 'tensorboard_log' field")
             model.tensorboard_log = model_params["tensorboard_log"]
             model.verbose = model_params["verbose"]
-            
-            # CRITICAL FIX: Reinitialize logger after loading from checkpoint
-            # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
-            # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
-            from stable_baselines3.common.logger import configure
-            new_logger = configure(model.tensorboard_log, ["tensorboard"])
-            model.set_logger(new_logger)
-            print(f"✅ Logger reinitialized for TensorBoard: {model.tensorboard_log}")
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
@@ -2239,18 +2116,12 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     print(f"Total cycles: ~{total_cycles} complete rotations through all scenarios")
     print(f"{'='*80}\n")
     
-    # Load agent-specific training config to get model parameters
-    training_config = config.load_agent_training_config(agent_key, training_config_name)
-    
-    # Raise error if required fields missing - NO FALLBACKS
-    if "max_turns_per_episode" not in training_config:
-        raise KeyError(f"max_turns_per_episode missing from {agent_key} training config phase {training_config_name}")
-    if "max_steps_per_turn" not in training_config:
-        raise KeyError(f"max_steps_per_turn missing from {agent_key} training config phase {training_config_name}")
+    # Load training config to get model parameters
+    training_config = config.load_training_config(training_config_name)
     
     # Calculate average steps per episode for timestep conversion
-    max_turns = training_config["max_turns_per_episode"]
-    max_steps = training_config["max_steps_per_turn"]
+    max_turns = training_config.get("max_turns_per_episode", 5)
+    max_steps = training_config.get("max_steps_per_turn", 8)
     avg_steps_per_episode = max_turns * max_steps * 0.6  # Estimate: 60% of max
     
     # Get model path
@@ -2267,9 +2138,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
     
-    # Use agent_key directly - it's the directory name for config loading
-    # rewards_config_name is the SECTION NAME within the rewards file
-    effective_agent_key = agent_key
+    # Determine effective agent key for rewards
+    if rewards_config_name not in ["default", "test"]:
+        effective_agent_key = rewards_config_name
+    else:
+        effective_agent_key = agent_key
     
     current_scenario = scenario_list[0]
     base_env = W40KEngine(
@@ -2300,15 +2173,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
             model = MaskablePPO.load(model_path, env=env)
-            
-            # CRITICAL FIX: Reinitialize logger after loading from checkpoint
-            # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
-            # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
-            from stable_baselines3.common.logger import configure
-            tensorboard_log_dir = model_params.get("tensorboard_log", "./tensorboard/")
-            new_logger = configure(tensorboard_log_dir, ["tensorboard"])
-            model.set_logger(new_logger)
-            print(f"✅ Logger reinitialized for TensorBoard: {tensorboard_log_dir}")
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
@@ -2329,10 +2193,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # Create metrics tracker for entire rotation training
     metrics_tracker = W40KMetricsTracker(agent_key, model_tensorboard_dir)
     print(f"📈 Metrics tracking enabled for agent: {agent_key}")
-    
-    # Create metrics callback ONCE before loop (not inside it)
-    from stable_baselines3.common.callbacks import CallbackList
-    metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=effective_agent_key)
     
     # Training loop with scenario rotation
     episodes_trained = 0
@@ -2381,6 +2241,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             global_episode_offset=episodes_trained
         )
         
+        # Add metrics collection callback
+        from stable_baselines3.common.callbacks import CallbackList
+        metrics_callback = MetricsCollectionCallback(metrics_tracker, model)
+        
         # Link metrics_tracker to bot evaluation callback
         for callback in rotation_callbacks:
             if hasattr(callback, '__class__') and callback.__class__.__name__ == 'BotEvaluationCallback':
@@ -2396,7 +2260,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             reset_num_timesteps=(episodes_trained == 0),  # Only reset on first iteration
             tb_log_name=tb_log_name,  # Same name = continuous graph
             callback=enhanced_callbacks,  # ← CHANGE FROM rotation_callbacks
-            log_interval=timesteps_this_iteration + 1,
             progress_bar=False
         )
         
@@ -2532,7 +2395,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     
     return callbacks
 
-def train_model(model, training_config, callbacks, model_path, training_config_name, rewards_config_name, controlled_agent=None):
+def train_model(model, training_config, callbacks, model_path, training_config_name, rewards_config_name):
     """Execute the training process with metrics tracking."""
     
     # Import metrics tracker
@@ -2592,7 +2455,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         print(f"📈 Metrics tracking enabled for agent: {agent_name}")
         
         # Enhanced callbacks with metrics collection
-        metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=controlled_agent)
+        metrics_callback = MetricsCollectionCallback(metrics_tracker, model)
         
         # Attach metrics_tracker to bot_eval_callback if it exists
         for callback in callbacks:
@@ -2662,7 +2525,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         traceback.print_exc()
         return False
 
-def test_trained_model(model, num_episodes, training_config_name="default", agent_key=None, rewards_config_name="default"):
+def test_trained_model(model, num_episodes, training_config_name="default"):
     """Test the trained model."""
     
     W40KEngine, _ = setup_imports()
@@ -2673,9 +2536,9 @@ def test_trained_model(model, num_episodes, training_config_name="default", agen
     unit_registry = UnitRegistry()
     
     env = W40KEngine(
-        rewards_config=rewards_config_name,
+        rewards_config="default",
         training_config_name=training_config_name,
-        controlled_agent=agent_key,
+        controlled_agent=None,
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
@@ -2946,13 +2809,8 @@ def generate_steplog_and_replay(config, args):
             json.dump(scenario_data, f, indent=2)
         
         # Load training config to override max_turns for this environment
-        # Test-only mode requires agent parameter
-        if not args.agent:
-            raise ValueError("--agent parameter required for test-only mode")
-        training_config = config.load_agent_training_config(args.agent, args.training_config)
-        if "max_turns_per_episode" not in training_config:
-            raise KeyError(f"max_turns_per_episode missing from {args.agent} training config phase {args.training_config}")
-        max_turns_override = training_config["max_turns_per_episode"]
+        training_config = config.load_training_config(args.training_config)
+        max_turns_override = training_config.get("max_turns_per_episode", 5)
         print(f"🎯 Using max_turns_per_episode: {max_turns_override} from config '{args.training_config}'")
         
         # Temporarily override game_config max_turns for this environment
@@ -3470,13 +3328,8 @@ def main():
             # Use config fallback for total_episodes if not provided
             total_episodes = args.total_episodes
             if total_episodes is None:
-                # Orchestration mode requires agent parameter
-                if not args.agent:
-                    raise ValueError("--agent parameter required when using --orchestrate without --total-episodes")
-                training_config = config.load_agent_training_config(args.agent, args.training_config)
-                if "total_episodes" not in training_config:
-                    raise KeyError(f"total_episodes missing from {args.agent} training config phase {args.training_config}")
-                total_episodes = training_config["total_episodes"]
+                training_config = config.load_training_config(args.training_config)
+                total_episodes = training_config.get("total_episodes", 500)  # Reasonable default
                 print(f"📊 Using total_episodes from config: {total_episodes}")
             else:
                 print(f"📊 Using total_episodes from command line: {total_episodes}")
@@ -3491,80 +3344,6 @@ def main():
             )
             return 0 if results else 1
 
-        # Test-only mode - check BEFORE training
-        elif args.test_only:
-            if not args.agent:
-                raise ValueError("--agent parameter required for --test-only mode")
-            
-            # Load existing model
-            model_path = config.get_model_path()
-            model_path = model_path.replace('.zip', f'_{args.agent}.zip')
-            
-            if not os.path.exists(model_path):
-                print(f"❌ Model not found: {model_path}")
-                return 1
-            
-            print(f"📁 Loading model: {model_path}")
-            
-            # Create minimal environment for model loading
-            W40KEngine, _ = setup_imports()
-            from ai.unit_registry import UnitRegistry
-            cfg = get_config_loader()
-            scenario_file = get_agent_scenario_file(cfg, args.agent, args.training_config)
-            unit_registry = UnitRegistry()
-            
-            base_env = W40KEngine(
-                rewards_config=args.rewards_config,
-                training_config_name=args.training_config,
-                controlled_agent=args.agent,
-                active_agents=None,
-                scenario_file=scenario_file,
-                unit_registry=unit_registry,
-                quiet=True,
-                gym_training_mode=True
-            )
-            
-            def mask_fn(env):
-                return env.get_action_mask()
-            
-            from sb3_contrib.common.wrappers import ActionMasker
-            masked_env = ActionMasker(base_env, mask_fn)
-            
-            # Load model
-            model = MaskablePPO.load(model_path, env=masked_env)
-            
-            # Run bot evaluation ONLY
-            # Use test_episodes if provided, otherwise default to 50 per bot
-            episodes_per_bot = args.test_episodes if args.test_episodes else 50
-            
-            print("\n" + "="*80)
-            print("🎯 RUNNING BOT EVALUATION")
-            print(f"Episodes per bot: {episodes_per_bot} (Total: {episodes_per_bot * 3})")
-            print("="*80)
-            
-            results = evaluate_against_bots(
-                model=model,
-                training_config_name=args.training_config,
-                rewards_config_name=args.rewards_config,
-                n_episodes=episodes_per_bot,
-                controlled_agent=args.agent,
-                show_progress=True,
-                deterministic=True
-            )
-            
-            # Display results
-            print("\n" + "="*80)
-            print("📊 BOT EVALUATION RESULTS")
-            print("="*80)
-            print(f"vs RandomBot:     {results['random']:.2f} (W:{results['random_wins']} L:{results['random_losses']} D:{results['random_draws']})")
-            print(f"vs GreedyBot:     {results['greedy']:.2f} (W:{results['greedy_wins']} L:{results['greedy_losses']} D:{results['greedy_draws']})")
-            print(f"vs DefensiveBot:  {results['defensive']:.2f} (W:{results['defensive_wins']} L:{results['defensive_losses']} D:{results['defensive_draws']})")
-            print(f"\nCombined Score:   {results['combined']:.2f}")
-            print("="*80 + "\n")
-            
-            masked_env.close()
-            return 0
-
         # Single agent training mode
         elif args.agent:
             # Check if scenario rotation is requested
@@ -3577,11 +3356,9 @@ def main():
                     print(f"ℹ️  Falling back to standard training...")
                     args.scenario = None  # Clear to use standard path
                 else:
-                    # Load agent-specific training config to get total episodes
-                    training_config = config.load_agent_training_config(args.agent, args.training_config)
-                    if "total_episodes" not in training_config:
-                        raise KeyError(f"total_episodes missing from {args.agent} training config phase {args.training_config}")
-                    total_episodes = training_config["total_episodes"]
+                    # Load training config to get total episodes
+                    training_config = config.load_training_config(args.training_config)
+                    total_episodes = training_config.get("total_episodes", 1000)
                     
                     # Determine rotation interval
                     config_rotation = training_config.get("rotation_interval", None)
@@ -3610,7 +3387,7 @@ def main():
                     )
                     
                     if success and args.test_episodes > 0:
-                        test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config)
+                        test_trained_model(model, args.test_episodes, args.training_config)
                     
                     return 0 if success else 1
             
@@ -3628,7 +3405,7 @@ def main():
             callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
             
             # Train model
-            success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config, controlled_agent=args.agent)
+            success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config)
             
             if success:
                 # Only test if episodes > 0
@@ -3639,6 +3416,48 @@ def main():
                 return 0
             else:
                 return 1
+
+        elif args.test_only:
+            # Load existing model for testing only
+            model_path = config.get_model_path()
+            # Ensure model directory exists
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            print(f"📁 Model path: {model_path}")
+            
+            # Determine whether to create new model or load existing
+            if not os.path.exists(model_path):
+                print(f"❌ Model not found: {model_path}")
+                return 1
+            
+            W40KEngine, _ = setup_imports()
+            # Load scenario and unit registry for testing
+            from ai.unit_registry import UnitRegistry
+            cfg = get_config_loader()
+            scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+            unit_registry = UnitRegistry()
+            
+            env = W40KEngine(
+                rewards_config=args.rewards_config,
+                training_config_name=args.training_config,
+                controlled_agent=None,
+                active_agents=None,
+                scenario_file=scenario_file,
+                unit_registry=unit_registry,
+                quiet=True
+            )
+            
+            # Connect step logger after environment creation
+            print(f"STEP LOGGER ASSIGNMENT DEBUG: step_logger={step_logger}, enabled={step_logger.enabled if step_logger else 'None'}")
+            if step_logger:
+                env.step_logger = step_logger
+                print(f"✅ StepLogger connected directly to W40KEngine: {env.step_logger}")
+            else:
+                print("❌ No step logger available")
+            model = MaskablePPO.load(model_path, env=env)
+            if args.test_episodes is None:
+                raise ValueError("--test-episodes is required for test-only mode")
+            test_trained_model(model, args.test_episodes, args.training_config)
+            return 0
         
         else:
             # Generic training mode
@@ -3656,12 +3475,12 @@ def main():
         callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
         
         # Train model
-        success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config, controlled_agent=args.agent)
+        success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config)
         
         if success:
             # Only test if episodes > 0
             if args.test_episodes > 0:
-                test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config)
+                test_trained_model(model, args.test_episodes, args.training_config)
                 
                 # Save training replay with our unified system
                 if hasattr(env, 'replay_logger'):

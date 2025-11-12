@@ -225,10 +225,18 @@ class RewardCalculator:
             return movement_result
             
         elif action_type == "skip":
-            skip_reward = self.calculate_reward_from_config(acting_unit, {"type": "move_wait"}, success, game_state)
+            # FIXED: Skip means no targets available - no penalty
+            skip_reward = 0.0
             reward_breakdown['base_actions'] = skip_reward
-            reward_breakdown['penalties'] = skip_reward
             reward_breakdown['total'] = skip_reward
+            
+            # Add situational reward if game ended
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                skip_reward += situational_reward
+                reward_breakdown['total'] = skip_reward
+            
             game_state['last_reward_breakdown'] = reward_breakdown
             return skip_reward
             
@@ -269,6 +277,7 @@ class RewardCalculator:
             return fight_reward
             
         elif action_type == "wait":
+            # FIXED: Wait means agent chose not to act when action was available
             current_phase = game_state.get("phase", "shoot")
             if current_phase == "move":
                 wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "move_wait"}, success, game_state)
@@ -462,13 +471,21 @@ class RewardCalculator:
         # Import here to avoid circular dependency
         from config_loader import get_config_loader
         
-        # Load FULL rewards config to access system_penalties
+        # Get controlled_agent from config
+        controlled_agent = self.config.get("controlled_agent")
+        if not controlled_agent:
+            raise ValueError(
+                "controlled_agent missing from config - required to load agent-specific rewards. "
+                "RewardCalculator requires config dict with 'controlled_agent' key."
+            )
+        
+        # Load agent-specific FULL rewards config to access system_penalties
         config_loader = get_config_loader()
-        full_rewards_config = config_loader.load_config("rewards_config", force_reload=False)
+        full_rewards_config = config_loader.load_agent_rewards_config(controlled_agent)
         
         if "system_penalties" not in full_rewards_config:
             raise KeyError(
-                "Missing required 'system_penalties' section in rewards_config.json. "
+                f"Missing required 'system_penalties' section in {controlled_agent}_rewards_config.json. "
                 "Required structure: {'system_penalties': {'forbidden_action': -1.0, 'invalid_action': -0.9, 'generic_error': -0.1, "
                 "'system_response': 0.0}}"
             )

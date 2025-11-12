@@ -133,25 +133,43 @@ class ConfigLoader:
         return game_config["ui"]["log_available_height"]
      
     def get_training_config(self) -> Dict[str, Any]:
-        """Get training configuration."""
-        return self.load_config("training_config", force_reload=False)
+        """DEPRECATED: Use load_agent_training_config() instead.
+        
+        Legacy method for backwards compatibility - raises error directing to new method.
+        """
+        raise RuntimeError(
+            "get_training_config() is deprecated. Training configs are now agent-specific.\n"
+            "Use config_loader.load_agent_training_config(agent_key) instead.\n"
+            "Agent configs located at: config/agents/{AGENT_KEY}/{AGENT_KEY}_training_config.json"
+        )
     
     def get_rewards_config(self) -> Dict[str, Any]:
-        """Get rewards configuration."""
-        return self.load_config("rewards_config", force_reload=False)
+        """DEPRECATED: Use load_agent_rewards_config() instead.
+        
+        Legacy method for backwards compatibility - raises error directing to new method.
+        """
+        raise RuntimeError(
+            "get_rewards_config() is deprecated. Rewards configs are now agent-specific.\n"
+            "Use config_loader.load_agent_rewards_config(agent_key) instead.\n"
+            "Agent configs located at: config/agents/{AGENT_KEY}/{AGENT_KEY}_rewards_config.json"
+        )
     
-    # ─── Alias methods for named config loading ─────────────────────────
+    # ─── DEPRECATED: Alias methods for named config loading ─────────────────────────
     def load_training_config(self, name: str) -> Dict[str, Any]:
-        """Load a named training configuration from training_config.json."""
-        configs = self.load_config("training_config", force_reload=False)
-        try:
-            return configs[name]
-        except KeyError:
-            raise KeyError(f"Training config '{name}' not found in training_config.json")
+        """DEPRECATED: Use load_agent_training_config() instead."""
+        raise RuntimeError(
+            f"load_training_config('{name}') is deprecated. Training configs are now agent-specific.\n"
+            "Use config_loader.load_agent_training_config(agent_key, phase) instead.\n"
+            "Agent configs located at: config/agents/{AGENT_KEY}/{AGENT_KEY}_training_config.json"
+        )
 
     def load_rewards_config(self, name: str) -> Dict[str, Any]:
-        """Load rewards configuration directly (unit-type-based approach)."""
-        return self.load_config("rewards_config", force_reload=False)
+        """DEPRECATED: Use load_agent_rewards_config() instead."""
+        raise RuntimeError(
+            f"load_rewards_config('{name}') is deprecated. Rewards configs are now agent-specific.\n"
+            "Use config_loader.load_agent_rewards_config(agent_key) instead.\n"
+            "Agent configs located at: config/agents/{AGENT_KEY}/{AGENT_KEY}_rewards_config.json"
+        )
     
     def get_board_config(self) -> Dict[str, Any]:
         """Get board configuration."""

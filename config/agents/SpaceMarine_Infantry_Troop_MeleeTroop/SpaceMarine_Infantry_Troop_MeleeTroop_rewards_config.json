@@ -1,0 +1,56 @@
+{
+  "description": "4-part agent reward system with faction-specific behaviors - fully migrated from legacy 2-part system",
+
+  "SpaceMarine_Infantry_Troop_MeleeTroop": {
+    "Unit": "######################################## SpaceMarine_Infantry_Troop_MeleeTroop ########################################",
+    "base_actions": {
+      "move_close": 0.3,
+      "move_away": -0.1,
+      "move_to_charge": 0.5,
+      "move_to_los": 0.1,
+      "ranged_attack": 0.2,
+      "melee_attack": 0.5,
+      "charge": 0.3,
+      "charge_success": 0.6,
+      "being_charged": -0.2,
+      "move_wait": -0.2,
+      "shoot_wait": -0.5
+    },
+    "target_type_bonuses": {
+      "vs_melee": 0.0,
+      "vs_ranged": 0.1,
+      "vs_swarm": 0.1,
+      "vs_troop": 0.2,
+      "vs_elite": 0.0,
+      "vs_vehicle": -0.1,
+      "vs_heavy": -0.2
+    },
+    "result_bonuses": {
+      "hit_target": 0.05,
+      "wound_target": 0.05,
+      "damage_target": 0.05,
+      "kill_target": 0.1,
+      "no_overkill": 0.05,
+      "target_lowest_hp": 0.05
+    },
+    "adaptive_bonuses": {
+      "step_up_when_covered": 0.05,
+      "step_down_when_needed": 0.05
+    },
+    "situational_modifiers": {
+      "win": 1,
+      "lose": -1,
+      "friendly_fire_penalty": -0.8,
+      "attack_wasted": -0.5,
+      "target_in_cover_penalty": -0.05,
+      "target_exposed_bonus": 0.05,
+      "no_targets_penalty": -1.0
+    },
+    "tactical_bonuses": {
+      "formation_cohesion": 0.1,
+      "combined_arms_support": 0.1,
+      "troop_line_specialist": 0.1,
+      "disciplined_assault": 0.1
+    }
+  }
+}
