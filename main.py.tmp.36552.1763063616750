@@ -10,49 +10,42 @@ import os
 from engine import W40KEngine
 
 
-def load_config(scenario_path=None):
-    """Load configuration from config files.
-
-    Args:
-        scenario_path: Optional path to scenario file. If None, uses default config/scenario.json
-
-    Returns:
-        Configuration dictionary with board, units, etc.
-    """
+def load_config():
+    """Load configuration from config files."""
     config = {}
-
+    
     # Load board configuration
     board_config_path = "config/board_config.json"
     if not os.path.exists(board_config_path):
         raise FileNotFoundError(f"Required config file missing: {board_config_path}")
-
+    
     with open(board_config_path, 'r', encoding='utf-8-sig') as f:
         content = f.read().strip()
         if not content:
             raise ValueError(f"Config file is empty: {board_config_path}")
         board_raw = json.loads(content)
-
+    
     # Extract default config from nested structure
     config["board"] = board_raw["default"]
-
+    
     # Load unit registry to get unit-to-file mappings
     unit_registry_path = "config/unit_registry.json"
     if not os.path.exists(unit_registry_path):
         raise FileNotFoundError(f"Required config file missing: {unit_registry_path}")
-
+    
     with open(unit_registry_path, 'r', encoding='utf-8-sig') as f:
         content = f.read()
-
+        
         if not content.strip():
             raise ValueError(f"File {unit_registry_path} is empty")
-
+        
         unit_registry = json.loads(content)
-
+    
     # Load actual unit definitions from TypeScript files
     unit_definitions = load_unit_definitions_from_ts(unit_registry)
-
-    config["units"] = load_scenario_units(unit_definitions, scenario_path)
-
+    
+    config["units"] = load_scenario_units(unit_definitions)
+    
     return config
 
 

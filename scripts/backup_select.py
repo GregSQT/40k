@@ -65,7 +65,7 @@ else:
         "config/board_config.json",    # Board Layout & Visualization
         #"config/config.json",        # Master Configuration & Paths
         "config/game_config.json",   # Game Rules & Mechanics
-        "config/scenario.json",        # Game Scenarios
+        #"config/scenario.json",        # Game Scenarios
         "config/scenario_1_Fight_Position.json",
         "config/scenario_2_Mixt_Positions.json",
         "config/scenario_templates.json",

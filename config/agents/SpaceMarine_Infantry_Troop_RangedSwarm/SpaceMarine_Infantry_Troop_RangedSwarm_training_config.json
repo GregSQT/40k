@@ -1,20 +1,20 @@
 {
   "phase1": {
     "type": "################################################### Phase 1 ###################################################",
-    "total_episodes": 4000,
+    "total_episodes": 2000,
     "total_episodes_normal_value": "2000 inital, but diminishing return after 1500",
     "max_turns_per_episode": 5,
-    "max_steps_per_turn": 8,
+    "max_steps_per_turn": 16,
     "model_params": {
       "policy": "MlpPolicy",
-      "learning_rate": 0.003,
+      "learning_rate": 0.0003,
       "n_steps": 2048,
       "batch_size": 256,
       "n_epochs": 10,
       "gamma": 0.95,
       "gae_lambda": 0.9,
       "clip_range": 0.2,
-      "ent_coef": 0.75,
+      "ent_coef": 0.40,
       "vf_coef": 1.0,
       "max_grad_norm": 0.5,
       "target_kl": null,
@@ -30,9 +30,9 @@
       "eval_deterministic": true,
       "eval_render": false,
       "n_eval_episodes": 0,
-      "bot_eval_freq": 50,
+      "bot_eval_freq": 200,
       "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 5,
+      "bot_eval_intermediate": 3,
       "bot_eval_final": 50
     },
     "observation_params": {

@@ -22,8 +22,22 @@ class RandomBot:
 
 class GreedyBot:
     """Shoots nearest enemy, moves toward closest target"""
-    
+
+    def __init__(self, randomness: float = 0.0):
+        """
+        Initialize GreedyBot with optional randomness.
+
+        Args:
+            randomness: Probability [0.0-1.0] of making a random move instead of greedy choice.
+                       0.0 = pure greedy, 0.15 = 15% random actions (recommended for training)
+        """
+        self.randomness = max(0.0, min(1.0, randomness))  # Clamp to [0, 1]
+
     def select_action(self, valid_actions: List[int]) -> int:
+        # Add randomness to prevent overfitting
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_actions) if valid_actions else 7
+
         # Prefer shoot > move > wait
         if 4 in valid_actions:  # Shoot
             return 4
@@ -35,7 +49,11 @@ class GreedyBot:
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]]) -> Tuple[int, int]:
         if not valid_destinations:
             return (unit["col"], unit["row"])
-        
+
+        # Add randomness to movement
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_destinations)
+
         # Move toward nearest enemy (simplified - just pick first destination)
         return valid_destinations[0]
     
@@ -46,19 +64,23 @@ class GreedyBot:
         """
         if not valid_targets:
             return ""
-        
+
+        # Add randomness to target selection
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_targets)
+
         if game_state:
             min_hp = float('inf')
             best_target = valid_targets[0]
-            
+
             for target_id in valid_targets:
                 target = self._get_unit_by_id(game_state, target_id)
                 if target and target.get('HP_CUR', float('inf')) < min_hp:
                     min_hp = target['HP_CUR']
                     best_target = target_id
-            
+
             return best_target
-        
+
         return valid_targets[0]
     
     def _get_unit_by_id(self, game_state, unit_id: str):
@@ -71,8 +93,22 @@ class GreedyBot:
 
 class DefensiveBot:
     """Prioritizes survival, maintains distance"""
-    
+
+    def __init__(self, randomness: float = 0.0):
+        """
+        Initialize DefensiveBot with optional randomness.
+
+        Args:
+            randomness: Probability [0.0-1.0] of making a random move instead of defensive choice.
+                       0.0 = pure defensive, 0.15 = 15% random actions (recommended for training)
+        """
+        self.randomness = max(0.0, min(1.0, randomness))  # Clamp to [0, 1]
+
     def select_action(self, valid_actions: List[int]) -> int:
+        # Add randomness to prevent overfitting
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_actions) if valid_actions else 7
+
         # Conservative: shoot when possible, otherwise wait
         if 4 in valid_actions:  # Shoot
             return 4
@@ -84,13 +120,24 @@ class DefensiveBot:
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]]) -> Tuple[int, int]:
         if not valid_destinations:
             return (unit["col"], unit["row"])
-        
+
+        # Add randomness to movement
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_destinations)
+
         # Pick last destination (tends to move away)
         return valid_destinations[-1]
     
     def select_shooting_target(self, valid_targets: List[str]) -> str:
+        if not valid_targets:
+            return ""
+
+        # Add randomness to target selection
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_targets)
+
         # Shoot first available target
-        return valid_targets[0] if valid_targets else ""
+        return valid_targets[0]
     
     def select_action_with_state(self, valid_actions: List[int], game_state) -> int:
         """

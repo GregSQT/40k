@@ -28,8 +28,14 @@ class ActionDecoder:
             return mask  # All False - no valid actions
         
         if current_phase == "move":
-            # Movement phase: actions 0-3 (movement types) + 11 (wait)
-            mask[[0, 1, 2, 3, 11]] = True
+            # Movement phase: actions 0-3 (movement strategies) + 11 (wait)
+            # Actions 0-3 now map to strategic heuristics:
+            # 0 = aggressive (toward enemies)
+            # 1 = tactical (shooting position)
+            # 2 = defensive (away from enemies)
+            # 3 = random (exploration)
+            mask[[0, 1, 2, 3]] = True
+            mask[11] = True  # Wait always valid
         elif current_phase == "shoot":
             # Shooting phase: actions 4-8 (target slots 0-4) + 11 (wait)
             # CRITICAL FIX: Dynamically enable based on ACTUAL available targets
@@ -140,10 +146,38 @@ class ActionDecoder:
         selected_unit_id = eligible_units[0]["id"]
         
         if current_phase == "move":
-            if action_int in [0, 1, 2, 3]:  # Move actions
+            if action_int in [0, 1, 2, 3]:  # Move with strategic heuristic
+                # Actions 0-3 map to movement strategies:
+                # 0 = aggressive (toward enemies)
+                # 1 = tactical (shooting position)
+                # 2 = defensive (away from enemies)
+                # 3 = random (exploration)
+
+                # Get unit to activate and build destinations
+                from engine.phase_handlers import movement_handlers
+                unit = movement_handlers._get_unit_by_id(game_state, selected_unit_id)
+
+                # Build valid destinations using BFS
+                movement_handlers.movement_build_valid_destinations_pool(game_state, selected_unit_id)
+                valid_destinations = game_state.get("valid_move_destinations_pool", [])
+
+                if not valid_destinations:
+                    # No valid moves - skip
+                    return {"action": "skip", "unitId": selected_unit_id}
+
+                # Use strategic selector to pick destination
+                dest_col, dest_row = movement_handlers._select_strategic_destination(
+                    action_int,
+                    valid_destinations,
+                    unit,
+                    game_state
+                )
+
                 return {
-                    "action": "activate_unit", 
-                    "unitId": selected_unit_id
+                    "action": "move",
+                    "unitId": selected_unit_id,
+                    "destCol": dest_col,
+                    "destRow": dest_row
                 }
             elif action_int == 11:  # WAIT - agent chooses not to move
                 return {"action": "skip", "unitId": selected_unit_id}

@@ -184,9 +184,10 @@ class BotControlledEnv:
 
 class EpisodeTerminationCallback(BaseCallback):
     """Callback to terminate training after exact episode count."""
-    
-    def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0, 
-                 total_episodes: int = None, scenario_info: str = None):
+
+    def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0,
+                 total_episodes: int = None, scenario_info: str = None,
+                 disable_early_stopping: bool = False):
         super().__init__(verbose)
         if max_episodes <= 0:
             raise ValueError("max_episodes must be positive - no defaults allowed")
@@ -204,6 +205,8 @@ class EpisodeTerminationCallback(BaseCallback):
         # NEW: Better time tracking
         self.last_episode_time = None  # Track per-episode time
         self.episode_times = []  # Store recent episode times for moving average
+        # ROTATION FIX: Disable early stopping to let model.learn() consume all timesteps
+        self.disable_early_stopping = disable_early_stopping
     
     def _on_training_start(self) -> None:
         """Initialize timing on training start."""
@@ -300,13 +303,19 @@ class EpisodeTerminationCallback(BaseCallback):
                     scenario_display = ""
                 print(f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{scenario_display}", end='\r', flush=True)
         
-        # CRITICAL: Stop when max episodes reached
+        # CRITICAL: Stop when max episodes reached (unless disabled for rotation mode)
         if self.episode_count >= self.max_episodes:
-            print()  # Newline after final progress update
-            print(f"🛑 STOPPING: Reached {self.max_episodes} episodes")
-            print(f"   Total timesteps: {self.model.num_timesteps if hasattr(self, 'model') else 'N/A'}")
-            return False
-        
+            if self.disable_early_stopping:
+                # Rotation mode: Let model.learn() consume all timesteps
+                # Don't stop early - just continue tracking episodes for metrics
+                return True
+            else:
+                # Normal mode: Stop when episode count reached
+                print()  # Newline after final progress update
+                print(f"🛑 STOPPING: Reached {self.max_episodes} episodes")
+                print(f"   Total timesteps: {self.model.num_timesteps if hasattr(self, 'model') else 'N/A'}")
+                return False
+
         return True
 
 class EpisodeBasedEvalCallback(BaseCallback):
@@ -945,9 +954,14 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         return {}
     
     results = {}
-    bots = {'random': RandomBot(), 'greedy': GreedyBot(), 'defensive': DefensiveBot()}
+    # Initialize bots with stochasticity to prevent overfitting (15% random actions)
+    bots = {
+        'random': RandomBot(),
+        'greedy': GreedyBot(randomness=0.15),
+        'defensive': DefensiveBot(randomness=0.15)
+    }
     config = get_config_loader()
-    scenario_file = os.path.join(config.config_dir, "scenario.json")
+    scenario_file = get_agent_scenario_file(config, controlled_agent, training_config_name)
     unit_registry = UnitRegistry()
     
     # Progress tracking
@@ -976,7 +990,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 elapsed_str = f"{int(elapsed//60):02d}:{int(elapsed%60):02d}"
                 eta_str = f"{int(eta//60):02d}:{int(eta%60):02d}"
                 
-                print(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [ {elapsed_str} < {eta_str} ]", end='', flush=True)
+                sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [ {elapsed_str} < {eta_str} ]")
+                sys.stdout.flush()
             
             try:
                 W40KEngine, _ = setup_imports()
@@ -1075,8 +1090,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         print("\r" + " " * 120)  # Clear the progress bar line
         print()  # New line after clearing
     
-    # Combined score with standard weighting: RandomBot 20%, GreedyBot 30%, DefensiveBot 50%
-    results['combined'] = 0.2 * results['random'] + 0.3 * results['greedy'] + 0.5 * results['defensive']
+    # Combined score with improved weighting: RandomBot 35%, GreedyBot 30%, DefensiveBot 35%
+    # Increased RandomBot weight to prevent overfitting to predictable patterns
+    results['combined'] = 0.35 * results['random'] + 0.30 * results['greedy'] + 0.35 * results['defensive']
     
     # DIAGNOSTIC: Print shoot statistics (sample from last episode of each bot)
     if show_progress:
@@ -1105,10 +1121,11 @@ class BotEvaluationCallback(BaseCallback):
         self.best_combined_win_rate = 0.0  # Track best performance
         
         if EVALUATION_BOTS_AVAILABLE:
+            # Initialize bots with stochasticity to prevent overfitting (15% random actions)
             self.bots = {
                 'random': RandomBot(),
-                'greedy': GreedyBot(),
-                'defensive': DefensiveBot()
+                'greedy': GreedyBot(randomness=0.15),
+                'defensive': DefensiveBot(randomness=0.15)
             }
         else:
             self.bots = {}
@@ -1136,11 +1153,12 @@ class BotEvaluationCallback(BaseCallback):
             results = self._evaluate_against_bots()
             
             # Calculate combined performance (weighted average)
-            # Standard weighting: RandomBot 20%, GreedyBot 30%, DefensiveBot 50%
+            # IMPROVED weighting: RandomBot 35%, GreedyBot 30%, DefensiveBot 35%
+            # Increased RandomBot weight to prevent overfitting to predictable patterns
             combined_win_rate = (
-                results.get('random', 0) * 0.2 +
-                results.get('greedy', 0) * 0.3 +
-                results.get('defensive', 0) * 0.5
+                results.get('random', 0) * 0.35 +
+                results.get('greedy', 0) * 0.30 +
+                results.get('defensive', 0) * 0.35
             )
             
             # Log to metrics_tracker (0_critical/ and bot_eval/ namespaces)
@@ -1898,16 +1916,16 @@ def get_agent_scenario_file(config, agent_key, training_config_name):
         if os.path.isfile(agent_scenario_path):
             return agent_scenario_path
         
-        # For Phase 2, try numbered variants (phase2-1, phase2-2, etc.)
-        if training_config_name.startswith("phase2"):
-            for i in range(1, 5):  # Check phase2-1 through phase2-4
-                variant_path = os.path.join(
-                    config.config_dir, "agents", agent_key, "scenarios",
-                    f"{agent_key}_scenario_phase2-{i}.json"
-                )
-                if os.path.isfile(variant_path):
-                    print(f"ℹ️  Phase 2 has multiple scenarios. Using first variant: phase2-{i}")
-                    return variant_path
+        # Try numbered variants for any phase (phase1-1, phase2-1, phase3-1, etc.)
+        # training_config_name is "phase1", "phase2", etc.
+        for i in range(1, 10):  # Check variants -1 through -9
+            variant_path = os.path.join(
+                config.config_dir, "agents", agent_key, "scenarios",
+                f"{agent_key}_scenario_{training_config_name}-{i}.json"
+            )
+            if os.path.isfile(variant_path):
+                print(f"ℹ️  {training_config_name} has multiple scenarios. Using first variant: {training_config_name}-{i}")
+                return variant_path
     
     # Fall back to global scenario.json
     global_scenario = os.path.join(config.config_dir, "scenario.json")
@@ -1945,35 +1963,21 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name):
         # No agent-specific scenarios directory
         return []
     
-    # For phase1, look for single scenario
-    if training_config_name == "phase1":
-        phase1_scenario = os.path.join(scenarios_dir, f"{agent_key}_scenario_phase1.json")
-        if os.path.isfile(phase1_scenario):
-            return [phase1_scenario]
-    
-    # For phase2, look for numbered variants (phase2-1, phase2-2, etc.)
-    elif training_config_name.startswith("phase2"):
-        for i in range(1, 10):  # Check phase2-1 through phase2-9
-            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_phase2-{i}.json")
-            if os.path.isfile(scenario_file):
-                scenario_files.append(scenario_file)
-        if scenario_files:
-            return scenario_files
-    
-    # For phase3, look for numbered variants
-    elif training_config_name.startswith("phase3"):
-        for i in range(1, 10):  # Check phase3-1 through phase3-9
-            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_phase3-{i}.json")
-            if os.path.isfile(scenario_file):
-                scenario_files.append(scenario_file)
-        if scenario_files:
-            return scenario_files
-    
-    # Default: try to find exact match
+    # First, try to find exact match (e.g., "phase1.json" without number)
     default_scenario = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}.json")
     if os.path.isfile(default_scenario):
         return [default_scenario]
-    
+
+    # Look for numbered variants for ANY phase (phase1-1, phase2-1, phase3-1, etc.)
+    # This works for phase1, phase2, phase3, debug, etc.
+    for i in range(1, 10):  # Check variants -1 through -9
+        scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-{i}.json")
+        if os.path.isfile(scenario_file):
+            scenario_files.append(scenario_file)
+
+    if scenario_files:
+        return scenario_files
+
     return []
 
 
@@ -2461,17 +2465,21 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         # Use overrides for rotation mode
         total_eps = total_episodes_override if total_episodes_override else max_episodes
         cycle_max_eps = max_episodes_override if max_episodes_override else max_episodes
-        
+
+        # Detect rotation mode
+        is_rotation_mode = (max_episodes_override is not None)
+
         # Recalculate expected_timesteps for the actual cycle length
         if max_episodes_override:
             expected_timesteps = max_episodes_override * max_steps_per_episode
-        
+
         episode_callback = EpisodeTerminationCallback(
             cycle_max_eps,  # Use cycle length, not total
-            expected_timesteps, 
+            expected_timesteps,
             verbose=1,
             total_episodes=total_eps,
-            scenario_info=scenario_info
+            scenario_info=scenario_info,
+            disable_early_stopping=is_rotation_mode  # Let model.learn() control timesteps in rotation
         )
         episode_callback.global_episode_offset = global_episode_offset
         callbacks.append(episode_callback)
@@ -2573,18 +2581,17 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
                 raise KeyError(f"Training config missing required 'max_steps_per_turn' field")
             max_turns_per_episode = training_config["max_turns_per_episode"]
             max_steps_per_turn = training_config["max_steps_per_turn"]
-            total_timesteps = total_episodes * max_turns_per_episode * max_steps_per_turn
             
-            # CRITICAL FIX: Add safety margin to prevent infinite training
-            # Allow 50% buffer for episode completion, but cap at 2x to prevent runaway
-            safety_timesteps = min(
-                int(total_timesteps * 1.5),
-                total_timesteps * 2
-            )
+            # CRITICAL FIX: Episode count controlled by EpisodeTerminationCallback, not timesteps
+            # Use 5x multiplier to ensure timestep limit never stops training early
+            # This accounts for complex scenarios (more units = longer episodes)
+            theoretical_timesteps = total_episodes * max_turns_per_episode * max_steps_per_turn
+            total_timesteps = theoretical_timesteps * 5
             
             print(f"🎮 Training Mode: Episode-based ({total_episodes:,} episodes)")
-            print(f"📊 Expected timesteps: {total_timesteps:,}")
-            print(f"🛡️ Safety limit: {safety_timesteps:,} (prevents overtraining)")
+            print(f"📊 Theoretical timesteps: {theoretical_timesteps:,}")
+            print(f"🛡️ Timestep limit (5x buffer): {total_timesteps:,}")
+            print(f"💡 EpisodeTerminationCallback will stop at exactly {total_episodes} episodes")
         else:
             raise ValueError("Training config must have either 'total_timesteps' or 'total_episodes'")
         
@@ -3440,15 +3447,16 @@ def main():
         # Sync configs to frontend automatically
         try:
             subprocess.run(['node', 'scripts/copy-configs.js'], 
-                         cwd=project_root, check=True, capture_output=True, text=True)
+                         cwd=project_root, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Config sync failed: {e}")
         
         # Setup environment and configuration
         config = get_config_loader()
         
-        # Ensure scenario exists
-        ensure_scenario()
+        # Ensure scenario exists ONLY for generic training (no agent specified)
+        if not args.agent:
+            ensure_scenario()
         
         # Convert existing steplog mode
         if args.convert_steplog:

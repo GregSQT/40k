@@ -60,25 +60,25 @@
 
   "SpaceMarine_Infantry_Troop_RangedSwarm_phase1": {
     "Unit": "######################################## SpaceMarine_Infantry_Troop_RangedSwarm ########################################",
-    "Info": "######################################## PHASE 1                                ########################################",
+    "Info": "######################################## PHASE 1 - BALANCED: Less aggressive penalties ########################################",
     "base_actions": {
       "move_close": 0.3,
-      "move_away": -3.0,
+      "move_away": -1.0,
       "move_to_charge": 0.4,
       "move_to_los": 5.0,
-      "ranged_attack": 5.0,
+      "ranged_attack": 8.0,
       "charge_success": 0.5,
       "melee_attack": 0.5,
       "move_wait": 0.0,
-      "shoot_wait": -25.0
+      "shoot_wait": -10.0
     },
     "result_bonuses": {
-      "hit_target": 2.0,
-      "wound_target": 5.0,
-      "damage_target": 10.0,
-      "kill_target": 35.0,
-      "no_overkill": 5.0,
-      "target_lowest_hp": 12.0
+      "hit_target": 3.0,
+      "wound_target": 6.0,
+      "damage_target": 12.0,
+      "kill_target": 25.0,
+      "no_overkill": 8.0,
+      "target_lowest_hp": 15.0
     },
     "situational_modifiers": {
       "win": 10.0,

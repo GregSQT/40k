@@ -30,6 +30,13 @@
   - [Bot Types](#bot-types)
   - [Evaluation Commands](#evaluation-commands)
   - [Win Rate Benchmarks](#win-rate-benchmarks)
+- [Anti-Overfitting Strategies](#️-anti-overfitting-strategies)
+  - [The Problem: Pattern Exploitation](#the-problem-pattern-exploitation-vs-robust-tactics)
+  - [Solution 1: Bot Stochasticity](#solution-1-bot-stochasticity-prevent-pattern-exploitation)
+  - [Solution 2: Balanced Reward Penalties](#solution-2-balanced-reward-penalties-reduce-over-aggression)
+  - [Solution 3: Increased RandomBot Weight](#solution-3-increased-randombot-evaluation-weight)
+  - [Monitoring for Overfitting](#monitoring-for-overfitting)
+  - [Troubleshooting Overfitting](#troubleshooting-overfitting)
 - [Hyperparameter Tuning Guide](#-hyperparameter-tuning-guide)
   - [When Agent Isn't Learning](#when-agent-isnt-learning)
   - [When Agent Is Unstable](#when-agent-is-unstable)
@@ -423,12 +430,14 @@ This comprehensive guide covers:
 - Always shoots nearest enemy
 - Moves toward closest target
 - Basic threat: Tests if agent learned shooting
+- **Supports randomness parameter** (0.0-0.3) to prevent pattern exploitation
 
-**Tactical Bot (Hard)**
+**Tactical Bot (Hard)** _(Also called DefensiveBot)_
 - Prioritizes low-HP targets
 - Uses cover when available
 - Avoids being charged
 - Real challenge: Tests full tactical learning
+- **Supports randomness parameter** (0.0-0.3) to prevent pattern exploitation
 
 ### Evaluation Commands
 
@@ -448,6 +457,229 @@ python evaluation.py --model ./models/ppo_checkpoint_phase1.zip --opponent tacti
 | Phase 1 End    | 80-90%    | 60-70%    | 30-40%      |
 | Phase 2 End    | 95%+      | 80-90%    | 60-70%      |
 | Phase 3 End    | 95%+      | 95%+      | 80-90%      |
+
+---
+
+## 🛡️ ANTI-OVERFITTING STRATEGIES
+
+### The Problem: Pattern Exploitation vs. Robust Tactics
+
+**Symptom**: Agent performs well against GreedyBot and DefensiveBot but fails against RandomBot
+
+**Root Cause**: The agent learned to **exploit predictable patterns** instead of developing robust tactical strategies.
+
+**Example Bad Behavior**:
+- Agent assumes enemies always shoot the nearest target (GreedyBot pattern)
+- Agent positions based on enemy predictability
+- When facing random/unpredictable opponents, strategy falls apart
+
+### Solution 1: Bot Stochasticity (Prevent Pattern Exploitation)
+
+**Location**: `ai/evaluation_bots.py`
+
+Both `GreedyBot` and `DefensiveBot` now accept a `randomness` parameter:
+
+```python
+GreedyBot(randomness=0.15)    # 15% chance of random action
+DefensiveBot(randomness=0.15) # 15% chance of random action
+```
+
+**How it works**:
+- Bots make their normal strategic decision 85% of the time
+- 15% of the time they make a random valid action
+- This prevents your agent from perfectly predicting and exploiting their behavior
+
+**Tuning recommendations**:
+- `0.0` = Pure bot (fully predictable) - use for testing specific strategies
+- `0.10-0.20` = **Recommended for training** (prevents overfitting)
+- `0.30+` = Too random, defeats the purpose of strategic bots
+
+**Implementation** (in `ai/train.py`):
+```python
+# Create evaluation bots with randomness
+bots = {
+    'random': RandomBot(),
+    'greedy': GreedyBot(randomness=0.15),  # 15% random actions
+    'defensive': DefensiveBot(randomness=0.15)  # 15% random actions
+}
+```
+
+---
+
+### Solution 2: Balanced Reward Penalties (Reduce Over-Aggression)
+
+**Location**: `config/agents/<agent>/<agent>_rewards_config.json`
+
+**Problem**: Overly harsh penalties force hyper-aggressive play that becomes predictable.
+
+**Changes in Phase 1** (Example for SpaceMarine_Infantry_Troop_RangedSwarm):
+```json
+{
+  "SpaceMarine_Infantry_Troop_RangedSwarm_phase1": {
+    "base_actions": {
+      "shoot_wait": -10.0   // Was -30.0 (too punishing)
+    },
+    "movement_penalties": {
+      "move_away": -1.0     // Was -3.0 (too punishing)
+    }
+  }
+}
+```
+
+**Why this helps**:
+- Old values forced hyper-aggressive play (always seeking shots)
+- Aggressive strategies are predictable and exploitable by random opponents
+- New values allow tactical patience and positional flexibility
+
+**Tuning recommendations by phase**:
+- **Phase 1**: Focus on learning basics with moderate penalties
+- **Phase 2**: Increase penalties slightly to encourage efficiency
+- **Phase 3**: Use balanced penalties for final tactical polish
+
+---
+
+### Solution 3: Increased RandomBot Evaluation Weight
+
+**Location**: `ai/train.py` (model selection logic)
+
+**Old weights**:
+```python
+combined_score = 0.20 * random + 0.30 * greedy + 0.50 * defensive
+```
+
+**New weights** (Recommended):
+```python
+combined_score = 0.35 * random + 0.30 * greedy + 0.35 * defensive
+```
+
+**Why this helps**:
+- RandomBot performance now impacts overall score significantly
+- Model selection favors agents that handle unpredictability
+- Prevents models that only beat predictable opponents from being saved as "best"
+
+**Tuning recommendations by training stage**:
+
+```python
+# Early training (Phase 1): Equal weighting
+combined_score = 0.33 * random + 0.33 * greedy + 0.34 * defensive
+
+# Mid training (Phase 2): Balanced (RECOMMENDED)
+combined_score = 0.35 * random + 0.30 * greedy + 0.35 * defensive
+
+# Late training (Phase 3): Emphasize advanced tactics
+combined_score = 0.30 * random + 0.25 * greedy + 0.45 * defensive
+```
+
+---
+
+### How to Use Anti-Overfitting Changes
+
+#### Starting Fresh Training
+
+```bash
+python ai/train.py --phase phase1 --agent SpaceMarine_Infantry_Troop_RangedSwarm
+```
+
+The new settings will automatically be used if:
+- Bot randomness is configured in `evaluation_bots.py`
+- Reward penalties are balanced in agent's rewards config
+- Evaluation weights are updated in `train.py`
+
+#### Continue Existing Training
+
+If your agent already learned bad habits:
+
+1. **Option A: Continue training with new rewards**
+   - Agent will slowly unlearn over-aggressive patterns
+   - Takes 500-1000 episodes to adapt
+   - Monitor `bot_eval/vs_random` for improvement
+
+2. **Option B: Start fresh from Phase 1** (Recommended)
+   - Faster to learn correct patterns
+   - Use if current performance vs RandomBot is very poor (<40% win rate)
+   - Delete old model and restart training
+
+---
+
+### Monitoring for Overfitting
+
+Watch these metrics in TensorBoard:
+
+```
+bot_eval/vs_random      - Should improve from -0.5 to 0.0+
+bot_eval/vs_greedy      - Should stay around 0.05-0.1
+bot_eval/vs_defensive   - Should stay around 0.1-0.15
+0_critical/combined     - Overall score should improve
+```
+
+**✅ Healthy performance**: All three bots within 0.2 reward range of each other
+
+**⚠️ Overfitting symptom**: Large gap between random and others (>0.5 difference)
+
+**Example healthy progression**:
+```
+Episode 1000:
+  vs_random: -0.3, vs_greedy: 0.0, vs_defensive: 0.1  (Gap: 0.4 - concerning)
+
+Episode 2000:
+  vs_random: -0.1, vs_greedy: 0.1, vs_defensive: 0.15 (Gap: 0.25 - improving)
+
+Episode 3000:
+  vs_random: 0.05, vs_greedy: 0.15, vs_defensive: 0.2 (Gap: 0.15 - healthy!)
+```
+
+---
+
+### Advanced: Self-Play Training (Future Enhancement)
+
+For future implementation, consider training against copies of your own agent:
+
+```python
+# Pseudo-code for self-play
+every N episodes:
+    save current model as "opponent_snapshot"
+    train against mix of:
+        - 40% current agent
+        - 30% RandomBot
+        - 15% GreedyBot(randomness=0.15)
+        - 15% DefensiveBot(randomness=0.15)
+```
+
+This forces continuous adaptation and prevents exploitation strategies.
+
+---
+
+### Configuration Summary
+
+| Setting | Old Value | New Value | Impact |
+|---------|-----------|-----------|--------|
+| GreedyBot randomness | 0.0 | 0.15 | Unpredictable greedy play |
+| DefensiveBot randomness | 0.0 | 0.15 | Unpredictable defensive play |
+| Phase1 shoot_wait penalty | -30.0 | -10.0 | Less forced aggression |
+| Phase1 move_away penalty | -3.0 | -1.0 | More tactical flexibility |
+| RandomBot eval weight | 20% | 35% | Higher importance in model selection |
+| DefensiveBot eval weight | 50% | 35% | Balanced with random |
+
+---
+
+### Troubleshooting Overfitting
+
+**Agent still struggles vs RandomBot after 1000 episodes**:
+- Increase GreedyBot/DefensiveBot randomness to 0.20-0.25
+- Further reduce shoot_wait penalty to -5.0
+- Consider starting fresh training from Phase 1
+- Check that combined_score weights favor RandomBot performance
+
+**Agent becomes too passive**:
+- Reduce shoot_wait penalty (make more negative: -10.0 → -15.0)
+- Check ent_coef isn't too low (should be 0.3-0.4 in Phase 1)
+- Verify movement rewards aren't too high
+
+**Agent performs poorly against all bots**:
+- Rewards may be too balanced (not enough learning signal)
+- Increase key rewards: kill_target, damage_target
+- Check observation includes enough enemy information
+- Verify bot randomness isn't too high (should be ≤0.20)
 
 ---
 

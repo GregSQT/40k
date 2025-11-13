@@ -92,9 +92,19 @@ def initialize_engine():
         project_root = os.path.join(os.path.dirname(__file__), '..')
         os.chdir(os.path.abspath(project_root))
         
-        # Load configuration and scenario
-        config = load_config()
-        scenario_file = os.path.join("config", "scenario.json")
+        # Define scenario file path for game/API mode
+        scenario_file = os.path.join("config", "scenario_game.json")
+
+        # Verify scenario file exists - no fallback
+        if not os.path.exists(scenario_file):
+            raise FileNotFoundError(
+                f"Game scenario file not found: {scenario_file}\n"
+                f"This file is required for the API server.\n"
+                f"Training scenarios are in config/agents/<agent>/scenarios/"
+            )
+
+        # Load configuration with game scenario
+        config = load_config(scenario_path=scenario_file)
         
         # Initialize unit registry
         from ai.unit_registry import UnitRegistry
@@ -192,9 +202,19 @@ def initialize_pve_engine():
         project_root = os.path.join(os.path.dirname(__file__), '..')
         os.chdir(os.path.abspath(project_root))
         
-        # Load configuration and scenario
-        config = load_config()
-        scenario_file = os.path.join("config", "scenario.json")
+        # Define scenario file path for game/API mode
+        scenario_file = os.path.join("config", "scenario_game.json")
+
+        # Verify scenario file exists - no fallback
+        if not os.path.exists(scenario_file):
+            raise FileNotFoundError(
+                f"Game scenario file not found: {scenario_file}\n"
+                f"This file is required for the API server.\n"
+                f"Training scenarios are in config/agents/<agent>/scenarios/"
+            )
+
+        # Load configuration with game scenario
+        config = load_config(scenario_path=scenario_file)
         
         # Initialize unit registry
         from ai.unit_registry import UnitRegistry

@@ -390,7 +390,7 @@ class W40KEngine(gym.Env):
         # BUILT-IN STEP COUNTING - AFTER validation, only for successful actions
         if success:
             self.game_state["episode_steps"] += 1
-            
+
             # NEW: AI_TURN.md compliance tracking - verify ONE unit per step
             compliance_data = {
                 'units_activated_this_step': 1,  # Should always be 1 per AI_TURN.md
@@ -398,15 +398,15 @@ class W40KEngine(gym.Env):
                 'duplicate_activation_attempts': 0,
                 'pool_corruption_detected': 0
             }
-            
+
             # Validate sequential activation (ONE unit per step)
             if hasattr(self, '_units_activated_this_step'):
                 if self._units_activated_this_step > 1:
                     compliance_data['units_activated_this_step'] = self._units_activated_this_step
-            
+
             # Store compliance data for metrics callback
             self.game_state['last_compliance_data'] = compliance_data
-            
+
             # Reset per-step counter
             self._units_activated_this_step = 0
         

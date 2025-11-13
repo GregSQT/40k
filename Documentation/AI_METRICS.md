@@ -2,15 +2,49 @@
 ## Training Optimization Through Metrics Analysis
 
 > **📍 Purpose**: Deep dive into metrics-driven training optimization for W40K tactical AI
-> 
+>
 > **Status**: January 2025 - Expert optimization guide
-> 
+>
 > **Companion Document**: [AI_TRAINING.md](AI_TRAINING.md) - Configuration and setup
+
+---
+
+## 🎯 CRITICAL METRICS QUICK REFERENCE
+
+These are the most important metrics to watch in the `game_critical/` and `eval_bots/` namespaces in TensorBoard.
+
+| Metric | What It Measures | Target Value | If Too Low (<) | If Too High (>) | Notes |
+|--------|------------------|--------------|----------------|-----------------|-------|
+| **game_critical/episode_reward** | Total reward per episode | Phase 1: 0+<br>Phase 2: +10 to +25<br>Phase 3: +25 to +50+ | • Check reward config balance<br>• Increase key action rewards<br>• Reduce penalties | • Possible reward hacking<br>• Review exploited rewards<br>• Add balancing penalties | Should increase steadily. Sudden drops = policy collapse |
+| **game_critical/episode_length** | Steps per episode | 50-150 steps<br>(stable) | • Agent dying too fast<br>• Increase defensive rewards<br>• Reduce aggression penalties | • Agent too passive<br>• Reduce wait penalty<br>• Increase action rewards | Increasing trend = agent stalling. Stable = good |
+| **game_critical/win_rate_100ep** | Rolling 100-episode win rate | Phase 1: 60%+<br>Phase 2: 70%+<br>Phase 3: 75%+ | • Increase training episodes<br>• Adjust reward balance<br>• Check observation quality | • Good! Advance to next phase<br>• Consider harder opponents | Primary success metric. Must be stable, not just lucky streak |
+| **game_critical/units_killed_vs_lost_ratio** | Kill/death ratio | 1.5+ (killing more than losing) | • Improve combat rewards<br>• Reduce defensive penalties<br>• Check target selection | • Excellent performance<br>• Consider phase advancement | <1.0 = losing units. >2.0 = dominating |
+| **game_critical/invalid_action_rate** | % of invalid actions | <5% (ideally <2%) | N/A - this is good! | • Action masking broken<br>• Observation quality issue<br>• Network capacity problem | >10% persistently = serious problem requiring restart |
+| **eval_bots/vs_random** | Reward vs RandomBot | 0.0+ (positive) | • Agent worse than random<br>• Major training problem<br>• Check overfitting | • Good! Should beat random<br>• Target: -0.3 to +0.1 range | Baseline competence. Failure here = critical issue |
+| **eval_bots/vs_greedy** | Reward vs GreedyBot | 0.05 to 0.15 | • Target selection poor<br>• Increase priority rewards<br>• Check tactical bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• Balance rewards | Tests target prioritization. Should be moderate |
+| **eval_bots/vs_defensive** | Reward vs DefensiveBot | 0.10 to 0.20 | • Tactical positioning weak<br>• Increase positioning rewards<br>• Check movement bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• More diverse scenarios | Tests tactical mastery. Hardest opponent |
+| **eval_bots/combined_win_rate** | Weighted average of all bots | 0.55+ (Phase 2)<br>0.70+ (Phase 3) | • Overall performance weak<br>• Review all reward categories<br>• Check observation system | • Excellent! Phase complete<br>• Save model and advance | Single number for overall competence. Used for model selection |
+
+### How to Use This Table
+
+1. **During Training**: Check these metrics every 100-200 episodes
+2. **Red Flags**: Any metric outside target range for 200+ episodes needs intervention
+3. **Green Lights**: All metrics in target range = training healthy
+4. **Progression**: Metrics should trend toward targets over time, not stay flat
+
+### Priority Order
+
+1. **invalid_action_rate** - Fix immediately if >10%
+2. **episode_reward** - Must be increasing (even slowly)
+3. **win_rate_100ep** - Primary success indicator
+4. **eval_bots/combined_win_rate** - Overall competence check
+5. **Other metrics** - Fine-tuning and optimization
 
 ---
 
 ## 📋 TABLE OF CONTENTS
 
+- [Critical Metrics Quick Reference](#-critical-metrics-quick-reference) ⭐ **START HERE**
 - [Why Metrics Matter](#why-metrics-matter)
 - [Core Metrics Explained](#core-metrics-explained)
   - [Training Metrics (PPO Internals)](#training-metrics-ppo-internals)
@@ -536,7 +570,7 @@ Episodes 800-1000:
 3. Watch replays: Agent may ignore cover, positioning, or defensive play
 
 **Fix Priority:**
-1. **Immediate:** More diverse training scenarios (add scenarios to scenario.json)
+1. **Immediate:** More diverse training scenarios (add scenarios to `config/agents/<agent>/scenarios/`)
 2. **Adjust rewards:** Increase rewards for defensive tactics (cover, safe positioning)
 3. **Evaluation:** Increase bot evaluation frequency to catch overfitting early
 4. **Consider:** Train against bot opponents occasionally (not just self-play)
@@ -745,7 +779,7 @@ START: Problem detected in daily monitoring
 | Win rate flat + low entropy | Stuck in local optimum | Increase exploration OR reset | `ent_coef`: +0.05 OR restart |
 | High reward variance | Policy unstable | Increase batch size | `batch_size`: 64 → 128 |
 | `value_loss` not decreasing | Value function failing | Increase VF coefficient | `vf_coef`: 0.5 → 1.0 |
-| Bot eval declining | Overfitting | More diverse scenarios | Add scenarios to scenario.json |
+| Bot eval declining | Overfitting | More diverse scenarios | Add scenarios to agent scenarios/ |
 | `episode_length` increasing | Too conservative | Reduce wait penalty | `wait` in rewards: -1.0 → -0.5 |
 | Win rate oscillating | Multiple issues | Stabilize everything | Reduce LR, increase batch_size, reduce ent_coef |
 
@@ -1370,7 +1404,7 @@ Episode 1200:
 | clip_fraction < 10% | Updates too conservative | Increase clip range | training_config.json | `clip_range`: 0.25 |
 | High reward variance | Policy unstable | Increase batch size | training_config.json | `batch_size`: ×2 |
 | value_loss not decreasing | Value function failing | Increase VF coefficient | training_config.json | `vf_coef`: 0.5 → 1.0 |
-| Self-play good, bot eval bad | Overfitting | Add diverse scenarios | scenario.json | Add new scenarios |
+| Self-play good, bot eval bad | Overfitting | Add diverse scenarios | agent scenarios/ | Add new scenarios |
 | episode_length increasing | Too conservative | Reduce wait penalty | rewards_config.json | `wait`: -1.0 → -0.5 |
 | Entropy high (< -1.5) late | Too much exploration | Reduce ent_coef by 50% | training_config.json | `ent_coef`: ÷2 |
 | Win rate improving but slow | Normal, patience needed | Wait 50 more episodes | - | - |
