@@ -182,6 +182,32 @@ class BotControlledEnv:
         return self.base_env.action_space
 
 
+class EntropyScheduleCallback(BaseCallback):
+    """Callback to linearly reduce entropy coefficient during training."""
+
+    def __init__(self, start_ent: float, end_ent: float, total_episodes: int, verbose: int = 0):
+        super().__init__(verbose)
+        self.start_ent = start_ent
+        self.end_ent = end_ent
+        self.total_episodes = total_episodes
+        self.episode_count = 0
+
+    def _on_step(self) -> bool:
+        # Detect episode end
+        if hasattr(self, 'locals') and 'infos' in self.locals:
+            for info in self.locals['infos']:
+                if 'episode' in info:
+                    self.episode_count += 1
+                    # Linear interpolation: ent = start + (end - start) * progress
+                    progress = min(1.0, self.episode_count / self.total_episodes)
+                    new_ent = self.start_ent + (self.end_ent - self.start_ent) * progress
+                    self.model.ent_coef = new_ent
+
+                    if self.verbose > 0 and self.episode_count % 100 == 0:
+                        print(f"Episode {self.episode_count}: ent_coef = {new_ent:.3f}")
+                    break
+        return True
+
 class EpisodeTerminationCallback(BaseCallback):
     """Callback to terminate training after exact episode count."""
 
@@ -202,9 +228,6 @@ class EpisodeTerminationCallback(BaseCallback):
         self.total_episodes = total_episodes if total_episodes else max_episodes
         self.scenario_info = scenario_info  # e.g., "Cycle 8 | Scenario: phase2-1"
         self.global_episode_offset = 0  # Set by rotation code to track overall progress
-        # NEW: Better time tracking
-        self.last_episode_time = None  # Track per-episode time
-        self.episode_times = []  # Store recent episode times for moving average
         # ROTATION FIX: Disable early stopping to let model.learn() consume all timesteps
         self.disable_early_stopping = disable_early_stopping
     
@@ -212,7 +235,6 @@ class EpisodeTerminationCallback(BaseCallback):
         """Initialize timing on training start."""
         import time
         self.start_time = time.time()
-        self.last_episode_time = time.time()
     
     def _on_step(self) -> bool:
         """Track episodes and display progress."""
@@ -252,20 +274,11 @@ class EpisodeTerminationCallback(BaseCallback):
             except Exception:
                 pass
         
-        # Track episode timing for better ETA calculation
+        # Update progress display on episode end
         if episode_ended:
             import time
             current_time = time.time()
-            
-            # Track episode timing for better ETA
-            if self.last_episode_time is not None:
-                episode_duration = current_time - self.last_episode_time
-                self.episode_times.append(episode_duration)
-                # Keep last 50 episodes for moving average (ignores scenario switch overhead)
-                if len(self.episode_times) > 50:
-                    self.episode_times.pop(0)
-            self.last_episode_time = current_time
-            
+
             # Update progress every 10 episodes
             if self.episode_count % 10 == 0:
                 # Calculate global progress (across all rotations)
@@ -277,21 +290,35 @@ class EpisodeTerminationCallback(BaseCallback):
                 filled = int(bar_length * global_episode_count / self.total_episodes)
                 bar = '█' * filled + '░' * (bar_length - filled)
                 
-                # Calculate time with moving average for better accuracy
+                # Calculate time with consistent overall average for stable estimates
                 time_info = ""
-                if self.start_time is not None and len(self.episode_times) > 5:
-                    # Use moving average of recent episodes for ETA (ignores scenario switches)
-                    avg_episode_time = sum(self.episode_times) / len(self.episode_times)
-                    remaining_episodes = self.total_episodes - global_episode_count
-                    eta = avg_episode_time * remaining_episodes
-                    
+                if self.start_time is not None and global_episode_count > 0:
                     # Total elapsed time from start
                     elapsed = current_time - self.start_time
-                    
-                    # Format times as MM:SS
-                    elapsed_str = f"{int(elapsed//60):02d}:{int(elapsed%60):02d}"
-                    eta_str = f"{int(eta//60):02d}:{int(eta%60):02d}"
-                    time_info = f" [{elapsed_str}<{eta_str}]"
+
+                    # CRITICAL FIX: Use SAME calculation for both speed and ETA
+                    # Overall average = total_elapsed / episodes_completed
+                    avg_episode_time = elapsed / global_episode_count
+                    remaining_episodes = self.total_episodes - global_episode_count
+                    eta = avg_episode_time * remaining_episodes
+
+                    # Calculate training speed (episodes per second) - matches ETA calculation
+                    eps_speed = global_episode_count / elapsed if elapsed > 0 else 0
+
+                    # Format times as HH:MM:SS or MM:SS depending on duration
+                    def format_time(seconds):
+                        hours = int(seconds // 3600)
+                        minutes = int((seconds % 3600) // 60)
+                        secs = int(seconds % 60)
+                        if hours > 0:
+                            return f"{hours}:{minutes:02d}:{secs:02d}"
+                        else:
+                            return f"{minutes:02d}:{secs:02d}"
+
+                    elapsed_str = format_time(elapsed)
+                    eta_str = format_time(eta)
+                    speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
+                    time_info = f" [{elapsed_str}<{eta_str}, {speed_str}]"
                 
                 # Build detailed scenario display with episode range
                 if self.scenario_info:
@@ -929,30 +956,30 @@ class MetricsCollectionCallback(BaseCallback):
         else:
             return 1.0 / (1.0 - gamma)
 
-def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes, 
+def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
                          controlled_agent=None, show_progress=False, deterministic=True):
     """
     Standalone bot evaluation function - single source of truth for all bot testing.
-    
+
     Args:
         model: Trained model to evaluate
         training_config_name: Name of training config to use (e.g., "phase1", "default")
-        n_episodes: Number of episodes per bot
+        n_episodes: Number of episodes per bot (will be split across all available scenarios)
         controlled_agent: Agent identifier (None for player 0, otherwise player 1)
         show_progress: Show progress bar with time estimates
         deterministic: Use deterministic policy
-    
+
     Returns:
-        Dict with keys: 'random', 'greedy', 'defensive', 'combined', 
+        Dict with keys: 'random', 'greedy', 'defensive', 'combined',
                        'random_wins', 'greedy_wins', 'defensive_wins'
     """
     from ai.unit_registry import UnitRegistry
     from config_loader import get_config_loader
     import time
-    
+
     if not EVALUATION_BOTS_AVAILABLE:
         return {}
-    
+
     results = {}
     # Initialize bots with stochasticity to prevent overfitting (15% random actions)
     bots = {
@@ -961,11 +988,21 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         'defensive': DefensiveBot(randomness=0.15)
     }
     config = get_config_loader()
-    scenario_file = get_agent_scenario_file(config, controlled_agent, training_config_name)
+
+    # MULTI-SCENARIO EVALUATION: Get all available scenarios for this phase
+    scenario_list = get_scenario_list_for_phase(config, controlled_agent, training_config_name)
+
+    # If only one scenario found, fall back to old behavior
+    if len(scenario_list) == 0:
+        scenario_list = [get_agent_scenario_file(config, controlled_agent, training_config_name)]
+
+    # Calculate episodes per scenario (distribute evenly)
+    episodes_per_scenario = max(1, n_episodes // len(scenario_list))
+
     unit_registry = UnitRegistry()
-    
+
     # Progress tracking
-    total_episodes = n_episodes * len(bots)
+    total_episodes = episodes_per_scenario * len(scenario_list) * len(bots)
     completed_episodes = 0
     start_time = time.time() if show_progress else None
     
@@ -973,101 +1010,122 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         wins = 0
         losses = 0
         draws = 0
-        for episode_num in range(n_episodes):
-            completed_episodes += 1
-            
-            # Progress bar (only if show_progress=True)
-            if show_progress:
-                progress_pct = (completed_episodes / total_episodes) * 100
-                bar_length = 50
-                filled = int(bar_length * completed_episodes / total_episodes)
-                bar = '█' * filled + '░' * (bar_length - filled)
-                
-                elapsed = time.time() - start_time
-                avg_time = elapsed / completed_episodes
-                remaining = total_episodes - completed_episodes
-                eta = avg_time * remaining
-                elapsed_str = f"{int(elapsed//60):02d}:{int(elapsed%60):02d}"
-                eta_str = f"{int(eta//60):02d}:{int(eta%60):02d}"
-                
-                sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [ {elapsed_str} < {eta_str} ]")
-                sys.stdout.flush()
-            
-            try:
-                W40KEngine, _ = setup_imports()
-                
-                # Create base environment with specified training config
-                base_env = W40KEngine(
-                    rewards_config=rewards_config_name,
-                    training_config_name=training_config_name,
-                    controlled_agent=controlled_agent,
-                    active_agents=None,
-                    scenario_file=scenario_file,
-                    unit_registry=unit_registry,
-                    quiet=True,
-                    gym_training_mode=True
-                )
-                
-                # Connect step logger if enabled
-                if 'step_logger' in globals() and step_logger and step_logger.enabled:
-                    base_env.step_logger = step_logger
-                
-                # Wrap with ActionMasker (CRITICAL for proper action masking)
-                def mask_fn(env):
-                    return env.get_action_mask()
-                
-                masked_env = ActionMasker(base_env, mask_fn)
-                bot_env = BotControlledEnv(masked_env, bot, unit_registry)
-                
-                obs, info = bot_env.reset()
-                done = False
-                step_count = 0
-                
-                # Calculate max_eval_steps from training_config
-                env_config = base_env.unwrapped.config if hasattr(base_env, 'unwrapped') else base_env.config
-                training_cfg = env_config.get('training_config', {})
-                max_turns = training_cfg.get('max_turns_per_episode', 5)
-                
-                # Calculate expected steps per episode
-                steps_per_turn = 8
-                expected_max_steps = max_turns * steps_per_turn
-                
-                # Add 100% buffer for slow/suboptimal play
-                max_eval_steps = expected_max_steps * 2
-                
-                while not done and step_count < max_eval_steps:
-                    action_masks = bot_env.engine.get_action_mask()
-                    action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
-                    
-                    obs, reward, terminated, truncated, info = bot_env.step(action)
-                    done = terminated or truncated
-                    step_count += 1
-                
-                # Determine winner - track wins/losses/draws
-                agent_player = 1 if controlled_agent else 0
-                winner = info.get('winner')
-                
-                if winner == agent_player:
-                    wins += 1
-                elif winner == -1:
-                    draws += 1
-                else:
-                    losses += 1
-                
-                # DIAGNOSTIC: Collect shoot stats from last 5 episodes
-                if episode_num >= n_episodes - 5:
+
+        # MULTI-SCENARIO: Iterate through all scenarios
+        for scenario_file in scenario_list:
+            scenario_name = os.path.basename(scenario_file).replace(f"{controlled_agent}_scenario_", "").replace(".json", "") if controlled_agent else "default"
+
+            for episode_num in range(episodes_per_scenario):
+                completed_episodes += 1
+
+                # Progress bar (only if show_progress=True)
+                if show_progress:
+                    progress_pct = (completed_episodes / total_episodes) * 100
+                    bar_length = 50
+                    filled = int(bar_length * completed_episodes / total_episodes)
+                    bar = '█' * filled + '░' * (bar_length - filled)
+
+                    elapsed = time.time() - start_time
+                    avg_time = elapsed / completed_episodes
+                    remaining = total_episodes - completed_episodes
+                    eta = avg_time * remaining
+
+                    # Calculate evaluation speed
+                    eps_speed = completed_episodes / elapsed if elapsed > 0 else 0
+
+                    # Format times as HH:MM:SS or MM:SS depending on duration
+                    def format_time(seconds):
+                        hours = int(seconds // 3600)
+                        minutes = int((seconds % 3600) // 60)
+                        secs = int(seconds % 60)
+                        if hours > 0:
+                            return f"{hours}:{minutes:02d}:{secs:02d}"
+                        else:
+                            return f"{minutes:02d}:{secs:02d}"
+
+                    elapsed_str = format_time(elapsed)
+                    eta_str = format_time(eta)
+                    speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
+
+                    sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [{scenario_name}] [{elapsed_str}<{eta_str}, {speed_str}]")
+                    sys.stdout.flush()
+
+                try:
+                    W40KEngine, _ = setup_imports()
+
+                    # Create base environment with specified training config
+                    base_env = W40KEngine(
+                        rewards_config=rewards_config_name,
+                        training_config_name=training_config_name,
+                        controlled_agent=controlled_agent,
+                        active_agents=None,
+                        scenario_file=scenario_file,
+                        unit_registry=unit_registry,
+                        quiet=True,
+                        gym_training_mode=True
+                    )
+
+                    # Connect step logger if enabled
+                    if 'step_logger' in globals() and step_logger and step_logger.enabled:
+                        base_env.step_logger = step_logger
+
+                    # Wrap with ActionMasker (CRITICAL for proper action masking)
+                    def mask_fn(env):
+                        return env.get_action_mask()
+
+                    masked_env = ActionMasker(base_env, mask_fn)
+                    bot_env = BotControlledEnv(masked_env, bot, unit_registry)
+
+                    obs, info = bot_env.reset()
+                    done = False
+                    step_count = 0
+
+                    # Calculate max_eval_steps from training_config
+                    env_config = base_env.unwrapped.config if hasattr(base_env, 'unwrapped') else base_env.config
+                    training_cfg = env_config.get('training_config', {})
+                    max_turns = training_cfg.get('max_turns_per_episode', 5)
+
+                    # Calculate expected steps per episode
+                    steps_per_turn = 8
+                    expected_max_steps = max_turns * steps_per_turn
+
+                    # Add 100% buffer for slow/suboptimal play
+                    max_eval_steps = expected_max_steps * 2
+
+                    while not done and step_count < max_eval_steps:
+                        action_masks = bot_env.engine.get_action_mask()
+                        action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
+
+                        obs, reward, terminated, truncated, info = bot_env.step(action)
+                        done = terminated or truncated
+                        step_count += 1
+
+                    # Determine winner - track wins/losses/draws
+                    agent_player = 1 if controlled_agent else 0
+                    winner = info.get('winner')
+
+                    if winner == agent_player:
+                        wins += 1
+                    elif winner == -1:
+                        draws += 1
+                    else:
+                        losses += 1
+
+                    # DIAGNOSTIC: Collect shoot stats from all episodes
                     bot_stats = bot_env.get_shoot_stats()
                     if f'{bot_name}_shoot_stats' not in results:
                         results[f'{bot_name}_shoot_stats'] = []
                     results[f'{bot_name}_shoot_stats'].append(bot_stats)
-                
-                bot_env.close()
-            except Exception as e:
-                if show_progress:
-                    print(f"\n⚠️  Episode {episode_num+1} error: {e}")
-                continue
-        
-        win_rate = wins / n_episodes
+
+                    bot_env.close()
+                except Exception as e:
+                    if show_progress:
+                        print(f"\n⚠️  Episode error: {e}")
+                    continue
+
+        # Calculate win rate across ALL scenarios
+        total_games = episodes_per_scenario * len(scenario_list)
+        win_rate = wins / total_games if total_games > 0 else 0.0
         results[bot_name] = win_rate
         results[f'{bot_name}_wins'] = wins
         results[f'{bot_name}_losses'] = losses
@@ -1697,7 +1755,16 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     # Load training configuration from config files (not script parameters)
     training_config = config.load_training_config(training_config_name)
     model_params = training_config["model_params"]
-    
+
+    # Handle entropy coefficient scheduling if configured
+    # Use START value for model creation; callback will handle the schedule
+    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
+        ent_config = model_params["ent_coef"]
+        start_val = float(ent_config["start"])
+        end_val = float(ent_config["end"])
+        model_params["ent_coef"] = start_val  # Use initial value
+        print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
+
     # Import environment
     W40KEngine, register_environment = setup_imports()
     
@@ -2078,9 +2145,18 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         # No agent specified, use global config
         training_config = config.load_training_config(training_config_name)
         agent_specific_mode = False
-    
+
     model_params = training_config["model_params"]
-    
+
+    # Handle entropy coefficient scheduling if configured
+    # Use START value for model creation; callback will handle the schedule
+    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
+        ent_config = model_params["ent_coef"]
+        start_val = float(ent_config["start"])
+        end_val = float(ent_config["end"])
+        model_params["ent_coef"] = start_val  # Use initial value
+        print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
+
     # Import environment
     W40KEngine, register_environment = setup_imports()
     
@@ -2296,7 +2372,16 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Create or load model
     model_params = training_config["model_params"]
-    
+
+    # Handle entropy coefficient scheduling if configured
+    # Use START value for model creation; callback will handle the schedule
+    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
+        ent_config = model_params["ent_coef"]
+        start_val = float(ent_config["start"])
+        end_val = float(ent_config["end"])
+        model_params["ent_coef"] = start_val  # Use initial value
+        print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
+
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model: {model_path}")
         model = MaskablePPO(env=env, **model_params)
@@ -2441,7 +2526,55 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     print(f"   Complete cycles: {cycle}")
     print(f"   Final model: {model_path}")
     print(f"{'='*80}\n")
-    
+
+    # Run final comprehensive bot evaluation
+    if EVALUATION_BOTS_AVAILABLE:
+        if 'bot_eval_final' not in training_config['callback_params']:
+            print("⚠️  Warning: 'bot_eval_final' not found in callback_params. Skipping final evaluation.")
+        else:
+            n_final = training_config['callback_params']['bot_eval_final']
+            if n_final > 0:
+                print(f"\n{'='*80}")
+                print(f"🤖 FINAL BOT EVALUATION ({n_final} episodes per bot across all scenarios)")
+                print(f"{'='*80}\n")
+
+                bot_results = evaluate_against_bots(
+                    model=model,
+                    training_config_name=training_config_name,
+                    rewards_config_name=rewards_config_name,
+                    n_episodes=n_final,
+                    controlled_agent=effective_agent_key,
+                    show_progress=True,
+                    deterministic=True
+                )
+
+                # Log final results to metrics tracker
+                if metrics_tracker and bot_results:
+                    final_bot_results = {
+                        'random': bot_results.get('random'),
+                        'greedy': bot_results.get('greedy'),
+                        'defensive': bot_results.get('defensive'),
+                        'combined': bot_results.get('combined', 0)
+                    }
+                    metrics_tracker.log_bot_evaluations(final_bot_results)
+
+                # Print summary
+                print(f"\n{'='*80}")
+                print(f"📊 FINAL BOT EVALUATION RESULTS")
+                print(f"{'='*80}")
+                if bot_results:
+                    for bot_name in ['random', 'greedy', 'defensive']:
+                        if bot_name in bot_results:
+                            win_rate = bot_results[bot_name] * 100
+                            wins = bot_results.get(f'{bot_name}_wins', 0)
+                            losses = bot_results.get(f'{bot_name}_losses', 0)
+                            draws = bot_results.get(f'{bot_name}_draws', 0)
+                            print(f"  vs {bot_name.capitalize()}Bot:    {win_rate:5.1f}% ({wins}W-{losses}L-{draws}D)")
+
+                    combined = bot_results.get('combined', 0) * 100
+                    print(f"  Combined Score: {combined:5.1f}%")
+                print(f"{'='*80}\n")
+
     return True, model, env
 
 def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
@@ -2483,7 +2616,24 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         )
         episode_callback.global_episode_offset = global_episode_offset
         callbacks.append(episode_callback)
-    
+
+    # Add entropy coefficient schedule callback if configured
+    if "model_params" in training_config and "ent_coef" in training_config["model_params"]:
+        ent_coef = training_config["model_params"]["ent_coef"]
+        if isinstance(ent_coef, dict) and "start" in ent_coef and "end" in ent_coef:
+            start_ent = float(ent_coef["start"])
+            end_ent = float(ent_coef["end"])
+            total_eps = total_episodes_override if total_episodes_override else training_config["total_episodes"]
+
+            entropy_callback = EntropyScheduleCallback(
+                start_ent=start_ent,
+                end_ent=end_ent,
+                total_episodes=total_eps,
+                verbose=1
+            )
+            callbacks.append(entropy_callback)
+            print(f"✅ Added entropy schedule callback: {start_ent} → {end_ent} over {total_eps} episodes")
+
     # Evaluation callback - test model periodically with logging enabled
     # Load scenario and unit registry for evaluation callback
     from ai.unit_registry import UnitRegistry

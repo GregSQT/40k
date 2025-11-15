@@ -194,7 +194,9 @@ class RewardCalculator:
             game_state['last_reward_breakdown'] = reward_breakdown
             return calculated_reward
             
-        elif action_type == "move":
+        elif action_type == "move" or action_type == "flee":
+            # CRITICAL FIX: Handle both 'move' and 'flee' actions the same way
+            # 'flee' is movement away from adjacent enemies (AI_TURN.md flee mechanics)
             old_pos = (result["fromCol"], result["fromRow"])
             new_pos = (result["toCol"], result["toRow"])
             tactical_context = self._build_tactical_context(acting_unit, result, game_state)
@@ -203,27 +205,27 @@ class RewardCalculator:
                 movement_reward = movement_result[0]
                 reward_breakdown['base_actions'] = movement_reward
                 reward_breakdown['total'] = movement_reward
-                
+
                 if game_state.get("game_over", False):
                     situational_reward = self._get_situational_reward(game_state)
                     reward_breakdown['situational'] = situational_reward
                     movement_reward += situational_reward
                     reward_breakdown['total'] = movement_reward
-                
+
                 game_state['last_reward_breakdown'] = reward_breakdown
                 return movement_reward
             reward_breakdown['base_actions'] = movement_result
             reward_breakdown['total'] = movement_result
-            
+
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
                 reward_breakdown['situational'] = situational_reward
                 movement_result += situational_reward
                 reward_breakdown['total'] = movement_result
-            
+
             game_state['last_reward_breakdown'] = reward_breakdown
             return movement_result
-            
+
         elif action_type == "skip":
             # FIXED: Skip means no targets available - no penalty
             skip_reward = 0.0
@@ -498,8 +500,9 @@ class RewardCalculator:
     def _build_tactical_context(self, unit: Dict[str, Any], result: Dict[str, Any], game_state: Dict[str, Any]) -> Dict[str, Any]:
         """Build tactical context for reward mapper."""
         action_type = result.get("action")
-        
-        if action_type == "move":
+
+        # CRITICAL FIX: Handle both 'move' and 'flee' actions (flee is a type of move)
+        if action_type == "move" or action_type == "flee":
             # AI_TURN.md COMPLIANCE: Direct access - movement context must provide coordinates
             if "fromCol" not in result:
                 raise KeyError(f"Movement context missing required 'fromCol' field: {result}")

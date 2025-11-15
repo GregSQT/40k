@@ -1,0 +1,4 @@
+wall_hexes type: <class 'set'>
+wall_hexes count: 72
+Sample: [(12, 4), (7, 17), (18, 17), (3, 4), (22, 5)]
+Checking (9,13): True

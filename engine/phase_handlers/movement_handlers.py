@@ -311,21 +311,19 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
 def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str, Any], dest_col: int, dest_row: int, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_TURN.md movement execution with destination validation.
-    
+
     Implements AI_TURN.md movement restrictions and flee detection.
     """
-    # Validate destination per AI_TURN.md rules - add debug
+    # Validate destination per AI_TURN.md rules
     if not _is_valid_destination(game_state, dest_col, dest_row, unit, config):
-        # print(f"MOVE BLOCKED: Unit {unit['id']} trying to move to ({dest_col},{dest_row}) failed validation")
         return False, {"error": "invalid_destination", "target": (dest_col, dest_row)}
-    # print(f"MOVE ALLOWED: Unit {unit['id']} moved to ({dest_col},{dest_row}) passed validation")
     
     # AI_TURN.md flee detection: was adjacent to enemy before move
     was_adjacent = _is_adjacent_to_enemy(game_state, unit)
     
     # Store original position
     orig_col, orig_row = unit["col"], unit["row"]
-    
+
     # Execute movement
     unit["col"] = dest_col
     unit["row"] = dest_row
@@ -348,61 +346,84 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
 def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any], config: Dict[str, Any]) -> bool:
     """
     AI_TURN.md destination validation implementation.
-    
+
     Validates movement destination per AI_TURN.md restrictions.
     """
     # Board bounds check
-    if (col < 0 or row < 0 or 
-        col >= game_state["board_cols"] or 
+    if (col < 0 or row < 0 or
+        col >= game_state["board_cols"] or
         row >= game_state["board_rows"]):
         return False
-    
+
     # Wall collision check
     if (col, row) in game_state["wall_hexes"]:
         return False
-    
+
     # Unit occupation check
     for other_unit in game_state["units"]:
-        if (other_unit["id"] != unit["id"] and 
+        if (other_unit["id"] != unit["id"] and
             other_unit["HP_CUR"] > 0 and
-            other_unit["col"] == col and 
+            other_unit["col"] == col and
             other_unit["row"] == row):
             return False
-    
+
+
     # AI_TURN.md: Cannot move TO hexes adjacent to enemies
     if _is_hex_adjacent_to_enemy(game_state, col, row, unit["player"]):
         return False
-    
+
     return True
 
 
 def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
     AI_TURN.md flee detection logic.
-    
+
     Check if unit is adjacent to enemy for flee marking.
+
+    CRITICAL FIX: Use proper hexagonal distance, not Chebyshev distance.
+    For CC_RNG=1 (typical), this means checking if enemy is in 6 neighbors.
+    For CC_RNG>1, use hex distance calculation.
     """
     cc_range = unit["CC_RNG"]
-    
-    for enemy in game_state["units"]:
-        if (enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0):
-            distance = max(abs(unit["col"] - enemy["col"]), 
-                          abs(unit["row"] - enemy["row"]))
-            if distance <= cc_range:
-                return True
-    return False
+    unit_col, unit_row = unit["col"], unit["row"]
+
+    # Optimization: For CC_RNG=1 (most common), check 6 neighbors directly
+    if cc_range == 1:
+        hex_neighbors = set(_get_hex_neighbors(unit_col, unit_row))
+        for enemy in game_state["units"]:
+            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+                enemy_pos = (enemy["col"], enemy["row"])
+                if enemy_pos in hex_neighbors:
+                    return True
+        return False
+    else:
+        # For longer ranges, use proper hex distance calculation
+        for enemy in game_state["units"]:
+            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+                hex_dist = _calculate_hex_distance(unit_col, unit_row, enemy["col"], enemy["row"])
+                if hex_dist <= cc_range:
+                    return True
+        return False
 
 
 def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, player: int) -> bool:
     """
     AI_TURN.md adjacency restriction implementation.
-    
+
     Check if hex position is adjacent to any enemy unit.
+
+    CRITICAL FIX: Use proper hexagonal adjacency, not Chebyshev distance.
+    Hexagonal grids require checking if enemy position is in the list of 6 neighbors.
     """
+    # Get the 6 hexagonal neighbors of this position
+    hex_neighbors = set(_get_hex_neighbors(col, row))
+
     for enemy in game_state["units"]:
         if enemy["player"] != player and enemy["HP_CUR"] > 0:
-            distance = max(abs(col - enemy["col"]), abs(row - enemy["row"]))
-            if distance <= 1:  # Adjacent check
+            enemy_pos = (enemy["col"], enemy["row"])
+            # Check if enemy is in our 6 neighbors (true hex adjacency)
+            if enemy_pos in hex_neighbors:
                 return True
     return False
 
@@ -443,95 +464,97 @@ def _get_hex_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
 def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any]) -> bool:
     """
     Check if a hex can be traversed (moved through) during pathfinding.
-    
+
     AI_TURN.md: A hex is traversable if it's:
     - Within board bounds
     - NOT a wall
     - NOT occupied by another unit
-    
+
     Note: We check enemy adjacency separately in _is_valid_destination
     """
     # Board bounds check
-    if (col < 0 or row < 0 or 
-        col >= game_state["board_cols"] or 
+    if (col < 0 or row < 0 or
+        col >= game_state["board_cols"] or
         row >= game_state["board_rows"]):
         return False
-    
+
     # Wall check - CRITICAL: Can't move through walls
     if (col, row) in game_state["wall_hexes"]:
         return False
-    
-    # Unit occupation check
+
+    # Unit occupation check - CRITICAL: Check ALL units including dead ones with HP check
     for other_unit in game_state["units"]:
-        if (other_unit["id"] != unit["id"] and 
+        if (other_unit["id"] != unit["id"] and
             other_unit["HP_CUR"] > 0 and
-            other_unit["col"] == col and 
+            other_unit["col"] == col and
             other_unit["row"] == row):
             return False
-    
+
     return True
 
 
 def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str) -> List[Tuple[int, int]]:
     """
     AI_TURN.md: Build valid movement destinations using BFS pathfinding.
-    
+
     CRITICAL FIX: Uses BFS to find REACHABLE hexes, not just hexes within distance.
     This prevents movement through walls (AI_TURN.md compliance).
     """
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return []
-    
+
     move_range = unit["MOVE"]
     start_col, start_row = unit["col"], unit["row"]
     start_pos = (start_col, start_row)
-    
+
     # BFS pathfinding to find all reachable hexes
     visited = {start_pos: 0}  # {(col, row): distance_from_start}
     queue = [(start_pos, 0)]  # [(position, distance)]
     valid_destinations = []
-    
+
     while queue:
         current_pos, current_dist = queue.pop(0)
         current_col, current_row = current_pos
-        
+
         # If we've reached max movement, don't explore further from this hex
         if current_dist >= move_range:
             continue
-        
+
         # Explore all 6 hex neighbors
         neighbors = _get_hex_neighbors(current_col, current_row)
-        
+
         for neighbor_col, neighbor_row in neighbors:
             neighbor_pos = (neighbor_col, neighbor_row)
             neighbor_dist = current_dist + 1
-            
+
             # Skip if already visited with a shorter path
             if neighbor_pos in visited:
                 continue
-            
+
             # Check if this neighbor is traversable (not a wall, not occupied)
             if not _is_traversable_hex(game_state, neighbor_col, neighbor_row, unit):
                 continue  # Can't move through this hex
-            
-            # Mark as visited
+
+            # CRITICAL: Cannot move THROUGH hexes adjacent to enemies (per movement rules)
+            # Check enemy adjacency BEFORE marking as visited
+            if _is_hex_adjacent_to_enemy(game_state, neighbor_col, neighbor_row, unit["player"]):
+                continue  # Cannot move through this hex - don't add to queue or destinations
+
+            # Mark as visited AFTER all blocking checks pass
             visited[neighbor_pos] = neighbor_dist
-            
-            # Check if this is a valid destination (not adjacent to enemy)
+
+            # Check if this is a valid destination (not wall, not occupied)
             if _is_valid_destination(game_state, neighbor_col, neighbor_row, unit, {}):
                 # Don't add start position as a destination
                 if neighbor_pos != start_pos:
                     valid_destinations.append(neighbor_pos)
-            
-            # Add to queue for further exploration (even if not a valid destination,
-            # we can still move THROUGH it to reach hexes beyond)
-            # UNLESS it's adjacent to enemy (can't move through those)
-            if not _is_hex_adjacent_to_enemy(game_state, neighbor_col, neighbor_row, unit["player"]):
-                queue.append((neighbor_pos, neighbor_dist))
-    
+
+            # Add to queue for further exploration
+            queue.append((neighbor_pos, neighbor_dist))
+
     game_state["valid_move_destinations_pool"] = valid_destinations
-    
+
     return valid_destinations
 
 
@@ -700,7 +723,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         raise KeyError(f"Action missing required 'destRow' field: {action}")
     dest_col = action["destCol"]
     dest_row = action["destRow"]
-    
+
     if dest_col is None or dest_row is None:
         return False, {"error": "missing_destination"}
     
@@ -714,28 +737,8 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     
     # Validate destination in valid pool
     if (dest_col, dest_row) not in valid_pool:
-        # print(f"VALIDATION DEBUG: VALIDATION FAILED - Investigating pathfinding consistency")
-        
-        # Get unit for detailed analysis
-        unit = _get_unit_by_id(game_state, unit_id)
-        if unit:
-            # print(f"VALIDATION DEBUG: Unit position: ({unit['col']}, {unit['row']})")
-            # print(f"VALIDATION DEBUG: Unit MOVE stat: {unit['MOVE']}")
-            
-            # Test if destination would be valid with fresh pathfinding
-            hex_distance = _calculate_hex_distance(unit["col"], unit["row"], dest_col, dest_row)
-            # print(f"VALIDATION DEBUG: Hex distance to destination: {hex_distance} (max: {unit['MOVE']})")
-            
-            # Check basic validity
-            is_basic_valid = _is_valid_destination(game_state, dest_col, dest_row, unit, {})
-            # print(f"VALIDATION DEBUG: Basic destination validity: {is_basic_valid}")
-            
-            # Rebuild fresh pool and compare
-            # print(f"VALIDATION DEBUG: Rebuilding fresh destinations pool...")
-            movement_build_valid_destinations_pool(game_state, unit_id)
-            fresh_pool = game_state["valid_move_destinations_pool"]
-            # print(f"VALIDATION DEBUG: Fresh pool size: {len(fresh_pool)}")
-            # print(f"VALIDATION DEBUG: Is AI selection in fresh pool? {(dest_col, dest_row) in fresh_pool}")
+        # Destination not reachable via BFS pathfinding
+        pass  # Validation will fail below
             
             # Show pool differences
             # if len(valid_pool) != len(fresh_pool):
@@ -751,24 +754,25 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
-    
-    # Check flee condition (simplified - distance <= 1)
-    was_adjacent = _is_adjacent_to_enemy_simple(game_state, unit)
-    
-    # Execute movement with validation
-    orig_col, orig_row = unit["col"], unit["row"]
-    # print(f"MOVEMENT EXECUTION: Unit {unit['id']} MOVING from ({orig_col}, {orig_row}) to ({dest_col}, {dest_row})")
-    
-    # CRITICAL: Actually update the unit position
-    unit["col"] = dest_col
-    unit["row"] = dest_row
-    
-    # VALIDATION: Confirm position changed
+
+    # CRITICAL FIX: Use _attempt_movement_to_destination() to validate occupation
+    # This function checks if destination is occupied, validates enemy adjacency, etc.
+    config = {}  # Empty config for now
+    move_success, move_result = _attempt_movement_to_destination(game_state, unit, dest_col, dest_row, config)
+
+    if not move_success:
+        # Move was blocked (occupied hex, adjacent to enemy, etc.)
+        return False, move_result
+
+    # Extract movement info from result
+    was_adjacent = (move_result.get("action") == "flee")
+    orig_col = move_result.get("fromCol")
+    orig_row = move_result.get("fromRow")
+
+    # Position has already been updated by _attempt_movement_to_destination()
+    # Validate it actually changed
     if unit["col"] != dest_col or unit["row"] != dest_row:
-        # print(f"MOVEMENT ERROR: Position update failed - expected ({dest_col}, {dest_row}), actual ({unit['col']}, {unit['row']})")
         return False, {"error": "position_update_failed"}
-    
-    # print(f"MOVEMENT SUCCESS: Unit {unit['id']} now at ({unit['col']}, {unit['row']})")
     
     # Generate movement log per requested format
     if "action_logs" not in game_state:

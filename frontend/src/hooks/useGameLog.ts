@@ -233,5 +233,6 @@ export function useGameLog(currentTurn?: number) {
     logCombatAction,
     logUnitDeath,
     clearLog,
+    addEvent,  // Export for custom messages (e.g., replay viewer)
   };
 }

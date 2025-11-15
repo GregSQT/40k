@@ -9,45 +9,12 @@
 
 ---
 
-## 🎯 CRITICAL METRICS QUICK REFERENCE
-
-These are the most important metrics to watch in the `game_critical/` and `eval_bots/` namespaces in TensorBoard.
-
-| Metric | What It Measures | Target Value | If Too Low (<) | If Too High (>) | Notes |
-|--------|------------------|--------------|----------------|-----------------|-------|
-| **game_critical/episode_reward** | Total reward per episode | Phase 1: 0+<br>Phase 2: +10 to +25<br>Phase 3: +25 to +50+ | • Check reward config balance<br>• Increase key action rewards<br>• Reduce penalties | • Possible reward hacking<br>• Review exploited rewards<br>• Add balancing penalties | Should increase steadily. Sudden drops = policy collapse |
-| **game_critical/episode_length** | Steps per episode | 50-150 steps<br>(stable) | • Agent dying too fast<br>• Increase defensive rewards<br>• Reduce aggression penalties | • Agent too passive<br>• Reduce wait penalty<br>• Increase action rewards | Increasing trend = agent stalling. Stable = good |
-| **game_critical/win_rate_100ep** | Rolling 100-episode win rate | Phase 1: 60%+<br>Phase 2: 70%+<br>Phase 3: 75%+ | • Increase training episodes<br>• Adjust reward balance<br>• Check observation quality | • Good! Advance to next phase<br>• Consider harder opponents | Primary success metric. Must be stable, not just lucky streak |
-| **game_critical/units_killed_vs_lost_ratio** | Kill/death ratio | 1.5+ (killing more than losing) | • Improve combat rewards<br>• Reduce defensive penalties<br>• Check target selection | • Excellent performance<br>• Consider phase advancement | <1.0 = losing units. >2.0 = dominating |
-| **game_critical/invalid_action_rate** | % of invalid actions | <5% (ideally <2%) | N/A - this is good! | • Action masking broken<br>• Observation quality issue<br>• Network capacity problem | >10% persistently = serious problem requiring restart |
-| **eval_bots/vs_random** | Reward vs RandomBot | 0.0+ (positive) | • Agent worse than random<br>• Major training problem<br>• Check overfitting | • Good! Should beat random<br>• Target: -0.3 to +0.1 range | Baseline competence. Failure here = critical issue |
-| **eval_bots/vs_greedy** | Reward vs GreedyBot | 0.05 to 0.15 | • Target selection poor<br>• Increase priority rewards<br>• Check tactical bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• Balance rewards | Tests target prioritization. Should be moderate |
-| **eval_bots/vs_defensive** | Reward vs DefensiveBot | 0.10 to 0.20 | • Tactical positioning weak<br>• Increase positioning rewards<br>• Check movement bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• More diverse scenarios | Tests tactical mastery. Hardest opponent |
-| **eval_bots/combined_win_rate** | Weighted average of all bots | 0.55+ (Phase 2)<br>0.70+ (Phase 3) | • Overall performance weak<br>• Review all reward categories<br>• Check observation system | • Excellent! Phase complete<br>• Save model and advance | Single number for overall competence. Used for model selection |
-
-### How to Use This Table
-
-1. **During Training**: Check these metrics every 100-200 episodes
-2. **Red Flags**: Any metric outside target range for 200+ episodes needs intervention
-3. **Green Lights**: All metrics in target range = training healthy
-4. **Progression**: Metrics should trend toward targets over time, not stay flat
-
-### Priority Order
-
-1. **invalid_action_rate** - Fix immediately if >10%
-2. **episode_reward** - Must be increasing (even slowly)
-3. **win_rate_100ep** - Primary success indicator
-4. **eval_bots/combined_win_rate** - Overall competence check
-5. **Other metrics** - Fine-tuning and optimization
-
----
-
 ## 📋 TABLE OF CONTENTS
 
-- [Critical Metrics Quick Reference](#-critical-metrics-quick-reference) ⭐ **START HERE**
 - [Why Metrics Matter](#why-metrics-matter)
 - [Core Metrics Explained](#core-metrics-explained)
   - [Training Metrics (PPO Internals)](#training-metrics-ppo-internals)
+  - [Critical Metrics Quick Reference](#-critical-metrics-quick-reference) ⭐ **START HERE**
   - [Game Metrics (Performance Indicators)](#game-metrics-performance-indicators)
   - [Evaluation Metrics (Bot Comparisons)](#evaluation-metrics-bot-comparisons)
 - [Metric Relationships](#metric-relationships)
@@ -210,6 +177,39 @@ These metrics reveal the health of the PPO learning algorithm itself.
 **Action triggers:**
 - Not decreasing → Increase `vf_coef`, check network capacity
 - Increasing → Reduce `learning_rate`
+
+---
+
+## 🎯 CRITICAL METRICS QUICK REFERENCE
+
+These are the most important metrics to watch in the `game_critical/` and `eval_bots/` namespaces in TensorBoard.
+
+| Metric | What It Measures | Target Value | If Too Low (<) | If Too High (>) | Notes |
+|--------|------------------|--------------|----------------|-----------------|-------|
+| **game_critical/episode_reward** | Total reward per episode | Phase 1: 0+<br>Phase 2: +10 to +25<br>Phase 3: +25 to +50+ | • Check reward config balance<br>• Increase key action rewards<br>• Reduce penalties | • Possible reward hacking<br>• Review exploited rewards<br>• Add balancing penalties | Should increase steadily. Sudden drops = policy collapse |
+| **game_critical/episode_length** | Steps per episode | 50-150 steps<br>(stable) | • Agent dying too fast<br>• Increase defensive rewards<br>• Reduce aggression penalties | • Agent too passive<br>• Reduce wait penalty<br>• Increase action rewards | Increasing trend = agent stalling. Stable = good |
+| **game_critical/win_rate_100ep** | Rolling 100-episode win rate | Phase 1: 60%+<br>Phase 2: 70%+<br>Phase 3: 75%+ | • Increase training episodes<br>• Adjust reward balance<br>• Check observation quality | • Good! Advance to next phase<br>• Consider harder opponents | Primary success metric. Must be stable, not just lucky streak |
+| **game_critical/units_killed_vs_lost_ratio** | Kill/death ratio | 1.5+ (killing more than losing) | • Improve combat rewards<br>• Reduce defensive penalties<br>• Check target selection | • Excellent performance<br>• Consider phase advancement | <1.0 = losing units. >2.0 = dominating |
+| **game_critical/invalid_action_rate** | % of invalid actions | <5% (ideally <2%) | N/A - this is good! | • Action masking broken<br>• Observation quality issue<br>• Network capacity problem | >10% persistently = serious problem requiring restart |
+| **eval_bots/vs_random** | Reward vs RandomBot | 0.0+ (positive) | • Agent worse than random<br>• Major training problem<br>• Check overfitting | • Good! Should beat random<br>• Target: -0.3 to +0.1 range | Baseline competence. Failure here = critical issue |
+| **eval_bots/vs_greedy** | Reward vs GreedyBot | 0.05 to 0.15 | • Target selection poor<br>• Increase priority rewards<br>• Check tactical bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• Balance rewards | Tests target prioritization. Should be moderate |
+| **eval_bots/vs_defensive** | Reward vs DefensiveBot | 0.10 to 0.20 | • Tactical positioning weak<br>• Increase positioning rewards<br>• Check movement bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• More diverse scenarios | Tests tactical mastery. Hardest opponent |
+| **eval_bots/combined_win_rate** | Weighted average of all bots | 0.55+ (Phase 2)<br>0.70+ (Phase 3) | • Overall performance weak<br>• Review all reward categories<br>• Check observation system | • Excellent! Phase complete<br>• Save model and advance | Single number for overall competence. Used for model selection |
+
+### How to Use This Table
+
+1. **During Training**: Check these metrics every 100-200 episodes
+2. **Red Flags**: Any metric outside target range for 200+ episodes needs intervention
+3. **Green Lights**: All metrics in target range = training healthy
+4. **Progression**: Metrics should trend toward targets over time, not stay flat
+
+### Priority Order
+
+1. **invalid_action_rate** - Fix immediately if >10%
+2. **episode_reward** - Must be increasing (even slowly)
+3. **win_rate_100ep** - Primary success indicator
+4. **eval_bots/combined_win_rate** - Overall competence check
+5. **Other metrics** - Fine-tuning and optimization
 
 ---
 

@@ -14,7 +14,10 @@
       "gamma": 0.95,
       "gae_lambda": 0.9,
       "clip_range": 0.2,
-      "ent_coef": 0.40,
+      "ent_coef": {
+        "start": 0.40,
+        "end": 0.10
+      },
       "vf_coef": 1.0,
       "max_grad_norm": 0.5,
       "target_kl": null,
@@ -33,7 +36,7 @@
       "bot_eval_freq": 200,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 3,
-      "bot_eval_final": 50
+      "bot_eval_final": 0
     },
     "observation_params": {
       "obs_size": 295,

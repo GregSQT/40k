@@ -189,7 +189,7 @@ class W40KEngine(gym.Env):
             "board_rows": self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"],
             "wall_hexes": set(map(tuple, self.config["board"]["default"]["wall_hexes"] if "default" in self.config["board"] else self.config["board"]["wall_hexes"]))
         }
-        
+
         # CRITICAL: Instantiate all module managers BEFORE using them
         self.state_manager = GameStateManager(self.config, self.unit_registry)
         self.obs_builder = ObservationBuilder(self.config)

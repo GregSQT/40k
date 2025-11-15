@@ -60,13 +60,13 @@
 
   "SpaceMarine_Infantry_Troop_RangedSwarm_phase1": {
     "Unit": "######################################## SpaceMarine_Infantry_Troop_RangedSwarm ########################################",
-    "Info": "######################################## PHASE 1 - BALANCED: Less aggressive penalties ########################################",
+    "Info": "######################################## PHASE 1 - FIXED: Win/Loss dominates, kills are essential ########################################",
     "base_actions": {
-      "move_close": 0.3,
-      "move_away": -1.0,
-      "move_to_charge": 0.4,
-      "move_to_los": 5.0,
-      "ranged_attack": 8.0,
+      "move_close": 0.1,
+      "move_away": -0.5,
+      "move_to_charge": 0.1,
+      "move_to_los": 2.0,
+      "ranged_attack": 2.0,
       "charge_success": 0.5,
       "melee_attack": 0.5,
       "move_wait": 0.0,
@@ -75,15 +75,15 @@
     "result_bonuses": {
       "hit_target": 3.0,
       "wound_target": 6.0,
-      "damage_target": 12.0,
+      "damage_target": 5.0,
       "kill_target": 25.0,
-      "no_overkill": 8.0,
-      "target_lowest_hp": 15.0
+      "no_overkill": 12.0,
+      "target_lowest_hp": 20.0
     },
     "situational_modifiers": {
-      "win": 10.0,
-      "lose": -10.0,
-      "draw": -8.0,
+      "win": 50.0,
+      "lose": -50.0,
+      "draw": -50.0,
       "friendly_fire_penalty": -8.0,
       "attack_wasted": -5.0,
       "target_in_cover_penalty": -0.2,

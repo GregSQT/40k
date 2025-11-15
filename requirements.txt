@@ -1,0 +1,13 @@
+# Core ML dependencies
+numpy>=2.3.0
+torch>=2.7.0
+stable-baselines3>=2.7.0
+sb3-contrib>=2.7.0
+gymnasium>=0.29.1
+
+# Visualization
+matplotlib>=3.10.0
+tensorboard>=2.18.0
+
+# Utilities
+pandas>=2.3.0

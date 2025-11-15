@@ -634,6 +634,83 @@ def execute_ai_turn():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/replay/parse', methods=['POST'])
+def parse_replay_log():
+    """
+    Parse train_step.log into replay format.
+
+    Request body:
+        {
+            "log_path": "train_step.log"  // Optional, defaults to "train_step.log"
+        }
+
+    Returns:
+        {
+            "total_episodes": N,
+            "episodes": [...]
+        }
+    """
+    try:
+        from services.replay_parser import parse_log_file
+
+        data = request.get_json() or {}
+        log_path = data.get('log_path', 'train_step.log')
+
+        # Security: Only allow logs in current directory or subdirectories
+        if '..' in log_path or log_path.startswith('/'):
+            return jsonify({"error": "Invalid log path"}), 400
+
+        if not os.path.exists(log_path):
+            return jsonify({"error": f"Log file not found: {log_path}"}), 404
+
+        replay_data = parse_log_file(log_path)
+        return jsonify(replay_data)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/replay/list', methods=['GET'])
+def list_replay_logs():
+    """
+    List available replay log files.
+
+    Returns:
+        {
+            "logs": [
+                {"name": "train_step.log", "size": 12345, "modified": "2025-01-14"},
+                ...
+            ]
+        }
+    """
+    try:
+        logs = []
+
+        # Check for train_step.log
+        if os.path.exists('train_step.log'):
+            stats = os.stat('train_step.log')
+            logs.append({
+                'name': 'train_step.log',
+                'size': stats.st_size,
+                'modified': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stats.st_mtime))
+            })
+
+        # Check for other .log files in current directory
+        for filename in os.listdir('.'):
+            if filename.endswith('.log') and filename != 'train_step.log':
+                stats = os.stat(filename)
+                logs.append({
+                    'name': filename,
+                    'size': stats.st_size,
+                    'modified': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stats.st_mtime))
+                })
+
+        return jsonify({'logs': logs})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/', methods=['GET'])
 def serve_frontend():
     """Serve frontend instructions."""
@@ -648,7 +725,9 @@ def serve_frontend():
             "get_state": "/api/game/state",
             "reset_game": "/api/game/reset",
             "board_config": "/api/config/board",
-            "debug_actions": "/api/debug/actions"
+            "debug_actions": "/api/debug/actions",
+            "replay_parse": "/api/replay/parse",
+            "replay_list": "/api/replay/list"
         },
         "instructions": [
             "1. Start frontend: cd frontend && npm run dev",

@@ -4,13 +4,13 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 //import PlayerVsAIPage from "./pages/PlayerVsAIPage";
-//import ReplayPage from "./pages/ReplayPage";
+import ReplayPage from "./pages/ReplayPage";
 import { BoardWithAPI } from "./components/BoardWithAPI";
 
-export default function App() {  
+export default function App() {
   React.useEffect(() => {
   }, []);
-  
+
   return (
     <BrowserRouter>
       <Routes>
@@ -19,7 +19,7 @@ export default function App() {
         <Route path="/home" element={<HomePage />} />
         <Route path="/game" element={<BoardWithAPI />} />
         {/* <Route path="/pve" element={<PlayerVsAIPage />} /> */}
-        {/* <Route path="/replay" element={<ReplayPage />} /> */}
+        <Route path="/replay" element={<ReplayPage />} />
       </Routes>
     </BrowserRouter>
   );
