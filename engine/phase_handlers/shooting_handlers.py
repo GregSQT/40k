@@ -1069,115 +1069,12 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     
     # Enhanced message format including shooter position per movement phase integration
     enhanced_message = f"Unit {unit_id} ({shooter['col']}, {shooter['row']}) SHOT Unit {target_id} ({target['col']}, {target['row']}) : {attack_result['attack_log'].split(' : ', 1)[1] if ' : ' in attack_result['attack_log'] else attack_result['attack_log']}"
-    
-    # Calculate reward for this action using progressive bonus system
+
+    # CRITICAL FIX: Append action_log BEFORE reward calculation
+    # This ensures the log exists even if reward calculation fails
     action_reward = 0.0
     action_name = "ranged_attack"
-   
-    try:
-        from ai.reward_mapper import RewardMapper
-        rewards_configs = game_state.get("rewards_configs")
-        if not rewards_configs:
-            raise ValueError(f"rewards_configs is missing from game_state for shooter {shooter.get('id', 'unknown')}")
-        
-        # Get unit type for config lookup using UnitRegistry
-        from ai.unit_registry import UnitRegistry
-        unit_registry = UnitRegistry()
-        shooter_unit_type = shooter["unitType"]
-        shooter_agent_key = unit_registry.get_model_key(shooter_unit_type)
-        
-        # Get unit-specific config - RAISE ERROR if not found
-        unit_reward_config = rewards_configs.get(shooter_agent_key)
-        if not unit_reward_config:
-            raise ValueError(f"No reward config found for unit type '{shooter_agent_key}' in rewards_configs")
-        
-        reward_mapper = RewardMapper(unit_reward_config)
-       
-        # CHANGE 1: Use unit_registry to map scenario type to reward config key
-        # This ensures EACH unit gets its correct reward configuration
-        config = game_state.get("config", {})
-        controlled_agent = config.get("controlled_agent")
-        
-        # CHANGE 2: Always use unit_registry for proper unit type mapping
-        # Only use controlled_agent as override for agent's own units in training
-        from ai.unit_registry import UnitRegistry
-        unit_registry = UnitRegistry()
-        
-        # Get the shooter's actual scenario unit type
-        shooter_scenario_type = shooter["unitType"]
-        
-        try:
-            # Map scenario type to reward config key using unit_registry
-            shooter_reward_key = unit_registry.get_model_key(shooter_scenario_type)
-        except ValueError:
-            # Unit type not found in registry
-            shooter_reward_key = None
-        
-        # CHANGE 5: Use controlled_agent for ALL units when in training mode
-        # This ensures consistent reward scaling across both players (e.g., phase4 rewards for all)
-        if controlled_agent and shooter_reward_key:
-            # Training mode - use controlled_agent for ALL units (includes phase suffix)
-            enriched_shooter = shooter.copy()
-            enriched_shooter["unitType"] = controlled_agent  # CHANGE 5: Removed player check - all units use phase1
-        elif shooter_reward_key:
-            # No controlled_agent or not in training - use registry mapping
-            enriched_shooter = shooter.copy()
-            enriched_shooter["unitType"] = shooter_reward_key
-        else:
-            # CHANGE 7: NO FALLBACK - raise error if no valid config found
-            raise ValueError(f"Cannot determine reward config for shooter {shooter.get('id', 'unknown')}: controlled_agent={controlled_agent}, shooter_reward_key={shooter_reward_key if 'shooter_reward_key' in locals() else 'not_set'}")
-       
-        # Get unit rewards config
-        unit_rewards = reward_mapper._get_unit_rewards(enriched_shooter)
-        base_actions = unit_rewards.get("base_actions", {})
-        result_bonuses = unit_rewards.get("result_bonuses", {})
-       
-        if "ranged_attack" not in base_actions:
-            raise KeyError(f"Missing 'ranged_attack' in base_actions for unit {shooter['id']} (enriched_unitType={enriched_shooter.get('unitType')}): base_actions={base_actions}")
-        
-        base_ranged_reward = base_actions["ranged_attack"]
-        
-        # Base shooting reward (always given for taking the shot)
-        action_reward = base_ranged_reward
-       
-        # Progressive bonuses based on attack sequence results
-        if attack_result.get("hit_success", False):
-            if "hit_target" in result_bonuses:
-                action_reward += result_bonuses["hit_target"]
-                action_name = "hit_target"
-       
-        if attack_result.get("wound_success", False):
-            if "wound_target" in result_bonuses:
-                action_reward += result_bonuses["wound_target"]
-                action_name = "wound_target"
-       
-        if attack_result.get("damage", 0) > 0:
-            if "damage_target" in result_bonuses:
-                action_reward += result_bonuses["damage_target"]
-                action_name = "damage_target"
-       
-        if attack_result.get("target_died", False):
-            if "kill_target" in result_bonuses:
-                action_reward += result_bonuses["kill_target"]
-                action_name = "kill_target"
-           
-            # No overkill bonus (exact kill)
-            if target["HP_CUR"] == attack_result.get("damage", 0):
-                if "no_overkill" in result_bonuses:
-                    action_reward += result_bonuses["no_overkill"]
-       
-    except Exception as e:
-        print(f"🚨 REWARD CALC FAILED for {shooter.get('id', 'unknown')} (P{shooter.get('player', '?')}): {e}")
-        print(f"   shooter_scenario_type={shooter.get('unitType', 'missing')}")
-        if 'shooter_reward_key' in locals():
-            print(f"   shooter_reward_key={shooter_reward_key}")
-        if 'controlled_agent' in locals():
-            print(f"   controlled_agent={controlled_agent}")
-        if 'config' in locals():
-            print(f"   controlled_player={config.get('controlled_player', 'not_set')}")
-        raise
-   
-    logged_reward = round(action_reward, 2)
+
     game_state["action_logs"].append({
         "type": "shoot",
         "message": enhanced_message,
@@ -1198,9 +1095,146 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "saveTarget": attack_result.get("save_target"),
         "timestamp": "server_time",
         "action_name": action_name,
-        "reward": logged_reward,
+        "reward": 0.0,  # Will be updated after reward calculation
         "is_ai_action": shooter["player"] == 1
     })
+
+    # Calculate reward for this action using progressive bonus system
+    # OPTIMIZATION: Only calculate rewards for controlled player's units
+    # Bot units don't need rewards since they don't learn
+    config = game_state.get("config", {})
+    controlled_player = config.get("controlled_player", 0)
+
+    # Skip reward calculation for bot units (not the controlled player)
+    if shooter["player"] != controlled_player:
+        action_reward = 0.0
+        # Continue without calculating detailed rewards
+    else:
+   
+        try:
+            from ai.reward_mapper import RewardMapper
+            rewards_configs = game_state.get("rewards_configs")
+            if not rewards_configs:
+                raise ValueError(f"rewards_configs is missing from game_state for shooter {shooter.get('id', 'unknown')}")
+
+        # CRITICAL FIX: Use controlled_agent for reward config lookup (includes phase suffix)
+            config = game_state.get("config", {})
+            controlled_agent = config.get("controlled_agent")
+
+            if not controlled_agent:
+                # Fallback: use unit_registry mapping if no controlled_agent
+                from ai.unit_registry import UnitRegistry
+                unit_registry = UnitRegistry()
+                shooter_unit_type = shooter["unitType"]
+                reward_config_key = unit_registry.get_model_key(shooter_unit_type)
+            else:
+                # Training mode: use controlled_agent which includes phase suffix
+                reward_config_key = controlled_agent
+
+        # Get unit-specific config - RAISE ERROR if not found
+            unit_reward_config = rewards_configs.get(reward_config_key)
+            if not unit_reward_config:
+                raise ValueError(f"No reward config found for unit type '{reward_config_key}' in rewards_configs. Available: {list(rewards_configs.keys())}")
+
+            # DEBUG: Print which config is being used
+            print(f"🔍 REWARD CONFIG: Using '{reward_config_key}' for Unit {shooter.get('id')}")
+            if 'base_actions' in unit_reward_config:
+                print(f"   ranged_attack: {unit_reward_config['base_actions'].get('ranged_attack', 'NOT FOUND')}")
+            if 'result_bonuses' in unit_reward_config:
+                print(f"   kill_target: {unit_reward_config['result_bonuses'].get('kill_target', 'NOT FOUND')}")
+
+            reward_mapper = RewardMapper(unit_reward_config)
+
+        # Get unit_registry for mapping scenario types
+            from ai.unit_registry import UnitRegistry
+            unit_registry = UnitRegistry()
+        
+        # Get the shooter's actual scenario unit type
+            shooter_scenario_type = shooter["unitType"]
+        
+            try:
+            # Map scenario type to reward config key using unit_registry
+                shooter_reward_key = unit_registry.get_model_key(shooter_scenario_type)
+            except ValueError:
+            # Unit type not found in registry
+                shooter_reward_key = None
+        
+        # CHANGE 5: Use controlled_agent for ALL units when in training mode
+        # This ensures consistent reward scaling across both players (e.g., phase4 rewards for all)
+            if controlled_agent and shooter_reward_key:
+            # Training mode - use controlled_agent for ALL units (includes phase suffix)
+                enriched_shooter = shooter.copy()
+                enriched_shooter["unitType"] = controlled_agent  # CHANGE 5: Removed player check - all units use phase1
+            elif shooter_reward_key:
+            # No controlled_agent or not in training - use registry mapping
+                enriched_shooter = shooter.copy()
+                enriched_shooter["unitType"] = shooter_reward_key
+            else:
+            # CHANGE 7: NO FALLBACK - raise error if no valid config found
+                raise ValueError(f"Cannot determine reward config for shooter {shooter.get('id', 'unknown')}: controlled_agent={controlled_agent}, shooter_reward_key={shooter_reward_key if 'shooter_reward_key' in locals() else 'not_set'}")
+       
+        # Get unit rewards config
+            unit_rewards = reward_mapper._get_unit_rewards(enriched_shooter)
+            base_actions = unit_rewards.get("base_actions", {})
+            result_bonuses = unit_rewards.get("result_bonuses", {})
+       
+            if "ranged_attack" not in base_actions:
+                raise KeyError(f"Missing 'ranged_attack' in base_actions for unit {shooter['id']} (enriched_unitType={enriched_shooter.get('unitType')}): base_actions={base_actions}")
+        
+            base_ranged_reward = base_actions["ranged_attack"]
+        
+        # Base shooting reward (always given for taking the shot)
+            action_reward = base_ranged_reward
+       
+        # Progressive bonuses based on attack sequence results
+            if attack_result.get("hit_success", False):
+                if "hit_target" in result_bonuses:
+                    action_reward += result_bonuses["hit_target"]
+                    action_name = "hit_target"
+       
+            if attack_result.get("wound_success", False):
+                if "wound_target" in result_bonuses:
+                    action_reward += result_bonuses["wound_target"]
+                    action_name = "wound_target"
+       
+            if attack_result.get("damage", 0) > 0:
+                if "damage_target" in result_bonuses:
+                    action_reward += result_bonuses["damage_target"]
+                    action_name = "damage_target"
+       
+            if attack_result.get("target_died", False):
+                if "kill_target" in result_bonuses:
+                    action_reward += result_bonuses["kill_target"]
+                    action_name = "kill_target"
+           
+            # No overkill bonus (exact kill)
+                if target["HP_CUR"] == attack_result.get("damage", 0):
+                    if "no_overkill" in result_bonuses:
+                        action_reward += result_bonuses["no_overkill"]
+       
+        except Exception as e:
+            print(f"🚨 REWARD CALC FAILED for {shooter.get('id', 'unknown')} (P{shooter.get('player', '?')}): {e}")
+            print(f"   shooter_scenario_type={shooter.get('unitType', 'missing')}")
+            if 'shooter_reward_key' in locals():
+                print(f"   shooter_reward_key={shooter_reward_key}")
+            if 'controlled_agent' in locals():
+                print(f"   controlled_agent={controlled_agent}")
+            if 'config' in locals():
+                print(f"   controlled_player={config.get('controlled_player', 'not_set')}")
+            raise
+
+    # Update the action_log entry with calculated reward and action_name
+    logged_reward = round(action_reward, 2)
+
+    # DEBUG: Print final calculated reward
+    if shooter["player"] == controlled_player:
+        print(f"💰 FINAL REWARD: Unit {unit_id} → {logged_reward} (action_name: {action_name})")
+
+    if game_state["action_logs"]:
+        last_log = game_state["action_logs"][-1]
+        if last_log.get("shooterId") == unit_id and last_log.get("type") == "shoot":
+            last_log["reward"] = logged_reward
+            last_log["action_name"] = action_name
     
     # Store attack result for engine access
     game_state["last_attack_result"] = attack_result

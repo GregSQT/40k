@@ -198,10 +198,22 @@ export class UnitRenderer {
     }
     
     const unitCircle = new PIXI.Graphics();
-    unitCircle.beginFill(unitColor);
-    unitCircle.lineStyle(borderWidth, borderColor);
+
+    // Ghost unit styling (for replay move visualization)
+    let finalUnitColor = unitColor;
+    let finalBorderColor = borderColor;
+    let circleAlpha = 1.0;
+    if ((unit as any).isGhost) {
+      finalUnitColor = 0x666666;  // Medium grey fill
+      finalBorderColor = 0x888888; // Lighter grey border
+      circleAlpha = 0.6;
+    }
+
+    unitCircle.beginFill(finalUnitColor);
+    unitCircle.lineStyle(borderWidth, finalBorderColor);
     unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
     unitCircle.endFill();
+    unitCircle.alpha = circleAlpha;
     unitCircle.zIndex = iconZIndex;
     
     // Add click handlers for normal units (with charge-cancel on re-click)
@@ -305,7 +317,13 @@ export class UnitRenderer {
         sprite.height = HEX_RADIUS * unitIconScale;
         sprite.zIndex = iconZIndex;
         sprite.alpha = 1.0; // Always fully opaque
-        
+
+        // Ghost unit rendering (for replay move visualization)
+        if ((unit as any).isGhost) {
+          sprite.alpha = 0.5;
+          sprite.tint = 0x666666;
+        }
+
         // Preview-specific properties
         if (isPreview) {
           if (previewType === 'move') {
@@ -340,15 +358,24 @@ export class UnitRenderer {
   
   private renderTextFallback(iconZIndex: number): void {
     const { unit, centerX, centerY, app } = this.props;
-    
+
+    // Ghost unit styling
+    let textColor = 0xffffff;
+    let textAlpha = 1.0;
+    if ((unit as any).isGhost) {
+      textColor = 0x999999;
+      textAlpha = 0.7;
+    }
+
     const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
       fontSize: this.props.UNIT_TEXT_SIZE,
-      fill: 0xffffff,
+      fill: textColor,
       align: "center",
       fontWeight: "bold",
     });
     unitText.anchor.set(0.5);
     unitText.position.set(centerX, centerY);
+    unitText.alpha = textAlpha;
     unitText.zIndex = iconZIndex;
     app.stage.addChild(unitText);
   }

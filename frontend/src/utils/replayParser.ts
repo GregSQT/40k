@@ -85,7 +85,22 @@ export function parse_log_file_from_text(text: string) {
         col: col,
         row: row,
         HP_CUR: 2,
-        HP_MAX: 2
+        HP_MAX: 2,
+        // Add placeholder stats - will be filled from gameConfig later
+        MOVE: 0,
+        T: 0,
+        ARMOR_SAVE: 0,
+        RNG_RNG: 0,
+        RNG_NB: 0,
+        RNG_ATK: 0,
+        RNG_STR: 0,
+        RNG_AP: 0,
+        RNG_DMG: 0,
+        MEL_NB: 0,
+        MEL_ATK: 0,
+        MEL_STR: 0,
+        MEL_AP: 0,
+        MEL_DMG: 0
       };
       currentEpisode.initial_positions[unitId] = { col, row };
       continue;
@@ -212,6 +227,16 @@ export function parse_log_file_from_text(text: string) {
           unit_id: shooterId,
           pos: { col: shooterCol, row: shooterRow }
         });
+      }
+      continue;
+    }
+
+    // Parse EPISODE END line
+    const episodeEndMatch = trimmed.match(/EPISODE END: Winner=(-?\d+)/);
+    if (episodeEndMatch) {
+      const winner = parseInt(episodeEndMatch[1]);
+      if (currentEpisode) {
+        currentEpisode.final_result = winner === -1 ? 'Draw' : winner === 0 ? 'P0 Win' : 'P1 Win';
       }
       continue;
     }

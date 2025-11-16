@@ -99,7 +99,7 @@ class W40KEngine(gym.Env):
                 "quiet": quiet,
                 "gym_training_mode": gym_training_mode,  # CRITICAL: Pass flag to handlers
                 "pve_mode": pve_mode_value,  # CRITICAL: Add PvE mode for handler detection
-                "controlled_player": 1  # CHANGE 4: Agent always controls player 1
+                "controlled_player": 0  # FIXED: Agent controls player 0 (matches scenario setup)
             }
         else:
             # Use provided config directly and add gym_training_mode
@@ -110,7 +110,7 @@ class W40KEngine(gym.Env):
                 self.config["pve_mode"] = config.get("pve_mode", False)
             # CHANGE 5: Ensure controlled_player is set
             if "controlled_player" not in self.config:
-                self.config["controlled_player"] = 1  # Agent always controls player 1
+                self.config["controlled_player"] = 0  # FIXED: Agent controls player 0 (matches scenario setup)
             
             # CRITICAL: Extract rewards_config from config dict for module initialization
             self.rewards_config = config.get("rewards_config", {})

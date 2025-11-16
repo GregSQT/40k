@@ -1,7 +1,7 @@
 {
   "phase1": {
     "type": "################################################### Phase 1 ###################################################",
-    "total_episodes": 5000,
+    "total_episodes": 4000,
     "total_episodes_normal_value": "2000 inital, but diminishing return after 1500",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 16,

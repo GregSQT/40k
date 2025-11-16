@@ -7,6 +7,8 @@
     {"id": 5, "unit_type": "Intercessor", "player": 1, "col": 9, "row": 7},
     {"id": 6, "unit_type": "Intercessor", "player": 1, "col": 11, "row": 12},
     {"id": 7, "unit_type": "Intercessor", "player": 1, "col": 13, "row": 7},
-    {"id": 8, "unit_type": "Intercessor", "player": 1, "col": 15, "row": 12}
+    {"id": 8, "unit_type": "Termagant", "player": 1, "col": 15, "row": 12},
+    {"id": 9, "unit_type": "Termagant", "player": 1, "col": 10, "row": 6},
+    {"id": 10, "unit_type": "Termagant", "player": 1, "col": 14, "row": 14}
   ]
 }

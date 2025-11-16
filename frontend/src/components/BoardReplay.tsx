@@ -11,6 +11,7 @@ import { UnitStatusTable } from './UnitStatusTable';
 import { GameLog } from './GameLog';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
 import { useGameLog } from '../hooks/useGameLog';
+import { initializeUnitRegistry, getUnitClass } from '../data/UnitFactory';
 
 // Import replay parser types
 interface ReplayAction {
@@ -56,15 +57,64 @@ export const BoardReplay: React.FC = () => {
   const [selectedEpisode, setSelectedEpisode] = useState<number | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string>('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [unitRegistryReady, setUnitRegistryReady] = useState<boolean>(false);
 
   // Playback state
   const [currentActionIndex, setCurrentActionIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [showHexCoordinates, setShowHexCoordinates] = useState<boolean>(false);
 
   const playbackInterval = useRef<number | null>(null);
 
-  // No longer loading log list from API - using file picker instead
+  // Initialize UnitFactory registry on mount
+  useEffect(() => {
+    const initRegistry = async () => {
+      try {
+        await initializeUnitRegistry();
+        setUnitRegistryReady(true);
+      } catch (error) {
+        console.error('Failed to initialize unit registry:', error);
+        setLoadError('Failed to initialize unit registry');
+      }
+    };
+    initRegistry();
+  }, []);
+
+  // Enrich units with stats from UnitFactory
+  const enrichUnitsWithStats = (units: any[]): any[] => {
+    if (!unitRegistryReady) return units;
+
+    return units.map(unit => {
+      try {
+        const UnitClass = getUnitClass(unit.type);
+
+        // Merge UnitClass stats with unit data
+        return {
+          ...unit,
+          MOVE: UnitClass.MOVE || 0,
+          T: UnitClass.T || 0,
+          ARMOR_SAVE: UnitClass.ARMOR_SAVE || 0,
+          RNG_RNG: UnitClass.RNG_RNG || 0,
+          RNG_NB: UnitClass.RNG_NB || 0,
+          RNG_ATK: UnitClass.RNG_ATK || 0,
+          RNG_STR: UnitClass.RNG_STR || 0,
+          RNG_AP: UnitClass.RNG_AP || 0,
+          RNG_DMG: UnitClass.RNG_DMG || 0,
+          CC_NB: UnitClass.CC_NB || 0,
+          CC_ATK: UnitClass.CC_ATK || 0,
+          CC_STR: UnitClass.CC_STR || 0,
+          CC_AP: UnitClass.CC_AP || 0,
+          CC_DMG: UnitClass.CC_DMG || 0,
+          ICON: UnitClass.ICON || '',
+          ICON_SCALE: UnitClass.ICON_SCALE || 1
+        };
+      } catch (error) {
+        console.warn(`Failed to enrich unit ${unit.id} (${unit.type}):`, error);
+        return unit;
+      }
+    });
+  };
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -134,7 +184,11 @@ export const BoardReplay: React.FC = () => {
         actionIndex: currentActionIndex,
         units: episode.initial_state.units?.map((u: any) => ({ id: u.id, player: u.player, pos: `(${u.col},${u.row})` }))
       });
-      return episode.initial_state;
+      // Enrich initial state units with stats
+      return {
+        ...episode.initial_state,
+        units: enrichUnitsWithStats(episode.initial_state.units || [])
+      };
     } else {
       const state = episode.states[currentActionIndex - 1];
       console.log('Showing action state:', {
@@ -143,7 +197,11 @@ export const BoardReplay: React.FC = () => {
         action: state?.action?.type,
         units: state?.units?.map((u: any) => ({ id: u.id, player: u.player, pos: `(${u.col},${u.row})` }))
       });
-      return state;
+      // Enrich state units with stats
+      return {
+        ...state,
+        units: enrichUnitsWithStats(state?.units || [])
+      };
     }
   };
 
@@ -151,6 +209,27 @@ export const BoardReplay: React.FC = () => {
   const currentEpisode = selectedEpisode !== null && replayData
     ? replayData.episodes[selectedEpisode - 1]
     : null;
+
+  // Get current action for move preview
+  const currentAction = currentEpisode && currentActionIndex > 0
+    ? currentEpisode.actions[currentActionIndex - 1]
+    : null;
+
+  // Add ghost unit at starting position for move actions
+  const unitsWithGhost = currentState?.units ? [...currentState.units] : [];
+  if (currentAction?.type === 'move' && currentAction?.from && currentAction.unit_id) {
+    // Add a ghost unit at the starting position
+    const originalUnit = unitsWithGhost.find((u: any) => u.id === currentAction.unit_id);
+    if (originalUnit) {
+      unitsWithGhost.push({
+        ...originalUnit,
+        id: -1, // Special ID for ghost unit
+        col: currentAction.from.col,
+        row: currentAction.from.row,
+        isGhost: true // Mark as ghost for special rendering
+      });
+    }
+  }
 
   // Update game log when action index changes
   useEffect(() => {
@@ -422,7 +501,7 @@ export const BoardReplay: React.FC = () => {
               <option value="">Select Episode</option>
               {replayData.episodes.map((ep) => (
                 <option key={ep.episode_num} value={ep.episode_num}>
-                  Episode {ep.episode_num}
+                  Episode {ep.episode_num} - {ep.final_result || 'Unknown'}
                 </option>
               ))}
             </select>
@@ -472,10 +551,10 @@ export const BoardReplay: React.FC = () => {
   // Center column: Board
   const centerContent = currentState && gameConfig ? (
     <BoardPvp
-      units={currentState.units || []}
+      units={unitsWithGhost}
       selectedUnitId={null}
       eligibleUnitIds={[]}
-      showHexCoordinates={false}
+      showHexCoordinates={showHexCoordinates}
       mode="select"
       movePreview={null}
       attackPreview={null}
@@ -513,7 +592,11 @@ export const BoardReplay: React.FC = () => {
   });
 
   return (
-    <SharedLayout rightColumnContent={rightColumnContent}>
+    <SharedLayout
+      rightColumnContent={rightColumnContent}
+      showHexCoordinates={showHexCoordinates}
+      onToggleHexCoordinates={setShowHexCoordinates}
+    >
       {centerContent}
     </SharedLayout>
   );

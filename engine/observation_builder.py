@@ -817,24 +817,26 @@ class ObservationBuilder:
             if distance <= perception_radius:
                 enemies.append((distance, other_unit))
         
-        # Sort by priority: closer > can_attack_me > wounded
+        # Sort by priority: wounded > can_attack_me > closer
+        # Wounded enemies are tactical priorities for focus fire
         def enemy_priority(item):
             distance, unit = item
             hp_ratio = unit["HP_CUR"] / max(1, unit["HP_MAX"])
-            
+
             # Check if enemy can attack me
             can_attack = 0.0
             if "RNG_RNG" in unit and distance <= unit["RNG_RNG"]:
                 can_attack = 1.0
             elif "CC_RNG" in unit and distance <= unit["CC_RNG"]:
                 can_attack = 1.0
-            
-            # Priority: enemies (always), closer (higher), can attack (higher), wounded (higher)
+
+            # Priority: wounded (highest), can attack (high), closer (low)
+            # More wounded = HIGHER priority for focus fire learning
             return (
                 1000,  # Enemy weight
+                -((1.0 - hp_ratio) * 200),  # More wounded = much higher priority
+                can_attack * 100,  # Can attack me = high priority
                 -distance * 10,  # Closer = higher priority
-                can_attack * 100,  # Can attack me = much higher priority
-                -(1.0 - hp_ratio) * 5  # More wounded = higher priority
             )
         
         enemies.sort(key=enemy_priority, reverse=True)
@@ -1106,10 +1108,39 @@ class ObservationBuilder:
                     if distance <= active_unit["CC_RNG"]:
                         valid_targets.append(enemy)
         
-        # Sort by distance (prioritize closer targets)
-        valid_targets.sort(key=lambda t: calculate_hex_distance(
-            active_unit["col"], active_unit["row"], t["col"], t["row"]
-        ))
+        # Sort by priority: wounded + favorite type > wounded > favorite > dangerous > close
+        # This puts best targets (wounded favorite enemies) in action slot 0 (action 8)
+        # Validated: All targets already passed LoS check in shooting_build_valid_target_pool
+        def target_priority(target):
+            distance = calculate_hex_distance(
+                active_unit["col"], active_unit["row"],
+                target["col"], target["row"]
+            )
+            hp_ratio = target["HP_CUR"] / max(1, target["HP_MAX"])
+
+            # Calculate target type match (1.0 = favorite, 0.3 = wrong type)
+            type_match = self._calculate_target_type_match(active_unit, target)
+
+            # Calculate if target is dangerous (can it shoot/charge me?)
+            is_dangerous = 0.0
+            if current_phase == "shoot" and "RNG_RNG" in target:
+                if distance <= target["RNG_RNG"]:
+                    is_dangerous = 1.0
+
+            # Priority scoring (lower = higher priority, sorted ascending)
+            # Example priorities:
+            #   Wounded (30% HP) + Favorite (1.0): 30 - 70 = -40 (HIGHEST PRIORITY)
+            #   Wounded (30% HP) + Wrong type (0.3): 30 - 21 = 9
+            #   Full HP (100%) + Favorite (1.0): 100 - 70 = 30
+            #   Full HP + Wrong type: 100 - 21 = 79 (LOWEST PRIORITY)
+            return (
+                hp_ratio * 100,         # Wounded = lower score (30% HP = 30)
+                -(type_match * 70),     # Favorite type = -70 bonus, wrong type = -21 penalty
+                -is_dangerous * 50,     # Dangerous = -50 bonus
+                distance                # Closer = lower score
+            )
+
+        valid_targets.sort(key=target_priority)
         
         # Build enemy index map for reference
         enemy_index_map = {}

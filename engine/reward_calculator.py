@@ -96,7 +96,17 @@ class RewardCalculator:
         acting_unit = get_unit_by_id(str(acting_unit_id), game_state)
         if not acting_unit:
             raise ValueError(f"Acting unit not found: {acting_unit_id}")
-        
+
+        # OPTIMIZATION: Skip reward calculation for bot units (not the controlled player)
+        # Bot units don't need rewards since they don't learn
+        config = game_state.get("config", {})
+        controlled_player = config.get("controlled_player", 0)
+        if acting_unit.get("player") != controlled_player:
+            # Bot unit - return 0.0 reward without config lookup
+            reward_breakdown['total'] = 0.0
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return 0.0
+
         # Get action type from result
         # Check both 'action' and 'endType' fields (handlers use different naming)
         if isinstance(result, dict):
@@ -129,14 +139,16 @@ class RewardCalculator:
             # Track rewards by category using action_name field
             base_action_reward = 0.0
             result_bonus_reward = 0.0
-            
+            logs_found = 0  # Track if we actually found any logs
+
             for log in reversed(action_logs):
                 # Stop if we hit a different turn
                 if log.get("turn") != current_turn:
                     break
-                
+
                 # If it's a shoot action from the same shooter, categorize the reward
                 if log.get("type") == "shoot" and log.get("shooterId") == shooter_id:
+                    logs_found += 1  # Found a matching log
                     if "reward" not in log:
                         raise RuntimeError(
                             f"CRITICAL: action_log missing reward field! "
@@ -169,8 +181,8 @@ class RewardCalculator:
                 elif log.get("type") != "shoot":
                     break
             
-            # Validate we found at least one shoot action
-            if base_action_reward == 0.0 and result_bonus_reward == 0.0:
+            # Validate we found at least one shoot action LOG (not just non-zero rewards)
+            if logs_found == 0:
                 raise RuntimeError(
                     f"CRITICAL: No shoot actions found in action_logs! "
                     f"Unit {shooter_id}, Player {acting_unit.get('player')}"
