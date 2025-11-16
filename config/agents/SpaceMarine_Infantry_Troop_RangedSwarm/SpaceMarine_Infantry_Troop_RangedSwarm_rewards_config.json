@@ -76,14 +76,14 @@
       "hit_target": 3.0,
       "wound_target": 6.0,
       "damage_target": 5.0,
-      "kill_target": 25.0,
+      "kill_target": 50.0,
       "no_overkill": 12.0,
-      "target_lowest_hp": 20.0
+      "target_lowest_hp": 40.0
     },
     "situational_modifiers": {
-      "win": 50.0,
-      "lose": -50.0,
-      "draw": -50.0,
+      "win": 100.0,
+      "lose": -100.0,
+      "draw": 0.0,
       "friendly_fire_penalty": -8.0,
       "attack_wasted": -5.0,
       "target_in_cover_penalty": -0.2,

@@ -55,7 +55,8 @@ export function useGameLog(currentTurn?: number) {
           damageDealt: logData.damage,
           hitResult: logData.hitRoll ? 'HIT' : 'MISS',
           strengthResult: logData.woundRoll ? 'SUCCESS' : 'FAILED',
-          saveSuccess: logData.saveRoll >= logData.saveTarget
+          saveSuccess: logData.saveRoll >= logData.saveTarget,
+          targetDied: logData.target_died || false
         }] : undefined
       });
     };

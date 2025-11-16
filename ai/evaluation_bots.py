@@ -8,14 +8,19 @@ from typing import Dict, List, Tuple, Any, Optional
 
 
 class RandomBot:
-    """Picks random valid actions"""
-    
+    """Picks random valid actions, but prioritizes shooting when available"""
+
     def select_action(self, valid_actions: List[int]) -> int:
+        # CRITICAL FIX: Prioritize shooting in shoot phase (like all other bots)
+        # Without this, RandomBot has only 33% shoot rate vs 90%+ for other bots
+        if 4 in valid_actions:  # Shoot action
+            return 4
+        # For other phases, pick randomly
         return random.choice(valid_actions) if valid_actions else 7
-    
+
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]]) -> Tuple[int, int]:
         return random.choice(valid_destinations) if valid_destinations else (unit["col"], unit["row"])
-    
+
     def select_shooting_target(self, valid_targets: List[str]) -> str:
         return random.choice(valid_targets) if valid_targets else ""
 

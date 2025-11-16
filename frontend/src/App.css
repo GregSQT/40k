@@ -232,6 +232,25 @@ body {
   color: var(--text-primary);
 }
 
+/* Replay Controls Containers */
+.replay-file-selector-container {
+  background: var(--bg-secondary);
+  border: 1px solid #555;
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+  color: var(--text-primary);
+}
+
+.replay-playback-controls-container {
+  background: var(--bg-secondary);
+  border: 1px solid #555;
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+  color: var(--text-primary);
+}
+
 .unit-status-table-empty {
   text-align: center;
   color: var(--text-secondary);
@@ -261,7 +280,7 @@ body {
   background: var(--bg-secondary);
   border: 1px solid #555;
   border-radius: var(--radius-lg);
-  margin-bottom: var(--spacing-sm); /* Space A = 8px (original) */
+  margin-bottom: var(--spacing-sm);
 }
 
 .turn-phase-tracker-right .flex {

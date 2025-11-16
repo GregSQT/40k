@@ -324,6 +324,20 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     # Store original position
     orig_col, orig_row = unit["col"], unit["row"]
 
+    # FINAL SAFETY CHECK: Redundant occupation check right before position update
+    # This catches occupation bugs that somehow bypass the validation above
+    for check_unit in game_state["units"]:
+        if (check_unit["id"] != unit["id"] and
+            check_unit["HP_CUR"] > 0 and
+            check_unit["col"] == dest_col and
+            check_unit["row"] == dest_row):
+            # Occupation detected - this should NEVER happen if validation worked correctly
+            return False, {
+                "error": "occupation_safety_check_failed",
+                "occupant_id": check_unit["id"],
+                "destination": (dest_col, dest_row)
+            }
+
     # Execute movement
     unit["col"] = dest_col
     unit["row"] = dest_row
@@ -366,7 +380,6 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
             other_unit["col"] == col and
             other_unit["row"] == row):
             return False
-
 
     # AI_TURN.md: Cannot move TO hexes adjacent to enemies
     if _is_hex_adjacent_to_enemy(game_state, col, row, unit["player"]):

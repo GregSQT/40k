@@ -62,7 +62,7 @@ export const BoardReplay: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
 
-  const playbackInterval = useRef<NodeJS.Timeout | null>(null);
+  const playbackInterval = useRef<number | null>(null);
 
   // No longer loading log list from API - using file picker instead
 
@@ -248,9 +248,9 @@ export const BoardReplay: React.FC = () => {
     if (!currentEpisode) return null;
 
     return (
-      <div className="bg-gray-800 rounded p-3 mb-4">
+      <div className="replay-playback-controls-container">
         {/* Single row: Controls left, Speed center, Action count right */}
-        <div className="flex items-center justify-between gap-4 mb-3">
+        <div className="flex items-center justify-between gap-4">
           {/* Navigation controls - LEFT */}
           <div className="flex items-center gap-1">
             <button
@@ -351,13 +351,54 @@ export const BoardReplay: React.FC = () => {
         </div>
       )}
 
+      {/* Turn/Phase Tracker */}
+      {gameConfig && currentState && (
+        <div className="turn-phase-tracker-right">
+          <TurnPhaseTracker
+            currentTurn={1}
+            currentPhase={currentState.phase || 'move'}
+            phases={["move", "shoot", "charge", "fight"]}
+            maxTurns={gameConfig.game_rules.max_turns}
+            className=""
+          />
+        </div>
+      )}
+
       {/* File and Episode selector - single line */}
-      <div className="bg-gray-800 rounded p-3 mb-4">
-        <div className="flex items-center gap-2">
-          {/* File selector button */}
-          <div className="flex items-center gap-2 flex-1">
-            <label className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-sm cursor-pointer">
-              Select File
+      <div className="replay-file-selector-container">
+        <div className="flex items-center justify-between gap-4">
+          {/* Left: Browse button + Select file text */}
+          <div className="flex items-center gap-3">
+            <label
+              className="text-sm cursor-pointer"
+              style={{
+                backgroundColor: '#d4a843',
+                color: '#1f2937',
+                borderRadius: '6px',
+                border: '1px solid #b8942f',
+                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3)',
+                transition: 'all 0.15s ease',
+                paddingLeft: '24px',
+                paddingRight: '24px',
+                paddingTop: '1px',
+                paddingBottom: '1px'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#e5b94d';
+                e.currentTarget.style.boxShadow = '0 3px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#d4a843';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3)';
+              }}
+              onMouseDown={(e) => {
+                e.currentTarget.style.boxShadow = 'inset 0 2px 4px rgba(0, 0, 0, 0.3)';
+              }}
+              onMouseUp={(e) => {
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3)';
+              }}
+            >
+              Browse
               <input
                 type="file"
                 accept=".log"
@@ -365,12 +406,12 @@ export const BoardReplay: React.FC = () => {
                 className="hidden"
               />
             </label>
-            {selectedFileName && (
-              <span className="text-xs text-gray-300 truncate">{selectedFileName}</span>
-            )}
+            <span className="text-sm text-gray-300" style={{ marginLeft: '16px' }}>
+              {selectedFileName ? `File selected: ${selectedFileName}` : 'Select file'}
+            </span>
           </div>
 
-          {/* Episode dropdown - right aligned */}
+          {/* Right: Episode dropdown (only visible after file selected) */}
           {replayData && replayData.episodes.length > 0 && (
             <select
               value={selectedEpisode || ''}
@@ -387,19 +428,6 @@ export const BoardReplay: React.FC = () => {
           )}
         </div>
       </div>
-
-      {/* Turn/Phase Tracker */}
-      {gameConfig && currentState && (
-        <div className="turn-phase-tracker-right">
-          <TurnPhaseTracker
-            currentTurn={1}
-            currentPhase={currentState.phase || 'move'}
-            phases={["move", "shoot", "charge", "fight"]}
-            maxTurns={gameConfig.game_rules.max_turns}
-            className=""
-          />
-        </div>
-      )}
 
       {/* PLAYBACK CONTROLS - inserted here between TurnPhaseTracker and UnitStatusTable */}
       <PlaybackControls />

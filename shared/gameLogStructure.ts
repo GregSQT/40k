@@ -49,6 +49,7 @@ export interface ShootDetail {
   saveRoll?: number;
   saveSuccess?: boolean;
   damageDealt?: number;
+  targetDied?: boolean;
 }
 
 /**
@@ -279,10 +280,13 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
     case 'shoot':
       // Check shootDetails for actual shooting results (same logic as BoardReplay.tsx)
       if (event.shootDetails && Array.isArray(event.shootDetails)) {
+        const targetDied = event.shootDetails.some((shot: any) => shot.targetDied === true);
         const hasWounds = event.shootDetails.some((shot: any) => shot.damageDealt && shot.damageDealt > 0);
         const hasSaves = event.shootDetails.some((shot: any) => shot.saveSuccess === true);
-        
-        if (hasWounds) {
+
+        if (targetDied) {
+          return 'game-log-entry--death'; // Black - target died
+        } else if (hasWounds) {
           return 'game-log-entry--shoot-damage'; // Red - target loses HP
         } else if (hasSaves) {
           return 'game-log-entry--shoot-saved'; // Orange - target succeeded save roll
@@ -293,10 +297,13 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
     case 'combat':
       // Check shootDetails for actual combat results (same logic as shooting)
       if (event.shootDetails && Array.isArray(event.shootDetails)) {
+        const targetDied = event.shootDetails.some((shot: any) => shot.targetDied === true);
         const hasWounds = event.shootDetails.some((shot: any) => shot.damageDealt && shot.damageDealt > 0);
         const hasSaves = event.shootDetails.some((shot: any) => shot.saveSuccess === true);
-        
-        if (hasWounds) {
+
+        if (targetDied) {
+          return 'game-log-entry--death'; // Black - target died
+        } else if (hasWounds) {
           return 'game-log-entry--combat-damage'; // Red - target loses HP
         } else if (hasSaves) {
           return 'game-log-entry--combat-saved'; // Orange - target succeeded save roll

@@ -191,21 +191,25 @@ class EntropyScheduleCallback(BaseCallback):
         self.end_ent = end_ent
         self.total_episodes = total_episodes
         self.episode_count = 0
+        self.last_update_step = 0
 
     def _on_step(self) -> bool:
-        # Detect episode end
-        if hasattr(self, 'locals') and 'infos' in self.locals:
-            for info in self.locals['infos']:
-                if 'episode' in info:
-                    self.episode_count += 1
-                    # Linear interpolation: ent = start + (end - start) * progress
-                    progress = min(1.0, self.episode_count / self.total_episodes)
-                    new_ent = self.start_ent + (self.end_ent - self.start_ent) * progress
-                    self.model.ent_coef = new_ent
+        # Detect episode end using dones array (more reliable than info dict)
+        if hasattr(self, 'locals') and 'dones' in self.locals:
+            dones = self.locals['dones']
+            # Count number of episodes that finished in this step
+            episodes_finished = sum(dones) if hasattr(dones, '__iter__') else (1 if dones else 0)
 
-                    if self.verbose > 0 and self.episode_count % 100 == 0:
-                        print(f"Episode {self.episode_count}: ent_coef = {new_ent:.3f}")
-                    break
+            if episodes_finished > 0:
+                self.episode_count += episodes_finished
+                # Linear interpolation: ent = start + (end - start) * progress
+                progress = min(1.0, self.episode_count / self.total_episodes)
+                new_ent = self.start_ent + (self.end_ent - self.start_ent) * progress
+                self.model.ent_coef = new_ent
+
+                if self.verbose > 0 and self.num_timesteps - self.last_update_step >= 10000:
+                    print(f"Episode {self.episode_count}/{self.total_episodes}: ent_coef = {new_ent:.3f}")
+                    self.last_update_step = self.num_timesteps
         return True
 
 class EpisodeTerminationCallback(BaseCallback):
