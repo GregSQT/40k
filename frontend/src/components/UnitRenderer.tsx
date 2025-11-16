@@ -12,12 +12,16 @@ interface UnitRendererProps {
   previewType?: 'move' | 'attack';
   isEligible?: boolean; // Add eligibility as a prop instead of calculating it
   isShootable?: boolean; // Add shootability based on LoS validation
-  
+
   // Blinking state for multi-unit HP bars
   blinkingUnits?: number[];
   isBlinkingActive?: boolean;
   blinkState?: boolean;
-  
+
+  // Shooting target (for replay mode explosion icon)
+  shootingTargetId?: number | null;
+  shootingUnitId?: number | null;
+
   // Board configuration
   boardConfig: any;
   HEX_RADIUS: number;
@@ -32,7 +36,7 @@ interface UnitRendererProps {
   SELECTED_BORDER_WIDTH: number;
   CHARGE_TARGET_BORDER_WIDTH: number;
   DEFAULT_BORDER_WIDTH: number;
-  
+
   // Game state
   phase: "move" | "shoot" | "charge" | "fight";
   mode: string;
@@ -118,6 +122,8 @@ export class UnitRenderer {
     this.renderGreenActivationCircle(isEligible, unitIconScale);
     this.renderHPBar(unitIconScale);
     this.renderShootingCounter(unitIconScale);
+    this.renderExplosionIcon(iconZIndex);
+    this.renderShootingIndicator(iconZIndex);
     this.renderAttackCounter(unitIconScale);
   }
   
@@ -413,7 +419,47 @@ export class UnitRenderer {
       app.stage.addChild(chargedOutline);
     }
   }
-  
+
+  private renderExplosionIcon(iconZIndex: number): void {
+    const { unit, shootingTargetId, centerX, centerY, app, HEX_RADIUS } = this.props;
+
+    // Only show explosion on the unit being shot at
+    if (!shootingTargetId || unit.id !== shootingTargetId) return;
+
+    // Create explosion text (using emoji)
+    const explosionText = new PIXI.Text('💥', {
+      fontSize: HEX_RADIUS * 0.8,
+      align: 'center',
+    });
+    explosionText.anchor.set(0.5);
+
+    // Position at top-left of the unit
+    const offset = HEX_RADIUS * 0.6;
+    explosionText.position.set(centerX - offset, centerY - offset);
+    explosionText.zIndex = iconZIndex + 100; // Above everything
+    app.stage.addChild(explosionText);
+  }
+
+  private renderShootingIndicator(iconZIndex: number): void {
+    const { unit, shootingUnitId, centerX, centerY, app, HEX_RADIUS } = this.props;
+
+    // Only show shooting indicator on the unit that is shooting
+    if (!shootingUnitId || unit.id !== shootingUnitId) return;
+
+    // Create shooting indicator text (using crosshair emoji)
+    const shootingText = new PIXI.Text('🎯', {
+      fontSize: HEX_RADIUS * 0.8,
+      align: 'center',
+    });
+    shootingText.anchor.set(0.5);
+
+    // Position at top-left of the unit (same position as explosion but on shooter)
+    const offset = HEX_RADIUS * 0.6;
+    shootingText.position.set(centerX - offset, centerY - offset);
+    shootingText.zIndex = iconZIndex + 100; // Above everything
+    app.stage.addChild(shootingText);
+  }
+
   private renderHPBar(unitIconScale: number): void {
     const { unit, centerX, centerY, app, targetPreview, units, boardConfig, parseColor, mode,
              HEX_RADIUS, HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT } = this.props;

@@ -56,21 +56,29 @@ class W40KEngine(gym.Env):
             # Load agent-specific rewards configuration
             if not controlled_agent:
                 raise ValueError("controlled_agent parameter required when config is None - cannot load agent-specific rewards")
-            
-            self.rewards_config = config_loader.load_agent_rewards_config(controlled_agent)
+
+            # CRITICAL FIX: Extract base agent key for file loading (strip phase suffix)
+            # controlled_agent may be "Agent_phase1", but file is at "config/agents/Agent/Agent_rewards_config.json"
+            base_agent_key = controlled_agent
+            for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
+                if controlled_agent.endswith(phase_suffix):
+                    base_agent_key = controlled_agent[:-len(phase_suffix)]
+                    break
+
+            self.rewards_config = config_loader.load_agent_rewards_config(base_agent_key)
             if not self.rewards_config:
-                raise RuntimeError(f"Failed to load rewards configuration for agent: {controlled_agent}")
-            
+                raise RuntimeError(f"Failed to load rewards configuration for agent: {base_agent_key}")
+
             # Store the agent-specific config name for reference
             self.rewards_config_name = rewards_config
             if not self.rewards_config_name:
                 raise ValueError("rewards_config parameter required - specifies which reward section to use")
-            
+
             # Load agent-specific training configuration for turn limits
             if not training_config_name:
                 raise ValueError("training_config_name parameter required when config is None - cannot load agent-specific training config")
-            
-            self.training_config = config_loader.load_agent_training_config(controlled_agent, training_config_name)
+
+            self.training_config = config_loader.load_agent_training_config(base_agent_key, training_config_name)
             if not self.training_config:
                 raise RuntimeError(f"Failed to load training configuration for agent {controlled_agent}, phase {training_config_name}")
             

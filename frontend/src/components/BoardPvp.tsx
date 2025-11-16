@@ -22,6 +22,8 @@ type BoardProps = {
   showHexCoordinates?: boolean;
   shootingActivationQueue?: Unit[];
   activeShootingUnit?: Unit | null;
+  shootingTargetId?: number | null; // For replay mode: shows explosion icon on target
+  shootingUnitId?: number | null; // For replay mode: shows shooting indicator on shooter
   mode: Mode;
   movePreview: { unitId: number; destCol: number; destRow: number } | null;
   attackPreview: { unitId: number; col: number; row: number } | null;
@@ -68,6 +70,8 @@ export default function Board({
   showHexCoordinates = false,
   shootingActivationQueue,
   activeShootingUnit,
+  shootingTargetId,
+  shootingUnitId,
   mode,
   movePreview,
   attackPreview,
@@ -899,7 +903,10 @@ export default function Board({
           units, chargeTargets, fightTargets, targetPreview,
           onConfirmMove, parseColor,
           // Pass blinking state
-          blinkingUnits, isBlinkingActive, blinkState
+          blinkingUnits, isBlinkingActive, blinkState,
+          // Pass shooting indicators
+          shootingTargetId,
+          shootingUnitId
         });
       }
 

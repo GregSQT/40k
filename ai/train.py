@@ -993,12 +993,21 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     }
     config = get_config_loader()
 
+    # CRITICAL FIX: Strip phase suffix from controlled_agent for file path lookup
+    # controlled_agent may be "Agent_phase1", but files are at "config/agents/Agent/..."
+    base_agent_key = controlled_agent
+    if controlled_agent:
+        for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
+            if controlled_agent.endswith(phase_suffix):
+                base_agent_key = controlled_agent[:-len(phase_suffix)]
+                break
+
     # MULTI-SCENARIO EVALUATION: Get all available scenarios for this phase
-    scenario_list = get_scenario_list_for_phase(config, controlled_agent, training_config_name)
+    scenario_list = get_scenario_list_for_phase(config, base_agent_key, training_config_name)
 
     # If only one scenario found, fall back to old behavior
     if len(scenario_list) == 0:
-        scenario_list = [get_agent_scenario_file(config, controlled_agent, training_config_name)]
+        scenario_list = [get_agent_scenario_file(config, base_agent_key, training_config_name)]
 
     # Calculate episodes per scenario (distribute evenly)
     episodes_per_scenario = max(1, n_episodes // len(scenario_list))
@@ -1017,7 +1026,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
         # MULTI-SCENARIO: Iterate through all scenarios
         for scenario_file in scenario_list:
-            scenario_name = os.path.basename(scenario_file).replace(f"{controlled_agent}_scenario_", "").replace(".json", "") if controlled_agent else "default"
+            scenario_name = os.path.basename(scenario_file).replace(f"{base_agent_key}_scenario_", "").replace(".json", "") if base_agent_key else "default"
 
             for episode_num in range(episodes_per_scenario):
                 completed_episodes += 1
@@ -2177,9 +2186,10 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
     
-    # Use agent_key directly - it's the directory name for config loading
-    # rewards_config_name is the SECTION NAME within the rewards file
-    effective_agent_key = agent_key
+    # CRITICAL FIX: Use rewards_config_name for controlled_agent (includes phase suffix)
+    # agent_key is the directory name for config loading
+    # rewards_config_name is the SECTION NAME within the rewards file (e.g., "..._phase1")
+    effective_agent_key = rewards_config_name if rewards_config_name else agent_key
     
     # ✓ CHANGE 8: Check if vectorization is enabled in config
     n_envs = training_config.get("n_envs", 1)
@@ -2351,9 +2361,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
     
-    # Use agent_key directly - it's the directory name for config loading
-    # rewards_config_name is the SECTION NAME within the rewards file
-    effective_agent_key = agent_key
+    # CRITICAL FIX: Use rewards_config_name for controlled_agent (includes phase suffix)
+    # agent_key is the directory name for config loading
+    # rewards_config_name is the SECTION NAME within the rewards file (e.g., "..._phase1")
+    effective_agent_key = rewards_config_name if rewards_config_name else agent_key
     
     current_scenario = scenario_list[0]
     base_env = W40KEngine(
@@ -3675,10 +3686,13 @@ def main():
             scenario_file = get_agent_scenario_file(cfg, args.agent, args.training_config)
             unit_registry = UnitRegistry()
             
+            # CRITICAL FIX: Use rewards_config for controlled_agent (includes phase suffix)
+            effective_agent_key = args.rewards_config if args.rewards_config else args.agent
+
             base_env = W40KEngine(
                 rewards_config=args.rewards_config,
                 training_config_name=args.training_config,
-                controlled_agent=args.agent,
+                controlled_agent=effective_agent_key,
                 active_agents=None,
                 scenario_file=scenario_file,
                 unit_registry=unit_registry,
@@ -3709,7 +3723,7 @@ def main():
                 training_config_name=args.training_config,
                 rewards_config_name=args.rewards_config,
                 n_episodes=episodes_per_bot,
-                controlled_agent=args.agent,
+                controlled_agent=effective_agent_key,
                 show_progress=True,
                 deterministic=True
             )

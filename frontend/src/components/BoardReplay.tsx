@@ -90,8 +90,19 @@ export const BoardReplay: React.FC = () => {
         const UnitClass = getUnitClass(unit.type);
 
         // Merge UnitClass stats with unit data
+        // Fix HP: replayParser hardcodes HP_MAX=2, so if HP_CUR==HP_MAX==2, reset to correct values
+        // Otherwise preserve HP_CUR from parsed data (tracks damage taken during replay)
+        const correctHpMax = UnitClass.HP_MAX || 1;
+        let currentHp = unit.HP_CUR;
+        if (unit.HP_MAX === 2 && unit.HP_CUR === 2) {
+          // This is the hardcoded placeholder value, reset to correct HP_MAX
+          currentHp = correctHpMax;
+        }
+
         return {
           ...unit,
+          HP_MAX: correctHpMax,
+          HP_CUR: currentHp,
           MOVE: UnitClass.MOVE || 0,
           T: UnitClass.T || 0,
           ARMOR_SAVE: UnitClass.ARMOR_SAVE || 0,
@@ -548,6 +559,14 @@ export const BoardReplay: React.FC = () => {
     </>
   );
 
+  // Get shooting target ID for explosion icon and shooter ID for shooting indicator
+  const shootingTargetId = currentAction?.type === 'shoot' && currentAction?.target_id
+    ? currentAction.target_id
+    : null;
+  const shootingUnitId = currentAction?.type === 'shoot' && currentAction?.shooter_id
+    ? currentAction.shooter_id
+    : null;
+
   // Center column: Board
   const centerContent = currentState && gameConfig ? (
     <BoardPvp
@@ -570,6 +589,8 @@ export const BoardReplay: React.FC = () => {
       onShoot={() => {}}
       gameState={currentState}
       getChargeDestinations={() => []}
+      shootingTargetId={shootingTargetId}
+      shootingUnitId={shootingUnitId}
     />
   ) : (
     <div className="flex items-center justify-center h-full text-white bg-gray-900">

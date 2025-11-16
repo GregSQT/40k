@@ -427,17 +427,23 @@ class RewardCalculator:
         if "unitType" not in unit:
             raise KeyError(f"Unit missing required 'unitType' field: {unit}")
         unit_type = unit["unitType"]
-        
+
         try:
-            agent_key = self.unit_registry.get_model_key(unit_type)
+            # CRITICAL FIX: Use controlled_agent from config (includes phase suffix)
+            # instead of unit_registry.get_model_key() (base key without phase)
+            agent_key = self.config.get("controlled_agent")
+            if not agent_key:
+                # Fallback to unit_registry if controlled_agent not in config
+                agent_key = self.unit_registry.get_model_key(unit_type)
+
             if agent_key not in self.rewards_config:
                 available_keys = list(self.rewards_config.keys())
                 raise KeyError(f"Agent key '{agent_key}' not found in rewards config. Available keys: {available_keys}")
-            
+
             unit_reward_config = self.rewards_config[agent_key]
             if "base_actions" not in unit_reward_config:
                 raise KeyError(f"Missing 'base_actions' section in rewards config for agent key '{agent_key}'")
-            
+
             return unit_reward_config
         except ValueError as e:
             raise ValueError(f"Failed to get reward config for unit type '{unit['unitType']}': {e}")
@@ -492,10 +498,18 @@ class RewardCalculator:
                 "controlled_agent missing from config - required to load agent-specific rewards. "
                 "RewardCalculator requires config dict with 'controlled_agent' key."
             )
-        
+
+        # CRITICAL FIX: Extract base agent key for file loading (strip phase suffix)
+        # controlled_agent may be "Agent_phase1", but file is at "config/agents/Agent/Agent_rewards_config.json"
+        base_agent_key = controlled_agent
+        for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
+            if controlled_agent.endswith(phase_suffix):
+                base_agent_key = controlled_agent[:-len(phase_suffix)]
+                break
+
         # Load agent-specific FULL rewards config to access system_penalties
         config_loader = get_config_loader()
-        full_rewards_config = config_loader.load_agent_rewards_config(controlled_agent)
+        full_rewards_config = config_loader.load_agent_rewards_config(base_agent_key)
         
         if "system_penalties" not in full_rewards_config:
             raise KeyError(
@@ -1284,10 +1298,14 @@ class RewardCalculator:
     def _enrich_unit_for_reward_mapper(self, unit: Dict[str, Any]) -> Dict[str, Any]:
         """Enrich unit data with tactical flags required by reward_mapper."""
         enriched = unit.copy()
-        
-        # AI_TURN.md COMPLIANCE: NO FALLBACKS - proper error handling        
-        if self.config and self.config.get("controlled_agent"):
-            agent_key = self.config["controlled_agent"]
+
+        # CRITICAL FIX: Use controlled_agent for reward config lookup (includes phase suffix)
+        config_controlled_agent = self.config.get("controlled_agent") if self.config else None
+
+        # AI_TURN.md COMPLIANCE: NO FALLBACKS - proper error handling
+        if config_controlled_agent:
+            # Training mode: use controlled_agent which includes phase suffix
+            agent_key = config_controlled_agent
         elif hasattr(self, 'unit_registry') and self.unit_registry:
             # AI_TURN.md: Direct access - NO DEFAULTS allowed
             if "unitType" not in unit:
@@ -1297,7 +1315,7 @@ class RewardCalculator:
             agent_key = self.unit_registry.get_model_key(scenario_unit_type)
         else:
             raise ValueError("Missing both controlled_agent config and unit_registry - cannot determine agent key")
-        
+
         # CRITICAL: Set the agent type as unitType for reward config lookup
         enriched["unitType"] = agent_key
         

@@ -1136,13 +1136,6 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             if not unit_reward_config:
                 raise ValueError(f"No reward config found for unit type '{reward_config_key}' in rewards_configs. Available: {list(rewards_configs.keys())}")
 
-            # DEBUG: Print which config is being used
-            print(f"🔍 REWARD CONFIG: Using '{reward_config_key}' for Unit {shooter.get('id')}")
-            if 'base_actions' in unit_reward_config:
-                print(f"   ranged_attack: {unit_reward_config['base_actions'].get('ranged_attack', 'NOT FOUND')}")
-            if 'result_bonuses' in unit_reward_config:
-                print(f"   kill_target: {unit_reward_config['result_bonuses'].get('kill_target', 'NOT FOUND')}")
-
             reward_mapper = RewardMapper(unit_reward_config)
 
         # Get unit_registry for mapping scenario types
@@ -1225,10 +1218,6 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
 
     # Update the action_log entry with calculated reward and action_name
     logged_reward = round(action_reward, 2)
-
-    # DEBUG: Print final calculated reward
-    if shooter["player"] == controlled_player:
-        print(f"💰 FINAL REWARD: Unit {unit_id} → {logged_reward} (action_name: {action_name})")
 
     if game_state["action_logs"]:
         last_log = game_state["action_logs"][-1]
