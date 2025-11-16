@@ -49,7 +49,7 @@ interface ReplayData {
 
 export const BoardReplay: React.FC = () => {
   const { gameConfig } = useGameConfig();
-  const gameLog = useGameLog(1);
+  const gameLog = useGameLog();
 
   // Replay data
   const [replayData, setReplayData] = useState<ReplayData | null>(null);
@@ -161,6 +161,7 @@ export const BoardReplay: React.FC = () => {
 
     for (let i = 0; i < currentActionIndex; i++) {
       const action = currentEpisode.actions[i];
+      const turnNumber = parseInt(action.turn.replace('T', ''));
 
       if (action.type === 'move' && action.from && action.to) {
         gameLog.logMoveAction(
@@ -169,12 +170,12 @@ export const BoardReplay: React.FC = () => {
           action.from.row,
           action.to.col,
           action.to.row,
-          1
+          turnNumber
         );
       } else if (action.type === 'move_wait' && action.pos) {
         gameLog.logNoMoveAction(
           { id: action.unit_id!, name: `Unit ${action.unit_id}` } as any,
-          1
+          turnNumber
         );
       } else if (action.type === 'shoot') {
         // Parse shooting details from log format to match PvP mode
@@ -233,7 +234,7 @@ export const BoardReplay: React.FC = () => {
           message,
           unitId: shooterId,
           targetId: targetId,
-          turnNumber: 1,
+          turnNumber: turnNumber,
           phase: 'shooting',
           player: action.player,
           shootDetails  // Include for color coding
@@ -352,10 +353,10 @@ export const BoardReplay: React.FC = () => {
       )}
 
       {/* Turn/Phase Tracker */}
-      {gameConfig && currentState && (
+      {gameConfig && currentState && currentEpisode && (
         <div className="turn-phase-tracker-right">
           <TurnPhaseTracker
-            currentTurn={1}
+            currentTurn={currentActionIndex > 0 ? parseInt(currentEpisode.actions[currentActionIndex - 1].turn.replace('T', '')) : 1}
             currentPhase={currentState.phase || 'move'}
             phases={["move", "shoot", "charge", "fight"]}
             maxTurns={gameConfig.game_rules.max_turns}
