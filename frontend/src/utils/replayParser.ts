@@ -1,5 +1,6 @@
 // frontend/src/utils/replayParser.ts
 // Parse train_step.log into replay format on the frontend
+// VERSION: 2025-11-17-11-35 - Dead unit tracking implementation
 
 interface ReplayAction {
   type: string;
@@ -23,6 +24,7 @@ interface ReplayAction {
 interface ReplayEpisode {
   episode_num: number;
   scenario: string;
+  bot_name: string;
   initial_state: any;
   actions: ReplayAction[];
   states: any[];
@@ -31,18 +33,12 @@ interface ReplayEpisode {
 }
 
 export function parse_log_file_from_text(text: string) {
-  console.log('Starting replay parser...');
   const lines = text.split('\n');
   const episodes: any[] = [];
   let currentEpisode: any = null;
 
   for (const line of lines) {
     const trimmed = line.trim();
-
-    // Debug: log all SHOOT lines
-    if (trimmed.includes(' SHOOT :')) {
-      console.log('RAW SHOOT LINE:', trimmed);
-    }
 
     // Episode start
     if (trimmed.includes('=== EPISODE START ===')) {
@@ -55,7 +51,8 @@ export function parse_log_file_from_text(text: string) {
         units: {},
         initial_positions: {},
         final_result: null,
-        scenario: 'Unknown'
+        scenario: 'Unknown',
+        bot_name: 'Unknown'
       };
       continue;
     }
@@ -66,6 +63,13 @@ export function parse_log_file_from_text(text: string) {
     const scenarioMatch = trimmed.match(/Scenario: (.+)/);
     if (scenarioMatch) {
       currentEpisode.scenario = scenarioMatch[1];
+      continue;
+    }
+
+    // Bot name (opponent)
+    const botMatch = trimmed.match(/(?:Bot|Opponent|P1_Agent): (.+)/);
+    if (botMatch) {
+      currentEpisode.bot_name = botMatch[1];
       continue;
     }
 
@@ -159,7 +163,8 @@ export function parse_log_file_from_text(text: string) {
     // Parse SHOOT actions
     const shootMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+), (\d+)\) (SHOT|WAIT)/);
     if (shootMatch) {
-      console.log('Matched SHOOT line:', trimmed);
+      // Removed verbose logging
+      // console.log('Matched SHOOT line:', trimmed);
       const timestamp = shootMatch[1];
       const turn = shootMatch[2];
       const player = parseInt(shootMatch[3]);
@@ -167,7 +172,7 @@ export function parse_log_file_from_text(text: string) {
       const shooterCol = parseInt(shootMatch[5]);
       const shooterRow = parseInt(shootMatch[6]);
       const actionType = shootMatch[7];
-      console.log('Action type:', actionType);
+      // console.log('Action type:', actionType);
 
       if (actionType === 'SHOT') {
         const targetMatch = trimmed.match(/SHOT at unit (\d+)/);
@@ -178,8 +183,9 @@ export function parse_log_file_from_text(text: string) {
         const woundMatch = trimmed.match(/Wound:(\d+)\+:(\d+)/);
         const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)/);
 
-        console.log('Parsing shoot line:', trimmed);
-        if (hitMatch) console.log('Found Hit - target:', hitMatch[1], 'roll:', hitMatch[2]);
+        // Removed verbose logging
+        // console.log('Parsing shoot line:', trimmed);
+        // if (hitMatch) console.log('Found Hit - target:', hitMatch[1], 'roll:', hitMatch[2]);
 
         if (targetMatch) {
           const targetId = parseInt(targetMatch[1]);
@@ -236,7 +242,7 @@ export function parse_log_file_from_text(text: string) {
     if (episodeEndMatch) {
       const winner = parseInt(episodeEndMatch[1]);
       if (currentEpisode) {
-        currentEpisode.final_result = winner === -1 ? 'Draw' : winner === 0 ? 'P0 Win' : 'P1 Win';
+        currentEpisode.final_result = winner === -1 ? 'Draw' : winner === 0 ? 'Agent Win' : 'Bot Win';
       }
       continue;
     }
@@ -262,7 +268,8 @@ export function parse_log_file_from_text(text: string) {
         HP_MAX: 2
       });
     }
-    console.log(`Episode ${episode.episode_num}: ${initialUnits.length} units`, initialUnits.map((u: any) => ({ id: u.id, player: u.player, pos: `(${u.col},${u.row})` })));
+    // Removed verbose episode units logging
+    // console.log(`Episode ${episode.episode_num}: ${initialUnits.length} units`, initialUnits.map((u: any) => ({ id: u.id, player: u.player, pos: `(${u.col},${u.row})` })));
 
     const initialState = {
       units: initialUnits,
@@ -279,25 +286,66 @@ export function parse_log_file_from_text(text: string) {
       currentUnits[unit.id] = { ...unit };
     }
 
+    // Track units to remove after they've been shown as dead
+    const unitsToRemove = new Set<number>();
+
     for (const action of episode.actions) {
+      // Clear isJustKilled flag and remove units that were killed in the previous action
+      unitsToRemove.forEach(unitId => {
+        if (currentUnits[unitId]) {
+          // First clear the flag so the unit shows normally (if it somehow survived)
+          delete currentUnits[unitId].isJustKilled;
+          // Then remove the unit since it's dead
+          delete currentUnits[unitId];
+        }
+      });
+      unitsToRemove.clear();
+
       if (action.type === 'move' && action.unit_id) {
         const unitId = action.unit_id;
         if (currentUnits[unitId] && action.to) {
           currentUnits[unitId].col = action.to.col;
           currentUnits[unitId].row = action.to.row;
         }
-      } else if (action.type === 'shoot' && action.target_id && action.damage) {
+      } else if (action.type === 'shoot' && action.target_id !== undefined) {
+        // Handle shoot actions (even if damage is 0)
         const targetId = action.target_id;
+        const damage = action.damage || 0;
+
         if (currentUnits[targetId]) {
-          currentUnits[targetId].HP_CUR -= action.damage;
-          if (currentUnits[targetId].HP_CUR < 0) {
-            currentUnits[targetId].HP_CUR = 0;
+          const wasAlive = currentUnits[targetId].HP_CUR > 0;
+          const hpBefore = currentUnits[targetId].HP_CUR;
+
+          // Apply damage
+          if (damage > 0) {
+            currentUnits[targetId].HP_CUR -= damage;
+            if (currentUnits[targetId].HP_CUR < 0) {
+              currentUnits[targetId].HP_CUR = 0;
+            }
+          }
+
+          const hpAfter = currentUnits[targetId].HP_CUR;
+
+          // Check if unit was just killed
+          if (hpAfter <= 0 && wasAlive) {
+            currentUnits[targetId].isJustKilled = true;
+            unitsToRemove.add(targetId);
           }
         }
       }
 
+      // Create state with current units (including just-killed units with flag preserved)
+      const stateUnits = Object.values(currentUnits).map(u => {
+        const unitCopy = { ...u };
+        // Preserve isJustKilled flag in the copy
+        if ((u as any).isJustKilled) {
+          (unitCopy as any).isJustKilled = true;
+        }
+        return unitCopy;
+      });
+
       states.push({
-        units: Object.values(currentUnits).map(u => ({ ...u })),
+        units: stateUnits,
         currentTurn: 1,
         currentPlayer: action.player,
         phase: action.type.includes('move') ? 'move' : action.type.includes('shoot') ? 'shoot' : 'move',
@@ -308,6 +356,7 @@ export function parse_log_file_from_text(text: string) {
     return {
       episode_num: episode.episode_num,
       scenario: episode.scenario,
+      bot_name: episode.bot_name || 'Unknown',
       initial_state: initialState,
       actions: episode.actions,
       states: states,

@@ -95,14 +95,20 @@ export class UnitRenderer {
   render(): void {
     // Clean up any existing blink intervals before rendering new ones
     this.cleanupExistingBlinkIntervals();
-    
+
     const { unit } = this.props;
-    
-    // AI_TURN.md COMPLIANCE: Dead units don't render - return early
+
+    // AI_TURN.md COMPLIANCE: Dead units don't render - UNLESS just killed (show as grey ghost)
+    // Just-killed units are shown in grey, then removed in the next action
+    const isJustKilled = (unit as any).isJustKilled === true;
     if (unit.HP_CUR <= 0) {
-      return;
+      if (isJustKilled) {
+        console.log(`Rendering just-killed unit ${unit.id} as grey ghost`);
+      } else {
+        return;
+      }
     }
-    
+
     const unitIconScale = unit.ICON_SCALE || this.props.ICON_SCALE;
     
     // ===== Z-INDEX CALCULATIONS =====
@@ -129,9 +135,11 @@ export class UnitRenderer {
   
   private calculateEligibilityCompliant(): boolean {
     const { unit, phase, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled } = this.props;
-    
+
     // AI_TURN.md: Basic eligibility checks
-    if (unit.HP_CUR === undefined || unit.HP_CUR <= 0) return false;
+    // Allow just-killed units to be rendered as grey ghosts
+    const isJustKilled = (unit as any).isJustKilled === true;
+    if (unit.HP_CUR === undefined || (unit.HP_CUR <= 0 && !isJustKilled)) return false;
     if (phase !== "fight" && unit.player !== currentPlayer) return false;
     
     switch (phase) {
@@ -213,6 +221,13 @@ export class UnitRenderer {
       finalUnitColor = 0x666666;  // Medium grey fill
       finalBorderColor = 0x888888; // Lighter grey border
       circleAlpha = 0.6;
+    }
+
+    // Just-killed unit styling (show as grey ghost before removal)
+    if ((unit as any).isJustKilled) {
+      finalUnitColor = 0x444444;  // Dark grey fill
+      finalBorderColor = 0x666666; // Medium grey border
+      circleAlpha = 0.5;
     }
 
     unitCircle.beginFill(finalUnitColor);
@@ -330,6 +345,12 @@ export class UnitRenderer {
           sprite.tint = 0x666666;
         }
 
+        // Just-killed unit rendering (show as dark grey before removal)
+        if ((unit as any).isJustKilled) {
+          sprite.alpha = 0.4;
+          sprite.tint = 0x444444;
+        }
+
         // Preview-specific properties
         if (isPreview) {
           if (previewType === 'move') {
@@ -371,6 +392,12 @@ export class UnitRenderer {
     if ((unit as any).isGhost) {
       textColor = 0x999999;
       textAlpha = 0.7;
+    }
+
+    // Just-killed unit styling
+    if ((unit as any).isJustKilled) {
+      textColor = 0x666666;
+      textAlpha = 0.5;
     }
 
     const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {

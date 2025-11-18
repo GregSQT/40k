@@ -884,9 +884,10 @@ export default function Board({
           }
           // All other phases: use standard eligibility
           const standardResult = eligibleUnitIds.includes(typeof unit.id === 'number' ? unit.id : parseInt(unit.id as string));
-          if (unit.id === 8 || unit.id === 9) {
-            console.log(`🟢 STANDARD ELIGIBILITY Unit ${unit.id}: ${standardResult}`);
-          }
+          // Removed debug log to reduce console flooding
+          // if (unit.id === 8 || unit.id === 9) {
+          //   console.log(`🟢 STANDARD ELIGIBILITY Unit ${unit.id}: ${standardResult}`);
+          // }
           return standardResult;
         })();
         
@@ -1024,7 +1025,10 @@ export default function Board({
         isBlinkingActive,
         JSON.stringify(blinkingUnits),
         // Add showHexCoordinates to trigger re-render when toggle changes
-        showHexCoordinates
+        showHexCoordinates,
+        // Add shooting indicators to trigger re-render
+        shootingTargetId,
+        shootingUnitId
       ]);
 
       // Simple container return - loading/error handled inside useEffect

@@ -86,9 +86,9 @@ class W40KEngine(gym.Env):
             board_config = config_loader.get_board_config()
             
             # CRITICAL FIX: Initialize PvE mode BEFORE config creation
-            # Training mode: no PvE mode needed
-            # PvE mode: will be set later in constructor
-            pve_mode_value = False  # Default for training
+            # Training mode: pve_mode=False (SelfPlayWrapper handles Player 1)
+            # PvE mode in API: pve_mode=True (load AI model for Player 1)
+            pve_mode_value = False  # Training uses SelfPlayWrapper, not pve_mode
             
             # Extract observation_params for module access - NO FALLBACKS
             if "observation_params" not in self.training_config:

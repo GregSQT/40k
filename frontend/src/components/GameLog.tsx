@@ -22,20 +22,20 @@ interface GameLogProps {
 export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availableHeight = 220, useStepNumbers = false, debugMode = false }) => {
   const eventsContainerRef = React.useRef<HTMLDivElement>(null);
 
-  // TEMPORARY DEBUG - Remove after verification
-  React.useEffect(() => {
-    console.log('🔍 GAMELOG DEBUG:', {
-      debugMode,
-      eventsCount: events.length,
-      firstEvent: events[0],
-      hasRewardInFirst: events[0] && 'reward' in events[0],
-      hasActionNameInFirst: events[0] && 'action_name' in events[0],
-      hasIsAiActionInFirst: events[0] && 'is_ai_action' in events[0],
-      rewardValue: events[0] && (events[0] as any).reward,
-      actionName: events[0] && (events[0] as any).action_name,
-      isAiAction: events[0] && (events[0] as any).is_ai_action
-    });
-  }, [debugMode, events.length]);
+  // TEMPORARY DEBUG - Removed to reduce console flooding
+  // React.useEffect(() => {
+  //   console.log('🔍 GAMELOG DEBUG:', {
+  //     debugMode,
+  //     eventsCount: events.length,
+  //     firstEvent: events[0],
+  //     hasRewardInFirst: events[0] && 'reward' in events[0],
+  //     hasActionNameInFirst: events[0] && 'action_name' in events[0],
+  //     hasIsAiActionInFirst: events[0] && 'is_ai_action' in events[0],
+  //     rewardValue: events[0] && (events[0] as any).reward,
+  //     actionName: events[0] && (events[0] as any).action_name,
+  //     isAiAction: events[0] && (events[0] as any).is_ai_action
+  //   });
+  // }, [debugMode, events.length]);
 
   // Display all events (newest first) - sort by timestamp descending, no limit
   const displayedEvents = [...events]

@@ -47,6 +47,7 @@ from config_loader import get_config_loader
 from ai.game_replay_logger import GameReplayIntegration
 import torch
 import time  # Add time import for StepLogger timestamps
+import gymnasium as gym  # For SelfPlayWrapper to inherit from gym.Wrapper
 
 
 class BotControlledEnv:
@@ -182,6 +183,172 @@ class BotControlledEnv:
         return self.base_env.action_space
 
 
+class SelfPlayWrapper(gym.Wrapper):
+    """
+    Wrapper for self-play training where Player 1 is controlled by a frozen copy of the model.
+
+    Key features:
+    - Player 0: Learning agent (receives gradient updates from SB3)
+    - Player 1: Frozen opponent (uses copy of model from N episodes ago)
+    - Frozen model updates periodically to keep opponent challenging
+    - Naturally targets ~50% win rate as learning agent improves
+    """
+
+    def __init__(self, base_env, frozen_model=None, update_frequency=500):
+        """
+        Args:
+            base_env: W40KEngine wrapped in ActionMasker
+            frozen_model: Initial frozen model for Player 1 (optional, will use random if None)
+            update_frequency: Episodes between frozen model updates
+        """
+        super().__init__(base_env)
+        self.frozen_model = frozen_model
+        self.update_frequency = update_frequency
+        self.episodes_since_update = 0
+        self.total_episodes = 0
+
+        # Unwrap ActionMasker to get actual engine
+        # self.env is set by gym.Wrapper.__init__
+        self.engine = self.env
+        if hasattr(self.env, 'env'):
+            self.engine = self.env.env
+
+        # Episode tracking
+        self.episode_reward = 0.0
+        self.episode_length = 0
+
+        # Self-play statistics
+        self.player0_wins = 0
+        self.player1_wins = 0
+        self.draws = 0
+
+    def reset(self, seed=None, options=None):
+        """Reset environment for new episode."""
+        obs, info = self.env.reset(seed=seed, options=options)
+        self.episode_reward = 0.0
+        self.episode_length = 0
+        return obs, info
+
+    def step(self, agent_action):
+        """
+        Execute one step in the environment.
+
+        If it's Player 0's turn: Execute the provided action
+        If it's Player 1's turn: Use frozen model action instead
+        """
+        # CRITICAL: First handle any pending Player 1 turns before Player 0's action
+        # This shouldn't happen normally, but safety check
+        obs = None
+        reward = 0.0
+        terminated = False
+        truncated = False
+        info = {}
+
+        while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
+            player1_action = self._get_frozen_model_action()
+            obs, reward, terminated, truncated, info = self.env.step(player1_action)
+            self.episode_length += 1
+
+        # Now execute Player 0's action (if game not over)
+        if not (terminated or truncated):
+            obs, reward, terminated, truncated, info = self.env.step(agent_action)
+            self.episode_reward += reward
+            self.episode_length += 1
+
+            # Handle any Player 1 turns that follow
+            while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
+                player1_action = self._get_frozen_model_action()
+                obs, reward, terminated, truncated, info = self.env.step(player1_action)
+                self.episode_length += 1
+
+        # Track episode end statistics
+        if terminated or truncated:
+            self.total_episodes += 1
+            self.episodes_since_update += 1
+
+            # Track wins/losses
+            winner = info.get("winner", -1)
+            if winner == 0:
+                self.player0_wins += 1
+            elif winner == 1:
+                self.player1_wins += 1
+            else:
+                self.draws += 1
+
+        return obs, reward, terminated, truncated, info
+
+    def _get_frozen_model_action(self) -> int:
+        """
+        Get action from frozen model for Player 1.
+        Falls back to random valid action if no frozen model available.
+        """
+        if self.frozen_model is None:
+            # No frozen model yet - use random valid action
+            action_mask = self.engine.get_action_mask()
+            valid_actions = [i for i in range(12) if action_mask[i]]
+            if not valid_actions:
+                return 11  # Wait action
+            import random
+            return random.choice(valid_actions)
+
+        # Use frozen model to predict action
+        obs = self.engine.obs_builder.build_observation(self.engine.game_state)
+        action, _ = self.frozen_model.predict(obs, deterministic=True)
+
+        # Validate action is legal
+        action_mask = self.engine.get_action_mask()
+        if action_mask[action]:
+            return int(action)
+        else:
+            # Frozen model suggested illegal action - fall back to random valid
+            valid_actions = [i for i in range(12) if action_mask[i]]
+            if not valid_actions:
+                return 11
+            import random
+            return random.choice(valid_actions)
+
+    def update_frozen_model(self, new_model):
+        """
+        Update the frozen model with a copy of the current learning model.
+        Should be called periodically (e.g., every N episodes).
+
+        Note: This method is deprecated. Use the persistent_frozen_model approach
+        in the training loop instead, which properly saves/loads via temp file.
+        """
+        # Set directly - the caller is responsible for providing an independent copy
+        self.frozen_model = new_model
+        self.episodes_since_update = 0
+        print(f"  🔄 Self-play: Updated frozen opponent (Episode {self.total_episodes})")
+
+    def should_update_frozen_model(self) -> bool:
+        """Check if it's time to update the frozen model."""
+        return self.episodes_since_update >= self.update_frequency
+
+    def get_win_rate_stats(self) -> dict:
+        """Get win rate statistics for Player 0 (learning agent)."""
+        total_games = self.player0_wins + self.player1_wins + self.draws
+        if total_games == 0:
+            return {
+                'player0_wins': 0,
+                'player1_wins': 0,
+                'draws': 0,
+                'player0_win_rate': 0.0,
+                'total_games': 0
+            }
+
+        return {
+            'player0_wins': self.player0_wins,
+            'player1_wins': self.player1_wins,
+            'draws': self.draws,
+            'player0_win_rate': self.player0_wins / total_games * 100,
+            'total_games': total_games
+        }
+
+    def close(self):
+        """Close the wrapped environment."""
+        self.env.close()
+
+
 class EntropyScheduleCallback(BaseCallback):
     """Callback to linearly reduce entropy coefficient during training."""
 
@@ -217,7 +384,7 @@ class EpisodeTerminationCallback(BaseCallback):
 
     def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0,
                  total_episodes: int = None, scenario_info: str = None,
-                 disable_early_stopping: bool = False):
+                 disable_early_stopping: bool = False, global_start_time: float = None):
         super().__init__(verbose)
         if max_episodes <= 0:
             raise ValueError("max_episodes must be positive - no defaults allowed")
@@ -227,18 +394,24 @@ class EpisodeTerminationCallback(BaseCallback):
         self.expected_timesteps = expected_timesteps
         self.episode_count = 0
         self.step_count = 0
-        self.start_time = None
+        self.start_time = global_start_time  # Use provided global start time if available
         # For global progress tracking in rotation mode
         self.total_episodes = total_episodes if total_episodes else max_episodes
         self.scenario_info = scenario_info  # e.g., "Cycle 8 | Scenario: phase2-1"
         self.global_episode_offset = 0  # Set by rotation code to track overall progress
         # ROTATION FIX: Disable early stopping to let model.learn() consume all timesteps
         self.disable_early_stopping = disable_early_stopping
-    
+        # EMA for smooth ETA estimation (weights recent episodes more heavily)
+        self.ema_episode_time = None
+        self.last_episode_time = None
+        self.ema_alpha = 0.1  # Smoothing factor (higher = more weight on recent)
+
     def _on_training_start(self) -> None:
         """Initialize timing on training start."""
         import time
-        self.start_time = time.time()
+        # Only set start_time if not already set (preserves global start time in rotation mode)
+        if self.start_time is None:
+            self.start_time = time.time()
     
     def _on_step(self) -> bool:
         """Track episodes and display progress."""
@@ -294,20 +467,38 @@ class EpisodeTerminationCallback(BaseCallback):
                 filled = int(bar_length * global_episode_count / self.total_episodes)
                 bar = '█' * filled + '░' * (bar_length - filled)
                 
-                # Calculate time with consistent overall average for stable estimates
+                # Calculate time with EMA for smooth, accurate ETA estimates
                 time_info = ""
                 if self.start_time is not None and global_episode_count > 0:
                     # Total elapsed time from start
                     elapsed = current_time - self.start_time
 
-                    # CRITICAL FIX: Use SAME calculation for both speed and ETA
-                    # Overall average = total_elapsed / episodes_completed
-                    avg_episode_time = elapsed / global_episode_count
-                    remaining_episodes = self.total_episodes - global_episode_count
-                    eta = avg_episode_time * remaining_episodes
+                    # Update EMA of episode time for better ETA estimation
+                    if self.last_episode_time is not None:
+                        # Time for last batch of episodes (10 episodes)
+                        episode_batch_time = current_time - self.last_episode_time
+                        avg_time_per_episode = episode_batch_time / 10
 
-                    # Calculate training speed (episodes per second) - matches ETA calculation
-                    eps_speed = global_episode_count / elapsed if elapsed > 0 else 0
+                        if self.ema_episode_time is None:
+                            # Initialize EMA with first measurement
+                            self.ema_episode_time = avg_time_per_episode
+                        else:
+                            # Update EMA: new_ema = alpha * new_value + (1 - alpha) * old_ema
+                            self.ema_episode_time = (self.ema_alpha * avg_time_per_episode +
+                                                    (1 - self.ema_alpha) * self.ema_episode_time)
+
+                    self.last_episode_time = current_time
+
+                    # Calculate ETA using EMA (or fallback to overall average for first few episodes)
+                    remaining_episodes = self.total_episodes - global_episode_count
+                    if self.ema_episode_time is not None:
+                        eta = self.ema_episode_time * remaining_episodes
+                        eps_speed = 1.0 / self.ema_episode_time if self.ema_episode_time > 0 else 0
+                    else:
+                        # Fallback for early episodes
+                        avg_episode_time = elapsed / global_episode_count
+                        eta = avg_episode_time * remaining_episodes
+                        eps_speed = global_episode_count / elapsed if elapsed > 0 else 0
 
                     # Format times as HH:MM:SS or MM:SS depending on duration
                     def format_time(seconds):
@@ -1081,6 +1272,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     # Connect step logger if enabled
                     if 'step_logger' in globals() and step_logger and step_logger.enabled:
                         base_env.step_logger = step_logger
+                        # Set bot name for episode logging
+                        step_logger.current_bot_name = bot_name
 
                     # Wrap with ActionMasker (CRITICAL for proper action masking)
                     def mask_fn(env):
@@ -1355,22 +1548,28 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None):
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None):
         """Log episode start with all unit starting positions"""
         if not self.enabled:
             return
-        
+
         # Reset per-episode counters
         self.episode_step_count = 0
         self.episode_action_count = 0
-            
+
+        # Use bot_name parameter or fall back to current_bot_name attribute
+        effective_bot_name = bot_name or getattr(self, 'current_bot_name', None)
+
         try:
             with open(self.output_file, 'a') as f:
                 timestamp = time.strftime("%H:%M:%S", time.localtime())
                 f.write(f"\n[{timestamp}] === EPISODE START ===\n")
-                
+
                 if scenario_info:
                     f.write(f"[{timestamp}] Scenario: {scenario_info}\n")
+
+                if effective_bot_name:
+                    f.write(f"[{timestamp}] Opponent: {effective_bot_name.capitalize()}Bot\n")
                 
                 # Log all unit starting positions
                 for unit in units_data:
@@ -2377,12 +2576,15 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         quiet=True,
         gym_training_mode=True
     )
-    
+
     # Wrap environment
     def mask_fn(env):
         return env.get_action_mask()
-    
+
     masked_env = ActionMasker(base_env, mask_fn)
+
+    # Simple wrapping - both players controlled by same model
+    # This is the original approach that worked
     env = Monitor(masked_env)
     
     # Create or load model
@@ -2442,7 +2644,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     episodes_trained = 0
     cycle = 0
     scenario_idx = 0
-    
+
+    # Global start time for accurate elapsed time tracking across rotations
+    global_start_time = time.time()
+
     while episodes_trained < total_episodes:
         current_scenario = scenario_list[scenario_idx]
         scenario_name = os.path.basename(current_scenario).replace(f"{agent_key}_scenario_", "").replace(".json", "")
@@ -2463,9 +2668,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             quiet=True,
             gym_training_mode=True
         )
-        
-        # Wrap environment
+
+        # Wrap environment with action masking first
         masked_env = ActionMasker(base_env, mask_fn)
+
+        # Simple wrapping - both players controlled by same model
         env = Monitor(masked_env)
         
         # Update model's environment
@@ -2482,7 +2689,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             total_episodes_override=total_episodes,
             max_episodes_override=episodes_this_iteration,
             scenario_info=scenario_display,
-            global_episode_offset=episodes_trained
+            global_episode_offset=episodes_trained,
+            global_start_time=global_start_time
         )
         
         # Link metrics_tracker to bot evaluation callback
@@ -2521,7 +2729,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # Update counters
         episodes_trained += episodes_this_iteration
         scenario_idx = (scenario_idx + 1) % len(scenario_list)
-        
+
         # Check if we completed a full cycle
         if scenario_idx == 0:
             cycle += 1
@@ -2593,7 +2801,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     return True, model, env
 
 def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
-                   total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0):
+                   total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0,
+                   global_start_time=None):
     W40KEngine, _ = setup_imports()
     callbacks = []
     
@@ -2627,7 +2836,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             verbose=1,
             total_episodes=total_eps,
             scenario_info=scenario_info,
-            disable_early_stopping=is_rotation_mode  # Let model.learn() control timesteps in rotation
+            disable_early_stopping=is_rotation_mode,  # Let model.learn() control timesteps in rotation
+            global_start_time=global_start_time
         )
         episode_callback.global_episode_offset = global_episode_offset
         callbacks.append(episode_callback)

@@ -36,6 +36,7 @@ interface ReplayAction {
 interface ReplayEpisode {
   episode_num: number;
   scenario: string;
+  bot_name: string;
   initial_state: any;
   actions: ReplayAction[];
   states: any[];
@@ -191,10 +192,6 @@ export const BoardReplay: React.FC = () => {
     // Action index 1 = state after first action (states[0])
     // Action index N = state after Nth action (states[N-1])
     if (currentActionIndex === 0) {
-      console.log('Showing initial state:', {
-        actionIndex: currentActionIndex,
-        units: episode.initial_state.units?.map((u: any) => ({ id: u.id, player: u.player, pos: `(${u.col},${u.row})` }))
-      });
       // Enrich initial state units with stats
       return {
         ...episode.initial_state,
@@ -202,16 +199,13 @@ export const BoardReplay: React.FC = () => {
       };
     } else {
       const state = episode.states[currentActionIndex - 1];
-      console.log('Showing action state:', {
-        actionIndex: currentActionIndex,
-        stateIndex: currentActionIndex - 1,
-        action: state?.action?.type,
-        units: state?.units?.map((u: any) => ({ id: u.id, player: u.player, pos: `(${u.col},${u.row})` }))
-      });
+
       // Enrich state units with stats
+      const enrichedUnits = enrichUnitsWithStats(state?.units || []);
+
       return {
         ...state,
-        units: enrichUnitsWithStats(state?.units || [])
+        units: enrichedUnits
       };
     }
   };
@@ -512,7 +506,7 @@ export const BoardReplay: React.FC = () => {
               <option value="">Select Episode</option>
               {replayData.episodes.map((ep) => (
                 <option key={ep.episode_num} value={ep.episode_num}>
-                  Episode {ep.episode_num} - {ep.final_result || 'Unknown'}
+                  Episode {ep.episode_num} - {ep.bot_name || 'Unknown'} - {ep.final_result || 'Unknown'}
                 </option>
               ))}
             </select>
@@ -572,7 +566,7 @@ export const BoardReplay: React.FC = () => {
     <BoardPvp
       units={unitsWithGhost}
       selectedUnitId={null}
-      eligibleUnitIds={[]}
+      eligibleUnitIds={unitsWithGhost.map((u: any) => u.id)}
       showHexCoordinates={showHexCoordinates}
       mode="select"
       movePreview={null}
@@ -605,12 +599,13 @@ export const BoardReplay: React.FC = () => {
     </div>
   );
 
-  console.log('BoardReplay render:', {
-    selectedFileName,
-    selectedEpisode,
-    currentState: !!currentState,
-    units: currentState?.units?.map((u: any) => ({ id: u.id, player: u.player, type: u.type }))
-  });
+  // Removed verbose render log to reduce console flooding
+  // console.log('BoardReplay render:', {
+  //   selectedFileName,
+  //   selectedEpisode,
+  //   currentState: !!currentState,
+  //   units: currentState?.units?.map((u: any) => ({ id: u.id, player: u.player, type: u.type }))
+  // });
 
   return (
     <SharedLayout

@@ -1051,9 +1051,12 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     if not shooter or not target:
         return {"error": "unit_or_target_not_found"}
     
+    # FOCUS FIRE: Store target's HP before damage for reward calculation
+    target_hp_before_damage = target["HP_CUR"]
+
     # Execute single attack_sequence(RNG) per AI_TURN.md
     attack_result = _attack_sequence_rng(shooter, target)
-    
+
     # Apply damage immediately per AI_TURN.md
     if attack_result["damage"] > 0:
         target["HP_CUR"] = max(0, target["HP_CUR"] - attack_result["damage"])
@@ -1062,6 +1065,9 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             attack_result["target_died"] = True
             # PERFORMANCE: Invalidate LoS cache for dead unit (partial invalidation)
             _invalidate_los_cache_for_unit(game_state, target["id"])
+
+    # Store pre-damage HP in attack_result for reward calculation
+    attack_result["target_hp_before_damage"] = target_hp_before_damage
     
     # CRITICAL: Store detailed log for frontend display with location data
     if "action_logs" not in game_state:
@@ -1199,12 +1205,54 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
                 if "kill_target" in result_bonuses:
                     action_reward += result_bonuses["kill_target"]
                     action_name = "kill_target"
-           
+
             # No overkill bonus (exact kill)
                 if target["HP_CUR"] == attack_result.get("damage", 0):
                     if "no_overkill" in result_bonuses:
                         action_reward += result_bonuses["no_overkill"]
-       
+
+            # FOCUS FIRE BONUS: Check if shooter targeted the lowest HP enemy
+            if "target_lowest_hp" in result_bonuses:
+                try:
+                    # Get all valid targets this shooter could have shot AT THE TIME OF SHOOTING
+                    valid_target_ids = shooting_build_valid_target_pool(game_state, shooter["id"])
+
+                    if len(valid_target_ids) > 1:  # Only apply if there was a choice
+                        # Get the target's HP before this shot (from attack_result)
+                        target_hp_before = attack_result.get("target_hp_before_damage")
+                        if target_hp_before is None:
+                            # Fallback to current HP if not stored (shouldn't happen)
+                            target_hp_before = target["HP_CUR"]
+
+                        # Find the lowest HP among all valid targets AT THE TIME OF SHOOTING
+                        lowest_hp = float('inf')
+                        for target_id in valid_target_ids:
+                            candidate = _get_unit_by_id(game_state, target_id)
+                            if not candidate:
+                                continue
+
+                            # Get candidate's current HP
+                            # If this is the target we just shot, use pre-damage HP
+                            if candidate["id"] == target["id"]:
+                                candidate_hp = target_hp_before
+                            else:
+                                candidate_hp = candidate.get("HP_CUR", 0)
+
+                            # Only consider alive targets
+                            if candidate_hp > 0:
+                                lowest_hp = min(lowest_hp, candidate_hp)
+
+                        # Check if the actual target had the lowest HP (or tied for lowest)
+                        if target_hp_before > 0 and target_hp_before <= lowest_hp:
+                            action_reward += result_bonuses["target_lowest_hp"]
+                            # Don't override action_name - keep kill_target/damage_target as primary
+                except Exception as focus_fire_error:
+                    # Don't crash training if focus fire bonus fails
+                    import traceback
+                    print(f"⚠️  Focus fire bonus calc failed: {focus_fire_error}")
+                    print(f"   Traceback: {traceback.format_exc()}")
+                    pass
+
         except Exception as e:
             print(f"🚨 REWARD CALC FAILED for {shooter.get('id', 'unknown')} (P{shooter.get('player', '?')}): {e}")
             print(f"   shooter_scenario_type={shooter.get('unitType', 'missing')}")
