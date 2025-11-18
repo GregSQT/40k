@@ -460,9 +460,9 @@ export class UnitRenderer {
     });
     explosionText.anchor.set(0.5);
 
-    // Position at top-left of the unit
+    // Position at bottom-left of the unit
     const offset = HEX_RADIUS * 0.6;
-    explosionText.position.set(centerX - offset, centerY - offset);
+    explosionText.position.set(centerX - offset, centerY + offset);
     explosionText.zIndex = iconZIndex + 100; // Above everything
     app.stage.addChild(explosionText);
   }
@@ -480,9 +480,9 @@ export class UnitRenderer {
     });
     shootingText.anchor.set(0.5);
 
-    // Position at top-left of the unit (same position as explosion but on shooter)
+    // Position at bottom-left of the unit (same position as explosion but on shooter)
     const offset = HEX_RADIUS * 0.6;
-    shootingText.position.set(centerX - offset, centerY - offset);
+    shootingText.position.set(centerX - offset, centerY + offset);
     shootingText.zIndex = iconZIndex + 100; // Above everything
     app.stage.addChild(shootingText);
   }
