@@ -207,11 +207,12 @@ class SelfPlayWrapper(gym.Wrapper):
         self.episodes_since_update = 0
         self.total_episodes = 0
 
-        # Unwrap ActionMasker to get actual engine
-        # self.env is set by gym.Wrapper.__init__
+        # Unwrap to get actual W40KEngine
+        # Wrapping order: SelfPlayWrapper(ActionMasker(W40KEngine))
+        # self.env is set by gym.Wrapper.__init__ to base_env (ActionMasker)
         self.engine = self.env
-        if hasattr(self.env, 'env'):
-            self.engine = self.env.env
+        while hasattr(self.engine, 'env'):
+            self.engine = self.engine.env
 
         # Episode tracking
         self.episode_reward = 0.0
@@ -244,22 +245,42 @@ class SelfPlayWrapper(gym.Wrapper):
         truncated = False
         info = {}
 
+        # Track P1 actions for diagnostic
+        p1_actions_before = 0
         while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
             player1_action = self._get_frozen_model_action()
             obs, reward, terminated, truncated, info = self.env.step(player1_action)
             self.episode_length += 1
+            p1_actions_before += 1
 
         # Now execute Player 0's action (if game not over)
+        p0_reward = 0.0  # Track P0's reward separately
         if not (terminated or truncated):
             obs, reward, terminated, truncated, info = self.env.step(agent_action)
+            p0_reward = reward  # CRITICAL: Save P0's reward before P1 overwrites it
             self.episode_reward += reward
             self.episode_length += 1
 
+            # DIAGNOSTIC: Log P0's reward for debugging
+            if self.total_episodes < 3 and abs(reward) > 0.1:
+                phase = self.engine.game_state.get("phase", "?")
+                print(f"      [P0 Reward] action={agent_action}, reward={reward:.2f}, phase={phase}")
+
             # Handle any Player 1 turns that follow
+            p1_actions_after = 0
             while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
                 player1_action = self._get_frozen_model_action()
-                obs, reward, terminated, truncated, info = self.env.step(player1_action)
+                obs, _, terminated, truncated, info = self.env.step(player1_action)  # Discard P1's reward
                 self.episode_length += 1
+                p1_actions_after += 1
+
+            # DIAGNOSTIC: Log if P1 took actions (should happen regularly)
+            if (p1_actions_before + p1_actions_after) > 0 and self.total_episodes < 3:
+                phase = self.engine.game_state.get("phase", "?")
+                print(f"    [SelfPlay] P0 action={agent_action}, P1 took {p1_actions_before}+{p1_actions_after} actions, phase={phase}")
+
+        # CRITICAL: Return P0's reward to SB3, not P1's!
+        reward = p0_reward
 
         # Track episode end statistics
         if terminated or truncated:
@@ -291,21 +312,16 @@ class SelfPlayWrapper(gym.Wrapper):
             import random
             return random.choice(valid_actions)
 
-        # Use frozen model to predict action
+        # Use frozen model to predict action WITH action masking
+        # CRITICAL: MaskablePPO requires action_masks parameter for proper masked inference
         obs = self.engine.obs_builder.build_observation(self.engine.game_state)
-        action, _ = self.frozen_model.predict(obs, deterministic=True)
-
-        # Validate action is legal
         action_mask = self.engine.get_action_mask()
-        if action_mask[action]:
-            return int(action)
-        else:
-            # Frozen model suggested illegal action - fall back to random valid
-            valid_actions = [i for i in range(12) if action_mask[i]]
-            if not valid_actions:
-                return 11
-            import random
-            return random.choice(valid_actions)
+
+        # MaskablePPO.predict() expects action_masks as keyword argument
+        # CRITICAL: Use deterministic=False so P1 explores like P0 (fair self-play)
+        action, _ = self.frozen_model.predict(obs, deterministic=False, action_masks=action_mask)
+
+        return int(action)
 
     def update_frozen_model(self, new_model):
         """
@@ -998,13 +1014,18 @@ class MetricsCollectionCallback(BaseCallback):
     def _handle_episode_end(self, info):
         """Handle episode completion and log metrics."""
         self.episode_count += 1
-       
+
         # Extract episode data
         episode_data = {
             'total_reward': info.get('episode_reward', self.episode_reward),
             'episode_length': info.get('episode_length', self.episode_length),
             'winner': info.get('winner', None)
         }
+
+        # DIAGNOSTIC: Log winner for first 10 episodes to debug win rate
+        if self.episode_count <= 10:
+            winner = episode_data['winner']
+            print(f"  [DIAG] Episode {self.episode_count}: winner={winner} (P0 wins if 0, P1 wins if 1, draw if -1)")
        
         # GAMMA MONITORING: Track discount factor effects
         if hasattr(self.model, 'gamma'):
@@ -1057,9 +1078,10 @@ class MetricsCollectionCallback(BaseCallback):
                 self.win_rate_window = deque(maxlen=100)
             
             if winner is not None:
-                agent_won = 1.0 if winner == 1 else 0.0
+                # CRITICAL FIX: Learning agent is Player 0, not Player 1!
+                agent_won = 1.0 if winner == 0 else 0.0
                 self.win_rate_window.append(agent_won)
-                
+
                 if len(self.win_rate_window) >= 10:
                     import numpy as np
                     rolling_win_rate = np.mean(self.win_rate_window)
@@ -1949,9 +1971,12 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             return env.get_action_mask()
         
         masked_env = ActionMasker(base_env, mask_fn)
-        
+
+        # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
+        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
+
         # Wrap with Monitor for episode statistics
-        return Monitor(masked_env)
+        return Monitor(selfplay_env)
     
     return _init
 
@@ -2086,9 +2111,14 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             return env.get_action_mask()
         
         masked_env = ActionMasker(base_env, mask_fn)
-        
+
+        # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
+        # This ensures Player 1 uses a frozen model copy, not the learning agent
+        # Without this, both P0 and P1 actions go into SB3's buffer with P1 getting 0.0 rewards
+        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
+
         # SB3 Required: Monitor wrapped environment
-        env = Monitor(masked_env)
+        env = Monitor(selfplay_env)
     
     # Check if action masking is available (works for both vectorized and single env)
     if n_envs == 1:
@@ -2215,33 +2245,52 @@ def get_agent_scenario_file(config, agent_key, training_config_name):
         f"No scenario file found for agent '{agent_key}' phase '{training_config_name}'"
     )
 
-def get_scenario_list_for_phase(config, agent_key, training_config_name):
+def get_scenario_list_for_phase(config, agent_key, training_config_name, scenario_type=None):
     """Get list of all available scenarios for a training phase.
-    
+
     Args:
         config: ConfigLoader instance
         agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
         training_config_name: Phase name (e.g., 'phase1', 'phase2')
-    
+        scenario_type: Optional filter - 'self' for self-play, 'bot' for bot training, None for all
+
     Returns:
         List of scenario file paths
     """
     scenario_files = []
-    
+
     if not agent_key:
         # No agent specified, return global scenario
         global_scenario = os.path.join(config.config_dir, "scenario.json")
         if os.path.isfile(global_scenario):
             return [global_scenario]
         return []
-    
+
     # Check for agent-specific scenarios
     scenarios_dir = os.path.join(config.config_dir, "agents", agent_key, "scenarios")
-    
+
     if not os.path.isdir(scenarios_dir):
         # No agent-specific scenarios directory
         return []
-    
+
+    # If specific type requested, only look for that type
+    if scenario_type == "self":
+        # Only self-play scenarios
+        for i in range(1, 10):
+            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-self{i}.json")
+            if os.path.isfile(scenario_file):
+                scenario_files.append(scenario_file)
+        return scenario_files
+
+    if scenario_type == "bot":
+        # Only bot scenarios
+        for i in range(1, 10):
+            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-bot{i}.json")
+            if os.path.isfile(scenario_file):
+                scenario_files.append(scenario_file)
+        return scenario_files
+
+    # Default behavior: try all patterns
     # First, try to find exact match (e.g., "phase1.json" without number)
     default_scenario = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}.json")
     if os.path.isfile(default_scenario):
@@ -2257,7 +2306,22 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name):
     if scenario_files:
         return scenario_files
 
-    return []
+    # Look for bot-prefixed variants (phase1-bot1, phase1-bot2, etc.)
+    for i in range(1, 10):
+        scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-bot{i}.json")
+        if os.path.isfile(scenario_file):
+            scenario_files.append(scenario_file)
+
+    if scenario_files:
+        return scenario_files
+
+    # Look for self-prefixed variants (phase1-self1, etc.) as fallback
+    for i in range(1, 10):
+        scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-self{i}.json")
+        if os.path.isfile(scenario_file):
+            scenario_files.append(scenario_file)
+
+    return scenario_files
 
 
 def get_agent_scenario_file(config, agent_key, training_config_name, scenario_override=None):
@@ -2340,8 +2404,8 @@ def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None
     # Fallback
     return 100
 
-def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default", 
-                            agent_key=None, new_model=False, append_training=False):
+def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default",
+                            agent_key=None, new_model=False, append_training=False, scenario_override=None):
     """Create or load PPO model for specific agent with configuration following AI_INSTRUCTIONS.md."""
     
     # Check GPU availability
@@ -2379,7 +2443,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     cfg = get_config_loader()
     
     # Get scenario file (agent-specific or global)
-    scenario_file = get_agent_scenario_file(cfg, agent_key if agent_specific_mode else None, training_config_name)
+    scenario_file = get_agent_scenario_file(cfg, agent_key if agent_specific_mode else None, training_config_name, scenario_override)
     print(f"✅ Using scenario: {scenario_file}")
     # Load unit registry for multi-agent environment
     from ai.unit_registry import UnitRegistry
@@ -2437,10 +2501,11 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             return env.get_action_mask()
         
         masked_env = ActionMasker(base_env, mask_fn)
-        
-        # DISABLED: No logging during training for speed
-        # Enhanced logging only during evaluation
-        env = Monitor(masked_env)
+
+        # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
+        # Without this, P1 never takes actions and the game is broken
+        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
+        env = Monitor(selfplay_env)
     
     # Agent-specific model path
     model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
@@ -2625,7 +2690,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Import metrics tracker
     from metrics_tracker import W40KMetricsTracker
-    
+
+    # Initialize frozen model for self-play
+    # The frozen model is a copy of the learning model used by Player 1
+    frozen_model = None
+    frozen_model_update_frequency = 100  # Episodes between frozen model updates
+    last_frozen_model_update = 0
+
     # Determine tensorboard log name for continuous logging
     tb_log_name = f"{training_config_name}_{agent_key}"
     
@@ -2672,8 +2743,22 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # Wrap environment with action masking first
         masked_env = ActionMasker(base_env, mask_fn)
 
-        # Simple wrapping - both players controlled by same model
-        env = Monitor(masked_env)
+        # CRITICAL: Update frozen model periodically for proper self-play
+        if episodes_trained - last_frozen_model_update >= frozen_model_update_frequency or frozen_model is None:
+            # Save current model to temp file and load as frozen copy
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as f:
+                temp_path = f.name
+            model.save(temp_path)
+            frozen_model = MaskablePPO.load(temp_path)
+            os.unlink(temp_path)  # Clean up temp file
+            last_frozen_model_update = episodes_trained
+            if episodes_trained > 0:
+                print(f"  🔄 Self-play: Updated frozen opponent (Episode {episodes_trained})")
+
+        # Wrap with SelfPlayWrapper for proper self-play training
+        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=frozen_model, update_frequency=frozen_model_update_frequency)
+        env = Monitor(selfplay_env)
         
         # Update model's environment
         model.set_env(env)
@@ -3082,8 +3167,9 @@ def test_trained_model(model, num_episodes, training_config_name="default", agen
             step_count += 1
         
         total_rewards.append(episode_reward)
-        
-        if info['winner'] == 1:  # AI won
+
+        # CRITICAL FIX: Learning agent is Player 0, not Player 1!
+        if info.get('winner') == 0:  # AI (Player 0) won
             wins += 1
     
     if num_episodes <= 0:
@@ -3954,14 +4040,32 @@ def main():
         # Single agent training mode
         elif args.agent:
             # Check if scenario rotation is requested
-            if args.scenario == "all":
-                # Get list of all scenarios for this phase
-                scenario_list = get_scenario_list_for_phase(config, args.agent, args.training_config)
-                
-                if len(scenario_list) <= 1:
-                    print(f"⚠️  Only {len(scenario_list)} scenario found for {args.training_config}. Rotation not needed.")
-                    print(f"ℹ️  Falling back to standard training...")
-                    args.scenario = None  # Clear to use standard path
+            if args.scenario == "all" or args.scenario == "self" or args.scenario == "bot":
+                # Get list of scenarios based on type
+                if args.scenario == "self" or args.scenario == "all":
+                    # "all" and "self" both mean: use self-play scenarios
+                    scenario_list = get_scenario_list_for_phase(config, args.agent, args.training_config, scenario_type="self")
+                    scenario_type_name = "self-play"
+                else:  # args.scenario == "bot"
+                    scenario_list = get_scenario_list_for_phase(config, args.agent, args.training_config, scenario_type="bot")
+                    scenario_type_name = "bot"
+
+                # NO FALLBACKS - if no scenarios found, ERROR
+                if len(scenario_list) == 0:
+                    raise FileNotFoundError(
+                        f"No {scenario_type_name} scenarios found for {args.training_config}. "
+                        f"Expected files matching: {args.agent}_scenario_{args.training_config}-{'self' if scenario_type_name == 'self-play' else 'bot'}*.json"
+                    )
+
+                print(f"📋 Found {len(scenario_list)} {scenario_type_name} scenario(s):")
+                for s in scenario_list:
+                    print(f"   - {os.path.basename(s)}")
+
+                if len(scenario_list) == 1:
+                    # Single scenario - use it directly without rotation
+                    # Extract scenario name from path for override
+                    scenario_name = os.path.basename(scenario_list[0]).replace(f"{args.agent}_scenario_", "").replace(".json", "")
+                    args.scenario = scenario_name  # Set specific scenario to use
                 else:
                     # Load agent-specific training config to get total episodes
                     training_config = config.load_agent_training_config(args.agent, args.training_config)
@@ -4007,14 +4111,16 @@ def main():
                 args.rewards_config,
                 agent_key=args.agent,
                 new_model=args.new,
-                append_training=args.append
+                append_training=args.append,
+                scenario_override=args.scenario
             )
             
             # Setup callbacks with agent-specific model path
             callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
             
             # Train model
-            success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config, controlled_agent=args.agent)
+            # CRITICAL: Use rewards_config for controlled_agent (includes phase suffix like "_phase1")
+            success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config, controlled_agent=args.rewards_config)
             
             if success:
                 # Only test if episodes > 0

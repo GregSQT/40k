@@ -1,7 +1,7 @@
 {
   "phase1": {
     "type": "################################################### Phase 1 - MODERATE AGGRESSION ###################################################",
-    "total_episodes": 4000,
+    "total_episodes": 1000,
     "total_episodes_normal_value": "4000 for stable learning with balanced rewards",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 16,

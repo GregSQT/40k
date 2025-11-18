@@ -97,12 +97,20 @@ class RewardCalculator:
         if not acting_unit:
             raise ValueError(f"Acting unit not found: {acting_unit_id}")
 
-        # OPTIMIZATION: Skip reward calculation for bot units (not the controlled player)
-        # Bot units don't need rewards since they don't learn
-        config = game_state.get("config", {})
-        controlled_player = config.get("controlled_player", 0)
+        # CRITICAL: Only give rewards to the controlled player (P0 during training)
+        # Player 1's actions are part of the environment, not the learning agent
+        controlled_player = self.config.get("controlled_player", 0)
         if acting_unit.get("player") != controlled_player:
-            # Bot unit - return 0.0 reward without config lookup
+            # No action rewards for opponent, BUT check if game ended
+            # If P1's action ended the game, P0 still needs the win/lose reward!
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                reward_breakdown['total'] = situational_reward
+                game_state['last_reward_breakdown'] = reward_breakdown
+                return situational_reward
+
+            # Game not over - no reward for opponent's actions
             reward_breakdown['total'] = 0.0
             game_state['last_reward_breakdown'] = reward_breakdown
             return 0.0
@@ -370,13 +378,14 @@ class RewardCalculator:
                 raise KeyError("Unit rewards missing required 'situational_modifiers' section")
             modifiers = unit_rewards["situational_modifiers"]
             winner = self._determine_winner(game_state)
-            
-            if winner == 1:  # AI wins
+
+            # Player 0 is always the controlled player during training
+            if winner == 0:  # Player 0 wins
                 if "win" not in modifiers:
                     raise KeyError(f"Situational modifiers missing required 'win' reward")
                 win_bonus = modifiers["win"]
                 base_reward += win_bonus
-                
+
                 # CRITICAL FIX: Track win bonus in game_state for metrics
                 game_state['last_reward_breakdown'] = {
                     'base_actions': base_reward - win_bonus,
@@ -385,13 +394,13 @@ class RewardCalculator:
                     'situational': win_bonus,
                     'penalties': 0.0
                 }
-                
-            elif winner == 0:  # AI loses
+
+            elif winner == 1:  # Player 1 wins (controlled player loses)
                 if "lose" not in modifiers:
                     raise KeyError(f"Situational modifiers missing required 'lose' reward")
                 lose_penalty = modifiers["lose"]
                 base_reward += lose_penalty
-                
+
                 # CRITICAL FIX: Track lose penalty in game_state for metrics
                 game_state['last_reward_breakdown'] = {
                     'base_actions': base_reward - lose_penalty,
@@ -452,35 +461,42 @@ class RewardCalculator:
         """
         Get situational reward (win/lose/draw) for current game state.
         Called when game ends to add final outcome bonus/penalty.
+
+        CRITICAL: The learning agent is ALWAYS Player 0 during training.
+        Player 1 is the opponent (frozen model in self-play, or bot).
         """
         if not game_state.get("game_over", False):
             return 0.0
-        
-        # Get any AI unit to access reward config (all units share situational modifiers)
+
+        # Get any Player 0 unit to access reward config (learning agent is P0)
+        # CRITICAL FIX: Learning agent is Player 0, not Player 1!
         acting_unit = None
         for unit in game_state["units"]:
-            if unit["player"] == 1:  # AI player
+            if unit["player"] == 0:  # Learning agent is Player 0
                 acting_unit = unit
                 break
-        
+
         if not acting_unit:
             return 0.0
-        
+
         try:
             unit_rewards = self._get_unit_reward_config(acting_unit)
             if "situational_modifiers" not in unit_rewards:
                 return 0.0
-            
+
             modifiers = unit_rewards["situational_modifiers"]
             winner = self._determine_winner(game_state)
-            
-            if winner == 1:  # AI wins
+
+            # CRITICAL FIX: Learning agent is Player 0!
+            # winner == 0 means Player 0 (learning agent) wins
+            # winner == 1 means Player 1 (opponent) wins, so learning agent loses
+            if winner == 0:  # Learning agent wins
                 return modifiers.get("win", 0.0)
-            elif winner == 0:  # AI loses
+            elif winner == 1:  # Learning agent loses
                 return modifiers.get("lose", 0.0)
             elif winner == -1:  # Draw
                 return modifiers.get("draw", 0.0)
-            
+
             return 0.0
         except (KeyError, ValueError) as e:
             # Silently return 0 if reward config unavailable

@@ -249,6 +249,252 @@ body {
   padding: var(--spacing-sm);
   margin-bottom: var(--spacing-sm);
   color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+/* Replay Playback Controls Layout */
+.replay-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.replay-nav-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.replay-speed-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.replay-speed-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.replay-action-counter {
+  font-size: 14px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Replay Buttons Base */
+.replay-btn {
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+  transition: background-color var(--transition-fast);
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  height: 20px;
+}
+
+.replay-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.replay-btn--nav {
+  background: white;
+  color: #1f2937;
+  font-size: 13px;
+  padding: 2px 7px;
+}
+
+.replay-btn--nav:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.replay-btn--play {
+  padding: 2px 9px;
+  background: #16a34a;
+  font-weight: var(--font-weight-bold);
+  font-size: 13px;
+}
+
+.replay-btn--play:hover {
+  background: #22c55e;
+}
+
+.replay-btn--pause {
+  padding: 2px 9px;
+  background: #ca8a04;
+  font-weight: var(--font-weight-bold);
+  font-size: 13px;
+}
+
+.replay-btn--pause:hover {
+  background: #eab308;
+}
+
+.replay-btn--stop {
+  background: #dc2626;
+  padding: 2px 7px;
+  font-size: 13px;
+}
+
+.replay-btn--stop:hover {
+  background: #ef4444;
+}
+
+.replay-btn--speed {
+  padding: 2px 7px;
+  font-size: 13px;
+  background: white;
+  color: #1f2937;
+}
+
+.replay-btn--speed:hover {
+  background: #e5e7eb;
+}
+
+.replay-btn--speed.active {
+  background: #2563eb;
+  color: white;
+}
+
+/* Replay Icon Position Adjustments */
+.replay-icon {
+  display: inline-block;
+  font-size: 15px;
+}
+
+.replay-icon--start,
+.replay-icon--end {
+  position: relative;
+  top: -1px;
+}
+
+.replay-icon--prev {
+  position: relative;
+  left: 1px;
+}
+
+.replay-icon--next {
+  position: relative;
+  left: -1px;
+}
+
+/* Replay Progress Bar */
+.replay-progress-bar {
+  width: 100%;
+  height: 6px;
+  background: #374151;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.replay-progress-fill {
+  height: 100%;
+  background: #2563eb;
+  border-radius: var(--radius-sm);
+  transition: width 0.2s ease;
+}
+
+/* Replay File Selector Layout */
+.replay-selector-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.replay-browse-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+/* Replay Browse Button */
+.replay-browse-btn {
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  background-color: #d4a843;
+  color: #1f2937;
+  border-radius: 6px;
+  border: 1px solid #b8942f;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: all 0.15s ease;
+  padding: 1px 24px;
+}
+
+.replay-browse-btn:hover {
+  background-color: #e5b94d;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.replay-browse-btn:active {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.replay-file-status {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin-left: var(--spacing-md);
+}
+
+/* Replay Episode Select */
+.replay-episode-select {
+  padding: 4px 8px;
+  background: white;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  min-width: 120px;
+  border: none;
+  color: #1f2937;
+}
+
+/* Replay Error Display */
+.replay-error {
+  background: #7f1d1d;
+  border: 1px solid #b91c1c;
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  font-size: var(--font-size-sm);
+}
+
+/* Replay Empty State */
+.replay-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: white;
+  background: #111827;
+}
+
+.replay-empty-state__content {
+  text-align: center;
+  padding: var(--spacing-xl);
+}
+
+.replay-empty-state__title {
+  font-size: 1.5rem;
+  font-weight: var(--font-weight-bold);
+  margin-bottom: var(--spacing-md);
+}
+
+.replay-empty-state__subtitle {
+  color: #9ca3af;
+  margin-bottom: var(--spacing-sm);
+}
+
+.replay-empty-state__info {
+  font-size: var(--font-size-xs);
+  color: #6b7280;
 }
 
 .unit-status-table-empty {

@@ -82,14 +82,17 @@ export function parse_log_file_from_text(text: string) {
       const col = parseInt(unitStart[4]);
       const row = parseInt(unitStart[5]);
 
+      // Determine HP based on unit type
+      const unitHP = (unitType === 'Termagant' || unitType === 'Hormagaunt' || unitType === 'Genestealer') ? 1 : 2;
+
       currentEpisode.units[unitId] = {
         id: unitId,
         type: unitType,
         player: player,
         col: col,
         row: row,
-        HP_CUR: 2,
-        HP_MAX: 2,
+        HP_CUR: unitHP,
+        HP_MAX: unitHP,
         // Add placeholder stats - will be filled from gameConfig later
         MOVE: 0,
         T: 0,
@@ -260,12 +263,14 @@ export function parse_log_file_from_text(text: string) {
     for (const uid in episode.units) {
       const unit = episode.units[uid];
       const startPos = episode.initial_positions[uid];
+      // Use unit's actual HP_MAX (set based on unit type during parsing)
+      const unitHP = unit.HP_MAX || 2;
       initialUnits.push({
         ...unit,
         col: startPos.col,
         row: startPos.row,
-        HP_CUR: 2,
-        HP_MAX: 2
+        HP_CUR: unitHP,
+        HP_MAX: unitHP
       });
     }
     // Removed verbose episode units logging

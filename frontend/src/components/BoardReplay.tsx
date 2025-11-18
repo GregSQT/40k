@@ -267,7 +267,9 @@ export const BoardReplay: React.FC = () => {
         const targetId = action.target_id!;
         const shooter = currentEpisode.actions.find((a: any) => a.shooter_id === shooterId);
         const shooterPos = shooter?.shooter_pos || action.shooter_pos || { col: 0, row: 0 };
-        const target = currentState?.units?.find((u: any) => u.id === targetId);
+        // Get target from the state AFTER this action
+        const stateAfterAction = currentEpisode.states[i];
+        const target = stateAfterAction?.units?.find((u: any) => u.id === targetId);
         const targetPos = target ? { col: target.col, row: target.row } : { col: 0, row: 0 };
 
         // Reconstruct message in the same format as shooting_handlers.py
@@ -282,7 +284,19 @@ export const BoardReplay: React.FC = () => {
         const hitTarget = 3;
         const woundTarget = 4; // Assuming 4+ for now
 
+        // Check if THIS shot killed the target by comparing HP before and after
+        // Get target's HP from state BEFORE this action
+        const stateBeforeAction = i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
+        const targetBefore = stateBeforeAction?.units?.find((u: any) => u.id === targetId);
+        const hpBefore = targetBefore ? (targetBefore as any).HP_CUR : 0;
+        const hpAfter = target ? (target as any).HP_CUR : 0;
+
+        // Target died if HP went from >0 to <=0 after this action
+        const targetDied = hpBefore > 0 && hpAfter <= 0;
+
         // Build shootDetails for color coding (must match format expected by getEventTypeClass)
+        // Note: Don't include targetDied here - shoot lines should show hit/wound/save results
+        // Death is shown as a separate black line below
         const shootDetails = hitRoll !== undefined ? [{
           shotNumber: 1,
           attackRoll: hitRoll,
@@ -323,6 +337,19 @@ export const BoardReplay: React.FC = () => {
           player: action.player,
           shootDetails  // Include for color coding
         });
+
+        // Add separate death event if target was killed (like PvP mode does)
+        if (targetDied && target) {
+          const targetType = (target as any).type || 'Unknown';
+          gameLog.addEvent({
+            type: 'death',
+            message: `Unit ${targetId} (${targetType}) was DESTROYED!`,
+            unitId: targetId,
+            turnNumber: turnNumber,
+            phase: 'shooting',
+            player: action.player  // Use acting player (shooter), not target's player
+          });
+        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -335,69 +362,67 @@ export const BoardReplay: React.FC = () => {
     return (
       <div className="replay-playback-controls-container">
         {/* Single row: Controls left, Speed center, Action count right */}
-        <div className="flex items-center justify-between gap-4">
+        <div className="replay-controls-row">
           {/* Navigation controls - LEFT */}
-          <div className="flex items-center gap-1">
+          <div className="replay-nav-buttons">
             <button
               onClick={() => setCurrentActionIndex(0)}
-              className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+              className="replay-btn replay-btn--nav"
               title="Go to start"
             >
-              ⏮
+              <span className="replay-icon replay-icon--start">⏮</span>
             </button>
             <button
               onClick={() => setCurrentActionIndex(prev => Math.max(0, prev - 1))}
               disabled={currentActionIndex === 0}
-              className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm disabled:opacity-50"
+              className="replay-btn replay-btn--nav"
             >
-              ⏪
+              <span className="replay-icon replay-icon--prev">⏪</span>
             </button>
             {!isPlaying ? (
               <button
                 onClick={() => setIsPlaying(true)}
-                className="px-3 py-1 bg-green-600 hover:bg-green-500 rounded text-sm font-bold"
+                className="replay-btn replay-btn--play"
               >
                 ▶
               </button>
             ) : (
               <button
                 onClick={() => setIsPlaying(false)}
-                className="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 rounded text-sm font-bold"
+                className="replay-btn replay-btn--pause"
               >
                 ⏸
               </button>
             )}
             <button
               onClick={() => { setIsPlaying(false); setCurrentActionIndex(0); }}
-              className="px-2 py-1 bg-red-600 hover:bg-red-500 rounded text-sm"
+              className="replay-btn replay-btn--stop"
             >
               ⏹
             </button>
             <button
               onClick={() => setCurrentActionIndex(prev => Math.min(currentEpisode.total_actions - 1, prev + 1))}
               disabled={currentActionIndex >= currentEpisode.total_actions - 1}
-              className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm disabled:opacity-50"
+              className="replay-btn replay-btn--nav"
             >
-              ⏩
+              <span className="replay-icon replay-icon--next">⏩</span>
             </button>
             <button
               onClick={() => setCurrentActionIndex(currentEpisode.total_actions - 1)}
-              className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+              className="replay-btn replay-btn--nav"
             >
-              ⏭
+              <span className="replay-icon replay-icon--end">⏭</span>
             </button>
           </div>
 
           {/* Speed controls - CENTER */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400">Speed:</span>
+          <div className="replay-speed-controls">
+            <span className="replay-speed-label">Speed:</span>
             {[0.25, 0.5, 1.0, 2.0, 4.0].map((speed) => (
               <button
                 key={speed}
                 onClick={() => setPlaybackSpeed(speed)}
-                className={`px-2 py-1 rounded text-xs ${
-                  playbackSpeed === speed ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
-                }`}
+                className={`replay-btn replay-btn--speed ${playbackSpeed === speed ? 'active' : ''}`}
               >
                 {speed}x
               </button>
@@ -405,7 +430,7 @@ export const BoardReplay: React.FC = () => {
           </div>
 
           {/* Action counter - RIGHT */}
-          <div className="text-sm text-gray-300 whitespace-nowrap">
+          <div className="replay-action-counter">
             {currentActionIndex === 0 ? (
               <>Initial State</>
             ) : (
@@ -415,9 +440,9 @@ export const BoardReplay: React.FC = () => {
         </div>
 
         {/* Progress bar - separate row below */}
-        <div className="w-full bg-gray-700 rounded h-1.5">
+        <div className="replay-progress-bar">
           <div
-            className="bg-blue-600 h-1.5 rounded transition-all"
+            className="replay-progress-fill"
             style={{ width: `${(currentActionIndex / currentEpisode.total_actions) * 100}%` }}
           />
         </div>
@@ -431,7 +456,7 @@ export const BoardReplay: React.FC = () => {
     <>
       {/* Error display */}
       {loadError && (
-        <div className="bg-red-900 border border-red-700 rounded p-3 mb-4 text-sm">
+        <div className="replay-error">
           <strong>Error:</strong> {loadError}
         </div>
       )}
@@ -451,38 +476,10 @@ export const BoardReplay: React.FC = () => {
 
       {/* File and Episode selector - single line */}
       <div className="replay-file-selector-container">
-        <div className="flex items-center justify-between gap-4">
+        <div className="replay-selector-row">
           {/* Left: Browse button + Select file text */}
-          <div className="flex items-center gap-3">
-            <label
-              className="text-sm cursor-pointer"
-              style={{
-                backgroundColor: '#d4a843',
-                color: '#1f2937',
-                borderRadius: '6px',
-                border: '1px solid #b8942f',
-                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3)',
-                transition: 'all 0.15s ease',
-                paddingLeft: '24px',
-                paddingRight: '24px',
-                paddingTop: '1px',
-                paddingBottom: '1px'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#e5b94d';
-                e.currentTarget.style.boxShadow = '0 3px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = '#d4a843';
-                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3)';
-              }}
-              onMouseDown={(e) => {
-                e.currentTarget.style.boxShadow = 'inset 0 2px 4px rgba(0, 0, 0, 0.3)';
-              }}
-              onMouseUp={(e) => {
-                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3)';
-              }}
-            >
+          <div className="replay-browse-group">
+            <label className="replay-browse-btn">
               Browse
               <input
                 type="file"
@@ -491,7 +488,7 @@ export const BoardReplay: React.FC = () => {
                 className="hidden"
               />
             </label>
-            <span className="text-sm text-gray-300" style={{ marginLeft: '16px' }}>
+            <span className="replay-file-status">
               {selectedFileName ? `File selected: ${selectedFileName}` : 'Select file'}
             </span>
           </div>
@@ -501,7 +498,7 @@ export const BoardReplay: React.FC = () => {
             <select
               value={selectedEpisode || ''}
               onChange={(e) => selectEpisode(parseInt(e.target.value))}
-              className="px-2 py-1 bg-gray-700 rounded text-sm min-w-[120px]"
+              className="replay-episode-select"
             >
               <option value="">Select Episode</option>
               {replayData.episodes.map((ep) => (
@@ -587,11 +584,11 @@ export const BoardReplay: React.FC = () => {
       shootingUnitId={shootingUnitId}
     />
   ) : (
-    <div className="flex items-center justify-center h-full text-white bg-gray-900">
-      <div className="text-center p-8">
-        <h2 className="text-2xl font-bold mb-4">Replay Viewer</h2>
-        <p className="text-gray-400 mb-2">Select a log file and episode to start replay</p>
-        <p className="text-xs text-gray-500">
+    <div className="replay-empty-state">
+      <div className="replay-empty-state__content">
+        <h2 className="replay-empty-state__title">Replay Viewer</h2>
+        <p className="replay-empty-state__subtitle">Select a log file and episode to start replay</p>
+        <p className="replay-empty-state__info">
           File: {selectedFileName || 'None'} |
           Episode: {selectedEpisode ? `#${selectedEpisode}` : 'None'}
         </p>

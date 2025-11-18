@@ -455,7 +455,7 @@ export class UnitRenderer {
 
     // Create explosion text (using emoji)
     const explosionText = new PIXI.Text('💥', {
-      fontSize: HEX_RADIUS * 0.8,
+      fontSize: HEX_RADIUS * 1.6,  // 100% bigger than original
       align: 'center',
     });
     explosionText.anchor.set(0.5);
@@ -475,7 +475,7 @@ export class UnitRenderer {
 
     // Create shooting indicator text (using crosshair emoji)
     const shootingText = new PIXI.Text('🎯', {
-      fontSize: HEX_RADIUS * 0.8,
+      fontSize: HEX_RADIUS * 1.2,  // 50% bigger than original
       align: 'center',
     });
     shootingText.anchor.set(0.5);

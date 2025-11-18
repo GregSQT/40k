@@ -13,6 +13,13 @@
   - [Run Training](#run-training)
   - [Continue Existing Model](#continue-existing-model)
   - [Key Paths](#key-paths)
+- [Replay Mode](#-replay-mode)
+  - [Overview](#overview)
+  - [Generating Replay Logs](#generating-replay-logs)
+  - [Using the Replay Viewer](#using-the-replay-viewer)
+  - [Replay Features](#replay-features)
+  - [Log Format Reference](#log-format-reference)
+  - [Best Practices](#best-practices)
 - [Curriculum Learning (3-Phase Strategy)](#-curriculum-learning-3-phase-strategy)
   - [Why Curriculum Learning?](#why-curriculum-learning)
   - [Phase 1: Learn Shooting Basics](#phase-1-learn-shooting-basics)
@@ -76,6 +83,93 @@ python train.py --config phase2 --model ./models/ppo_checkpoint_phase1.zip
 - **Models**: `./models/` (checkpoints saved here)
 - **Logs**: `./tensorboard/` (TensorBoard data)
 - **Events**: `ai/event_log/` (battle replays)
+- **Step Logs**: `train_step.log` (detailed action logs for replay viewer)
+
+---
+
+## 🎬 REPLAY MODE
+
+### Overview
+The Replay Mode allows you to visualize training episodes step-by-step in the frontend. This is invaluable for understanding agent behavior and debugging tactical decisions.
+
+### Generating Replay Logs
+During training or evaluation, a `train_step.log` file is generated containing detailed action logs:
+
+```bash
+# Training automatically generates train_step.log
+python train.py --config phase1
+```
+
+The log captures:
+- Episode start/end markers
+- Unit starting positions
+- Move actions (from/to coordinates)
+- Shoot actions (hit/wound/save rolls, damage dealt)
+- Episode results (winner, total actions)
+
+### Using the Replay Viewer
+
+1. **Start the frontend**:
+   ```bash
+   cd frontend && npm run dev
+   ```
+
+2. **Navigate to Replay Mode**:
+   - Click the "Replay" tab in the frontend
+   - Click "Browse" to select your `train_step.log` file
+
+3. **Select an Episode**:
+   - Use the dropdown to select an episode
+   - Episodes show: `Episode N - BotName - Result`
+   - Example: `Episode 5 - GreedyBot - Agent Win`
+
+4. **Control Playback**:
+   - Use forward/backward buttons to step through actions
+   - Watch units move, shoot, and take damage
+   - Dead units appear as grey ghosts before being removed
+
+### Replay Features
+
+**Visual Indicators:**
+- **Shoot lines**: Orange lines show shooting actions
+- **Explosion icons**: Appear on damaged/killed units
+- **Grey ghosts**: Units killed in the current step appear grey before removal
+- **Death logs**: Black log entries appear when a unit is destroyed
+- **HP display**: Unit health shown as bars
+
+**Game Log Color Coding:**
+- **Yellow**: Failed hit or wound rolls
+- **Orange**: Successful save by target
+- **Red**: Damage dealt to target
+- **Black**: Unit destroyed
+
+**Episode Information:**
+- Bot opponent name (e.g., GreedyBot, RandomBot)
+- Win/Loss/Draw result
+- Total actions in episode
+- Current action counter
+
+### Log Format Reference
+
+The `train_step.log` uses this format:
+
+```
+[HH:MM:SS] === EPISODE START ===
+[HH:MM:SS] Scenario: phase1-2
+[HH:MM:SS] Opponent: GreedyBot
+[HH:MM:SS] Unit 1 (Intercessor) P0: Starting position (9, 12)
+[HH:MM:SS] === ACTIONS START ===
+[HH:MM:SS] T1 P0 MOVE : Unit 1(6, 15) MOVED from (9, 12) to (6, 15) [SUCCESS] [STEP: YES]
+[HH:MM:SS] T1 P0 SHOOT : Unit 1(6, 15) SHOT at unit 5 - Hit:3+:6(HIT) Wound:4+:5(SUCCESS) Save:3+:2(FAILED) Dmg:1HP [SUCCESS] [STEP: YES]
+[HH:MM:SS] EPISODE END: Winner=0, Actions=68, Steps=68, Total=138
+```
+
+### Best Practices
+
+1. **Debug unexpected behavior**: Use replay to see exactly what the agent did
+2. **Validate training progress**: Check if agent is making tactical decisions
+3. **Compare phases**: Replay episodes from different training phases to see improvement
+4. **Check target selection**: Verify agent is prioritizing correct targets
 
 ---
 
