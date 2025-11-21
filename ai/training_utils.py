@@ -81,50 +81,83 @@ def setup_imports():
         raise ImportError(f"AI_TURN.md: w40k_engine import failed: {e}")
 
 def make_training_env(rank, scenario_file, rewards_config_name, training_config_name,
-                     unit_registry, controlled_agent=None, enable_action_masking=True):
+                     controlled_agent_key, unit_registry, step_logger_enabled=False):
     """
-    Create training environment with proper configuration.
-
+    Factory function to create a single W40KEngine instance for vectorization.
+    
     Args:
-        rank: Environment rank (for vectorized environments)
+        rank: Environment index (0, 1, 2, 3, ...)
         scenario_file: Path to scenario JSON file
         rewards_config_name: Name of rewards configuration
         training_config_name: Name of training configuration
-        unit_registry: UnitRegistry instance
-        controlled_agent: Agent being controlled (None=Player 0, str=Player 1)
-        enable_action_masking: Whether to enable action masking
-
+        controlled_agent_key: Agent key for this environment
+        unit_registry: Shared UnitRegistry instance
+        step_logger_enabled: Whether step logging is enabled (disable for vectorized envs)
+    
     Returns:
-        Callable that creates the environment
+        Callable that creates and returns a wrapped environment instance
     """
     def _init():
-        # Import here to avoid circular dependencies
-        from config_loader import get_config_loader
-        from ai.w40k_engine import W40KEngine
-
-        config = get_config_loader()
-
-        # Create base engine
-        env = W40KEngine(
-            scenario_file=scenario_file,
-            rewards_config_name=rewards_config_name,
-            unit_registry=unit_registry,
+        # Import environment (inside function to avoid import issues)
+        from engine.w40k_core import W40KEngine
+        
+        # Create base environment
+        base_env = W40KEngine(
+            rewards_config=rewards_config_name,
             training_config_name=training_config_name,
-            controlled_agent=controlled_agent
+            controlled_agent=controlled_agent_key,
+            active_agents=None,
+            scenario_file=scenario_file,
+            unit_registry=unit_registry,
+            quiet=True,
+            gym_training_mode=True
         )
+        
+        # ✓ CHANGE 9: Removed seed() call - W40KEngine uses reset(seed=...) instead
+        # Seeding will happen naturally during first reset() call
+        
+        # Disable step logger for parallel envs to avoid file conflicts
+        if not step_logger_enabled:
+            base_env.step_logger = None  # ✓ CHANGE 2: Prevent log conflicts
+        
+        # Wrap with ActionMasker for MaskablePPO
+        def mask_fn(env):
+            return env.get_action_mask()
+        
+        masked_env = ActionMasker(base_env, mask_fn)
 
-        # Wrap in Monitor for statistics tracking
-        env = Monitor(env)
+        # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
+        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
 
-        # Add action masking if enabled
-        if enable_action_masking:
-            def action_mask_fn(env_instance):
-                return env_instance.get_action_mask()
-            env = ActionMasker(env, action_mask_fn)
-
-        return env
-
+        # Wrap with Monitor for episode statistics
+        return Monitor(selfplay_env)
+    
     return _init
+
+def create_model(config, training_config_name, rewards_config_name, new_model, append_training, args):
+    """Create or load PPO model with configuration following AI_INSTRUCTIONS.md."""
+    
+    # Import metrics tracker for training monitoring
+    from metrics_tracker import W40KMetricsTracker
+    
+    # Check GPU availability
+    gpu_available = check_gpu_availability()
+    
+    # Load training configuration from config files (not script parameters)
+    training_config = config.load_training_config(training_config_name)
+    model_params = training_config["model_params"]
+
+    # Handle entropy coefficient scheduling if configured
+    # Use START value for model creation; callback will handle the schedule
+    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
+        ent_config = model_params["ent_coef"]
+        start_val = float(ent_config["start"])
+        end_val = float(ent_config["end"])
+        model_params["ent_coef"] = start_val  # Use initial value
+        print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
+
+    # Import environment
+    W40KEngine, register_environment = setup_imports()
 
 def get_scenario_list_for_phase(config, agent_key, training_config_name, scenario_type=None):
     """
