@@ -67,107 +67,21 @@ from ai.training_callbacks import (
     BotEvaluationCallback
 )
 
+# Training utilities (extracted to ai/training_utils.py)
+from ai.training_utils import (
+    check_gpu_availability,
+    setup_imports,
+    make_training_env,
+    get_agent_scenario_file,
+    get_scenario_list_for_phase,
+    calculate_rotation_interval,
+    ensure_scenario
+)
+
 
 
 # Global step logger instance
 step_logger = None
-
-def check_gpu_availability():
-    """Check and display GPU availability for training."""
-    print("\n🔍 GPU AVAILABILITY CHECK")
-    print("=" * 30)
-    
-    if torch.cuda.is_available():
-        device_count = torch.cuda.device_count()
-        current_device = torch.cuda.current_device()
-        device_name = torch.cuda.get_device_name(current_device)
-        memory_gb = torch.cuda.get_device_properties(current_device).total_memory / 1024**3
-        
-        print(f"✅ CUDA Available: YES")
-        print(f"📊 GPU Devices: {device_count}")
-        print(f"🎯 Current Device: {current_device} ({device_name})")
-        print(f"💾 GPU Memory: {memory_gb:.1f} GB")
-        print(f"🚀 PyTorch CUDA Version: {torch.version.cuda}")
-        
-        # Force PyTorch to use GPU for Stable-Baselines3
-        torch.cuda.set_device(current_device)
-        
-        return True
-    else:
-        print(f"❌ CUDA Available: NO")
-        print(f"⚠️  Training will use CPU (much slower)")
-        print(f"💡 Install CUDA-enabled PyTorch: pip install torch --index-url https://download.pytorch.org/whl/cu118")
-        
-        return False
-
-def setup_imports():
-    """Set up import paths and return required modules."""
-    try:
-        # AI_TURN.md COMPLIANCE: Use compliant engine with gym interface
-        from engine.w40k_core import W40KEngine
-        
-        # Compatibility function for training system
-        def register_environment():
-            """No registration needed for direct engine usage"""
-            pass
-            
-        return W40KEngine, register_environment
-    except ImportError as e:
-        raise ImportError(f"AI_TURN.md: w40k_engine import failed: {e}")
-    
-def make_training_env(rank, scenario_file, rewards_config_name, training_config_name,
-                     controlled_agent_key, unit_registry, step_logger_enabled=False):
-    """
-    Factory function to create a single W40KEngine instance for vectorization.
-    
-    Args:
-        rank: Environment index (0, 1, 2, 3, ...)
-        scenario_file: Path to scenario JSON file
-        rewards_config_name: Name of rewards configuration
-        training_config_name: Name of training configuration
-        controlled_agent_key: Agent key for this environment
-        unit_registry: Shared UnitRegistry instance
-        step_logger_enabled: Whether step logging is enabled (disable for vectorized envs)
-    
-    Returns:
-        Callable that creates and returns a wrapped environment instance
-    """
-    def _init():
-        # Import environment (inside function to avoid import issues)
-        from engine.w40k_core import W40KEngine
-        
-        # Create base environment
-        base_env = W40KEngine(
-            rewards_config=rewards_config_name,
-            training_config_name=training_config_name,
-            controlled_agent=controlled_agent_key,
-            active_agents=None,
-            scenario_file=scenario_file,
-            unit_registry=unit_registry,
-            quiet=True,
-            gym_training_mode=True
-        )
-        
-        # ✓ CHANGE 9: Removed seed() call - W40KEngine uses reset(seed=...) instead
-        # Seeding will happen naturally during first reset() call
-        
-        # Disable step logger for parallel envs to avoid file conflicts
-        if not step_logger_enabled:
-            base_env.step_logger = None  # ✓ CHANGE 2: Prevent log conflicts
-        
-        # Wrap with ActionMasker for MaskablePPO
-        def mask_fn(env):
-            return env.get_action_mask()
-        
-        masked_env = ActionMasker(base_env, mask_fn)
-
-        # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
-        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
-
-        # Wrap with Monitor for episode statistics
-        return Monitor(selfplay_env)
-    
-    return _init
 
 def create_model(config, training_config_name, rewards_config_name, new_model, append_training, args):
     """Create or load PPO model with configuration following AI_INSTRUCTIONS.md."""
@@ -419,208 +333,6 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             model = MaskablePPO(env=env, **model_params_copy)
     
     return model, env, training_config, model_path
-
-def get_agent_scenario_file(config, agent_key, training_config_name):
-    """Get scenario file path for agent-specific training.
-    
-    Args:
-        config: ConfigLoader instance
-        agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
-        training_config_name: Phase name (e.g., 'phase1', 'phase2')
-    
-    Returns:
-        Path to scenario file
-        
-    Raises:
-        FileNotFoundError: If no valid scenario file found
-    """
-    # Try agent-specific scenario first
-    if agent_key:
-        agent_scenario_path = os.path.join(
-            config.config_dir, "agents", agent_key, "scenarios",
-            f"{agent_key}_scenario_{training_config_name}.json"
-        )
-        if os.path.isfile(agent_scenario_path):
-            return agent_scenario_path
-        
-        # Try numbered variants for any phase (phase1-1, phase2-1, phase3-1, etc.)
-        # training_config_name is "phase1", "phase2", etc.
-        for i in range(1, 10):  # Check variants -1 through -9
-            variant_path = os.path.join(
-                config.config_dir, "agents", agent_key, "scenarios",
-                f"{agent_key}_scenario_{training_config_name}-{i}.json"
-            )
-            if os.path.isfile(variant_path):
-                print(f"ℹ️  {training_config_name} has multiple scenarios. Using first variant: {training_config_name}-{i}")
-                return variant_path
-    
-    # Fall back to global scenario.json
-    global_scenario = os.path.join(config.config_dir, "scenario.json")
-    if os.path.isfile(global_scenario):
-        return global_scenario
-    
-    raise FileNotFoundError(
-        f"No scenario file found for agent '{agent_key}' phase '{training_config_name}'"
-    )
-
-def get_scenario_list_for_phase(config, agent_key, training_config_name, scenario_type=None):
-    """Get list of all available scenarios for a training phase.
-
-    Args:
-        config: ConfigLoader instance
-        agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
-        training_config_name: Phase name (e.g., 'phase1', 'phase2')
-        scenario_type: Optional filter - 'self' for self-play, 'bot' for bot training, None for all
-
-    Returns:
-        List of scenario file paths
-    """
-    scenario_files = []
-
-    if not agent_key:
-        # No agent specified, return global scenario
-        global_scenario = os.path.join(config.config_dir, "scenario.json")
-        if os.path.isfile(global_scenario):
-            return [global_scenario]
-        return []
-
-    # Check for agent-specific scenarios
-    scenarios_dir = os.path.join(config.config_dir, "agents", agent_key, "scenarios")
-
-    if not os.path.isdir(scenarios_dir):
-        # No agent-specific scenarios directory
-        return []
-
-    # If specific type requested, only look for that type
-    if scenario_type == "self":
-        # Only self-play scenarios
-        for i in range(1, 10):
-            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-self{i}.json")
-            if os.path.isfile(scenario_file):
-                scenario_files.append(scenario_file)
-        return scenario_files
-
-    if scenario_type == "bot":
-        # Only bot scenarios
-        for i in range(1, 10):
-            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-bot{i}.json")
-            if os.path.isfile(scenario_file):
-                scenario_files.append(scenario_file)
-        return scenario_files
-
-    # Default behavior: try all patterns
-    # First, try to find exact match (e.g., "phase1.json" without number)
-    default_scenario = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}.json")
-    if os.path.isfile(default_scenario):
-        return [default_scenario]
-
-    # Look for numbered variants for ANY phase (phase1-1, phase2-1, phase3-1, etc.)
-    # This works for phase1, phase2, phase3, debug, etc.
-    for i in range(1, 10):  # Check variants -1 through -9
-        scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-{i}.json")
-        if os.path.isfile(scenario_file):
-            scenario_files.append(scenario_file)
-
-    if scenario_files:
-        return scenario_files
-
-    # Look for bot-prefixed variants (phase1-bot1, phase1-bot2, etc.)
-    for i in range(1, 10):
-        scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-bot{i}.json")
-        if os.path.isfile(scenario_file):
-            scenario_files.append(scenario_file)
-
-    if scenario_files:
-        return scenario_files
-
-    # Look for self-prefixed variants (phase1-self1, etc.) as fallback
-    for i in range(1, 10):
-        scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-self{i}.json")
-        if os.path.isfile(scenario_file):
-            scenario_files.append(scenario_file)
-
-    return scenario_files
-
-
-def get_agent_scenario_file(config, agent_key, training_config_name, scenario_override=None):
-    """Get scenario file path for agent-specific training.
-    
-    Args:
-        config: ConfigLoader instance
-        agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
-        training_config_name: Phase name (e.g., 'phase1', 'phase2')
-        scenario_override: Optional specific scenario name (e.g., 'phase2-3')
-    
-    Returns:
-        Path to scenario file
-        
-    Raises:
-        FileNotFoundError: If no valid scenario file found
-    """
-    # If specific scenario requested, try to find it
-    if scenario_override and scenario_override != "all":
-        if agent_key:
-            # Agent-specific scenario
-            scenario_path = os.path.join(
-                config.config_dir, "agents", agent_key, "scenarios",
-                f"{agent_key}_scenario_{scenario_override}.json"
-            )
-            if os.path.isfile(scenario_path):
-                return scenario_path
-            
-            # Try without agent prefix (e.g., user passed "phase2-3" instead of full name)
-            scenario_path = os.path.join(
-                config.config_dir, "agents", agent_key, "scenarios",
-                f"{agent_key}_scenario_{training_config_name}-{scenario_override}.json"
-            )
-            if os.path.isfile(scenario_path):
-                return scenario_path
-        
-        # Try global scenario
-        global_scenario = os.path.join(config.config_dir, f"scenario_{scenario_override}.json")
-        if os.path.isfile(global_scenario):
-            return global_scenario
-        
-        raise FileNotFoundError(
-            f"Scenario '{scenario_override}' not found for agent '{agent_key}' phase '{training_config_name}'"
-        )
-    
-    # Get list of scenarios for this phase
-    scenario_list = get_scenario_list_for_phase(config, agent_key, training_config_name)
-    
-    if scenario_list:
-        # Return first scenario (rotation will handle the rest)
-        return scenario_list[0]
-    
-    # No fallback - agent-specific scenarios are required
-    raise FileNotFoundError(
-        f"No scenario file found for agent '{agent_key}' phase '{training_config_name}'. "
-        f"Expected: config/agents/{agent_key}/scenarios/{agent_key}_scenario_{training_config_name}.json"
-    )
-
-
-def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None):
-    """Calculate rotation interval for scenario rotation.
-    
-    Args:
-        total_episodes: Total number of episodes for training
-        num_scenarios: Number of scenarios to rotate through
-        config_value: Optional value from config file
-    
-    Returns:
-        Number of episodes per scenario before rotation
-    """
-    if config_value and config_value > 0:
-        return config_value
-    
-    # Formula: total_episodes / (num_scenarios * 10) for ~10 complete cycles
-    if num_scenarios > 0:
-        calculated = total_episodes // (num_scenarios * 10)
-        # Ensure at least 10 episodes per rotation
-        return max(10, calculated)
-    
-    # Fallback
-    return 100
 
 def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default",
                             agent_key=None, new_model=False, append_training=False, scenario_override=None):
@@ -2119,11 +1831,6 @@ def convert_to_replay_format(steplog_data):
     
     return replay_data
 
-def ensure_scenario():
-    """Ensure scenario.json exists."""
-    scenario_path = os.path.join(project_root, "config", "scenario.json")
-    if not os.path.exists(scenario_path):
-        raise FileNotFoundError(f"Missing required scenario.json file: {scenario_path}. AI_INSTRUCTIONS.md: No fallbacks allowed - scenario file must exist.")
 
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
