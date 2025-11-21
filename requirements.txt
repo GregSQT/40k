@@ -10,6 +10,8 @@ cycler==0.12.1
 Farama-Notifications==0.0.4
 fastapi==0.115.12
 filelock==3.18.0
+Flask>=3.0.0
+Flask-CORS>=4.0.0
 fonttools==4.58.1
 fsspec==2025.5.1
 grpcio==1.71.0

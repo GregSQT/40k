@@ -235,7 +235,7 @@ class MetricsCollectionCallback(BaseCallback):
                     metrics['winner'] = info['winner']
 
                 # Send to metrics tracker
-                self.metrics_tracker.record_episode(metrics)
+                self.metrics_tracker.log_episode_end(metrics)
 
                 # Reset episode tracking
                 self.current_episode_reward = 0.0

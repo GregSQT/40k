@@ -717,7 +717,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Create metrics callback ONCE before loop (not inside it)
     from stable_baselines3.common.callbacks import CallbackList
-    metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=effective_agent_key)
+    scenario_name = training_config_name if training_config_name else "default"
+    metrics_callback = MetricsCollectionCallback(metrics_tracker, scenario_name)
     
     # Training loop with scenario rotation
     episodes_trained = 0
@@ -900,7 +901,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
 def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
                    total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0,
-                   global_start_time=None):
+                   global_start_time=None, agent=None, rewards_config_name=None):
     W40KEngine, _ = setup_imports()
     callbacks = []
     
@@ -999,10 +1000,12 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         bot_eval_callback = BotEvaluationCallback(
             eval_freq=bot_eval_freq,
             n_eval_episodes=bot_n_episodes_intermediate,
+            training_config_name=training_config_name,
+            rewards_config_name=rewards_config_name if rewards_config_name else agent,
             best_model_save_path=os.path.dirname(model_path),
-            metrics_tracker=metrics_tracker,  # Pass metrics_tracker for TensorBoard logging
-            use_episode_freq=bot_eval_use_episodes,
-            verbose=1
+            controlled_agent=agent,
+            verbose=1,
+            step_logger=None
         )
         callbacks.append(bot_eval_callback)
         
@@ -1073,7 +1076,8 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         # print(f"📈 Metrics tracking enabled for agent: {agent_name}")
         
         # Enhanced callbacks with metrics collection
-        metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=controlled_agent)
+        scenario_name = training_config_name if training_config_name else "default"
+        metrics_callback = MetricsCollectionCallback(metrics_tracker, scenario_name)
         
         # Attach metrics_tracker to bot_eval_callback if it exists
         for callback in callbacks:
@@ -1096,7 +1100,8 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         )
         
         # Print final training summary with critical metrics
-        metrics_callback.print_final_training_summary(model=model, training_config=training_config, training_config_name=training_config_name, rewards_config_name=rewards_config_name)
+        # Note: print_final_training_summary not implemented in MetricsCollectionCallback
+        # metrics_callback.print_final_training_summary(model=model, training_config=training_config, training_config_name=training_config_name, rewards_config_name=rewards_config_name)
         
         # Save final model
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
@@ -1542,7 +1547,8 @@ def main():
             )
             
             # Setup callbacks with agent-specific model path
-            callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
+            callbacks = setup_callbacks(config, model_path, training_config, args.training_config,
+                                      agent=args.agent, rewards_config_name=args.rewards_config)
             
             # Train model
             # CRITICAL: Use rewards_config for controlled_agent (includes phase suffix like "_phase1")
