@@ -134,30 +134,6 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
     
     return _init
 
-def create_model(config, training_config_name, rewards_config_name, new_model, append_training, args):
-    """Create or load PPO model with configuration following AI_INSTRUCTIONS.md."""
-    
-    # Import metrics tracker for training monitoring
-    from metrics_tracker import W40KMetricsTracker
-    
-    # Check GPU availability
-    gpu_available = check_gpu_availability()
-    
-    # Load training configuration from config files (not script parameters)
-    training_config = config.load_training_config(training_config_name)
-    model_params = training_config["model_params"]
-
-    # Handle entropy coefficient scheduling if configured
-    # Use START value for model creation; callback will handle the schedule
-    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
-        ent_config = model_params["ent_coef"]
-        start_val = float(ent_config["start"])
-        end_val = float(ent_config["end"])
-        model_params["ent_coef"] = start_val  # Use initial value
-        print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
-
-    # Import environment
-    W40KEngine, register_environment = setup_imports()
 
 def get_scenario_list_for_phase(config, agent_key, training_config_name, scenario_type=None):
     """
@@ -188,12 +164,15 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name, scenari
 
     # Filter by scenario type if specified
     if scenario_type:
-        # scenario_type like "1" matches "phase1-1", "2" matches "phase1-2", etc.
+        # scenario_type like "bot" matches "phase1-bot1", "phase1-bot2", etc.
+        # scenario_type like "self" matches "phase1-self1", "phase1-self2", etc.
+        # scenario_type like "1" matches "phase1-1", etc.
         filtered = []
         for f in matching_files:
             basename = os.path.basename(f)
-            # Extract scenario suffix: phase1-1 → "1", phase1-2 → "2", phase1 → None
-            if f"-{scenario_type}.json" in basename:
+            # Match pattern: phase1-bot1, phase1-bot2, phase1-self1, phase1-1, etc.
+            # Check if the scenario type appears after the phase name with a hyphen
+            if f"-{scenario_type}" in basename:
                 filtered.append(f)
         scenarios = filtered
     else:

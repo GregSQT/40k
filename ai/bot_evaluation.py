@@ -119,6 +119,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
             # Run episodes
             wins = 0
+            shoot_stats_list = []
             bot_bar = tqdm(
                 range(episodes_per_scenario),
                 desc=f"{bot_name.capitalize()} ({scenario_name[:20]})",
@@ -130,12 +131,20 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 obs, info = env.reset()
                 done = False
                 total_reward = 0
+                step_count = 0
 
-                while not done:
-                    action, _ = model.predict(obs, deterministic=deterministic)
+                # Calculate max_eval_steps from training_config for safety
+                # Use reasonable default: 5 turns * 8 steps/turn * 2 buffer = 80 steps
+                max_eval_steps = 80
+
+                while not done and step_count < max_eval_steps:
+                    # CRITICAL: Get action mask for MaskablePPO
+                    action_masks = env.engine.get_action_mask()
+                    action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
                     obs, reward, terminated, truncated, info = env.step(action)
                     total_reward += reward
                     done = terminated or truncated
+                    step_count += 1
 
                 # Check if agent won (Player 0 if controlled_agent is None, else Player 1)
                 winner = info.get("winner", -1)
@@ -144,11 +153,20 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 if winner == expected_winner:
                     wins += 1
 
+                # DIAGNOSTIC: Collect shoot stats from each episode
+                bot_stats = env.get_shoot_stats()
+                shoot_stats_list.append(bot_stats)
+
                 # Update progress bar
                 current_wr = (wins / (ep_num + 1)) * 100
                 bot_bar.set_postfix_str(f"WR: {current_wr:.1f}%")
 
             env.close()
+
+            # Store shoot stats for this bot
+            if f'{bot_name}_shoot_stats' not in results:
+                results[f'{bot_name}_shoot_stats'] = []
+            results[f'{bot_name}_shoot_stats'].extend(shoot_stats_list)
 
             # Accumulate results across scenarios
             if bot_name == 'random':
@@ -177,5 +195,24 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     print(f"   Greedy:     {results['greedy']:5.1f}% ({total_greedy_wins}/{total_greedy_episodes} wins)")
     print(f"   Defensive:  {results['defensive']:5.1f}% ({total_defensive_wins}/{total_defensive_episodes} wins)")
     print(f"   Combined:   {results['combined']:5.1f}%\n")
+
+    # DIAGNOSTIC: Print shoot statistics for each bot
+    if show_progress:
+        print("="*80)
+        print("📊 DIAGNOSTIC: Shoot Phase Behavior")
+        print("="*80)
+        for bot_name in ['random', 'greedy', 'defensive']:
+            stats_key = f'{bot_name}_shoot_stats'
+            if stats_key in results and results[stats_key]:
+                stats_list = results[stats_key]
+                avg_opportunities = sum(s['shoot_opportunities'] for s in stats_list) / len(stats_list)
+                avg_shoot_rate = sum(s['shoot_rate'] for s in stats_list) / len(stats_list)
+
+                avg_ai_opportunities = sum(s['ai_shoot_opportunities'] for s in stats_list) / len(stats_list)
+                avg_ai_shoot_rate = sum(s['ai_shoot_rate'] for s in stats_list) / len(stats_list)
+
+                print(f"\n   📊 {bot_name.capitalize()}Bot: {avg_shoot_rate:.1f}% shoot rate ({avg_opportunities:.1f} opportunities/game)")
+                print(f"   🤖 AI Agent:  {avg_ai_shoot_rate:.1f}% shoot rate ({avg_ai_opportunities:.1f} opportunities/game)")
+        print("="*80 + "\n")
 
     return results

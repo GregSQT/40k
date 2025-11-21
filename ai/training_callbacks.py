@@ -14,6 +14,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 
 import os
 import time
+import numpy as np
 from typing import Optional
 from stable_baselines3.common.callbacks import BaseCallback
 
