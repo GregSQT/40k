@@ -64,57 +64,158 @@ class EpisodeTerminationCallback(BaseCallback):
                  disable_early_stopping: bool = False, global_start_time: float = None):
         super().__init__(verbose)
         if max_episodes <= 0:
-            raise ValueError(f"max_episodes must be > 0, got {max_episodes}")
-
+            raise ValueError("max_episodes must be positive - no defaults allowed")
+        if expected_timesteps <= 0:
+            raise ValueError("expected_timesteps must be positive - no defaults allowed")
         self.max_episodes = max_episodes
         self.expected_timesteps = expected_timesteps
         self.episode_count = 0
-        self.total_episodes = total_episodes  # Global total across all rotations (for progress bar)
-        self.scenario_info = scenario_info
+        self.step_count = 0
+        self.start_time = global_start_time  # Use provided global start time if available
+        # For global progress tracking in rotation mode
+        self.total_episodes = total_episodes if total_episodes else max_episodes
+        self.scenario_info = scenario_info  # e.g., "Cycle 8 | Scenario: phase2-1"
+        self.global_episode_offset = 0  # Set by rotation code to track overall progress
+        # ROTATION FIX: Disable early stopping to let model.learn() consume all timesteps
         self.disable_early_stopping = disable_early_stopping
-        self.global_start_time = global_start_time if global_start_time else time.time()
-        self.last_progress_percent = 0
+        # EMA for smooth ETA estimation (weights recent episodes more heavily)
+        self.ema_episode_time = None
+        self.last_episode_time = None
+        self.ema_alpha = 0.1  # Smoothing factor (higher = more weight on recent)
+
+    def _on_training_start(self) -> None:
+        """Initialize timing on training start."""
+        import time
+        # Only set start_time if not already set (preserves global start time in rotation mode)
+        if self.start_time is None:
+            self.start_time = time.time()
 
     def _on_step(self) -> bool:
-        # Detect episode end using dones array
-        if hasattr(self, 'locals') and 'dones' in self.locals:
-            dones = self.locals['dones']
-            episodes_finished = sum(dones) if hasattr(dones, '__iter__') else (1 if dones else 0)
+        """Track episodes and display progress."""
+        self.step_count += 1
 
-            if episodes_finished > 0:
-                self.episode_count += episodes_finished
+        # CRITICAL FIX: Detect episodes using MULTIPLE methods
+        episode_ended = False
 
-                # Calculate progress percentage
-                current_progress = int((self.episode_count / self.max_episodes) * 100)
-                if current_progress >= self.last_progress_percent + 10:  # Print every 10%
-                    elapsed_time = time.time() - self.global_start_time
-                    elapsed_min = elapsed_time / 60
-                    estimated_total = (elapsed_time / self.episode_count) * self.total_episodes if self.episode_count > 0 else 0
-                    eta_min = (estimated_total - elapsed_time) / 60
+        # Method 1: Check info dicts for 'episode' key (SB3 standard)
+        if hasattr(self, 'locals') and 'infos' in self.locals:
+            for info in self.locals['infos']:
+                if 'episode' in info:
+                    episode_ended = True
+                    self.episode_count += 1
+                    break
 
-                    scenario_str = f" [{self.scenario_info}]" if self.scenario_info else ""
-                    print(f"  Progress: {current_progress}%{scenario_str} ({self.episode_count}/{self.max_episodes} episodes) | "
-                          f"Elapsed: {elapsed_min:.1f}m | ETA: {eta_min:.1f}m")
-                    self.last_progress_percent = current_progress
+        # Method 2: Check dones array (backup)
+        if not episode_ended and hasattr(self, 'locals') and 'dones' in self.locals:
+            if any(self.locals['dones']):
+                episode_ended = True
+                self.episode_count += 1
 
-                # Stop when we reach max episodes
-                if self.episode_count >= self.max_episodes:
-                    if self.verbose > 0:
-                        print(f"Reached {self.max_episodes} episodes. Stopping training.")
-                    return False  # Stop training
+        # Method 3: Try to get episode count from environment directly (most reliable)
+        if not episode_ended and hasattr(self, 'training_env'):
+            try:
+                if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
+                    env = self.training_env.envs[0]
+                    # Unwrap ActionMasker/Monitor wrappers
+                    while hasattr(env, 'env'):
+                        env = env.env
 
-        # EARLY STOPPING: Detect training anomalies
-        if not self.disable_early_stopping and self.num_timesteps >= 100:
-            # If timesteps exceed expected by 3x, training is stalling
-            expected_at_this_episode = self.expected_timesteps * (self.episode_count / self.max_episodes)
-            if self.num_timesteps > expected_at_this_episode * 3 and self.episode_count > 5:
-                print(f"\n⚠️  EARLY STOP: Training stalled!")
-                print(f"   Episodes: {self.episode_count}/{self.max_episodes}")
-                print(f"   Timesteps: {self.num_timesteps} (expected ~{expected_at_this_episode:.0f})")
-                print(f"   Stopping to prevent infinite loop.\n")
+                    if hasattr(env, 'episode_count'):
+                        env_episodes = env.episode_count
+                        if env_episodes > self.episode_count:
+                            self.episode_count = env_episodes
+                            episode_ended = True
+            except Exception:
+                pass
+
+        # Update progress display on episode end
+        if episode_ended:
+            import time
+            current_time = time.time()
+
+            # Update progress every 10 episodes
+            if self.episode_count % 10 == 0:
+                # Calculate global progress (across all rotations)
+                global_episode_count = self.global_episode_offset + self.episode_count
+                global_progress_pct = (global_episode_count / self.total_episodes) * 100
+
+                # Global progress bar (full width)
+                bar_length = 40
+                filled = int(bar_length * global_episode_count / self.total_episodes)
+                bar = '█' * filled + '░' * (bar_length - filled)
+
+                # Calculate time with EMA for smooth, accurate ETA estimates
+                time_info = ""
+                if self.start_time is not None and global_episode_count > 0:
+                    # Total elapsed time from start
+                    elapsed = current_time - self.start_time
+
+                    # Update EMA of episode time for better ETA estimation
+                    if self.last_episode_time is not None:
+                        # Time for last batch of episodes (10 episodes)
+                        episode_batch_time = current_time - self.last_episode_time
+                        avg_time_per_episode = episode_batch_time / 10
+
+                        if self.ema_episode_time is None:
+                            # Initialize EMA with first measurement
+                            self.ema_episode_time = avg_time_per_episode
+                        else:
+                            # Update EMA: new_ema = alpha * new_value + (1 - alpha) * old_ema
+                            self.ema_episode_time = (self.ema_alpha * avg_time_per_episode +
+                                                    (1 - self.ema_alpha) * self.ema_episode_time)
+
+                    self.last_episode_time = current_time
+
+                    # Calculate ETA using EMA (or fallback to overall average for first few episodes)
+                    remaining_episodes = self.total_episodes - global_episode_count
+                    if self.ema_episode_time is not None:
+                        eta = self.ema_episode_time * remaining_episodes
+                        eps_speed = 1.0 / self.ema_episode_time if self.ema_episode_time > 0 else 0
+                    else:
+                        # Fallback for early episodes
+                        avg_episode_time = elapsed / global_episode_count
+                        eta = avg_episode_time * remaining_episodes
+                        eps_speed = global_episode_count / elapsed if elapsed > 0 else 0
+
+                    # Format times as HH:MM:SS or MM:SS depending on duration
+                    def format_time(seconds):
+                        hours = int(seconds // 3600)
+                        minutes = int((seconds % 3600) // 60)
+                        secs = int(seconds % 60)
+                        if hours > 0:
+                            return f"{hours}:{minutes:02d}:{secs:02d}"
+                        else:
+                            return f"{minutes:02d}:{secs:02d}"
+
+                    elapsed_str = format_time(elapsed)
+                    eta_str = format_time(eta)
+                    speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
+                    time_info = f" [{elapsed_str}<{eta_str}, {speed_str}]"
+
+                # Build detailed scenario display with episode range
+                if self.scenario_info:
+                    # Calculate cycle episode range (e.g., "0-100", "100-200")
+                    cycle_start = self.global_episode_offset
+                    cycle_end = self.global_episode_offset + self.max_episodes
+                    scenario_display = f" | {self.scenario_info} | Episodes {cycle_start}-{cycle_end}/{self.total_episodes}"
+                else:
+                    scenario_display = ""
+                print(f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{scenario_display}", end='\r', flush=True)
+
+        # CRITICAL: Stop when max episodes reached (unless disabled for rotation mode)
+        if self.episode_count >= self.max_episodes:
+            if self.disable_early_stopping:
+                # Rotation mode: Let model.learn() consume all timesteps
+                # Don't stop early - just continue tracking episodes for metrics
+                return True
+            else:
+                # Normal mode: Stop when episode count reached
+                print()  # Newline after final progress update
+                print(f"🛑 STOPPING: Reached {self.max_episodes} episodes")
+                print(f"   Total timesteps: {self.model.num_timesteps if hasattr(self, 'model') else 'N/A'}")
                 return False
 
-        return True  # Continue training
+        return True
 
 class EpisodeBasedEvalCallback(BaseCallback):
     """Episode-counting evaluation callback - triggers every N episodes, not timesteps."""
