@@ -171,8 +171,24 @@ class GameStateManager:
                 }
                 
                 enhanced_units.append(enhanced_unit)
-            
-            return enhanced_units
+
+            # Extract optional terrain data from scenario
+            # If present in scenario, use it; if not, return None to signal fallback to board config
+            scenario_walls = None
+            scenario_objectives = None
+
+            if isinstance(scenario_data, dict):
+                if "wall_hexes" in scenario_data:
+                    scenario_walls = scenario_data["wall_hexes"]
+                if "objective_hexes" in scenario_data:
+                    scenario_objectives = scenario_data["objective_hexes"]
+
+            # Return dict with units and optional terrain
+            return {
+                "units": enhanced_units,
+                "wall_hexes": scenario_walls,
+                "objective_hexes": scenario_objectives
+            }
     
     # ============================================================================
     # UTILITIES

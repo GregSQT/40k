@@ -31,6 +31,7 @@ interface ReplayAction {
   wound_roll?: number;
   save_roll?: number;
   save_target?: number;
+  reward?: number;
 }
 
 interface ReplayEpisode {
@@ -169,7 +170,7 @@ export const BoardReplay: React.FC = () => {
 
       playbackInterval.current = setInterval(() => {
         setCurrentActionIndex(prev => {
-          if (prev >= episode.total_actions - 1) {
+          if (prev >= episode.total_actions) {
             setIsPlaying(false);
             return prev;
           }
@@ -335,8 +336,12 @@ export const BoardReplay: React.FC = () => {
           turnNumber: turnNumber,
           phase: 'shooting',
           player: action.player,
-          shootDetails  // Include for color coding
-        });
+          shootDetails,  // Include for color coding
+          // Add reward info for debug mode display (player 0 = agent)
+          is_ai_action: action.player === 0,
+          reward: action.reward,
+          action_name: 'shoot'
+        } as any);
 
         // Add separate death event if target was killed (like PvP mode does)
         if (targetDied && target) {
@@ -361,9 +366,27 @@ export const BoardReplay: React.FC = () => {
 
     return (
       <div className="replay-playback-controls-container">
-        {/* Single row: Controls left, Speed center, Action count right */}
+        {/* Single row: Step controls left, Playback controls center-left, Speed center, Action count right */}
         <div className="replay-controls-row">
-          {/* Navigation controls - LEFT */}
+          {/* Step controls - LEFT */}
+          <div className="replay-step-buttons">
+            <button
+              onClick={() => setCurrentActionIndex(prev => Math.max(0, prev - 1))}
+              disabled={currentActionIndex === 0}
+              className="replay-btn replay-btn--nav"
+            >
+              <span className="replay-icon replay-icon--prev">⏪</span>
+            </button>
+            <button
+              onClick={() => setCurrentActionIndex(prev => Math.min(currentEpisode.total_actions, prev + 1))}
+              disabled={currentActionIndex >= currentEpisode.total_actions}
+              className="replay-btn replay-btn--nav"
+            >
+              <span className="replay-icon replay-icon--next">⏩</span>
+            </button>
+          </div>
+
+          {/* Main playback controls - CENTER-LEFT */}
           <div className="replay-nav-buttons">
             <button
               onClick={() => setCurrentActionIndex(0)}
@@ -371,13 +394,6 @@ export const BoardReplay: React.FC = () => {
               title="Go to start"
             >
               <span className="replay-icon replay-icon--start">⏮</span>
-            </button>
-            <button
-              onClick={() => setCurrentActionIndex(prev => Math.max(0, prev - 1))}
-              disabled={currentActionIndex === 0}
-              className="replay-btn replay-btn--nav"
-            >
-              <span className="replay-icon replay-icon--prev">⏪</span>
             </button>
             {!isPlaying ? (
               <button
@@ -401,14 +417,7 @@ export const BoardReplay: React.FC = () => {
               ⏹
             </button>
             <button
-              onClick={() => setCurrentActionIndex(prev => Math.min(currentEpisode.total_actions - 1, prev + 1))}
-              disabled={currentActionIndex >= currentEpisode.total_actions - 1}
-              className="replay-btn replay-btn--nav"
-            >
-              <span className="replay-icon replay-icon--next">⏩</span>
-            </button>
-            <button
-              onClick={() => setCurrentActionIndex(currentEpisode.total_actions - 1)}
+              onClick={() => setCurrentActionIndex(currentEpisode.total_actions)}
               className="replay-btn replay-btn--nav"
             >
               <span className="replay-icon replay-icon--end">⏭</span>
@@ -501,11 +510,16 @@ export const BoardReplay: React.FC = () => {
               className="replay-episode-select"
             >
               <option value="">Select Episode</option>
-              {replayData.episodes.map((ep) => (
-                <option key={ep.episode_num} value={ep.episode_num}>
-                  Episode {ep.episode_num} - {ep.bot_name || 'Unknown'} - {ep.final_result || 'Unknown'}
-                </option>
-              ))}
+              {replayData.episodes.map((ep) => {
+                // Extract scenario identifier (e.g., "phase1-bot3" from "..._scenario_phase1-bot3")
+                const scenarioMatch = ep.scenario.match(/_scenario_(.+)$/);
+                const scenarioId = scenarioMatch ? scenarioMatch[1] : '';
+                return (
+                  <option key={ep.episode_num} value={ep.episode_num}>
+                    Episode {ep.episode_num} - {scenarioId || 'Unknown'} - {ep.bot_name || 'Unknown'} - {ep.final_result || 'Unknown'}
+                  </option>
+                );
+              })}
             </select>
           )}
         </div>
@@ -545,7 +559,7 @@ export const BoardReplay: React.FC = () => {
 
       {/* Game Log */}
       <ErrorBoundary fallback={<div>Failed to load game log</div>}>
-        <GameLog {...gameLog} availableHeight={200} />
+        <GameLog {...gameLog} availableHeight={200} debugMode={showHexCoordinates} />
       </ErrorBoundary>
     </>
   );
@@ -582,6 +596,7 @@ export const BoardReplay: React.FC = () => {
       getChargeDestinations={() => []}
       shootingTargetId={shootingTargetId}
       shootingUnitId={shootingUnitId}
+      wallHexesOverride={currentState.walls}
     />
   ) : (
     <div className="replay-empty-state">

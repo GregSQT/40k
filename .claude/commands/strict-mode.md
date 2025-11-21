@@ -95,6 +95,10 @@ When modifying training behavior, ALWAYS review:
 - Reference specific line numbers and functions
 - Show evidence from actual code (Read tool output)
 
+### NEVER ASSUME
+- Always ensure you have checked any code part you refer to
+- never guess any code or parameter
+
 ### Be Cautious
 - Suggest testing/validation steps before production
 - Warn about side effects on learning/rewards

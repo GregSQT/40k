@@ -50,21 +50,22 @@ import time  # Add time import for StepLogger timestamps
 import gymnasium as gym  # For SelfPlayWrapper to inherit from gym.Wrapper
 
 
-class BotControlledEnv:
+class BotControlledEnv(gym.Wrapper):
     """Wrapper for bot-controlled Player 1 evaluation."""
-    
+
     def __init__(self, base_env, bot, unit_registry):
-        self.base_env = base_env
+        super().__init__(base_env)
         self.bot = bot
         self.unit_registry = unit_registry
         self.episode_reward = 0.0
         self.episode_length = 0
-        
+
         # Unwrap ActionMasker to get actual engine
-        self.engine = base_env
-        if hasattr(base_env, 'env'):
+        # self.env is set by gym.Wrapper.__init__ to base_env
+        self.engine = self.env
+        if hasattr(self.env, 'env'):
             # ActionMasker wraps the actual engine in .env attribute
-            self.engine = base_env.env
+            self.engine = self.env.env
         
         # DIAGNOSTIC: Track shoot phase decisions FOR BOT
         self.shoot_opportunities = 0  # Times shoot was available
@@ -77,47 +78,47 @@ class BotControlledEnv:
         self.ai_wait_actions = 0
     
     def reset(self, seed=None, options=None):
-        obs, info = self.base_env.reset(seed=seed, options=options)
+        obs, info = self.env.reset(seed=seed, options=options)
         self.episode_reward = 0.0
         self.episode_length = 0
-        
+
         # DIAGNOSTIC: Reset shoot tracking for new episode
         self.shoot_opportunities = 0
         self.shoot_actions = 0
         self.wait_actions = 0
-        
+
         # DIAGNOSTIC: Reset AI shoot tracking
         self.ai_shoot_opportunities = 0
         self.ai_shoot_actions = 0
         self.ai_wait_actions = 0
-        
+
         return obs, info
-    
+
     def step(self, agent_action):
         # DIAGNOSTIC: Track AI shoot phase decisions BEFORE executing action
         game_state = self.engine.game_state
         current_phase = game_state.get("phase", "")
         action_mask = self.engine.get_action_mask()
-        
+
         if current_phase == "shoot" and 4 in [i for i in range(12) if action_mask[i]]:
             self.ai_shoot_opportunities += 1
-            if agent_action == 4:
+            if agent_action in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
                 self.ai_shoot_actions += 1
-            elif agent_action in [7, 11]:  # Wait actions
+            elif agent_action == 11:  # Wait action
                 self.ai_wait_actions += 1
-        
+
         # Execute agent action
-        obs, reward, terminated, truncated, info = self.base_env.step(agent_action)
+        obs, reward, terminated, truncated, info = self.env.step(agent_action)
         self.episode_reward += reward
         self.episode_length += 1
-        
+
         # CRITICAL FIX: Loop through ALL bot turns until control returns to agent
         while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
             debug_bot = self.episode_length < 10
             bot_action = self._get_bot_action(debug=debug_bot)
-            obs, reward, terminated, truncated, info = self.base_env.step(bot_action)
+            obs, reward, terminated, truncated, info = self.env.step(bot_action)
             self.episode_length += 1
-        
+
         return obs, reward, terminated, truncated, info
     
     def _get_bot_action(self, debug=False) -> int:
@@ -143,24 +144,21 @@ class BotControlledEnv:
         
         # DIAGNOSTIC: Track actual shoot/wait decisions in shoot phase
         if current_phase == "shoot":
-            if bot_choice == 4:
+            if bot_choice in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
                 self.shoot_actions += 1
-            elif bot_choice == 7:  # Wait
+            elif bot_choice == 11:  # Wait action
                 self.wait_actions += 1
         
         return bot_choice
-    
-    def close(self):
-        self.base_env.close()
     
     def get_shoot_stats(self) -> dict:
         """Return shooting statistics for diagnostic analysis."""
         shoot_rate = (self.shoot_actions / self.shoot_opportunities * 100) if self.shoot_opportunities > 0 else 0
         wait_rate = (self.wait_actions / self.shoot_opportunities * 100) if self.shoot_opportunities > 0 else 0
-        
+
         ai_shoot_rate = (self.ai_shoot_actions / self.ai_shoot_opportunities * 100) if self.ai_shoot_opportunities > 0 else 0
         ai_wait_rate = (self.ai_wait_actions / self.ai_shoot_opportunities * 100) if self.ai_shoot_opportunities > 0 else 0
-        
+
         return {
             'shoot_opportunities': self.shoot_opportunities,
             'shoot_actions': self.shoot_actions,
@@ -173,14 +171,6 @@ class BotControlledEnv:
             'ai_shoot_rate': ai_shoot_rate,
             'ai_wait_rate': ai_wait_rate
         }
-    
-    @property
-    def observation_space(self):
-        return self.base_env.observation_space
-    
-    @property
-    def action_space(self):
-        return self.base_env.action_space
 
 
 class SelfPlayWrapper(gym.Wrapper):
@@ -247,37 +237,49 @@ class SelfPlayWrapper(gym.Wrapper):
 
         # Track P1 actions for diagnostic
         p1_actions_before = 0
+        p1_terminal_reward = 0.0  # Capture lose penalty if P1 ends game before P0 acts
         while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
             player1_action = self._get_frozen_model_action()
             obs, reward, terminated, truncated, info = self.env.step(player1_action)
             self.episode_length += 1
             p1_actions_before += 1
 
+            # If P1's action ended the game before P0 could act, capture the reward
+            if terminated or truncated:
+                p1_terminal_reward = reward
+
         # Now execute Player 0's action (if game not over)
-        p0_reward = 0.0  # Track P0's reward separately
+        p0_reward = p1_terminal_reward  # Start with any terminal reward from P1's pre-emptive kill
         if not (terminated or truncated):
             obs, reward, terminated, truncated, info = self.env.step(agent_action)
             p0_reward = reward  # CRITICAL: Save P0's reward before P1 overwrites it
             self.episode_reward += reward
             self.episode_length += 1
 
-            # DIAGNOSTIC: Log P0's reward for debugging
-            if self.total_episodes < 3 and abs(reward) > 0.1:
-                phase = self.engine.game_state.get("phase", "?")
-                print(f"      [P0 Reward] action={agent_action}, reward={reward:.2f}, phase={phase}")
+            # DIAGNOSTIC: Log P0's reward for debugging (disabled for cleaner output)
+            # if self.total_episodes < 3 and abs(reward) > 0.1:
+            #     phase = self.engine.game_state.get("phase", "?")
+            #     print(f"      [P0 Reward] action={agent_action}, reward={reward:.2f}, phase={phase}")
 
             # Handle any Player 1 turns that follow
             p1_actions_after = 0
             while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
                 player1_action = self._get_frozen_model_action()
-                obs, _, terminated, truncated, info = self.env.step(player1_action)  # Discard P1's reward
+                # CRITICAL FIX: Capture reward when P1's action ends game!
+                # When P1 kills last P0 unit, reward contains P0's LOSE penalty
+                obs, p1_step_reward, terminated, truncated, info = self.env.step(player1_action)
                 self.episode_length += 1
                 p1_actions_after += 1
 
-            # DIAGNOSTIC: Log if P1 took actions (should happen regularly)
-            if (p1_actions_before + p1_actions_after) > 0 and self.total_episodes < 3:
-                phase = self.engine.game_state.get("phase", "?")
-                print(f"    [SelfPlay] P0 action={agent_action}, P1 took {p1_actions_before}+{p1_actions_after} actions, phase={phase}")
+                # If P1's action ended the game, P0 needs the situational reward (win/lose)
+                # The engine returns P0's perspective reward even for P1's actions
+                if terminated or truncated:
+                    p0_reward += p1_step_reward  # Add win/lose bonus to P0's total
+
+            # DIAGNOSTIC: Log if P1 took actions (disabled for cleaner output)
+            # if (p1_actions_before + p1_actions_after) > 0 and self.total_episodes < 3:
+            #     phase = self.engine.game_state.get("phase", "?")
+            #     print(f"    [SelfPlay] P0 action={agent_action}, P1 took {p1_actions_before}+{p1_actions_after} actions, phase={phase}")
 
         # CRITICAL: Return P0's reward to SB3, not P1's!
         reward = p0_reward
@@ -1022,10 +1024,10 @@ class MetricsCollectionCallback(BaseCallback):
             'winner': info.get('winner', None)
         }
 
-        # DIAGNOSTIC: Log winner for first 10 episodes to debug win rate
-        if self.episode_count <= 10:
-            winner = episode_data['winner']
-            print(f"  [DIAG] Episode {self.episode_count}: winner={winner} (P0 wins if 0, P1 wins if 1, draw if -1)")
+        # DIAGNOSTIC: Log winner for first 10 episodes (disabled for cleaner output)
+        # if self.episode_count <= 10:
+        #     winner = episode_data['winner']
+        #     print(f"  [DIAG] Episode {self.episode_count}: winner={winner} (P0 wins if 0, P1 wins if 1, draw if -1)")
        
         # GAMMA MONITORING: Track discount factor effects
         if hasattr(self.model, 'gamma'):
@@ -1329,7 +1331,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                         step_count += 1
 
                     # Determine winner - track wins/losses/draws
-                    agent_player = 1 if controlled_agent else 0
+                    # CRITICAL FIX: Learning agent is ALWAYS Player 0, regardless of controlled_agent name
+                    # controlled_agent is the agent key string (e.g., "SpaceMarine_phase1"), NOT a player ID
+                    agent_player = 0  # Learning agent is always Player 0
                     winner = info.get('winner')
 
                     if winner == agent_player:
@@ -1570,8 +1574,8 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None, bot_name=None):
-        """Log episode start with all unit starting positions"""
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None):
+        """Log episode start with all unit starting positions and walls"""
         if not self.enabled:
             return
 
@@ -1592,7 +1596,14 @@ class StepLogger:
 
                 if effective_bot_name:
                     f.write(f"[{timestamp}] Opponent: {effective_bot_name.capitalize()}Bot\n")
-                
+
+                # Log walls/obstacles for replay
+                if walls:
+                    wall_coords = ";".join([f"({w['col']},{w['row']})" for w in walls])
+                    f.write(f"[{timestamp}] Walls: {wall_coords}\n")
+                else:
+                    f.write(f"[{timestamp}] Walls: none\n")
+
                 # Log all unit starting positions
                 for unit in units_data:
                     if "id" not in unit:
@@ -1603,12 +1614,12 @@ class StepLogger:
                         raise KeyError(f"Unit {unit['id']} missing required 'row' field")
                     if "player" not in unit:
                         raise KeyError(f"Unit {unit['id']} missing required 'player' field")
-                    
+
                     # Use unitType instead of name (name field doesn't exist)
                     unit_type = unit.get("unitType", "Unknown")
                     player_name = f"P{unit['player']}"
                     f.write(f"[{timestamp}] Unit {unit['id']} ({unit_type}) {player_name}: Starting position ({unit['col']}, {unit['row']})\n")
-                
+
                 f.write(f"[{timestamp}] === ACTIONS START ===\n")
                 
         except Exception as e:
@@ -2164,7 +2175,17 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model on {device.upper()}...")
         print("✅ Using MaskablePPO with action masking for tactical combat")
-        model = MaskablePPO(env=env, **model_params)
+
+        # Use specific log directory for continuous TensorBoard graphs across runs
+        tb_log_name = f"{training_config_name}_{agent_key}"
+        specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+        os.makedirs(specific_log_dir, exist_ok=True)
+
+        # Update model_params to use specific directory
+        model_params_copy = model_params.copy()
+        model_params_copy["tensorboard_log"] = specific_log_dir
+
+        model = MaskablePPO(env=env, **model_params_copy)
         # Properly suppress rollout console output
         if hasattr(model, '_logger') and model._logger:
             original_info = model._logger.info
@@ -2184,13 +2205,26 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
             # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
             from stable_baselines3.common.logger import configure
-            new_logger = configure(model.tensorboard_log, ["tensorboard"])
+
+            # Use specific log directory to ensure continuous TensorBoard graphs across runs
+            # Format: ./tensorboard/{config_name}_{agent_key}/{run_name}
+            # This prevents creating new timestamped subdirectories on each script run
+            tb_log_name = f"{training_config_name}_{agent_key}"
+            specific_log_dir = os.path.join(model.tensorboard_log, tb_log_name)
+
+            # Create directory if it doesn't exist
+            os.makedirs(specific_log_dir, exist_ok=True)
+
+            new_logger = configure(specific_log_dir, ["tensorboard"])
             model.set_logger(new_logger)
-            print(f"✅ Logger reinitialized for TensorBoard: {model.tensorboard_log}")
+            print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
-            model = MaskablePPO(env=env, **model_params)
+            # Use same specific directory as above
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            model = MaskablePPO(env=env, **model_params_copy)
     else:
         print(f"📁 Loading existing model: {model_path}")
         try:
@@ -2198,7 +2232,13 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
-            model = MaskablePPO(env=env, **model_params)
+            # Need to create specific directory here too
+            tb_log_name = f"{training_config_name}_{agent_key}"
+            specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+            os.makedirs(specific_log_dir, exist_ok=True)
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            model = MaskablePPO(env=env, **model_params_copy)
     
     return model, env, training_config, model_path
 
@@ -2499,13 +2539,24 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         # Wrap environment with ActionMasker for MaskablePPO compatibility
         def mask_fn(env):
             return env.get_action_mask()
-        
+
         masked_env = ActionMasker(base_env, mask_fn)
 
-        # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
-        # Without this, P1 never takes actions and the game is broken
-        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
-        env = Monitor(selfplay_env)
+        # Check if scenario name contains "bot" to use BotControlledEnv
+        scenario_name = os.path.basename(scenario_file) if scenario_file else ""
+        use_bot_env = "bot" in scenario_name.lower()
+
+        if use_bot_env and EVALUATION_BOTS_AVAILABLE:
+            # Use BotControlledEnv with GreedyBot for bot scenarios
+            training_bot = GreedyBot(randomness=0.15)
+            bot_env = BotControlledEnv(masked_env, training_bot, unit_registry)
+            env = Monitor(bot_env)
+            print(f"🤖 Using GreedyBot (randomness=0.15) for Player 1 (detected 'bot' in scenario name)")
+        else:
+            # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
+            # Without this, P1 never takes actions and the game is broken
+            selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
+            env = Monitor(selfplay_env)
     
     # Agent-specific model path
     model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
@@ -2530,7 +2581,17 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # Determine whether to create new model or load existing
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model for {agent_key} on {device.upper()}...")
-        model = MaskablePPO(env=env, **model_params)
+
+        # Use specific log directory for continuous TensorBoard graphs across runs
+        tb_log_name = f"{training_config_name}_{agent_key}"
+        specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+        os.makedirs(specific_log_dir, exist_ok=True)
+
+        # Update model_params to use specific directory
+        model_params_copy = model_params.copy()
+        model_params_copy["tensorboard_log"] = specific_log_dir
+
+        model = MaskablePPO(env=env, **model_params_copy)
         # Disable rollout logging for multi-agent models too
         if hasattr(model, 'logger') and model.logger:
             model.logger.record = lambda key, value, exclude=None: None if key.startswith('rollout/') else model.logger.record.__wrapped__(key, value, exclude)
@@ -2547,13 +2608,26 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
             # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
             from stable_baselines3.common.logger import configure
-            new_logger = configure(model.tensorboard_log, ["tensorboard"])
+
+            # Use specific log directory to ensure continuous TensorBoard graphs across runs
+            # Format: ./tensorboard/{config_name}_{agent_key}/{run_name}
+            # This prevents creating new timestamped subdirectories on each script run
+            tb_log_name = f"{training_config_name}_{agent_key}"
+            specific_log_dir = os.path.join(model.tensorboard_log, tb_log_name)
+
+            # Create directory if it doesn't exist
+            os.makedirs(specific_log_dir, exist_ok=True)
+
+            new_logger = configure(specific_log_dir, ["tensorboard"])
             model.set_logger(new_logger)
-            print(f"✅ Logger reinitialized for TensorBoard: {model.tensorboard_log}")
+            print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
-            model = MaskablePPO(env=env, **model_params)
+            # Use same specific directory as above
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            model = MaskablePPO(env=env, **model_params_copy)
     else:
         print(f"📁 Loading existing model: {model_path}")
         try:
@@ -2561,13 +2635,19 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("�' Creating new model instead...")
-            model = MaskablePPO(env=env, **model_params)
+            # Need to create specific directory here too
+            tb_log_name = f"{training_config_name}_{agent_key}"
+            specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+            os.makedirs(specific_log_dir, exist_ok=True)
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            model = MaskablePPO(env=env, **model_params_copy)
     
     return model, env, training_config, model_path
 
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
                                  scenario_list, rotation_interval, total_episodes,
-                                 new_model=False, append_training=False):
+                                 new_model=False, append_training=False, use_bots=False):
     """Train model with automatic scenario rotation for curriculum learning.
     
     Args:
@@ -2580,7 +2660,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         total_episodes: Total episodes for entire training
         new_model: Whether to create new model
         append_training: Whether to continue from existing model
-    
+        use_bots: If True, use bots for Player 1 instead of self-play frozen model
+
     Returns:
         Tuple of (success: bool, final_model, final_env)
     """
@@ -2648,9 +2729,20 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     masked_env = ActionMasker(base_env, mask_fn)
 
-    # Simple wrapping - both players controlled by same model
-    # This is the original approach that worked
-    env = Monitor(masked_env)
+    # Create initial bot for bot training mode (needed before model creation)
+    initial_bot = None
+    if use_bots:
+        if EVALUATION_BOTS_AVAILABLE:
+            initial_bot = GreedyBot(randomness=0.15)
+        else:
+            raise ImportError("Evaluation bots not available but use_bots=True")
+
+    # Wrap environment appropriately for bot or self-play training
+    if use_bots and initial_bot:
+        bot_env = BotControlledEnv(masked_env, initial_bot, unit_registry)
+        env = Monitor(bot_env)
+    else:
+        env = Monitor(masked_env)
     
     # Create or load model
     model_params = training_config["model_params"]
@@ -2664,29 +2756,39 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         model_params["ent_coef"] = start_val  # Use initial value
         print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
 
+    # Use specific log directory for continuous TensorBoard graphs across runs
+    tb_log_name = f"{training_config_name}_{agent_key}"
+    specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+    os.makedirs(specific_log_dir, exist_ok=True)
+
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model: {model_path}")
-        model = MaskablePPO(env=env, **model_params)
+        model_params_copy = model_params.copy()
+        model_params_copy["tensorboard_log"] = specific_log_dir
+        model = MaskablePPO(env=env, **model_params_copy)
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
             model = MaskablePPO.load(model_path, env=env)
-            
+
             # CRITICAL FIX: Reinitialize logger after loading from checkpoint
             # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
             # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
             from stable_baselines3.common.logger import configure
-            tensorboard_log_dir = model_params.get("tensorboard_log", "./tensorboard/")
-            new_logger = configure(tensorboard_log_dir, ["tensorboard"])
+            new_logger = configure(specific_log_dir, ["tensorboard"])
             model.set_logger(new_logger)
-            print(f"✅ Logger reinitialized for TensorBoard: {tensorboard_log_dir}")
+            print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
-            model = MaskablePPO(env=env, **model_params)
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            model = MaskablePPO(env=env, **model_params_copy)
     else:
         print(f"⚠️ Model exists but neither --new nor --append specified. Creating new model.")
-        model = MaskablePPO(env=env, **model_params)
+        model_params_copy = model_params.copy()
+        model_params_copy["tensorboard_log"] = specific_log_dir
+        model = MaskablePPO(env=env, **model_params_copy)
     
     # Import metrics tracker
     from metrics_tracker import W40KMetricsTracker
@@ -2697,6 +2799,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     frozen_model_update_frequency = 100  # Episodes between frozen model updates
     last_frozen_model_update = 0
 
+    # Use the bot created earlier for training mode
+    training_bot = initial_bot
+    if use_bots and training_bot:
+        print(f"🤖 Using GreedyBot (randomness=0.15) for Player 1")
+
     # Determine tensorboard log name for continuous logging
     tb_log_name = f"{training_config_name}_{agent_key}"
     
@@ -2705,7 +2812,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Create metrics tracker for entire rotation training
     metrics_tracker = W40KMetricsTracker(agent_key, model_tensorboard_dir)
-    print(f"📈 Metrics tracking enabled for agent: {agent_key}")
+    # print(f"📈 Metrics tracking enabled for agent: {agent_key}")
     
     # Create metrics callback ONCE before loop (not inside it)
     from stable_baselines3.common.callbacks import CallbackList
@@ -2743,22 +2850,27 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # Wrap environment with action masking first
         masked_env = ActionMasker(base_env, mask_fn)
 
-        # CRITICAL: Update frozen model periodically for proper self-play
-        if episodes_trained - last_frozen_model_update >= frozen_model_update_frequency or frozen_model is None:
-            # Save current model to temp file and load as frozen copy
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as f:
-                temp_path = f.name
-            model.save(temp_path)
-            frozen_model = MaskablePPO.load(temp_path)
-            os.unlink(temp_path)  # Clean up temp file
-            last_frozen_model_update = episodes_trained
-            if episodes_trained > 0:
-                print(f"  🔄 Self-play: Updated frozen opponent (Episode {episodes_trained})")
+        # For bot training, use BotControlledEnv to handle Player 1's bot actions
+        if use_bots:
+            bot_env = BotControlledEnv(masked_env, training_bot, unit_registry)
+            env = Monitor(bot_env)
+        else:
+            # CRITICAL: Update frozen model periodically for proper self-play
+            if episodes_trained - last_frozen_model_update >= frozen_model_update_frequency or frozen_model is None:
+                # Save current model to temp file and load as frozen copy
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as f:
+                    temp_path = f.name
+                model.save(temp_path)
+                frozen_model = MaskablePPO.load(temp_path)
+                os.unlink(temp_path)  # Clean up temp file
+                last_frozen_model_update = episodes_trained
+                if episodes_trained > 0:
+                    print(f"  🔄 Self-play: Updated frozen opponent (Episode {episodes_trained})")
 
-        # Wrap with SelfPlayWrapper for proper self-play training
-        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=frozen_model, update_frequency=frozen_model_update_frequency)
-        env = Monitor(selfplay_env)
+            # Wrap with SelfPlayWrapper for proper self-play training
+            selfplay_env = SelfPlayWrapper(masked_env, frozen_model=frozen_model, update_frequency=frozen_model_update_frequency)
+            env = Monitor(selfplay_env)
         
         # Update model's environment
         model.set_env(env)
@@ -3055,8 +3167,9 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         else:
             raise ValueError("Training config must have either 'total_timesteps' or 'total_episodes'")
         
-        print(f"📊 Progress tracking: Episodes are primary metric (AI_TURN.md compliance)")
-        print(f"📈 Metrics tracking enabled for agent: {agent_name}")
+        # Startup info (disabled for cleaner output)
+        # print(f"📊 Progress tracking: Episodes are primary metric (AI_TURN.md compliance)")
+        # print(f"📈 Metrics tracking enabled for agent: {agent_name}")
         
         # Enhanced callbacks with metrics collection
         metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=controlled_agent)
@@ -3065,7 +3178,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         for callback in callbacks:
             if isinstance(callback, BotEvaluationCallback):
                 callback.metrics_tracker = metrics_tracker
-                print(f"✅ Linked BotEvaluationCallback to metrics_tracker")
+                # print(f"✅ Linked BotEvaluationCallback to metrics_tracker")
         
         all_callbacks = callbacks + [metrics_callback]
         enhanced_callbacks = CallbackList(all_callbacks)
@@ -4096,7 +4209,8 @@ def main():
                         rotation_interval=rotation_interval,
                         total_episodes=total_episodes,
                         new_model=args.new,
-                        append_training=args.append
+                        append_training=args.append,
+                        use_bots=(args.scenario == "bot")
                     )
                     
                     if success and args.test_episodes > 0:

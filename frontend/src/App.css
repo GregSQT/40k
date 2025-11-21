@@ -262,6 +262,12 @@ body {
   gap: var(--spacing-md);
 }
 
+.replay-step-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .replay-nav-buttons {
   display: flex;
   align-items: center;

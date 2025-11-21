@@ -19,6 +19,7 @@ interface ReplayAction {
   wound_roll?: number;
   save_roll?: number;
   save_target?: number;
+  reward?: number;
 }
 
 interface ReplayEpisode {
@@ -52,7 +53,8 @@ export function parse_log_file_from_text(text: string) {
         initial_positions: {},
         final_result: null,
         scenario: 'Unknown',
-        bot_name: 'Unknown'
+        bot_name: 'Unknown',
+        walls: []
       };
       continue;
     }
@@ -70,6 +72,26 @@ export function parse_log_file_from_text(text: string) {
     const botMatch = trimmed.match(/(?:Bot|Opponent|P1_Agent): (.+)/);
     if (botMatch) {
       currentEpisode.bot_name = botMatch[1];
+      continue;
+    }
+
+    // Walls/obstacles
+    const wallsMatch = trimmed.match(/Walls: (.+)/);
+    if (wallsMatch) {
+      const wallsStr = wallsMatch[1];
+      if (wallsStr !== 'none') {
+        // Parse format: (col,row);(col,row);...
+        const wallCoords = wallsStr.split(';');
+        for (const coord of wallCoords) {
+          const match = coord.match(/\((\d+),(\d+)\)/);
+          if (match) {
+            currentEpisode.walls.push({
+              col: parseInt(match[1]),
+              row: parseInt(match[2])
+            });
+          }
+        }
+      }
       continue;
     }
 
@@ -185,6 +207,8 @@ export function parse_log_file_from_text(text: string) {
         const hitMatch = trimmed.match(/Hit:(\d+)\+:(\d+)/);
         const woundMatch = trimmed.match(/Wound:(\d+)\+:(\d+)/);
         const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)/);
+        // Extract reward from format: [R:+53.2] or [R:-10.0]
+        const rewardMatch = trimmed.match(/\[R:([+-]?\d+\.?\d*)\]/);
 
         // Removed verbose logging
         // console.log('Parsing shoot line:', trimmed);
@@ -216,6 +240,10 @@ export function parse_log_file_from_text(text: string) {
           if (saveMatch) {
             action.save_target = parseInt(saveMatch[1]);  // The target number
             action.save_roll = parseInt(saveMatch[2]);  // The actual roll
+          }
+          // Add reward if available
+          if (rewardMatch) {
+            action.reward = parseFloat(rewardMatch[1]);
           }
 
           currentEpisode.actions.push(action);
@@ -278,6 +306,7 @@ export function parse_log_file_from_text(text: string) {
 
     const initialState = {
       units: initialUnits,
+      walls: episode.walls || [],
       currentTurn: 1,
       currentPlayer: 0,
       phase: 'move'
@@ -351,6 +380,7 @@ export function parse_log_file_from_text(text: string) {
 
       states.push({
         units: stateUnits,
+        walls: episode.walls || [],
         currentTurn: 1,
         currentPlayer: action.player,
         phase: action.type.includes('move') ? 'move' : action.type.includes('shoot') ? 'shoot' : 'move',

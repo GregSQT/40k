@@ -231,9 +231,31 @@ Each phase uses different reward weights to emphasize current learning goal.
 **Goal**: Agent learns to prioritize weak/valuable targets
 
 **What Agent Learns:**
-- Kill low-HP enemies first (no overkill)
-- Different unit types have different values
-- Focus fire is effective
+- Kill efficiency: prioritize targets that remove the most threat per turn invested
+- Focus fire on wounded enemies (half the time to kill = double the efficiency)
+- Ignore distant enemies that can't threaten you (outside move + range)
+
+**Target Priority Formula:**
+```
+kill_efficiency = threat_per_turn / turns_to_kill
+```
+
+- **Higher efficiency = higher priority** (action slot 0)
+- Wounded targets have higher efficiency (same threat, less time to kill)
+- Distant targets outside (MOVE + RNG_RNG) have near-zero threat
+
+**Example priorities (Intercessor selecting targets):**
+
+| Target | Threat/Turn | Turns to Kill | Kill Efficiency |
+|--------|-------------|---------------|-----------------|
+| Wounded Intercessor (1 HP) | 0.333 | ~3 | **0.111** (highest) |
+| Termagant | 0.111 | ~1.4 | **0.079** |
+| Full HP Intercessor | 0.333 | ~6 | **0.056** (lowest) |
+
+This formula naturally encourages:
+- Finishing wounded enemies (double efficiency)
+- Killing easy targets first (Termagants before full HP Intercessors)
+- Ignoring distant non-threats
 
 **Reward Emphasis** (from `rewards_config.json`):
 ```json
@@ -244,11 +266,10 @@ Each phase uses different reward weights to emphasize current learning goal.
   },
   "result_bonuses": {
     "kill_target": 5.0,          // Reduced from Phase 1
-    "no_overkill": 1.0,          // NEW: Efficiency bonus
-    "target_lowest_hp": 8.0      // NEW: Priority on weak targets
+    "target_lowest_hp": 15.0     // Priority on wounded/easy targets
   },
   "target_type_bonuses": {
-    "vs_swarm": 2.0,             // NEW: Unit type bonuses
+    "vs_swarm": 2.0,             // Unit type bonuses
     "vs_elite": 1.0,
     "vs_troop": 0.5
   }

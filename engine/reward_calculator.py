@@ -694,7 +694,7 @@ class RewardCalculator:
         # Save failure probability (use better of armor or invul)
         modified_armor_save = target_save - ap
         best_save = min(modified_armor_save, target_invul)
-        
+
         if best_save > 6:
             p_fail_save = 1.0  # Impossible to save
         else:

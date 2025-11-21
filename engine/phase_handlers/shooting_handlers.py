@@ -422,6 +422,140 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
             else:
                 valid_target_pool.append(enemy["id"])
 
+    # Sort by priority to match observation encoding
+    # Priority: tactical efficiency > type match > distance
+    def target_priority(target_id):
+        target = _get_unit_by_id(game_state, target_id)
+        if not target:
+            return (999, 0, 999)
+
+        distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
+
+        # Calculate tactical efficiency = threat_per_turn / kill_difficulty
+        # This prioritizes targets that deal most damage before we can kill them
+
+        # Step 1: Calculate target's threat to us (probability to wound per turn)
+        # Target shooting at unit
+        target_attacks = target.get("RNG_NB", 1)
+        target_bs = target.get("RNG_ATK", 4)  # To-hit roll needed
+        target_s = target.get("RNG_STR", 3)
+        target_ap = target.get("RNG_AP", 0)
+
+        unit_t = unit.get("T", 4)
+        unit_save = unit.get("ARMOR_SAVE", 3)
+
+        # Hit probability
+        hit_prob = (7 - target_bs) / 6.0
+
+        # Wound probability (S vs T)
+        if target_s >= unit_t * 2:
+            wound_prob = 5/6  # 2+
+        elif target_s > unit_t:
+            wound_prob = 4/6  # 3+
+        elif target_s == unit_t:
+            wound_prob = 3/6  # 4+
+        elif target_s * 2 <= unit_t:
+            wound_prob = 1/6  # 6+
+        else:
+            wound_prob = 2/6  # 5+
+
+        # Failed save probability
+        modified_save = unit_save + target_ap
+        if modified_save > 6:
+            failed_save_prob = 1.0
+        else:
+            failed_save_prob = (modified_save - 1) / 6.0
+
+        # Threat per attack
+        threat_per_attack = hit_prob * wound_prob * failed_save_prob
+        threat_per_turn = target_attacks * (1 - (1 - threat_per_attack) ** target_attacks)
+        # Simplified: use expected wounds
+        threat_per_turn = target_attacks * threat_per_attack
+
+        # Step 2: Calculate our kill difficulty (expected activations to kill target)
+        unit_attacks = unit.get("RNG_NB", 2)
+        unit_bs = unit.get("RNG_ATK", 3)
+        unit_s = unit.get("RNG_STR", 4)
+        unit_ap = unit.get("RNG_AP", 1)
+
+        target_t = target.get("T", 3)
+        target_save = target.get("ARMOR_SAVE", 6)
+        target_hp = target.get("HP_CUR", 1)
+
+        # Our hit probability
+        our_hit_prob = (7 - unit_bs) / 6.0
+
+        # Our wound probability
+        if unit_s >= target_t * 2:
+            our_wound_prob = 5/6
+        elif unit_s > target_t:
+            our_wound_prob = 4/6
+        elif unit_s == target_t:
+            our_wound_prob = 3/6
+        elif unit_s * 2 <= target_t:
+            our_wound_prob = 1/6
+        else:
+            our_wound_prob = 2/6
+
+        # Target's failed save
+        target_modified_save = target_save + unit_ap
+        if target_modified_save > 6:
+            target_failed_save = 1.0
+        else:
+            target_failed_save = (target_modified_save - 1) / 6.0
+
+        # Expected damage per activation
+        damage_per_attack = our_hit_prob * our_wound_prob * target_failed_save
+        expected_damage_per_activation = unit_attacks * damage_per_attack
+
+        # Expected activations to kill
+        if expected_damage_per_activation > 0:
+            activations_to_kill = target_hp / expected_damage_per_activation
+        else:
+            activations_to_kill = 100  # Very hard to kill
+
+        # Step 3: Tactical efficiency = expected damage target deals before death
+        # Higher = more urgent to kill
+        tactical_efficiency = threat_per_turn * activations_to_kill
+
+        # Calculate target type match based on unit specialization
+        unit_type = unit.get("unitType", "")
+        target_max_hp = target.get("HP_MAX", 1)
+
+        # Determine preferred target type from unit name
+        if "Swarm" in unit_type:
+            preferred = "swarm"
+        elif "Troop" in unit_type:
+            preferred = "troop"
+        elif "Elite" in unit_type:
+            preferred = "elite"
+        else:
+            preferred = "troop"  # Default
+
+        # Determine target type from HP
+        if target_max_hp <= 1:
+            target_type = "swarm"
+        elif target_max_hp <= 3:
+            target_type = "troop"
+        elif target_max_hp <= 6:
+            target_type = "elite"
+        else:
+            target_type = "leader"
+
+        type_match = 1.0 if preferred == target_type else 0.3
+
+        # Priority scoring (lower = higher priority)
+        # Tactical efficiency is primary (higher efficiency = lower score)
+        # Type match is secondary
+        # Distance is tiebreaker
+        return (
+            -tactical_efficiency * 100,  # Higher efficiency = lower score = first
+            -(type_match * 70),          # Favorite type = -70 bonus
+            distance                     # Closer = lower score
+        )
+
+    valid_target_pool.sort(key=target_priority)
+
     # Store in cache
     _target_pool_cache[cache_key] = valid_target_pool
 

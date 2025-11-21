@@ -3,35 +3,35 @@
 
   "SpaceMarine_Infantry_Troop_RangedSwarm_phase1": {
     "Unit": "######################################## SpaceMarine_Infantry_Troop_RangedSwarm ########################################",
-    "Info": "######################################## PHASE 1 - MODERATE: Balanced aggression with tactical awareness ########################################",
+    "Info": "######################################## PHASE 1 - SHOOTING IS GOOD: Strong rewards for ranged combat ########################################",
     "base_actions": {
       "move_close": 0.0,
       "move_away": 0.0,
       "move_to_charge": 0.0,
-      "move_to_los": 0.5,
-      "ranged_attack": 0.5,
+      "move_to_los": 0.6,
+      "ranged_attack": 3.0,
       "charge_success": 0.1,
       "melee_attack": 0.1,
       "move_wait": 0.0,
       "shoot_wait": -10.0
     },
     "result_bonuses": {
-      "hit_target": 0.5,
-      "wound_target": 1.0,
-      "damage_target": 1.5,
-      "kill_target": 10.0,
-      "no_overkill": 0.8,
+      "hit_target": 1.2,
+      "wound_target": 3.0,
+      "damage_target": 6.0,
+      "kill_target": 30.0,
+      "no_overkill": 5.0,
       "target_lowest_hp": 15.0
     },
     "situational_modifiers": {
-      "win": 10.0,
-      "lose": -10.0,
-      "draw": -2.5,
-      "friendly_fire_penalty": -2.0,
-      "attack_wasted": -0.5,
+      "win": 50.0,
+      "lose": -50.0,
+      "draw": 0.0,
+      "friendly_fire_penalty": -8.0,
+      "attack_wasted": -4.0,
       "target_in_cover_penalty": -0.1,
       "target_exposed_bonus": 0.2,
-      "no_targets_penalty": -0.8
+      "no_targets_penalty": -2.0
     },
     "target_type_bonuses": {},
     "adaptive_bonuses": {},

@@ -61,6 +61,7 @@ type BoardProps = {
   gameState: GameState; // Add gameState prop
   chargeRollPopup?: { unitId: number; roll: number; tooLow: boolean; timestamp: number } | null;
   getChargeDestinations: (unitId: number) => { col: number; row: number }[];
+  wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
 };
 
 export default function Board({
@@ -108,6 +109,7 @@ export default function Board({
   gameState,
   chargeRollPopup,
   getChargeDestinations,
+  wallHexesOverride,
 }: BoardProps) {
   React.useEffect(() => {
   }, [phase, mode, selectedUnitId]);
@@ -240,6 +242,11 @@ export default function Board({
     const ELIGIBLE_COLOR = parseColor(boardConfig.colors.eligible!);
     const OBJECTIVE_ZONE_COLOR = parseColor(boardConfig.colors.objective_zone!);
     const WALL_COLOR = parseColor(boardConfig.colors.wall!);
+
+    // Use wallHexesOverride if provided (from replay), otherwise use config wall_hexes
+    const effectiveWallHexes: [number, number][] = wallHexesOverride
+      ? wallHexesOverride.map(w => [w.col, w.row] as [number, number])
+      : (boardConfig.wall_hexes || []);
 
     // ✅ ALL DISPLAY VALUES FROM CONFIG - NO FALLBACKS, RAISE ERRORS IF MISSING
     if (!boardConfig.display) {
@@ -497,7 +504,7 @@ export default function Board({
         
         // Add all wall hexes as forbidden
         const wallHexSet = new Set<string>(
-          (boardConfig.wall_hexes || []).map((wall: number[]) => `${wall[0]},${wall[1]}`)
+          effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`)
         );
         wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
         
@@ -629,7 +636,7 @@ export default function Board({
             const lineOfSight = hasLineOfSight(
               { col: selectedUnit.col, row: selectedUnit.row },
               { col: enemy.col, row: enemy.row },
-              (boardConfig.wall_hexes || []) as [number, number][]
+              effectiveWallHexes
             );
             
             if (!lineOfSight.canSee) {
@@ -683,7 +690,7 @@ export default function Board({
                 const lineOfSight = hasLineOfSight(
                   { col: attackFromCol, row: attackFromRow },
                   { col: enemy.col, row: enemy.row },
-                  (boardConfig.wall_hexes || []) as [number, number][]
+                  effectiveWallHexes
                 );
                 
                 if (!lineOfSight.canSee) {
@@ -732,7 +739,7 @@ export default function Board({
                   const lineOfSight = hasLineOfSight(
                     { col: attackFromCol!, row: attackFromRow! },
                     { col: enemy.col, row: enemy.row },
-                    (boardConfig.wall_hexes || []) as [number, number][]
+                    effectiveWallHexes
                   );
                   
                   
@@ -744,7 +751,7 @@ export default function Board({
                     // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
                     const pathHexes: any[] = getHexLine(attackFromCol!, attackFromRow!, enemy.col, enemy.row);
                     const wallHexSet = new Set<string>(
-                      (boardConfig.wall_hexes || []).map((wall: number[]) => `${wall[0]},${wall[1]}`)
+                      effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`)
                     );
                     pathHexes.forEach(hex => {
                       const hexKey = `${hex.col},${hex.row}`;
@@ -783,7 +790,7 @@ export default function Board({
                         const lineOfSight = hasLineOfSight(
                           { col: attackFromCol!, row: attackFromRow! },
                           { col: col, row: row },
-                          (boardConfig.wall_hexes || []) as [number, number][]
+                          effectiveWallHexes
                         );
                         
                         if (lineOfSight.canSee && !lineOfSight.inCover) {
@@ -802,7 +809,11 @@ export default function Board({
 
 
       // ✅ DRAW BOARD ONCE with populated availableCells
-      drawBoard(app, boardConfig as any, {
+      // Override wall_hexes if wallHexesOverride is provided (for replay mode)
+      const boardConfigWithWalls = wallHexesOverride
+        ? { ...boardConfig, wall_hexes: effectiveWallHexes }
+        : boardConfig;
+      drawBoard(app, boardConfigWithWalls as any, {
         availableCells,
         attackCells,
         coverCells,
@@ -1028,7 +1039,9 @@ export default function Board({
         showHexCoordinates,
         // Add shooting indicators to trigger re-render
         shootingTargetId,
-        shootingUnitId
+        shootingUnitId,
+        // Add wall override for replay mode
+        JSON.stringify(wallHexesOverride)
       ]);
 
       // Simple container return - loading/error handled inside useEffect

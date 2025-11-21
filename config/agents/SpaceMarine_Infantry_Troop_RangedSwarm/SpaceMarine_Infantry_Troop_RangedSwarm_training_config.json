@@ -1,26 +1,28 @@
 {
   "phase1": {
     "type": "################################################### Phase 1 - MODERATE AGGRESSION ###################################################",
-    "total_episodes": 1000,
-    "total_episodes_normal_value": "4000 for stable learning with balanced rewards",
+    "total_episodes": 16000,
+    "total_episodes_normal_value": "16000 = 4 scenarios × 1000 episodes × 4 rotations for curriculum learning",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 16,
+    "rotation_interval": 1000,
+    "rotation_comment": "1000 episodes per scenario = 4 rotations through all bots. Gives agent time to adapt while preventing catastrophic forgetting.",
     "model_params": {
       "policy": "MlpPolicy",
-      "learning_rate": 0.0001,
+      "learning_rate": 0.003,
       "n_steps": 2048,
       "batch_size": 256,
-      "n_epochs": 4,
-      "gamma": 0.98,
+      "n_epochs": 6,
+      "gamma": 0.95,
       "gae_lambda": 0.95,
-      "clip_range": 0.2,
+      "clip_range": 0.15,
       "ent_coef": {
-        "start": 0.35,
-        "end": 0.08
+        "start": 0.3,
+        "end": 0.15
       },
       "vf_coef": 0.5,
-      "max_grad_norm": 0.5,
-      "target_kl": 0.01,
+      "max_grad_norm": 0.3,
+      "target_kl": null,
       "tensorboard_log": "./tensorboard/",
       "policy_kwargs": {
         "net_arch": [320, 320]

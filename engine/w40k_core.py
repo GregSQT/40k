@@ -84,20 +84,56 @@ class W40KEngine(gym.Env):
             
             # Load base configuration
             board_config = config_loader.get_board_config()
-            
+
             # CRITICAL FIX: Initialize PvE mode BEFORE config creation
             # Training mode: pve_mode=False (SelfPlayWrapper handles Player 1)
             # PvE mode in API: pve_mode=True (load AI model for Player 1)
             pve_mode_value = False  # Training uses SelfPlayWrapper, not pve_mode
-            
+
             # Extract observation_params for module access - NO FALLBACKS
             if "observation_params" not in self.training_config:
                 raise KeyError(f"observation_params missing from {controlled_agent} training config phase {training_config_name}")
             obs_params = self.training_config["observation_params"]
-            
+
+            # Load scenario data (units + optional terrain)
+            scenario_result = self._load_units_from_scenario(scenario_file, unit_registry)
+            scenario_units = scenario_result["units"]
+
+            # Determine wall_hexes: use scenario if provided, otherwise fallback to board config
+            if scenario_result.get("wall_hexes") is not None:
+                scenario_wall_hexes = scenario_result["wall_hexes"]
+            else:
+                # Fallback to board config
+                if "default" in board_config:
+                    scenario_wall_hexes = board_config["default"].get("wall_hexes", [])
+                else:
+                    scenario_wall_hexes = board_config.get("wall_hexes", [])
+
+            # Determine objective_hexes: use scenario if provided, otherwise fallback to board config
+            if scenario_result.get("objective_hexes") is not None:
+                scenario_objective_hexes = scenario_result["objective_hexes"]
+            else:
+                # Fallback to board config
+                if "default" in board_config:
+                    scenario_objective_hexes = board_config["default"].get("objective_hexes", [])
+                else:
+                    scenario_objective_hexes = board_config.get("objective_hexes", [])
+
+            # Store scenario terrain for game_state initialization
+            self._scenario_wall_hexes = scenario_wall_hexes
+            self._scenario_objective_hexes = scenario_objective_hexes
+
+            # Extract scenario name from file path for logging
+            scenario_name = scenario_file if scenario_file else "Unknown Scenario"
+            if scenario_name and "/" in scenario_name:
+                scenario_name = scenario_name.split("/")[-1].replace(".json", "")
+            elif scenario_name and "\\" in scenario_name:
+                scenario_name = scenario_name.split("\\")[-1].replace(".json", "")
+
             self.config = {
                 "board": board_config,
-                "units": self._load_units_from_scenario(scenario_file, unit_registry),
+                "units": scenario_units,
+                "name": scenario_name,  # Store scenario name for logging
                 "rewards_config_name": self.rewards_config_name,
                 "training_config_name": training_config_name,
                 "training_config": self.training_config,
@@ -119,9 +155,13 @@ class W40KEngine(gym.Env):
             # CHANGE 5: Ensure controlled_player is set
             if "controlled_player" not in self.config:
                 self.config["controlled_player"] = 0  # FIXED: Agent controls player 0 (matches scenario setup)
-            
+
             # CRITICAL: Extract rewards_config from config dict for module initialization
             self.rewards_config = config.get("rewards_config", {})
+
+            # No scenario loaded - use board config for terrain (set to None for fallback logic)
+            self._scenario_wall_hexes = None
+            self._scenario_objective_hexes = None
         
         # Store training system compatibility parameters
         self.quiet = quiet
@@ -195,7 +235,9 @@ class W40KEngine(gym.Env):
             # Board state - handle both config formats
             "board_cols": self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"],
             "board_rows": self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"],
-            "wall_hexes": set(map(tuple, self.config["board"]["default"]["wall_hexes"] if "default" in self.config["board"] else self.config["board"]["wall_hexes"]))
+            # Use scenario terrain if loaded, otherwise fallback to board config
+            "wall_hexes": set(map(tuple, self._scenario_wall_hexes)) if self._scenario_wall_hexes is not None else set(map(tuple, self.config["board"]["default"]["wall_hexes"] if "default" in self.config["board"] else self.config["board"].get("wall_hexes", []))),
+            "objective_hexes": set(map(tuple, self._scenario_objective_hexes)) if self._scenario_objective_hexes is not None else set(map(tuple, self.config["board"]["default"].get("objective_hexes", []) if "default" in self.config["board"] else self.config["board"].get("objective_hexes", [])))
         }
 
         # CRITICAL: Instantiate all module managers BEFORE using them
@@ -344,10 +386,11 @@ class W40KEngine(gym.Env):
             'total_enemies': 0
         }
         
-        # Log episode start with all unit positions
+        # Log episode start with all unit positions and walls
         if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
             scenario_name = self.config.get("name", "Unknown Scenario")
-            self.step_logger.log_episode_start(self.game_state["units"], scenario_name)
+            walls = self.config.get("wall_hexes", [])
+            self.step_logger.log_episode_start(self.game_state["units"], scenario_name, walls=walls)
         
         observation = self.obs_builder.build_observation(self.game_state)
         info = {"phase": self.game_state["phase"]}
