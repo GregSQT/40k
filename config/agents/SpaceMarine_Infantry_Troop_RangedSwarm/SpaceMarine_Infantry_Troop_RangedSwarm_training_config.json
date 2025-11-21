@@ -1,15 +1,15 @@
 {
   "phase1": {
     "type": "################################################### Phase 1 - MODERATE AGGRESSION ###################################################",
-    "total_episodes": 16000,
-    "total_episodes_normal_value": "16000 = 4 scenarios × 1000 episodes × 4 rotations for curriculum learning",
+    "total_episodes": 12000,
+    "total_episodes_normal_value": "12000 = 4 scenarios × 1000 episodes × 3 rotations for curriculum learning",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 16,
     "rotation_interval": 1000,
-    "rotation_comment": "1000 episodes per scenario = 4 rotations through all bots. Gives agent time to adapt while preventing catastrophic forgetting.",
+    "rotation_comment": "1000 episodes per scenario = 3 rotations through all bots. Gives agent time to adapt while preventing catastrophic forgetting.",
     "model_params": {
       "policy": "MlpPolicy",
-      "learning_rate": 0.003,
+      "learning_rate": 0.0003,
       "n_steps": 2048,
       "batch_size": 256,
       "n_epochs": 6,

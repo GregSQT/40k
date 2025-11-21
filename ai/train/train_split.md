@@ -1,4 +1,4 @@
-# train.py Refactoring Plan - Practical Implementation Guide
+# train_core.py Refactoring Plan - Practical Implementation Guide
 
 **Status:** Ready for Implementation
 **Complexity:** Medium (4-6 hours)
@@ -8,7 +8,7 @@
 
 ## 📊 EXECUTIVE SUMMARY
 
-**Current State:** `train.py` is 4,229 lines containing mixed responsibilities
+**Current State:** `train_core.py` is 4,229 lines containing mixed responsibilities
 
 **Goal:** Split into 6 focused modules with flat structure for maintainability
 
@@ -24,7 +24,7 @@
 
 ```
 ai/
-├── train.py                    # CLI + orchestration (~800 lines)
+├── train_core.py              # CLI + orchestration (~800 lines)
 ├── env_wrappers.py            # Environment wrappers (~320 lines)
 ├── training_callbacks.py      # Training callbacks (~1,100 lines)
 ├── step_logger.py             # Step logging (~380 lines)
@@ -39,7 +39,7 @@ ai/
 - ✅ Easy to navigate
 - ✅ No `__init__.py` complexity
 
-**Key Decision: train.py STAYS ~800 LINES**
+**Key Decision: train_core.py STAYS ~800 LINES**
 - ✅ Keeps CLI + orchestration together
 - ✅ High-level workflow visible in one file
 - ✅ Not over-fragmented
@@ -52,7 +52,7 @@ ai/
 
 **Purpose:** Gym environment wrappers for training
 
-**Extract from train.py:**
+**Extract from train_core.py:**
 - Lines 53-175: `BotControlledEnv` class
 - Lines 176-369: `SelfPlayWrapper` class
 
@@ -83,7 +83,7 @@ __all__ = ['BotControlledEnv', 'SelfPlayWrapper']
 
 **Purpose:** Stable-Baselines3 training callbacks
 
-**Extract from train.py:**
+**Extract from train_core.py:**
 - Lines 370-399: `EntropyScheduleCallback`
 - Lines 400-560: `EpisodeTerminationCallback`
 - Lines 561-730: `EpisodeBasedEvalCallback`
@@ -134,7 +134,7 @@ __all__ = [
 
 **Purpose:** Step-by-step action logging for replay generation
 
-**Extract from train.py:**
+**Extract from train_core.py:**
 - Lines 1516-1896: `StepLogger` class
 
 **Key Class:**
@@ -159,7 +159,7 @@ __all__ = ['StepLogger']
 **⚠️ CRITICAL:** This class is imported by `ai/multi_agent_trainer.py`
 - **Action Required:** Update import after extraction:
   ```python
-  # OLD: from ai.train import StepLogger
+  # OLD: from ai.train_core import StepLogger
   # NEW: from ai.step_logger import StepLogger
   ```
 
@@ -169,7 +169,7 @@ __all__ = ['StepLogger']
 
 **Purpose:** Bot evaluation system for training assessment
 
-**Extract from train.py:**
+**Extract from train_core.py:**
 - Lines 1178-1397: `evaluate_against_bots()` function
 
 **Key Function:**
@@ -214,7 +214,7 @@ def evaluate_against_bots(...):
 
 **Purpose:** Training utility functions
 
-**Extract from train.py:**
+**Extract from train_core.py:**
 - Lines 1897-1924: `check_gpu_availability()`
 - Lines 1925-1939: `setup_imports()`
 - Lines 1940-1993: `make_training_env()`
@@ -272,7 +272,7 @@ __all__ = [
 
 **Purpose:** Convert step logs to frontend replay format
 
-**Extract from train.py:**
+**Extract from train_core.py:**
 - Lines 3293-3305: `extract_scenario_name_for_replay()`
 - Lines 3306-3339: `convert_steplog_to_replay()`
 - Lines 3340-3546: `generate_steplog_and_replay()`
@@ -312,7 +312,7 @@ __all__ = [
 
 ---
 
-### 7. `ai/train.py` (UPDATED - ~800 lines)
+### 7. `ai/train_core.py` (UPDATED - ~800 lines)
 
 **Purpose:** CLI orchestration and main training workflow
 
@@ -366,7 +366,7 @@ from ai.replay_converter import (
 )
 ```
 
-**Why Keep ~800 Lines:**
+**Why Keep train_core.py ~800 Lines:**
 - ✅ Model creation logic stays with orchestration
 - ✅ Training loops visible in one place
 - ✅ Clear entry point for understanding workflow
@@ -387,17 +387,17 @@ from ai.replay_converter import (
 
 2. **Run baseline test:**
    ```bash
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --training-config default --episodes 10
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --training-config default --episodes 10
    ```
 
 3. **Create backup:**
    ```bash
-   cp ai/train.py ai/train_backup_$(date +%Y%m%d).py
+   cp ai/train_core.py ai/train_backup_$(date +%Y%m%d).py
    ```
 
 4. **Check import dependencies:**
    ```bash
-   grep -r "from ai.train import" . --include="*.py"
+   grep -r "from ai.train_core import" . --include="*.py"
    # Expected: ai/multi_agent_trainer.py imports StepLogger
    ```
 
@@ -446,24 +446,24 @@ from ai.replay_converter import (
    python -c "from ai.env_wrappers import BotControlledEnv, SelfPlayWrapper; print('OK')"
    ```
 
-5. **Update train.py:**
+5. **Update train_core.py:**
    - Add import: `from ai.env_wrappers import BotControlledEnv, SelfPlayWrapper`
    - Delete lines 53-369
 
 6. **Test training still works:**
    ```bash
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 5
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 5
    ```
 
 7. **Commit:**
    ```bash
-   git add ai/env_wrappers.py ai/train.py
+   git add ai/env_wrappers.py ai/train_core.py
    git commit -m "refactor: extract environment wrappers to env_wrappers.py"
    ```
 
 **Success Criteria:**
 - ✅ env_wrappers.py imports successfully
-- ✅ train.py still works
+- ✅ train_core.py still works
 - ✅ Git commit created
 
 ---
@@ -501,7 +501,7 @@ from ai.replay_converter import (
    python -c "from ai.step_logger import StepLogger; print('OK')"
    ```
 
-5. **Update train.py:**
+5. **Update train_core.py:**
    - Add import: `from ai.step_logger import StepLogger`
    - Delete lines 1516-1896
 
@@ -518,11 +518,11 @@ from ai.replay_converter import (
 
 8. **Commit:**
    ```bash
-   git add ai/step_logger.py ai/train.py ai/multi_agent_trainer.py
+   git add ai/step_logger.py ai/train_core.py ai/multi_agent_trainer.py
    git commit -m "refactor: extract StepLogger to step_logger.py
 
 BREAKING: Updates import in multi_agent_trainer.py
-OLD: from ai.train import StepLogger
+OLD: from ai.train_core import StepLogger
 NEW: from ai.step_logger import StepLogger"
    ```
 
@@ -580,18 +580,18 @@ NEW: from ai.step_logger import StepLogger"
    python -c "from ai.bot_evaluation import evaluate_against_bots; print('OK')"
    ```
 
-6. **Update train.py:**
+6. **Update train_core.py:**
    - Add import: `from ai.bot_evaluation import evaluate_against_bots`
    - Delete lines 1178-1397
 
 7. **Test training with bot evaluation:**
    ```bash
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 5 --test-episodes 10
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 5 --test-episodes 10
    ```
 
 8. **Commit:**
    ```bash
-   git add ai/bot_evaluation.py ai/train.py
+   git add ai/bot_evaluation.py ai/train_core.py
    git commit -m "refactor: extract bot evaluation to bot_evaluation.py
 
 Uses lazy import to resolve circular dependency with env_wrappers"
@@ -668,13 +668,13 @@ Uses lazy import to resolve circular dependency with env_wrappers"
    python -c "from ai.training_callbacks import MetricsCollectionCallback; print('OK')"
    ```
 
-6. **Update train.py:**
+6. **Update train_core.py:**
    - Add imports for all callbacks
    - Delete lines 370-1515
 
 7. **Test training with callbacks:**
    ```bash
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 10
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 10
    ```
 
 8. **Verify TensorBoard metrics:**
@@ -685,7 +685,7 @@ Uses lazy import to resolve circular dependency with env_wrappers"
 
 9. **Commit:**
    ```bash
-   git add ai/training_callbacks.py ai/train.py
+   git add ai/training_callbacks.py ai/train_core.py
    git commit -m "refactor: extract training callbacks to training_callbacks.py
 
 Includes all 5 callback classes with lazy imports for circular deps"
@@ -762,18 +762,18 @@ Includes all 5 callback classes with lazy imports for circular deps"
    python -c "from ai.training_utils import check_gpu_availability, get_agent_scenario_file; print('OK')"
    ```
 
-6. **Update train.py:**
+6. **Update train_core.py:**
    - Add imports for all utility functions
    - Delete lines 1897-1993, 2216-2417, 3876-3881
 
 7. **Test scenario rotation:**
    ```bash
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --scenario self --episodes 10
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --scenario self --episodes 10
    ```
 
 8. **Commit:**
    ```bash
-   git add ai/training_utils.py ai/train.py
+   git add ai/training_utils.py ai/train_core.py
    git commit -m "refactor: extract training utilities to training_utils.py
 
 Resolved duplicate get_agent_scenario_file() - kept version with scenario_override"
@@ -834,22 +834,22 @@ Resolved duplicate get_agent_scenario_file() - kept version with scenario_overri
    python -c "from ai.replay_converter import convert_steplog_to_replay; print('OK')"
    ```
 
-5. **Update train.py:**
+5. **Update train_core.py:**
    - Add imports: `from ai.replay_converter import convert_steplog_to_replay, generate_steplog_and_replay`
    - Delete lines 3293-3875
 
 6. **Test replay conversion (if steplog exists):**
    ```bash
    # Generate a steplog first
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 5
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 5
 
    # Then convert it
-   python ai/train.py --convert-steplog ai/event_log/training_step.log
+   python ai/train_core.py --convert-steplog ai/event_log/training_step.log
    ```
 
 7. **Commit:**
    ```bash
-   git add ai/replay_converter.py ai/train.py
+   git add ai/replay_converter.py ai/train_core.py
    git commit -m "refactor: extract replay converter to replay_converter.py"
    ```
 
@@ -860,13 +860,13 @@ Resolved duplicate get_agent_scenario_file() - kept version with scenario_overri
 
 ---
 
-### Phase 8: Finalize train.py (20 min)
+### Phase 8: Finalize train_core.py (20 min)
 
-**Goal:** Verify train.py structure and test all functionality
+**Goal:** Verify train_core.py structure and test all functionality
 
-1. **Check train.py final size:**
+1. **Check train_core.py final size:**
    ```bash
-   wc -l ai/train.py
+   wc -l ai/train_core.py
    # Expected: ~800-900 lines
    ```
 
@@ -884,28 +884,28 @@ Resolved duplicate get_agent_scenario_file() - kept version with scenario_overri
 3. **Test all training modes:**
    ```bash
    # Basic training
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 10
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 10
 
    # New model
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --new --episodes 10
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --new --episodes 10
 
    # Bot evaluation
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --test-episodes 20
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --test-episodes 20
 
    # Scenario rotation
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --scenario self --episodes 10
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --scenario self --episodes 10
    ```
 
 4. **Final commit:**
    ```bash
-   git add ai/train.py
-   git commit -m "refactor: finalize train.py after module extraction
+   git add ai/train_core.py
+   git commit -m "refactor: finalize train_core.py after module extraction
 
-train.py now ~800 lines with clear orchestration focus"
+train_core.py now ~800 lines with clear orchestration focus"
    ```
 
 **Success Criteria:**
-- ✅ train.py is 800-900 lines
+- ✅ train_core.py is 800-900 lines
 - ✅ All imports correct
 - ✅ All training modes work
 - ✅ No functionality lost
@@ -936,7 +936,7 @@ train.py now ~800 lines with clear orchestration focus"
    import ai.training_utils
    import ai.replay_converter
    import ai.step_logger
-   import ai.train
+   import ai.train_core
    print('No circular import errors')
    "
    ```
@@ -947,7 +947,7 @@ train.py now ~800 lines with clear orchestration focus"
    wc -l ai/train_backup_*.py
 
    echo -e "\nAfter refactoring:"
-   wc -l ai/train.py
+   wc -l ai/train_core.py
    wc -l ai/env_wrappers.py
    wc -l ai/training_callbacks.py
    wc -l ai/step_logger.py
@@ -959,13 +959,13 @@ train.py now ~800 lines with clear orchestration focus"
 4. **Run regression tests:**
    ```bash
    # Phase 1 training
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --training-config phase1 --episodes 100
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --training-config phase1 --episodes 100
 
    # Bot evaluation
-   python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --test-episodes 50
+   python ai/train_core.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --test-episodes 50
 
    # Multi-agent (if applicable)
-   python ai/train.py --multi-agent --episodes 100
+   python ai/train_core.py --multi-agent --episodes 100
    ```
 
 5. **Git status:**
@@ -977,16 +977,16 @@ train.py now ~800 lines with clear orchestration focus"
 6. **Create summary commit:**
    ```bash
    git add -A
-   git commit -m "refactor: complete train.py modularization
+   git commit -m "refactor: complete train_core.py modularization
 
-Split 4,229-line train.py into 6 focused modules:
+Split 4,229-line train_core.py into 6 focused modules:
 - env_wrappers.py: Environment wrappers (320 lines)
 - training_callbacks.py: Training callbacks (1,100 lines)
 - step_logger.py: Step logging (380 lines)
 - bot_evaluation.py: Bot evaluation (220 lines)
 - training_utils.py: Training utilities (500 lines)
 - replay_converter.py: Replay conversion (530 lines)
-- train.py: CLI + orchestration (800 lines)
+- train_core.py: CLI + orchestration (800 lines)
 
 Changes:
 - Flat module structure for simple imports
@@ -1041,7 +1041,7 @@ def evaluate_against_bots(...):
 **Action:**
 ```bash
 # Find and replace in multi_agent_trainer.py
-OLD: from ai.train import StepLogger
+OLD: from ai.train_core import StepLogger
 NEW: from ai.step_logger import StepLogger
 ```
 
@@ -1090,7 +1090,7 @@ git revert <commit-hash>
 
 **Option 2: Complete rollback**
 ```bash
-cp ai/train_backup_YYYYMMDD.py ai/train.py
+cp ai/train_backup_YYYYMMDD.py ai/train_core.py
 git checkout main
 git branch -D refactor/split-train-py
 ```
@@ -1111,7 +1111,7 @@ Before considering refactor complete:
 - [ ] All 6 new modules created
 - [ ] Each module has docstring
 - [ ] Each module has `__all__` exports
-- [ ] train.py updated with new imports
+- [ ] train_core.py updated with new imports
 - [ ] No duplicate code
 
 **Functionality:**
@@ -1151,7 +1151,7 @@ Before considering refactor complete:
 | 5 | Extract training_callbacks | 45 min | 2:45 |
 | 6 | Extract training_utils | 45 min | 3:30 |
 | 7 | Extract replay_converter | 40 min | 4:10 |
-| 8 | Finalize train.py | 20 min | 4:30 |
+| 8 | Finalize train_core.py | 20 min | 4:30 |
 | 9 | Final validation | 30 min | **5:00** |
 
 **Total: 4-6 hours** (one focused session)
@@ -1170,7 +1170,7 @@ Before considering refactor complete:
 - No `__init__.py` management
 
 ### ✅ **Preserves Cohesion**
-- train.py stays ~800 lines with orchestration
+- train_core.py stays ~800 lines with orchestration
 - High-level workflow visible in one file
 - Not over-fragmented
 
