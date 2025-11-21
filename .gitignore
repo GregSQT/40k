@@ -19,6 +19,7 @@ Desktop.ini
 
 # Environnements virtuels Python
 .venv/
+.venv310/
 venv/
 env/
 ENV/
