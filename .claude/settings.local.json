@@ -1,15 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find:*)",
-      "Bash(python:*)",
-      "Bash(dir:*)",
-      "Bash(nul)",
-      "Bash(git add:*)",
-      "Bash(git reset:*)",
-      "Bash(del nul 2)",
-      "Bash(git commit:*)",
-      "Bash(git push)"
+      "Bash(pip freeze:*)",
+      "Bash(requirements.txt)",
+      "Bash(pip show:*)",
+      "Bash(python3.11:*)",
+      "Bash(py:*)",
+      "Bash(source:*)",
+      "Bash(pip install:*)"
     ],
     "deny": [],
     "ask": []

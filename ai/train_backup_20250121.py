@@ -1,4 +1,4 @@
-# ai/train.py
+﻿# ai/train.py
 #!/usr/bin/env python3
 """
 ai/train.py - Main training script following AI_INSTRUCTIONS.md exactly
@@ -47,43 +47,78 @@ from config_loader import get_config_loader
 from ai.game_replay_logger import GameReplayIntegration
 import torch
 import time  # Add time import for StepLogger timestamps
+import gymnasium as gym  # For SelfPlayWrapper to inherit from gym.Wrapper
 
 
-class BotControlledEnv:
+class BotControlledEnv(gym.Wrapper):
     """Wrapper for bot-controlled Player 1 evaluation."""
-    
+
     def __init__(self, base_env, bot, unit_registry):
-        self.base_env = base_env
+        super().__init__(base_env)
         self.bot = bot
         self.unit_registry = unit_registry
         self.episode_reward = 0.0
         self.episode_length = 0
-        
+
         # Unwrap ActionMasker to get actual engine
-        self.engine = base_env
-        if hasattr(base_env, 'env'):
+        # self.env is set by gym.Wrapper.__init__ to base_env
+        self.engine = self.env
+        if hasattr(self.env, 'env'):
             # ActionMasker wraps the actual engine in .env attribute
-            self.engine = base_env.env
+            self.engine = self.env.env
+        
+        # DIAGNOSTIC: Track shoot phase decisions FOR BOT
+        self.shoot_opportunities = 0  # Times shoot was available
+        self.shoot_actions = 0        # Times bot actually shot
+        self.wait_actions = 0          # Times bot waited in shoot phase
+        
+        # DIAGNOSTIC: Track shoot phase decisions FOR AI AGENT
+        self.ai_shoot_opportunities = 0
+        self.ai_shoot_actions = 0
+        self.ai_wait_actions = 0
     
     def reset(self, seed=None, options=None):
-        obs, info = self.base_env.reset(seed=seed, options=options)
+        obs, info = self.env.reset(seed=seed, options=options)
         self.episode_reward = 0.0
         self.episode_length = 0
+
+        # DIAGNOSTIC: Reset shoot tracking for new episode
+        self.shoot_opportunities = 0
+        self.shoot_actions = 0
+        self.wait_actions = 0
+
+        # DIAGNOSTIC: Reset AI shoot tracking
+        self.ai_shoot_opportunities = 0
+        self.ai_shoot_actions = 0
+        self.ai_wait_actions = 0
+
         return obs, info
-    
+
     def step(self, agent_action):
+        # DIAGNOSTIC: Track AI shoot phase decisions BEFORE executing action
+        game_state = self.engine.game_state
+        current_phase = game_state.get("phase", "")
+        action_mask = self.engine.get_action_mask()
+
+        if current_phase == "shoot" and 4 in [i for i in range(12) if action_mask[i]]:
+            self.ai_shoot_opportunities += 1
+            if agent_action in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
+                self.ai_shoot_actions += 1
+            elif agent_action == 11:  # Wait action
+                self.ai_wait_actions += 1
+
         # Execute agent action
-        obs, reward, terminated, truncated, info = self.base_env.step(agent_action)
+        obs, reward, terminated, truncated, info = self.env.step(agent_action)
         self.episode_reward += reward
         self.episode_length += 1
-        
+
         # CRITICAL FIX: Loop through ALL bot turns until control returns to agent
         while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
             debug_bot = self.episode_length < 10
             bot_action = self._get_bot_action(debug=debug_bot)
-            obs, reward, terminated, truncated, info = self.base_env.step(bot_action)
+            obs, reward, terminated, truncated, info = self.env.step(bot_action)
             self.episode_length += 1
-        
+
         return obs, reward, terminated, truncated, info
     
     def _get_bot_action(self, debug=False) -> int:
@@ -94,32 +129,280 @@ class BotControlledEnv:
         if not valid_actions:
             return 11
         
+        # DIAGNOSTIC: Track shoot phase opportunities
+        current_phase = game_state.get("phase", "")
+        if current_phase == "shoot" and 4 in valid_actions:
+            self.shoot_opportunities += 1
+        
         if hasattr(self.bot, 'select_action_with_state'):
             bot_choice = self.bot.select_action_with_state(valid_actions, game_state)
         else:
             bot_choice = self.bot.select_action(valid_actions)
         
         if bot_choice not in valid_actions:
-            return valid_actions[0]        
+            return valid_actions[0]
+        
+        # DIAGNOSTIC: Track actual shoot/wait decisions in shoot phase
+        if current_phase == "shoot":
+            if bot_choice in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
+                self.shoot_actions += 1
+            elif bot_choice == 11:  # Wait action
+                self.wait_actions += 1
+        
         return bot_choice
     
-    def close(self):
-        self.base_env.close()
-    
-    @property
-    def observation_space(self):
-        return self.base_env.observation_space
-    
-    @property
-    def action_space(self):
-        return self.base_env.action_space
+    def get_shoot_stats(self) -> dict:
+        """Return shooting statistics for diagnostic analysis."""
+        shoot_rate = (self.shoot_actions / self.shoot_opportunities * 100) if self.shoot_opportunities > 0 else 0
+        wait_rate = (self.wait_actions / self.shoot_opportunities * 100) if self.shoot_opportunities > 0 else 0
 
+        ai_shoot_rate = (self.ai_shoot_actions / self.ai_shoot_opportunities * 100) if self.ai_shoot_opportunities > 0 else 0
+        ai_wait_rate = (self.ai_wait_actions / self.ai_shoot_opportunities * 100) if self.ai_shoot_opportunities > 0 else 0
+
+        return {
+            'shoot_opportunities': self.shoot_opportunities,
+            'shoot_actions': self.shoot_actions,
+            'wait_actions': self.wait_actions,
+            'shoot_rate': shoot_rate,
+            'wait_rate': wait_rate,
+            'ai_shoot_opportunities': self.ai_shoot_opportunities,
+            'ai_shoot_actions': self.ai_shoot_actions,
+            'ai_wait_actions': self.ai_wait_actions,
+            'ai_shoot_rate': ai_shoot_rate,
+            'ai_wait_rate': ai_wait_rate
+        }
+
+
+class SelfPlayWrapper(gym.Wrapper):
+    """
+    Wrapper for self-play training where Player 1 is controlled by a frozen copy of the model.
+
+    Key features:
+    - Player 0: Learning agent (receives gradient updates from SB3)
+    - Player 1: Frozen opponent (uses copy of model from N episodes ago)
+    - Frozen model updates periodically to keep opponent challenging
+    - Naturally targets ~50% win rate as learning agent improves
+    """
+
+    def __init__(self, base_env, frozen_model=None, update_frequency=500):
+        """
+        Args:
+            base_env: W40KEngine wrapped in ActionMasker
+            frozen_model: Initial frozen model for Player 1 (optional, will use random if None)
+            update_frequency: Episodes between frozen model updates
+        """
+        super().__init__(base_env)
+        self.frozen_model = frozen_model
+        self.update_frequency = update_frequency
+        self.episodes_since_update = 0
+        self.total_episodes = 0
+
+        # Unwrap to get actual W40KEngine
+        # Wrapping order: SelfPlayWrapper(ActionMasker(W40KEngine))
+        # self.env is set by gym.Wrapper.__init__ to base_env (ActionMasker)
+        self.engine = self.env
+        while hasattr(self.engine, 'env'):
+            self.engine = self.engine.env
+
+        # Episode tracking
+        self.episode_reward = 0.0
+        self.episode_length = 0
+
+        # Self-play statistics
+        self.player0_wins = 0
+        self.player1_wins = 0
+        self.draws = 0
+
+    def reset(self, seed=None, options=None):
+        """Reset environment for new episode."""
+        obs, info = self.env.reset(seed=seed, options=options)
+        self.episode_reward = 0.0
+        self.episode_length = 0
+        return obs, info
+
+    def step(self, agent_action):
+        """
+        Execute one step in the environment.
+
+        If it's Player 0's turn: Execute the provided action
+        If it's Player 1's turn: Use frozen model action instead
+        """
+        # CRITICAL: First handle any pending Player 1 turns before Player 0's action
+        # This shouldn't happen normally, but safety check
+        obs = None
+        reward = 0.0
+        terminated = False
+        truncated = False
+        info = {}
+
+        # Track P1 actions for diagnostic
+        p1_actions_before = 0
+        p1_terminal_reward = 0.0  # Capture lose penalty if P1 ends game before P0 acts
+        while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
+            player1_action = self._get_frozen_model_action()
+            obs, reward, terminated, truncated, info = self.env.step(player1_action)
+            self.episode_length += 1
+            p1_actions_before += 1
+
+            # If P1's action ended the game before P0 could act, capture the reward
+            if terminated or truncated:
+                p1_terminal_reward = reward
+
+        # Now execute Player 0's action (if game not over)
+        p0_reward = p1_terminal_reward  # Start with any terminal reward from P1's pre-emptive kill
+        if not (terminated or truncated):
+            obs, reward, terminated, truncated, info = self.env.step(agent_action)
+            p0_reward = reward  # CRITICAL: Save P0's reward before P1 overwrites it
+            self.episode_reward += reward
+            self.episode_length += 1
+
+            # DIAGNOSTIC: Log P0's reward for debugging (disabled for cleaner output)
+            # if self.total_episodes < 3 and abs(reward) > 0.1:
+            #     phase = self.engine.game_state.get("phase", "?")
+            #     print(f"      [P0 Reward] action={agent_action}, reward={reward:.2f}, phase={phase}")
+
+            # Handle any Player 1 turns that follow
+            p1_actions_after = 0
+            while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
+                player1_action = self._get_frozen_model_action()
+                # CRITICAL FIX: Capture reward when P1's action ends game!
+                # When P1 kills last P0 unit, reward contains P0's LOSE penalty
+                obs, p1_step_reward, terminated, truncated, info = self.env.step(player1_action)
+                self.episode_length += 1
+                p1_actions_after += 1
+
+                # If P1's action ended the game, P0 needs the situational reward (win/lose)
+                # The engine returns P0's perspective reward even for P1's actions
+                if terminated or truncated:
+                    p0_reward += p1_step_reward  # Add win/lose bonus to P0's total
+
+            # DIAGNOSTIC: Log if P1 took actions (disabled for cleaner output)
+            # if (p1_actions_before + p1_actions_after) > 0 and self.total_episodes < 3:
+            #     phase = self.engine.game_state.get("phase", "?")
+            #     print(f"    [SelfPlay] P0 action={agent_action}, P1 took {p1_actions_before}+{p1_actions_after} actions, phase={phase}")
+
+        # CRITICAL: Return P0's reward to SB3, not P1's!
+        reward = p0_reward
+
+        # Track episode end statistics
+        if terminated or truncated:
+            self.total_episodes += 1
+            self.episodes_since_update += 1
+
+            # Track wins/losses
+            winner = info.get("winner", -1)
+            if winner == 0:
+                self.player0_wins += 1
+            elif winner == 1:
+                self.player1_wins += 1
+            else:
+                self.draws += 1
+
+        return obs, reward, terminated, truncated, info
+
+    def _get_frozen_model_action(self) -> int:
+        """
+        Get action from frozen model for Player 1.
+        Falls back to random valid action if no frozen model available.
+        """
+        if self.frozen_model is None:
+            # No frozen model yet - use random valid action
+            action_mask = self.engine.get_action_mask()
+            valid_actions = [i for i in range(12) if action_mask[i]]
+            if not valid_actions:
+                return 11  # Wait action
+            import random
+            return random.choice(valid_actions)
+
+        # Use frozen model to predict action WITH action masking
+        # CRITICAL: MaskablePPO requires action_masks parameter for proper masked inference
+        obs = self.engine.obs_builder.build_observation(self.engine.game_state)
+        action_mask = self.engine.get_action_mask()
+
+        # MaskablePPO.predict() expects action_masks as keyword argument
+        # CRITICAL: Use deterministic=False so P1 explores like P0 (fair self-play)
+        action, _ = self.frozen_model.predict(obs, deterministic=False, action_masks=action_mask)
+
+        return int(action)
+
+    def update_frozen_model(self, new_model):
+        """
+        Update the frozen model with a copy of the current learning model.
+        Should be called periodically (e.g., every N episodes).
+
+        Note: This method is deprecated. Use the persistent_frozen_model approach
+        in the training loop instead, which properly saves/loads via temp file.
+        """
+        # Set directly - the caller is responsible for providing an independent copy
+        self.frozen_model = new_model
+        self.episodes_since_update = 0
+        print(f"  🔄 Self-play: Updated frozen opponent (Episode {self.total_episodes})")
+
+    def should_update_frozen_model(self) -> bool:
+        """Check if it's time to update the frozen model."""
+        return self.episodes_since_update >= self.update_frequency
+
+    def get_win_rate_stats(self) -> dict:
+        """Get win rate statistics for Player 0 (learning agent)."""
+        total_games = self.player0_wins + self.player1_wins + self.draws
+        if total_games == 0:
+            return {
+                'player0_wins': 0,
+                'player1_wins': 0,
+                'draws': 0,
+                'player0_win_rate': 0.0,
+                'total_games': 0
+            }
+
+        return {
+            'player0_wins': self.player0_wins,
+            'player1_wins': self.player1_wins,
+            'draws': self.draws,
+            'player0_win_rate': self.player0_wins / total_games * 100,
+            'total_games': total_games
+        }
+
+    def close(self):
+        """Close the wrapped environment."""
+        self.env.close()
+
+
+class EntropyScheduleCallback(BaseCallback):
+    """Callback to linearly reduce entropy coefficient during training."""
+
+    def __init__(self, start_ent: float, end_ent: float, total_episodes: int, verbose: int = 0):
+        super().__init__(verbose)
+        self.start_ent = start_ent
+        self.end_ent = end_ent
+        self.total_episodes = total_episodes
+        self.episode_count = 0
+        self.last_update_step = 0
+
+    def _on_step(self) -> bool:
+        # Detect episode end using dones array (more reliable than info dict)
+        if hasattr(self, 'locals') and 'dones' in self.locals:
+            dones = self.locals['dones']
+            # Count number of episodes that finished in this step
+            episodes_finished = sum(dones) if hasattr(dones, '__iter__') else (1 if dones else 0)
+
+            if episodes_finished > 0:
+                self.episode_count += episodes_finished
+                # Linear interpolation: ent = start + (end - start) * progress
+                progress = min(1.0, self.episode_count / self.total_episodes)
+                new_ent = self.start_ent + (self.end_ent - self.start_ent) * progress
+                self.model.ent_coef = new_ent
+
+                if self.verbose > 0 and self.num_timesteps - self.last_update_step >= 10000:
+                    print(f"Episode {self.episode_count}/{self.total_episodes}: ent_coef = {new_ent:.3f}")
+                    self.last_update_step = self.num_timesteps
+        return True
 
 class EpisodeTerminationCallback(BaseCallback):
     """Callback to terminate training after exact episode count."""
-    
-    def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0, 
-                 total_episodes: int = None, scenario_info: str = None):
+
+    def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0,
+                 total_episodes: int = None, scenario_info: str = None,
+                 disable_early_stopping: bool = False, global_start_time: float = None):
         super().__init__(verbose)
         if max_episodes <= 0:
             raise ValueError("max_episodes must be positive - no defaults allowed")
@@ -129,20 +412,24 @@ class EpisodeTerminationCallback(BaseCallback):
         self.expected_timesteps = expected_timesteps
         self.episode_count = 0
         self.step_count = 0
-        self.start_time = None
+        self.start_time = global_start_time  # Use provided global start time if available
         # For global progress tracking in rotation mode
         self.total_episodes = total_episodes if total_episodes else max_episodes
         self.scenario_info = scenario_info  # e.g., "Cycle 8 | Scenario: phase2-1"
         self.global_episode_offset = 0  # Set by rotation code to track overall progress
-        # NEW: Better time tracking
-        self.last_episode_time = None  # Track per-episode time
-        self.episode_times = []  # Store recent episode times for moving average
-    
+        # ROTATION FIX: Disable early stopping to let model.learn() consume all timesteps
+        self.disable_early_stopping = disable_early_stopping
+        # EMA for smooth ETA estimation (weights recent episodes more heavily)
+        self.ema_episode_time = None
+        self.last_episode_time = None
+        self.ema_alpha = 0.1  # Smoothing factor (higher = more weight on recent)
+
     def _on_training_start(self) -> None:
         """Initialize timing on training start."""
         import time
-        self.start_time = time.time()
-        self.last_episode_time = time.time()
+        # Only set start_time if not already set (preserves global start time in rotation mode)
+        if self.start_time is None:
+            self.start_time = time.time()
     
     def _on_step(self) -> bool:
         """Track episodes and display progress."""
@@ -182,20 +469,11 @@ class EpisodeTerminationCallback(BaseCallback):
             except Exception:
                 pass
         
-        # Track episode timing for better ETA calculation
+        # Update progress display on episode end
         if episode_ended:
             import time
             current_time = time.time()
-            
-            # Track episode timing for better ETA
-            if self.last_episode_time is not None:
-                episode_duration = current_time - self.last_episode_time
-                self.episode_times.append(episode_duration)
-                # Keep last 50 episodes for moving average (ignores scenario switch overhead)
-                if len(self.episode_times) > 50:
-                    self.episode_times.pop(0)
-            self.last_episode_time = current_time
-            
+
             # Update progress every 10 episodes
             if self.episode_count % 10 == 0:
                 # Calculate global progress (across all rotations)
@@ -207,21 +485,53 @@ class EpisodeTerminationCallback(BaseCallback):
                 filled = int(bar_length * global_episode_count / self.total_episodes)
                 bar = '█' * filled + '░' * (bar_length - filled)
                 
-                # Calculate time with moving average for better accuracy
+                # Calculate time with EMA for smooth, accurate ETA estimates
                 time_info = ""
-                if self.start_time is not None and len(self.episode_times) > 5:
-                    # Use moving average of recent episodes for ETA (ignores scenario switches)
-                    avg_episode_time = sum(self.episode_times) / len(self.episode_times)
-                    remaining_episodes = self.total_episodes - global_episode_count
-                    eta = avg_episode_time * remaining_episodes
-                    
+                if self.start_time is not None and global_episode_count > 0:
                     # Total elapsed time from start
                     elapsed = current_time - self.start_time
-                    
-                    # Format times as MM:SS
-                    elapsed_str = f"{int(elapsed//60):02d}:{int(elapsed%60):02d}"
-                    eta_str = f"{int(eta//60):02d}:{int(eta%60):02d}"
-                    time_info = f" [{elapsed_str}<{eta_str}]"
+
+                    # Update EMA of episode time for better ETA estimation
+                    if self.last_episode_time is not None:
+                        # Time for last batch of episodes (10 episodes)
+                        episode_batch_time = current_time - self.last_episode_time
+                        avg_time_per_episode = episode_batch_time / 10
+
+                        if self.ema_episode_time is None:
+                            # Initialize EMA with first measurement
+                            self.ema_episode_time = avg_time_per_episode
+                        else:
+                            # Update EMA: new_ema = alpha * new_value + (1 - alpha) * old_ema
+                            self.ema_episode_time = (self.ema_alpha * avg_time_per_episode +
+                                                    (1 - self.ema_alpha) * self.ema_episode_time)
+
+                    self.last_episode_time = current_time
+
+                    # Calculate ETA using EMA (or fallback to overall average for first few episodes)
+                    remaining_episodes = self.total_episodes - global_episode_count
+                    if self.ema_episode_time is not None:
+                        eta = self.ema_episode_time * remaining_episodes
+                        eps_speed = 1.0 / self.ema_episode_time if self.ema_episode_time > 0 else 0
+                    else:
+                        # Fallback for early episodes
+                        avg_episode_time = elapsed / global_episode_count
+                        eta = avg_episode_time * remaining_episodes
+                        eps_speed = global_episode_count / elapsed if elapsed > 0 else 0
+
+                    # Format times as HH:MM:SS or MM:SS depending on duration
+                    def format_time(seconds):
+                        hours = int(seconds // 3600)
+                        minutes = int((seconds % 3600) // 60)
+                        secs = int(seconds % 60)
+                        if hours > 0:
+                            return f"{hours}:{minutes:02d}:{secs:02d}"
+                        else:
+                            return f"{minutes:02d}:{secs:02d}"
+
+                    elapsed_str = format_time(elapsed)
+                    eta_str = format_time(eta)
+                    speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
+                    time_info = f" [{elapsed_str}<{eta_str}, {speed_str}]"
                 
                 # Build detailed scenario display with episode range
                 if self.scenario_info:
@@ -233,13 +543,19 @@ class EpisodeTerminationCallback(BaseCallback):
                     scenario_display = ""
                 print(f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{scenario_display}", end='\r', flush=True)
         
-        # CRITICAL: Stop when max episodes reached
+        # CRITICAL: Stop when max episodes reached (unless disabled for rotation mode)
         if self.episode_count >= self.max_episodes:
-            print()  # Newline after final progress update
-            print(f"🛑 STOPPING: Reached {self.max_episodes} episodes")
-            print(f"   Total timesteps: {self.model.num_timesteps if hasattr(self, 'model') else 'N/A'}")
-            return False
-        
+            if self.disable_early_stopping:
+                # Rotation mode: Let model.learn() consume all timesteps
+                # Don't stop early - just continue tracking episodes for metrics
+                return True
+            else:
+                # Normal mode: Stop when episode count reached
+                print()  # Newline after final progress update
+                print(f"🛑 STOPPING: Reached {self.max_episodes} episodes")
+                print(f"   Total timesteps: {self.model.num_timesteps if hasattr(self, 'model') else 'N/A'}")
+                return False
+
         return True
 
 class EpisodeBasedEvalCallback(BaseCallback):
@@ -415,10 +731,11 @@ class EpisodeBasedEvalCallback(BaseCallback):
 class MetricsCollectionCallback(BaseCallback):
     """Callback to collect training metrics and send to W40KMetricsTracker."""
     
-    def __init__(self, metrics_tracker, model, verbose: int = 0):
+    def __init__(self, metrics_tracker, model, controlled_agent=None, verbose: int = 0):
         super().__init__(verbose)
         self.metrics_tracker = metrics_tracker
         self.model = model
+        self.controlled_agent = controlled_agent  # CRITICAL FIX: Store controlled_agent for bot evaluation
         self.episode_count = 0
         self.episode_reward = 0
         self.episode_length = 0
@@ -550,7 +867,7 @@ class MetricsCollectionCallback(BaseCallback):
     
     def _run_final_bot_eval(self, model, training_config, training_config_name, rewards_config_name):
         """Run final comprehensive bot evaluation using standalone function"""
-        controlled_agent = training_config.get('controlled_agent')
+        controlled_agent = self.controlled_agent  # CRITICAL FIX: Use stored controlled_agent instead of looking in training_config
         
         # Extract n_episodes from callback_params in training_config
         if 'callback_params' not in training_config:
@@ -685,7 +1002,7 @@ class MetricsCollectionCallback(BaseCallback):
             
             # Only log if there are actual training metrics available
             # SB3 updates these after each policy update (every n_steps)
-            if any(key.startswith('train/') for key in model_stats.keys()):
+            if len(model_stats) > 0:
                 # Pass complete model stats to metrics tracker
                 # This includes: learning_rate, policy_loss, value_loss, entropy_loss,
                 # clip_fraction, approx_kl, explained_variance, n_updates, fps
@@ -699,13 +1016,18 @@ class MetricsCollectionCallback(BaseCallback):
     def _handle_episode_end(self, info):
         """Handle episode completion and log metrics."""
         self.episode_count += 1
-       
+
         # Extract episode data
         episode_data = {
             'total_reward': info.get('episode_reward', self.episode_reward),
             'episode_length': info.get('episode_length', self.episode_length),
             'winner': info.get('winner', None)
         }
+
+        # DIAGNOSTIC: Log winner for first 10 episodes (disabled for cleaner output)
+        # if self.episode_count <= 10:
+        #     winner = episode_data['winner']
+        #     print(f"  [DIAG] Episode {self.episode_count}: winner={winner} (P0 wins if 0, P1 wins if 1, draw if -1)")
        
         # GAMMA MONITORING: Track discount factor effects
         if hasattr(self.model, 'gamma'):
@@ -758,9 +1080,10 @@ class MetricsCollectionCallback(BaseCallback):
                 self.win_rate_window = deque(maxlen=100)
             
             if winner is not None:
-                agent_won = 1.0 if winner == 1 else 0.0
+                # CRITICAL FIX: Learning agent is Player 0, not Player 1!
+                agent_won = 1.0 if winner == 0 else 0.0
                 self.win_rate_window.append(agent_won)
-                
+
                 if len(self.win_rate_window) >= 10:
                     import numpy as np
                     rolling_win_rate = np.mean(self.win_rate_window)
@@ -852,129 +1175,222 @@ class MetricsCollectionCallback(BaseCallback):
         else:
             return 1.0 / (1.0 - gamma)
 
-def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes, 
+def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
                          controlled_agent=None, show_progress=False, deterministic=True):
     """
     Standalone bot evaluation function - single source of truth for all bot testing.
-    
+
     Args:
         model: Trained model to evaluate
         training_config_name: Name of training config to use (e.g., "phase1", "default")
-        n_episodes: Number of episodes per bot
+        n_episodes: Number of episodes per bot (will be split across all available scenarios)
         controlled_agent: Agent identifier (None for player 0, otherwise player 1)
         show_progress: Show progress bar with time estimates
         deterministic: Use deterministic policy
-    
+
     Returns:
-        Dict with keys: 'random', 'greedy', 'defensive', 'combined', 
+        Dict with keys: 'random', 'greedy', 'defensive', 'combined',
                        'random_wins', 'greedy_wins', 'defensive_wins'
     """
     from ai.unit_registry import UnitRegistry
     from config_loader import get_config_loader
     import time
-    
+
     if not EVALUATION_BOTS_AVAILABLE:
         return {}
-    
+
     results = {}
-    bots = {'random': RandomBot(), 'greedy': GreedyBot(), 'defensive': DefensiveBot()}
+    # Initialize bots with stochasticity to prevent overfitting (15% random actions)
+    bots = {
+        'random': RandomBot(),
+        'greedy': GreedyBot(randomness=0.15),
+        'defensive': DefensiveBot(randomness=0.15)
+    }
     config = get_config_loader()
-    scenario_file = os.path.join(config.config_dir, "scenario.json")
+
+    # CRITICAL FIX: Strip phase suffix from controlled_agent for file path lookup
+    # controlled_agent may be "Agent_phase1", but files are at "config/agents/Agent/..."
+    base_agent_key = controlled_agent
+    if controlled_agent:
+        for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
+            if controlled_agent.endswith(phase_suffix):
+                base_agent_key = controlled_agent[:-len(phase_suffix)]
+                break
+
+    # MULTI-SCENARIO EVALUATION: Get all available scenarios for this phase
+    scenario_list = get_scenario_list_for_phase(config, base_agent_key, training_config_name)
+
+    # If only one scenario found, fall back to old behavior
+    if len(scenario_list) == 0:
+        scenario_list = [get_agent_scenario_file(config, base_agent_key, training_config_name)]
+
+    # Calculate episodes per scenario (distribute evenly)
+    episodes_per_scenario = max(1, n_episodes // len(scenario_list))
+
     unit_registry = UnitRegistry()
-    
+
     # Progress tracking
-    total_episodes = n_episodes * len(bots)
+    total_episodes = episodes_per_scenario * len(scenario_list) * len(bots)
     completed_episodes = 0
     start_time = time.time() if show_progress else None
     
     for bot_name, bot in bots.items():
         wins = 0
-        for episode_num in range(n_episodes):
-            completed_episodes += 1
-            
-            # Progress bar (only if show_progress=True)
-            if show_progress:
-                progress_pct = (completed_episodes / total_episodes) * 100
-                bar_length = 50
-                filled = int(bar_length * completed_episodes / total_episodes)
-                bar = '█' * filled + '░' * (bar_length - filled)
-                
-                elapsed = time.time() - start_time
-                avg_time = elapsed / completed_episodes
-                remaining = total_episodes - completed_episodes
-                eta = avg_time * remaining
-                elapsed_str = f"{int(elapsed//60):02d}:{int(elapsed%60):02d}"
-                eta_str = f"{int(eta//60):02d}:{int(eta%60):02d}"
-                
-                print(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [ {elapsed_str} < {eta_str} ]", end='', flush=True)
-            
-            try:
-                W40KEngine, _ = setup_imports()
-                
-                # Create base environment with specified training config
-                base_env = W40KEngine(
-                    rewards_config=training_config_name,
-                    training_config_name=training_config_name,
-                    controlled_agent=controlled_agent,
-                    active_agents=None,
-                    scenario_file=scenario_file,
-                    unit_registry=unit_registry,
-                    quiet=True,
-                    gym_training_mode=True
-                )
-                
-                # Wrap with ActionMasker (CRITICAL for proper action masking)
-                def mask_fn(env):
-                    return env.get_action_mask()
-                
-                masked_env = ActionMasker(base_env, mask_fn)
-                bot_env = BotControlledEnv(masked_env, bot, unit_registry)
-                
-                obs, info = bot_env.reset()
-                done = False
-                step_count = 0
-                
-                # Calculate max_eval_steps from training_config
-                env_config = base_env.unwrapped.config if hasattr(base_env, 'unwrapped') else base_env.config
-                training_cfg = env_config.get('training_config', {})
-                max_turns = training_cfg.get('max_turns_per_episode', 5)
-                
-                # Calculate expected steps per episode
-                steps_per_turn = 8
-                expected_max_steps = max_turns * steps_per_turn
-                
-                # Add 100% buffer for slow/suboptimal play
-                max_eval_steps = expected_max_steps * 2
-                
-                while not done and step_count < max_eval_steps:
-                    action_masks = bot_env.engine.get_action_mask()
-                    action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
-                    
-                    obs, reward, terminated, truncated, info = bot_env.step(action)
-                    done = terminated or truncated
-                    step_count += 1
-                
-                # Determine winner - handle both controlled_agent cases
-                agent_player = 1 if controlled_agent else 0
-                if info.get('winner') == agent_player:
-                    wins += 1
-                
-                bot_env.close()
-            except Exception as e:
+        losses = 0
+        draws = 0
+
+        # MULTI-SCENARIO: Iterate through all scenarios
+        for scenario_file in scenario_list:
+            scenario_name = os.path.basename(scenario_file).replace(f"{base_agent_key}_scenario_", "").replace(".json", "") if base_agent_key else "default"
+
+            for episode_num in range(episodes_per_scenario):
+                completed_episodes += 1
+
+                # Progress bar (only if show_progress=True)
                 if show_progress:
-                    print(f"\n⚠️  Episode {episode_num+1} error: {e}")
-                continue
-        
-        win_rate = wins / n_episodes
+                    progress_pct = (completed_episodes / total_episodes) * 100
+                    bar_length = 50
+                    filled = int(bar_length * completed_episodes / total_episodes)
+                    bar = '█' * filled + '░' * (bar_length - filled)
+
+                    elapsed = time.time() - start_time
+                    avg_time = elapsed / completed_episodes
+                    remaining = total_episodes - completed_episodes
+                    eta = avg_time * remaining
+
+                    # Calculate evaluation speed
+                    eps_speed = completed_episodes / elapsed if elapsed > 0 else 0
+
+                    # Format times as HH:MM:SS or MM:SS depending on duration
+                    def format_time(seconds):
+                        hours = int(seconds // 3600)
+                        minutes = int((seconds % 3600) // 60)
+                        secs = int(seconds % 60)
+                        if hours > 0:
+                            return f"{hours}:{minutes:02d}:{secs:02d}"
+                        else:
+                            return f"{minutes:02d}:{secs:02d}"
+
+                    elapsed_str = format_time(elapsed)
+                    eta_str = format_time(eta)
+                    speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
+
+                    sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [{scenario_name}] [{elapsed_str}<{eta_str}, {speed_str}]")
+                    sys.stdout.flush()
+
+                try:
+                    W40KEngine, _ = setup_imports()
+
+                    # Create base environment with specified training config
+                    base_env = W40KEngine(
+                        rewards_config=rewards_config_name,
+                        training_config_name=training_config_name,
+                        controlled_agent=controlled_agent,
+                        active_agents=None,
+                        scenario_file=scenario_file,
+                        unit_registry=unit_registry,
+                        quiet=True,
+                        gym_training_mode=True
+                    )
+
+                    # Connect step logger if enabled
+                    if 'step_logger' in globals() and step_logger and step_logger.enabled:
+                        base_env.step_logger = step_logger
+                        # Set bot name for episode logging
+                        step_logger.current_bot_name = bot_name
+
+                    # Wrap with ActionMasker (CRITICAL for proper action masking)
+                    def mask_fn(env):
+                        return env.get_action_mask()
+
+                    masked_env = ActionMasker(base_env, mask_fn)
+                    bot_env = BotControlledEnv(masked_env, bot, unit_registry)
+
+                    obs, info = bot_env.reset()
+                    done = False
+                    step_count = 0
+
+                    # Calculate max_eval_steps from training_config
+                    env_config = base_env.unwrapped.config if hasattr(base_env, 'unwrapped') else base_env.config
+                    training_cfg = env_config.get('training_config', {})
+                    max_turns = training_cfg.get('max_turns_per_episode', 5)
+
+                    # Calculate expected steps per episode
+                    steps_per_turn = 8
+                    expected_max_steps = max_turns * steps_per_turn
+
+                    # Add 100% buffer for slow/suboptimal play
+                    max_eval_steps = expected_max_steps * 2
+
+                    while not done and step_count < max_eval_steps:
+                        action_masks = bot_env.engine.get_action_mask()
+                        action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
+
+                        obs, reward, terminated, truncated, info = bot_env.step(action)
+                        done = terminated or truncated
+                        step_count += 1
+
+                    # Determine winner - track wins/losses/draws
+                    # CRITICAL FIX: Learning agent is ALWAYS Player 0, regardless of controlled_agent name
+                    # controlled_agent is the agent key string (e.g., "SpaceMarine_phase1"), NOT a player ID
+                    agent_player = 0  # Learning agent is always Player 0
+                    winner = info.get('winner')
+
+                    if winner == agent_player:
+                        wins += 1
+                    elif winner == -1:
+                        draws += 1
+                    else:
+                        losses += 1
+
+                    # DIAGNOSTIC: Collect shoot stats from all episodes
+                    bot_stats = bot_env.get_shoot_stats()
+                    if f'{bot_name}_shoot_stats' not in results:
+                        results[f'{bot_name}_shoot_stats'] = []
+                    results[f'{bot_name}_shoot_stats'].append(bot_stats)
+
+                    bot_env.close()
+                except Exception as e:
+                    if show_progress:
+                        print(f"\n⚠️  Episode error: {e}")
+                    continue
+
+        # Calculate win rate across ALL scenarios
+        total_games = episodes_per_scenario * len(scenario_list)
+        win_rate = wins / total_games if total_games > 0 else 0.0
         results[bot_name] = win_rate
         results[f'{bot_name}_wins'] = wins
+        results[f'{bot_name}_losses'] = losses
+        results[f'{bot_name}_draws'] = draws
+        
+        # DIAGNOSTIC: Print average shoot stats for this bot
+        if f'{bot_name}_shoot_stats' in results and results[f'{bot_name}_shoot_stats']:
+            stats_list = results[f'{bot_name}_shoot_stats']
+            avg_opportunities = sum(s['shoot_opportunities'] for s in stats_list) / len(stats_list)
+            avg_shoot_rate = sum(s['shoot_rate'] for s in stats_list) / len(stats_list)
+            
+            avg_ai_opportunities = sum(s['ai_shoot_opportunities'] for s in stats_list) / len(stats_list)
+            avg_ai_shoot_rate = sum(s['ai_shoot_rate'] for s in stats_list) / len(stats_list)
+            
+            if show_progress:
+                print(f"\n   📊 {bot_name.capitalize()}Bot: {avg_shoot_rate:.1f}% shoot rate ({avg_opportunities:.1f} opportunities/game)")
+                print(f"   🤖 AI Agent:  {avg_ai_shoot_rate:.1f}% shoot rate ({avg_ai_opportunities:.1f} opportunities/game)")
     
     if show_progress:
         print("\r" + " " * 120)  # Clear the progress bar line
         print()  # New line after clearing
     
-    # Combined score with standard weighting: RandomBot 20%, GreedyBot 30%, DefensiveBot 50%
-    results['combined'] = 0.2 * results['random'] + 0.3 * results['greedy'] + 0.5 * results['defensive']
+    # Combined score with improved weighting: RandomBot 35%, GreedyBot 30%, DefensiveBot 35%
+    # Increased RandomBot weight to prevent overfitting to predictable patterns
+    results['combined'] = 0.35 * results['random'] + 0.30 * results['greedy'] + 0.35 * results['defensive']
+    
+    # DIAGNOSTIC: Print shoot statistics (sample from last episode of each bot)
+    if show_progress:
+        print("\n" + "="*80)
+        print("📊 DIAGNOSTIC: Shoot Phase Behavior")
+        print("="*80)
+        print("Bot behavior analysis completed - check logs for detailed stats")
+        print("="*80 + "\n")
     
     return results
 
@@ -995,10 +1411,11 @@ class BotEvaluationCallback(BaseCallback):
         self.best_combined_win_rate = 0.0  # Track best performance
         
         if EVALUATION_BOTS_AVAILABLE:
+            # Initialize bots with stochasticity to prevent overfitting (15% random actions)
             self.bots = {
                 'random': RandomBot(),
-                'greedy': GreedyBot(),
-                'defensive': DefensiveBot()
+                'greedy': GreedyBot(randomness=0.15),
+                'defensive': DefensiveBot(randomness=0.15)
             }
         else:
             self.bots = {}
@@ -1026,11 +1443,12 @@ class BotEvaluationCallback(BaseCallback):
             results = self._evaluate_against_bots()
             
             # Calculate combined performance (weighted average)
-            # Standard weighting: RandomBot 20%, GreedyBot 30%, DefensiveBot 50%
+            # IMPROVED weighting: RandomBot 35%, GreedyBot 30%, DefensiveBot 35%
+            # Increased RandomBot weight to prevent overfitting to predictable patterns
             combined_win_rate = (
-                results.get('random', 0) * 0.2 +
-                results.get('greedy', 0) * 0.3 +
-                results.get('defensive', 0) * 0.5
+                results.get('random', 0) * 0.35 +
+                results.get('greedy', 0) * 0.30 +
+                results.get('defensive', 0) * 0.35
             )
             
             # Log to metrics_tracker (0_critical/ and bot_eval/ namespaces)
@@ -1156,23 +1574,36 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None):
-        """Log episode start with all unit starting positions"""
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None):
+        """Log episode start with all unit starting positions and walls"""
         if not self.enabled:
             return
-        
+
         # Reset per-episode counters
         self.episode_step_count = 0
         self.episode_action_count = 0
-            
+
+        # Use bot_name parameter or fall back to current_bot_name attribute
+        effective_bot_name = bot_name or getattr(self, 'current_bot_name', None)
+
         try:
             with open(self.output_file, 'a') as f:
                 timestamp = time.strftime("%H:%M:%S", time.localtime())
                 f.write(f"\n[{timestamp}] === EPISODE START ===\n")
-                
+
                 if scenario_info:
                     f.write(f"[{timestamp}] Scenario: {scenario_info}\n")
-                
+
+                if effective_bot_name:
+                    f.write(f"[{timestamp}] Opponent: {effective_bot_name.capitalize()}Bot\n")
+
+                # Log walls/obstacles for replay
+                if walls:
+                    wall_coords = ";".join([f"({w['col']},{w['row']})" for w in walls])
+                    f.write(f"[{timestamp}] Walls: {wall_coords}\n")
+                else:
+                    f.write(f"[{timestamp}] Walls: none\n")
+
                 # Log all unit starting positions
                 for unit in units_data:
                     if "id" not in unit:
@@ -1183,12 +1614,12 @@ class StepLogger:
                         raise KeyError(f"Unit {unit['id']} missing required 'row' field")
                     if "player" not in unit:
                         raise KeyError(f"Unit {unit['id']} missing required 'player' field")
-                    
+
                     # Use unitType instead of name (name field doesn't exist)
                     unit_type = unit.get("unitType", "Unknown")
                     player_name = f"P{unit['player']}"
                     f.write(f"[{timestamp}] Unit {unit['id']} ({unit_type}) {player_name}: Starting position ({unit['col']}, {unit['row']})\n")
-                
+
                 f.write(f"[{timestamp}] === ACTIONS START ===\n")
                 
         except Exception as e:
@@ -1551,9 +1982,12 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             return env.get_action_mask()
         
         masked_env = ActionMasker(base_env, mask_fn)
-        
+
+        # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
+        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
+
         # Wrap with Monitor for episode statistics
-        return Monitor(masked_env)
+        return Monitor(selfplay_env)
     
     return _init
 
@@ -1569,7 +2003,16 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     # Load training configuration from config files (not script parameters)
     training_config = config.load_training_config(training_config_name)
     model_params = training_config["model_params"]
-    
+
+    # Handle entropy coefficient scheduling if configured
+    # Use START value for model creation; callback will handle the schedule
+    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
+        ent_config = model_params["ent_coef"]
+        start_val = float(ent_config["start"])
+        end_val = float(ent_config["end"])
+        model_params["ent_coef"] = start_val  # Use initial value
+        print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
+
     # Import environment
     W40KEngine, register_environment = setup_imports()
     
@@ -1679,9 +2122,14 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             return env.get_action_mask()
         
         masked_env = ActionMasker(base_env, mask_fn)
-        
+
+        # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
+        # This ensures Player 1 uses a frozen model copy, not the learning agent
+        # Without this, both P0 and P1 actions go into SB3's buffer with P1 getting 0.0 rewards
+        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
+
         # SB3 Required: Monitor wrapped environment
-        env = Monitor(masked_env)
+        env = Monitor(selfplay_env)
     
     # Check if action masking is available (works for both vectorized and single env)
     if n_envs == 1:
@@ -1727,7 +2175,17 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model on {device.upper()}...")
         print("✅ Using MaskablePPO with action masking for tactical combat")
-        model = MaskablePPO(env=env, **model_params)
+
+        # Use specific log directory for continuous TensorBoard graphs across runs
+        tb_log_name = f"{training_config_name}_{agent_key}"
+        specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+        os.makedirs(specific_log_dir, exist_ok=True)
+
+        # Update model_params to use specific directory
+        model_params_copy = model_params.copy()
+        model_params_copy["tensorboard_log"] = specific_log_dir
+
+        model = MaskablePPO(env=env, **model_params_copy)
         # Properly suppress rollout console output
         if hasattr(model, '_logger') and model._logger:
             original_info = model._logger.info
@@ -1742,10 +2200,31 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             # Update any model parameters that might have changed
             model.tensorboard_log = model_params["tensorboard_log"]
             model.verbose = model_params["verbose"]
+            
+            # CRITICAL FIX: Reinitialize logger after loading from checkpoint
+            # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
+            # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
+            from stable_baselines3.common.logger import configure
+
+            # Use specific log directory to ensure continuous TensorBoard graphs across runs
+            # Format: ./tensorboard/{config_name}_{agent_key}/{run_name}
+            # This prevents creating new timestamped subdirectories on each script run
+            tb_log_name = f"{training_config_name}_{agent_key}"
+            specific_log_dir = os.path.join(model.tensorboard_log, tb_log_name)
+
+            # Create directory if it doesn't exist
+            os.makedirs(specific_log_dir, exist_ok=True)
+
+            new_logger = configure(specific_log_dir, ["tensorboard"])
+            model.set_logger(new_logger)
+            print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
-            model = MaskablePPO(env=env, **model_params)
+            # Use same specific directory as above
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            model = MaskablePPO(env=env, **model_params_copy)
     else:
         print(f"📁 Loading existing model: {model_path}")
         try:
@@ -1753,7 +2232,13 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
-            model = MaskablePPO(env=env, **model_params)
+            # Need to create specific directory here too
+            tb_log_name = f"{training_config_name}_{agent_key}"
+            specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+            os.makedirs(specific_log_dir, exist_ok=True)
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            model = MaskablePPO(env=env, **model_params_copy)
     
     return model, env, training_config, model_path
 
@@ -1780,16 +2265,16 @@ def get_agent_scenario_file(config, agent_key, training_config_name):
         if os.path.isfile(agent_scenario_path):
             return agent_scenario_path
         
-        # For Phase 2, try numbered variants (phase2-1, phase2-2, etc.)
-        if training_config_name.startswith("phase2"):
-            for i in range(1, 5):  # Check phase2-1 through phase2-4
-                variant_path = os.path.join(
-                    config.config_dir, "agents", agent_key, "scenarios",
-                    f"{agent_key}_scenario_phase2-{i}.json"
-                )
-                if os.path.isfile(variant_path):
-                    print(f"ℹ️  Phase 2 has multiple scenarios. Using first variant: phase2-{i}")
-                    return variant_path
+        # Try numbered variants for any phase (phase1-1, phase2-1, phase3-1, etc.)
+        # training_config_name is "phase1", "phase2", etc.
+        for i in range(1, 10):  # Check variants -1 through -9
+            variant_path = os.path.join(
+                config.config_dir, "agents", agent_key, "scenarios",
+                f"{agent_key}_scenario_{training_config_name}-{i}.json"
+            )
+            if os.path.isfile(variant_path):
+                print(f"ℹ️  {training_config_name} has multiple scenarios. Using first variant: {training_config_name}-{i}")
+                return variant_path
     
     # Fall back to global scenario.json
     global_scenario = os.path.join(config.config_dir, "scenario.json")
@@ -1800,63 +2285,83 @@ def get_agent_scenario_file(config, agent_key, training_config_name):
         f"No scenario file found for agent '{agent_key}' phase '{training_config_name}'"
     )
 
-def get_scenario_list_for_phase(config, agent_key, training_config_name):
+def get_scenario_list_for_phase(config, agent_key, training_config_name, scenario_type=None):
     """Get list of all available scenarios for a training phase.
-    
+
     Args:
         config: ConfigLoader instance
         agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
         training_config_name: Phase name (e.g., 'phase1', 'phase2')
-    
+        scenario_type: Optional filter - 'self' for self-play, 'bot' for bot training, None for all
+
     Returns:
         List of scenario file paths
     """
     scenario_files = []
-    
+
     if not agent_key:
         # No agent specified, return global scenario
         global_scenario = os.path.join(config.config_dir, "scenario.json")
         if os.path.isfile(global_scenario):
             return [global_scenario]
         return []
-    
+
     # Check for agent-specific scenarios
     scenarios_dir = os.path.join(config.config_dir, "agents", agent_key, "scenarios")
-    
+
     if not os.path.isdir(scenarios_dir):
         # No agent-specific scenarios directory
         return []
-    
-    # For phase1, look for single scenario
-    if training_config_name == "phase1":
-        phase1_scenario = os.path.join(scenarios_dir, f"{agent_key}_scenario_phase1.json")
-        if os.path.isfile(phase1_scenario):
-            return [phase1_scenario]
-    
-    # For phase2, look for numbered variants (phase2-1, phase2-2, etc.)
-    elif training_config_name.startswith("phase2"):
-        for i in range(1, 10):  # Check phase2-1 through phase2-9
-            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_phase2-{i}.json")
+
+    # If specific type requested, only look for that type
+    if scenario_type == "self":
+        # Only self-play scenarios
+        for i in range(1, 10):
+            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-self{i}.json")
             if os.path.isfile(scenario_file):
                 scenario_files.append(scenario_file)
-        if scenario_files:
-            return scenario_files
-    
-    # For phase3, look for numbered variants
-    elif training_config_name.startswith("phase3"):
-        for i in range(1, 10):  # Check phase3-1 through phase3-9
-            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_phase3-{i}.json")
+        return scenario_files
+
+    if scenario_type == "bot":
+        # Only bot scenarios
+        for i in range(1, 10):
+            scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-bot{i}.json")
             if os.path.isfile(scenario_file):
                 scenario_files.append(scenario_file)
-        if scenario_files:
-            return scenario_files
-    
-    # Default: try to find exact match
+        return scenario_files
+
+    # Default behavior: try all patterns
+    # First, try to find exact match (e.g., "phase1.json" without number)
     default_scenario = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}.json")
     if os.path.isfile(default_scenario):
         return [default_scenario]
-    
-    return []
+
+    # Look for numbered variants for ANY phase (phase1-1, phase2-1, phase3-1, etc.)
+    # This works for phase1, phase2, phase3, debug, etc.
+    for i in range(1, 10):  # Check variants -1 through -9
+        scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-{i}.json")
+        if os.path.isfile(scenario_file):
+            scenario_files.append(scenario_file)
+
+    if scenario_files:
+        return scenario_files
+
+    # Look for bot-prefixed variants (phase1-bot1, phase1-bot2, etc.)
+    for i in range(1, 10):
+        scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-bot{i}.json")
+        if os.path.isfile(scenario_file):
+            scenario_files.append(scenario_file)
+
+    if scenario_files:
+        return scenario_files
+
+    # Look for self-prefixed variants (phase1-self1, etc.) as fallback
+    for i in range(1, 10):
+        scenario_file = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-self{i}.json")
+        if os.path.isfile(scenario_file):
+            scenario_files.append(scenario_file)
+
+    return scenario_files
 
 
 def get_agent_scenario_file(config, agent_key, training_config_name, scenario_override=None):
@@ -1939,8 +2444,8 @@ def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None
     # Fallback
     return 100
 
-def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default", 
-                            agent_key=None, new_model=False, append_training=False):
+def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default",
+                            agent_key=None, new_model=False, append_training=False, scenario_override=None):
     """Create or load PPO model for specific agent with configuration following AI_INSTRUCTIONS.md."""
     
     # Check GPU availability
@@ -1956,9 +2461,18 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         # No agent specified, use global config
         training_config = config.load_training_config(training_config_name)
         agent_specific_mode = False
-    
+
     model_params = training_config["model_params"]
-    
+
+    # Handle entropy coefficient scheduling if configured
+    # Use START value for model creation; callback will handle the schedule
+    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
+        ent_config = model_params["ent_coef"]
+        start_val = float(ent_config["start"])
+        end_val = float(ent_config["end"])
+        model_params["ent_coef"] = start_val  # Use initial value
+        print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
+
     # Import environment
     W40KEngine, register_environment = setup_imports()
     
@@ -1969,18 +2483,16 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     cfg = get_config_loader()
     
     # Get scenario file (agent-specific or global)
-    scenario_file = get_agent_scenario_file(cfg, agent_key if agent_specific_mode else None, training_config_name)
+    scenario_file = get_agent_scenario_file(cfg, agent_key if agent_specific_mode else None, training_config_name, scenario_override)
     print(f"✅ Using scenario: {scenario_file}")
     # Load unit registry for multi-agent environment
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
     
-    # CRITICAL FIX: Use rewards_config_name for phase-specific training
-    # When rewards_config is phase-specific (e.g., "..._phase1"), use it as controlled_agent
-    if rewards_config_name not in ["default", "test"]:
-        effective_agent_key = rewards_config_name
-    else:
-        effective_agent_key = agent_key
+    # CRITICAL FIX: Use rewards_config_name for controlled_agent (includes phase suffix)
+    # agent_key is the directory name for config loading
+    # rewards_config_name is the SECTION NAME within the rewards file (e.g., "..._phase1")
+    effective_agent_key = rewards_config_name if rewards_config_name else agent_key
     
     # ✓ CHANGE 8: Check if vectorization is enabled in config
     n_envs = training_config.get("n_envs", 1)
@@ -2027,12 +2539,24 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         # Wrap environment with ActionMasker for MaskablePPO compatibility
         def mask_fn(env):
             return env.get_action_mask()
-        
+
         masked_env = ActionMasker(base_env, mask_fn)
-        
-        # DISABLED: No logging during training for speed
-        # Enhanced logging only during evaluation
-        env = Monitor(masked_env)
+
+        # Check if scenario name contains "bot" to use BotControlledEnv
+        scenario_name = os.path.basename(scenario_file) if scenario_file else ""
+        use_bot_env = "bot" in scenario_name.lower()
+
+        if use_bot_env and EVALUATION_BOTS_AVAILABLE:
+            # Use BotControlledEnv with GreedyBot for bot scenarios
+            training_bot = GreedyBot(randomness=0.15)
+            bot_env = BotControlledEnv(masked_env, training_bot, unit_registry)
+            env = Monitor(bot_env)
+            print(f"🤖 Using GreedyBot (randomness=0.15) for Player 1 (detected 'bot' in scenario name)")
+        else:
+            # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
+            # Without this, P1 never takes actions and the game is broken
+            selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
+            env = Monitor(selfplay_env)
     
     # Agent-specific model path
     model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
@@ -2057,7 +2581,17 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # Determine whether to create new model or load existing
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model for {agent_key} on {device.upper()}...")
-        model = MaskablePPO(env=env, **model_params)
+
+        # Use specific log directory for continuous TensorBoard graphs across runs
+        tb_log_name = f"{training_config_name}_{agent_key}"
+        specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+        os.makedirs(specific_log_dir, exist_ok=True)
+
+        # Update model_params to use specific directory
+        model_params_copy = model_params.copy()
+        model_params_copy["tensorboard_log"] = specific_log_dir
+
+        model = MaskablePPO(env=env, **model_params_copy)
         # Disable rollout logging for multi-agent models too
         if hasattr(model, 'logger') and model.logger:
             model.logger.record = lambda key, value, exclude=None: None if key.startswith('rollout/') else model.logger.record.__wrapped__(key, value, exclude)
@@ -2069,10 +2603,31 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                 raise KeyError("model_params missing required 'tensorboard_log' field")
             model.tensorboard_log = model_params["tensorboard_log"]
             model.verbose = model_params["verbose"]
+            
+            # CRITICAL FIX: Reinitialize logger after loading from checkpoint
+            # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
+            # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
+            from stable_baselines3.common.logger import configure
+
+            # Use specific log directory to ensure continuous TensorBoard graphs across runs
+            # Format: ./tensorboard/{config_name}_{agent_key}/{run_name}
+            # This prevents creating new timestamped subdirectories on each script run
+            tb_log_name = f"{training_config_name}_{agent_key}"
+            specific_log_dir = os.path.join(model.tensorboard_log, tb_log_name)
+
+            # Create directory if it doesn't exist
+            os.makedirs(specific_log_dir, exist_ok=True)
+
+            new_logger = configure(specific_log_dir, ["tensorboard"])
+            model.set_logger(new_logger)
+            print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
-            model = MaskablePPO(env=env, **model_params)
+            # Use same specific directory as above
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            model = MaskablePPO(env=env, **model_params_copy)
     else:
         print(f"📁 Loading existing model: {model_path}")
         try:
@@ -2080,13 +2635,19 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("�' Creating new model instead...")
-            model = MaskablePPO(env=env, **model_params)
+            # Need to create specific directory here too
+            tb_log_name = f"{training_config_name}_{agent_key}"
+            specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+            os.makedirs(specific_log_dir, exist_ok=True)
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            model = MaskablePPO(env=env, **model_params_copy)
     
     return model, env, training_config, model_path
 
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
                                  scenario_list, rotation_interval, total_episodes,
-                                 new_model=False, append_training=False):
+                                 new_model=False, append_training=False, use_bots=False):
     """Train model with automatic scenario rotation for curriculum learning.
     
     Args:
@@ -2099,7 +2660,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         total_episodes: Total episodes for entire training
         new_model: Whether to create new model
         append_training: Whether to continue from existing model
-    
+        use_bots: If True, use bots for Player 1 instead of self-play frozen model
+
     Returns:
         Tuple of (success: bool, final_model, final_env)
     """
@@ -2116,12 +2678,18 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     print(f"Total cycles: ~{total_cycles} complete rotations through all scenarios")
     print(f"{'='*80}\n")
     
-    # Load training config to get model parameters
-    training_config = config.load_training_config(training_config_name)
+    # Load agent-specific training config to get model parameters
+    training_config = config.load_agent_training_config(agent_key, training_config_name)
+    
+    # Raise error if required fields missing - NO FALLBACKS
+    if "max_turns_per_episode" not in training_config:
+        raise KeyError(f"max_turns_per_episode missing from {agent_key} training config phase {training_config_name}")
+    if "max_steps_per_turn" not in training_config:
+        raise KeyError(f"max_steps_per_turn missing from {agent_key} training config phase {training_config_name}")
     
     # Calculate average steps per episode for timestep conversion
-    max_turns = training_config.get("max_turns_per_episode", 5)
-    max_steps = training_config.get("max_steps_per_turn", 8)
+    max_turns = training_config["max_turns_per_episode"]
+    max_steps = training_config["max_steps_per_turn"]
     avg_steps_per_episode = max_turns * max_steps * 0.6  # Estimate: 60% of max
     
     # Get model path
@@ -2138,11 +2706,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
     
-    # Determine effective agent key for rewards
-    if rewards_config_name not in ["default", "test"]:
-        effective_agent_key = rewards_config_name
-    else:
-        effective_agent_key = agent_key
+    # CRITICAL FIX: Use rewards_config_name for controlled_agent (includes phase suffix)
+    # agent_key is the directory name for config loading
+    # rewards_config_name is the SECTION NAME within the rewards file (e.g., "..._phase1")
+    effective_agent_key = rewards_config_name if rewards_config_name else agent_key
     
     current_scenario = scenario_list[0]
     base_env = W40KEngine(
@@ -2155,35 +2722,88 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         quiet=True,
         gym_training_mode=True
     )
-    
+
     # Wrap environment
     def mask_fn(env):
         return env.get_action_mask()
-    
+
     masked_env = ActionMasker(base_env, mask_fn)
-    env = Monitor(masked_env)
+
+    # Create initial bot for bot training mode (needed before model creation)
+    initial_bot = None
+    if use_bots:
+        if EVALUATION_BOTS_AVAILABLE:
+            initial_bot = GreedyBot(randomness=0.15)
+        else:
+            raise ImportError("Evaluation bots not available but use_bots=True")
+
+    # Wrap environment appropriately for bot or self-play training
+    if use_bots and initial_bot:
+        bot_env = BotControlledEnv(masked_env, initial_bot, unit_registry)
+        env = Monitor(bot_env)
+    else:
+        env = Monitor(masked_env)
     
     # Create or load model
     model_params = training_config["model_params"]
-    
+
+    # Handle entropy coefficient scheduling if configured
+    # Use START value for model creation; callback will handle the schedule
+    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
+        ent_config = model_params["ent_coef"]
+        start_val = float(ent_config["start"])
+        end_val = float(ent_config["end"])
+        model_params["ent_coef"] = start_val  # Use initial value
+        print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
+
+    # Use specific log directory for continuous TensorBoard graphs across runs
+    tb_log_name = f"{training_config_name}_{agent_key}"
+    specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+    os.makedirs(specific_log_dir, exist_ok=True)
+
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model: {model_path}")
-        model = MaskablePPO(env=env, **model_params)
+        model_params_copy = model_params.copy()
+        model_params_copy["tensorboard_log"] = specific_log_dir
+        model = MaskablePPO(env=env, **model_params_copy)
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
             model = MaskablePPO.load(model_path, env=env)
+
+            # CRITICAL FIX: Reinitialize logger after loading from checkpoint
+            # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
+            # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
+            from stable_baselines3.common.logger import configure
+            new_logger = configure(specific_log_dir, ["tensorboard"])
+            model.set_logger(new_logger)
+            print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
         except Exception as e:
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
-            model = MaskablePPO(env=env, **model_params)
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            model = MaskablePPO(env=env, **model_params_copy)
     else:
         print(f"⚠️ Model exists but neither --new nor --append specified. Creating new model.")
-        model = MaskablePPO(env=env, **model_params)
+        model_params_copy = model_params.copy()
+        model_params_copy["tensorboard_log"] = specific_log_dir
+        model = MaskablePPO(env=env, **model_params_copy)
     
     # Import metrics tracker
     from metrics_tracker import W40KMetricsTracker
-    
+
+    # Initialize frozen model for self-play
+    # The frozen model is a copy of the learning model used by Player 1
+    frozen_model = None
+    frozen_model_update_frequency = 100  # Episodes between frozen model updates
+    last_frozen_model_update = 0
+
+    # Use the bot created earlier for training mode
+    training_bot = initial_bot
+    if use_bots and training_bot:
+        print(f"🤖 Using GreedyBot (randomness=0.15) for Player 1")
+
     # Determine tensorboard log name for continuous logging
     tb_log_name = f"{training_config_name}_{agent_key}"
     
@@ -2192,13 +2812,20 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Create metrics tracker for entire rotation training
     metrics_tracker = W40KMetricsTracker(agent_key, model_tensorboard_dir)
-    print(f"📈 Metrics tracking enabled for agent: {agent_key}")
+    # print(f"📈 Metrics tracking enabled for agent: {agent_key}")
+    
+    # Create metrics callback ONCE before loop (not inside it)
+    from stable_baselines3.common.callbacks import CallbackList
+    metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=effective_agent_key)
     
     # Training loop with scenario rotation
     episodes_trained = 0
     cycle = 0
     scenario_idx = 0
-    
+
+    # Global start time for accurate elapsed time tracking across rotations
+    global_start_time = time.time()
+
     while episodes_trained < total_episodes:
         current_scenario = scenario_list[scenario_idx]
         scenario_name = os.path.basename(current_scenario).replace(f"{agent_key}_scenario_", "").replace(".json", "")
@@ -2219,10 +2846,31 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             quiet=True,
             gym_training_mode=True
         )
-        
-        # Wrap environment
+
+        # Wrap environment with action masking first
         masked_env = ActionMasker(base_env, mask_fn)
-        env = Monitor(masked_env)
+
+        # For bot training, use BotControlledEnv to handle Player 1's bot actions
+        if use_bots:
+            bot_env = BotControlledEnv(masked_env, training_bot, unit_registry)
+            env = Monitor(bot_env)
+        else:
+            # CRITICAL: Update frozen model periodically for proper self-play
+            if episodes_trained - last_frozen_model_update >= frozen_model_update_frequency or frozen_model is None:
+                # Save current model to temp file and load as frozen copy
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as f:
+                    temp_path = f.name
+                model.save(temp_path)
+                frozen_model = MaskablePPO.load(temp_path)
+                os.unlink(temp_path)  # Clean up temp file
+                last_frozen_model_update = episodes_trained
+                if episodes_trained > 0:
+                    print(f"  🔄 Self-play: Updated frozen opponent (Episode {episodes_trained})")
+
+            # Wrap with SelfPlayWrapper for proper self-play training
+            selfplay_env = SelfPlayWrapper(masked_env, frozen_model=frozen_model, update_frequency=frozen_model_update_frequency)
+            env = Monitor(selfplay_env)
         
         # Update model's environment
         model.set_env(env)
@@ -2238,12 +2886,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             total_episodes_override=total_episodes,
             max_episodes_override=episodes_this_iteration,
             scenario_info=scenario_display,
-            global_episode_offset=episodes_trained
+            global_episode_offset=episodes_trained,
+            global_start_time=global_start_time
         )
-        
-        # Add metrics collection callback
-        from stable_baselines3.common.callbacks import CallbackList
-        metrics_callback = MetricsCollectionCallback(metrics_tracker, model)
         
         # Link metrics_tracker to bot evaluation callback
         for callback in rotation_callbacks:
@@ -2260,6 +2905,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             reset_num_timesteps=(episodes_trained == 0),  # Only reset on first iteration
             tb_log_name=tb_log_name,  # Same name = continuous graph
             callback=enhanced_callbacks,  # ← CHANGE FROM rotation_callbacks
+            log_interval=timesteps_this_iteration + 1,
             progress_bar=False
         )
         
@@ -2280,7 +2926,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # Update counters
         episodes_trained += episodes_this_iteration
         scenario_idx = (scenario_idx + 1) % len(scenario_list)
-        
+
         # Check if we completed a full cycle
         if scenario_idx == 0:
             cycle += 1
@@ -2300,11 +2946,60 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     print(f"   Complete cycles: {cycle}")
     print(f"   Final model: {model_path}")
     print(f"{'='*80}\n")
-    
+
+    # Run final comprehensive bot evaluation
+    if EVALUATION_BOTS_AVAILABLE:
+        if 'bot_eval_final' not in training_config['callback_params']:
+            print("⚠️  Warning: 'bot_eval_final' not found in callback_params. Skipping final evaluation.")
+        else:
+            n_final = training_config['callback_params']['bot_eval_final']
+            if n_final > 0:
+                print(f"\n{'='*80}")
+                print(f"🤖 FINAL BOT EVALUATION ({n_final} episodes per bot across all scenarios)")
+                print(f"{'='*80}\n")
+
+                bot_results = evaluate_against_bots(
+                    model=model,
+                    training_config_name=training_config_name,
+                    rewards_config_name=rewards_config_name,
+                    n_episodes=n_final,
+                    controlled_agent=effective_agent_key,
+                    show_progress=True,
+                    deterministic=True
+                )
+
+                # Log final results to metrics tracker
+                if metrics_tracker and bot_results:
+                    final_bot_results = {
+                        'random': bot_results.get('random'),
+                        'greedy': bot_results.get('greedy'),
+                        'defensive': bot_results.get('defensive'),
+                        'combined': bot_results.get('combined', 0)
+                    }
+                    metrics_tracker.log_bot_evaluations(final_bot_results)
+
+                # Print summary
+                print(f"\n{'='*80}")
+                print(f"📊 FINAL BOT EVALUATION RESULTS")
+                print(f"{'='*80}")
+                if bot_results:
+                    for bot_name in ['random', 'greedy', 'defensive']:
+                        if bot_name in bot_results:
+                            win_rate = bot_results[bot_name] * 100
+                            wins = bot_results.get(f'{bot_name}_wins', 0)
+                            losses = bot_results.get(f'{bot_name}_losses', 0)
+                            draws = bot_results.get(f'{bot_name}_draws', 0)
+                            print(f"  vs {bot_name.capitalize()}Bot:    {win_rate:5.1f}% ({wins}W-{losses}L-{draws}D)")
+
+                    combined = bot_results.get('combined', 0) * 100
+                    print(f"  Combined Score: {combined:5.1f}%")
+                print(f"{'='*80}\n")
+
     return True, model, env
 
 def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
-                   total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0):
+                   total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0,
+                   global_start_time=None):
     W40KEngine, _ = setup_imports()
     callbacks = []
     
@@ -2324,21 +3019,43 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         # Use overrides for rotation mode
         total_eps = total_episodes_override if total_episodes_override else max_episodes
         cycle_max_eps = max_episodes_override if max_episodes_override else max_episodes
-        
+
+        # Detect rotation mode
+        is_rotation_mode = (max_episodes_override is not None)
+
         # Recalculate expected_timesteps for the actual cycle length
         if max_episodes_override:
             expected_timesteps = max_episodes_override * max_steps_per_episode
-        
+
         episode_callback = EpisodeTerminationCallback(
             cycle_max_eps,  # Use cycle length, not total
-            expected_timesteps, 
+            expected_timesteps,
             verbose=1,
             total_episodes=total_eps,
-            scenario_info=scenario_info
+            scenario_info=scenario_info,
+            disable_early_stopping=is_rotation_mode,  # Let model.learn() control timesteps in rotation
+            global_start_time=global_start_time
         )
         episode_callback.global_episode_offset = global_episode_offset
         callbacks.append(episode_callback)
-    
+
+    # Add entropy coefficient schedule callback if configured
+    if "model_params" in training_config and "ent_coef" in training_config["model_params"]:
+        ent_coef = training_config["model_params"]["ent_coef"]
+        if isinstance(ent_coef, dict) and "start" in ent_coef and "end" in ent_coef:
+            start_ent = float(ent_coef["start"])
+            end_ent = float(ent_coef["end"])
+            total_eps = total_episodes_override if total_episodes_override else training_config["total_episodes"]
+
+            entropy_callback = EntropyScheduleCallback(
+                start_ent=start_ent,
+                end_ent=end_ent,
+                total_episodes=total_eps,
+                verbose=1
+            )
+            callbacks.append(entropy_callback)
+            print(f"✅ Added entropy schedule callback: {start_ent} → {end_ent} over {total_eps} episodes")
+
     # Evaluation callback - test model periodically with logging enabled
     # Load scenario and unit registry for evaluation callback
     from ai.unit_registry import UnitRegistry
@@ -2395,7 +3112,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     
     return callbacks
 
-def train_model(model, training_config, callbacks, model_path, training_config_name, rewards_config_name):
+def train_model(model, training_config, callbacks, model_path, training_config_name, rewards_config_name, controlled_agent=None):
     """Execute the training process with metrics tracking."""
     
     # Import metrics tracker
@@ -2436,32 +3153,32 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
                 raise KeyError(f"Training config missing required 'max_steps_per_turn' field")
             max_turns_per_episode = training_config["max_turns_per_episode"]
             max_steps_per_turn = training_config["max_steps_per_turn"]
-            total_timesteps = total_episodes * max_turns_per_episode * max_steps_per_turn
             
-            # CRITICAL FIX: Add safety margin to prevent infinite training
-            # Allow 50% buffer for episode completion, but cap at 2x to prevent runaway
-            safety_timesteps = min(
-                int(total_timesteps * 1.5),
-                total_timesteps * 2
-            )
+            # CRITICAL FIX: Episode count controlled by EpisodeTerminationCallback, not timesteps
+            # Use 5x multiplier to ensure timestep limit never stops training early
+            # This accounts for complex scenarios (more units = longer episodes)
+            theoretical_timesteps = total_episodes * max_turns_per_episode * max_steps_per_turn
+            total_timesteps = theoretical_timesteps * 5
             
             print(f"🎮 Training Mode: Episode-based ({total_episodes:,} episodes)")
-            print(f"📊 Expected timesteps: {total_timesteps:,}")
-            print(f"🛡️ Safety limit: {safety_timesteps:,} (prevents overtraining)")
+            print(f"📊 Theoretical timesteps: {theoretical_timesteps:,}")
+            print(f"🛡️ Timestep limit (5x buffer): {total_timesteps:,}")
+            print(f"💡 EpisodeTerminationCallback will stop at exactly {total_episodes} episodes")
         else:
             raise ValueError("Training config must have either 'total_timesteps' or 'total_episodes'")
         
-        print(f"📊 Progress tracking: Episodes are primary metric (AI_TURN.md compliance)")
-        print(f"📈 Metrics tracking enabled for agent: {agent_name}")
+        # Startup info (disabled for cleaner output)
+        # print(f"📊 Progress tracking: Episodes are primary metric (AI_TURN.md compliance)")
+        # print(f"📈 Metrics tracking enabled for agent: {agent_name}")
         
         # Enhanced callbacks with metrics collection
-        metrics_callback = MetricsCollectionCallback(metrics_tracker, model)
+        metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=controlled_agent)
         
         # Attach metrics_tracker to bot_eval_callback if it exists
         for callback in callbacks:
             if isinstance(callback, BotEvaluationCallback):
                 callback.metrics_tracker = metrics_tracker
-                print(f"✅ Linked BotEvaluationCallback to metrics_tracker")
+                # print(f"✅ Linked BotEvaluationCallback to metrics_tracker")
         
         all_callbacks = callbacks + [metrics_callback]
         enhanced_callbacks = CallbackList(all_callbacks)
@@ -2525,7 +3242,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         traceback.print_exc()
         return False
 
-def test_trained_model(model, num_episodes, training_config_name="default"):
+def test_trained_model(model, num_episodes, training_config_name="default", agent_key=None, rewards_config_name="default"):
     """Test the trained model."""
     
     W40KEngine, _ = setup_imports()
@@ -2536,9 +3253,9 @@ def test_trained_model(model, num_episodes, training_config_name="default"):
     unit_registry = UnitRegistry()
     
     env = W40KEngine(
-        rewards_config="default",
+        rewards_config=rewards_config_name,
         training_config_name=training_config_name,
-        controlled_agent=None,
+        controlled_agent=agent_key,
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
@@ -2563,8 +3280,9 @@ def test_trained_model(model, num_episodes, training_config_name="default"):
             step_count += 1
         
         total_rewards.append(episode_reward)
-        
-        if info['winner'] == 1:  # AI won
+
+        # CRITICAL FIX: Learning agent is Player 0, not Player 1!
+        if info.get('winner') == 0:  # AI (Player 0) won
             wins += 1
     
     if num_episodes <= 0:
@@ -2809,8 +3527,13 @@ def generate_steplog_and_replay(config, args):
             json.dump(scenario_data, f, indent=2)
         
         # Load training config to override max_turns for this environment
-        training_config = config.load_training_config(args.training_config)
-        max_turns_override = training_config.get("max_turns_per_episode", 5)
+        # Test-only mode requires agent parameter
+        if not args.agent:
+            raise ValueError("--agent parameter required for test-only mode")
+        training_config = config.load_agent_training_config(args.agent, args.training_config)
+        if "max_turns_per_episode" not in training_config:
+            raise KeyError(f"max_turns_per_episode missing from {args.agent} training config phase {args.training_config}")
+        max_turns_override = training_config["max_turns_per_episode"]
         print(f"🎯 Using max_turns_per_episode: {max_turns_override} from config '{args.training_config}'")
         
         # Temporarily override game_config max_turns for this environment
@@ -3298,15 +4021,16 @@ def main():
         # Sync configs to frontend automatically
         try:
             subprocess.run(['node', 'scripts/copy-configs.js'], 
-                         cwd=project_root, check=True, capture_output=True, text=True)
+                         cwd=project_root, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Config sync failed: {e}")
         
         # Setup environment and configuration
         config = get_config_loader()
         
-        # Ensure scenario exists
-        ensure_scenario()
+        # Ensure scenario exists ONLY for generic training (no agent specified)
+        if not args.agent:
+            ensure_scenario()
         
         # Convert existing steplog mode
         if args.convert_steplog:
@@ -3328,8 +4052,13 @@ def main():
             # Use config fallback for total_episodes if not provided
             total_episodes = args.total_episodes
             if total_episodes is None:
-                training_config = config.load_training_config(args.training_config)
-                total_episodes = training_config.get("total_episodes", 500)  # Reasonable default
+                # Orchestration mode requires agent parameter
+                if not args.agent:
+                    raise ValueError("--agent parameter required when using --orchestrate without --total-episodes")
+                training_config = config.load_agent_training_config(args.agent, args.training_config)
+                if "total_episodes" not in training_config:
+                    raise KeyError(f"total_episodes missing from {args.agent} training config phase {args.training_config}")
+                total_episodes = training_config["total_episodes"]
                 print(f"📊 Using total_episodes from config: {total_episodes}")
             else:
                 print(f"📊 Using total_episodes from command line: {total_episodes}")
@@ -3344,21 +4073,118 @@ def main():
             )
             return 0 if results else 1
 
+        # Test-only mode - check BEFORE training
+        elif args.test_only:
+            if not args.agent:
+                raise ValueError("--agent parameter required for --test-only mode")
+            
+            # Load existing model
+            model_path = config.get_model_path()
+            model_path = model_path.replace('.zip', f'_{args.agent}.zip')
+            
+            if not os.path.exists(model_path):
+                print(f"❌ Model not found: {model_path}")
+                return 1
+            
+            print(f"📁 Loading model: {model_path}")
+            
+            # Create minimal environment for model loading
+            W40KEngine, _ = setup_imports()
+            from ai.unit_registry import UnitRegistry
+            cfg = get_config_loader()
+            scenario_file = get_agent_scenario_file(cfg, args.agent, args.training_config)
+            unit_registry = UnitRegistry()
+            
+            # CRITICAL FIX: Use rewards_config for controlled_agent (includes phase suffix)
+            effective_agent_key = args.rewards_config if args.rewards_config else args.agent
+
+            base_env = W40KEngine(
+                rewards_config=args.rewards_config,
+                training_config_name=args.training_config,
+                controlled_agent=effective_agent_key,
+                active_agents=None,
+                scenario_file=scenario_file,
+                unit_registry=unit_registry,
+                quiet=True,
+                gym_training_mode=True
+            )
+            
+            def mask_fn(env):
+                return env.get_action_mask()
+            
+            from sb3_contrib.common.wrappers import ActionMasker
+            masked_env = ActionMasker(base_env, mask_fn)
+            
+            # Load model
+            model = MaskablePPO.load(model_path, env=masked_env)
+            
+            # Run bot evaluation ONLY
+            # Use test_episodes if provided, otherwise default to 50 per bot
+            episodes_per_bot = args.test_episodes if args.test_episodes else 50
+            
+            print("\n" + "="*80)
+            print("🎯 RUNNING BOT EVALUATION")
+            print(f"Episodes per bot: {episodes_per_bot} (Total: {episodes_per_bot * 3})")
+            print("="*80)
+            
+            results = evaluate_against_bots(
+                model=model,
+                training_config_name=args.training_config,
+                rewards_config_name=args.rewards_config,
+                n_episodes=episodes_per_bot,
+                controlled_agent=effective_agent_key,
+                show_progress=True,
+                deterministic=True
+            )
+            
+            # Display results
+            print("\n" + "="*80)
+            print("📊 BOT EVALUATION RESULTS")
+            print("="*80)
+            print(f"vs RandomBot:     {results['random']:.2f} (W:{results['random_wins']} L:{results['random_losses']} D:{results['random_draws']})")
+            print(f"vs GreedyBot:     {results['greedy']:.2f} (W:{results['greedy_wins']} L:{results['greedy_losses']} D:{results['greedy_draws']})")
+            print(f"vs DefensiveBot:  {results['defensive']:.2f} (W:{results['defensive_wins']} L:{results['defensive_losses']} D:{results['defensive_draws']})")
+            print(f"\nCombined Score:   {results['combined']:.2f}")
+            print("="*80 + "\n")
+            
+            masked_env.close()
+            return 0
+
         # Single agent training mode
         elif args.agent:
             # Check if scenario rotation is requested
-            if args.scenario == "all":
-                # Get list of all scenarios for this phase
-                scenario_list = get_scenario_list_for_phase(config, args.agent, args.training_config)
-                
-                if len(scenario_list) <= 1:
-                    print(f"⚠️  Only {len(scenario_list)} scenario found for {args.training_config}. Rotation not needed.")
-                    print(f"ℹ️  Falling back to standard training...")
-                    args.scenario = None  # Clear to use standard path
+            if args.scenario == "all" or args.scenario == "self" or args.scenario == "bot":
+                # Get list of scenarios based on type
+                if args.scenario == "self" or args.scenario == "all":
+                    # "all" and "self" both mean: use self-play scenarios
+                    scenario_list = get_scenario_list_for_phase(config, args.agent, args.training_config, scenario_type="self")
+                    scenario_type_name = "self-play"
+                else:  # args.scenario == "bot"
+                    scenario_list = get_scenario_list_for_phase(config, args.agent, args.training_config, scenario_type="bot")
+                    scenario_type_name = "bot"
+
+                # NO FALLBACKS - if no scenarios found, ERROR
+                if len(scenario_list) == 0:
+                    raise FileNotFoundError(
+                        f"No {scenario_type_name} scenarios found for {args.training_config}. "
+                        f"Expected files matching: {args.agent}_scenario_{args.training_config}-{'self' if scenario_type_name == 'self-play' else 'bot'}*.json"
+                    )
+
+                print(f"📋 Found {len(scenario_list)} {scenario_type_name} scenario(s):")
+                for s in scenario_list:
+                    print(f"   - {os.path.basename(s)}")
+
+                if len(scenario_list) == 1:
+                    # Single scenario - use it directly without rotation
+                    # Extract scenario name from path for override
+                    scenario_name = os.path.basename(scenario_list[0]).replace(f"{args.agent}_scenario_", "").replace(".json", "")
+                    args.scenario = scenario_name  # Set specific scenario to use
                 else:
-                    # Load training config to get total episodes
-                    training_config = config.load_training_config(args.training_config)
-                    total_episodes = training_config.get("total_episodes", 1000)
+                    # Load agent-specific training config to get total episodes
+                    training_config = config.load_agent_training_config(args.agent, args.training_config)
+                    if "total_episodes" not in training_config:
+                        raise KeyError(f"total_episodes missing from {args.agent} training config phase {args.training_config}")
+                    total_episodes = training_config["total_episodes"]
                     
                     # Determine rotation interval
                     config_rotation = training_config.get("rotation_interval", None)
@@ -3383,11 +4209,12 @@ def main():
                         rotation_interval=rotation_interval,
                         total_episodes=total_episodes,
                         new_model=args.new,
-                        append_training=args.append
+                        append_training=args.append,
+                        use_bots=(args.scenario == "bot")
                     )
                     
                     if success and args.test_episodes > 0:
-                        test_trained_model(model, args.test_episodes, args.training_config)
+                        test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config)
                     
                     return 0 if success else 1
             
@@ -3398,14 +4225,16 @@ def main():
                 args.rewards_config,
                 agent_key=args.agent,
                 new_model=args.new,
-                append_training=args.append
+                append_training=args.append,
+                scenario_override=args.scenario
             )
             
             # Setup callbacks with agent-specific model path
             callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
             
             # Train model
-            success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config)
+            # CRITICAL: Use rewards_config for controlled_agent (includes phase suffix like "_phase1")
+            success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config, controlled_agent=args.rewards_config)
             
             if success:
                 # Only test if episodes > 0
@@ -3416,48 +4245,6 @@ def main():
                 return 0
             else:
                 return 1
-
-        elif args.test_only:
-            # Load existing model for testing only
-            model_path = config.get_model_path()
-            # Ensure model directory exists
-            os.makedirs(os.path.dirname(model_path), exist_ok=True)
-            print(f"📁 Model path: {model_path}")
-            
-            # Determine whether to create new model or load existing
-            if not os.path.exists(model_path):
-                print(f"❌ Model not found: {model_path}")
-                return 1
-            
-            W40KEngine, _ = setup_imports()
-            # Load scenario and unit registry for testing
-            from ai.unit_registry import UnitRegistry
-            cfg = get_config_loader()
-            scenario_file = os.path.join(cfg.config_dir, "scenario.json")
-            unit_registry = UnitRegistry()
-            
-            env = W40KEngine(
-                rewards_config=args.rewards_config,
-                training_config_name=args.training_config,
-                controlled_agent=None,
-                active_agents=None,
-                scenario_file=scenario_file,
-                unit_registry=unit_registry,
-                quiet=True
-            )
-            
-            # Connect step logger after environment creation
-            print(f"STEP LOGGER ASSIGNMENT DEBUG: step_logger={step_logger}, enabled={step_logger.enabled if step_logger else 'None'}")
-            if step_logger:
-                env.step_logger = step_logger
-                print(f"✅ StepLogger connected directly to W40KEngine: {env.step_logger}")
-            else:
-                print("❌ No step logger available")
-            model = MaskablePPO.load(model_path, env=env)
-            if args.test_episodes is None:
-                raise ValueError("--test-episodes is required for test-only mode")
-            test_trained_model(model, args.test_episodes, args.training_config)
-            return 0
         
         else:
             # Generic training mode
@@ -3475,12 +4262,12 @@ def main():
         callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
         
         # Train model
-        success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config)
+        success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config, controlled_agent=args.agent)
         
         if success:
             # Only test if episodes > 0
             if args.test_episodes > 0:
-                test_trained_model(model, args.test_episodes, args.training_config)
+                test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config)
                 
                 # Save training replay with our unified system
                 if hasattr(env, 'replay_logger'):

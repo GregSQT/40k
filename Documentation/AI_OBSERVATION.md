@@ -1,8 +1,8 @@
 # AI_OBSERVATION.md
 ## The Canonical Reference for Agent Observation & Training Systems
 
-> **📍 File Location**: Save as `Documentation/AI_OBSERVATION.md`  
-> **Status**: ✅ CANONICAL REFERENCE (December 2025)  
+> **📍 File Location**: Save as `Documentation/AI_OBSERVATION.md`
+> **Status**: ✅ CANONICAL REFERENCE (January 2025)
 > **Version**: 2.1 - Asymmetric Observation System
 
 ---
@@ -18,9 +18,9 @@
 - ✅ Migration procedures
 
 **Version History:**
-- **v2.1 (December 2025)**: 295-float asymmetric observation (current) ⭐
-- v2.0 (December 2025): 165-float pure RL (archived)
-- v1.0 (October 2025): 150-float egocentric (never deployed)
+- **v2.1 (January 2025)**: 295-float asymmetric observation (current) ⭐
+- v2.0 (December 2024): 165-float pure RL (archived)
+- v1.0 (October 2024): 150-float egocentric (never deployed)
 
 **Related Documents:**
 - `AI_TURN.md` → Game state management (authoritative)
