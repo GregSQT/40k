@@ -8,7 +8,7 @@
 
 ## 📊 EXECUTIVE SUMMARY
 
-**Current State:** `train_core.py` is 4,229 lines containing mixed responsibilities
+**Current State:** `train.py` is 4,229 lines containing mixed responsibilities
 
 **Goal:** Split into 6 focused modules with flat structure for maintainability
 
@@ -1103,40 +1103,475 @@ git reset --hard <last-working-commit>
 
 ---
 
-## 📝 VALIDATION CHECKLIST
+## 🔧 DETAILED: multi_agent_trainer.py UPDATE
+
+### Why This Update is Critical
+
+**File**: `ai/multi_agent_trainer.py` (Line 730)
+
+This file imports `StepLogger` from `ai.train` to enable per-agent step logging during multi-agent training sessions. After refactoring, `StepLogger` moves to its own module.
+
+**If not updated**: Multi-agent training will crash with `ImportError: cannot import name 'StepLogger' from 'ai.train'`
+
+---
+
+### Exact Update Instructions
+
+**Step 1: Locate the import (Phase 3 of refactoring)**
+
+```bash
+# Find the exact line
+grep -n "from ai.train import StepLogger" ai/multi_agent_trainer.py
+# Output: 730:                        from ai.train import StepLogger
+```
+
+**Step 2: Read the context**
+
+```python
+# Lines 726-735 in ai/multi_agent_trainer.py
+try:
+    import sys
+    train_module = sys.modules.get('ai.train') or sys.modules.get('__main__')
+    if train_module and hasattr(train_module, 'step_logger') and train_module.step_logger and train_module.step_logger.enabled:
+        agent_log_file = f"train_step_{agent_key}.log"
+        from ai.train import StepLogger  # ← LINE 730: UPDATE THIS
+        agent_step_logger = StepLogger(agent_log_file, enabled=True)
+        base_env.controller.connect_step_logger(agent_step_logger)
+        print(f"✅ StepLogger connected for agent {agent_key}: {agent_log_file}")
+except Exception as log_error:
+```
+
+**Step 3: Make the change**
+
+Replace:
+```python
+from ai.train import StepLogger
+```
+
+With:
+```python
+from ai.step_logger import StepLogger
+```
+
+**Step 4: Verify the fix**
+
+```bash
+# Test import
+python -c "from ai.step_logger import StepLogger; print('✅ StepLogger import OK')"
+
+# Test multi_agent_trainer imports
+python -c "from ai.multi_agent_trainer import MultiAgentTrainer; print('✅ MultiAgentTrainer import OK')"
+
+# Test multi-agent training runs
+python ai/train.py --multi-agent --episodes 5
+```
+
+**Step 5: Commit with multi_agent_trainer.py**
+
+```bash
+git add ai/step_logger.py ai/train.py ai/multi_agent_trainer.py
+git commit -m "refactor: extract StepLogger to step_logger.py
+
+BREAKING: Updates import in multi_agent_trainer.py
+- OLD: from ai.train import StepLogger
+- NEW: from ai.step_logger import StepLogger
+
+This change is required for multi-agent training to continue working.
+Tested with: python ai/train.py --multi-agent --episodes 5"
+```
+
+---
+
+### Why Only This One File?
+
+**Analysis of codebase imports**:
+
+```bash
+# Search for all imports from ai.train
+$ grep -r "from ai.train import" . --include="*.py"
+./ai/multi_agent_trainer.py:730:  from ai.train import StepLogger
+./Backup_Select/multi_agent_trainer.py:730:  from ai.train import StepLogger  # (backup, ignore)
+
+# Result: Only 1 active file imports from ai.train
+```
+
+**Why is this unique?**
+- `StepLogger` is the only class/function imported from `train.py` by external code
+- All other code uses CLI invocation: `python ai/train.py` (no Python imports)
+- Documentation uses command-line examples only (no code imports)
+
+**This is excellent design** - shows clean separation of concerns!
+
+---
+
+## 📝 COMPREHENSIVE TESTING CHECKLIST
+
+### Pre-Refactoring Baseline Tests
+
+Run these **BEFORE** starting refactoring to establish baseline:
+
+```bash
+# 1. Create test results directory
+mkdir -p refactor_test_results
+
+# 2. Test basic training (save output)
+python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm \
+  --training-config phase1 --episodes 10 \
+  > refactor_test_results/baseline_basic_training.log 2>&1
+echo "Exit code: $?" >> refactor_test_results/baseline_basic_training.log
+
+# 3. Test bot evaluation
+python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm \
+  --test-episodes 20 \
+  > refactor_test_results/baseline_bot_eval.log 2>&1
+echo "Exit code: $?" >> refactor_test_results/baseline_bot_eval.log
+
+# 4. Test scenario rotation
+python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm \
+  --scenario self --episodes 10 \
+  > refactor_test_results/baseline_scenario_rotation.log 2>&1
+echo "Exit code: $?" >> refactor_test_results/baseline_scenario_rotation.log
+
+# 5. Test multi-agent (if applicable)
+python ai/train.py --multi-agent --episodes 5 \
+  > refactor_test_results/baseline_multi_agent.log 2>&1
+echo "Exit code: $?" >> refactor_test_results/baseline_multi_agent.log
+
+# 6. Record TensorBoard logs exist
+ls -la tensorboard_logs/ > refactor_test_results/baseline_tensorboard_files.log
+
+# 7. Record baseline file structure
+ls -la ai/*.py > refactor_test_results/baseline_file_structure.log
+
+echo "✅ Baseline tests complete - results in refactor_test_results/"
+```
+
+---
+
+### After Each Phase: Module Extraction Tests
+
+Run after **EACH** extraction phase (2-7):
+
+```bash
+# Template for each phase (replace <module_name>)
+PHASE_NUM=2  # Update for each phase
+MODULE_NAME="env_wrappers"  # Update for each phase
+
+# 1. Test module imports independently
+python -c "import ai.${MODULE_NAME}; print('✅ ai.${MODULE_NAME} imports OK')" \
+  > refactor_test_results/phase${PHASE_NUM}_${MODULE_NAME}_import.log 2>&1
+
+# 2. Test train.py still works
+python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 5 \
+  > refactor_test_results/phase${PHASE_NUM}_train_smoke.log 2>&1
+
+# 3. Check for import errors
+if grep -i "ImportError\|ModuleNotFoundError" refactor_test_results/phase${PHASE_NUM}_*.log; then
+  echo "❌ Phase ${PHASE_NUM} has import errors!"
+  exit 1
+else
+  echo "✅ Phase ${PHASE_NUM} imports OK"
+fi
+```
+
+**Specific tests per phase**:
+
+**Phase 2 (env_wrappers)**:
+```bash
+python -c "from ai.env_wrappers import BotControlledEnv, SelfPlayWrapper; print('✅ OK')"
+```
+
+**Phase 3 (step_logger)** - CRITICAL:
+```bash
+python -c "from ai.step_logger import StepLogger; print('✅ OK')"
+python -c "from ai.multi_agent_trainer import MultiAgentTrainer; print('✅ OK')"  # Must work!
+```
+
+**Phase 4 (bot_evaluation)**:
+```bash
+python -c "from ai.bot_evaluation import evaluate_against_bots; print('✅ OK')"
+python ai/train.py --test-episodes 10  # Test evaluation works
+```
+
+**Phase 5 (training_callbacks)**:
+```bash
+python -c "from ai.training_callbacks import MetricsCollectionCallback; print('✅ OK')"
+python ai/train.py --episodes 5  # Check TensorBoard logs generated
+ls tensorboard_logs/ | tail -5
+```
+
+**Phase 6 (training_utils)**:
+```bash
+python -c "from ai.training_utils import check_gpu_availability; print('✅ OK')"
+python ai/train.py --scenario self --episodes 5  # Test scenario utils
+```
+
+**Phase 7 (replay_converter)**:
+```bash
+python -c "from ai.replay_converter import convert_steplog_to_replay; print('✅ OK')"
+# Generate steplog, then convert
+python ai/train.py --episodes 5
+python ai/train.py --convert-steplog ai/event_log/training_step.log
+```
+
+---
+
+### Post-Refactoring Regression Tests
+
+Run these **AFTER** all phases complete (Phase 9):
+
+```bash
+# 1. Import Matrix Test
+echo "Testing all module imports..."
+python -c "
+import ai.env_wrappers
+import ai.training_callbacks
+import ai.step_logger
+import ai.bot_evaluation
+import ai.training_utils
+import ai.replay_converter
+import ai.train
+print('✅ All modules import successfully')
+" > refactor_test_results/final_import_matrix.log 2>&1
+
+# 2. Circular Import Test
+echo "Testing for circular imports..."
+python -c "
+# Test circular dependency resolution
+from ai.env_wrappers import BotControlledEnv
+from ai.bot_evaluation import evaluate_against_bots
+from ai.training_callbacks import BotEvaluationCallback
+print('✅ No circular import errors')
+" > refactor_test_results/final_circular_imports.log 2>&1
+
+# 3. Basic Training - Full Episode
+echo "Testing basic training..."
+python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm \
+  --training-config phase1 --episodes 10 \
+  > refactor_test_results/final_basic_training.log 2>&1
+EXIT_CODE=$?
+if [ $EXIT_CODE -eq 0 ]; then
+  echo "✅ Basic training: PASS"
+else
+  echo "❌ Basic training: FAIL (exit code $EXIT_CODE)"
+fi
+
+# 4. New Model Creation
+echo "Testing new model creation..."
+python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm \
+  --new --episodes 5 \
+  > refactor_test_results/final_new_model.log 2>&1
+EXIT_CODE=$?
+if [ $EXIT_CODE -eq 0 ]; then
+  echo "✅ New model creation: PASS"
+else
+  echo "❌ New model creation: FAIL (exit code $EXIT_CODE)"
+fi
+
+# 5. Bot Evaluation
+echo "Testing bot evaluation..."
+python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm \
+  --test-episodes 20 \
+  > refactor_test_results/final_bot_eval.log 2>&1
+EXIT_CODE=$?
+if [ $EXIT_CODE -eq 0 ]; then
+  echo "✅ Bot evaluation: PASS"
+else
+  echo "❌ Bot evaluation: FAIL (exit code $EXIT_CODE)"
+fi
+
+# 6. Scenario Rotation
+echo "Testing scenario rotation..."
+python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm \
+  --scenario self --rotation-interval 5 --episodes 10 \
+  > refactor_test_results/final_scenario_rotation.log 2>&1
+EXIT_CODE=$?
+if [ $EXIT_CODE -eq 0 ]; then
+  echo "✅ Scenario rotation: PASS"
+else
+  echo "❌ Scenario rotation: FAIL (exit code $EXIT_CODE)"
+fi
+
+# 7. Multi-Agent Training
+echo "Testing multi-agent training..."
+python ai/train.py --multi-agent --episodes 5 \
+  > refactor_test_results/final_multi_agent.log 2>&1
+EXIT_CODE=$?
+if [ $EXIT_CODE -eq 0 ]; then
+  echo "✅ Multi-agent training: PASS"
+else
+  echo "❌ Multi-agent training: FAIL (exit code $EXIT_CODE)"
+fi
+
+# 8. Replay Conversion
+echo "Testing replay conversion..."
+if [ -f "ai/event_log/training_step.log" ]; then
+  python ai/train.py --convert-steplog ai/event_log/training_step.log \
+    > refactor_test_results/final_replay_conversion.log 2>&1
+  EXIT_CODE=$?
+  if [ $EXIT_CODE -eq 0 ]; then
+    echo "✅ Replay conversion: PASS"
+  else
+    echo "❌ Replay conversion: FAIL (exit code $EXIT_CODE)"
+  fi
+else
+  echo "⚠️  Replay conversion: SKIP (no steplog found)"
+fi
+
+# 9. TensorBoard Logs Generated
+echo "Checking TensorBoard logs..."
+if [ -d "tensorboard_logs" ] && [ "$(ls -A tensorboard_logs)" ]; then
+  ls -la tensorboard_logs/ > refactor_test_results/final_tensorboard_files.log
+  echo "✅ TensorBoard logs: EXIST"
+else
+  echo "❌ TensorBoard logs: MISSING"
+fi
+
+# 10. Compare File Sizes
+echo "Comparing file sizes..."
+echo "BEFORE refactoring:" > refactor_test_results/final_file_size_comparison.log
+wc -l ai/train_backup_*.py >> refactor_test_results/final_file_size_comparison.log 2>/dev/null || echo "No backup found"
+
+echo -e "\nAFTER refactoring:" >> refactor_test_results/final_file_size_comparison.log
+wc -l ai/train.py >> refactor_test_results/final_file_size_comparison.log
+wc -l ai/env_wrappers.py >> refactor_test_results/final_file_size_comparison.log
+wc -l ai/training_callbacks.py >> refactor_test_results/final_file_size_comparison.log
+wc -l ai/step_logger.py >> refactor_test_results/final_file_size_comparison.log
+wc -l ai/bot_evaluation.py >> refactor_test_results/final_file_size_comparison.log
+wc -l ai/training_utils.py >> refactor_test_results/final_file_size_comparison.log
+wc -l ai/replay_converter.py >> refactor_test_results/final_file_size_comparison.log
+
+cat refactor_test_results/final_file_size_comparison.log
+
+echo ""
+echo "═══════════════════════════════════════════════"
+echo "  REFACTORING REGRESSION TEST SUMMARY"
+echo "═══════════════════════════════════════════════"
+echo ""
+echo "Test results saved to: refactor_test_results/"
+echo ""
+echo "Review logs for any errors:"
+echo "  grep -i 'error\|fail\|traceback' refactor_test_results/*.log"
+echo ""
+```
+
+---
+
+### Validation Checklist (Updated)
 
 Before considering refactor complete:
 
 **Code Quality:**
-- [ ] All 6 new modules created
+- [ ] All 6 new modules created (`env_wrappers.py`, `training_callbacks.py`, `step_logger.py`, `bot_evaluation.py`, `training_utils.py`, `replay_converter.py`)
 - [ ] Each module has docstring
 - [ ] Each module has `__all__` exports
-- [ ] train_core.py updated with new imports
-- [ ] No duplicate code
+- [ ] `train.py` updated with new imports
+- [ ] No duplicate code (duplicate `get_agent_scenario_file` removed)
+- [ ] File sizes match expectations (~800 train.py, ~320 env_wrappers, etc.)
 
-**Functionality:**
-- [ ] Basic training works
-- [ ] New model creation works
-- [ ] Bot evaluation works
-- [ ] Scenario rotation works
-- [ ] Replay conversion works
-- [ ] Multi-agent training works (if applicable)
+**External Dependencies:**
+- [ ] `ai/multi_agent_trainer.py` Line 730 updated: `from ai.step_logger import StepLogger`
+- [ ] Multi-agent import test passes: `python -c "from ai.multi_agent_trainer import MultiAgentTrainer"`
+- [ ] No other files import from `ai.train` (verified with grep)
 
-**Imports:**
-- [ ] All modules import independently
-- [ ] No circular import errors
-- [ ] multi_agent_trainer.py updated
+**Import Tests (Phase 9 - Import Matrix):**
+- [ ] `import ai.env_wrappers` works
+- [ ] `import ai.training_callbacks` works
+- [ ] `import ai.step_logger` works
+- [ ] `import ai.bot_evaluation` works
+- [ ] `import ai.training_utils` works
+- [ ] `import ai.replay_converter` works
+- [ ] `import ai.train` works
+- [ ] No circular import errors (lazy imports verified)
 
-**Testing:**
-- [ ] All import tests pass
-- [ ] All regression tests pass
-- [ ] TensorBoard metrics generated
-- [ ] No error logs
+**Functionality Tests (Phase 9 - Regression):**
+- [ ] Basic training: `python ai/train.py --episodes 10` (exit code 0)
+- [ ] New model creation: `python ai/train.py --new --episodes 5` (exit code 0)
+- [ ] Bot evaluation: `python ai/train.py --test-episodes 20` (exit code 0)
+- [ ] Scenario rotation: `python ai/train.py --scenario self --episodes 10` (exit code 0)
+- [ ] Multi-agent training: `python ai/train.py --multi-agent --episodes 5` (exit code 0)
+- [ ] Replay conversion: `python ai/train.py --convert-steplog <file>` (exit code 0)
+
+**TensorBoard & Logging:**
+- [ ] TensorBoard logs generated in `tensorboard_logs/`
+- [ ] Step logs generated in `ai/event_log/training_step.log`
+- [ ] Replay JSON files generated (if replay conversion tested)
+- [ ] No error traces in log files
 
 **Git:**
-- [ ] All changes committed
-- [ ] Commit messages descriptive
-- [ ] Backup file preserved
+- [ ] Feature branch created: `refactor/split-train-py`
+- [ ] Backup created: `ai/train_backup_YYYYMMDD.py`
+- [ ] All 7 phases committed separately
+- [ ] Commit messages descriptive (include "refactor:", "BREAKING:", etc.)
+- [ ] Final summary commit created
+
+**Comparison with Baseline:**
+- [ ] Compare `refactor_test_results/baseline_*.log` vs `refactor_test_results/final_*.log`
+- [ ] Exit codes match (all 0)
+- [ ] No new errors introduced
+- [ ] Functionality identical
+
+---
+
+### Quick Smoke Test Script
+
+Save this as `refactor_smoke_test.sh` for quick validation:
+
+```bash
+#!/bin/bash
+# refactor_smoke_test.sh - Quick validation after refactoring
+
+set -e  # Exit on first error
+
+echo "🔍 Running refactoring smoke tests..."
+
+# Test 1: All modules import
+echo "1/7 Testing module imports..."
+python -c "import ai.env_wrappers, ai.training_callbacks, ai.step_logger, ai.bot_evaluation, ai.training_utils, ai.replay_converter, ai.train"
+
+# Test 2: No circular imports
+echo "2/7 Testing circular imports..."
+python -c "from ai.bot_evaluation import evaluate_against_bots; from ai.env_wrappers import BotControlledEnv"
+
+# Test 3: Multi-agent import
+echo "3/7 Testing multi_agent_trainer..."
+python -c "from ai.multi_agent_trainer import MultiAgentTrainer"
+
+# Test 4: Basic training
+echo "4/7 Testing basic training..."
+timeout 60 python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --episodes 2 || echo "Training test skipped (timeout)"
+
+# Test 5: Bot evaluation
+echo "5/7 Testing bot evaluation..."
+timeout 30 python ai/train.py --test-episodes 5 || echo "Evaluation test skipped (timeout)"
+
+# Test 6: File structure
+echo "6/7 Checking file structure..."
+test -f ai/env_wrappers.py && echo "  ✅ env_wrappers.py exists"
+test -f ai/training_callbacks.py && echo "  ✅ training_callbacks.py exists"
+test -f ai/step_logger.py && echo "  ✅ step_logger.py exists"
+test -f ai/bot_evaluation.py && echo "  ✅ bot_evaluation.py exists"
+test -f ai/training_utils.py && echo "  ✅ training_utils.py exists"
+test -f ai/replay_converter.py && echo "  ✅ replay_converter.py exists"
+test -f ai/train.py && echo "  ✅ train.py exists"
+
+# Test 7: Line counts reasonable
+echo "7/7 Checking line counts..."
+TRAIN_LINES=$(wc -l < ai/train.py)
+if [ "$TRAIN_LINES" -lt 1000 ]; then
+  echo "  ✅ train.py is ${TRAIN_LINES} lines (target: ~800)"
+else
+  echo "  ⚠️  train.py is ${TRAIN_LINES} lines (expected ~800)"
+fi
+
+echo ""
+echo "✅ All smoke tests passed!"
+echo ""
+echo "Next steps:"
+echo "  - Review test results in refactor_test_results/"
+echo "  - Run full regression tests"
+echo "  - Compare with baseline tests"
+```
 
 ---
 

@@ -64,14 +64,21 @@ def check_gpu_availability():
 
 def setup_imports():
     """
-    Setup import paths for AI modules.
-    Adds both ai/ directory and project root to Python path.
-    CRITICAL: This function must run BEFORE any W40KEngine imports!
+    Setup import paths and return required modules.
+    Returns W40KEngine and register_environment function.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-    sys.path.insert(0, script_dir)  # ai/ directory
-    sys.path.insert(0, project_root)  # project root
+    try:
+        # AI_TURN.md COMPLIANCE: Use compliant engine with gym interface
+        from engine.w40k_core import W40KEngine
+
+        # Compatibility function for training system
+        def register_environment():
+            """No registration needed for direct engine usage"""
+            pass
+
+        return W40KEngine, register_environment
+    except ImportError as e:
+        raise ImportError(f"AI_TURN.md: w40k_engine import failed: {e}")
 
 def make_training_env(rank, scenario_file, rewards_config_name, training_config_name,
                      unit_registry, controlled_agent=None, enable_action_masking=True):
@@ -206,6 +213,16 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
         )
         if os.path.isfile(agent_scenario_path):
             return agent_scenario_path
+
+        # Try variants for any phase (phase1-bot1, phase1-self1, phase2-1, etc.)
+        # Use glob to find any file matching the pattern
+        scenarios_dir = os.path.join(config.config_dir, "agents", agent_key, "scenarios")
+        pattern = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-*.json")
+        matching_files = sorted(glob.glob(pattern))
+        if matching_files:
+            variant_name = os.path.basename(matching_files[0]).replace(f"{agent_key}_scenario_", "").replace(".json", "")
+            print(f"ℹ️  {training_config_name} has multiple scenarios. Using first variant: {variant_name}")
+            return matching_files[0]
 
     # Fall back to default scenarios
     fallback_path = os.path.join(

@@ -3,9 +3,14 @@
 
 > **📍 Purpose**: Deep dive into metrics-driven training optimization for W40K tactical AI
 >
-> **Status**: January 2025 - Expert optimization guide
+> **Status**: January 2025 - Expert optimization guide (Updated: Corrected metric namespaces to match actual code)
 >
 > **Companion Document**: [AI_TRAINING.md](AI_TRAINING.md) - Configuration and setup
+>
+> **⚠️ IMPORTANT CORRECTION**: This document has been updated to use correct metric namespaces:
+> - Bot evaluation metrics use `bot_eval/` namespace (not `eval_bots/`)
+> - Bot metric names: `vs_random`, `vs_greedy`, `vs_defensive`, `combined` (not `vs_random_bot`, etc.)
+> - Added documentation for the `0_critical/` dashboard - **START HERE** for training monitoring
 
 ---
 
@@ -15,6 +20,8 @@
 - [Core Metrics Explained](#core-metrics-explained)
   - [Training Metrics (PPO Internals)](#training-metrics-ppo-internals)
   - [Critical Metrics Quick Reference](#-critical-metrics-quick-reference) ⭐ **START HERE**
+    - [0_critical/ Dashboard](#-start-here-0_critical-dashboard) ⭐⭐ **PRIMARY DASHBOARD**
+    - [Game Critical Metrics](#game-critical-metrics)
   - [Game Metrics (Performance Indicators)](#game-metrics-performance-indicators)
   - [Evaluation Metrics (Bot Comparisons)](#evaluation-metrics-bot-comparisons)
 - [Metric Relationships](#metric-relationships)
@@ -182,7 +189,38 @@ These metrics reveal the health of the PPO learning algorithm itself.
 
 ## 🎯 CRITICAL METRICS QUICK REFERENCE
 
-These are the most important metrics to watch in the `game_critical/` and `eval_bots/` namespaces in TensorBoard.
+These are the most important metrics to watch in TensorBoard.
+
+### **⭐ START HERE: `0_critical/` Dashboard**
+
+The `0_critical/` namespace contains **THE 10 ESSENTIAL METRICS** for hyperparameter tuning. All metrics are smoothed (20-episode rolling average) for clear trends.
+
+**TIP:** Open TensorBoard and navigate to the `0_critical/` namespace first - it contains everything you need for tuning.
+
+| Metric | What It Measures | Target Value | Critical For |
+|--------|------------------|--------------|--------------|
+| **0_critical/a_bot_eval_combined** | Weighted win rate vs all bots | 0.55+ (Phase 2)<br>0.70+ (Phase 3) | **PRIMARY GOAL** - Overall competence |
+| **0_critical/b_win_rate_100ep** | Rolling 100-episode win rate | Phase 1: 60%+<br>Phase 2: 70%+<br>Phase 3: 75%+ | Self-play performance |
+| **0_critical/c_episode_reward_smooth** | Smoothed episode reward | Increasing trend | Learning progress signal |
+| **0_critical/d_loss_mean** | Combined policy + value loss | Decreasing then stable | Training convergence |
+| **0_critical/e_explained_variance** | Value function quality (R²) | >0.70 (Phase 1)<br>>0.85 (Phase 2+) | Value network capacity |
+| **0_critical/f_clip_fraction** | % of clipped policy updates | 0.10-0.30 | Tune `learning_rate` |
+| **0_critical/g_approx_kl** | Policy change magnitude | <0.02 (ideally 0.01-0.015) | Policy stability |
+| **0_critical/h_entropy_loss** | Exploration level | -2.0 to -0.5 (decreasing) | Tune `ent_coef` |
+| **0_critical/i_gradient_norm** | Gradient magnitude | <10 | No gradient explosion |
+| **0_critical/j_immediate_reward_ratio** | Immediate vs total reward | <0.9 | Reward balance check |
+
+**How to use this dashboard:**
+1. Open TensorBoard: `tensorboard --logdir=./tensorboard/`
+2. Navigate to Scalars → `0_critical/`
+3. Check all 10 metrics are trending correctly
+4. Use table above to diagnose issues
+
+---
+
+### **Game Critical Metrics**
+
+These are the most important gameplay metrics to watch in the `game_critical/` and `bot_eval/` namespaces in TensorBoard.
 
 | Metric | What It Measures | Target Value | If Too Low (<) | If Too High (>) | Notes |
 |--------|------------------|--------------|----------------|-----------------|-------|
@@ -191,10 +229,10 @@ These are the most important metrics to watch in the `game_critical/` and `eval_
 | **game_critical/win_rate_100ep** | Rolling 100-episode win rate | Phase 1: 60%+<br>Phase 2: 70%+<br>Phase 3: 75%+ | • Increase training episodes<br>• Adjust reward balance<br>• Check observation quality | • Good! Advance to next phase<br>• Consider harder opponents | Primary success metric. Must be stable, not just lucky streak |
 | **game_critical/units_killed_vs_lost_ratio** | Kill/death ratio | 1.5+ (killing more than losing) | • Improve combat rewards<br>• Reduce defensive penalties<br>• Check target selection | • Excellent performance<br>• Consider phase advancement | <1.0 = losing units. >2.0 = dominating |
 | **game_critical/invalid_action_rate** | % of invalid actions | <5% (ideally <2%) | N/A - this is good! | • Action masking broken<br>• Observation quality issue<br>• Network capacity problem | >10% persistently = serious problem requiring restart |
-| **eval_bots/vs_random** | Reward vs RandomBot | 0.0+ (positive) | • Agent worse than random<br>• Major training problem<br>• Check overfitting | • Good! Should beat random<br>• Target: -0.3 to +0.1 range | Baseline competence. Failure here = critical issue |
-| **eval_bots/vs_greedy** | Reward vs GreedyBot | 0.05 to 0.15 | • Target selection poor<br>• Increase priority rewards<br>• Check tactical bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• Balance rewards | Tests target prioritization. Should be moderate |
-| **eval_bots/vs_defensive** | Reward vs DefensiveBot | 0.10 to 0.20 | • Tactical positioning weak<br>• Increase positioning rewards<br>• Check movement bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• More diverse scenarios | Tests tactical mastery. Hardest opponent |
-| **eval_bots/combined_win_rate** | Weighted average of all bots | 0.55+ (Phase 2)<br>0.70+ (Phase 3) | • Overall performance weak<br>• Review all reward categories<br>• Check observation system | • Excellent! Phase complete<br>• Save model and advance | Single number for overall competence. Used for model selection |
+| **bot_eval/vs_random** | Reward vs RandomBot | 0.0+ (positive) | • Agent worse than random<br>• Major training problem<br>• Check overfitting | • Good! Should beat random<br>• Target: -0.3 to +0.1 range | Baseline competence. Failure here = critical issue |
+| **bot_eval/vs_greedy** | Reward vs GreedyBot | 0.05 to 0.15 | • Target selection poor<br>• Increase priority rewards<br>• Check tactical bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• Balance rewards | Tests target prioritization. Should be moderate |
+| **bot_eval/vs_defensive** | Reward vs DefensiveBot | 0.10 to 0.20 | • Tactical positioning weak<br>• Increase positioning rewards<br>• Check movement bonuses | • Agent exploiting patterns<br>• Increase bot randomness<br>• More diverse scenarios | Tests tactical mastery. Hardest opponent |
+| **bot_eval/combined** | Weighted average of all bots | 0.55+ (Phase 2)<br>0.70+ (Phase 3) | • Overall performance weak<br>• Review all reward categories<br>• Check observation system | • Excellent! Phase complete<br>• Save model and advance | Single number for overall competence. Used for model selection |
 
 ### How to Use This Table
 
@@ -205,11 +243,14 @@ These are the most important metrics to watch in the `game_critical/` and `eval_
 
 ### Priority Order
 
-1. **invalid_action_rate** - Fix immediately if >10%
-2. **episode_reward** - Must be increasing (even slowly)
-3. **win_rate_100ep** - Primary success indicator
-4. **eval_bots/combined_win_rate** - Overall competence check
-5. **Other metrics** - Fine-tuning and optimization
+**For daily monitoring:**
+1. **0_critical/** dashboard - Check all 10 metrics first
+2. **bot_eval/combined** (in 0_critical/) - Primary goal metric
+3. **invalid_action_rate** - Fix immediately if >10%
+4. **episode_reward** - Must be increasing (even slowly)
+5. **win_rate_100ep** - Primary success indicator
+
+**TIP:** If all `0_critical/` metrics are healthy, your training is on track. Dive into detailed namespaces only when debugging specific issues.
 
 ---
 
@@ -277,7 +318,7 @@ These metrics measure the agent's actual gameplay performance.
 
 These metrics compare agent performance against scripted opponents.
 
-#### `eval_bots/vs_random_bot`
+#### `bot_eval/vs_random`
 **What it is:** Win rate against random action bot
 
 **Why it matters:** Baseline competence check. Any learning agent should beat random.
@@ -290,7 +331,7 @@ These metrics compare agent performance against scripted opponents.
 
 ---
 
-#### `eval_bots/vs_greedy_bot`
+#### `bot_eval/vs_greedy`
 **What it is:** Win rate against greedy bot (shoots nearest enemy)
 
 **Why it matters:** Tests if agent learned target prioritization.
@@ -303,7 +344,7 @@ These metrics compare agent performance against scripted opponents.
 
 ---
 
-#### `eval_bots/vs_defensive_bot`
+#### `bot_eval/vs_defensive`
 **What it is:** Win rate against defensive bot (uses cover, cautious)
 
 **Why it matters:** Tests if agent learned tactical positioning.
@@ -316,7 +357,7 @@ These metrics compare agent performance against scripted opponents.
 
 ---
 
-#### `eval_bots/combined_score`
+#### `bot_eval/combined`
 **What it is:** Weighted average of all bot win rates
 
 **Why it matters:** Single number representing overall competence.
@@ -345,7 +386,7 @@ Understanding how metrics move together helps diagnose root causes.
 - Policy becoming more confident and stable over time
 - **Normal progression** in successful training
 
-**Win rate ↑ + `eval_bots/combined_score` ↑**
+**Win rate ↑ + `bot_eval/combined` ↑**
 - Self-play performance matches bot evaluation
 - **Good sign:** Agent generalizing, not overfitting
 
@@ -408,7 +449,7 @@ Understanding how metrics move together helps diagnose root causes.
 - Reflects policy learned 50-100 episodes ago
 - Changes slowly, not useful for immediate decisions
 
-**`eval_bots/combined_score`**
+**`bot_eval/combined`**
 - Only evaluated every N episodes
 - Good for phase advancement, bad for real-time tuning
 
@@ -445,7 +486,7 @@ Episodes 1-50:
 ```
 Episodes 51-550:
   win_rate:          45% → 52% → 58% → 63% → 67%
-  vs_random_bot:     0.55 → 0.62 → 0.68 → 0.73 → 0.78
+  vs_random:         0.55 → 0.62 → 0.68 → 0.73 → 0.78
   kill_ratio:        0.8 → 0.95 → 1.1 → 1.25 → 1.35
   explained_var:     0.80 → 0.83 → 0.87 → 0.90 → 0.92
   approx_kl:         0.015 → 0.012 → 0.010 → 0.009 → 0.008
@@ -467,9 +508,9 @@ Episodes 51-550:
 ```
 Episodes 551-1550:
   win_rate:          67% → 70% → 73% → 75% → 77%
-  vs_greedy_bot:     0.45 → 0.52 → 0.58 → 0.63 → 0.67
-  vs_defensive_bot:  0.30 → 0.35 → 0.42 → 0.48 → 0.53
-  combined_score:    0.45 → 0.50 → 0.56 → 0.61 → 0.66
+  vs_greedy:         0.45 → 0.52 → 0.58 → 0.63 → 0.67
+  vs_defensive:      0.30 → 0.35 → 0.42 → 0.48 → 0.53
+  combined:          0.45 → 0.50 → 0.56 → 0.61 → 0.66
   explained_var:     0.90 → 0.92 → 0.93 → 0.94 → 0.95
 ```
 
@@ -519,9 +560,9 @@ Episodes 20-50:
 
 ```
 Episodes 300-350:
-  win_rate:      55% → 62% → 48% → 70% → 45% → 68% (WILD SWINGS)
-  approx_kl:     0.025 → 0.035 → 0.028 → 0.042 → 0.031 (TOO HIGH)
-  clip_fraction: 0.45 → 0.52 → 0.48 → 0.55 → 0.50 (TOO MUCH CLIPPING)
+  win_rate:       55% → 62% → 48% → 70% → 45% → 68% (WILD SWINGS)
+  approx_kl:      0.025 → 0.035 → 0.028 → 0.042 → 0.031 (TOO HIGH)
+  clip_fraction:  0.45 → 0.52 → 0.48 → 0.55 → 0.50 (TOO MUCH CLIPPING)
   episode_reward: 18 → 25 → 12 → 28 → 10 (VOLATILE)
 ```
 
@@ -550,10 +591,10 @@ Episodes 300-350:
 ```
 Episodes 800-1000:
   win_rate (self-play):  78% → 80% → 82% → 83% (GREAT)
-  vs_random_bot:         0.82 → 0.84 → 0.85 → 0.86 (GREAT)
-  vs_greedy_bot:         0.45 → 0.43 → 0.41 → 0.38 (DECLINING!)
-  vs_defensive_bot:      0.28 → 0.25 → 0.23 → 0.20 (WORSE!)
-  combined_score:        0.52 → 0.51 → 0.50 → 0.48 (DECLINING!)
+  vs_random:             0.82 → 0.84 → 0.85 → 0.86 (GREAT)
+  vs_greedy:             0.45 → 0.43 → 0.41 → 0.38 (DECLINING!)
+  vs_defensive:          0.28 → 0.25 → 0.23 → 0.20 (WORSE!)
+  combined:              0.52 → 0.51 → 0.50 → 0.48 (DECLINING!)
 ```
 
 **Root Cause:** Agent overfitting to random opponent, not generalizing
@@ -662,9 +703,9 @@ tensorboard --logdir ./tensorboard/
    - `clip_fraction`: Between 20-30%?
    - `entropy_loss`: Decreasing gradually?
 
-4. **Check Scalars → eval_bots/ (if eval ran today)**
+4. **Check Scalars → bot_eval/ (if eval ran today)**
    - All bot win rates improving or stable?
-   - `combined_score` trending upward?
+   - `combined` trending upward?
 
 5. **Decision:**
 ```
@@ -1016,9 +1057,9 @@ START: Problem detected in daily monitoring
 
 #### 2. ✅ Bot Evaluation Excellence
 **Condition:**
-- `eval_bots/vs_random_bot` > 0.85
-- `eval_bots/vs_greedy_bot` > 0.70
-- `eval_bots/vs_defensive_bot` > 0.60
+- `bot_eval/vs_random` > 0.85
+- `bot_eval/vs_greedy` > 0.70
+- `bot_eval/vs_defensive` > 0.60
 - ALL targets exceeded simultaneously
 
 **Meaning:** Agent has mastered all difficulty levels
@@ -1027,7 +1068,7 @@ START: Problem detected in daily monitoring
 
 #### 3. ✅ Combined Score Threshold
 **Condition:**
-- `eval_bots/combined_score` > 0.75 AND stable for 100 episodes
+- `bot_eval/combined` > 0.75 AND stable for 100 episodes
 
 **Meaning:** Weighted average accounts for all difficulties, agent is expert-level
 
@@ -1273,9 +1314,9 @@ Episode 50:
 
 Episode 70:
   win_rate: 61%
-  vs_random_bot: 0.73
+  vs_random: 0.73
   explained_var: 0.87
-  combined_score: 0.48
+  combined: 0.48
   → DECISION: Advance to Phase 2 ✅
 ```
 
@@ -1299,7 +1340,7 @@ Episode 70:
 Episodes 100-200:
   win_rate: 52% → 54% → 53% → 52% → 53% (STUCK)
   explained_var: 0.62 → 0.64 → 0.63 → 0.64 (PLATEAU)
-  vs_greedy_bot: 0.38 → 0.40 → 0.39 (NOT IMPROVING)
+  vs_greedy: 0.38 → 0.40 → 0.39 (NOT IMPROVING)
 ```
 
 **Diagnosis:**
@@ -1317,17 +1358,17 @@ Episodes 100-200:
 Episode 50 (post-restart):
   win_rate: 58%
   explained_var: 0.78 (BIG IMPROVEMENT)
-  vs_greedy_bot: 0.51
+  vs_greedy: 0.51
 
 Episode 150:
   win_rate: 68%
   explained_var: 0.89
-  vs_greedy_bot: 0.66
+  vs_greedy: 0.66
   → DECISION: Continue, on track
 
 Episode 300:
   win_rate: 74%
-  combined_score: 0.63
+  combined: 0.63
   → DECISION: Advance to Phase 3 ✅
 ```
 
@@ -1373,12 +1414,12 @@ Episodes 550-650:
 
 Episode 900:
   win_rate: 79%
-  vs_defensive_bot: 0.58
-  combined_score: 0.72
+  vs_defensive: 0.58
+  combined: 0.72
   → DECISION: Continue, near target
 
 Episode 1200:
-  combined_score: 0.78 (stable for 100 eps)
+  combined: 0.78 (stable for 100 eps)
   → DECISION: Training complete ✅
 ```
 

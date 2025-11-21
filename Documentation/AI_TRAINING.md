@@ -2,8 +2,14 @@
 ## PPO Training Configuration Guide - Streamlined Edition
 
 > **📍 Purpose**: Configure and monitor PPO training for W40K tactical AI
-> 
-> **Status**: January 2025 - Configuration-focused edition
+>
+> **Status**: January 2025 - Configuration-focused edition (Updated: Added `0_critical/` dashboard, corrected metric namespaces)
+>
+> **⚠️ UPDATE**: Metrics section updated to reflect actual logged metrics:
+> - Added `0_critical/` dashboard documentation (primary monitoring interface)
+> - Corrected bot evaluation namespace: `bot_eval/` (not `eval/`)
+> - Removed outdated `eval/mean_reward` and `eval/mean_ep_length` metrics
+> - Added `game_critical/` metrics reference
 
 ---
 
@@ -461,6 +467,8 @@ Each unit type has reward profiles for:
 
 ## 📊 MONITORING TRAINING
 
+> **💡 TIP:** This section provides quick-start monitoring guidance. For comprehensive metric analysis, troubleshooting patterns, and hyperparameter tuning, see [AI_METRICS.md](AI_METRICS.md)
+
 ### TensorBoard Metrics
 
 Start TensorBoard:
@@ -468,17 +476,41 @@ Start TensorBoard:
 tensorboard --logdir=./tensorboard/
 ```
 
-**Key Metrics to Watch:**
+#### 🎯 **Quick Start: The `0_critical/` Dashboard**
 
-| Metric | What It Shows | Good Trend |
-|--------|---------------|------------|
-| `rollout/ep_rew_mean` | Average episode reward | Increasing |
-| `rollout/ep_len_mean` | Episode length | Stable or decreasing |
-| `train/entropy_loss` | Exploration level | Decreasing gradually |
-| `train/policy_loss` | Policy improvement | Decreasing |
-| `train/value_loss` | Value estimation | Decreasing then stable |
-| `eval/mean_reward` | Evaluation performance | Increasing |
-| `eval/mean_ep_length` | Evaluation efficiency | Stable |
+**For immediate training monitoring, start here:**
+
+Navigate to the `0_critical/` namespace in TensorBoard - it contains **10 essential metrics** optimized for hyperparameter tuning:
+
+**Primary Metrics to Check Daily:**
+- `0_critical/a_bot_eval_combined` - **Your primary goal** (overall competence vs all bots)
+- `0_critical/b_win_rate_100ep` - Recent 100-episode performance trend
+- `0_critical/g_approx_kl` - Policy stability (<0.02 = healthy)
+- `0_critical/h_entropy_loss` - Exploration level (should decrease gradually)
+- `0_critical/e_explained_variance` - Value function quality (>0.70 Phase 1, >0.85 Phase 2+)
+
+**✅ Healthy Training:** All `0_critical/` metrics trending toward targets
+**⚠️ Red Flag:** Any metric outside range for 200+ episodes needs intervention
+
+**For detailed metric analysis**, see [AI_METRICS.md](AI_METRICS.md#-start-here-0_critical-dashboard)
+
+---
+
+#### **Other Key Metrics**
+
+| Namespace | Metric | What It Shows | Good Trend |
+|-----------|--------|---------------|------------|
+| `rollout/` | `ep_rew_mean` | Average episode reward | Increasing |
+| `rollout/` | `ep_len_mean` | Episode length | Stable or decreasing |
+| `train/` | `entropy_loss` | Exploration level | Decreasing gradually |
+| `train/` | `policy_loss` | Policy improvement | Decreasing |
+| `train/` | `value_loss` | Value estimation | Decreasing then stable |
+| `game_critical/` | `win_rate_100ep` | Rolling win rate | Increasing to target |
+| `game_critical/` | `invalid_action_rate` | Action masking health | <5% (ideally <2%) |
+| `bot_eval/` | `vs_random` | Performance vs RandomBot | Improving |
+| `bot_eval/` | `vs_greedy` | Performance vs GreedyBot | Improving |
+| `bot_eval/` | `vs_defensive` | Performance vs DefensiveBot | Improving |
+| `bot_eval/` | `combined` | Overall bot evaluation | Increasing to 0.70+ |
 
 ### Phase-Specific Success Indicators
 

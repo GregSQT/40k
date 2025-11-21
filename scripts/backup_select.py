@@ -66,9 +66,6 @@ else:
         #"config/config.json",        # Master Configuration & Paths
         "config/game_config.json",   # Game Rules & Mechanics
         #"config/scenario.json",        # Game Scenarios
-        "config/scenario_1_Fight_Position.json",
-        "config/scenario_2_Mixt_Positions.json",
-        "config/scenario_templates.json",
         "config/unit_definitions.json", # Unit Stats & Abilities
         "config/unit_registry.json", # Unit Registry
         
@@ -76,7 +73,11 @@ else:
         # SpaceMarine_Infantry_Troop_RangedSwarm
         "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/SpaceMarine_Infantry_Troop_RangedSwarm_rewards_config.json",
         "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/SpaceMarine_Infantry_Troop_RangedSwarm_training_config.json",
-        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase1.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase1-bot1.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase1-bot2.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase1-bot3.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase1-bot4.json",
+        "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase1-self1.json",
         "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase2-1.json",
         "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase2-2.json",
         "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/scenarios/SpaceMarine_Infantry_Troop_RangedSwarm_scenario_phase2-3.json",
