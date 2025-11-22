@@ -12,7 +12,7 @@ export class Carnifex extends TyranidInfantryEliteMeleeElite {
   static HP_MAX = 8;           // Max hit points
   static LD = 8;               // Leadership score
   static OC = 3;               // Operative Control
-  static VALUE = 100;          // Unit value
+  static VALUE = 125;          // Unit value (W40K points cost)
   // RANGE WEAPON
   static RNG_RNG = 24;         // Range attack : range
   static RNG_NB = 6;           // Range attack : number of attacks - 6

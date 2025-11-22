@@ -233,35 +233,212 @@ Each phase uses different reward weights to emphasize current learning goal.
 
 ---
 
-### Phase 2: Learn Target Priorities
-**Goal**: Agent learns to prioritize weak/valuable targets
+### Phase 2: Learn Target Priorities & Positioning
+**Goal**: Agent learns to prioritize targets AND position for maximum effect while minimizing exposure
 
 **What Agent Learns:**
-- Kill efficiency: prioritize targets that remove the most threat per turn invested
+- Kill efficiency: prioritize targets by VALUE / turns_to_kill
 - Focus fire on wounded enemies (half the time to kill = double the efficiency)
-- Ignore distant enemies that can't threaten you (outside move + range)
+- Positioning: shoot high-priority targets while minimizing enemy threat
+- Use walls/cover to reduce enemy line-of-sight
 
-**Target Priority Formula:**
+---
+
+#### Target Priority Formula
+
 ```
-kill_efficiency = threat_per_turn / turns_to_kill
+target_priority = VALUE / turns_to_kill
 ```
 
-- **Higher efficiency = higher priority** (action slot 0)
-- Wounded targets have higher efficiency (same threat, less time to kill)
-- Distant targets outside (MOVE + RNG_RNG) have near-zero threat
+- **VALUE**: W40K point cost from unit profile (e.g., Termagant=6, Intercessor=19, Captain=80)
+- **turns_to_kill**: How many activations needed to kill this target (based on expected damage)
 
 **Example priorities (Intercessor selecting targets):**
 
-| Target | Threat/Turn | Turns to Kill | Kill Efficiency |
-|--------|-------------|---------------|-----------------|
-| Wounded Intercessor (1 HP) | 0.333 | ~3 | **0.111** (highest) |
-| Termagant | 0.111 | ~1.4 | **0.079** |
-| Full HP Intercessor | 0.333 | ~6 | **0.056** (lowest) |
+| Target | VALUE | Turns to Kill | Priority Score |
+|--------|-------|---------------|----------------|
+| Captain (wounded, 2HP left) | 80 | 2 | **40** (highest) |
+| Intercessor (wounded, 1HP) | 19 | 1 | **19** |
+| Termagant | 6 | 1.35 | **4.4** |
 
 This formula naturally encourages:
-- Finishing wounded enemies (double efficiency)
-- Killing easy targets first (Termagants before full HP Intercessors)
-- Ignoring distant non-threats
+- High-value targets when killable (Captain > Intercessor)
+- Finishing wounded enemies (faster kill = higher priority)
+- Efficient use of attacks (don't waste on hard-to-kill targets)
+
+---
+
+#### Movement Reward Formula (Position Score)
+
+The agent learns to choose positions that maximize offensive potential while minimizing defensive exposure:
+
+```
+position_score = offensive_value - (defensive_threat × tactical_positioning)
+movement_reward = position_score_after - position_score_before
+```
+
+---
+
+#### Offensive Value
+
+**Goal**: Estimate the total VALUE the unit can secure by shooting from this position.
+
+**Core concept**: The unit has a limited number of attacks (RNG_NB). Each attack can contribute to killing enemies. We want to estimate the total VALUE of enemies that can be killed or partially killed with available attacks.
+
+**Step-by-step calculation:**
+
+1. **Identify visible enemies**: Find all enemy units the unit has line-of-sight (LOS) to from this position.
+
+2. **Calculate attacks needed per target**: For each visible enemy, calculate how many attacks are needed to kill it:
+   - `attacks_needed = turns_to_kill × RNG_NB`
+   - Example: If `turns_to_kill = 0.67` and `RNG_NB = 2`, then `attacks_needed = 1.34`
+
+3. **Sort targets by target_priority** (highest first): `target_priority = VALUE / turns_to_kill`
+   - This prioritizes efficient kills (high value, easy to kill)
+
+4. **Allocate attacks to targets** (greedy allocation):
+   - Start with `attacks_remaining = RNG_NB`
+   - For each target (highest target_priority first):
+     - **If enough attacks to secure the kill** (`attacks_remaining >= attacks_needed`):
+       - Add the target's full **VALUE** to offensive_value
+       - Subtract attacks used: `attacks_remaining -= attacks_needed`
+     - **If NOT enough attacks** (`attacks_remaining < attacks_needed`):
+       - Calculate **kill probability**: `kill_prob = attacks_remaining / attacks_needed`
+       - Add **VALUE × kill_prob** to offensive_value (probabilistic partial kill)
+       - Set `attacks_remaining = 0` (all attacks used)
+
+5. **Result**: Sum of all secured and probabilistic VALUE = **offensive_value**
+
+**Why this works**:
+- Guarantees full VALUE for targets we can definitely kill
+- Gives partial credit for targets we might kill with remaining attacks
+- Naturally prioritizes high-value targets
+- Accounts for attack distribution across multiple targets
+
+**Example**: Intercessor (RNG_NB=2) sees 3 Termagants
+
+| Target | VALUE | turns_to_kill | attacks_needed |
+|--------|-------|---------------|----------------|
+| Termagant 1 | 6 | 0.67 | 1.34 |
+| Termagant 2 | 6 | 0.67 | 1.34 |
+| Termagant 3 | 6 | 0.67 | 1.34 |
+
+Allocation:
+1. Termagant 1: Have 2.0 attacks, need 1.34 → **Secured kill: +6 VALUE**, remaining = 0.66
+2. Termagant 2: Have 0.66 attacks, need 1.34 → kill_prob = 0.66/1.34 = 0.49 → **Probabilistic: +2.9 VALUE**
+3. No attacks remaining
+
+**Offensive value = 8.9** (one guaranteed kill + ~49% chance of second kill)
+
+---
+
+#### Defensive Threat
+
+**Goal**: Estimate how much damage this unit will receive at this position, accounting for enemy movement decisions and targeting priorities.
+
+**Core concept**: Enemies are intelligent. They will:
+1. Move toward high-priority targets (not randomly)
+2. Shoot high-priority targets (not randomly)
+
+Therefore, if a high-value friendly unit (like a Captain) is nearby, enemies will likely move toward and shoot the Captain instead of you. This means your actual threat is lower than if you were alone.
+
+**Step-by-step calculation:**
+
+**Step 1: Identify threatening enemies**
+
+For each enemy unit:
+- Find all positions the enemy could reach after moving (within their MOVE range)
+- Check which of those positions give LOS to YOU
+- If at least one position gives LOS → this enemy is a **potential threat**
+
+**Step 2: Determine who the enemy will target**
+
+For each threatening enemy:
+- List ALL friendly units the enemy could potentially see after moving (not just you)
+- Calculate priority for each friendly from the enemy's perspective:
+  - `priority = friendly_VALUE / turns_to_kill_friendly`
+- Rank all reachable friendlies by priority (highest = rank 1)
+- Find YOUR rank in this list
+
+**Step 3: Calculate movement probability**
+
+The enemy will move toward their highest-priority target. If you're not #1, the enemy may not even move toward you:
+
+| Your Rank | Enemy Moves Toward You Probability |
+|-----------|-----------------------------------|
+| 1 (you're top priority) | **100%** - Enemy definitely comes for you |
+| 2 | **30%** - Unlikely, but possible (enemy might have tactical reasons) |
+| 3+ | **10%** - Very unlikely (better targets exist) |
+
+**Step 4: Calculate targeting probability**
+
+Even if the enemy moves to a position where they can see you, they may shoot someone else:
+
+| Your Rank | Enemy Shoots You Probability |
+|-----------|------------------------------|
+| 1 | **100%** - You're the priority |
+| 2 | **50%** - Might shoot you if #1 is harder to kill |
+| 3+ | **25%** - Low chance |
+
+**Step 5: Calculate weighted threat**
+
+For each threatening enemy:
+```
+threat_weight = move_probability × targeting_probability
+threat_from_enemy = enemy_expected_damage × threat_weight
+```
+
+Sum all threats = **defensive_threat**
+
+**Example**: Carnifex evaluating threat to an Intercessor
+
+Carnifex can move and reach LOS to:
+- Captain Gravis (far away, but high VALUE)
+- Intercessor (me, closer)
+- Another Intercessor (nearby)
+
+From Carnifex perspective:
+| Friendly | VALUE | Turns to Kill | Priority | Rank |
+|----------|-------|---------------|----------|------|
+| Captain Gravis | 80 | 2 | 40 | 1 |
+| Intercessor (me) | 19 | 1 | 19 | 2 |
+| Intercessor B | 19 | 1 | 19 | 3 |
+
+**Analysis for "me" (Intercessor):**
+- I'm rank 2
+- Move probability = 30% (Carnifex will likely move toward Captain)
+- Targeting probability = 50%
+- Threat weight = 0.30 × 0.50 = **15%**
+
+If Carnifex expected_damage = 4.0:
+- My threat from Carnifex = 4.0 × 0.15 = **0.6**
+
+Compare to if I were alone (no Captain):
+- I'd be rank 1 → threat weight = 1.0 × 1.0 = 100%
+- My threat from Carnifex = 4.0 × 1.0 = **4.0**
+
+**The Captain's presence reduces my threat by 85%!**
+
+---
+
+#### Position Score Summary
+
+```
+position_score = offensive_value - (defensive_threat × tactical_positioning)
+movement_reward = position_score_after - position_score_before
+```
+
+**Parameters:**
+- `tactical_positioning`: Hyperparameter balancing offense vs defense (default: 1.0)
+  - `0.5` = aggressive (ignores half the threat, prioritizes offense)
+  - `1.0` = balanced (equal weight to offense and defense)
+  - `2.0` = defensive (double-weights threat, prioritizes safety)
+
+**What the agent learns:**
+- Move to positions with LOS on high-value targets
+- Avoid positions where you're the top priority for many enemies
+- Stay near high-value allies (they draw enemy attention)
+- Use walls to break LOS from enemies who would otherwise target you
 
 **Reward Emphasis** (from `rewards_config.json`):
 ```json

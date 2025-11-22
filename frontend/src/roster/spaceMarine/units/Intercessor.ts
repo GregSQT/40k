@@ -12,7 +12,7 @@ export class Intercessor extends SpaceMarineInfantryTroopRangedSwarm {
   static HP_MAX = 2;           // Max hit points
   static LD = 6;               // Leadership score
   static OC = 2;               // Operative Control
-  static VALUE = 20;           // Unit value
+  static VALUE = 19;           // Unit value (W40K points cost)
   // RANGE WEAPON
   static RNG_RNG = 24;         // Range attack : range - 24
   static RNG_NB = 2;           // Range attack : number of attacks - 2

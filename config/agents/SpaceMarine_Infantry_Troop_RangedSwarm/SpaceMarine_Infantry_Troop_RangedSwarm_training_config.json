@@ -1,7 +1,7 @@
 {
   "phase1": {
     "type": "################################################### Phase 1 - MODERATE AGGRESSION ###################################################",
-    "total_episodes": 50,
+    "total_episodes": 12000,
     "total_episodes_normal_value": "12000 = 4 scenarios × 1000 episodes × 3 rotations for curriculum learning",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 16,
@@ -10,15 +10,15 @@
     "model_params": {
       "policy": "MlpPolicy",
       "learning_rate": 0.0003,
-      "n_steps": 1024,
-      "batch_size": 128,
+      "n_steps": 2048,
+      "batch_size": 256,
       "n_epochs": 6,
       "gamma": 0.95,
       "gae_lambda": 0.95,
       "clip_range": 0.15,
       "ent_coef": {
-        "start": 0.3,
-        "end": 0.15
+        "start": 0.2,
+        "end": 0.1
       },
       "vf_coef": 0.5,
       "max_grad_norm": 0.3,
@@ -37,7 +37,7 @@
       "n_eval_episodes": 0,
       "bot_eval_freq": 200,
       "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 5,
+      "bot_eval_intermediate": 3,
       "bot_eval_final": 0
     },
     "observation_params": {
@@ -50,26 +50,33 @@
 
   },
   "phase2": {
-    "type": "################################################### Phase 2 ###################################################",
-    "total_episodes": 3000,
-    "total_episodes_normal_value": "4000",
+    "type": "################################################### Phase 2 - POSITIONING WITH WALLS ###################################################",
+    "total_episodes": 12000,
+    "total_episodes_normal_value": "12000 = 4 scenarios × 1000 episodes × 3 rotations for curriculum learning",
     "max_turns_per_episode": 5,
-    "max_steps_per_turn": 8,
-    "rotation_interval": 75,
-    "rotation_comment": "Episodes per scenario before rotation. Formula: total_episodes / (num_scenarios * target_cycles). For 3000 episodes with 4 scenarios and 10 cycles: 3000 / (4 * 10) = 75",
-    "model_params": { 
+    "max_steps_per_turn": 16,
+    "rotation_interval": 1000,
+    "rotation_comment": "1000 episodes per scenario = 3 rotations through all bots. Matches Phase 1 successful configuration.",
+    "tactical_positioning": 1.0,
+    "tactical_positioning_comment": "Movement reward balance: 0.5=aggressive, 1.0=balanced, 2.0=defensive. See AI_TRAINING.md Position Score.",
+    "position_reward_scale": 0.1,
+    "position_reward_scale_comment": "Scales position_score delta to reward magnitude. 0.1 = 10 VALUE difference = 1.0 reward.",
+    "model_params": {
       "policy": "MlpPolicy",
-      "learning_rate": 0.003,
+      "learning_rate": 0.0003,
       "n_steps": 2048,
       "batch_size": 256,
       "n_epochs": 6,
       "gamma": 0.95,
       "gae_lambda": 0.95,
-      "clip_range": 0.2,
-      "ent_coef": 0.20,
-      "vf_coef": 1.0,
-      "target_kl": 0.05,
-      "max_grad_norm": 0.5,
+      "clip_range": 0.15,
+      "ent_coef": {
+        "start": 0.2,
+        "end": 0.1
+      },
+      "vf_coef": 0.5,
+      "max_grad_norm": 0.3,
+      "target_kl": null,
       "tensorboard_log": "./tensorboard/",
       "policy_kwargs": {
         "net_arch": [320, 320]
@@ -77,14 +84,14 @@
       "verbose": 0
     },
     "callback_params": {
-      "checkpoint_save_freq": 10000,
+      "checkpoint_save_freq": 5000,
       "checkpoint_name_prefix": "ppo_curriculum_p2",
       "eval_deterministic": true,
       "eval_render": false,
-      "n_eval_episodes": 50,
-      "bot_eval_freq": 100,
+      "n_eval_episodes": 0,
+      "bot_eval_freq": 200,
       "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 5,
+      "bot_eval_intermediate": 3,
       "bot_eval_final": 50
     },
     "observation_params": {
@@ -92,9 +99,9 @@
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "Phase 2: Learn target priorities - kill weak targets first. 295 floats = asymmetric obs"
+      "justification": "Phase 2: Learn positioning with walls - move around obstacles for LOS advantage. 295 floats = asymmetric obs"
     }
-        
+
   },
   "phase3": {
     "type": "################################################### Phase 3 ###################################################",

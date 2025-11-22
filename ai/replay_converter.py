@@ -20,6 +20,12 @@ import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
+# Import required modules for generate_steplog_and_replay
+from ai.step_logger import StepLogger
+from ai.training_utils import setup_imports
+from config_loader import get_config_loader
+from sb3_contrib import MaskablePPO  # CRITICAL: Use MaskablePPO, not PPO - all trained models use action masking
+
 __all__ = [
     'extract_scenario_name_for_replay',
     'convert_steplog_to_replay',
@@ -228,7 +234,7 @@ def generate_steplog_and_replay(config, args):
         
         # Connect step logger
         env.controller.connect_step_logger(temp_step_logger)
-        model = PPO.load(model_path, env=env)
+        model = MaskablePPO.load(model_path, env=env)
         
         # Step 3: Run test episodes with step logging
         if not hasattr(args, 'test_episodes') or args.test_episodes is None:

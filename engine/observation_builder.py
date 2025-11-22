@@ -1108,8 +1108,8 @@ class ObservationBuilder:
                     if distance <= active_unit["CC_RNG"]:
                         valid_targets.append(enemy)
         
-        # Sort by priority: tactical efficiency > type match > distance
-        # This puts tactically important targets (high threat, easy kill) in action slot 0
+        # Sort by priority: VALUE / turns_to_kill (strategic efficiency)
+        # This prioritizes targets that give best point return per activation spent
         # Validated: All targets already passed LoS check in shooting_build_valid_target_pool
         def target_priority(target):
             distance = calculate_hex_distance(
@@ -1117,56 +1117,15 @@ class ObservationBuilder:
                 target["col"], target["row"]
             )
 
-            # Calculate tactical efficiency = threat_per_turn * activations_to_kill
-            # This prioritizes targets that deal most damage before we can kill them
+            # Get target's W40K point value
+            target_value = target.get("VALUE", 10)
 
-            # Step 1: Calculate target's threat to us (probability to wound per turn)
-            target_attacks = target.get("RNG_NB", 1)
-            target_bs = target.get("RNG_ATK", 4)
-            target_s = target.get("RNG_STR", 3)
-            target_ap = target.get("RNG_AP", 0)
-
-            unit_t = active_unit.get("T", 4)
-            unit_save = active_unit.get("ARMOR_SAVE", 3)
-
-            # Hit probability
-            hit_prob = (7 - target_bs) / 6.0
-
-            # Wound probability (S vs T)
-            if target_s >= unit_t * 2:
-                wound_prob = 5/6
-            elif target_s > unit_t:
-                wound_prob = 4/6
-            elif target_s == unit_t:
-                wound_prob = 3/6
-            elif target_s * 2 <= unit_t:
-                wound_prob = 1/6
-            else:
-                wound_prob = 2/6
-
-            # Failed save probability
-            modified_save = unit_save + target_ap
-            if modified_save > 6:
-                failed_save_prob = 1.0
-            else:
-                failed_save_prob = (modified_save - 1) / 6.0
-
-            # Threat per turn
-            threat_per_attack = hit_prob * wound_prob * failed_save_prob
-            threat_per_turn = target_attacks * threat_per_attack
-
-            # Check if target can actually threaten us (within move + range)
-            target_move = target.get("MOVE", 6)
-            target_range = target.get("RNG_RNG", 12)
-            if distance > target_move + target_range:
-                # Target cannot reach us to shoot - minimal threat
-                threat_per_turn = 0.001  # Small value to still allow sorting by other factors
-
-            # Step 2: Calculate our kill difficulty
+            # Calculate activations needed to kill this target
             unit_attacks = active_unit.get("RNG_NB", 2)
             unit_bs = active_unit.get("RNG_ATK", 3)
             unit_s = active_unit.get("RNG_STR", 4)
             unit_ap = active_unit.get("RNG_AP", 1)
+            unit_dmg = active_unit.get("RNG_DMG", 1)
 
             target_t = target.get("T", 3)
             target_save = target.get("ARMOR_SAVE", 6)
@@ -1175,7 +1134,7 @@ class ObservationBuilder:
             # Our hit probability
             our_hit_prob = (7 - unit_bs) / 6.0
 
-            # Our wound probability
+            # Our wound probability (S vs T)
             if unit_s >= target_t * 2:
                 our_wound_prob = 5/6
             elif unit_s > target_t:
@@ -1187,7 +1146,7 @@ class ObservationBuilder:
             else:
                 our_wound_prob = 2/6
 
-            # Target's failed save
+            # Target's failed save probability
             target_modified_save = target_save + unit_ap
             if target_modified_save > 6:
                 target_failed_save = 1.0
@@ -1195,30 +1154,26 @@ class ObservationBuilder:
                 target_failed_save = (target_modified_save - 1) / 6.0
 
             # Expected damage per activation
-            damage_per_attack = our_hit_prob * our_wound_prob * target_failed_save
+            damage_per_attack = our_hit_prob * our_wound_prob * target_failed_save * unit_dmg
             expected_damage_per_activation = unit_attacks * damage_per_attack
 
             # Expected activations to kill
             if expected_damage_per_activation > 0:
                 activations_to_kill = target_hp / expected_damage_per_activation
             else:
-                activations_to_kill = 100
+                activations_to_kill = 100  # Can't kill = very low priority
 
-            # Kill efficiency = threat removed per turn invested
-            # Higher = better target (removes more threat per turn spent)
+            # Strategic efficiency = VALUE / turns_to_kill
+            # Higher = better target (more points per activation spent)
             if activations_to_kill > 0:
-                kill_efficiency = threat_per_turn / activations_to_kill
+                strategic_efficiency = target_value / activations_to_kill
             else:
-                kill_efficiency = threat_per_turn * 100  # Instant kill = very high priority
-
-            # Calculate target type match
-            type_match = self._calculate_target_type_match(active_unit, target)
+                strategic_efficiency = target_value * 100  # Instant kill = very high priority
 
             # Priority scoring (lower = higher priority)
             return (
-                -kill_efficiency * 100,      # Higher kill efficiency = lower score = first
-                -(type_match * 70),          # Favorite type = -70 bonus
-                distance                     # Closer = lower score
+                -strategic_efficiency,       # Higher efficiency = lower score = first
+                distance                     # Closer = lower score (tiebreaker)
             )
 
         valid_targets.sort(key=target_priority)

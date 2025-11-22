@@ -13,7 +13,7 @@ export class CaptainGravis extends SpaceMarineInfantryLeaderEliteMeleeElite {
   static HP_MAX = 6;           // Max hit points
   static LD = 6;               // Leadership score
   static OC = 1;               // Operative Control
-  static VALUE = 100;          // Unit value
+  static VALUE = 80;           // Unit value (W40K points cost)
   // RANGE WEAPON
   static RNG_RNG = 12;         // Range attack : range - 12
   static RNG_NB = 3;           // Range attack : number of attacks - 3

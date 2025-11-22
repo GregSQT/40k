@@ -13,7 +13,7 @@ export class Termagant extends TyranidInfantrySwarmRangedSwarm {
   static HP_MAX = 1;           // Max hit points
   static LD = 8;               // Leadership score
   static OC = 2;               // Operative Control
-  static VALUE = 10;           // Unit value
+  static VALUE = 6;            // Unit value (W40K points cost)
   // RANGE WEAPON
   static RNG_RNG = 18;         // Range attack : range
   static RNG_NB = 1;           // Range attack : number of attacks

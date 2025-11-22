@@ -2,8 +2,8 @@
   "description": "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/SpaceMarine_Infantry_Troop_RangedSwarm_rewards_config.json",
 
   "SpaceMarine_Infantry_Troop_RangedSwarm_phase1": {
-    "Unit": "######################################## SpaceMarine_Infantry_Troop_RangedSwarm ########################################",
-    "Info": "######################################## PHASE 1 - SHOOTING IS GOOD: Strong rewards for ranged combat ########################################",
+    "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm #######################################################",
+    "Info": "######################### PHASE 1 - SHOOTING IS GOOD: Strong rewards for ranged combat #################################",
     "base_actions": {
       "move_close": 0.0,
       "move_away": 0.0,
@@ -45,8 +45,8 @@
   },
 
   "SpaceMarine_Infantry_Troop_RangedSwarm_phase2": {
-    "Unit": "######################################## SpaceMarine_Infantry_Troop_RangedSwarm ########################################",
-    "Info": "######################################## PHASE 2 - FIXED: Efficient Aggression ########################################",
+    "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm ######################################################",
+    "Info": "######################### PHASE 2 - FIXED: Efficient Aggression #######################################################",
     "base_actions": {
       "move_close": 0.3,
       "move_away": -0.2,
@@ -94,8 +94,8 @@
   },
 
   "SpaceMarine_Infantry_Troop_RangedSwarm_phase3": {
-    "Unit": "######################################## SpaceMarine_Infantry_Troop_RangedSwarm ########################################",
-    "Info": "######################################## PHASE 3                                ########################################",
+    "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm ########################################################",
+    "Info": "######################### PHASE 3                                ########################################################",
     "base_actions": {
       "move_close": 0.4,
       "move_away": -0.2,

@@ -8,6 +8,9 @@ Contains:
 Extracted from ai/train.py during refactoring (2025-01-21)
 """
 
+import os
+import sys
+
 __all__ = ['evaluate_against_bots']
 
 
@@ -28,26 +31,24 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         Dict with keys: 'random', 'greedy', 'defensive', 'combined',
                        'random_wins', 'greedy_wins', 'defensive_wins'
     """
-    # Lazy imports to avoid circular dependencies
-    from ai.env_wrappers import BotControlledEnv
     from ai.unit_registry import UnitRegistry
     from config_loader import get_config_loader
     import time
 
-    # Import evaluation bots - these are optional dependencies
+    # Import evaluation bots for testing
     try:
-        from ai.bots.random_bot import RandomBot
-        from ai.bots.greedy_bot import GreedyBot
-        from ai.bots.defensive_bot import DefensiveBot
+        from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
         EVALUATION_BOTS_AVAILABLE = True
     except ImportError:
         EVALUATION_BOTS_AVAILABLE = False
 
-    # Import scenario utilities from train.py
-    from ai.train import get_scenario_list_for_phase, get_agent_scenario_file
-
     if not EVALUATION_BOTS_AVAILABLE:
         return {}
+
+    # Import scenario utilities from training_utils
+    from ai.training_utils import get_scenario_list_for_phase, get_agent_scenario_file, setup_imports
+    from ai.env_wrappers import BotControlledEnv
+    from sb3_contrib.common.wrappers import ActionMasker
 
     results = {}
     # Initialize bots with stochasticity to prevent overfitting (15% random actions)
@@ -76,143 +77,168 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
     # Calculate episodes per scenario (distribute evenly)
     episodes_per_scenario = max(1, n_episodes // len(scenario_list))
-    total_episodes = episodes_per_scenario * len(scenario_list)
 
-    print(f"\n🎯 Bot Evaluation Configuration:")
-    print(f"   Agent: {controlled_agent or 'Player 0'}")
-    print(f"   Training Config: {training_config_name}")
-    print(f"   Scenarios: {len(scenario_list)} found")
-    print(f"   Episodes per bot: {total_episodes} ({episodes_per_scenario} per scenario)")
-    print(f"   Deterministic: {deterministic}")
+    unit_registry = UnitRegistry()
 
-    # Initialize tracking
-    total_random_wins = 0
-    total_greedy_wins = 0
-    total_defensive_wins = 0
-    total_random_episodes = 0
-    total_greedy_episodes = 0
-    total_defensive_episodes = 0
+    # Progress tracking
+    total_episodes = episodes_per_scenario * len(scenario_list) * len(bots)
+    completed_episodes = 0
+    start_time = time.time() if show_progress else None
 
-    # Evaluate across all scenarios
-    from tqdm import tqdm
-    scenario_bar = tqdm(scenario_list, desc="Scenarios", disable=not show_progress, leave=False)
+    for bot_name, bot in bots.items():
+        wins = 0
+        losses = 0
+        draws = 0
 
-    for scenario_idx, scenario_file in enumerate(scenario_bar):
-        scenario_name = scenario_file.split('/')[-1].replace('.json', '')
-        scenario_bar.set_postfix_str(f"Scenario: {scenario_name}")
+        # MULTI-SCENARIO: Iterate through all scenarios
+        for scenario_file in scenario_list:
+            scenario_name = os.path.basename(scenario_file).replace(f"{base_agent_key}_scenario_", "").replace(".json", "") if base_agent_key else "default"
 
-        # Inner loop: Evaluate each bot
-        for bot_name, bot in bots.items():
-            unit_registry = UnitRegistry(config)
+            for episode_num in range(episodes_per_scenario):
+                completed_episodes += 1
 
-            # Create evaluation environment with this bot
-            # Lazy import of make_training_env from train.py
-            from ai.train import make_training_env
-            base_env = make_training_env(
-                scenario_file=scenario_file,
-                rewards_config_name=rewards_config_name,
-                controlled_agent=controlled_agent,
-                unit_registry=unit_registry,
-                enable_action_masking=True
-            )()
-            env = BotControlledEnv(base_env, bot, unit_registry)
+                # Progress bar (only if show_progress=True)
+                if show_progress:
+                    progress_pct = (completed_episodes / total_episodes) * 100
+                    bar_length = 50
+                    filled = int(bar_length * completed_episodes / total_episodes)
+                    bar = '█' * filled + '░' * (bar_length - filled)
 
-            # Run episodes
-            wins = 0
-            shoot_stats_list = []
-            bot_bar = tqdm(
-                range(episodes_per_scenario),
-                desc=f"{bot_name.capitalize()} ({scenario_name[:20]})",
-                disable=not show_progress,
-                leave=False
-            )
+                    elapsed = time.time() - start_time
+                    avg_time = elapsed / completed_episodes
+                    remaining = total_episodes - completed_episodes
+                    eta = avg_time * remaining
 
-            for ep_num in bot_bar:
-                obs, info = env.reset()
-                done = False
-                total_reward = 0
-                step_count = 0
+                    # Calculate evaluation speed
+                    eps_speed = completed_episodes / elapsed if elapsed > 0 else 0
 
-                # Calculate max_eval_steps from training_config for safety
-                # Use reasonable default: 5 turns * 8 steps/turn * 2 buffer = 80 steps
-                max_eval_steps = 80
+                    # Format times as HH:MM:SS or MM:SS depending on duration
+                    def format_time(seconds):
+                        hours = int(seconds // 3600)
+                        minutes = int((seconds % 3600) // 60)
+                        secs = int(seconds % 60)
+                        if hours > 0:
+                            return f"{hours}:{minutes:02d}:{secs:02d}"
+                        else:
+                            return f"{minutes:02d}:{secs:02d}"
 
-                while not done and step_count < max_eval_steps:
-                    # CRITICAL: Get action mask for MaskablePPO
-                    action_masks = env.engine.get_action_mask()
-                    action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
-                    obs, reward, terminated, truncated, info = env.step(action)
-                    total_reward += reward
-                    done = terminated or truncated
-                    step_count += 1
+                    elapsed_str = format_time(elapsed)
+                    eta_str = format_time(eta)
+                    speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
 
-                # Check if agent won (Player 0 if controlled_agent is None, else Player 1)
-                winner = info.get("winner", -1)
-                expected_winner = 1 if controlled_agent else 0
+                    sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [{scenario_name}] [{elapsed_str}<{eta_str}, {speed_str}]")
+                    sys.stdout.flush()
 
-                if winner == expected_winner:
-                    wins += 1
+                try:
+                    W40KEngine, _ = setup_imports()
 
-                # DIAGNOSTIC: Collect shoot stats from each episode
-                bot_stats = env.get_shoot_stats()
-                shoot_stats_list.append(bot_stats)
+                    # Create base environment with specified training config
+                    base_env = W40KEngine(
+                        rewards_config=rewards_config_name,
+                        training_config_name=training_config_name,
+                        controlled_agent=controlled_agent,
+                        active_agents=None,
+                        scenario_file=scenario_file,
+                        unit_registry=unit_registry,
+                        quiet=True,
+                        gym_training_mode=True
+                    )
 
-                # Update progress bar
-                current_wr = (wins / (ep_num + 1)) * 100
-                bot_bar.set_postfix_str(f"WR: {current_wr:.1f}%")
+                    # NOTE: step_logger connection removed during refactoring
+                    # Step logging during bot evaluation requires passing step_logger as parameter
+                    # For now, bot evaluation runs without step logging
 
-            env.close()
+                    # Wrap with ActionMasker (CRITICAL for proper action masking)
+                    def mask_fn(env):
+                        return env.get_action_mask()
 
-            # Store shoot stats for this bot
-            if f'{bot_name}_shoot_stats' not in results:
-                results[f'{bot_name}_shoot_stats'] = []
-            results[f'{bot_name}_shoot_stats'].extend(shoot_stats_list)
+                    masked_env = ActionMasker(base_env, mask_fn)
+                    bot_env = BotControlledEnv(masked_env, bot, unit_registry)
 
-            # Accumulate results across scenarios
-            if bot_name == 'random':
-                total_random_wins += wins
-                total_random_episodes += episodes_per_scenario
-            elif bot_name == 'greedy':
-                total_greedy_wins += wins
-                total_greedy_episodes += episodes_per_scenario
-            elif bot_name == 'defensive':
-                total_defensive_wins += wins
-                total_defensive_episodes += episodes_per_scenario
+                    obs, info = bot_env.reset()
+                    done = False
+                    step_count = 0
 
-    # Calculate final win rates
-    results['random'] = (total_random_wins / total_random_episodes * 100) if total_random_episodes > 0 else 0
-    results['greedy'] = (total_greedy_wins / total_greedy_episodes * 100) if total_greedy_episodes > 0 else 0
-    results['defensive'] = (total_defensive_wins / total_defensive_episodes * 100) if total_defensive_episodes > 0 else 0
-    results['combined'] = (results['random'] + results['greedy'] + results['defensive']) / 3
+                    # Calculate max_eval_steps from training_config
+                    env_config = base_env.unwrapped.config if hasattr(base_env, 'unwrapped') else base_env.config
+                    training_cfg = env_config.get('training_config', {})
+                    max_turns = training_cfg.get('max_turns_per_episode', 5)
 
-    # Add raw win counts
-    results['random_wins'] = total_random_wins
-    results['greedy_wins'] = total_greedy_wins
-    results['defensive_wins'] = total_defensive_wins
+                    # Calculate expected steps per episode
+                    steps_per_turn = 8
+                    expected_max_steps = max_turns * steps_per_turn
 
-    print(f"\n📊 Bot Evaluation Results ({total_episodes} episodes per bot):")
-    print(f"   Random:     {results['random']:5.1f}% ({total_random_wins}/{total_random_episodes} wins)")
-    print(f"   Greedy:     {results['greedy']:5.1f}% ({total_greedy_wins}/{total_greedy_episodes} wins)")
-    print(f"   Defensive:  {results['defensive']:5.1f}% ({total_defensive_wins}/{total_defensive_episodes} wins)")
-    print(f"   Combined:   {results['combined']:5.1f}%\n")
+                    # Add 100% buffer for slow/suboptimal play
+                    max_eval_steps = expected_max_steps * 2
 
-    # DIAGNOSTIC: Print shoot statistics for each bot
-    if show_progress:
-        print("="*80)
-        print("📊 DIAGNOSTIC: Shoot Phase Behavior")
-        print("="*80)
-        for bot_name in ['random', 'greedy', 'defensive']:
-            stats_key = f'{bot_name}_shoot_stats'
-            if stats_key in results and results[stats_key]:
-                stats_list = results[stats_key]
-                avg_opportunities = sum(s['shoot_opportunities'] for s in stats_list) / len(stats_list)
-                avg_shoot_rate = sum(s['shoot_rate'] for s in stats_list) / len(stats_list)
+                    while not done and step_count < max_eval_steps:
+                        action_masks = bot_env.engine.get_action_mask()
+                        action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
 
-                avg_ai_opportunities = sum(s['ai_shoot_opportunities'] for s in stats_list) / len(stats_list)
-                avg_ai_shoot_rate = sum(s['ai_shoot_rate'] for s in stats_list) / len(stats_list)
+                        obs, reward, terminated, truncated, info = bot_env.step(action)
+                        done = terminated or truncated
+                        step_count += 1
 
+                    # Determine winner - track wins/losses/draws
+                    # CRITICAL FIX: Learning agent is ALWAYS Player 0, regardless of controlled_agent name
+                    # controlled_agent is the agent key string (e.g., "SpaceMarine_phase1"), NOT a player ID
+                    agent_player = 0  # Learning agent is always Player 0
+                    winner = info.get('winner')
+
+                    if winner == agent_player:
+                        wins += 1
+                    elif winner == -1:
+                        draws += 1
+                    else:
+                        losses += 1
+
+                    # DIAGNOSTIC: Collect shoot stats from all episodes
+                    bot_stats = bot_env.get_shoot_stats()
+                    if f'{bot_name}_shoot_stats' not in results:
+                        results[f'{bot_name}_shoot_stats'] = []
+                    results[f'{bot_name}_shoot_stats'].append(bot_stats)
+
+                    bot_env.close()
+                except Exception as e:
+                    if show_progress:
+                        print(f"\n⚠️  Episode error: {e}")
+                    continue
+
+        # Calculate win rate across ALL scenarios
+        total_games = episodes_per_scenario * len(scenario_list)
+        win_rate = wins / total_games if total_games > 0 else 0.0
+        results[bot_name] = win_rate
+        results[f'{bot_name}_wins'] = wins
+        results[f'{bot_name}_losses'] = losses
+        results[f'{bot_name}_draws'] = draws
+
+        # DIAGNOSTIC: Print average shoot stats for this bot
+        if f'{bot_name}_shoot_stats' in results and results[f'{bot_name}_shoot_stats']:
+            stats_list = results[f'{bot_name}_shoot_stats']
+            avg_opportunities = sum(s['shoot_opportunities'] for s in stats_list) / len(stats_list)
+            avg_shoot_rate = sum(s['shoot_rate'] for s in stats_list) / len(stats_list)
+
+            avg_ai_opportunities = sum(s['ai_shoot_opportunities'] for s in stats_list) / len(stats_list)
+            avg_ai_shoot_rate = sum(s['ai_shoot_rate'] for s in stats_list) / len(stats_list)
+
+            if show_progress:
                 print(f"\n   📊 {bot_name.capitalize()}Bot: {avg_shoot_rate:.1f}% shoot rate ({avg_opportunities:.1f} opportunities/game)")
                 print(f"   🤖 AI Agent:  {avg_ai_shoot_rate:.1f}% shoot rate ({avg_ai_opportunities:.1f} opportunities/game)")
+
+    if show_progress:
+        print("\r" + " " * 120)  # Clear the progress bar line
+        print()  # New line after clearing
+
+    # Combined score with improved weighting: RandomBot 35%, GreedyBot 30%, DefensiveBot 35%
+    # Increased RandomBot weight to prevent overfitting to predictable patterns
+    results['combined'] = 0.35 * results['random'] + 0.30 * results['greedy'] + 0.35 * results['defensive']
+
+    # DIAGNOSTIC: Print shoot statistics (sample from last episode of each bot)
+    if show_progress:
+        print("\n" + "="*80)
+        print("📊 DIAGNOSTIC: Shoot Phase Behavior")
+        print("="*80)
+        print("Bot behavior analysis completed - check logs for detailed stats")
         print("="*80 + "\n")
 
     return results

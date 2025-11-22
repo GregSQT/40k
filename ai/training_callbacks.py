@@ -15,8 +15,16 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 import os
 import time
 import numpy as np
-from typing import Optional
+import torch
+from typing import Dict, Optional
 from stable_baselines3.common.callbacks import BaseCallback
+
+# Import evaluation bots for testing - flag used by print_final_training_summary
+try:
+    from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
+    EVALUATION_BOTS_AVAILABLE = True
+except ImportError:
+    EVALUATION_BOTS_AVAILABLE = False
 
 __all__ = [
     'EntropyScheduleCallback',
@@ -343,9 +351,9 @@ class EpisodeBasedEvalCallback(BaseCallback):
             
             episode_rewards.append(episode_reward)
             episode_lengths.append(episode_length)
-            
-            # Track wins - check if AI (player 1) won
-            if final_info and final_info.get('winner') == 1:
+
+            # Track wins - CRITICAL FIX: Learning agent is Player 0, not Player 1!
+            if final_info and final_info.get('winner') == 0:
                 wins += 1
         
         # Calculate statistics
@@ -528,15 +536,18 @@ class MetricsCollectionCallback(BaseCallback):
     
     def _run_final_bot_eval(self, model, training_config, training_config_name, rewards_config_name):
         """Run final comprehensive bot evaluation using standalone function"""
+        # Lazy import to avoid circular dependency
+        from ai.bot_evaluation import evaluate_against_bots
+
         controlled_agent = self.controlled_agent  # CRITICAL FIX: Use stored controlled_agent instead of looking in training_config
-        
+
         # Extract n_episodes from callback_params in training_config
         if 'callback_params' not in training_config:
             raise KeyError("training_config missing required 'callback_params' field")
         if 'bot_eval_final' not in training_config['callback_params']:
             raise KeyError("training_config['callback_params'] missing required 'bot_eval_final' field")
         n_episodes = training_config['callback_params']['bot_eval_final']
-        
+
         # Use standalone function with progress bar for final eval
         return evaluate_against_bots(
             model=model,
@@ -840,80 +851,120 @@ class MetricsCollectionCallback(BaseCallback):
 class BotEvaluationCallback(BaseCallback):
     """Callback to test agent against evaluation bots with best model saving"""
 
-    def __init__(self, eval_freq: int, n_eval_episodes: int = 30,
-                 training_config_name: str = "default", rewards_config_name: str = "default",
-                 best_model_save_path: Optional[str] = None,
-                 controlled_agent: Optional[str] = None, verbose: int = 1,
-                 step_logger = None):
+    def __init__(self, eval_freq: int = 5000, n_eval_episodes: int = 20,
+                 best_model_save_path: str = None, metrics_tracker=None,
+                 use_episode_freq: bool = False, verbose: int = 1):
         super().__init__(verbose)
-        self.eval_freq = eval_freq  # Evaluate every N episodes
+        self.eval_freq = eval_freq
         self.n_eval_episodes = n_eval_episodes
-        self.training_config_name = training_config_name
-        self.rewards_config_name = rewards_config_name
         self.best_model_save_path = best_model_save_path
-        self.controlled_agent = controlled_agent
-        self.step_logger = step_logger
+        self.metrics_tracker = metrics_tracker  # Store metrics_tracker reference
+        self.use_episode_freq = use_episode_freq  # True = episodes, False = timesteps
+        self.last_eval_episode = 0  # Track last episode we evaluated at
+        self.best_combined_win_rate = 0.0  # Track best performance
 
-        self.episode_count = 0
-        self.last_eval_episode = 0
-        self.best_combined_score = -float('inf')
-
-        # Create save directory if needed
-        if best_model_save_path is not None:
-            os.makedirs(best_model_save_path, exist_ok=True)
+        if EVALUATION_BOTS_AVAILABLE:
+            # Initialize bots with stochasticity to prevent overfitting (15% random actions)
+            self.bots = {
+                'random': RandomBot(),
+                'greedy': GreedyBot(randomness=0.15),
+                'defensive': DefensiveBot(randomness=0.15)
+            }
+        else:
+            self.bots = {}
 
     def _on_step(self) -> bool:
-        # Detect episode end
-        if hasattr(self, 'locals') and 'dones' in self.locals:
-            dones = self.locals['dones']
-            episodes_finished = sum(dones) if hasattr(dones, '__iter__') else (1 if dones else 0)
+        if not EVALUATION_BOTS_AVAILABLE:
+            return True
 
-            if episodes_finished > 0:
-                self.episode_count += episodes_finished
+        # Determine if we should evaluate based on mode
+        should_evaluate = False
+        if self.use_episode_freq:
+            # Episode-based evaluation
+            if self.metrics_tracker:
+                current_episode = self.metrics_tracker.episode_count
+                # Evaluate every eval_freq episodes, but only once per episode
+                if current_episode > 0 and current_episode % self.eval_freq == 0 and current_episode != self.last_eval_episode:
+                    should_evaluate = True
+                    self.last_eval_episode = current_episode
+        else:
+            # Timestep-based evaluation (original behavior)
+            if self.num_timesteps % self.eval_freq == 0:
+                should_evaluate = True
 
-                # Trigger evaluation every eval_freq episodes
-                if self.episode_count - self.last_eval_episode >= self.eval_freq:
-                    self._evaluate_against_bots()
-                    self.last_eval_episode = self.episode_count
+        if should_evaluate:
+            results = self._evaluate_against_bots()
 
+            # Calculate combined performance (weighted average)
+            # IMPROVED weighting: RandomBot 35%, GreedyBot 30%, DefensiveBot 35%
+            # Increased RandomBot weight to prevent overfitting to predictable patterns
+            combined_win_rate = (
+                results.get('random', 0) * 0.35 +
+                results.get('greedy', 0) * 0.30 +
+                results.get('defensive', 0) * 0.35
+            )
+
+            # Log to metrics_tracker (0_critical/ and bot_eval/ namespaces)
+            if self.metrics_tracker:
+                bot_results = {
+                    'random': results.get('random'),
+                    'greedy': results.get('greedy'),
+                    'defensive': results.get('defensive'),
+                    'combined': combined_win_rate
+                }
+                self.metrics_tracker.log_bot_evaluations(bot_results)
+
+            # Also log to model's logger (backup)
+            if hasattr(self.model, 'logger') and self.model.logger:
+                self.model.logger.record('eval_bots/combined_win_rate', combined_win_rate)
+
+            # Save best model based on combined performance
+            if combined_win_rate > self.best_combined_win_rate:
+                self.best_combined_win_rate = combined_win_rate
+                if self.best_model_save_path:
+                    save_path = f"{self.best_model_save_path}/best_model"
+                    self.model.save(save_path)
         return True
 
-    def _evaluate_against_bots(self):
-        """Run bot evaluation and save best model"""
+    def _evaluate_against_bots(self) -> Dict[str, float]:
+        """Evaluate agent against bots using standalone function"""
         # Lazy import to avoid circular dependency
         from ai.bot_evaluation import evaluate_against_bots
 
-        if self.verbose > 0:
-            print(f"\n🤖 Running bot evaluation @ Episode {self.episode_count}...")
+        # Extract controlled_agent, training_config_name, and rewards_config_name from training environment
+        controlled_agent = None
+        training_config_name = None
+        rewards_config_name = None
 
-        # Pause step logger during evaluation
-        if self.step_logger and hasattr(self.step_logger, 'enabled'):
-            original_enabled = self.step_logger.enabled
-            self.step_logger.enabled = False
-        else:
-            original_enabled = False
+        if hasattr(self, 'training_env') and hasattr(self.training_env, 'envs'):
+            if len(self.training_env.envs) > 0:
+                train_env = self.training_env.envs[0]
+                if hasattr(train_env, 'unwrapped'):
+                    train_env = train_env.unwrapped
+                if hasattr(train_env, 'config'):
+                    controlled_agent = train_env.config.get('controlled_agent')
+                    # Extract training_config_name from config
+                    if 'training_config_name' not in train_env.config:
+                        raise KeyError("Training environment config missing required 'training_config_name' field")
+                    training_config_name = train_env.config['training_config_name']
+                    # Extract rewards_config_name from config (might be stored as rewards_config)
+                    if 'rewards_config' not in train_env.config and 'rewards_config_name' not in train_env.config:
+                        raise KeyError("Training environment config missing required 'rewards_config' or 'rewards_config_name' field")
+                    rewards_config_name = train_env.config.get('rewards_config_name') or train_env.config.get('rewards_config')
 
-        results = evaluate_against_bots(
+        # Raise error if extraction failed
+        if not training_config_name:
+            raise RuntimeError("Failed to extract training_config_name from training environment")
+        if not rewards_config_name:
+            raise RuntimeError("Failed to extract rewards_config_name from training environment")
+
+        # Use standalone function with no progress bar for intermediate eval
+        return evaluate_against_bots(
             model=self.model,
-            training_config_name=self.training_config_name,
-            rewards_config_name=self.rewards_config_name,
+            training_config_name=training_config_name,
+            rewards_config_name=rewards_config_name,
             n_episodes=self.n_eval_episodes,
-            controlled_agent=self.controlled_agent,
+            controlled_agent=controlled_agent,
             show_progress=False,
+            deterministic=True
         )
-
-        # Resume step logger
-        if self.step_logger and hasattr(self.step_logger, 'enabled'):
-            self.step_logger.enabled = original_enabled
-
-        # Get combined score
-        combined_score = results.get('combined', 0.0)
-
-        # Save best model based on combined score
-        if combined_score > self.best_combined_score:
-            self.best_combined_score = combined_score
-            if self.best_model_save_path is not None:
-                model_path = os.path.join(self.best_model_save_path, "best_bot_eval_model")
-                self.model.save(model_path)
-                if self.verbose > 0:
-                    print(f"💾 New best bot eval model saved! Combined: {combined_score:.1f}%")

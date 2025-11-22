@@ -219,32 +219,42 @@ class RewardCalculator:
             # 'flee' is movement away from adjacent enemies (AI_TURN.md flee mechanics)
             old_pos = (result["fromCol"], result["fromRow"])
             new_pos = (result["toCol"], result["toRow"])
+
+            # Phase 2+: Use position_score-based movement reward
+            # Get tactical_positioning hyperparameter from config (default 1.0 = balanced)
+            tactical_positioning = self.config.get("tactical_positioning", 1.0)
+
+            # Calculate position scores before and after
+            position_score_before = self.calculate_position_score(acting_unit, old_pos, game_state, tactical_positioning)
+            position_score_after = self.calculate_position_score(acting_unit, new_pos, game_state, tactical_positioning)
+
+            # Movement reward = position improvement (scaled for reward magnitude)
+            # Scale factor ensures position_score delta translates to meaningful reward
+            position_reward_scale = self.config.get("position_reward_scale", 0.1)
+            position_based_reward = (position_score_after - position_score_before) * position_reward_scale
+
+            # Also get legacy tactical context rewards (for backward compatibility)
             tactical_context = self._build_tactical_context(acting_unit, result, game_state)
-            movement_result = reward_mapper.get_movement_reward(enriched_unit, old_pos, new_pos, tactical_context)
-            if isinstance(movement_result, tuple):
-                movement_reward = movement_result[0]
-                reward_breakdown['base_actions'] = movement_reward
-                reward_breakdown['total'] = movement_reward
+            legacy_reward = reward_mapper.get_movement_reward(enriched_unit, old_pos, new_pos, tactical_context)
+            if isinstance(legacy_reward, tuple):
+                legacy_reward = legacy_reward[0]
 
-                if game_state.get("game_over", False):
-                    situational_reward = self._get_situational_reward(game_state)
-                    reward_breakdown['situational'] = situational_reward
-                    movement_reward += situational_reward
-                    reward_breakdown['total'] = movement_reward
+            # Combine position-based and legacy rewards
+            # Position-based is primary for Phase 2+, legacy provides additional signals
+            movement_reward = position_based_reward + legacy_reward
 
-                game_state['last_reward_breakdown'] = reward_breakdown
-                return movement_reward
-            reward_breakdown['base_actions'] = movement_result
-            reward_breakdown['total'] = movement_result
+            reward_breakdown['base_actions'] = legacy_reward
+            reward_breakdown['tactical_bonuses'] = position_based_reward
+            reward_breakdown['total'] = movement_reward
 
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
                 reward_breakdown['situational'] = situational_reward
-                movement_result += situational_reward
-                reward_breakdown['total'] = movement_result
+                movement_reward += situational_reward
+                reward_breakdown['total'] = movement_reward
 
             game_state['last_reward_breakdown'] = reward_breakdown
-            return movement_result
+            return movement_reward
 
         elif action_type == "skip":
             # FIXED: Skip means no targets available - no penalty
@@ -1366,7 +1376,7 @@ class RewardCalculator:
         if "unitType" not in unit:
             raise KeyError(f"Unit missing required 'unitType' field: {unit}")
         unit_type = unit["unitType"]
-        
+
         # Use unit registry to get agent key (matches rewards config)
         try:
             agent_key = self.unit_registry.get_model_key(unit_type)
@@ -1374,3 +1384,322 @@ class RewardCalculator:
         except ValueError as e:
             # AI_TURN.md COMPLIANCE: NO FALLBACKS - propagate the error
             raise ValueError(f"Failed to get reward config key for unit type '{unit_type}': {e}")
+
+    # ============================================================================
+    # POSITION SCORE CALCULATION (Phase 2 Movement Rewards)
+    # ============================================================================
+
+    def calculate_position_score(self, unit: Dict[str, Any], position: Tuple[int, int],
+                                  game_state: Dict[str, Any], tactical_positioning: float = 1.0) -> float:
+        """
+        Calculate position score for movement rewards.
+
+        Formula: position_score = offensive_value - (defensive_threat × tactical_positioning)
+
+        Args:
+            unit: The unit evaluating the position
+            position: (col, row) tuple of the position to evaluate
+            game_state: Current game state
+            tactical_positioning: Hyperparameter (0.5=aggressive, 1.0=balanced, 2.0=defensive)
+
+        Returns:
+            Position score (higher = better position)
+        """
+        offensive_value = self._calculate_offensive_value(unit, position, game_state)
+        defensive_threat = self._calculate_defensive_threat(unit, position, game_state)
+
+        return offensive_value - (defensive_threat * tactical_positioning)
+
+    def _calculate_offensive_value(self, unit: Dict[str, Any], position: Tuple[int, int],
+                                    game_state: Dict[str, Any]) -> float:
+        """
+        Calculate offensive value from a position.
+
+        AI_TRAINING.md: Estimate total VALUE the unit can secure by shooting from this position.
+        Uses greedy allocation of attacks to targets, sorted by VALUE.
+        """
+        col, row = position
+
+        # Create temporary unit state at the new position for LOS checks
+        temp_unit = unit.copy()
+        temp_unit["col"] = col
+        temp_unit["row"] = row
+
+        # Get all visible enemies
+        visible_enemies = []
+        for enemy in game_state["units"]:
+            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+                if has_line_of_sight(temp_unit, enemy, game_state):
+                    # Check if in range
+                    distance = calculate_hex_distance(col, row, enemy["col"], enemy["row"])
+                    if distance <= unit.get("RNG_RNG", 0):
+                        visible_enemies.append(enemy)
+
+        if not visible_enemies:
+            return 0.0
+
+        # Calculate attacks_needed and VALUE for each target
+        targets_data = []
+        for enemy in visible_enemies:
+            value = enemy.get("VALUE", 10)  # Default VALUE if not set
+            turns_to_kill = self._calculate_turns_to_kill(unit, enemy, game_state)
+            attacks_needed = turns_to_kill * unit.get("RNG_NB", 1)
+            targets_data.append({
+                "enemy": enemy,
+                "value": value,
+                "turns_to_kill": turns_to_kill,
+                "attacks_needed": attacks_needed
+            })
+
+        # Sort by target_priority = VALUE / turns_to_kill (highest first)
+        # This prioritizes efficient kills (high value, easy to kill)
+        targets_data.sort(key=lambda x: x["value"] / x["turns_to_kill"] if x["turns_to_kill"] > 0 else x["value"] * 100, reverse=True)
+
+        # Greedy allocation
+        attacks_remaining = float(unit.get("RNG_NB", 1))
+        offensive_value = 0.0
+
+        for target in targets_data:
+            if attacks_remaining <= 0:
+                break
+
+            if attacks_remaining >= target["attacks_needed"]:
+                # Secured kill - add full VALUE
+                offensive_value += target["value"]
+                attacks_remaining -= target["attacks_needed"]
+            else:
+                # Probabilistic kill
+                kill_prob = attacks_remaining / target["attacks_needed"]
+                offensive_value += target["value"] * kill_prob
+                attacks_remaining = 0
+
+        return offensive_value
+
+    def _calculate_defensive_threat(self, unit: Dict[str, Any], position: Tuple[int, int],
+                                     game_state: Dict[str, Any]) -> float:
+        """
+        Calculate defensive threat at a position.
+
+        AI_TRAINING.md: Estimate damage received, accounting for enemy movement decisions
+        and targeting priorities. Uses smart targeting (enemies are intelligent).
+        """
+        from engine.phase_handlers.movement_handlers import _get_hex_neighbors, _is_traversable_hex
+
+        col, row = position
+        my_player = unit["player"]
+        my_value = unit.get("VALUE", 10)
+
+        # Get all living friendly units
+        friendlies = [u for u in game_state["units"]
+                     if u["player"] == my_player and u["HP_CUR"] > 0]
+
+        # Get all living enemy units
+        enemies = [u for u in game_state["units"]
+                  if u["player"] != my_player and u["HP_CUR"] > 0]
+
+        if not enemies:
+            return 0.0
+
+        total_threat = 0.0
+
+        for enemy in enemies:
+            # Step 1: Find positions enemy could reach
+            reachable_positions = self._get_enemy_reachable_positions(enemy, game_state)
+
+            # Step 2: Check which friendlies this enemy could see after moving
+            reachable_friendlies = []
+            can_reach_me = False
+
+            for reachable_pos in reachable_positions:
+                temp_enemy = enemy.copy()
+                temp_enemy["col"] = reachable_pos[0]
+                temp_enemy["row"] = reachable_pos[1]
+
+                # Check if enemy can see ME from this position
+                temp_unit = unit.copy()
+                temp_unit["col"] = col
+                temp_unit["row"] = row
+
+                if has_line_of_sight(temp_enemy, temp_unit, game_state):
+                    distance = calculate_hex_distance(reachable_pos[0], reachable_pos[1], col, row)
+                    if distance <= enemy.get("RNG_RNG", 0):
+                        can_reach_me = True
+
+                # Check all friendlies this enemy could see
+                for friendly in friendlies:
+                    if has_line_of_sight(temp_enemy, friendly, game_state):
+                        distance = calculate_hex_distance(reachable_pos[0], reachable_pos[1],
+                                                         friendly["col"], friendly["row"])
+                        if distance <= enemy.get("RNG_RNG", 0):
+                            if friendly["id"] not in [f["id"] for f in reachable_friendlies]:
+                                reachable_friendlies.append(friendly)
+
+            if not can_reach_me:
+                continue  # This enemy can't threaten me
+
+            # Step 3: Rank friendlies by priority from enemy's perspective
+            friendly_priorities = []
+            for friendly in reachable_friendlies:
+                f_value = friendly.get("VALUE", 10)
+                f_turns_to_kill = self._calculate_turns_to_kill_by_attacker(enemy, friendly, game_state)
+                if f_turns_to_kill > 0:
+                    f_priority = f_value / f_turns_to_kill
+                else:
+                    f_priority = f_value * 100  # Very high priority if instant kill
+                friendly_priorities.append({
+                    "friendly": friendly,
+                    "priority": f_priority
+                })
+
+            # Add myself to the list
+            my_turns_to_kill = self._calculate_turns_to_kill_by_attacker(enemy, unit, game_state)
+            if my_turns_to_kill > 0:
+                my_priority = my_value / my_turns_to_kill
+            else:
+                my_priority = my_value * 100
+
+            friendly_priorities.append({
+                "friendly": unit,
+                "priority": my_priority
+            })
+
+            # Sort by priority (highest first)
+            friendly_priorities.sort(key=lambda x: x["priority"], reverse=True)
+
+            # Find my rank
+            my_rank = 1
+            for i, fp in enumerate(friendly_priorities):
+                if fp["friendly"]["id"] == unit["id"]:
+                    my_rank = i + 1
+                    break
+
+            # Step 4 & 5: Calculate threat weight
+            # Movement probability
+            if my_rank == 1:
+                move_prob = 1.0
+            elif my_rank == 2:
+                move_prob = 0.3
+            else:
+                move_prob = 0.1
+
+            # Targeting probability
+            if my_rank == 1:
+                target_prob = 1.0
+            elif my_rank == 2:
+                target_prob = 0.5
+            else:
+                target_prob = 0.25
+
+            threat_weight = move_prob * target_prob
+
+            # Calculate enemy's expected damage against me
+            expected_damage = self._calculate_expected_damage_against(enemy, unit, game_state)
+
+            total_threat += expected_damage * threat_weight
+
+        return total_threat
+
+    def _get_enemy_reachable_positions(self, enemy: Dict[str, Any], game_state: Dict[str, Any]) -> List[Tuple[int, int]]:
+        """
+        Get all positions an enemy could reach after moving.
+        Uses BFS like movement_build_valid_destinations_pool but simplified.
+        """
+        from engine.phase_handlers.movement_handlers import _get_hex_neighbors, _is_traversable_hex
+
+        move_range = enemy.get("MOVE", 0)
+        start_pos = (enemy["col"], enemy["row"])
+
+        # BFS to find reachable positions
+        visited = {start_pos: 0}
+        queue = [(start_pos, 0)]
+        reachable = [start_pos]  # Include current position
+
+        while queue:
+            current_pos, current_dist = queue.pop(0)
+
+            if current_dist >= move_range:
+                continue
+
+            neighbors = _get_hex_neighbors(current_pos[0], current_pos[1])
+
+            for neighbor_col, neighbor_row in neighbors:
+                neighbor_pos = (neighbor_col, neighbor_row)
+
+                if neighbor_pos in visited:
+                    continue
+
+                # Simplified traversability check (ignore enemy adjacency rules for estimation)
+                if not _is_traversable_hex(game_state, neighbor_col, neighbor_row, enemy):
+                    continue
+
+                visited[neighbor_pos] = current_dist + 1
+                reachable.append(neighbor_pos)
+                queue.append((neighbor_pos, current_dist + 1))
+
+        return reachable
+
+    def _calculate_turns_to_kill(self, shooter: Dict[str, Any], target: Dict[str, Any],
+                                  game_state: Dict[str, Any]) -> float:
+        """Calculate how many turns (activations) it takes for shooter to kill target."""
+        expected_damage = self._calculate_expected_damage_against(shooter, target, game_state)
+
+        if expected_damage <= 0:
+            return 100.0  # Can't kill
+
+        return target["HP_CUR"] / expected_damage
+
+    def _calculate_turns_to_kill_by_attacker(self, attacker: Dict[str, Any], defender: Dict[str, Any],
+                                              game_state: Dict[str, Any]) -> float:
+        """Calculate how many turns it takes for attacker to kill defender."""
+        return self._calculate_turns_to_kill(attacker, defender, game_state)
+
+    def _calculate_expected_damage_against(self, attacker: Dict[str, Any], defender: Dict[str, Any],
+                                            game_state: Dict[str, Any]) -> float:
+        """
+        Calculate expected damage from attacker against defender in one activation.
+        Uses ranged stats (assuming shooting phase context).
+        """
+        # Get attacker ranged stats
+        num_attacks = attacker.get("RNG_NB", 0)
+        if num_attacks == 0:
+            return 0.0
+
+        to_hit = attacker.get("RNG_ATK", 4)
+        strength = attacker.get("RNG_STR", 4)
+        ap = attacker.get("RNG_AP", 0)
+        damage = attacker.get("RNG_DMG", 1)
+
+        # Get defender stats
+        toughness = defender.get("T", 4)
+        armor_save = defender.get("ARMOR_SAVE", 4)
+        invul_save = defender.get("INVUL_SAVE", 7)  # 7+ = no invul
+
+        # Calculate probabilities
+        p_hit = max(0.0, min(1.0, (7 - to_hit) / 6.0))
+
+        wound_target = self._calculate_wound_target(strength, toughness)
+        p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
+
+        # Save calculation (use better of armor or invul after AP modification)
+        modified_armor = armor_save + ap  # AP reduces armor save
+        best_save = min(modified_armor, invul_save)
+        if best_save > 6:
+            p_fail_save = 1.0
+        else:
+            p_fail_save = max(0.0, min(1.0, (best_save - 1) / 6.0))
+
+        expected_damage = num_attacks * p_hit * p_wound * p_fail_save * damage
+        return expected_damage
+
+    def _calculate_wound_target(self, strength: int, toughness: int) -> int:
+        """W40K wound chart."""
+        if strength >= toughness * 2:
+            return 2  # 2+
+        elif strength > toughness:
+            return 3  # 3+
+        elif strength == toughness:
+            return 4  # 4+
+        elif strength * 2 <= toughness:
+            return 6  # 6+
+        else:
+            return 5  # 5+

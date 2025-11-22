@@ -280,7 +280,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         print("✅ Using MaskablePPO with action masking for tactical combat")
 
         # Use specific log directory for continuous TensorBoard graphs across runs
-        tb_log_name = f"{training_config_name}_{agent_key}"
+        tb_log_name = f"{training_config_name}_{controlled_agent_key}"
         specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
         os.makedirs(specific_log_dir, exist_ok=True)
 
@@ -303,16 +303,16 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             # Update any model parameters that might have changed
             model.tensorboard_log = model_params["tensorboard_log"]
             model.verbose = model_params["verbose"]
-            
+
             # CRITICAL FIX: Reinitialize logger after loading from checkpoint
             # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
             # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
             from stable_baselines3.common.logger import configure
 
             # Use specific log directory to ensure continuous TensorBoard graphs across runs
-            # Format: ./tensorboard/{config_name}_{agent_key}/{run_name}
+            # Format: ./tensorboard/{config_name}_{controlled_agent_key}/{run_name}
             # This prevents creating new timestamped subdirectories on each script run
-            tb_log_name = f"{training_config_name}_{agent_key}"
+            tb_log_name = f"{training_config_name}_{controlled_agent_key}"
             specific_log_dir = os.path.join(model.tensorboard_log, tb_log_name)
 
             # Create directory if it doesn't exist
@@ -336,13 +336,13 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             print(f"⚠️ Failed to load model: {e}")
             print("🆕 Creating new model instead...")
             # Need to create specific directory here too
-            tb_log_name = f"{training_config_name}_{agent_key}"
+            tb_log_name = f"{training_config_name}_{controlled_agent_key}"
             specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
             os.makedirs(specific_log_dir, exist_ok=True)
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
             model = MaskablePPO(env=env, **model_params_copy)
-    
+
     return model, env, training_config, model_path
 
 def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default",
@@ -717,8 +717,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Create metrics callback ONCE before loop (not inside it)
     from stable_baselines3.common.callbacks import CallbackList
-    scenario_name = training_config_name if training_config_name else "default"
-    metrics_callback = MetricsCollectionCallback(metrics_tracker, scenario_name)
+    metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=effective_agent_key)
     
     # Training loop with scenario rotation
     episodes_trained = 0
@@ -1000,12 +999,10 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         bot_eval_callback = BotEvaluationCallback(
             eval_freq=bot_eval_freq,
             n_eval_episodes=bot_n_episodes_intermediate,
-            training_config_name=training_config_name,
-            rewards_config_name=rewards_config_name if rewards_config_name else agent,
             best_model_save_path=os.path.dirname(model_path),
-            controlled_agent=agent,
-            verbose=1,
-            step_logger=None
+            metrics_tracker=metrics_tracker,  # Pass metrics_tracker for TensorBoard logging
+            use_episode_freq=bot_eval_use_episodes,
+            verbose=1
         )
         callbacks.append(bot_eval_callback)
         
@@ -1076,14 +1073,13 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         # print(f"📈 Metrics tracking enabled for agent: {agent_name}")
         
         # Enhanced callbacks with metrics collection
-        scenario_name = training_config_name if training_config_name else "default"
-        metrics_callback = MetricsCollectionCallback(metrics_tracker, scenario_name)
+        metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=controlled_agent)
         
         # Attach metrics_tracker to bot_eval_callback if it exists
         for callback in callbacks:
             if isinstance(callback, BotEvaluationCallback):
                 callback.metrics_tracker = metrics_tracker
-                # print(f"✅ Linked BotEvaluationCallback to metrics_tracker")
+                print(f"✅ Linked BotEvaluationCallback to metrics_tracker")
         
         all_callbacks = callbacks + [metrics_callback]
         enhanced_callbacks = CallbackList(all_callbacks)
@@ -1099,9 +1095,8 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
             progress_bar=False  # Disable step-based progress bar (using episode-based instead)
         )
         
-        # Print final training summary with critical metrics
-        # Note: print_final_training_summary not implemented in MetricsCollectionCallback
-        # metrics_callback.print_final_training_summary(model=model, training_config=training_config, training_config_name=training_config_name, rewards_config_name=rewards_config_name)
+        # Print final training summary with critical metrics and bot evaluation
+        metrics_callback.print_final_training_summary(model=model, training_config=training_config, training_config_name=training_config_name, rewards_config_name=rewards_config_name)
         
         # Save final model
         os.makedirs(os.path.dirname(model_path), exist_ok=True)

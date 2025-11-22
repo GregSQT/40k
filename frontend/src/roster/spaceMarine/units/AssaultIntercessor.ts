@@ -12,7 +12,7 @@ export class AssaultIntercessor extends SpaceMarineInfantryTroopMeleeTroop {
   static HP_MAX = 2;           // Max hit points
   static LD = 6;               // Leadership score
   static OC = 2;               // Operative Control
-  static VALUE = 20;           // Unit value
+  static VALUE = 18;           // Unit value (W40K points cost)
   // RANGE WEAPON
   static RNG_RNG = 18;         // Range attack : range - 18
   static RNG_NB = 1;           // Range attack : number of attacks - 1

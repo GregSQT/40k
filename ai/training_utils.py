@@ -22,6 +22,7 @@ import gymnasium as gym
 from typing import Optional, List
 from stable_baselines3.common.monitor import Monitor
 from sb3_contrib.common.wrappers import ActionMasker
+from ai.env_wrappers import SelfPlayWrapper
 
 __all__ = [
     'check_gpu_availability',
@@ -269,4 +270,11 @@ def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None
     return max(1, total_episodes // (num_scenarios * target_rotations))
 
 def ensure_scenario():
-    pass
+    """Ensure scenario.json exists."""
+    # Get project root (parent of ai/ directory)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+
+    scenario_path = os.path.join(project_root, "config", "scenario.json")
+    if not os.path.exists(scenario_path):
+        raise FileNotFoundError(f"Missing required scenario.json file: {scenario_path}. AI_INSTRUCTIONS.md: No fallbacks allowed - scenario file must exist.")
