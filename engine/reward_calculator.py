@@ -1390,7 +1390,7 @@ class RewardCalculator:
     # ============================================================================
 
     def calculate_position_score(self, unit: Dict[str, Any], position: Tuple[int, int],
-                                  game_state: Dict[str, Any], tactical_positioning: float = 1.0) -> float:
+                                  game_state: Dict[str, Any], tactical_positioning: float = 0.0) -> float:
         """
         Calculate position score for movement rewards.
 
@@ -1400,15 +1400,25 @@ class RewardCalculator:
             unit: The unit evaluating the position
             position: (col, row) tuple of the position to evaluate
             game_state: Current game state
-            tactical_positioning: Hyperparameter (0.5=aggressive, 1.0=balanced, 2.0=defensive)
+            tactical_positioning: Hyperparameter controlling defense weight
+                - 0.0 = Phase 2 (offensive only, no defensive consideration)
+                - 0.5 = aggressive (low defense weight)
+                - 1.0 = balanced (equal weight)
+                - 2.0 = defensive (high defense weight)
 
         Returns:
             Position score (higher = better position)
         """
         offensive_value = self._calculate_offensive_value(unit, position, game_state)
-        defensive_threat = self._calculate_defensive_threat(unit, position, game_state)
 
-        return offensive_value - (defensive_threat * tactical_positioning)
+        # Phase 2: tactical_positioning=0 means ignore defensive_threat entirely
+        # This avoids teaching wrong predictions vs dumb bots
+        # Phase 3+: Enable defensive_threat with self-play or smart bots
+        if tactical_positioning > 0:
+            defensive_threat = self._calculate_defensive_threat(unit, position, game_state)
+            return offensive_value - (defensive_threat * tactical_positioning)
+        else:
+            return offensive_value
 
     def _calculate_offensive_value(self, unit: Dict[str, Any], position: Tuple[int, int],
                                     game_state: Dict[str, Any]) -> float:

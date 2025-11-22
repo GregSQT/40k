@@ -270,12 +270,20 @@ This formula naturally encourages:
 
 #### Movement Reward Formula (Position Score)
 
-The agent learns to choose positions that maximize offensive potential while minimizing defensive exposure:
+The agent learns to choose positions that maximize offensive potential:
 
 ```
-position_score = offensive_value - (defensive_threat × tactical_positioning)
+Phase 2:  position_score = offensive_value
+Phase 3+: position_score = offensive_value - (defensive_threat × tactical_positioning)
+
 movement_reward = position_score_after - position_score_before
 ```
+
+**Why Phase 2 ignores defensive_threat:**
+- Bots are dumb (random targeting), so defensive predictions would be wrong
+- Training on wrong predictions = agent learns to ignore the signal
+- Better to stay "naive" about defense than learn incorrect patterns
+- Phase 3 introduces defense with self-play (smart opponents)
 
 ---
 
@@ -424,21 +432,25 @@ Compare to if I were alone (no Captain):
 #### Position Score Summary
 
 ```
-position_score = offensive_value - (defensive_threat × tactical_positioning)
-movement_reward = position_score_after - position_score_before
+Phase 2:  position_score = offensive_value                    (tactical_positioning = 0)
+Phase 3+: position_score = offensive_value - (defensive_threat × tactical_positioning)
 ```
 
 **Parameters:**
-- `tactical_positioning`: Hyperparameter balancing offense vs defense (default: 1.0)
-  - `0.5` = aggressive (ignores half the threat, prioritizes offense)
+- `tactical_positioning`: Hyperparameter controlling defense weight
+  - `0.0` = **Phase 2** (offensive only - no defense vs dumb bots)
+  - `0.5` = aggressive (low defense weight)
   - `1.0` = balanced (equal weight to offense and defense)
-  - `2.0` = defensive (double-weights threat, prioritizes safety)
+  - `2.0` = defensive (high defense weight)
 
-**What the agent learns:**
+**Phase 2 - What the agent learns:**
 - Move to positions with LOS on high-value targets
+- Use walls to get/break LOS for shooting advantage
+
+**Phase 3+ - Additional learning (with self-play):**
 - Avoid positions where you're the top priority for many enemies
 - Stay near high-value allies (they draw enemy attention)
-- Use walls to break LOS from enemies who would otherwise target you
+- Use walls defensively to break enemy LOS
 
 **Reward Emphasis** (from `rewards_config.json`):
 ```json

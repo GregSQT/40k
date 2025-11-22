@@ -51,14 +51,14 @@
   },
   "phase2": {
     "type": "################################################### Phase 2 - POSITIONING WITH WALLS ###################################################",
-    "total_episodes": 12000,
+    "total_episodes": 3000,
     "total_episodes_normal_value": "12000 = 4 scenarios × 1000 episodes × 3 rotations for curriculum learning",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 16,
     "rotation_interval": 1000,
     "rotation_comment": "1000 episodes per scenario = 3 rotations through all bots. Matches Phase 1 successful configuration.",
-    "tactical_positioning": 1.0,
-    "tactical_positioning_comment": "Movement reward balance: 0.5=aggressive, 1.0=balanced, 2.0=defensive. See AI_TRAINING.md Position Score.",
+    "tactical_positioning": 0.0,
+    "tactical_positioning_comment": "Phase 2: 0.0 = offensive only (no defense vs dumb bots). Phase 3+: 1.0 = balanced with self-play.",
     "position_reward_scale": 0.1,
     "position_reward_scale_comment": "Scales position_score delta to reward magnitude. 0.1 = 10 VALUE difference = 1.0 reward.",
     "model_params": {
