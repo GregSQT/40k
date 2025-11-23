@@ -81,9 +81,13 @@ class GreedyBot:
 
             for target_id in valid_targets:
                 target = self._get_unit_by_id(game_state, target_id)
-                if target and target.get('HP_CUR', float('inf')) < min_hp:
-                    min_hp = target['HP_CUR']
-                    best_target = target_id
+                if target:
+                    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+                    if 'HP_CUR' not in target:
+                        raise KeyError(f"Target missing required 'HP_CUR' field: {target}")
+                    if target['HP_CUR'] < min_hp:
+                        min_hp = target['HP_CUR']
+                        best_target = target_id
 
             return best_target
 

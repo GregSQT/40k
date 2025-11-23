@@ -85,7 +85,12 @@ class TargetSelector:
         score += self.weights.get("kill_probability", 2.0) * kill_prob
         
         # Component 2: Threat level
-        threat = max(target.get("RNG_DMG", 0), target.get("CC_DMG", 0)) / 5.0
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+        if "RNG_DMG" not in target:
+            raise KeyError(f"Target missing required 'RNG_DMG' field: {target}")
+        if "CC_DMG" not in target:
+            raise KeyError(f"Target missing required 'CC_DMG' field: {target}")
+        threat = max(target["RNG_DMG"], target["CC_DMG"]) / 5.0
         score += self.weights.get("threat_level", 1.5) * threat
         
         # Component 3: HP ratio (prefer wounded)
@@ -101,25 +106,39 @@ class TargetSelector:
     def _estimate_kill_probability(self, shooter: Dict[str, Any],
                                    target: Dict[str, Any]) -> float:
         """Estimate probability of killing target (simplified W40K math)."""
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
+        if "RNG_ATK" not in shooter:
+            raise KeyError(f"Shooter missing required 'RNG_ATK' field: {shooter}")
+        if "RNG_STR" not in shooter:
+            raise KeyError(f"Shooter missing required 'RNG_STR' field: {shooter}")
+        if "RNG_NB" not in shooter:
+            raise KeyError(f"Shooter missing required 'RNG_NB' field: {shooter}")
+        if "RNG_DMG" not in shooter:
+            raise KeyError(f"Shooter missing required 'RNG_DMG' field: {shooter}")
+        if "T" not in target:
+            raise KeyError(f"Target missing required 'T' field: {target}")
+        if "HP_CUR" not in target:
+            raise KeyError(f"Target missing required 'HP_CUR' field: {target}")
+
         # Hit probability
-        hit_target = shooter.get("RNG_ATK", 4)
+        hit_target = shooter["RNG_ATK"]
         p_hit = max(0.0, (7 - hit_target) / 6.0)
-        
+
         # Wound probability (simplified)
-        strength = shooter.get("RNG_STR", 4)
-        toughness = target.get("T", 4)
+        strength = shooter["RNG_STR"]
+        toughness = target["T"]
         if strength >= toughness * 2:
             p_wound = 5/6
         elif strength > toughness:
             p_wound = 4/6
         else:
             p_wound = 3/6
-        
+
         # Expected damage
-        num_attacks = shooter.get("RNG_NB", 1)
-        damage_per_hit = shooter.get("RNG_DMG", 1)
+        num_attacks = shooter["RNG_NB"]
+        damage_per_hit = shooter["RNG_DMG"]
         expected_damage = num_attacks * p_hit * p_wound * damage_per_hit
-        
+
         # Kill probability
         if expected_damage >= target["HP_CUR"]:
             return 1.0
@@ -129,24 +148,36 @@ class TargetSelector:
     def _calculate_army_threat(self, target: Dict[str, Any],
                                game_state: Dict[str, Any]) -> float:
         """Calculate threat to entire friendly army."""
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
+        if "RNG_RNG" not in target:
+            raise KeyError(f"Target missing required 'RNG_RNG' field: {target}")
+        if "RNG_DMG" not in target:
+            raise KeyError(f"Target missing required 'RNG_DMG' field: {target}")
+        if "CC_DMG" not in target:
+            raise KeyError(f"Target missing required 'CC_DMG' field: {target}")
+
         my_player = game_state["current_player"]
-        friendly_units = [u for u in game_state["units"] 
+        friendly_units = [u for u in game_state["units"]
                          if u["player"] == my_player and u["HP_CUR"] > 0]
-        
+
         if not friendly_units:
             return 0.0
-        
+
         total_threat = 0.0
         for friendly in friendly_units:
+            # AI_TURN.md COMPLIANCE: Direct field access
+            if "VALUE" not in friendly:
+                raise KeyError(f"Friendly unit missing required 'VALUE' field: {friendly}")
+
             # Distance check
             distance = calculate_hex_distance(friendly["col"], friendly["row"], target["col"], target["row"])
-            
+
             # Threat only if in range
-            if distance <= target.get("RNG_RNG", 0):
-                unit_value = friendly.get("VALUE", 10.0)
-                threat_factor = max(target.get("RNG_DMG", 0), target.get("CC_DMG", 0)) / 5.0
+            if distance <= target["RNG_RNG"]:
+                unit_value = friendly["VALUE"]
+                threat_factor = max(target["RNG_DMG"], target["CC_DMG"]) / 5.0
                 total_threat += unit_value * threat_factor / max(1, distance)
-        
+
         return min(1.0, total_threat / 100.0)  # Normalize to 0-1
     
     @staticmethod

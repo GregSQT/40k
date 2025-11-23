@@ -72,9 +72,9 @@
       "clip_range": 0.2,
       "ent_coef": {
         "start": 0.35,
-        "end": 0.28
+        "end": 0.28,
+        "_comment": "INCREASED - previous training showed entropy collapse (0.85). Need more exploration."
       },
-      "ent_coef_comment": "INCREASED end from 0.15 to 0.25 - previous training showed entropy collapse (0.85). Need more exploration.",
       "vf_coef": 0.5,
       "max_grad_norm": 0.3,
       "target_kl": null,

@@ -304,7 +304,9 @@ class ObservationBuilder:
             strength = shooter["RNG_STR"]
             damage = shooter["RNG_DMG"]
             num_attacks = shooter["RNG_NB"]
-            ap = shooter.get("RNG_AP", 0)
+            if "RNG_AP" not in shooter:
+                raise KeyError(f"Shooter missing required 'RNG_AP' field: {shooter}")
+            ap = shooter["RNG_AP"]
         else:
             if "CC_ATK" not in shooter or "CC_STR" not in shooter or "CC_DMG" not in shooter:
                 raise KeyError(f"Shooter missing required melee stats: {shooter}")
@@ -315,7 +317,9 @@ class ObservationBuilder:
             strength = shooter["CC_STR"]
             damage = shooter["CC_DMG"]
             num_attacks = shooter["CC_NB"]
-            ap = shooter.get("CC_AP", 0)
+            if "CC_AP" not in shooter:
+                raise KeyError(f"Shooter missing required 'CC_AP' field: {shooter}")
+            ap = shooter["CC_AP"]
         
         p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
         
@@ -353,31 +357,53 @@ class ObservationBuilder:
             defender["col"], defender["row"],
             attacker["col"], attacker["row"]
         )
-        
-        can_use_ranged = distance <= attacker.get("RNG_RNG", 0)
-        can_use_melee = distance <= attacker.get("CC_RNG", 0)
-        
+
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
+        if "RNG_RNG" not in attacker:
+            raise KeyError(f"Attacker missing required 'RNG_RNG' field: {attacker}")
+        if "CC_RNG" not in attacker:
+            raise KeyError(f"Attacker missing required 'CC_RNG' field: {attacker}")
+
+        can_use_ranged = distance <= attacker["RNG_RNG"]
+        can_use_melee = distance <= attacker["CC_RNG"]
+
         if not can_use_ranged and not can_use_melee:
             return 0.0
-        
+
         if can_use_ranged and not can_use_melee:
-            if "RNG_ATK" not in attacker or "RNG_STR" not in attacker:
-                return 0.0
-            
+            if "RNG_ATK" not in attacker:
+                raise KeyError(f"Attacker missing required 'RNG_ATK' field: {attacker}")
+            if "RNG_STR" not in attacker:
+                raise KeyError(f"Attacker missing required 'RNG_STR' field: {attacker}")
+            if "RNG_DMG" not in attacker:
+                raise KeyError(f"Attacker missing required 'RNG_DMG' field: {attacker}")
+            if "RNG_NB" not in attacker:
+                raise KeyError(f"Attacker missing required 'RNG_NB' field: {attacker}")
+            if "RNG_AP" not in attacker:
+                raise KeyError(f"Attacker missing required 'RNG_AP' field: {attacker}")
+
             hit_target = attacker["RNG_ATK"]
             strength = attacker["RNG_STR"]
             damage = attacker["RNG_DMG"]
-            num_attacks = attacker.get("RNG_NB", 0)
-            ap = attacker.get("RNG_AP", 0)
+            num_attacks = attacker["RNG_NB"]
+            ap = attacker["RNG_AP"]
         else:
-            if "CC_ATK" not in attacker or "CC_STR" not in attacker:
-                return 0.0
-            
+            if "CC_ATK" not in attacker:
+                raise KeyError(f"Attacker missing required 'CC_ATK' field: {attacker}")
+            if "CC_STR" not in attacker:
+                raise KeyError(f"Attacker missing required 'CC_STR' field: {attacker}")
+            if "CC_DMG" not in attacker:
+                raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker}")
+            if "CC_NB" not in attacker:
+                raise KeyError(f"Attacker missing required 'CC_NB' field: {attacker}")
+            if "CC_AP" not in attacker:
+                raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker}")
+
             hit_target = attacker["CC_ATK"]
             strength = attacker["CC_STR"]
             damage = attacker["CC_DMG"]
-            num_attacks = attacker.get("CC_NB", 0)
-            ap = attacker.get("CC_AP", 0)
+            num_attacks = attacker["CC_NB"]
+            ap = attacker["CC_AP"]
         
         if num_attacks == 0:
             return 0.0
@@ -429,16 +455,20 @@ class ObservationBuilder:
         total_weighted_threat = 0.0
         for friendly in friendly_units:
             danger = self._calculate_danger_probability(friendly, target, game_state)
-            unit_value = friendly.get("VALUE", 10.0)
+            if "VALUE" not in friendly:
+                raise KeyError(f"Friendly unit missing required 'VALUE' field: {friendly}")
+            unit_value = friendly["VALUE"]
             weighted_threat = danger * unit_value
             total_weighted_threat += weighted_threat
-        
+
         all_weighted_threats = []
         for t in valid_targets:
             t_total = 0.0
             for friendly in friendly_units:
-                danger = self._calculate_danger_probability(friendly, t)
-                unit_value = friendly.get("VALUE", 10.0)
+                danger = self._calculate_danger_probability(friendly, t, game_state)
+                if "VALUE" not in friendly:
+                    raise KeyError(f"Friendly unit missing required 'VALUE' field: {friendly}")
+                unit_value = friendly["VALUE"]
                 t_total += danger * unit_value
             all_weighted_threats.append(t_total)
         
@@ -460,8 +490,10 @@ class ObservationBuilder:
         try:
             if not hasattr(self, 'unit_registry') or not self.unit_registry:
                 return 0.5
-            
-            unit_type = active_unit.get("unitType", "")
+
+            if "unitType" not in active_unit:
+                raise KeyError(f"Active unit missing required 'unitType' field: {active_unit}")
+            unit_type = active_unit["unitType"]
             
             if "Swarm" in unit_type:
                 preferred = "swarm"
@@ -473,8 +505,10 @@ class ObservationBuilder:
                 preferred = "leader"
             else:
                 return 0.5
-            
-            target_hp = target.get("HP_MAX", 1)
+
+            if "HP_MAX" not in target:
+                raise KeyError(f"Target missing required 'HP_MAX' field: {target}")
+            target_hp = target["HP_MAX"]
             if target_hp <= 1:
                 target_type = "swarm"
             elif target_hp <= 3:
@@ -1117,19 +1151,39 @@ class ObservationBuilder:
                 target["col"], target["row"]
             )
 
-            # Get target's W40K point value
-            target_value = target.get("VALUE", 10)
+            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
+            if "VALUE" not in target:
+                raise KeyError(f"Target missing required 'VALUE' field: {target}")
+            target_value = target["VALUE"]
 
             # Calculate activations needed to kill this target
-            unit_attacks = active_unit.get("RNG_NB", 2)
-            unit_bs = active_unit.get("RNG_ATK", 3)
-            unit_s = active_unit.get("RNG_STR", 4)
-            unit_ap = active_unit.get("RNG_AP", 1)
-            unit_dmg = active_unit.get("RNG_DMG", 1)
+            if "RNG_NB" not in active_unit:
+                raise KeyError(f"Active unit missing required 'RNG_NB' field: {active_unit}")
+            if "RNG_ATK" not in active_unit:
+                raise KeyError(f"Active unit missing required 'RNG_ATK' field: {active_unit}")
+            if "RNG_STR" not in active_unit:
+                raise KeyError(f"Active unit missing required 'RNG_STR' field: {active_unit}")
+            if "RNG_AP" not in active_unit:
+                raise KeyError(f"Active unit missing required 'RNG_AP' field: {active_unit}")
+            if "RNG_DMG" not in active_unit:
+                raise KeyError(f"Active unit missing required 'RNG_DMG' field: {active_unit}")
 
-            target_t = target.get("T", 3)
-            target_save = target.get("ARMOR_SAVE", 6)
-            target_hp = target.get("HP_CUR", 1)
+            unit_attacks = active_unit["RNG_NB"]
+            unit_bs = active_unit["RNG_ATK"]
+            unit_s = active_unit["RNG_STR"]
+            unit_ap = active_unit["RNG_AP"]
+            unit_dmg = active_unit["RNG_DMG"]
+
+            if "T" not in target:
+                raise KeyError(f"Target missing required 'T' field: {target}")
+            if "ARMOR_SAVE" not in target:
+                raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target}")
+            if "HP_CUR" not in target:
+                raise KeyError(f"Target missing required 'HP_CUR' field: {target}")
+
+            target_t = target["T"]
+            target_save = target["ARMOR_SAVE"]
+            target_hp = target["HP_CUR"]
 
             # Our hit probability
             our_hit_prob = (7 - unit_bs) / 6.0

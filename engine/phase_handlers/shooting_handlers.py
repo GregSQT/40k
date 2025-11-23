@@ -431,18 +431,35 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
 
         distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
 
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
+        # Validate target stats
+        if "RNG_NB" not in target:
+            raise KeyError(f"Target missing required 'RNG_NB' field: {target}")
+        if "RNG_ATK" not in target:
+            raise KeyError(f"Target missing required 'RNG_ATK' field: {target}")
+        if "RNG_STR" not in target:
+            raise KeyError(f"Target missing required 'RNG_STR' field: {target}")
+        if "RNG_AP" not in target:
+            raise KeyError(f"Target missing required 'RNG_AP' field: {target}")
+
+        # Validate unit stats
+        if "T" not in unit:
+            raise KeyError(f"Unit missing required 'T' field: {unit}")
+        if "ARMOR_SAVE" not in unit:
+            raise KeyError(f"Unit missing required 'ARMOR_SAVE' field: {unit}")
+
         # Calculate tactical efficiency = threat_per_turn / kill_difficulty
         # This prioritizes targets that deal most damage before we can kill them
 
         # Step 1: Calculate target's threat to us (probability to wound per turn)
         # Target shooting at unit
-        target_attacks = target.get("RNG_NB", 1)
-        target_bs = target.get("RNG_ATK", 4)  # To-hit roll needed
-        target_s = target.get("RNG_STR", 3)
-        target_ap = target.get("RNG_AP", 0)
+        target_attacks = target["RNG_NB"]
+        target_bs = target["RNG_ATK"]  # To-hit roll needed
+        target_s = target["RNG_STR"]
+        target_ap = target["RNG_AP"]
 
-        unit_t = unit.get("T", 4)
-        unit_save = unit.get("ARMOR_SAVE", 3)
+        unit_t = unit["T"]
+        unit_save = unit["ARMOR_SAVE"]
 
         # Hit probability
         hit_prob = (7 - target_bs) / 6.0
@@ -473,14 +490,32 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         threat_per_turn = target_attacks * threat_per_attack
 
         # Step 2: Calculate our kill difficulty (expected activations to kill target)
-        unit_attacks = unit.get("RNG_NB", 2)
-        unit_bs = unit.get("RNG_ATK", 3)
-        unit_s = unit.get("RNG_STR", 4)
-        unit_ap = unit.get("RNG_AP", 1)
+        # AI_TURN.md COMPLIANCE: Validate unit stats
+        if "RNG_NB" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
+        if "RNG_ATK" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_ATK' field: {unit}")
+        if "RNG_STR" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_STR' field: {unit}")
+        if "RNG_AP" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_AP' field: {unit}")
 
-        target_t = target.get("T", 3)
-        target_save = target.get("ARMOR_SAVE", 6)
-        target_hp = target.get("HP_CUR", 1)
+        # AI_TURN.md COMPLIANCE: Validate target stats
+        if "T" not in target:
+            raise KeyError(f"Target missing required 'T' field: {target}")
+        if "ARMOR_SAVE" not in target:
+            raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target}")
+        if "HP_CUR" not in target:
+            raise KeyError(f"Target missing required 'HP_CUR' field: {target}")
+
+        unit_attacks = unit["RNG_NB"]
+        unit_bs = unit["RNG_ATK"]
+        unit_s = unit["RNG_STR"]
+        unit_ap = unit["RNG_AP"]
+
+        target_t = target["T"]
+        target_save = target["ARMOR_SAVE"]
+        target_hp = target["HP_CUR"]
 
         # Our hit probability
         our_hit_prob = (7 - unit_bs) / 6.0
@@ -519,8 +554,13 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         tactical_efficiency = threat_per_turn * activations_to_kill
 
         # Calculate target type match based on unit specialization
-        unit_type = unit.get("unitType", "")
-        target_max_hp = target.get("HP_MAX", 1)
+        # AI_TURN.md COMPLIANCE: Direct field access
+        if "unitType" not in unit:
+            raise KeyError(f"Unit missing required 'unitType' field: {unit}")
+        if "HP_MAX" not in target:
+            raise KeyError(f"Target missing required 'HP_MAX' field: {target}")
+        unit_type = unit["unitType"]
+        target_max_hp = target["HP_MAX"]
 
         # Determine preferred target type from unit name
         if "Swarm" in unit_type:

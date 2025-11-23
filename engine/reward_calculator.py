@@ -876,7 +876,9 @@ class RewardCalculator:
             strength = shooter["RNG_STR"]
             damage = shooter["RNG_DMG"]
             num_attacks = shooter["RNG_NB"]
-            ap = shooter.get("RNG_AP", 0)
+            if "RNG_AP" not in shooter:
+                raise KeyError(f"Shooter missing required 'RNG_AP' field: {shooter}")
+            ap = shooter["RNG_AP"]
         else:
             if "CC_ATK" not in shooter or "CC_STR" not in shooter or "CC_DMG" not in shooter:
                 raise KeyError(f"Shooter missing required melee stats: {shooter}")
@@ -887,7 +889,9 @@ class RewardCalculator:
             strength = shooter["CC_STR"]
             damage = shooter["CC_DMG"]
             num_attacks = shooter["CC_NB"]
-            ap = shooter.get("CC_AP", 0)
+            if "CC_AP" not in shooter:
+                raise KeyError(f"Shooter missing required 'CC_AP' field: {shooter}")
+            ap = shooter["CC_AP"]
         
         p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
         
@@ -926,30 +930,50 @@ class RewardCalculator:
             attacker["col"], attacker["row"]
         )
         
-        can_use_ranged = distance <= attacker.get("RNG_RNG", 0)
-        can_use_melee = distance <= attacker.get("CC_RNG", 0)
-        
+        if "RNG_RNG" not in attacker:
+            raise KeyError(f"Attacker missing required 'RNG_RNG' field: {attacker}")
+        if "CC_RNG" not in attacker:
+            raise KeyError(f"Attacker missing required 'CC_RNG' field: {attacker}")
+        can_use_ranged = distance <= attacker["RNG_RNG"]
+        can_use_melee = distance <= attacker["CC_RNG"]
+
         if not can_use_ranged and not can_use_melee:
             return 0.0
-        
+
         if can_use_ranged and not can_use_melee:
-            if "RNG_ATK" not in attacker or "RNG_STR" not in attacker:
-                return 0.0
-            
+            if "RNG_ATK" not in attacker:
+                raise KeyError(f"Attacker missing required 'RNG_ATK' field: {attacker}")
+            if "RNG_STR" not in attacker:
+                raise KeyError(f"Attacker missing required 'RNG_STR' field: {attacker}")
+            if "RNG_DMG" not in attacker:
+                raise KeyError(f"Attacker missing required 'RNG_DMG' field: {attacker}")
+            if "RNG_NB" not in attacker:
+                raise KeyError(f"Attacker missing required 'RNG_NB' field: {attacker}")
+            if "RNG_AP" not in attacker:
+                raise KeyError(f"Attacker missing required 'RNG_AP' field: {attacker}")
+
             hit_target = attacker["RNG_ATK"]
             strength = attacker["RNG_STR"]
             damage = attacker["RNG_DMG"]
-            num_attacks = attacker.get("RNG_NB", 0)
-            ap = attacker.get("RNG_AP", 0)
+            num_attacks = attacker["RNG_NB"]
+            ap = attacker["RNG_AP"]
         else:
-            if "CC_ATK" not in attacker or "CC_STR" not in attacker:
-                return 0.0
-            
+            if "CC_ATK" not in attacker:
+                raise KeyError(f"Attacker missing required 'CC_ATK' field: {attacker}")
+            if "CC_STR" not in attacker:
+                raise KeyError(f"Attacker missing required 'CC_STR' field: {attacker}")
+            if "CC_DMG" not in attacker:
+                raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker}")
+            if "CC_NB" not in attacker:
+                raise KeyError(f"Attacker missing required 'CC_NB' field: {attacker}")
+            if "CC_AP" not in attacker:
+                raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker}")
+
             hit_target = attacker["CC_ATK"]
             strength = attacker["CC_STR"]
             damage = attacker["CC_DMG"]
-            num_attacks = attacker.get("CC_NB", 0)
-            ap = attacker.get("CC_AP", 0)
+            num_attacks = attacker["CC_NB"]
+            ap = attacker["CC_AP"]
         
         if num_attacks == 0:
             return 0.0
@@ -1001,16 +1025,20 @@ class RewardCalculator:
         total_weighted_threat = 0.0
         for friendly in friendly_units:
             danger = self._calculate_danger_probability(friendly, target, game_state)
-            unit_value = friendly.get("VALUE", 10.0)
+            if "VALUE" not in friendly:
+                raise KeyError(f"Friendly unit missing required 'VALUE' field: {friendly}")
+            unit_value = friendly["VALUE"]
             weighted_threat = danger * unit_value
             total_weighted_threat += weighted_threat
-        
+
         all_weighted_threats = []
         for t in valid_targets:
             t_total = 0.0
             for friendly in friendly_units:
                 danger = self._calculate_danger_probability(friendly, t, game_state)
-                unit_value = friendly.get("VALUE", 10.0)
+                if "VALUE" not in friendly:
+                    raise KeyError(f"Friendly unit missing required 'VALUE' field: {friendly}")
+                unit_value = friendly["VALUE"]
                 t_total += danger * unit_value
             all_weighted_threats.append(t_total)
         
@@ -1046,7 +1074,9 @@ class RewardCalculator:
             else:
                 return 0.5
             
-            target_hp = target.get("HP_MAX", 1)
+            if "HP_MAX" not in target:
+                raise KeyError(f"Target missing required 'HP_MAX' field: {target}")
+            target_hp = target["HP_MAX"]
             if target_hp <= 1:
                 target_type = "swarm"
             elif target_hp <= 3:
@@ -1227,7 +1257,11 @@ class RewardCalculator:
             return False
         
         # Find priority target (lowest HP for RangedSwarm units)
-        priority_target = min(enemies_in_range, key=lambda e: e.get("HP_CUR", 999))
+        # AI_TURN.md COMPLIANCE: All units must have HP_CUR
+        for e in enemies_in_range:
+            if "HP_CUR" not in e:
+                raise KeyError(f"Enemy missing required 'HP_CUR' field: {e}")
+        priority_target = min(enemies_in_range, key=lambda e: e["HP_CUR"])
         
         # Check LoS at old position
         old_unit_state = unit.copy()
@@ -1479,6 +1513,10 @@ class RewardCalculator:
         temp_unit["col"] = col
         temp_unit["row"] = row
 
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+        if "RNG_RNG" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
+
         # Get all visible enemies
         visible_enemies = []
         for enemy in game_state["units"]:
@@ -1486,18 +1524,24 @@ class RewardCalculator:
                 if has_line_of_sight(temp_unit, enemy, game_state):
                     # Check if in range
                     distance = calculate_hex_distance(col, row, enemy["col"], enemy["row"])
-                    if distance <= unit.get("RNG_RNG", 0):
+                    if distance <= unit["RNG_RNG"]:
                         visible_enemies.append(enemy)
 
         if not visible_enemies:
             return 0.0
 
+        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+        if "RNG_NB" not in unit:
+            raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
+
         # Calculate attacks_needed and VALUE for each target
         targets_data = []
         for enemy in visible_enemies:
-            value = enemy.get("VALUE", 10)  # Default VALUE if not set
+            if "VALUE" not in enemy:
+                raise KeyError(f"Enemy missing required 'VALUE' field: {enemy}")
+            value = enemy["VALUE"]
             turns_to_kill = self._calculate_turns_to_kill(unit, enemy, game_state)
-            attacks_needed = turns_to_kill * unit.get("RNG_NB", 1)
+            attacks_needed = turns_to_kill * unit["RNG_NB"]
             targets_data.append({
                 "enemy": enemy,
                 "value": value,
@@ -1510,7 +1554,7 @@ class RewardCalculator:
         targets_data.sort(key=lambda x: x["value"] / x["turns_to_kill"] if x["turns_to_kill"] > 0 else x["value"] * 100, reverse=True)
 
         # Greedy allocation
-        attacks_remaining = float(unit.get("RNG_NB", 1))
+        attacks_remaining = float(unit["RNG_NB"])
         offensive_value = 0.0
 
         for target in targets_data:
@@ -1541,7 +1585,9 @@ class RewardCalculator:
 
         col, row = position
         my_player = unit["player"]
-        my_value = unit.get("VALUE", 10)
+        if "VALUE" not in unit:
+            raise KeyError(f"Unit missing required 'VALUE' field: {unit}")
+        my_value = unit["VALUE"]
 
         # Get all living friendly units
         friendlies = [u for u in game_state["units"]
@@ -1574,9 +1620,13 @@ class RewardCalculator:
                 temp_unit["col"] = col
                 temp_unit["row"] = row
 
+                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+                if "RNG_RNG" not in enemy:
+                    raise KeyError(f"Enemy missing required 'RNG_RNG' field: {enemy}")
+
                 if has_line_of_sight(temp_enemy, temp_unit, game_state):
                     distance = calculate_hex_distance(reachable_pos[0], reachable_pos[1], col, row)
-                    if distance <= enemy.get("RNG_RNG", 0):
+                    if distance <= enemy["RNG_RNG"]:
                         can_reach_me = True
 
                 # Check all friendlies this enemy could see
@@ -1584,7 +1634,7 @@ class RewardCalculator:
                     if has_line_of_sight(temp_enemy, friendly, game_state):
                         distance = calculate_hex_distance(reachable_pos[0], reachable_pos[1],
                                                          friendly["col"], friendly["row"])
-                        if distance <= enemy.get("RNG_RNG", 0):
+                        if distance <= enemy["RNG_RNG"]:
                             if friendly["id"] not in [f["id"] for f in reachable_friendlies]:
                                 reachable_friendlies.append(friendly)
 
@@ -1594,7 +1644,9 @@ class RewardCalculator:
             # Step 3: Rank friendlies by priority from enemy's perspective
             friendly_priorities = []
             for friendly in reachable_friendlies:
-                f_value = friendly.get("VALUE", 10)
+                if "VALUE" not in friendly:
+                    raise KeyError(f"Friendly unit missing required 'VALUE' field: {friendly}")
+                f_value = friendly["VALUE"]
                 f_turns_to_kill = self._calculate_turns_to_kill_by_attacker(enemy, friendly, game_state)
                 if f_turns_to_kill > 0:
                     f_priority = f_value / f_turns_to_kill
@@ -1660,7 +1712,9 @@ class RewardCalculator:
         """
         from engine.phase_handlers.movement_handlers import _get_hex_neighbors, _is_traversable_hex
 
-        move_range = enemy.get("MOVE", 0)
+        if "MOVE" not in enemy:
+            raise KeyError(f"Enemy missing required 'MOVE' field: {enemy}")
+        move_range = enemy["MOVE"]
         start_pos = (enemy["col"], enemy["row"])
 
         # BFS to find reachable positions
@@ -1712,21 +1766,39 @@ class RewardCalculator:
         """
         Calculate expected damage from attacker against defender in one activation.
         Uses ranged stats (assuming shooting phase context).
+
+        AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults on unit stats.
         """
-        # Get attacker ranged stats
-        num_attacks = attacker.get("RNG_NB", 0)
+        # Validate required attacker ranged stats
+        if "RNG_NB" not in attacker:
+            raise KeyError(f"Attacker missing required 'RNG_NB' field: {attacker}")
+        num_attacks = attacker["RNG_NB"]
         if num_attacks == 0:
             return 0.0
 
-        to_hit = attacker.get("RNG_ATK", 4)
-        strength = attacker.get("RNG_STR", 4)
-        ap = attacker.get("RNG_AP", 0)
-        damage = attacker.get("RNG_DMG", 1)
+        if "RNG_ATK" not in attacker:
+            raise KeyError(f"Attacker missing required 'RNG_ATK' field: {attacker}")
+        if "RNG_STR" not in attacker:
+            raise KeyError(f"Attacker missing required 'RNG_STR' field: {attacker}")
+        if "RNG_AP" not in attacker:
+            raise KeyError(f"Attacker missing required 'RNG_AP' field: {attacker}")
+        if "RNG_DMG" not in attacker:
+            raise KeyError(f"Attacker missing required 'RNG_DMG' field: {attacker}")
 
-        # Get defender stats
-        toughness = defender.get("T", 4)
-        armor_save = defender.get("ARMOR_SAVE", 4)
-        invul_save = defender.get("INVUL_SAVE", 7)  # 7+ = no invul
+        to_hit = attacker["RNG_ATK"]
+        strength = attacker["RNG_STR"]
+        ap = attacker["RNG_AP"]
+        damage = attacker["RNG_DMG"]
+
+        # Validate required defender stats
+        if "T" not in defender:
+            raise KeyError(f"Defender missing required 'T' field: {defender}")
+        if "ARMOR_SAVE" not in defender:
+            raise KeyError(f"Defender missing required 'ARMOR_SAVE' field: {defender}")
+        toughness = defender["T"]
+        armor_save = defender["ARMOR_SAVE"]
+        # INVUL_SAVE defaults to 7 (no invul) which is legitimate game logic
+        invul_save = defender.get("INVUL_SAVE", 7)  # 7+ = no invul (legitimate default)
 
         # Calculate probabilities
         p_hit = max(0.0, min(1.0, (7 - to_hit) / 6.0))
