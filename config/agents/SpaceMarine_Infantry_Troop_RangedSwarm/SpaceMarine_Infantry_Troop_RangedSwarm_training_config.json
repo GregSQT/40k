@@ -1,6 +1,6 @@
 {
   "phase1": {
-    "type": "################################################### Phase 1 - MODERATE AGGRESSION ###################################################",
+    "type": "##### Phase 1 - MODERATE AGGRESSION ###################################################################################################",
     "total_episodes": 12000,
     "total_episodes_normal_value": "12000 = 4 scenarios × 1000 episodes × 3 rotations for curriculum learning",
     "max_turns_per_episode": 5,
@@ -50,17 +50,17 @@
 
   },
   "phase2": {
-    "type": "################################################### Phase 2 - POSITIONING WITH WALLS ###################################################",
-    "total_episodes": 3000,
-    "total_episodes_normal_value": "12000 = 4 scenarios × 1000 episodes × 3 rotations for curriculum learning",
+    "type": "##### Phase 2 - POSITIONING WITH WALLS #################################################################################################",
+    "total_episodes": 15000,
+    "total_episodes_normal_value": "3000 = 4 scenarios × 1000 episodes × 3 rotations for curriculum learning",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 16,
     "rotation_interval": 1000,
     "rotation_comment": "1000 episodes per scenario = 3 rotations through all bots. Matches Phase 1 successful configuration.",
     "tactical_positioning": 0.0,
     "tactical_positioning_comment": "Phase 2: 0.0 = offensive only (no defense vs dumb bots). Phase 3+: 1.0 = balanced with self-play.",
-    "position_reward_scale": 0.1,
-    "position_reward_scale_comment": "Scales position_score delta to reward magnitude. 0.1 = 10 VALUE difference = 1.0 reward.",
+    "position_reward_scale": 0.05,
+    "position_reward_scale_comment": "Scales absolute position_score to reward. 0.05 = offensive_value of 10 = 0.5 reward (reduced to not overwhelm shooting rewards).",
     "model_params": {
       "policy": "MlpPolicy",
       "learning_rate": 0.0003,
@@ -71,8 +71,8 @@
       "gae_lambda": 0.95,
       "clip_range": 0.15,
       "ent_coef": {
-        "start": 0.2,
-        "end": 0.1
+        "start": 0.3,
+        "end": 0.15
       },
       "vf_coef": 0.5,
       "max_grad_norm": 0.3,
@@ -92,7 +92,7 @@
       "bot_eval_freq": 200,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 3,
-      "bot_eval_final": 50
+      "bot_eval_final": 0
     },
     "observation_params": {
       "obs_size": 295,
@@ -104,7 +104,7 @@
 
   },
   "phase3": {
-    "type": "################################################### Phase 3 ###################################################",
+    "type": "##### Phase 3 ###############################################################################################################",
     "total_episodes": 6000,
     "total_episodes_normal_value": "1000",
     "max_turns_per_episode": 5,

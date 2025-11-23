@@ -389,7 +389,9 @@ class W40KEngine(gym.Env):
         # Log episode start with all unit positions and walls
         if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
             scenario_name = self.config.get("name", "Unknown Scenario")
-            walls = self.config.get("wall_hexes", [])
+            # Use _scenario_wall_hexes (set during scenario loading) - convert to step_logger format
+            raw_walls = self._scenario_wall_hexes if self._scenario_wall_hexes is not None else []
+            walls = [{"col": w[0], "row": w[1]} for w in raw_walls] if raw_walls else []
             self.step_logger.log_episode_start(self.game_state["units"], scenario_name, walls=walls)
         
         observation = self.obs_builder.build_observation(self.game_state)

@@ -68,23 +68,33 @@ class RewardCalculator:
                 return penalty_reward
         
         # Handle system responses (no unit-specific rewards)
+        # BUT: If result contains action data (action, fromCol/toCol), it's an action that triggered
+        # a phase transition, NOT a pure system response. Process it as an action.
         system_response_indicators = [
-            "phase_complete", "phase_transition", "while_loop_active", 
+            "phase_complete", "phase_transition", "while_loop_active",
             "context", "blinking_units", "start_blinking", "validTargets",
             "type", "next_phase", "current_player", "new_turn", "episode_complete",
             "unit_activated", "valid_destinations", "preview_data", "waiting_for_player"
         ]
-        
-        if any(indicator in result for indicator in system_response_indicators):
+
+        # CRITICAL FIX: Check if this is actually an action result with phase transition attached
+        # If result has 'action' field with move/shoot/etc, it's an action - NOT a system response
+        # Position data (fromCol/toCol) confirms it's a completed action, not just a prompt
+        is_action_result = result.get("action") in ["move", "shoot", "wait", "flee", "charge", "fight"]
+        has_position_data = any(ind in result for ind in ["fromCol", "toCol", "fromRow", "toRow"])
+
+        matching_indicators = [ind for ind in system_response_indicators if ind in result]
+        if matching_indicators and not (is_action_result or has_position_data):
+            # Pure system response - no action attached
             system_response_reward = system_penalties['system_response']
             reward_breakdown['total'] = system_response_reward
-            
+
             # CRITICAL FIX: Check if game ended and add situational reward
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
                 reward_breakdown['situational'] = situational_reward
                 reward_breakdown['total'] += situational_reward
-            
+
             game_state['last_reward_breakdown'] = reward_breakdown
             return reward_breakdown['total']
         
@@ -123,7 +133,7 @@ class RewardCalculator:
                 action_type = "unknown"
         else:
             action_type = "unknown"
-        
+
         # Full reward mapper integration
         reward_mapper = self._get_reward_mapper()
         enriched_unit = self._enrich_unit_for_reward_mapper(acting_unit)
@@ -224,14 +234,14 @@ class RewardCalculator:
             # Get tactical_positioning hyperparameter from config (default 1.0 = balanced)
             tactical_positioning = self.config.get("tactical_positioning", 1.0)
 
-            # Calculate position scores before and after
-            position_score_before = self.calculate_position_score(acting_unit, old_pos, game_state, tactical_positioning)
-            position_score_after = self.calculate_position_score(acting_unit, new_pos, game_state, tactical_positioning)
+            # Calculate position score at current (new) position - ABSOLUTE approach
+            # Rewards the agent for being in a good position, not just for improving
+            # This is correct because: agent that starts at best position should still be rewarded
+            position_score = self.calculate_position_score(acting_unit, new_pos, game_state, tactical_positioning)
 
-            # Movement reward = position improvement (scaled for reward magnitude)
-            # Scale factor ensures position_score delta translates to meaningful reward
+            # Scale factor ensures position_score translates to meaningful reward magnitude
             position_reward_scale = self.config.get("position_reward_scale", 0.1)
-            position_based_reward = (position_score_after - position_score_before) * position_reward_scale
+            position_based_reward = position_score * position_reward_scale
 
             # Also get legacy tactical context rewards (for backward compatibility)
             tactical_context = self._build_tactical_context(acting_unit, result, game_state)
@@ -245,6 +255,7 @@ class RewardCalculator:
 
             reward_breakdown['base_actions'] = legacy_reward
             reward_breakdown['tactical_bonuses'] = position_based_reward
+            reward_breakdown['position_score'] = position_score  # Raw score before scaling (for metrics)
             reward_breakdown['total'] = movement_reward
 
             if game_state.get("game_over", False):

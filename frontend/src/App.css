@@ -14,6 +14,26 @@
   --hp-bar-player1: #ff4d4d;
   --hp-bar-lost: #444444;
   --hp-bar-damage-preview: #444444;
+
+  /* Replay Mode Icons */
+  --icon-move-color: #6622bb;
+  --icon-move-stroke: #ffffff;
+  --icon-move-stroke-thickness: 3;
+  --icon-move-size: 1.0;
+  --icon-charge-color: #ff4444;
+  --icon-charge-stroke: #ffffff;
+  --icon-charge-stroke-thickness: 3;
+  --icon-charge-size: 1.0;
+  --icon-shoot-color: #ffaa00;
+  --icon-shoot-stroke: #000000;
+  --icon-shoot-stroke-thickness: 2;
+  --icon-shoot-size: 1.2;
+  --icon-explosion-color: #ff6600;
+  --icon-explosion-size: 1.6;
+  --icon-fight-color: #ff4444;
+  --icon-fight-stroke: #ffffff;
+  --icon-fight-stroke-thickness: 3;
+  --icon-fight-size: 1.0;
   
   /* Background Colors */
   --bg-primary: #222;

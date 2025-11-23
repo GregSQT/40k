@@ -7,6 +7,9 @@ import numpy as np
 from typing import Dict, List, Any
 from engine.game_utils import get_unit_by_id
 
+# Game phases - single source of truth for phase count
+GAME_PHASES = ["move", "shoot", "charge", "fight"]
+
 class ActionDecoder:
     """Decodes actions and computes valid action masks."""
     

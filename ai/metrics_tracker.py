@@ -69,6 +69,9 @@ class W40KMetricsTracker:
             'situational': [],
             'penalties': []
         }
+
+        # NEW: Position score tracking (Phase 2+ movement rewards)
+        self.position_scores = []  # Raw position_score values per move action
         
         # NEW: AI_TURN.md compliance tracking
         self.compliance_data = {
@@ -308,7 +311,30 @@ class W40KMetricsTracker:
         for key in self.reward_components:
             if len(self.reward_components[key]) > 100:
                 self.reward_components[key].pop(0)
-    
+
+    def log_position_score(self, position_score: float):
+        """Log raw position_score from movement rewards (Phase 2+ positioning metric).
+
+        This tracks the pre-scaled offensive_value from movement actions.
+        Higher values = unit moved to position with better shooting potential.
+
+        Args:
+            position_score: Raw position_score value (before position_reward_scale)
+        """
+        if position_score is None:
+            return
+
+        self.position_scores.append(position_score)
+
+        # Keep last 1000 position scores
+        if len(self.position_scores) > 1000:
+            self.position_scores.pop(0)
+
+        # Log rolling average every 10 moves
+        if len(self.position_scores) >= 10 and len(self.position_scores) % 10 == 0:
+            avg_position_score = np.mean(self.position_scores[-100:])  # Last 100 moves
+            self.writer.add_scalar('game_tactical/avg_position_score', avg_position_score, self.episode_count)
+
     def log_aiturn_compliance(self, compliance_data: Dict[str, Any]):
         """Log AI_TURN.md compliance validation metrics.
         
@@ -568,10 +594,11 @@ class W40KMetricsTracker:
         This dashboard contains ONLY the metrics you need to tune PPO hyperparameters.
         All metrics are smoothed (20-episode rolling average) for clear trends.
         
-        GAME PERFORMANCE (2 metrics):
+        GAME PERFORMANCE (3 metrics):
         - 0_critical/a_bot_eval_combined    - Primary goal [0-1] (sorts first)
         - 0_critical/b_win_rate_100ep       - Training opponent performance
-        - 0_critical/episode_reward_smooth  - Learning progress
+        - 0_critical/c_episode_reward_smooth  - Learning progress
+        - 0_critical/d_position_score       - Phase 2+ positioning quality (offensive_value)
         
         PPO HEALTH (5 metrics):
         - 0_critical/clip_fraction         - [0.1-0.3] → Tune learning_rate
@@ -605,7 +632,12 @@ class W40KMetricsTracker:
         if len(self.all_episode_rewards) >= 20:
             reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=20)
             self.writer.add_scalar('0_critical/c_episode_reward_smooth', reward_smooth, self.episode_count)
-        
+
+        # 3. Position Score (100-move smooth) - Phase 2+ positioning quality
+        if len(self.position_scores) >= 20:
+            position_score_smooth = self._calculate_smoothed_metric(self.position_scores, window_size=100)
+            self.writer.add_scalar('0_critical/d_position_score', position_score_smooth, self.episode_count)
+
         # ==========================================
         # PPO HEALTH (5 metrics)
         # ==========================================

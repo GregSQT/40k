@@ -22,6 +22,9 @@ interface UnitRendererProps {
   shootingTargetId?: number | null;
   shootingUnitId?: number | null;
 
+  // Movement indicator (for replay mode boot icon)
+  movingUnitId?: number | null;
+
   // Board configuration
   boardConfig: any;
   HEX_RADIUS: number;
@@ -73,6 +76,14 @@ export class UnitRenderer {
       return parseInt(value.replace('#', ''), 16);
     }
     throw new Error(`CSS variable ${variableName} not found or empty`);
+  }
+
+  private getCSSNumber(variableName: string, fallback: number): number {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+    if (value && value !== '') {
+      return parseFloat(value);
+    }
+    return fallback;
   }
   
   private cleanupExistingBlinkIntervals(): void {
@@ -130,6 +141,7 @@ export class UnitRenderer {
     this.renderShootingCounter(unitIconScale);
     this.renderExplosionIcon(iconZIndex);
     this.renderShootingIndicator(iconZIndex);
+    this.renderMovementIndicator(iconZIndex);
     this.renderAttackCounter(unitIconScale);
   }
   
@@ -453,9 +465,12 @@ export class UnitRenderer {
     // Only show explosion on the unit being shot at
     if (!shootingTargetId || unit.id !== shootingTargetId) return;
 
+    // Get icon parameters from CSS variables
+    const iconSize = this.getCSSNumber('--icon-explosion-size', 1.6);
+
     // Create explosion text (using emoji)
     const explosionText = new PIXI.Text('💥', {
-      fontSize: HEX_RADIUS * 1.6,  // 100% bigger than original
+      fontSize: HEX_RADIUS * iconSize,
       align: 'center',
     });
     explosionText.anchor.set(0.5);
@@ -473,9 +488,12 @@ export class UnitRenderer {
     // Only show shooting indicator on the unit that is shooting
     if (!shootingUnitId || unit.id !== shootingUnitId) return;
 
+    // Get icon parameters from CSS variables
+    const iconSize = this.getCSSNumber('--icon-shoot-size', 1.2);
+
     // Create shooting indicator text (using crosshair emoji)
     const shootingText = new PIXI.Text('🎯', {
-      fontSize: HEX_RADIUS * 1.2,  // 50% bigger than original
+      fontSize: HEX_RADIUS * iconSize,
       align: 'center',
     });
     shootingText.anchor.set(0.5);
@@ -485,6 +503,35 @@ export class UnitRenderer {
     shootingText.position.set(centerX - offset, centerY + offset);
     shootingText.zIndex = iconZIndex + 100; // Above everything
     app.stage.addChild(shootingText);
+  }
+
+  private renderMovementIndicator(iconZIndex: number): void {
+    const { unit, movingUnitId, centerX, centerY, app, HEX_RADIUS } = this.props;
+
+    // Only show movement indicator on the unit that is moving
+    if (!movingUnitId || unit.id !== movingUnitId) return;
+
+    // Get icon parameters from CSS variables
+    const iconColor = this.getCSSColor('--icon-move-color');
+    const iconStroke = this.getCSSColor('--icon-move-stroke');
+    const iconStrokeThickness = this.getCSSNumber('--icon-move-stroke-thickness', 3);
+    const iconSize = this.getCSSNumber('--icon-move-size', 1.0);
+
+    // Create movement indicator text (arrow for move phase)
+    const movementText = new PIXI.Text('➤', {
+      fontSize: HEX_RADIUS * iconSize,
+      fill: iconColor,
+      align: 'center',
+      stroke: iconStroke,
+      strokeThickness: iconStrokeThickness,
+    });
+    movementText.anchor.set(0.5);
+
+    // Position at bottom-left of the unit (same position as shooting indicator)
+    const offset = HEX_RADIUS * 0.6;
+    movementText.position.set(centerX - offset, centerY + offset);
+    movementText.zIndex = iconZIndex + 100; // Above everything
+    app.stage.addChild(movementText);
   }
 
   private renderHPBar(unitIconScale: number): void {

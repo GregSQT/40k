@@ -9,7 +9,8 @@
       "Bash(source:*)",
       "Bash(pip install:*)",
       "Bash(.venv310/Scripts/python.exe:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

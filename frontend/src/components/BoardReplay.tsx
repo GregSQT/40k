@@ -572,6 +572,11 @@ export const BoardReplay: React.FC = () => {
     ? currentAction.shooter_id
     : null;
 
+  // Get moving unit ID for boot icon during movement phase
+  const movingUnitId = (currentAction?.type === 'move' || currentAction?.type === 'move_wait') && currentAction?.unit_id
+    ? currentAction.unit_id
+    : null;
+
   // Center column: Board
   const centerContent = currentState && gameConfig ? (
     <BoardPvp
@@ -596,6 +601,7 @@ export const BoardReplay: React.FC = () => {
       getChargeDestinations={() => []}
       shootingTargetId={shootingTargetId}
       shootingUnitId={shootingUnitId}
+      movingUnitId={movingUnitId}
       wallHexesOverride={currentState.walls}
     />
   ) : (

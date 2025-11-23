@@ -24,6 +24,7 @@ type BoardProps = {
   activeShootingUnit?: Unit | null;
   shootingTargetId?: number | null; // For replay mode: shows explosion icon on target
   shootingUnitId?: number | null; // For replay mode: shows shooting indicator on shooter
+  movingUnitId?: number | null; // For replay mode: shows boot icon on moving unit
   mode: Mode;
   movePreview: { unitId: number; destCol: number; destRow: number } | null;
   attackPreview: { unitId: number; col: number; row: number } | null;
@@ -73,6 +74,7 @@ export default function Board({
   activeShootingUnit,
   shootingTargetId,
   shootingUnitId,
+  movingUnitId,
   mode,
   movePreview,
   attackPreview,
@@ -918,7 +920,9 @@ export default function Board({
           blinkingUnits, isBlinkingActive, blinkState,
           // Pass shooting indicators
           shootingTargetId,
-          shootingUnitId
+          shootingUnitId,
+          // Pass movement indicator
+          movingUnitId
         });
       }
 

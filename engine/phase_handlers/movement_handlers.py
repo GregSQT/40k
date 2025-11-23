@@ -60,29 +60,29 @@ def movement_build_activation_pool(game_state: Dict[str, Any]) -> None:
 def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     """
     AI_TURN.md movement eligibility decision tree implementation.
-    
+
     Returns list of unit IDs eligible for movement activation.
     Pure function - no internal state storage.
     """
     eligible_units = []
     current_player = game_state["current_player"]
-    
+
     for unit in game_state["units"]:
         # AI_TURN.md: "unit.HP_CUR > 0?"
         if unit["HP_CUR"] <= 0:
             continue  # Dead unit (Skip, no log)
-            
+
         # AI_TURN.md: "unit.player === current_player?"
         if unit["player"] != current_player:
             continue  # Wrong player (Skip, no log)
-            
+
         # AI_TURN.md: "unit.id not in units_moved?"
         if unit["id"] in game_state["units_moved"]:
             continue  # Already moved (Skip, no log)
-            
+
         # AI_TURN.md: Unit passes all conditions
         eligible_units.append(unit["id"])
-    
+
     return eligible_units
 
 

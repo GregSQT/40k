@@ -276,8 +276,14 @@ The agent learns to choose positions that maximize offensive potential:
 Phase 2:  position_score = offensive_value
 Phase 3+: position_score = offensive_value - (defensive_threat × tactical_positioning)
 
-movement_reward = position_score_after - position_score_before
+movement_reward = position_score × position_reward_scale  (ABSOLUTE approach)
 ```
+
+**Why ABSOLUTE reward (not delta):**
+- Agent is rewarded for being in a good position, not just for improving
+- Agent at best position should still be rewarded (delta would give 0)
+- Simpler: only 1 calculation instead of 2 (faster training)
+- Conceptually correct: goal is "be in good positions", not "improve position"
 
 **Why Phase 2 ignores defensive_threat:**
 - Bots are dumb (random targeting), so defensive predictions would be wrong

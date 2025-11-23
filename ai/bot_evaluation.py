@@ -15,7 +15,8 @@ __all__ = ['evaluate_against_bots']
 
 
 def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
-                         controlled_agent=None, show_progress=False, deterministic=True):
+                         controlled_agent=None, show_progress=False, deterministic=True,
+                         step_logger=None):
     """
     Standalone bot evaluation function - single source of truth for all bot testing.
 
@@ -26,6 +27,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         controlled_agent: Agent identifier (None for player 0, otherwise player 1)
         show_progress: Show progress bar with time estimates
         deterministic: Use deterministic policy
+        step_logger: Optional StepLogger instance for detailed action logging
 
     Returns:
         Dict with keys: 'random', 'greedy', 'defensive', 'combined',
@@ -144,9 +146,11 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                         gym_training_mode=True
                     )
 
-                    # NOTE: step_logger connection removed during refactoring
-                    # Step logging during bot evaluation requires passing step_logger as parameter
-                    # For now, bot evaluation runs without step logging
+                    # Connect step_logger if provided and enabled
+                    if step_logger and step_logger.enabled:
+                        base_env.step_logger = step_logger
+                        # Set bot name for episode logging
+                        step_logger.current_bot_name = bot_name
 
                     # Wrap with ActionMasker (CRITICAL for proper action masking)
                     def mask_fn(env):

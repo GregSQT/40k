@@ -140,12 +140,19 @@ class StepLogger:
             if "start_pos" in details and "end_pos" in details:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
-                return f"Unit {unit_id}{unit_coords} MOVED from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+                base_msg = f"Unit {unit_id}{unit_coords} MOVED from ({start_col}, {start_row}) to ({end_col}, {end_row})"
             elif "col" in details and "row" in details:
                 # Use destination coordinates from mirror_action
-                return f"Unit {unit_id}{unit_coords} MOVED to ({details['col']}, {details['row']})"
+                base_msg = f"Unit {unit_id}{unit_coords} MOVED to ({details['col']}, {details['row']})"
             else:
                 raise KeyError("Move action missing required position data")
+
+            # Add position reward if available (like shooting reward)
+            reward = details.get("reward")
+            if reward is not None:
+                base_msg += f" [R:{reward:+.1f}]"
+
+            return base_msg
                 
         elif action_type == "shoot":
             if "target_id" not in details:

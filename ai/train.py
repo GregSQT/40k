@@ -581,16 +581,28 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Load agent-specific training config to get model parameters
     training_config = config.load_agent_training_config(agent_key, training_config_name)
-    
+
     # Raise error if required fields missing - NO FALLBACKS
     if "max_turns_per_episode" not in training_config:
         raise KeyError(f"max_turns_per_episode missing from {agent_key} training config phase {training_config_name}")
-    if "max_steps_per_turn" not in training_config:
-        raise KeyError(f"max_steps_per_turn missing from {agent_key} training config phase {training_config_name}")
-    
+
+    # AUTO-CALCULATE max_steps_per_turn = num_units × num_phases
+    # Load first scenario to count units
+    first_scenario = scenario_list[0]
+    with open(first_scenario, 'r') as f:
+        scenario_data = json.load(f)
+    num_units = len(scenario_data.get("units", []))
+
+    # Import GAME_PHASES from action_decoder - single source of truth
+    from engine.action_decoder import GAME_PHASES
+    num_phases = len(GAME_PHASES)
+
+    # Calculate max_steps_per_turn dynamically
+    max_steps = num_units * num_phases
+    print(f"📊 Auto-calculated max_steps_per_turn: {num_units} units × {num_phases} phases = {max_steps}")
+
     # Calculate average steps per episode for timestep conversion
     max_turns = training_config["max_turns_per_episode"]
-    max_steps = training_config["max_steps_per_turn"]
     avg_steps_per_episode = max_turns * max_steps * 0.6  # Estimate: 60% of max
     
     # Get model path
@@ -866,7 +878,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     n_episodes=n_final,
                     controlled_agent=effective_agent_key,
                     show_progress=True,
-                    deterministic=True
+                    deterministic=True,
+                    step_logger=step_logger
                 )
 
                 # Log final results to metrics tracker
@@ -1446,7 +1459,8 @@ def main():
                 n_episodes=episodes_per_bot,
                 controlled_agent=effective_agent_key,
                 show_progress=True,
-                deterministic=True
+                deterministic=True,
+                step_logger=step_logger
             )
             
             # Display results

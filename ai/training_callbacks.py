@@ -620,7 +620,11 @@ class MetricsCollectionCallback(BaseCallback):
                     self.episode_reward_components['tactical_bonuses'] += reward_breakdown.get('tactical_bonuses', 0.0)
                     self.episode_reward_components['situational'] += reward_breakdown.get('situational', 0.0)
                     self.episode_reward_components['penalties'] += reward_breakdown.get('penalties', 0.0)
-                    
+
+                    # Log position_score if available (Phase 2+ movement metric)
+                    if 'position_score' in reward_breakdown and self.metrics_tracker:
+                        self.metrics_tracker.log_position_score(reward_breakdown['position_score'])
+
                     # Clear breakdown from game_state to avoid double-counting
                     del game_state['last_reward_breakdown']
         
