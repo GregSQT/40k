@@ -48,9 +48,9 @@
     "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm ######################################################",
     "Info": "######################### PHASE 2 - FIXED: Efficient Aggression #######################################################",
     "base_actions": {
-      "move_close": 0.3,
-      "move_away": -0.2,
-      "move_to_charge": 0.4,
+      "move_close": 0.0,
+      "move_away": 0.0,
+      "move_to_charge": 0.0,
       "move_to_los": 0.6,
       "ranged_attack": 3.0,
       "charge_success": 0.5,
