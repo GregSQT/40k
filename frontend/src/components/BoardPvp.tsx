@@ -63,6 +63,7 @@ type BoardProps = {
   chargeRollPopup?: { unitId: number; roll: number; tooLow: boolean; timestamp: number } | null;
   getChargeDestinations: (unitId: number) => { col: number; row: number }[];
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
+  availableCellsOverride?: Array<{ col: number; row: number }>; // For replay mode: override available cells (green highlights)
 };
 
 export default function Board({
@@ -112,6 +113,7 @@ export default function Board({
   chargeRollPopup,
   getChargeDestinations,
   wallHexesOverride,
+  availableCellsOverride,
 }: BoardProps) {
   React.useEffect(() => {
   }, [phase, mode, selectedUnitId]);
@@ -815,8 +817,10 @@ export default function Board({
       const boardConfigWithWalls = wallHexesOverride
         ? { ...boardConfig, wall_hexes: effectiveWallHexes }
         : boardConfig;
+      // Override availableCells if availableCellsOverride is provided (for replay mode)
+      const effectiveAvailableCells = availableCellsOverride || availableCells;
       drawBoard(app, boardConfigWithWalls as any, {
-        availableCells,
+        availableCells: effectiveAvailableCells,
         attackCells,
         coverCells,
         chargeCells,

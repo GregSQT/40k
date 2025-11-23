@@ -8,26 +8,54 @@ import sys
 import re
 from collections import defaultdict, Counter
 
+
+def calculate_hex_distance(col1, row1, col2, row2):
+    """Calculate hex distance using cube coordinates."""
+    # Convert offset to cube
+    x1 = col1
+    z1 = row1 - ((col1 - (col1 & 1)) >> 1)
+    y1 = -x1 - z1
+
+    x2 = col2
+    z2 = row2 - ((col2 - (col2 & 1)) >> 1)
+    y2 = -x2 - z2
+
+    # Cube distance
+    return max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
+
+
+def get_hex_line(start_col, start_row, end_col, end_row):
+    """Get all hexes on a line between two points (simplified Bresenham for hex)."""
+    hexes = []
+    distance = calculate_hex_distance(start_col, start_row, end_col, end_row)
+    if distance == 0:
+        return [(start_col, start_row)]
+
+    for i in range(distance + 1):
+        t = i / distance
+        # Linear interpolation
+        col = round(start_col + (end_col - start_col) * t)
+        row = round(start_row + (end_row - start_row) * t)
+        if (col, row) not in hexes:
+            hexes.append((col, row))
+
+    return hexes
+
+
+def has_line_of_sight(shooter_col, shooter_row, target_col, target_row, wall_hexes):
+    """Check if there's clear LOS between shooter and target (no walls blocking)."""
+    line = get_hex_line(shooter_col, shooter_row, target_col, target_row)
+    # Check all hexes except start and end
+    for col, row in line[1:-1]:
+        if (col, row) in wall_hexes:
+            return False
+    return True
+
 def parse_log(filepath):
     """Parse train_step.log and extract statistics."""
 
-    # Load wall hexes from board config
+    # Load wall hexes from scenario (will be populated per episode)
     wall_hexes = set()
-    try:
-        import json
-        import os
-        # Try to load from config/board_config.json
-        board_config_path = os.path.join(os.path.dirname(filepath), 'config', 'board_config.json')
-        if not os.path.exists(board_config_path):
-            # Try relative to script location
-            board_config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'board_config.json')
-        if os.path.exists(board_config_path):
-            with open(board_config_path, 'r') as f:
-                board_config = json.load(f)
-                wall_list = board_config.get('default', {}).get('wall_hexes', [])
-                wall_hexes = set(tuple(w) for w in wall_list)
-    except Exception as e:
-        print(f"Warning: Could not load wall hexes from board_config.json: {e}")
 
     stats = {
         'total_episodes': 0,
@@ -39,40 +67,40 @@ def parse_log(filepath):
         'turns_distribution': Counter(),
         'episode_lengths': [],
         'sample_games': {'win': None, 'loss': None, 'draw': None},
-        'partial_shooting': {
-            0: {'units_shot_once_no_kill': 0, 'total_shooting_activations': 0},
-            1: {'units_shot_once_no_kill': 0, 'total_shooting_activations': 0}
-        },
-        'wait_by_phase': {
-            0: {'move_wait': 0, 'shoot_wait': 0},
-            1: {'move_wait': 0, 'shoot_wait': 0}
-        },
         'shoot_vs_wait_by_player': {
             0: {'shoot': 0, 'wait': 0, 'skip': 0},
             1: {'shoot': 0, 'wait': 0, 'skip': 0}
         },
         'wall_collisions': {0: 0, 1: 0},
-        # NEW: Target priority tracking
+        # Target priority tracking - with LOS awareness
         'target_priority': {
-            0: {'shots_at_damaged': 0, 'shots_at_full_hp_while_wounded_exists': 0, 'total_shots': 0},
-            1: {'shots_at_damaged': 0, 'shots_at_full_hp_while_wounded_exists': 0, 'total_shots': 0}
+            0: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'total_shots': 0},
+            1: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'total_shots': 0}
         },
-        # NEW: Enemy death order tracking
-        'death_orders': [],  # List of death order tuples per episode
-        'current_episode_deaths': [],  # Track deaths in current episode
-        # Track enemy HP states by player (which player's enemies are damaged)
-        'wounded_enemies': {0: set(), 1: set()}  # player -> set of wounded enemy unit IDs
+        # WAIT behavior - shoot waits only when had targets in LOS
+        'wait_by_phase': {
+            0: {'move_wait': 0, 'shoot_wait_with_los': 0, 'shoot_wait_no_los': 0},
+            1: {'move_wait': 0, 'shoot_wait_with_los': 0, 'shoot_wait_no_los': 0}
+        },
+        # Enemy death order tracking with unit types
+        'death_orders': [],
+        'current_episode_deaths': [],
+        # Track enemy HP and positions
+        'wounded_enemies': {0: set(), 1: set()},
+        # Track unit types for death order display
+        'unit_types': {},  # unit_id -> unit_type (e.g., "Termagant", "Intercessor")
     }
 
     current_episode = []
     current_episode_num = 0
     episode_turn = 0
     episode_actions = 0
-    current_episode_shooting = {}  # Track shooting per unit per episode
 
-    # Track unit HP for kill detection
+    # Track unit HP and positions for LOS calculation
     unit_hp = {}  # unit_id -> current HP
     unit_player = {}  # unit_id -> player (0 or 1)
+    unit_positions = {}  # unit_id -> (col, row)
+    unit_types = {}  # unit_id -> unit_type
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -83,15 +111,6 @@ def parse_log(filepath):
             # Episode start
             if '=== EPISODE START ===' in line:
                 if current_episode:
-                    # Process previous episode's shooting data per player
-                    for unit_key, unit_data in current_episode_shooting.items():
-                        # Extract player from unit_key format: "T{turn}P{player}U{unit}"
-                        player_id = int(unit_key.split('P')[1].split('U')[0])
-                        stats['partial_shooting'][player_id]['total_shooting_activations'] += 1
-                        # Check if unit shot only once without killing
-                        if unit_data['shots'] == 1 and not unit_data['killed']:
-                            stats['partial_shooting'][player_id]['units_shot_once_no_kill'] += 1
-
                     # Save death order for this episode
                     if stats['current_episode_deaths']:
                         stats['death_orders'].append(tuple(stats['current_episode_deaths']))
@@ -105,38 +124,49 @@ def parse_log(filepath):
                 stats['total_episodes'] += 1
                 episode_turn = 0
                 episode_actions = 0
-                current_episode_shooting = {}
                 stats['current_episode_deaths'] = []
-                stats['wounded_enemies'] = {0: set(), 1: set()}  # Reset wounded tracking
-                unit_hp = {}  # Reset HP tracking
-                unit_player = {}  # Reset player tracking
+                stats['wounded_enemies'] = {0: set(), 1: set()}
+                unit_hp = {}
+                unit_player = {}
+                unit_positions = {}
+                unit_types = {}
+                wall_hexes = set()
                 continue
 
-            # Parse unit starting positions to get HP
+            # Parse wall hexes from step log
+            # Format: [timestamp] Walls: (col,row);(col,row);...
+            wall_match = re.search(r'Walls: (.+)$', line)
+            if wall_match:
+                wall_str = wall_match.group(1).strip()
+                if wall_str != 'none':
+                    # Parse tuples like (4,10);(5,10)
+                    for coord_match in re.finditer(r'\((\d+),(\d+)\)', wall_str):
+                        col, row = int(coord_match.group(1)), int(coord_match.group(2))
+                        wall_hexes.add((col, row))
+                continue
+
+            # Parse unit starting positions to get HP and type
             # Format: Unit 1 (Intercessor) P0: Starting position (9, 12)
-            unit_start_match = re.match(r'.*Unit (\d+) \((\w+)\) P(\d+): Starting position', line)
+            unit_start_match = re.match(r'.*Unit (\d+) \((\w+)\) P(\d+): Starting position \((\d+), (\d+)\)', line)
             if unit_start_match:
                 unit_id = unit_start_match.group(1)
                 unit_type = unit_start_match.group(2)
                 player = int(unit_start_match.group(3))
+                col = int(unit_start_match.group(4))
+                row = int(unit_start_match.group(5))
                 # Set HP based on unit type
                 if unit_type in ['Termagant', 'Hormagaunt', 'Genestealer']:
                     unit_hp[unit_id] = 1
                 else:
                     unit_hp[unit_id] = 2  # Intercessor, etc.
                 unit_player[unit_id] = player
+                unit_positions[unit_id] = (col, row)
+                unit_types[unit_id] = unit_type
+                stats['unit_types'][unit_id] = unit_type
                 continue
 
             # Episode end
             if 'EPISODE END' in line:
-                # Process final episode's shooting data before reset per player
-                for unit_key, unit_data in current_episode_shooting.items():
-                    # Extract player from unit_key format: "T{turn}P{player}U{unit}"
-                    player_id = int(unit_key.split('P')[1].split('U')[0])
-                    stats['partial_shooting'][player_id]['total_shooting_activations'] += 1
-                    if unit_data['shots'] == 1 and not unit_data['killed']:
-                        stats['partial_shooting'][player_id]['units_shot_once_no_kill'] += 1
-
                 # Save death order for this episode
                 if stats['current_episode_deaths']:
                     stats['death_orders'].append(tuple(stats['current_episode_deaths']))
@@ -146,15 +176,14 @@ def parse_log(filepath):
                 if winner_match:
                     winner = int(winner_match.group(1))
 
-                    # Save sample games (first of each type)
+                    # Save sample games (first of each type) - 20 actions
                     if winner == 0 and not stats['sample_games']['win']:
-                        stats['sample_games']['win'] = '\n'.join(current_episode[:30])  # First 30 lines
+                        stats['sample_games']['win'] = '\n'.join(current_episode[:20])
                     elif winner == 1 and not stats['sample_games']['loss']:
-                        stats['sample_games']['loss'] = '\n'.join(current_episode[:30])
+                        stats['sample_games']['loss'] = '\n'.join(current_episode[:20])
                     elif winner == -1 and not stats['sample_games']['draw']:
-                        stats['sample_games']['draw'] = '\n'.join(current_episode[:30])
+                        stats['sample_games']['draw'] = '\n'.join(current_episode[:20])
 
-                current_episode_shooting = {}
                 stats['current_episode_deaths'] = []
                 stats['wounded_enemies'] = {0: set(), 1: set()}
                 continue
@@ -182,23 +211,40 @@ def parse_log(filepath):
                         stats['shoot_vs_wait']['shoot'] += 1
                         stats['shoot_vs_wait_by_player'][player]['shoot'] += 1
 
-                        # Extract target unit ID and check HP state
-                        # Format: "Unit X(col, row) SHOT at unit Y" or similar
-                        target_match = re.search(r'SHOT at unit (\d+)|shoots Unit (\d+)|→ Unit (\d+)', action_desc, re.IGNORECASE)
-                        if target_match:
-                            target_id = target_match.group(1) or target_match.group(2) or target_match.group(3)
+                        # Extract shooter and target info
+                        # Format: "Unit X(col, row) SHOT at unit Y"
+                        shooter_match = re.search(r'Unit (\d+)\((\d+), (\d+)\)', action_desc)
+                        target_match = re.search(r'SHOT at unit (\d+)', action_desc, re.IGNORECASE)
+
+                        if shooter_match and target_match:
+                            shooter_id = shooter_match.group(1)
+                            shooter_col = int(shooter_match.group(2))
+                            shooter_row = int(shooter_match.group(3))
+                            target_id = target_match.group(1)
+
+                            # Update shooter position
+                            unit_positions[shooter_id] = (shooter_col, shooter_row)
 
                             stats['target_priority'][player]['total_shots'] += 1
 
                             # Check if target was already wounded
-                            if target_id in stats['wounded_enemies'][player]:
+                            target_was_wounded = target_id in stats['wounded_enemies'][player]
+
+                            # Find all wounded enemies in LOS for this shooter (with wall checking)
+                            wounded_in_los = set()
+                            for wounded_id in stats['wounded_enemies'][player]:
+                                if wounded_id in unit_positions and wounded_id in unit_hp and unit_hp.get(wounded_id, 0) > 0:
+                                    wounded_pos = unit_positions[wounded_id]
+                                    # Real LOS check with walls
+                                    if has_line_of_sight(shooter_col, shooter_row, wounded_pos[0], wounded_pos[1], wall_hexes):
+                                        wounded_in_los.add(wounded_id)
+
+                            if target_was_wounded:
                                 # Good: shooting at a wounded enemy
-                                stats['target_priority'][player]['shots_at_damaged'] += 1
-                            else:
-                                # Shooting at full HP enemy - check if there's a wounded enemy available
-                                if len(stats['wounded_enemies'][player]) > 0:
-                                    # Bad: shooting full HP while wounded enemies exist
-                                    stats['target_priority'][player]['shots_at_full_hp_while_wounded_exists'] += 1
+                                stats['target_priority'][player]['shots_at_wounded_in_los'] += 1
+                            elif len(wounded_in_los) > 0:
+                                # Bad: shooting full HP while wounded enemies exist (in LOS)
+                                stats['target_priority'][player]['shots_at_full_hp_while_wounded_in_los'] += 1
 
                             # Check for damage in the action description
                             damage_match = re.search(r'Dmg:(\d+)', action_desc)
@@ -217,23 +263,11 @@ def parse_log(filepath):
 
                             # Track death order and remove from wounded
                             if killed:
-                                # Record which player killed which unit
-                                stats['current_episode_deaths'].append((player, target_id))
+                                # Record which player killed which unit with type
+                                target_type = unit_types.get(target_id, "Unknown")
+                                stats['current_episode_deaths'].append((player, target_id, target_type))
                                 # Remove from wounded set since it's dead
                                 stats['wounded_enemies'][player].discard(target_id)
-
-                        # Extract unit ID for partial shooting detection
-                        unit_match = re.search(r'Unit (\d+)', action_desc)
-                        if unit_match and phase == 'SHOOT':
-                            unit_id = f"T{turn}P{player}U{unit_match.group(1)}"
-
-                            # Initialize tracking for this unit in this turn
-                            if unit_id not in current_episode_shooting:
-                                current_episode_shooting[unit_id] = {'shots': 0, 'killed': False}
-
-                            current_episode_shooting[unit_id]['shots'] += 1
-                            if killed:
-                                current_episode_shooting[unit_id]['killed'] = True
 
                     elif 'wait' in action_desc.lower():
                         action_type = 'wait'
@@ -242,19 +276,33 @@ def parse_log(filepath):
 
                         # Track waits by phase (MOVE or SHOOT)
                         if phase == 'SHOOT':
-                            stats['wait_by_phase'][player]['shoot_wait'] += 1
+                            # Extract unit position for LOS check
+                            unit_match = re.search(r'Unit (\d+)\((\d+), (\d+)\)', action_desc)
+                            if unit_match:
+                                wait_unit_id = unit_match.group(1)
+                                wait_col = int(unit_match.group(2))
+                                wait_row = int(unit_match.group(3))
+
+                                # Check if any enemy is in LOS (with wall checking)
+                                enemy_player = 1 - player
+                                enemies_in_los = []
+                                for uid, p in unit_player.items():
+                                    if p == enemy_player and unit_hp.get(uid, 0) > 0 and uid in unit_positions:
+                                        enemy_pos = unit_positions[uid]
+                                        if has_line_of_sight(wait_col, wait_row, enemy_pos[0], enemy_pos[1], wall_hexes):
+                                            enemies_in_los.append(uid)
+
+                                if enemies_in_los:
+                                    # Has enemies in LOS - this is a "bad" wait
+                                    stats['wait_by_phase'][player]['shoot_wait_with_los'] += 1
+                                else:
+                                    # No enemies in LOS - this wait is fine (blocked by walls)
+                                    stats['wait_by_phase'][player]['shoot_wait_no_los'] += 1
+                            else:
+                                # Couldn't parse - count as no LOS
+                                stats['wait_by_phase'][player]['shoot_wait_no_los'] += 1
                         elif phase == 'MOVE':
                             stats['wait_by_phase'][player]['move_wait'] += 1
-
-                            # Also track unit that waited (counts as activation)
-                            unit_match = re.search(r'Unit (\d+)', action_desc)
-                            if unit_match:
-                                unit_id = f"T{turn}P{player}U{unit_match.group(1)}"
-                                # If unit waited, mark it (it might have shot before waiting)
-                                if unit_id not in current_episode_shooting:
-                                    # Unit waited without shooting at all - don't count as partial shooting
-                                    pass
-                                # If unit already shot, it will be counted in partial shooting check
 
                     elif 'skip' in action_desc.lower():
                         action_type = 'skip'
@@ -263,12 +311,15 @@ def parse_log(filepath):
                     elif 'moves' in action_desc.lower() or 'moved' in action_desc.lower():
                         action_type = 'move'
 
-                        # Check if unit moved into a wall
-                        # Format: "Unit X(col, row) MOVED from (col, row) to (col, row)"
-                        move_match = re.search(r'Unit \d+\((\d+), (\d+)\)', action_desc)
-                        if move_match and phase == 'MOVE':
-                            dest_col = int(move_match.group(1))
-                            dest_row = int(move_match.group(2))
+                        # Update unit position
+                        move_match = re.search(r'Unit (\d+)\((\d+), (\d+)\)', action_desc)
+                        if move_match:
+                            move_unit_id = move_match.group(1)
+                            dest_col = int(move_match.group(2))
+                            dest_row = int(move_match.group(3))
+                            unit_positions[move_unit_id] = (dest_col, dest_row)
+
+                            # Check if unit moved into a wall
                             if (dest_col, dest_row) in wall_hexes:
                                 stats['wall_collisions'][player] += 1
                     elif 'charge' in action_desc.lower():
@@ -306,43 +357,52 @@ def print_statistics(stats):
         pct = (count / stats['total_episodes'] * 100) if stats['total_episodes'] > 0 else 0
         print(f"Turn {turn}: {count:3d} games ({pct:5.1f}%)")
 
+    # ACTIONS BY TYPE - 2 columns
     print("\n" + "-" * 80)
     print("ACTIONS BY TYPE")
     print("-" * 80)
-    for action_type, count in stats['actions_by_type'].most_common():
-        pct = (count / stats['total_actions'] * 100) if stats['total_actions'] > 0 else 0
-        print(f"{action_type:10s}: {count:5d} ({pct:5.1f}%)")
+    print(f"{'Action':<12} {'Agent (P0)':>18} {'Bot (P1)':>18}")
+    print("-" * 80)
 
+    # Get all action types
+    all_actions = set(stats['actions_by_player'][0].keys()) | set(stats['actions_by_player'][1].keys())
+    # Sort by total count
+    action_totals = [(a, stats['actions_by_player'][0].get(a, 0) + stats['actions_by_player'][1].get(a, 0))
+                     for a in all_actions]
+    action_totals.sort(key=lambda x: -x[1])
+
+    agent_total = sum(stats['actions_by_player'][0].values())
+    bot_total = sum(stats['actions_by_player'][1].values())
+
+    for action_type, _ in action_totals:
+        agent_count = stats['actions_by_player'][0].get(action_type, 0)
+        bot_count = stats['actions_by_player'][1].get(action_type, 0)
+        agent_pct = (agent_count / agent_total * 100) if agent_total > 0 else 0
+        bot_pct = (bot_count / bot_total * 100) if bot_total > 0 else 0
+        print(f"{action_type:<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
+
+    # SHOOTING PHASE BEHAVIOR - 2 columns
     print("\n" + "-" * 80)
     print("SHOOTING PHASE BEHAVIOR")
     print("-" * 80)
-    shoot_total = stats['shoot_vs_wait']['shoot'] + stats['shoot_vs_wait']['wait'] + stats['shoot_vs_wait']['skip']
-    if shoot_total > 0:
-        print(f"Shoot:   {stats['shoot_vs_wait']['shoot']:5d} ({stats['shoot_vs_wait']['shoot']/shoot_total*100:5.1f}%)")
-        print(f"Wait:    {stats['shoot_vs_wait']['wait']:5d} ({stats['shoot_vs_wait']['wait']/shoot_total*100:5.1f}%)")
-        print(f"Skip:    {stats['shoot_vs_wait']['skip']:5d} ({stats['shoot_vs_wait']['skip']/shoot_total*100:5.1f}%)")
-
-    # Partial shooting statistics per player
-    print("\n" + "-" * 80)
-    print("PARTIAL SHOOTING ANALYSIS")
+    print(f"{'Action':<12} {'Agent (P0)':>18} {'Bot (P1)':>18}")
     print("-" * 80)
-    print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
-    print("-" * 80)
-    for player in [0, 1]:
-        total_act = stats['partial_shooting'][player]['total_shooting_activations']
-        partial = stats['partial_shooting'][player]['units_shot_once_no_kill']
-        pct = (partial / total_act * 100) if total_act > 0 else 0
-        player_label = 'Agent (P0)' if player == 0 else 'Bot (P1)'
-        if player == 0:
-            print(f"Shot once, no kill:           {partial:6d} ({pct:5.1f}%)  ", end='')
-        else:
-            print(f"{partial:6d} ({pct:5.1f}%)")
 
-    agent_total = stats['partial_shooting'][0]['total_shooting_activations']
-    bot_total = stats['partial_shooting'][1]['total_shooting_activations']
-    print(f"Total shooting activations:   {agent_total:6d}           {bot_total:6d}")
+    agent_shoot_total = (stats['shoot_vs_wait_by_player'][0]['shoot'] +
+                        stats['shoot_vs_wait_by_player'][0]['wait'] +
+                        stats['shoot_vs_wait_by_player'][0]['skip'])
+    bot_shoot_total = (stats['shoot_vs_wait_by_player'][1]['shoot'] +
+                      stats['shoot_vs_wait_by_player'][1]['wait'] +
+                      stats['shoot_vs_wait_by_player'][1]['skip'])
 
-    # WAIT behavior separated by phase
+    for action in ['shoot', 'wait', 'skip']:
+        agent_count = stats['shoot_vs_wait_by_player'][0][action]
+        bot_count = stats['shoot_vs_wait_by_player'][1][action]
+        agent_pct = (agent_count / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
+        bot_pct = (bot_count / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
+        print(f"{action.capitalize():<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
+
+    # WAIT BEHAVIOR - shoot waits with LOS only
     print("\n" + "-" * 80)
     print("WAIT BEHAVIOR BY PHASE")
     print("-" * 80)
@@ -350,40 +410,41 @@ def print_statistics(stats):
     print("-" * 80)
     agent_move_wait = stats['wait_by_phase'][0]['move_wait']
     bot_move_wait = stats['wait_by_phase'][1]['move_wait']
-    agent_shoot_wait = stats['wait_by_phase'][0]['shoot_wait']
-    bot_shoot_wait = stats['wait_by_phase'][1]['shoot_wait']
-    print(f"MOVE phase waits:             {agent_move_wait:6d}           {bot_move_wait:6d}")
-    print(f"SHOOT phase waits:            {agent_shoot_wait:6d}           {bot_shoot_wait:6d}")
+    agent_shoot_wait_los = stats['wait_by_phase'][0]['shoot_wait_with_los']
+    bot_shoot_wait_los = stats['wait_by_phase'][1]['shoot_wait_with_los']
+    agent_shoot_wait_no_los = stats['wait_by_phase'][0]['shoot_wait_no_los']
+    bot_shoot_wait_no_los = stats['wait_by_phase'][1]['shoot_wait_no_los']
 
-    # Target priority analysis
+    print(f"MOVE phase waits:             {agent_move_wait:6d}           {bot_move_wait:6d}")
+    print(f"SHOOT waits (enemies in LOS): {agent_shoot_wait_los:6d}           {bot_shoot_wait_los:6d}")
+    print(f"SHOOT waits (no LOS):         {agent_shoot_wait_no_los:6d}           {bot_shoot_wait_no_los:6d}")
+
+    # Target priority analysis - with LOS
     print("\n" + "-" * 80)
-    print("TARGET PRIORITY ANALYSIS")
+    print("TARGET PRIORITY ANALYSIS (Focus Fire)")
     print("-" * 80)
     print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
     print("-" * 80)
 
-    # Shots at damaged enemy
-    agent_damaged = stats['target_priority'][0]['shots_at_damaged']
-    bot_damaged = stats['target_priority'][1]['shots_at_damaged']
-    agent_total = stats['target_priority'][0]['total_shots']
-    bot_total = stats['target_priority'][1]['total_shots']
+    agent_bad = stats['target_priority'][0]['shots_at_full_hp_while_wounded_in_los']
+    bot_bad = stats['target_priority'][1]['shots_at_full_hp_while_wounded_in_los']
+    agent_total_shots = stats['target_priority'][0]['total_shots']
+    bot_total_shots = stats['target_priority'][1]['total_shots']
 
-    agent_pct = (agent_damaged / agent_total * 100) if agent_total > 0 else 0
-    bot_pct = (bot_damaged / bot_total * 100) if bot_total > 0 else 0
-    print(f"Shots at wounded enemy:       {agent_damaged:6d} ({agent_pct:5.1f}%)  {bot_damaged:6d} ({bot_pct:5.1f}%)")
+    agent_bad_pct = (agent_bad / agent_total_shots * 100) if agent_total_shots > 0 else 0
+    bot_bad_pct = (bot_bad / bot_total_shots * 100) if bot_total_shots > 0 else 0
+    print(f"FAILURES (shot full HP while")
+    print(f"  wounded in LOS):            {agent_bad:6d} ({agent_bad_pct:5.1f}%)  {bot_bad:6d} ({bot_bad_pct:5.1f}%)")
 
-    # Shots at full HP while wounded exists (BAD behavior)
-    agent_bad = stats['target_priority'][0]['shots_at_full_hp_while_wounded_exists']
-    bot_bad = stats['target_priority'][1]['shots_at_full_hp_while_wounded_exists']
+    agent_good = stats['target_priority'][0]['shots_at_wounded_in_los']
+    bot_good = stats['target_priority'][1]['shots_at_wounded_in_los']
+    agent_good_pct = (agent_good / agent_total_shots * 100) if agent_total_shots > 0 else 0
+    bot_good_pct = (bot_good / bot_total_shots * 100) if bot_total_shots > 0 else 0
+    print(f"SUCCESS (shot wounded):       {agent_good:6d} ({agent_good_pct:5.1f}%)  {bot_good:6d} ({bot_good_pct:5.1f}%)")
 
-    agent_bad_pct = (agent_bad / agent_total * 100) if agent_total > 0 else 0
-    bot_bad_pct = (bot_bad / bot_total * 100) if bot_total > 0 else 0
-    print(f"Shots at full HP (bad):       {agent_bad:6d} ({agent_bad_pct:5.1f}%)  {bot_bad:6d} ({bot_bad_pct:5.1f}%)")
-    print(f"  (while wounded enemy exists)")
+    print(f"Total shots:                  {agent_total_shots:6d}           {bot_total_shots:6d}")
 
-    print(f"Total shots:                  {agent_total:6d}           {bot_total:6d}")
-
-    # Death order analysis
+    # Death order analysis with unit types
     print("\n" + "-" * 80)
     print("ENEMY DEATH ORDER ANALYSIS")
     print("-" * 80)
@@ -392,14 +453,14 @@ def print_statistics(stats):
         # Count how often each death order pattern occurs
         death_order_counter = Counter()
         for death_order in stats['death_orders']:
-            # Extract just the unit IDs in order
-            units_killed = tuple(unit_id for player, unit_id in death_order)
+            # Extract unit IDs with types in order
+            units_killed = tuple(f"{unit_type}({unit_id})" for player, unit_id, unit_type in death_order)
             if units_killed:
                 death_order_counter[units_killed] += 1
 
         # Show most common death orders
         print(f"Total episodes with kills: {len(stats['death_orders'])}")
-        print(f"\nMost common death orders (unit IDs):")
+        print(f"\nMost common death orders:")
         for order, count in death_order_counter.most_common(10):
             pct = (count / len(stats['death_orders']) * 100)
             order_str = " → ".join(order)
@@ -409,7 +470,7 @@ def print_statistics(stats):
         print(f"\nKills by player:")
         player_kills = {0: 0, 1: 0}
         for death_order in stats['death_orders']:
-            for player, unit_id in death_order:
+            for player, unit_id, unit_type in death_order:
                 player_kills[player] += 1
         print(f"  Agent (P0) kills: {player_kills[0]}")
         print(f"  Bot (P1) kills:   {player_kills[1]}")
@@ -425,18 +486,9 @@ def print_statistics(stats):
     print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
     print(f"Moves into walls:             {agent_walls:6d}           {bot_walls:6d}")
 
-    print("\n" + "-" * 80)
-    print("ACTIONS BY PLAYER")
-    print("-" * 80)
-    for player in [0, 1]:
-        print(f"\nPlayer {player} ({'Agent' if player == 0 else 'Bot'}):")
-        player_total = sum(stats['actions_by_player'][player].values())
-        for action_type, count in stats['actions_by_player'][player].most_common():
-            pct = (count / player_total * 100) if player_total > 0 else 0
-            print(f"  {action_type:10s}: {count:5d} ({pct:5.1f}%)")
-
+    # SAMPLE GAMES - 20 actions
     print("\n" + "=" * 80)
-    print("SAMPLE GAMES (first 30 actions)")
+    print("SAMPLE GAMES (first 20 actions)")
     print("=" * 80)
 
     if stats['sample_games']['win']:

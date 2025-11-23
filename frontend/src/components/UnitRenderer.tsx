@@ -467,11 +467,15 @@ export class UnitRenderer {
 
     // Get icon parameters from CSS variables
     const iconSize = this.getCSSNumber('--icon-explosion-size', 1.6);
+    const iconStroke = this.getCSSColor('--icon-explosion-stroke');
+    const iconStrokeThickness = this.getCSSNumber('--icon-explosion-stroke-thickness', 3);
 
     // Create explosion text (using emoji)
     const explosionText = new PIXI.Text('💥', {
       fontSize: HEX_RADIUS * iconSize,
       align: 'center',
+      stroke: iconStroke,
+      strokeThickness: iconStrokeThickness,
     });
     explosionText.anchor.set(0.5);
 
@@ -490,11 +494,15 @@ export class UnitRenderer {
 
     // Get icon parameters from CSS variables
     const iconSize = this.getCSSNumber('--icon-shoot-size', 1.2);
+    const iconStroke = this.getCSSColor('--icon-shoot-stroke');
+    const iconStrokeThickness = this.getCSSNumber('--icon-shoot-stroke-thickness', 3);
 
     // Create shooting indicator text (using crosshair emoji)
     const shootingText = new PIXI.Text('🎯', {
       fontSize: HEX_RADIUS * iconSize,
       align: 'center',
+      stroke: iconStroke,
+      strokeThickness: iconStrokeThickness,
     });
     shootingText.anchor.set(0.5);
 

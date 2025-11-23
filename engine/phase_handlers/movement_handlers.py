@@ -9,6 +9,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
+from engine.combat_utils import calculate_hex_distance
 
 
 def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -258,16 +259,16 @@ def _ai_select_movement_destination_pve(game_state: Dict[str, Any], unit: Dict[s
     
     # Strategy: Move toward nearest enemy for aggressive positioning
     enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
-    
+
     if enemies:
-        # Find nearest enemy
-        nearest_enemy = min(enemies, key=lambda e: abs(e["col"] - unit["col"]) + abs(e["row"] - unit["row"]))
+        # Find nearest enemy using hex distance
+        nearest_enemy = min(enemies, key=lambda e: calculate_hex_distance(unit["col"], unit["row"], e["col"], e["row"]))
         enemy_pos = (nearest_enemy["col"], nearest_enemy["row"])
-        
-        # Select move that gets closest to nearest enemy
-        best_move = min(actual_moves, 
-                       key=lambda dest: abs(dest[0] - enemy_pos[0]) + abs(dest[1] - enemy_pos[1]))
-        
+
+        # Select move that gets closest to nearest enemy using hex distance
+        best_move = min(actual_moves,
+                       key=lambda dest: calculate_hex_distance(dest[0], dest[1], enemy_pos[0], enemy_pos[1]))
+
         return best_move
     else:
         # No enemies - just take first available move

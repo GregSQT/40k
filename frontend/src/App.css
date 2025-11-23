@@ -25,10 +25,12 @@
   --icon-charge-stroke-thickness: 3;
   --icon-charge-size: 1.0;
   --icon-shoot-color: #ffaa00;
-  --icon-shoot-stroke: #000000;
-  --icon-shoot-stroke-thickness: 2;
+  --icon-shoot-stroke: #ffffff;
+  --icon-shoot-stroke-thickness: 3;
   --icon-shoot-size: 1.2;
   --icon-explosion-color: #ff6600;
+  --icon-explosion-stroke: #ffffff;
+  --icon-explosion-stroke-thickness: 3;
   --icon-explosion-size: 1.6;
   --icon-fight-color: #ff4444;
   --icon-fight-stroke: #ffffff;

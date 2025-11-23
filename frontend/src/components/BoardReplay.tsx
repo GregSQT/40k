@@ -83,6 +83,40 @@ export const BoardReplay: React.FC = () => {
     initRegistry();
   }, []);
 
+  // Auto-load train_step.log on mount
+  useEffect(() => {
+    const loadDefaultLog = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/replay/default');
+        if (!response.ok) {
+          // Silent fail - file might not exist, user can still browse manually
+          console.log('No default train_step.log found, user can browse manually');
+          return;
+        }
+
+        const text = await response.text();
+
+        // Parse it directly on frontend
+        const { parse_log_file_from_text } = await import('../utils/replayParser');
+        const data = parse_log_file_from_text(text);
+
+        setReplayData(data);
+        setSelectedFileName('train_step.log');
+        setSelectedEpisode(null);
+        setCurrentActionIndex(0);
+        setIsPlaying(false);
+        setLoadError(null);
+
+        console.log(`Auto-loaded train_step.log with ${data.total_episodes} episodes`);
+      } catch (error) {
+        // Silent fail - user can still browse manually
+        console.log('Could not auto-load train_step.log:', error);
+      }
+    };
+
+    loadDefaultLog();
+  }, []);
+
   // Enrich units with stats from UnitFactory
   const enrichUnitsWithStats = (units: any[]): any[] => {
     if (!unitRegistryReady) return units;
@@ -222,7 +256,14 @@ export const BoardReplay: React.FC = () => {
     : null;
 
   // Add ghost unit at starting position for move actions
-  const unitsWithGhost = currentState?.units ? [...currentState.units] : [];
+  // For shoot actions, ensure shooter has SHOOT_LEFT > 0 for LoS calculation
+  const unitsWithGhost = currentState?.units ? [...currentState.units].map((u: any) => {
+    // During shoot action, ensure shooter has SHOOT_LEFT > 0 to trigger LoS display
+    if (currentAction?.type === 'shoot' && u.id === currentAction.shooter_id) {
+      return { ...u, SHOOT_LEFT: Math.max(u.SHOOT_LEFT || 0, 1) };
+    }
+    return u;
+  }) : [];
   if (currentAction?.type === 'move' && currentAction?.from && currentAction.unit_id) {
     // Add a ghost unit at the starting position
     const originalUnit = unitsWithGhost.find((u: any) => u.id === currentAction.unit_id);
@@ -577,11 +618,18 @@ export const BoardReplay: React.FC = () => {
     ? currentAction.unit_id
     : null;
 
+  // For move actions, select the ghost unit to show movement range
+  // For shoot actions, select the shooter to show LoS/attack range
+  // Ghost unit has ID -1 and is at the starting position
+  const replaySelectedUnitId = currentAction?.type === 'move'
+    ? -1
+    : (currentAction?.type === 'shoot' ? currentAction.shooter_id : null);
+
   // Center column: Board
   const centerContent = currentState && gameConfig ? (
     <BoardPvp
       units={unitsWithGhost}
-      selectedUnitId={null}
+      selectedUnitId={replaySelectedUnitId}
       eligibleUnitIds={unitsWithGhost.map((u: any) => u.id)}
       showHexCoordinates={showHexCoordinates}
       mode="select"
@@ -593,9 +641,9 @@ export const BoardReplay: React.FC = () => {
       onStartAttackPreview={() => {}}
       onConfirmMove={() => {}}
       onCancelMove={() => {}}
-      currentPlayer={currentState.currentPlayer || 0}
+      currentPlayer={(currentAction?.type === 'move' || currentAction?.type === 'shoot') ? (currentAction.player as 0 | 1) : (currentState.currentPlayer || 0)}
       unitsMoved={[]}
-      phase={currentState.phase || 'move'}
+      phase={currentAction?.type === 'move' ? 'move' : (currentAction?.type === 'shoot' ? 'shoot' : (currentState.phase || 'move'))}
       onShoot={() => {}}
       gameState={currentState}
       getChargeDestinations={() => []}

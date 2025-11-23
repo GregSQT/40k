@@ -51,7 +51,7 @@
   },
   "phase2": {
     "type": "##### Phase 2 - POSITIONING WITH WALLS #################################################################################################",
-    "total_episodes": 15000,
+    "total_episodes": 3000,
     "total_episodes_normal_value": "3000 = 4 scenarios × 1000 episodes × 3 rotations for curriculum learning",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 16,
@@ -63,7 +63,7 @@
     "position_reward_scale_comment": "Scales absolute position_score to reward. 0.05 = offensive_value of 10 = 0.5 reward (reduced to not overwhelm shooting rewards).",
     "model_params": {
       "policy": "MlpPolicy",
-      "learning_rate": 0.0003,
+      "learning_rate": 0.0005,
       "n_steps": 2048,
       "batch_size": 256,
       "n_epochs": 6,
@@ -72,8 +72,9 @@
       "clip_range": 0.15,
       "ent_coef": {
         "start": 0.3,
-        "end": 0.15
+        "end": 0.25
       },
+      "ent_coef_comment": "INCREASED end from 0.15 to 0.25 - previous training showed entropy collapse (0.85). Need more exploration.",
       "vf_coef": 0.5,
       "max_grad_norm": 0.3,
       "target_kl": null,

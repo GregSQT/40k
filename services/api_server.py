@@ -670,6 +670,31 @@ def parse_replay_log():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/replay/default', methods=['GET'])
+def get_default_replay_log():
+    """
+    Get the default train_step.log file content for auto-loading in replay mode.
+
+    Returns:
+        Raw text content of train_step.log
+    """
+    try:
+        log_path = 'train_step.log'
+
+        if not os.path.exists(log_path):
+            return jsonify({"error": "train_step.log not found"}), 404
+
+        with open(log_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Return as plain text for frontend parsing
+        from flask import Response
+        return Response(content, mimetype='text/plain')
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/replay/list', methods=['GET'])
 def list_replay_logs():
     """
@@ -727,6 +752,7 @@ def serve_frontend():
             "board_config": "/api/config/board",
             "debug_actions": "/api/debug/actions",
             "replay_parse": "/api/replay/parse",
+            "replay_default": "/api/replay/default",
             "replay_list": "/api/replay/list"
         },
         "instructions": [

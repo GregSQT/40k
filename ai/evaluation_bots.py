@@ -5,6 +5,7 @@ ai/evaluation_bots.py - Simple tactical bots for measuring agent performance
 
 import random
 from typing import Dict, List, Tuple, Any, Optional
+from engine.combat_utils import calculate_hex_distance
 
 
 class RandomBot:
@@ -177,7 +178,7 @@ class DefensiveBot:
         
         for enemy in game_state.get('units', []):
             if enemy['player'] != unit['player'] and enemy['HP_CUR'] > 0:
-                distance = abs(enemy['col'] - unit['col']) + abs(enemy['row'] - unit['row'])
+                distance = calculate_hex_distance(unit['col'], unit['row'], enemy['col'], enemy['row'])
                 if distance <= threat_range:
                     threat_count += 1
         

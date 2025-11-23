@@ -605,14 +605,31 @@ class RewardCalculator:
                 "safe_from_enemy_ranged": safe_from_enemy_ranged
             }
             
-            # Handle same-position movement (no actual movement) - REMOVE DEBUG THAT TRIGGERS DOUBLE PROCESSING
+            # Handle same-position movement (no actual movement)
             if old_col == new_col and old_row == new_row:
-                # Unit didn't actually move - this should be treated as a wait action
-                context = {"moved_to_safety": True}  # Conservative choice for no movement
-            elif not any(context.values()):
-                # If unit moved but no tactical benefit detected, default to moved_closer
-                context["moved_closer"] = True
-            
+                # Unit didn't actually move - this should NOT happen in normal flow
+                # If it does, raise error to investigate
+                raise ValueError(
+                    f"Unit {unit.get('id')} has same fromCol/toCol and fromRow/toRow in movement result. "
+                    f"This should be a WAIT action, not MOVE. Result: {result}"
+                )
+
+            # Verify at least one primary flag is set - NO FALLBACK, expose bugs!
+            primary_flags = [
+                context.get("moved_closer", False),
+                context.get("moved_away", False),
+                context.get("moved_to_optimal_range", False),
+                context.get("moved_to_charge_range", False),
+                context.get("moved_to_safety", False)
+            ]
+            if not any(primary_flags):
+                # This should NOT happen - investigate!
+                raise ValueError(
+                    f"No primary movement context for unit {unit.get('id')}. "
+                    f"Moved from ({old_col},{old_row}) to ({new_col},{new_row}). "
+                    f"Context: {context}. Game state has {len([u for u in game_state.get('units', []) if u.get('HP_CUR', 0) > 0])} alive units."
+                )
+
             return context
         
         return {}
@@ -1085,47 +1102,59 @@ class RewardCalculator:
         return ranged_enemies_with_los <= 1
     
     def _moved_closer_to_enemies(self, unit: Dict[str, Any], old_pos: Tuple[int, int], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
-        """Check if unit moved closer to enemies."""
+        """Check if unit moved closer to enemies (or maintained same distance = lateral move)."""
         enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
         if not enemies:
             return False
-        
-        old_min_distance = min(abs(old_pos[0] - e["col"]) + abs(old_pos[1] - e["row"]) for e in enemies)
-        new_min_distance = min(abs(new_pos[0] - e["col"]) + abs(new_pos[1] - e["row"]) for e in enemies)
-        
-        return new_min_distance < old_min_distance
+
+        old_min_distance = min(calculate_hex_distance(old_pos[0], old_pos[1], e["col"], e["row"]) for e in enemies)
+        new_min_distance = min(calculate_hex_distance(new_pos[0], new_pos[1], e["col"], e["row"]) for e in enemies)
+
+        # Include equal distance (lateral movement) - unit is still engaged
+        return new_min_distance <= old_min_distance
     
     def _moved_away_from_enemies(self, unit: Dict[str, Any], old_pos: Tuple[int, int], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit moved away from enemies."""
         enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
         if not enemies:
             return False
-        
-        old_min_distance = min(abs(old_pos[0] - e["col"]) + abs(old_pos[1] - e["row"]) for e in enemies)
-        new_min_distance = min(abs(new_pos[0] - e["col"]) + abs(new_pos[1] - e["row"]) for e in enemies)
-        
+
+        old_min_distance = min(calculate_hex_distance(old_pos[0], old_pos[1], e["col"], e["row"]) for e in enemies)
+        new_min_distance = min(calculate_hex_distance(new_pos[0], new_pos[1], e["col"], e["row"]) for e in enemies)
+
         return new_min_distance > old_min_distance
     
     def _moved_to_optimal_range(self, unit: Dict[str, Any], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
-        """Check if unit moved to optimal shooting range per W40K shooting rules."""
+        """Check if unit moved to optimal shooting range per W40K shooting rules.
+
+        CRITICAL: Must check BOTH range AND line of sight.
+        A position is only optimal if the unit can actually shoot from there.
+        """
         # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
         if "RNG_RNG" not in unit:
             raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
         if unit["RNG_RNG"] <= 0:
             return False
-        
+
         max_range = unit["RNG_RNG"]
         if "CC_RNG" not in unit:
             raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
         min_range = unit["CC_RNG"]  # Minimum engagement distance
         enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
-        
+
+        # Create temporary unit state at new position for LOS check
+        temp_unit = unit.copy()
+        temp_unit["col"] = new_pos[0]
+        temp_unit["row"] = new_pos[1]
+
         for enemy in enemies:
-            distance = abs(new_pos[0] - enemy["col"]) + abs(new_pos[1] - enemy["row"])
+            distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
             # Optimal range: can shoot but not in melee (min_range < distance <= max_range)
             if min_range < distance <= max_range:
-                return True
-        
+                # CRITICAL: Also check LOS - position is only optimal if we can actually shoot
+                if has_line_of_sight(temp_unit, enemy, game_state):
+                    return True
+
         return False
     
     def _moved_to_charge_range(self, unit: Dict[str, Any], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
@@ -1135,36 +1164,40 @@ class RewardCalculator:
             raise KeyError(f"Unit missing required 'CC_DMG' field: {unit}")
         if unit["CC_DMG"] <= 0:
             return False
-        
+
         enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
         if "MOVE" not in unit:
             raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
         max_charge_range = unit["MOVE"] + 12  # Average 2d6 charge distance
-        
+
         for enemy in enemies:
-            distance = abs(new_pos[0] - enemy["col"]) + abs(new_pos[1] - enemy["row"])
+            distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
             if distance <= max_charge_range:
                 return True
-        
+
         return False
     
     def _moved_to_safety(self, unit: Dict[str, Any], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit moved to safety from enemy threats."""
         enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
-        
+
+        # No enemies should mean game is over - don't mask this with return True
+        if not enemies:
+            return False
+
         for enemy in enemies:
             # Check if moved out of enemy threat range
-            distance = abs(new_pos[0] - enemy["col"]) + abs(new_pos[1] - enemy["row"])
+            distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
             # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
             if "RNG_RNG" not in enemy:
                 raise KeyError(f"Enemy unit missing required 'RNG_RNG' field: {enemy}")
             if "CC_RNG" not in enemy:
                 raise KeyError(f"Enemy unit missing required 'CC_RNG' field: {enemy}")
             enemy_threat_range = max(enemy["RNG_RNG"], enemy["CC_RNG"])
-            
+
             if distance > enemy_threat_range:
                 return True
-        
+
         return False
     
     def _gained_los_on_priority_target(self, unit: Dict[str, Any], old_pos: Tuple[int, int], game_state: Dict[str, Any], 

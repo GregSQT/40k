@@ -499,14 +499,14 @@ class ObservationBuilder:
                 unit["CC_DMG"] > 0):  # AI_TURN.md: Direct field access
                 
                 # Simple charge range check (2d6 movement + unit MOVE)
-                distance = abs(unit["col"] - target["col"]) + abs(unit["row"] - target["row"])
+                distance = calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
                 if "MOVE" not in unit:
                     raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
                 max_charge_range = unit["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
-                
+
                 if distance <= max_charge_range:
                     return True
-        
+
         return False
     
     
