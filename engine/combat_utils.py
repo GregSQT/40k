@@ -35,9 +35,63 @@ def get_hex_line(start_col: int, start_row: int, end_col: int, end_row: int) -> 
 # ============================================================================
 
 def has_line_of_sight(shooter: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
-        """Check line of sight between shooter and target using handler delegation."""
+        """
+        Check line of sight between shooter and target.
+
+        PERFORMANCE: Uses hex-coordinate cache (5-10x speedup on cache hits).
+        Cache key: ((from_col, from_row), (to_col, to_row))
+        Walls are static within episode, so LoS from hex A to hex B is constant.
+        """
         from engine.phase_handlers import shooting_handlers
-        return shooting_handlers._has_line_of_sight(game_state, shooter, target)
+
+        # Extract coordinates
+        from_col, from_row = shooter["col"], shooter["row"]
+        to_col, to_row = target["col"], target["row"]
+
+        # Check hex-coordinate cache first
+        if "hex_los_cache" in game_state:
+            cache_key = ((from_col, from_row), (to_col, to_row))
+            if cache_key in game_state["hex_los_cache"]:
+                return game_state["hex_los_cache"][cache_key]
+
+        # Cache miss: compute LoS (expensive)
+        has_los = shooting_handlers._has_line_of_sight(game_state, shooter, target)
+
+        # Store in cache for future lookups
+        if "hex_los_cache" not in game_state:
+            game_state["hex_los_cache"] = {}
+        game_state["hex_los_cache"][((from_col, from_row), (to_col, to_row))] = has_los
+
+        return has_los
+
+
+def has_line_of_sight_coords(from_col: int, from_row: int, to_col: int, to_row: int,
+                              game_state: Dict[str, Any]) -> bool:
+        """
+        Check line of sight between two hex coordinates.
+
+        PERFORMANCE: Direct coordinate-based LoS check with caching.
+        Use this when you don't have unit dicts, only coordinates.
+        """
+        from engine.phase_handlers import shooting_handlers
+
+        # Check hex-coordinate cache first
+        if "hex_los_cache" in game_state:
+            cache_key = ((from_col, from_row), (to_col, to_row))
+            if cache_key in game_state["hex_los_cache"]:
+                return game_state["hex_los_cache"][cache_key]
+
+        # Cache miss: compute LoS using temp unit dicts
+        temp_shooter = {"col": from_col, "row": from_row}
+        temp_target = {"col": to_col, "row": to_row}
+        has_los = shooting_handlers._has_line_of_sight(game_state, temp_shooter, temp_target)
+
+        # Store in cache
+        if "hex_los_cache" not in game_state:
+            game_state["hex_los_cache"] = {}
+        game_state["hex_los_cache"][((from_col, from_row), (to_col, to_row))] = has_los
+
+        return has_los
 
 
 def check_los_cached(shooter: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:

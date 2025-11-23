@@ -225,7 +225,10 @@ class W40KEngine(gym.Env):
             
             # Metrics tracking
             "action_logs": [],  # CRITICAL: For metrics collection - tracks all actions per episode
-            
+
+            # PERFORMANCE: Hex-coordinate LoS cache (walls static within episode)
+            "hex_los_cache": {},
+
             # CHANGE 11: Add rewards_configs (plural) to game_state for handler access
             "rewards_configs": {
                 self.config.get("controlled_agent", "default"): self.rewards_config
@@ -338,7 +341,8 @@ class W40KEngine(gym.Env):
             "fight_subphase": None,
             "charge_range_rolls": {},
             "action_logs": [],  # CRITICAL: Reset action logs for new episode metrics
-            "gym_training_mode": self.gym_training_mode  # ADDED: For handler access
+            "gym_training_mode": self.gym_training_mode,  # ADDED: For handler access
+            "hex_los_cache": {}  # PERFORMANCE: Clear hex-coordinate LoS cache for new episode
         })
         
         # Reset unit health and positions to original scenario values
