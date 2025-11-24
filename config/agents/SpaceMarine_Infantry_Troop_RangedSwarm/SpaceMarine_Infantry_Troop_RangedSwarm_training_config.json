@@ -37,7 +37,7 @@
       "n_eval_episodes": 0,
       "bot_eval_freq": 200,
       "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 3,
+      "bot_eval_intermediate": 10,
       "bot_eval_final": 0
     },
     "observation_params": {
@@ -51,7 +51,7 @@
   },
   "phase2": {
     "type": "##### Phase 2 - POSITIONING WITH WALLS #################################################################################################",
-    "total_episodes": 3000,
+    "total_episodes": 6000,
     "total_episodes_normal_value": "3000 = 4 scenarios × 1000 episodes × 3 rotations for curriculum learning",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 16,
@@ -59,8 +59,8 @@
     "rotation_comment": "1000 episodes per scenario = 3 rotations through all bots. Matches Phase 1 successful configuration.",
     "tactical_positioning": 0.0,
     "tactical_positioning_comment": "Phase 2: 0.0 = offensive only (no defense vs dumb bots). Phase 3+: 1.0 = balanced with self-play.",
-    "position_reward_scale": 0.05,
-    "position_reward_scale_comment": "Scales absolute position_score to reward. 0.05 = offensive_value of 10 = 0.5 reward (reduced to not overwhelm shooting rewards).",
+    "position_reward_scale": 0.20,
+    "position_reward_scale_comment": "INCREASED from 0.05 to 0.20 - stronger position signal to overcome value function noise floor.",
     "model_params": {
       "policy": "MlpPolicy",
       "learning_rate": 0.001,
@@ -75,7 +75,7 @@
         "end": 0.28,
         "_comment": "INCREASED - previous training showed entropy collapse (0.85). Need more exploration."
       },
-      "vf_coef": 0.5,
+      "vf_coef": 0.75,
       "max_grad_norm": 0.3,
       "target_kl": null,
       "tensorboard_log": "./tensorboard/",
@@ -92,7 +92,7 @@
       "n_eval_episodes": 0,
       "bot_eval_freq": 200,
       "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 3,
+      "bot_eval_intermediate": 10,
       "bot_eval_final": 0
     },
     "observation_params": {

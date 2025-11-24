@@ -1709,8 +1709,18 @@ class RewardCalculator:
         """
         Get all positions an enemy could reach after moving.
         Uses BFS like movement_build_valid_destinations_pool but simplified.
+
+        PERFORMANCE: Results are cached per enemy ID in game_state["enemy_reachable_cache"].
+        Cache is valid within a phase (enemies don't move during ally movement).
+        Cache cleared in movement_phase_start when phase transitions.
         """
         from engine.phase_handlers.movement_handlers import _get_hex_neighbors, _is_traversable_hex
+
+        # Check cache first - enemy reachable positions are static within a phase
+        if "enemy_reachable_cache" in game_state:
+            cache_key = enemy["id"]
+            if cache_key in game_state["enemy_reachable_cache"]:
+                return game_state["enemy_reachable_cache"][cache_key]
 
         if "MOVE" not in enemy:
             raise KeyError(f"Enemy missing required 'MOVE' field: {enemy}")
@@ -1743,6 +1753,11 @@ class RewardCalculator:
                 visited[neighbor_pos] = current_dist + 1
                 reachable.append(neighbor_pos)
                 queue.append((neighbor_pos, current_dist + 1))
+
+        # Store in cache for future lookups within this phase
+        if "enemy_reachable_cache" not in game_state:
+            game_state["enemy_reachable_cache"] = {}
+        game_state["enemy_reachable_cache"][enemy["id"]] = reachable
 
         return reachable
 
@@ -1807,7 +1822,8 @@ class RewardCalculator:
         p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
 
         # Save calculation (use better of armor or invul after AP modification)
-        modified_armor = armor_save + ap  # AP reduces armor save
+        # AP is stored as negative (e.g., -1), subtract to worsen save: 3+ with -1 AP = 4+
+        modified_armor = armor_save - ap
         best_save = min(modified_armor, invul_save)
         if best_save > 6:
             p_fail_save = 1.0

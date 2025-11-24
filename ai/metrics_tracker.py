@@ -633,9 +633,9 @@ class W40KMetricsTracker:
             reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=20)
             self.writer.add_scalar('0_critical/c_episode_reward_smooth', reward_smooth, self.episode_count)
 
-        # 3. Position Score (100-move smooth) - Phase 2+ positioning quality
+        # 3. Position Score (500-move smooth) - Phase 2+ positioning quality
         if len(self.position_scores) >= 20:
-            position_score_smooth = self._calculate_smoothed_metric(self.position_scores, window_size=100)
+            position_score_smooth = self._calculate_smoothed_metric(self.position_scores, window_size=500)
             self.writer.add_scalar('0_critical/d_position_score', position_score_smooth, self.episode_count)
 
         # ==========================================

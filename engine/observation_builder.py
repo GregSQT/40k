@@ -28,6 +28,10 @@ class ObservationBuilder:
         self.perception_radius = obs_params["perception_radius"]  # ✓ CHANGE 3: No default fallback
         self.max_nearby_units = obs_params.get("max_nearby_units", 10)  # ✓ CHANGE 3: Cache for line 553
         self.max_valid_targets = obs_params.get("max_valid_targets", 5)  # ✓ CHANGE 3: Cache for future use
+
+        # PERFORMANCE: Per-observation cache for danger probability calculations
+        # Cleared at start of each build_observation() call
+        self._danger_probability_cache = {}
         
     # ============================================================================
     # MAIN OBSERVATION
@@ -344,15 +348,24 @@ class ObservationBuilder:
         """
         Calculate probability that attacker will kill defender on its next turn.
         Works for ANY unit pair (active unit vs enemy, VIP vs enemy, etc.)
-        
+
         Considers:
         - Distance (can they reach?)
         - Hit/wound/save probabilities
         - Number of attacks
         - Damage output
-        
+
         Returns: 0.0-1.0 probability
+
+        PERFORMANCE: Memoized per build_observation() call.
+        Same (defender, attacker) pairs are calculated 7+ times in single observation.
+        Cache is cleared at start of each build_observation() call.
         """
+        # PERFORMANCE: Check memoization cache first
+        cache_key = (defender["id"], attacker["id"])
+        if cache_key in self._danger_probability_cache:
+            return self._danger_probability_cache[cache_key]
+
         distance = calculate_hex_distance(
             defender["col"], defender["row"],
             attacker["col"], attacker["row"]
@@ -368,6 +381,7 @@ class ObservationBuilder:
         can_use_melee = distance <= attacker["CC_RNG"]
 
         if not can_use_ranged and not can_use_melee:
+            self._danger_probability_cache[cache_key] = 0.0
             return 0.0
 
         if can_use_ranged and not can_use_melee:
@@ -406,11 +420,13 @@ class ObservationBuilder:
             ap = attacker["CC_AP"]
         
         if num_attacks == 0:
+            self._danger_probability_cache[cache_key] = 0.0
             return 0.0
         
         p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
         
         if "T" not in defender:
+            self._danger_probability_cache[cache_key] = 0.0
             return 0.0
         wound_target = self._calculate_wound_target(strength, defender["T"])
         p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
@@ -422,9 +438,12 @@ class ObservationBuilder:
         expected_damage = num_attacks * p_damage_per_attack * damage
         
         if expected_damage >= defender["HP_CUR"]:
+            self._danger_probability_cache[cache_key] = 1.0
             return 1.0
         else:
-            return min(1.0, expected_damage / defender["HP_CUR"])
+            result = min(1.0, expected_damage / defender["HP_CUR"])
+            self._danger_probability_cache[cache_key] = result
+            return result
     
     def _calculate_army_weighted_threat(self, target: Dict[str, Any], valid_targets: List[Dict[str, Any]], game_state: Dict[str, Any])  -> float:
         """
@@ -568,6 +587,9 @@ class ObservationBuilder:
         Asymmetric design: More complete information about enemies than allies.
         Agent discovers optimal tactical combinations through training.
         """
+        # PERFORMANCE: Clear per-observation cache (same pairs recalculated multiple times)
+        self._danger_probability_cache = {}
+
         obs = np.zeros(295, dtype=np.float32)
         
         # Get active unit (agent's current unit)
@@ -782,8 +804,10 @@ class ObservationBuilder:
                 obs[feature_base + 7] = self._calculate_combat_mix_score(ally)
                 
                 # Feature 8-9: Favorite targets
-                obs[feature_base + 8] = self._calculate_favorite_target(ally)
-                obs[feature_base + 9] = self._calculate_favorite_target(ally)  # Same for both modes
+                # PERFORMANCE: Calculate once, use twice (was called twice per ally)
+                fav_target = self._calculate_favorite_target(ally)
+                obs[feature_base + 8] = fav_target
+                obs[feature_base + 9] = fav_target
                 
                 # Feature 10: Can shoot my target (placeholder - requires current target context)
                 obs[feature_base + 10] = 0.0
@@ -942,8 +966,10 @@ class ObservationBuilder:
                 
                 # Feature 20-22: Enemy capabilities
                 obs[feature_base + 20] = self._calculate_combat_mix_score(enemy)
-                obs[feature_base + 21] = self._calculate_favorite_target(enemy)
-                obs[feature_base + 22] = self._calculate_favorite_target(enemy)
+                # PERFORMANCE: Calculate once, use twice (was called twice per enemy)
+                enemy_fav_target = self._calculate_favorite_target(enemy)
+                obs[feature_base + 21] = enemy_fav_target
+                obs[feature_base + 22] = enemy_fav_target
             else:
                 # Padding for empty slots
                 for j in range(23):
@@ -1087,11 +1113,12 @@ class ObservationBuilder:
                 game_state, active_unit["id"]
             )
             
-            valid_targets = [
-                get_unit_by_id(str(tid), game_state) 
-                for tid in target_ids 
-                if get_unit_by_id(str(tid), game_state)
-            ]
+            # PERFORMANCE: Call get_unit_by_id once per target, not twice
+            valid_targets = []
+            for tid in target_ids:
+                unit = get_unit_by_id(str(tid), game_state)
+                if unit:
+                    valid_targets.append(unit)
             
         elif current_phase == "charge":
             # Get valid charge targets (enemies within charge range)
@@ -1200,8 +1227,8 @@ class ObservationBuilder:
             else:
                 our_wound_prob = 2/6
 
-            # Target's failed save probability
-            target_modified_save = target_save + unit_ap
+            # Target's failed save probability (AP is negative, subtract to worsen save)
+            target_modified_save = target_save - unit_ap
             if target_modified_save > 6:
                 target_failed_save = 1.0
             else:

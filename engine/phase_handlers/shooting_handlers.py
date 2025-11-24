@@ -422,17 +422,60 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
             else:
                 valid_target_pool.append(enemy["id"])
 
-    # Sort by priority to match observation encoding
+    # PERFORMANCE: Pre-calculate priorities for all targets ONCE before sorting
+    # This reduces from O(n log n) priority calculations to O(n) calculations
     # Priority: tactical efficiency > type match > distance
-    def target_priority(target_id):
+
+    # Pre-validate unit stats ONCE (not inside loop)
+    if "T" not in unit:
+        raise KeyError(f"Unit missing required 'T' field: {unit}")
+    if "ARMOR_SAVE" not in unit:
+        raise KeyError(f"Unit missing required 'ARMOR_SAVE' field: {unit}")
+    if "RNG_NB" not in unit:
+        raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
+    if "RNG_ATK" not in unit:
+        raise KeyError(f"Unit missing required 'RNG_ATK' field: {unit}")
+    if "RNG_STR" not in unit:
+        raise KeyError(f"Unit missing required 'RNG_STR' field: {unit}")
+    if "RNG_AP" not in unit:
+        raise KeyError(f"Unit missing required 'RNG_AP' field: {unit}")
+    if "unitType" not in unit:
+        raise KeyError(f"Unit missing required 'unitType' field: {unit}")
+
+    # Cache unit stats for priority calculations
+    unit_t = unit["T"]
+    unit_save = unit["ARMOR_SAVE"]
+    unit_attacks = unit["RNG_NB"]
+    unit_bs = unit["RNG_ATK"]
+    unit_s = unit["RNG_STR"]
+    unit_ap = unit["RNG_AP"]
+    unit_type = unit["unitType"]
+
+    # Determine preferred target type from unit name (ONCE)
+    if "Swarm" in unit_type:
+        preferred = "swarm"
+    elif "Troop" in unit_type:
+        preferred = "troop"
+    elif "Elite" in unit_type:
+        preferred = "elite"
+    else:
+        preferred = "troop"  # Default
+
+    # Calculate our hit probability (ONCE - unit stats don't change per target)
+    our_hit_prob = (7 - unit_bs) / 6.0
+
+    # Pre-calculate priorities for all targets
+    target_priorities = []  # [(target_id, priority_tuple)]
+
+    for target_id in valid_target_pool:
         target = _get_unit_by_id(game_state, target_id)
         if not target:
-            return (999, 0, 999)
+            target_priorities.append((target_id, (999, 0, 999)))
+            continue
 
         distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
 
         # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
-        # Validate target stats
         if "RNG_NB" not in target:
             raise KeyError(f"Target missing required 'RNG_NB' field: {target}")
         if "RNG_ATK" not in target:
@@ -441,25 +484,20 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
             raise KeyError(f"Target missing required 'RNG_STR' field: {target}")
         if "RNG_AP" not in target:
             raise KeyError(f"Target missing required 'RNG_AP' field: {target}")
-
-        # Validate unit stats
-        if "T" not in unit:
-            raise KeyError(f"Unit missing required 'T' field: {unit}")
-        if "ARMOR_SAVE" not in unit:
-            raise KeyError(f"Unit missing required 'ARMOR_SAVE' field: {unit}")
-
-        # Calculate tactical efficiency = threat_per_turn / kill_difficulty
-        # This prioritizes targets that deal most damage before we can kill them
+        if "T" not in target:
+            raise KeyError(f"Target missing required 'T' field: {target}")
+        if "ARMOR_SAVE" not in target:
+            raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target}")
+        if "HP_CUR" not in target:
+            raise KeyError(f"Target missing required 'HP_CUR' field: {target}")
+        if "HP_MAX" not in target:
+            raise KeyError(f"Target missing required 'HP_MAX' field: {target}")
 
         # Step 1: Calculate target's threat to us (probability to wound per turn)
-        # Target shooting at unit
         target_attacks = target["RNG_NB"]
-        target_bs = target["RNG_ATK"]  # To-hit roll needed
+        target_bs = target["RNG_ATK"]
         target_s = target["RNG_STR"]
         target_ap = target["RNG_AP"]
-
-        unit_t = unit["T"]
-        unit_save = unit["ARMOR_SAVE"]
 
         # Hit probability
         hit_prob = (7 - target_bs) / 6.0
@@ -476,8 +514,8 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         else:
             wound_prob = 2/6  # 5+
 
-        # Failed save probability
-        modified_save = unit_save + target_ap
+        # Failed save probability (AP is negative, subtract to worsen save)
+        modified_save = unit_save - target_ap
         if modified_save > 6:
             failed_save_prob = 1.0
         else:
@@ -485,40 +523,12 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
 
         # Threat per attack
         threat_per_attack = hit_prob * wound_prob * failed_save_prob
-        threat_per_turn = target_attacks * (1 - (1 - threat_per_attack) ** target_attacks)
-        # Simplified: use expected wounds
         threat_per_turn = target_attacks * threat_per_attack
 
         # Step 2: Calculate our kill difficulty (expected activations to kill target)
-        # AI_TURN.md COMPLIANCE: Validate unit stats
-        if "RNG_NB" not in unit:
-            raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
-        if "RNG_ATK" not in unit:
-            raise KeyError(f"Unit missing required 'RNG_ATK' field: {unit}")
-        if "RNG_STR" not in unit:
-            raise KeyError(f"Unit missing required 'RNG_STR' field: {unit}")
-        if "RNG_AP" not in unit:
-            raise KeyError(f"Unit missing required 'RNG_AP' field: {unit}")
-
-        # AI_TURN.md COMPLIANCE: Validate target stats
-        if "T" not in target:
-            raise KeyError(f"Target missing required 'T' field: {target}")
-        if "ARMOR_SAVE" not in target:
-            raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target}")
-        if "HP_CUR" not in target:
-            raise KeyError(f"Target missing required 'HP_CUR' field: {target}")
-
-        unit_attacks = unit["RNG_NB"]
-        unit_bs = unit["RNG_ATK"]
-        unit_s = unit["RNG_STR"]
-        unit_ap = unit["RNG_AP"]
-
         target_t = target["T"]
         target_save = target["ARMOR_SAVE"]
         target_hp = target["HP_CUR"]
-
-        # Our hit probability
-        our_hit_prob = (7 - unit_bs) / 6.0
 
         # Our wound probability
         if unit_s >= target_t * 2:
@@ -532,8 +542,8 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         else:
             our_wound_prob = 2/6
 
-        # Target's failed save
-        target_modified_save = target_save + unit_ap
+        # Target's failed save (AP is negative, subtract to worsen save)
+        target_modified_save = target_save - unit_ap
         if target_modified_save > 6:
             target_failed_save = 1.0
         else:
@@ -550,27 +560,10 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
             activations_to_kill = 100  # Very hard to kill
 
         # Step 3: Tactical efficiency = expected damage target deals before death
-        # Higher = more urgent to kill
         tactical_efficiency = threat_per_turn * activations_to_kill
 
-        # Calculate target type match based on unit specialization
-        # AI_TURN.md COMPLIANCE: Direct field access
-        if "unitType" not in unit:
-            raise KeyError(f"Unit missing required 'unitType' field: {unit}")
-        if "HP_MAX" not in target:
-            raise KeyError(f"Target missing required 'HP_MAX' field: {target}")
-        unit_type = unit["unitType"]
+        # Calculate target type match
         target_max_hp = target["HP_MAX"]
-
-        # Determine preferred target type from unit name
-        if "Swarm" in unit_type:
-            preferred = "swarm"
-        elif "Troop" in unit_type:
-            preferred = "troop"
-        elif "Elite" in unit_type:
-            preferred = "elite"
-        else:
-            preferred = "troop"  # Default
 
         # Determine target type from HP
         if target_max_hp <= 1:
@@ -585,16 +578,18 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         type_match = 1.0 if preferred == target_type else 0.3
 
         # Priority scoring (lower = higher priority)
-        # Tactical efficiency is primary (higher efficiency = lower score)
-        # Type match is secondary
-        # Distance is tiebreaker
-        return (
+        priority = (
             -tactical_efficiency * 100,  # Higher efficiency = lower score = first
             -(type_match * 70),          # Favorite type = -70 bonus
             distance                     # Closer = lower score
         )
+        target_priorities.append((target_id, priority))
 
-    valid_target_pool.sort(key=target_priority)
+    # Sort by pre-calculated priority (O(n log n) comparisons, O(1) per comparison)
+    target_priorities.sort(key=lambda x: x[1])
+
+    # Extract sorted target IDs
+    valid_target_pool = [tp[0] for tp in target_priorities]
 
     # Store in cache
     _target_pool_cache[cache_key] = valid_target_pool
@@ -1578,8 +1573,8 @@ def _calculate_save_target(target: Dict[str, Any], ap: int) -> int:
     armor_save = target["ARMOR_SAVE"]
     invul_save = target["INVUL_SAVE"]
     
-    # Apply AP to armor save (AP makes saves worse, so add to target number)
-    modified_armor_save = armor_save + ap
+    # Apply AP to armor save (AP is negative, subtract to worsen save: 3+ with -1 AP = 4+)
+    modified_armor_save = armor_save - ap
     
     # Handle invulnerable saves: 0 means no invul save, use 7 (impossible)
     effective_invul = invul_save if invul_save > 0 else 7

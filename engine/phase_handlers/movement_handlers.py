@@ -25,11 +25,15 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["units_shot"] = set()
     game_state["units_charged"] = set()
     game_state["units_attacked"] = set()
-    
+
     # Clear movement preview state
     game_state["valid_move_destinations_pool"] = []
     game_state["preview_hexes"] = []
     game_state["active_movement_unit"] = None
+
+    # Clear enemy reachable positions cache (enemy positions may have changed)
+    # Used by RewardCalculator._get_enemy_reachable_positions for defensive threat calculation
+    game_state["enemy_reachable_cache"] = {}
     
     # Build activation pool
     movement_build_activation_pool(game_state)
@@ -358,11 +362,15 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     }
 
 
-def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any], config: Dict[str, Any]) -> bool:
+def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any], config: Dict[str, Any],
+                          enemy_adjacent_hexes: Set[Tuple[int, int]] = None) -> bool:
     """
     AI_TURN.md destination validation implementation.
 
     Validates movement destination per AI_TURN.md restrictions.
+
+    PERFORMANCE: If enemy_adjacent_hexes set is provided, uses O(1) set lookup
+    instead of O(n) iteration through all units for adjacency check.
     """
     # Board bounds check
     if (col < 0 or row < 0 or
@@ -383,7 +391,7 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
             return False
 
     # AI_TURN.md: Cannot move TO hexes adjacent to enemies
-    if _is_hex_adjacent_to_enemy(game_state, col, row, unit["player"]):
+    if _is_hex_adjacent_to_enemy(game_state, col, row, unit["player"], enemy_adjacent_hexes):
         return False
 
     return True
@@ -421,7 +429,8 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
         return False
 
 
-def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, player: int) -> bool:
+def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, player: int,
+                               enemy_adjacent_hexes: Set[Tuple[int, int]] = None) -> bool:
     """
     AI_TURN.md adjacency restriction implementation.
 
@@ -429,8 +438,15 @@ def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, pl
 
     CRITICAL FIX: Use proper hexagonal adjacency, not Chebyshev distance.
     Hexagonal grids require checking if enemy position is in the list of 6 neighbors.
+
+    PERFORMANCE: If enemy_adjacent_hexes set is provided, uses O(1) set lookup
+    instead of O(n) iteration through all units.
     """
-    # Get the 6 hexagonal neighbors of this position
+    # PERFORMANCE: Use pre-computed set if available (5-10x speedup)
+    if enemy_adjacent_hexes is not None:
+        return (col, row) in enemy_adjacent_hexes
+
+    # Fallback: compute dynamically (original behavior)
     hex_neighbors = set(_get_hex_neighbors(col, row))
 
     for enemy in game_state["units"]:
@@ -440,6 +456,32 @@ def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, pl
             if enemy_pos in hex_neighbors:
                 return True
     return False
+
+
+def _build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
+    """
+    PERFORMANCE: Pre-compute all hexes adjacent to enemy units.
+
+    Returns a set of (col, row) tuples that are adjacent to at least one enemy.
+    This allows O(1) adjacency checks instead of O(n) iteration per hex.
+
+    Args:
+        game_state: Game state with units
+        player: The player checking adjacency (enemies are units with different player)
+
+    Returns:
+        Set of hex coordinates adjacent to any living enemy unit
+    """
+    enemy_adjacent_hexes = set()
+
+    for enemy in game_state["units"]:
+        if enemy["player"] != player and enemy["HP_CUR"] > 0:
+            # Add all 6 neighbors of this enemy to the set
+            neighbors = _get_hex_neighbors(enemy["col"], enemy["row"])
+            for neighbor in neighbors:
+                enemy_adjacent_hexes.add(neighbor)
+
+    return enemy_adjacent_hexes
 
 
 def _get_hex_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
@@ -475,7 +517,8 @@ def _get_hex_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
     return neighbors
 
 
-def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any]) -> bool:
+def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any],
+                        occupied_positions: set = None) -> bool:
     """
     Check if a hex can be traversed (moved through) during pathfinding.
 
@@ -485,6 +528,9 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
     - NOT occupied by another unit
 
     Note: We check enemy adjacency separately in _is_valid_destination
+
+    PERFORMANCE: Pass occupied_positions set for O(1) occupation check during BFS.
+    If not provided, falls back to O(n) unit iteration.
     """
     # Board bounds check
     if (col < 0 or row < 0 or
@@ -497,12 +543,18 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
         return False
 
     # Unit occupation check - CRITICAL: Check ALL units including dead ones with HP check
-    for other_unit in game_state["units"]:
-        if (other_unit["id"] != unit["id"] and
-            other_unit["HP_CUR"] > 0 and
-            other_unit["col"] == col and
-            other_unit["row"] == row):
+    # PERFORMANCE: Use pre-computed set if available (O(1) vs O(n))
+    if occupied_positions is not None:
+        if (col, row) in occupied_positions:
             return False
+    else:
+        # Fallback to O(n) iteration if no cache provided
+        for other_unit in game_state["units"]:
+            if (other_unit["id"] != unit["id"] and
+                other_unit["HP_CUR"] > 0 and
+                other_unit["col"] == col and
+                other_unit["row"] == row):
+                return False
 
     return True
 
@@ -513,6 +565,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     CRITICAL FIX: Uses BFS to find REACHABLE hexes, not just hexes within distance.
     This prevents movement through walls (AI_TURN.md compliance).
+
+    PERFORMANCE: Pre-computes enemy adjacent hexes and occupied positions once at BFS start for O(1) lookups.
     """
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
@@ -521,6 +575,15 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     move_range = unit["MOVE"]
     start_col, start_row = unit["col"], unit["row"]
     start_pos = (start_col, start_row)
+
+    # PERFORMANCE: Pre-compute enemy adjacent hexes once for this BFS
+    # This reduces O(n) per hex check to O(1) set lookup
+    enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit["player"])
+
+    # PERFORMANCE: Pre-compute occupied positions once for this BFS
+    # This reduces O(n) per-hex unit iteration to O(1) set lookup
+    occupied_positions = {(u["col"], u["row"]) for u in game_state["units"]
+                         if u["HP_CUR"] > 0 and u["id"] != unit["id"]}
 
     # BFS pathfinding to find all reachable hexes
     visited = {start_pos: 0}  # {(col, row): distance_from_start}
@@ -547,19 +610,22 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 continue
 
             # Check if this neighbor is traversable (not a wall, not occupied)
-            if not _is_traversable_hex(game_state, neighbor_col, neighbor_row, unit):
+            # PERFORMANCE: Pass pre-computed occupied_positions for O(1) lookup
+            if not _is_traversable_hex(game_state, neighbor_col, neighbor_row, unit, occupied_positions):
                 continue  # Can't move through this hex
 
             # CRITICAL: Cannot move THROUGH hexes adjacent to enemies (per movement rules)
             # Check enemy adjacency BEFORE marking as visited
-            if _is_hex_adjacent_to_enemy(game_state, neighbor_col, neighbor_row, unit["player"]):
+            # PERFORMANCE: Uses pre-computed set for O(1) lookup
+            if _is_hex_adjacent_to_enemy(game_state, neighbor_col, neighbor_row, unit["player"], enemy_adjacent_hexes):
                 continue  # Cannot move through this hex - don't add to queue or destinations
 
             # Mark as visited AFTER all blocking checks pass
             visited[neighbor_pos] = neighbor_dist
 
             # Check if this is a valid destination (not wall, not occupied)
-            if _is_valid_destination(game_state, neighbor_col, neighbor_row, unit, {}):
+            # PERFORMANCE: Uses pre-computed set for O(1) lookup
+            if _is_valid_destination(game_state, neighbor_col, neighbor_row, unit, {}, enemy_adjacent_hexes):
                 # Don't add start position as a destination
                 if neighbor_pos != start_pos:
                     valid_destinations.append(neighbor_pos)

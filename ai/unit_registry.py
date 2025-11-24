@@ -168,16 +168,16 @@ class UnitRegistry:
         for prop_name, prop_value in matches:
             # Clean up the value
             prop_value = prop_value.strip()
-            
+
             # Try to convert to appropriate type
             if prop_value.startswith('"') or prop_value.startswith("'"):
                 # String value
                 properties[prop_name] = prop_value.strip('"\'')
-            elif prop_value.isdigit():
-                # Integer value
+            elif re.match(r'^-?\d+$', prop_value):
+                # Integer value (including negative numbers like -1, -2)
                 properties[prop_name] = int(prop_value)
-            elif re.match(r'^\d+\.\d+$', prop_value):
-                # Float value
+            elif re.match(r'^-?\d+\.\d+$', prop_value):
+                # Float value (including negative floats)
                 properties[prop_name] = float(prop_value)
             elif prop_value.lower() in ['true', 'false']:
                 # Boolean value

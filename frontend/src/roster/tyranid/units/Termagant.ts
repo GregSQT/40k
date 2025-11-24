@@ -9,7 +9,7 @@ export class Termagant extends TyranidInfantrySwarmRangedSwarm {
   static MOVE = 6;             // Move distance
   static T = 3;                // Toughness score
   static ARMOR_SAVE = 5;       // Armor save score
-  static INVUL_SAVE = 0;       // Armor invulnerable save score
+  static INVUL_SAVE = 7;       // Armor invulnerable save score (7+ = no invul)
   static HP_MAX = 1;           // Max hit points
   static LD = 8;               // Leadership score
   static OC = 2;               // Operative Control

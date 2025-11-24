@@ -25,7 +25,7 @@ export class Genestealer extends TyranidInfantryTroopMeleeTroop {
   static CC_RNG = 1;           // Melee attack : range
   static CC_ATK = 2;           // Melee attack : score
   static CC_STR = 4;           // Melee attack Strength
-  static CC_AP = 2;            // Melee attack Armor penetration
+  static CC_AP = -2;           // Melee attack Armor penetration
   static CC_DMG = 1;           // Melee attack : damages
 
   // AI CLASSIFICATION

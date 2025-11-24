@@ -304,6 +304,32 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             model.tensorboard_log = model_params["tensorboard_log"]
             model.verbose = model_params["verbose"]
 
+            # CURRICULUM LEARNING: Apply new phase hyperparameters to loaded model
+            # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
+            # while preserving the neural network weights learned in Phase 1
+            if "learning_rate" in model_params:
+                model.learning_rate = model_params["learning_rate"]
+            if "ent_coef" in model_params:
+                model.ent_coef = model_params["ent_coef"]
+            if "clip_range" in model_params:
+                model.clip_range = model_params["clip_range"]
+            if "gamma" in model_params:
+                model.gamma = model_params["gamma"]
+            if "gae_lambda" in model_params:
+                model.gae_lambda = model_params["gae_lambda"]
+            if "n_steps" in model_params:
+                model.n_steps = model_params["n_steps"]
+            if "batch_size" in model_params:
+                model.batch_size = model_params["batch_size"]
+            if "n_epochs" in model_params:
+                model.n_epochs = model_params["n_epochs"]
+            if "vf_coef" in model_params:
+                model.vf_coef = model_params["vf_coef"]
+            if "max_grad_norm" in model_params:
+                model.max_grad_norm = model_params["max_grad_norm"]
+
+            print(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
+
             # CRITICAL FIX: Reinitialize logger after loading from checkpoint
             # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
             # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
@@ -504,7 +530,33 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                 raise KeyError("model_params missing required 'tensorboard_log' field")
             model.tensorboard_log = model_params["tensorboard_log"]
             model.verbose = model_params["verbose"]
-            
+
+            # CURRICULUM LEARNING: Apply new phase hyperparameters to loaded model
+            # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
+            # while preserving the neural network weights learned in Phase 1
+            if "learning_rate" in model_params:
+                model.learning_rate = model_params["learning_rate"]
+            if "ent_coef" in model_params:
+                model.ent_coef = model_params["ent_coef"]
+            if "clip_range" in model_params:
+                model.clip_range = model_params["clip_range"]
+            if "gamma" in model_params:
+                model.gamma = model_params["gamma"]
+            if "gae_lambda" in model_params:
+                model.gae_lambda = model_params["gae_lambda"]
+            if "n_steps" in model_params:
+                model.n_steps = model_params["n_steps"]
+            if "batch_size" in model_params:
+                model.batch_size = model_params["batch_size"]
+            if "n_epochs" in model_params:
+                model.n_epochs = model_params["n_epochs"]
+            if "vf_coef" in model_params:
+                model.vf_coef = model_params["vf_coef"]
+            if "max_grad_norm" in model_params:
+                model.max_grad_norm = model_params["max_grad_norm"]
+
+            print(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
+
             # CRITICAL FIX: Reinitialize logger after loading from checkpoint
             # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
             # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
@@ -683,6 +735,32 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
             model = MaskablePPO.load(model_path, env=env)
+
+            # CURRICULUM LEARNING: Apply new phase hyperparameters to loaded model
+            # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
+            # while preserving the neural network weights learned in Phase 1
+            if "learning_rate" in model_params:
+                model.learning_rate = model_params["learning_rate"]
+            if "ent_coef" in model_params:
+                model.ent_coef = model_params["ent_coef"]
+            if "clip_range" in model_params:
+                model.clip_range = model_params["clip_range"]
+            if "gamma" in model_params:
+                model.gamma = model_params["gamma"]
+            if "gae_lambda" in model_params:
+                model.gae_lambda = model_params["gae_lambda"]
+            if "n_steps" in model_params:
+                model.n_steps = model_params["n_steps"]
+            if "batch_size" in model_params:
+                model.batch_size = model_params["batch_size"]
+            if "n_epochs" in model_params:
+                model.n_epochs = model_params["n_epochs"]
+            if "vf_coef" in model_params:
+                model.vf_coef = model_params["vf_coef"]
+            if "max_grad_norm" in model_params:
+                model.max_grad_norm = model_params["max_grad_norm"]
+
+            print(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
 
             # CRITICAL FIX: Reinitialize logger after loading from checkpoint
             # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
