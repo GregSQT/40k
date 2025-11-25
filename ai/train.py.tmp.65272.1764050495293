@@ -831,12 +831,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # Calculate episodes for this iteration
         episodes_remaining = total_episodes - episodes_trained
         episodes_this_iteration = min(rotation_interval, episodes_remaining)
-
-        # EPISODE-BASED ROTATION FIX: Calculate generous timestep budget
-        # The EpisodeTerminationCallback will stop at exact episode count
-        # We provide 2x the estimated timesteps to ensure we never run out
-        # (callback stops training when episodes_this_iteration is reached)
-        timesteps_this_iteration = int(episodes_this_iteration * avg_steps_per_episode * 2.0)
+        timesteps_this_iteration = int(episodes_this_iteration * avg_steps_per_episode)
         
         # Create new environment with current scenario
         base_env = W40KEngine(

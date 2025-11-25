@@ -74,8 +74,8 @@ def parse_log(filepath):
         'wall_collisions': {0: 0, 1: 0},
         # Target priority tracking - with LOS awareness
         'target_priority': {
-            0: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'total_shots': 0},
-            1: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'total_shots': 0}
+            0: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'shots_no_choice': 0, 'total_shots': 0},
+            1: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'shots_no_choice': 0, 'total_shots': 0}
         },
         # WAIT behavior - shoot waits only when had targets in LOS
         'wait_by_phase': {
@@ -245,9 +245,6 @@ def parse_log(filepath):
                             elif len(wounded_in_los) > 0:
                                 # Bad: shooting full HP while wounded enemies exist (in LOS)
                                 stats['target_priority'][player]['shots_at_full_hp_while_wounded_in_los'] += 1
-                            else:
-                                # Good: shooting at full HP when no wounded enemies in LOS (correct decision)
-                                stats['target_priority'][player]['shots_at_wounded_in_los'] += 1
 
                             # Check for damage in the action description
                             damage_match = re.search(r'Dmg:(\d+)', action_desc)
@@ -431,20 +428,20 @@ def print_statistics(stats):
 
     agent_bad = stats['target_priority'][0]['shots_at_full_hp_while_wounded_in_los']
     bot_bad = stats['target_priority'][1]['shots_at_full_hp_while_wounded_in_los']
-    agent_good = stats['target_priority'][0]['shots_at_wounded_in_los']
-    bot_good = stats['target_priority'][1]['shots_at_wounded_in_los']
     agent_total_shots = stats['target_priority'][0]['total_shots']
     bot_total_shots = stats['target_priority'][1]['total_shots']
 
     agent_bad_pct = (agent_bad / agent_total_shots * 100) if agent_total_shots > 0 else 0
     bot_bad_pct = (bot_bad / bot_total_shots * 100) if bot_total_shots > 0 else 0
-    agent_good_pct = (agent_good / agent_total_shots * 100) if agent_total_shots > 0 else 0
-    bot_good_pct = (bot_good / bot_total_shots * 100) if bot_total_shots > 0 else 0
-
     print(f"FAILURES (shot full HP while")
     print(f"  wounded in LOS):            {agent_bad:6d} ({agent_bad_pct:5.1f}%)  {bot_bad:6d} ({bot_bad_pct:5.1f}%)")
-    print(f"SUCCESS (shot wounded or")
-    print(f"  no wounded in LOS):         {agent_good:6d} ({agent_good_pct:5.1f}%)  {bot_good:6d} ({bot_good_pct:5.1f}%)")
+
+    agent_good = stats['target_priority'][0]['shots_at_wounded_in_los']
+    bot_good = stats['target_priority'][1]['shots_at_wounded_in_los']
+    agent_good_pct = (agent_good / agent_total_shots * 100) if agent_total_shots > 0 else 0
+    bot_good_pct = (bot_good / bot_total_shots * 100) if bot_total_shots > 0 else 0
+    print(f"SUCCESS (shot wounded):       {agent_good:6d} ({agent_good_pct:5.1f}%)  {bot_good:6d} ({bot_good_pct:5.1f}%)")
+
     print(f"Total shots:                  {agent_total_shots:6d}           {bot_total_shots:6d}")
 
     # Death order analysis with unit types

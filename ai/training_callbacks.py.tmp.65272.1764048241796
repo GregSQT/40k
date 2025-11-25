@@ -219,6 +219,9 @@ class EpisodeTerminationCallback(BaseCallback):
                 return True
             else:
                 # Normal mode: Stop when episode count reached
+                print()  # Newline after final progress update
+                print(f"🛑 STOPPING: Reached {self.max_episodes} episodes")
+                print(f"   Total timesteps: {self.model.num_timesteps if hasattr(self, 'model') else 'N/A'}")
                 return False
 
         return True
