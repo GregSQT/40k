@@ -113,9 +113,30 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             game_state["charge_activation_pool"].remove(unit_id)
             response["removed_from_charge_pool"] = True
     elif arg4 == "FIGHT":
-        if "fight_activation_pool" in game_state and unit_id in game_state["fight_activation_pool"]:
-            game_state["fight_activation_pool"].remove(unit_id)
-            response["removed_from_fight_pool"] = True
+        # AI_TURN.md: Fight phase has 3 sub-phase pools - check all 3
+        # Units can only be in ONE pool at a time (verified via AI_TURN.md lines 717-718, 730-731)
+        removed = False
+
+        # Sub-phase 1: Charging pool (current player's charging units)
+        if "charging_activation_pool" in game_state and unit_id in game_state["charging_activation_pool"]:
+            game_state["charging_activation_pool"].remove(unit_id)
+            response["removed_from_charging_pool"] = True
+            removed = True
+
+        # Sub-phase 2: Active alternating pool (current player's non-charging units)
+        if not removed and "active_alternating_activation_pool" in game_state and unit_id in game_state["active_alternating_activation_pool"]:
+            game_state["active_alternating_activation_pool"].remove(unit_id)
+            response["removed_from_active_alternating_pool"] = True
+            removed = True
+
+        # Sub-phase 2: Non-active alternating pool (opponent's units)
+        if not removed and "non_active_alternating_activation_pool" in game_state and unit_id in game_state["non_active_alternating_activation_pool"]:
+            game_state["non_active_alternating_activation_pool"].remove(unit_id)
+            response["removed_from_non_active_alternating_pool"] = True
+            removed = True
+
+        if removed:
+            response["removed_from_fight_pool"] = True  # Generic flag for compatibility
     
     # ├── Arg5 = 1 ?
     # │   ├── YES → log the error
@@ -146,17 +167,44 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             unit["valid_target_pool"] = []
     
     # Check if activation pool is empty after removal
+    # AI_TURN.md COMPLIANCE: Phase completion check (defensive, not field access)
     current_phase = game_state["phase"]
     pool_empty = False
-    
+
     if current_phase == "move":
-        pool_empty = len(game_state.get("move_activation_pool", [])) == 0
+        # Defensive: pool might not exist if phase not started
+        if "move_activation_pool" not in game_state:
+            pool_empty = True
+        else:
+            pool_empty = len(game_state["move_activation_pool"]) == 0
     elif current_phase == "shoot":
-        pool_empty = len(game_state.get("shoot_activation_pool", [])) == 0
+        if "shoot_activation_pool" not in game_state:
+            pool_empty = True
+        else:
+            pool_empty = len(game_state["shoot_activation_pool"]) == 0
     elif current_phase == "charge":
-        pool_empty = len(game_state.get("charge_activation_pool", [])) == 0
+        if "charge_activation_pool" not in game_state:
+            pool_empty = True
+        else:
+            pool_empty = len(game_state["charge_activation_pool"]) == 0
     elif current_phase == "fight":
-        pool_empty = len(game_state.get("fight_activation_pool", [])) == 0
+        # AI_TURN.md: Fight phase complete when ALL 3 pools empty
+        if "charging_activation_pool" not in game_state:
+            charging_empty = True
+        else:
+            charging_empty = len(game_state["charging_activation_pool"]) == 0
+
+        if "active_alternating_activation_pool" not in game_state:
+            active_alt_empty = True
+        else:
+            active_alt_empty = len(game_state["active_alternating_activation_pool"]) == 0
+
+        if "non_active_alternating_activation_pool" not in game_state:
+            non_active_alt_empty = True
+        else:
+            non_active_alt_empty = len(game_state["non_active_alternating_activation_pool"]) == 0
+
+        pool_empty = charging_empty and active_alt_empty and non_active_alt_empty
     
     if pool_empty:
         response["phase_complete"] = True

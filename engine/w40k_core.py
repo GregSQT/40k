@@ -715,16 +715,47 @@ class W40KEngine(gym.Env):
         # Route to phase handlers with detailed logging
         if current_phase == "move":
             success, result = self._process_movement_phase(action)
-            return success, result
         elif current_phase == "shoot":
             success, result = self._process_shooting_phase(action)
-            return success, result
         elif current_phase == "charge":
-            return self._process_charge_phase(action)
+            success, result = self._process_charge_phase(action)
         elif current_phase == "fight":
-            return self._process_fight_phase(action)
+            success, result = self._process_fight_phase(action)
         else:
             return False, {"error": "invalid_phase", "phase": current_phase}
+
+        # AI_TURN.md: Auto-advance to next phase when current phase completes
+        # Loop to handle cascading empty phases (e.g., charge → fight → move if all empty)
+        max_cascade = 10  # Prevent infinite loops
+        cascade_count = 0
+        while success and result.get("phase_complete") and result.get("next_phase") and cascade_count < max_cascade:
+            next_phase = result["next_phase"]
+            cascade_count += 1
+
+            if "console_logs" not in self.game_state:
+                self.game_state["console_logs"] = []
+            self.game_state["console_logs"].append(f"🔄 PHASE TRANSITION: {current_phase} → {next_phase} (cascade #{cascade_count})")
+
+            # Initialize next phase using phase handlers
+            phase_init_result = None
+            if next_phase == "shoot":
+                phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
+            elif next_phase == "charge":
+                phase_init_result = charge_handlers.charge_phase_start(self.game_state)
+            elif next_phase == "fight":
+                phase_init_result = fight_handlers.fight_phase_start(self.game_state)
+            elif next_phase == "move":
+                phase_init_result = movement_handlers.movement_phase_start(self.game_state)
+
+            self.game_state["console_logs"].append(f"🔄 PHASE NOW: {self.game_state.get('phase', 'UNKNOWN')}")
+
+            # If phase_start returns phase_complete, cascade to next phase
+            if phase_init_result and phase_init_result.get("phase_complete") and phase_init_result.get("next_phase"):
+                result = phase_init_result  # Update result for next iteration
+            else:
+                break  # Phase has eligible units, stop cascading
+
+        return success, result
     
     
     # ============================================================================
@@ -794,22 +825,37 @@ class W40KEngine(gym.Env):
         return success, result
     
     
-    def _process_charge_phase(self, action: int) -> Tuple[bool, Dict[str, Any]]:
-        """Placeholder for charge phase - implements AI_TURN.md decision tree."""
-        # TODO: Implement charge phase logic
-        self._advance_to_fight_phase()
-        return self._process_fight_phase(action)
-    
-    def _advance_to_fight_phase(self):
-        """Advance to fight phase per AI_TURN.md progression."""
-        self.game_state["phase"] = "fight"
-        self.game_state["fight_subphase"] = "charging_units"
-    
-    def _process_fight_phase(self, action: int) -> Tuple[bool, Dict[str, Any]]:
-        """Placeholder for fight phase - implements AI_TURN.md sub-phases."""
-        # TODO: Implement fight phase logic
-        self._advance_to_next_player()
-        return True, {"type": "phase_complete", "next_player": self.game_state["current_player"]}
+    def _process_charge_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """AI_TURN.md EXACT: Pure delegation - handler manages complete charge phase."""
+        # Get current unit for handler
+        unit_id = action.get("unitId")
+        current_unit = None
+        if unit_id:
+            current_unit = self._get_unit_by_id(unit_id)
+
+        # Full delegation to charge_handlers
+        handler_response = charge_handlers.execute_action(self.game_state, current_unit, action, self.config)
+        if isinstance(handler_response, tuple) and len(handler_response) == 2:
+            success, result = handler_response
+            return success, result
+        else:
+            return True, handler_response
+
+    def _process_fight_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """AI_TURN.md EXACT: Pure delegation - handler manages complete fight phase."""
+        # Get current unit for handler
+        unit_id = action.get("unitId")
+        current_unit = None
+        if unit_id:
+            current_unit = self._get_unit_by_id(unit_id)
+
+        # Full delegation to fight_handlers
+        handler_response = fight_handlers.execute_action(self.game_state, current_unit, action, self.config)
+        if isinstance(handler_response, tuple) and len(handler_response) == 2:
+            success, result = handler_response
+            return success, result
+        else:
+            return True, handler_response
     
     # ============================================================================
     # PHASE INITIALIZATION - KEEP THESE (Handler delegation)

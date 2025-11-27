@@ -12,7 +12,7 @@ export class Genestealer extends TyranidInfantryTroopMeleeTroop {
   static HP_MAX = 2;           // Max hit points
   static LD = 7;               // Leadership score
   static OC = 1;               // Operative Control
-  static VALUE = 10;           // Unit value
+  static VALUE = 19;           // Unit value
   // RANGE WEAPON
   static RNG_RNG = 0;         // Range attack : range
   static RNG_NB = 0;           // Range attack : number of attacks

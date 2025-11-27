@@ -354,6 +354,7 @@ export const GameController: React.FC<GameControllerProps> = ({
         onShoot={gameActions.handleShoot}
         onFightAttack={gameActions.handleFightAttack}
         onCharge={gameActions.handleCharge}
+        onActivateCharge={gameActions.handleActivateCharge}
         onMoveCharger={gameActions.moveCharger}
         onCancelCharge={gameActions.cancelCharge}
         onValidateCharge={gameActions.validateCharge}

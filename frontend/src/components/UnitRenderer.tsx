@@ -165,12 +165,14 @@ export class UnitRenderer {
         // Simplified check - parent should provide queue membership
         return this.props.isEligible || false;
       case "charge":
-        if (unitsCharged && unitsCharged.includes(unit.id)) return false;
-        if (unitsFled && unitsFled.includes(unit.id)) return false;
-        return true; // Simplified for charge phase
+        // AI_TURN.md: Charge phase uses pool-based eligibility (charge_activation_pool)
+        // Parent provides proper eligibility through isEligible prop
+        // Lines 493-496: Must have enemies within charge_max_distance AND not already adjacent
+        return this.props.isEligible || false;
       case "fight":
-        if (unitsAttacked && unitsAttacked.includes(unit.id)) return false;
-        return true; // Simplified for fight phase
+        // AI_TURN.md: Fight phase uses pool-based eligibility (sub-phases)
+        // Parent provides proper eligibility through isEligible prop
+        return this.props.isEligible || false;
       default:
         return false;
     }
@@ -264,9 +266,20 @@ export class UnitRenderer {
     } else {
       // AI_TURN.md: Block enemy unit clicks when no friendly unit is selected
       let addClickHandler = true;
-      
+
+      // AI_TURN.md: Fight phase exception - allow clicking units in ALL fight subphases
+      // Lines 738, 765, 820, 847: "player activate one unit by left clicking on it"
+      const isFightPhaseActive = phase === "fight" && (
+        this.props.fightSubPhase === "charging" ||
+        this.props.fightSubPhase === "alternating_non_active" ||
+        this.props.fightSubPhase === "alternating_active" ||
+        this.props.fightSubPhase === "cleanup_non_active" ||
+        this.props.fightSubPhase === "cleanup_active"
+      );
+
       // Block enemy clicks when no unit is selected (prevents stuck preview)
-      if (unit.player !== currentPlayer && selectedUnitId === null) {
+      // EXCEPT during fight phase where eligible units must be clickable
+      if (unit.player !== currentPlayer && selectedUnitId === null && !isFightPhaseActive) {
         addClickHandler = false;
       }
       
@@ -701,12 +714,12 @@ export class UnitRenderer {
         displayProbability = targetPreview.overallProbability || 0;
       } else if (shouldBlink) {
         // Calculate probability for multi-unit blinking
-        const activeShooterId = this.props.gameState?.active_shooting_unit || this.props.selectedUnitId;
-        const activeShooter = this.props.units.find(u => u.id === activeShooterId);
-        
-        if (activeShooter && this.props.phase === "shoot") {
-          const hitProb = Math.max(0, (7 - (activeShooter.RNG_ATK || 4)) / 6);          
-          const strength = activeShooter.RNG_STR || 4;
+        const activeAttackerId = this.props.gameState?.active_shooting_unit || this.props.gameState?.active_fight_unit || this.props.selectedUnitId;
+        const activeAttacker = this.props.units.find(u => u.id === activeAttackerId);
+
+        if (activeAttacker && this.props.phase === "shoot") {
+          const hitProb = Math.max(0, (7 - (activeAttacker.RNG_ATK || 4)) / 6);
+          const strength = activeAttacker.RNG_STR || 4;
           const toughness = unit.T || 4;
           let woundTarget = 4;
           if (strength >= toughness * 2) woundTarget = 2;
@@ -714,9 +727,24 @@ export class UnitRenderer {
           else if (strength === toughness) woundTarget = 4;
           else if (strength < toughness) woundTarget = 5;
           else woundTarget = 6;
-          const woundProb = Math.max(0, (7 - woundTarget) / 6);          
-          const saveTarget = Math.max(2, Math.min((unit.ARMOR_SAVE || 5) - (activeShooter.RNG_AP || 0), unit.INVUL_SAVE || 7));
-          const saveFailProb = Math.max(0, (saveTarget - 1) / 6);        
+          const woundProb = Math.max(0, (7 - woundTarget) / 6);
+          const saveTarget = Math.max(2, Math.min((unit.ARMOR_SAVE || 5) - (activeAttacker.RNG_AP || 0), unit.INVUL_SAVE || 7));
+          const saveFailProb = Math.max(0, (saveTarget - 1) / 6);
+          displayProbability = hitProb * woundProb * saveFailProb;
+        } else if (activeAttacker && this.props.phase === "fight") {
+          // AI_TURN.md: Fight phase uses CC_ stats instead of RNG_ stats
+          const hitProb = Math.max(0, (7 - (activeAttacker.CC_ATK || 4)) / 6);
+          const strength = activeAttacker.CC_STR || 4;
+          const toughness = unit.T || 4;
+          let woundTarget = 4;
+          if (strength >= toughness * 2) woundTarget = 2;
+          else if (strength > toughness) woundTarget = 3;
+          else if (strength === toughness) woundTarget = 4;
+          else if (strength < toughness) woundTarget = 5;
+          else woundTarget = 6;
+          const woundProb = Math.max(0, (7 - woundTarget) / 6);
+          const saveTarget = Math.max(2, Math.min((unit.ARMOR_SAVE || 5) - (activeAttacker.CC_AP || 0), unit.INVUL_SAVE || 7));
+          const saveFailProb = Math.max(0, (saveTarget - 1) / 6);
           displayProbability = hitProb * woundProb * saveFailProb;
         }
       }
@@ -777,9 +805,30 @@ export class UnitRenderer {
   }
   
   private renderAttackCounter(unitIconScale: number): void {
-    const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled, units } = this.props;
-    
-    if (phase !== 'fight' || unit.player !== currentPlayer) return;
+    const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled, units, mode, selectedUnitId, fightSubPhase, isEligible } = this.props;
+
+    // AI_TURN.md: Attack counter shows for actively fighting units in fight phase
+    if (phase !== 'fight') return;
+
+    // AI_TURN.md Lines 768, 777: ATTACK_LEFT visible during fight activation
+    // Show counter for: (1) actively attacking unit (selectedUnitId in attackPreview)
+    // OR (2) eligible units in their pool waiting to be activated
+    const isActivelyAttacking = mode === 'attackPreview' && selectedUnitId === unit.id;
+
+    if (!isActivelyAttacking) {
+      // Not actively attacking - check if eligible in current subphase pool
+      let shouldShowIfEligible = false;
+
+      if (fightSubPhase === "charging") {
+        shouldShowIfEligible = unit.player === currentPlayer;
+      } else if (fightSubPhase === "alternating_non_active" || fightSubPhase === "cleanup_non_active") {
+        shouldShowIfEligible = unit.player !== currentPlayer;
+      } else if (fightSubPhase === "alternating_active" || fightSubPhase === "cleanup_active") {
+        shouldShowIfEligible = unit.player === currentPlayer;
+      }
+
+      if (!shouldShowIfEligible || !isEligible) return;
+    }
     
     // NEW: Only show attack counter for units that have enemies in melee range
     const enemies = units.filter(u => u.player !== unit.player);

@@ -1,6 +1,7 @@
 // frontend/src/hooks/useEngineAPI.ts
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Unit, PlayerId } from '../types';
+import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
 
 // Get max_turns from config instead of hardcoded fallback
 const getMaxTurnsFromConfig = async (): Promise<number> => {
@@ -77,6 +78,7 @@ interface APIGameState {
   charging_activation_pool: string[];
   active_alternating_activation_pool: string[];
   non_active_alternating_activation_pool: string[];
+  fight_subphase: string | null;
   // AI_TURN.md shooting phase state
   active_shooting_unit?: string;
   pve_mode?: boolean; // Add PvE mode flag
@@ -90,6 +92,8 @@ export const useEngineAPI = () => {
   const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
   const [mode, setMode] = useState<"select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview">("select");
   const [movePreview, setMovePreview] = useState<{ unitId: number; destCol: number; destRow: number } | null>(null);
+  const [attackPreview, setAttackPreview] = useState<{ unitId: number; col: number; row: number } | null>(null);
+  const [chargeDestinations, setChargeDestinations] = useState<Array<{ col: number; row: number }>>([]);
   const [targetPreview, setTargetPreview] = useState<{
   shooterId: number;
   targetId: number;
@@ -182,28 +186,35 @@ export const useEngineAPI = () => {
       }
       
       const data = await response.json();
-      
+
+      // ONLY LOG FIGHT PHASE FOR DEBUGGING
+      if (data.game_state?.phase === "fight") {
+        console.log("🎯 Backend result:", data.result);
+        console.log("🎯 game_state.action_logs:", data.game_state?.action_logs);
+      }
+
       // Process detailed backend action logs FIRST
       if (data.action_logs && data.action_logs.length > 0) {
         data.action_logs.forEach((logEntry: any) => {
-          console.log(`🎯 DETAILED BACKEND LOG: ${logEntry.message}`);
+          // console.log(`🎯 DETAILED BACKEND LOG: ${logEntry.message}`);
           
           // Send detailed log to GameLog component via custom event
+          // AI_TURN.md: Handle both shooting (shooterId, hitRoll) and fight (attackerId, hit_roll) formats
           window.dispatchEvent(new CustomEvent('backendLogEvent', {
             detail: {
               type: logEntry.type,
               message: logEntry.message,
               turn: logEntry.turn,
               phase: logEntry.phase,
-              shooterId: logEntry.shooterId,
+              shooterId: logEntry.shooterId || logEntry.attackerId,  // shooting uses shooterId, fight uses attackerId
               targetId: logEntry.targetId,
               player: logEntry.player,
               damage: logEntry.damage,
               target_died: logEntry.target_died,
-              hitRoll: logEntry.hitRoll,
-              woundRoll: logEntry.woundRoll,
-              saveRoll: logEntry.saveRoll,
-              saveTarget: logEntry.saveTarget,
+              hitRoll: logEntry.hitRoll || logEntry.hit_roll,  // shooting uses hitRoll, fight uses hit_roll
+              woundRoll: logEntry.woundRoll || logEntry.wound_roll,
+              saveRoll: logEntry.saveRoll || logEntry.save_roll,
+              saveTarget: logEntry.saveTarget || logEntry.save_target,
               timestamp: new Date()
             }
           }));
@@ -260,17 +271,16 @@ export const useEngineAPI = () => {
           
           // Auto-display Python console logs in browser (only during actions)
           if (data.game_state?.console_logs && data.game_state.console_logs.length > 0) {
-            // Filter out logs we've already shown to prevent duplicates
-            const newLogs = data.game_state.console_logs.filter((log: string) => 
-              !lastShownLogs.current.has(log)
-            );
-            
-            if (newLogs.length > 0) {
-              newLogs.forEach((log: string) => {
-                console.log(`  ${log}`);
-                lastShownLogs.current.add(log);
-              });
-            }
+            // DISABLED TO REDUCE FLOOD
+            // const newLogs = data.game_state.console_logs.filter((log: string) =>
+            //   !lastShownLogs.current.has(log)
+            // );
+            // if (newLogs.length > 0) {
+            //   newLogs.forEach((log: string) => {
+            //     console.log(`  ${log}`);
+            //     lastShownLogs.current.add(log);
+            //   });
+            // }
             
             // Clear logs from the data before setting state to prevent persistence
             data.game_state.console_logs = [];
@@ -296,15 +306,95 @@ export const useEngineAPI = () => {
             
             setBlinkingUnits({unitIds, blinkTimer: timer, blinkState: false});
             setMode("attackPreview");
-            
+
             // Force component re-render to ensure props propagate
             setSelectedUnitId(prevId => prevId);
           }
-          
+
           setGameState(data.game_state);
-        
+
+        // DEBUG: Check what values we have for fight phase detection
+        if (data.game_state?.phase === "fight") {
+          console.log("🔍 FIGHT PHASE RESPONSE DEBUG:", {
+            phase: data.game_state?.phase,
+            waiting_for_player: data.result?.waiting_for_player,
+            has_valid_targets: !!data.result?.valid_targets,
+            valid_targets_length: data.result?.valid_targets?.length,
+            ATTACK_LEFT: data.result?.ATTACK_LEFT
+          });
+        }
+
+        // AI_TURN.md: Handle charge activation response with valid destinations
+        // MUST be after setGameState to prevent being overwritten
+        if (data.result?.valid_destinations && data.result?.waiting_for_player) {
+          console.log("🎯 CHARGE ACTIVATION: Valid destinations received, switching to chargePreview mode");
+          console.log("🎯 Valid destinations count:", data.result.valid_destinations.length);
+          console.log("🎯 Charge roll:", data.result.charge_roll);
+          console.log("🎯 Setting selectedUnitId to:", data.result.unitId);
+          setChargeDestinations(data.result.valid_destinations);
+          setSelectedUnitId(parseInt(data.result.unitId));
+          setMode("chargePreview");
+        }
+        // AI_TURN.md: Handle charge completion - reset to select mode
+        // CRITICAL FIX: When phase_complete=true, backend has already transitioned to next phase
+        // So we check activation_complete AND (current phase is charge OR phase just completed)
+        else if (data.result?.activation_complete &&
+                 (data.game_state?.phase === "charge" || data.result?.phase_complete)) {
+          console.log("🎯 CHARGE COMPLETE: Resetting to select mode");
+          setChargeDestinations([]);
+          setSelectedUnitId(null);
+          setMode("select");
+        }
+        // AI_TURN.md: Handle fight phase multi-attack (ATTACK_LEFT > 0, waiting_for_player)
+        else if (data.game_state?.phase === "fight" && data.result?.waiting_for_player && data.result?.valid_targets) {
+          console.log("✅ FIGHT CONDITION MATCHED - staying in attackPreview");
+          console.log("🎯 FIGHT ATTACK: Unit still has attacks left, staying in attackPreview mode");
+          console.log("🎯 Valid targets:", data.result.valid_targets);
+          console.log("🎯 ATTACK_LEFT:", data.result.ATTACK_LEFT);
+
+          // Keep the attacking unit selected and show valid targets
+          const unitId = parseInt(data.result.unitId || data.game_state.active_fight_unit);
+          setSelectedUnitId(unitId);
+          setMode("attackPreview");
+
+          // Set attackPreview state for red hexes to appear
+          const unit = data.game_state.units.find((u: any) => parseInt(u.id) === unitId);
+          if (unit) {
+            setAttackPreview({ unitId, col: unit.col, row: unit.row });
+          }
+
+          // Start blinking for valid fight targets if not already blinking
+          if (data.result.valid_targets.length > 0 && !blinkingUnits.blinkTimer) {
+            const unitIds = data.result.valid_targets.map((id: string) => parseInt(id));
+            const timer = window.setInterval(() => {
+              setBlinkingUnits(prev => ({
+                ...prev,
+                blinkState: !prev.blinkState
+              }));
+            }, 500);
+            setBlinkingUnits({unitIds, blinkTimer: timer, blinkState: false});
+          }
+        }
+        // AI_TURN.md: Handle fight phase completion (ATTACK_LEFT = 0, activation_ended)
+        else if (data.game_state?.phase === "fight" && data.result?.activation_ended) {
+          console.log("🎯 FIGHT COMPLETE: Activation ended, resetting to select mode");
+          console.log("🔍 FIGHT POOLS AFTER ACTIVATION:", {
+            fight_subphase: data.game_state.fight_subphase,
+            charging_pool: data.game_state.charging_activation_pool,
+            non_active_pool: data.game_state.non_active_alternating_activation_pool,
+            active_pool: data.game_state.active_alternating_activation_pool
+          });
+          // Clear blinking
+          if (blinkingUnits.blinkTimer) {
+            clearInterval(blinkingUnits.blinkTimer);
+          }
+          setBlinkingUnits({unitIds: [], blinkTimer: null, blinkState: false});
+          setAttackPreview(null);
+          setSelectedUnitId(null);
+          setMode("select");
+        }
         // Set visual state based on shooting activation
-        if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
+        else if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
           setSelectedUnitId(parseInt(data.game_state.active_shooting_unit));
           setMode("attackPreview");
         } else {
@@ -524,6 +614,110 @@ export const useEngineAPI = () => {
     }
   }, [handleRightClick, executeAction]);
 
+  // AI_TURN.md: Charge activation - sends left_click to trigger 2d6 roll and destination building
+  const handleActivateCharge = useCallback(async (chargerId: number | string) => {
+    console.log("🎯 handleActivateCharge called with chargerId:", chargerId);
+    const numericChargerId = typeof chargerId === 'string' ? parseInt(chargerId) : chargerId;
+    console.log("🎯 Converted to numeric:", numericChargerId);
+
+    // Send left_click action to backend
+    // Backend will call _handle_unit_activation which:
+    // 1. Rolls 2d6 for charge_range
+    // 2. Builds valid_charge_destinations_pool via BFS pathfinding
+    // 3. Returns destinations for orange highlighting
+    console.log("🎯 Sending executeAction with:", {
+      action: "left_click",
+      unitId: numericChargerId.toString()
+    });
+    await executeAction({
+      action: "left_click",
+      unitId: numericChargerId.toString()
+    });
+    console.log("🎯 executeAction completed");
+  }, [executeAction]);
+
+  // AI_TURN.md: Fight activation - sends activate_unit to activate unit and get valid targets
+  const handleActivateFight = useCallback(async (fighterId: number | string) => {
+    const numericFighterId = typeof fighterId === 'string' ? parseInt(fighterId) : fighterId;
+
+    // Send activate_unit action to backend
+    // Backend will call _handle_fight_unit_activation which:
+    // 1. Sets ATTACK_LEFT = CC_NB
+    // 2. Builds valid_targets list (enemies adjacent within CC_RNG)
+    // 3. Returns waiting_for_player if targets exist, triggering attackPreview mode
+    // Backend will reject if unit not in current pool
+    await executeAction({
+      action: "activate_unit",
+      unitId: numericFighterId.toString()
+    });
+  }, [executeAction]);
+
+  const handleFightAttack = useCallback(async (attackerId: number | string, targetId: number | string | null) => {
+    // AI_TURN.md: Fight action - send fight action to backend
+    if (targetId === null) {
+      console.warn("🟠 Fight attack called with null target");
+      return;
+    }
+
+    const numericAttackerId = typeof attackerId === 'string' ? parseInt(attackerId) : attackerId;
+    const numericTargetId = typeof targetId === 'string' ? parseInt(targetId) : targetId;
+
+    await executeAction({
+      action: "fight",
+      unitId: numericAttackerId.toString(),
+      targetId: numericTargetId.toString()
+    });
+  }, [executeAction]);
+
+  const handleMoveCharger = useCallback(async (chargerId: number | string, destCol: number, destRow: number) => {
+    console.log("🎯 handleMoveCharger called with:", { chargerId, destCol, destRow });
+    const numericChargerId = typeof chargerId === 'string' ? parseInt(chargerId) : chargerId;
+
+    // AI_TURN.md: Find target enemy adjacent to destination
+    if (!gameState) return;
+
+    const charger = gameState.units.find(u => parseInt(u.id) === numericChargerId);
+    if (!charger) {
+      console.error("🟠 Charger unit not found:", numericChargerId);
+      return;
+    }
+
+    // Find enemy units adjacent to destination (within CC_RNG)
+    const enemies = gameState.units.filter(u =>
+      u.player !== charger.player &&
+      parseInt(u.HP_CUR) > 0
+    );
+
+    const destCube = offsetToCube(destCol, destRow);
+    let targetEnemy = null;
+
+    for (const enemy of enemies) {
+      const enemyCube = offsetToCube(enemy.col, enemy.row);
+      const distance = cubeDistance(destCube, enemyCube);
+      if (distance <= (charger.CC_RNG || 1)) {
+        targetEnemy = enemy;
+        break; // Use first adjacent enemy
+      }
+    }
+
+    if (!targetEnemy) {
+      console.error("🟠 No enemy found adjacent to destination:", { destCol, destRow });
+      return;
+    }
+
+    console.log("🎯 Target enemy found:", targetEnemy.id);
+
+    // AI_TURN.md: Send charge action with correct field names
+    await executeAction({
+      action: "charge",
+      unitId: numericChargerId.toString(),
+      destCol: destCol,
+      destRow: destRow,
+      targetId: targetEnemy.id.toString()
+    });
+    console.log("🎯 handleMoveCharger completed");
+  }, [executeAction, gameState]);
+
   const handleStartTargetPreview = useCallback(async (shooterId: number | string, targetId: number | string) => {
     const numericShooterId = typeof shooterId === 'number' ? shooterId : parseInt(shooterId);
     const numericTargetId = typeof targetId === 'number' ? targetId : parseInt(targetId);
@@ -620,7 +814,7 @@ export const useEngineAPI = () => {
     if (!gameState) {
       throw new Error(`API ERROR: gameState is null when getting eligible units`);
     }
-    
+
     if (gameState.phase === 'move') {
       if (!gameState.move_activation_pool) {
         throw new Error(`API ERROR: Missing move_activation_pool in move phase`);
@@ -631,14 +825,59 @@ export const useEngineAPI = () => {
         return []; // Empty pool is valid - let backend handle phase advancement
       }
       return gameState.shoot_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
+    } else if (gameState.phase === 'charge') {
+      if (!gameState.charge_activation_pool || gameState.charge_activation_pool.length === 0) {
+        return []; // Empty pool is valid - phase will auto-advance
+      }
+      const eligible = gameState.charge_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
+      console.log("🔍 getEligibleUnitIds returning for charge phase:", eligible);
+      return eligible;
+    } else if (gameState.phase === 'fight') {
+      // AI_TURN.md COMPLIANCE: Fight phase has sub-phases - only show units from current sub-phase
+      const subphase = gameState.fight_subphase;
+
+      if (subphase === 'charging') {
+        // Sub-Phase 1: Only charging units (current player's charged units)
+        if (!gameState.charging_activation_pool) {
+          return [];
+        }
+        return gameState.charging_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
+      } else if (subphase === 'alternating_non_active') {
+        // Sub-Phase 2: Non-active player's turn in alternating
+        if (!gameState.non_active_alternating_activation_pool) {
+          return [];
+        }
+        return gameState.non_active_alternating_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
+      } else if (subphase === 'alternating_active') {
+        // Sub-Phase 2: Active player's turn in alternating
+        if (!gameState.active_alternating_activation_pool) {
+          return [];
+        }
+        return gameState.active_alternating_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
+      } else if (subphase === 'cleanup_non_active') {
+        // Sub-Phase 3: Cleanup - only non-active pool has units left
+        if (!gameState.non_active_alternating_activation_pool) {
+          return [];
+        }
+        return gameState.non_active_alternating_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
+      } else if (subphase === 'cleanup_active') {
+        // Sub-Phase 3: Cleanup - only active pool has units left
+        if (!gameState.active_alternating_activation_pool) {
+          return [];
+        }
+        return gameState.active_alternating_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
+      }
+
+      // No subphase set or unknown subphase - return empty (phase not ready)
+      return [];
     }
-    
+
     throw new Error(`API ERROR: Unsupported phase for eligible units: ${gameState.phase}`);
   }, [gameState]);
 
   const getChargeDestinations = useCallback((_unitId: number) => {
-    return [];
-  }, []);
+    return chargeDestinations;
+  }, [chargeDestinations]);
 
   // Return props compatible with BoardPvp
   if (error) {
@@ -676,6 +915,7 @@ export const useEngineAPI = () => {
       onStartTargetPreview: () => {},
       onFightAttack: () => {},
       onCharge: () => {},
+      onActivateCharge: () => {},
       onMoveCharger: () => {},
       onCancelCharge: () => {},
       onValidateCharge: () => {},
@@ -696,7 +936,7 @@ export const useEngineAPI = () => {
     eligibleUnitIds: getEligibleUnitIds(),
     mode,
     movePreview,
-    attackPreview: null,
+    attackPreview,
     targetPreview,
     currentPlayer: gameState.current_player as PlayerId,
     maxTurns: maxTurnsFromConfig,
@@ -705,6 +945,8 @@ export const useEngineAPI = () => {
     unitsAttacked: gameState.units_attacked ? gameState.units_attacked.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_attacked array'); })(),
     unitsFled: gameState.units_fled ? gameState.units_fled.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_fled array'); })(),
     phase: gameState.phase as "move" | "shoot" | "charge" | "fight",
+    // AI_TURN.md COMPLIANCE: Expose fight_subphase for UnitRenderer click handling
+    fightSubPhase: gameState.fight_subphase as "charging" | "alternating_non_active" | "alternating_active" | "cleanup_non_active" | "cleanup_active" | null,
     gameState: {
       episode_steps: gameState.episode_steps,
       units: convertUnits(gameState.units),
@@ -737,9 +979,11 @@ export const useEngineAPI = () => {
     onShoot: handleShoot,
     onSkipShoot: handleSkipShoot,
     onStartTargetPreview: handleStartTargetPreview,
-    onFightAttack: () => {},
+    onFightAttack: handleFightAttack,
+    onActivateFight: handleActivateFight,
     onCharge: () => {},
-    onMoveCharger: () => {},
+    onActivateCharge: handleActivateCharge,
+    onMoveCharger: handleMoveCharger,
     onCancelCharge: () => {},
     onValidateCharge: () => {},
 onLogChargeRoll: () => {},

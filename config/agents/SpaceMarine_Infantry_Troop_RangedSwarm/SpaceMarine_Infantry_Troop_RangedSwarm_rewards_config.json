@@ -1,6 +1,55 @@
 {
   "description": "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/SpaceMarine_Infantry_Troop_RangedSwarm_rewards_config.json",
 
+  "SpaceMarine_Infantry_Troop_RangedSwarm": {
+    "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm ######################################################",
+    "Info": "######################### BASE CONFIG (PvP Mode) - Copy of Phase 2 ########################################################",
+    "base_actions": {
+      "move_close": 0.0,
+      "move_away": 0.0,
+      "move_to_charge": 0.0,
+      "move_to_los": 0.6,
+      "ranged_attack": 3.0,
+      "charge_success": 0.1,
+      "melee_attack": 0.1,
+      "move_wait": 0.0,
+      "shoot_wait": -10.0
+    },
+    "result_bonuses": {
+      "hit_target": 1.2,
+      "wound_target": 3.0,
+      "damage_target": 6.0,
+      "kill_target": 25.0,
+      "no_overkill": 5.0,
+      "target_lowest_hp": 15.0
+    },
+    "target_type_bonuses": {
+      "vs_swarm": 3.0,
+      "vs_troop": 1.0,
+      "vs_elite": 2.0,
+      "vs_vehicle": 0.0,
+      "vs_heavy": 0.0
+    },
+    "situational_modifiers": {
+      "win": 40.0,
+      "lose": -40.0,
+      "draw": 0.0,
+      "friendly_fire_penalty": -8.0,
+      "attack_wasted": -4.0,
+      "target_in_cover_penalty": -0.2,
+      "target_exposed_bonus": 0.2,
+      "no_targets_penalty": -2.0
+    },
+    "adaptive_bonuses": {},
+    "tactical_bonuses": {},
+    "system_penalties": {
+      "forbidden_action": -1.0,
+      "invalid_action": -0.9,
+      "generic_error": -0.1,
+      "system_response": 0.0
+    }
+  },
+
   "SpaceMarine_Infantry_Troop_RangedSwarm_phase1": {
     "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm #######################################################",
     "Info": "######################### PHASE 1 - SHOOTING IS GOOD: Strong rewards for ranged combat #################################",

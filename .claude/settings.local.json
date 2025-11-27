@@ -11,7 +11,8 @@
       "Bash(.venv310/Scripts/python.exe:*)",
       "Bash(find:*)",
       "Bash(python:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []

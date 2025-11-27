@@ -754,13 +754,13 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     
     # AI_TURN.md: Player progression logic
     if game_state["current_player"] == 0:
-        # Player 0 complete → Player 1 movement phase
-        game_state["current_player"] = 1
+        # AI_TURN.md Line 105: P0 Move → P0 Shoot → P0 Charge → P0 Fight
+        # Player stays 0, advance to charge phase
         return {
             "phase_complete": True,
             "phase_transition": True,
-            "next_phase": "move",
-            "current_player": 1,
+            "next_phase": "charge",
+            "current_player": 0,
             # AI_TURN.md COMPLIANCE: Direct field access
             "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
             # CRITICAL: Add missing frontend cleanup signals
@@ -786,20 +786,19 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "clear_attack_preview": True
             }
         else:
-            # Safe to increment turn and continue to P0's movement phase
-            game_state["turn"] += 1
-            game_state["current_player"] = 0
+            # AI_TURN.md Line 105: P1 Move → P1 Shoot → P1 Charge → P1 Fight
+            # Player stays 1, advance to charge phase
+            # Turn increment happens at P1 Fight end (fight_handlers.py:797)
             return {
                 "phase_complete": True,
                 "phase_transition": True,
-                "next_phase": "move",
-                "current_player": 0,
-                "new_turn": game_state["turn"],
+                "next_phase": "charge",
+                "current_player": 1,
                 # AI_TURN.md COMPLIANCE: Direct field access
                 "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
                 # CRITICAL: Add missing frontend cleanup signals
                 "clear_blinking_gentle": True,
-                "reset_mode": "select", 
+                "reset_mode": "select",
                 "clear_selected_unit": True,
                 "clear_attack_preview": True
             }

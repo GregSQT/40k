@@ -175,7 +175,26 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
         const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
         const isAttackable = attackCells.some(cell => cell.col === col && cell.row === row);
         const isInCover = coverCells.some(cell => cell.col === col && cell.row === row);
-        const isChargeable = chargeCells.some(cell => cell.col === col && cell.row === row);
+        // AI_TURN.md: chargeCells come as [col, row] arrays from backend, not {col, row} objects
+        const isChargeable = chargeCells.some(cell => {
+          if (Array.isArray(cell)) {
+            const matches = cell[0] === col && cell[1] === row;
+            if (matches) {
+              console.log(`🟠 ARRAY FORMAT MATCH at (${col}, ${row}) from cell:`, cell);
+            }
+            return matches;
+          }
+          const matches = cell.col === col && cell.row === row;
+          if (matches) {
+            console.log(`🟠 OBJECT FORMAT MATCH at (${col}, ${row}) from cell:`, cell);
+          }
+          return matches;
+        });
+
+        // AI_TURN.md: Debug charge hex detection
+        if (isChargeable) {
+          console.log(`🟠 CHARGE HEX DETECTED at (${col}, ${row})`);
+        }
 
         // Check if this is a wall hex
         const isWallHex = wallHexSet.has(`${col},${row}`);
@@ -226,9 +245,9 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
           
           highlightCell.drawPolygon(points);
           highlightCell.endFill();
-          
-          // Add click handlers for movement hexes
-          if (isAvailable) {
+
+          // AI_TURN.md: Add click handlers for movement and charge hexes
+          if (isAvailable || isChargeable) {
             highlightCell.eventMode = 'static';
             highlightCell.cursor = 'pointer';
             highlightCell.on('pointerdown', (e: PIXI.FederatedPointerEvent) => {

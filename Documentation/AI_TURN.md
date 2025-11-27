@@ -634,9 +634,9 @@ Start of the Figh Phase:
 │   │   │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having HP_CUR > 0 → added to valid_target_pool
 │   │   │   │   └── valid_target_pool NOT empty ?
 │   │   │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
-│   │   │   │       │   ├── 🎯 VALID ACTIONS: [attack]
+│   │   │   │       │   ├── 🎯 VALID ACTIONS: [fight]
 │   │   │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT)
-│   │   │   │       │   └── AGENT ACTION SELECTION → Choose attack?
+│   │   │   │       │   └── AGENT ACTION SELECTION → Choose fight?
 │   │   │   │       │       ├── YES → ✅ VALID → Execute attack_sequence(CC)
 │   │   │   │       │       │   ├── ATTACK_LEFT -= 1
 │   │   │   │       │       │   ├── Concatenate Return to TOTAL_ACTION log
@@ -744,9 +744,9 @@ Start of the Figh Phase:
 │   │   │   │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having HP_CUR > 0 → added to valid_target_pool
 │   │   │   │   │   └── valid_target_pool NOT empty ?
 │   │   │   │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
-│   │   │   │   │       │   ├── 🎯 VALID ACTIONS: [attack]
+│   │   │   │   │       │   ├── 🎯 VALID ACTIONS: [fight]
 │   │   │   │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT)
-│   │   │   │   │       │   └── AGENT ACTION SELECTION → Choose attack?
+│   │   │   │   │       │   └── AGENT ACTION SELECTION → Choose fight?
 │   │   │   │   │       │       ├── YES → ✅ VALID → Execute attack_sequence(CC)
 │   │   │   │   │       │       │   ├── ATTACK_LEFT -= 1
 │   │   │   │   │       │       │   ├── Concatenate Return to TOTAL_ACTION log
@@ -826,9 +826,9 @@ Start of the Figh Phase:
 │   │       │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having HP_CUR > 0 → added to valid_target_pool
 │   │       │   │   └── valid_target_pool NOT empty ?
 │   │       │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
-│   │       │   │       │   ├── 🎯 VALID ACTIONS: [attack]
+│   │       │   │       │   ├── 🎯 VALID ACTIONS: [fight]
 │   │       │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT)
-│   │       │   │       │   └── AGENT ACTION SELECTION → Choose attack?
+│   │       │   │       │   └── AGENT ACTION SELECTION → Choose fight?
 │   │       │   │       │       ├── YES → ✅ VALID → Execute attack_sequence(CC)
 │   │       │   │       │       │   ├── ATTACK_LEFT -= 1
 │   │       │   │       │       │   ├── Concatenate Return to TOTAL_ACTION log
@@ -912,9 +912,9 @@ Start of the Figh Phase:
 │           │   │   ├── Build valid_target_pool : All enemies adjacent to active_unit AND having HP_CUR > 0 → added to valid_target_pool
 │           │   │   └── valid_target_pool NOT empty ?
 │           │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
-│           │   │       │   ├── 🎯 VALID ACTIONS: [attack]
+│           │   │       │   ├── 🎯 VALID ACTIONS: [fight]
 │           │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT)
-│           │   │       │   └── AGENT ACTION SELECTION → Choose attack?
+│           │   │       │   └── AGENT ACTION SELECTION → Choose fight?
 │           │   │       │       ├── YES → ✅ VALID → Execute attack_sequence(CC)
 │           │   │       │       │   ├── ATTACK_LEFT -= 1
 │           │   │       │       │   ├── Concatenate Return to TOTAL_ACTION log
@@ -1047,11 +1047,11 @@ function processChargingAI() {
  // REF: Line 16 "pick one → FIGHT PHASE SUB-PHASE 1 ACTION AVAILABLE"
  const selectedUnit = chargingActivationPool[0]
  
- // REF: Line 20 "Choose attack?"
+ // REF: Line 20 "Choose fight?"
  // REF: Line 21 "YES → ✅ VALID → Execute CC_NB attacks"
  if (hasAdjacentEnemies(selectedUnit)) {    // MATCHES: Current script helper functions
    executeAIAttackSequence(selectedUnit)
-   // REF: Line 25 "Result: +1 step, Attack sequence logged, Mark as units_attacked"
+   // REF: Line 25 "Result: +1 step, Attack sequence logged, Mark as units_fought"
    gameState.episode_steps += 1            // MATCHES: Current script step counting
    logAttackSequence(selectedUnit, fightActionLog)
    actions.addAttackedUnit(selectedUnit.id) // MATCHES: Current script actions pattern
@@ -1102,7 +1102,7 @@ function chargingWaitingForAction(clickType, target) {
  const validTargets = getValidTargets(activeUnit)
  
  if (validTargets.length === 0) {
-   // REF: Line 67 "NO → Result: +1 step, Fight sequence logged, Mark as units_attacked"
+   // REF: Line 67 "NO → Result: +1 step, Fight sequence logged, Mark as units_fought"
    chargingEndActivation("attacked")
    return
  }
@@ -1132,7 +1132,7 @@ function chargingWaitingForAction(clickType, target) {
      // REF: Line 62 "YES → Result: +1 step, Wait action logged, no Mark"
      chargingEndActivation("wait")
    } else {
-     // REF: Line 60 "NO → Result: +1 step, fight sequence logged, Mark as units_attacked"
+     // REF: Line 60 "NO → Result: +1 step, fight sequence logged, Mark as units_fought"
      chargingEndActivation("attacked")
    }
  }
@@ -1189,7 +1189,7 @@ function chargingTargetPreviewing(clickType, target) {
 }
 
 function chargingEndActivation(type) {
- // REF: Line 60,62,67 "Result: +1 step, [action] logged, Mark as units_attacked"
+ // REF: Line 60,62,67 "Result: +1 step, [action] logged, Mark as units_fought"
  gameState.episode_steps += 1            // MATCHES: Current script step counting
  
  if (type === "attacked") {
@@ -1308,7 +1308,7 @@ function executeAlternatingAI(unit, pool) {
  if (hasAdjacentEnemies(unit)) {
    // REF: Line 152 "Execute CC_NB attacks"
    executeAIAttackSequence(unit)
-   // REF: Line 158 "Result: +1 step → Attack sequence logged → Mark as units_attacked"
+   // REF: Line 158 "Result: +1 step → Attack sequence logged → Mark as units_fought"
    gameState.episode_steps += 1          // MATCHES: Current script step counting
    logAttackSequence(unit, fightActionLog)
    actions.addAttackedUnit(unit.id)      // MATCHES: Current script actions
@@ -1474,7 +1474,7 @@ function handleFightClick(clickType, target) {
 **Target Priority During Alternating Phase:**
 
 **Safe Delay Condition:**
-- If ALL adjacent enemies are marked as `units_attacked` → Unit can delay its attack safely
+- If ALL adjacent enemies are marked as `units_fought` → Unit can delay its attack safely
 - **Why**: No risk of enemy retaliation this phase → Strategic flexibility available
 
 **Activation and target Priority Order:**
@@ -1485,7 +1485,7 @@ function handleFightClick(clickType, target) {
 **Priority Assessment Logic:**
 - **"Likely to die"**: Enemy HP_CUR ≤ Expected damage from this unit's attacks
 - **"High melee damage"**: Enemy CC_STR and CC_NB pose significant threat
-- **"Safe targets"**: Enemies already marked as `units_attacked` (cannot retaliate)
+- **"Safe targets"**: Enemies already marked as `units_fought` (cannot retaliate)
 
 **Tactical Reasoning:**
 - **Eliminate threats before they act**: Remove dangerous enemies that can still attack
@@ -1588,7 +1588,7 @@ Result: Charging grants first strike, then fair alternation
 - **Reset timing**: Start of movement phase
 - **Usage**: Fight priority determination
 
-**units_attacked** (Fight Phase):
+**units_fought** (Fight Phase):
 - **Purpose**: Track units that have attacked
 - **Reset timing**: Start of movement phase
 - **Usage**: Used to identify units having attacked during this turn

@@ -367,13 +367,16 @@ export const BoardWithAPI: React.FC = () => {
           console.log("🎯 Canceling target preview");
         }}
         onFightAttack={apiProps.onFightAttack}
+        onActivateFight={apiProps.onActivateFight}
         currentPlayer={apiProps.currentPlayer as PlayerId}
         unitsMoved={apiProps.unitsMoved}
         unitsCharged={apiProps.unitsCharged}
         unitsAttacked={apiProps.unitsAttacked}
         unitsFled={apiProps.unitsFled}
         phase={apiProps.phase as "move" | "shoot" | "charge" | "fight"}
+        fightSubPhase={apiProps.fightSubPhase}
         onCharge={apiProps.onCharge}
+        onActivateCharge={apiProps.onActivateCharge}
         onMoveCharger={apiProps.onMoveCharger}
         onCancelCharge={apiProps.onCancelCharge}
         onValidateCharge={apiProps.onValidateCharge}

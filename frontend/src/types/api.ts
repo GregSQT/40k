@@ -29,7 +29,7 @@ export interface AIActionRequest {
 }
 
 export interface AIActionResponse {
-  action: "move" | "moveAwayToRngRng" | "shoot" | "charge" | "attack" | "skip";
+  action: "move" | "moveAwayToRngRng" | "shoot" | "charge" | "fight" | "skip";
   unitId: number;
   destCol?: number;
   destRow?: number;

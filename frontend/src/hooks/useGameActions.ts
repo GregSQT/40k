@@ -66,7 +66,7 @@ interface UseGameActionsParams {
   }, [gameState]);
 
   // AI_TURN.md: Simple unit selection with step counting
-  const selectUnit = useCallback((unitId: UnitId | null) => {    
+  const selectUnit = useCallback((unitId: UnitId | null) => {
     if (unitId === null) {
       actions.setSelectedUnitId(null);
       actions.setMode("select");
@@ -74,13 +74,22 @@ interface UseGameActionsParams {
     }
 
     const unit = gameState.units.find(u => u.id === unitId);
-    
-    // AI_TURN.md: Strict player validation - only current player units selectable
-    if (!unit || unit.player !== gameState.currentPlayer || !isUnitEligible(unit)) {
-      console.log(`[AI_TURN.md] Blocked selection of unit ${unitId}: player=${unit?.player}, currentPlayer=${gameState.currentPlayer}, eligible=${unit ? isUnitEligible(unit) : false}`);
+
+    // AI_TURN.md: Player validation with fight phase exception
+    // Fight phase alternating allows non-active player units to be selected
+    const isFightPhaseAlternating = gameState.phase === "fight" &&
+      (gameState.fight_subphase === "alternating_non_active" ||
+       gameState.fight_subphase === "alternating_active" ||
+       gameState.fight_subphase === "cleanup_non_active" ||
+       gameState.fight_subphase === "cleanup_active");
+
+    const playerCheck = isFightPhaseAlternating ? true : (unit?.player === gameState.currentPlayer);
+
+    if (!unit || !playerCheck || !isUnitEligible(unit)) {
+      console.log(`[AI_TURN.md] Blocked selection of unit ${unitId}: player=${unit?.player}, currentPlayer=${gameState.currentPlayer}, eligible=${unit ? isUnitEligible(unit) : false}, fight_subphase=${gameState.fight_subphase}`);
       return;
     }
-    
+
     actions.setSelectedUnitId(unitId);
     actions.setMode("select");
   }, [gameState, isUnitEligible, actions]);
@@ -170,6 +179,9 @@ interface UseGameActionsParams {
   }, [actions]);
 
   // Stub implementations for missing functions
+  const handleActivateCharge = useCallback(() => {
+    console.log("⚠️ handleActivateCharge called in PvP mode - this should use backend API instead");
+  }, []);
   const moveCharger = useCallback(() => {}, []);
   const cancelCharge = useCallback(() => {}, []);
   const validateCharge = useCallback(() => {}, []);
@@ -185,6 +197,7 @@ interface UseGameActionsParams {
     handleShoot,
     handleFightAttack,
     handleCharge,
+    handleActivateCharge,
     moveCharger,
     cancelCharge,
     validateCharge,

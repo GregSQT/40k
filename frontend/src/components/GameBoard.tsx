@@ -38,6 +38,7 @@ interface GameBoardProps {
   onShoot: (shooterId: UnitId, targetId: UnitId) => void;
   onFightAttack: (attackerId: UnitId, targetId: UnitId | null) => void;
   onCharge: (chargerId: UnitId, targetId: UnitId) => void;
+  onActivateCharge?: (chargerId: UnitId) => void;
   onMoveCharger: (chargerId: UnitId, destCol: number, destRow: number) => void;
   onCancelCharge: () => void;
   onValidateCharge: (chargerId: UnitId) => void;
@@ -120,6 +121,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         onShoot={props.onShoot}
         onFightAttack={props.onFightAttack}
         onCharge={props.onCharge}
+        onActivateCharge={props.onActivateCharge}
         onMoveCharger={props.onMoveCharger}
         onCancelCharge={props.onCancelCharge}
         onValidateCharge={props.onValidateCharge}

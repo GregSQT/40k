@@ -43,6 +43,7 @@ type BoardProps = {
   onCancelMove: () => void;
   onShoot: (shooterId: number, targetId: number) => void;
   onFightAttack?: (attackerId: number, targetId: number | null) => void;
+  onActivateFight?: (fighterId: number) => void;
   currentPlayer: 0 | 1;
   unitsMoved: number[];
   unitsCharged?: number[];
@@ -52,6 +53,7 @@ type BoardProps = {
   fightActivePlayer?: PlayerId; // NEW
   phase: "move" | "shoot" | "charge" | "fight";
   onCharge?: (chargerId: number, targetId: number) => void;
+  onActivateCharge?: (chargerId: number) => void;
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
   onCancelCharge?: () => void;
   onValidateCharge?: (chargerId: number) => void;
@@ -96,7 +98,9 @@ export default function Board({
   phase,
   onShoot,
   onFightAttack,
+  onActivateFight,
   onCharge,
+  onActivateCharge,
   unitsCharged,
   unitsAttacked,
   unitsFled,
@@ -138,6 +142,7 @@ export default function Board({
     onShoot: (shooterId: number, targetId: number) => void;
     onFightAttack?: (attackerId: number, targetId: number | null) => void;
     onCharge?: (chargerId: number, targetId: number) => void;
+    onActivateCharge?: (chargerId: number) => void;
     onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
     onCancelCharge?: () => void;
     onValidateCharge?: (chargerId: number) => void;
@@ -152,6 +157,7 @@ export default function Board({
     onShoot,
     onFightAttack,
     onCharge,
+    onActivateCharge,
     onMoveCharger,
     onCancelCharge,
     onValidateCharge,
@@ -169,7 +175,9 @@ export default function Board({
     onCancelMove,
     onShoot,
     onFightAttack,
+    onActivateFight,
     onCharge,
+    onActivateCharge,
     onMoveCharger,
     onCancelCharge,
     onValidateCharge,
@@ -376,6 +384,8 @@ export default function Board({
       onCombatAttack: stableCallbacks.current.onFightAttack || (() => {}),
       onConfirmMove: stableCallbacks.current.onConfirmMove,
       onCancelCharge: stableCallbacks.current.onCancelCharge,
+      onActivateCharge: stableCallbacks.current.onActivateCharge,
+      onActivateFight: stableCallbacks.current.onActivateFight,
       onMoveCharger: stableCallbacks.current.onMoveCharger,
       onStartMovePreview: onStartMovePreview,
       onDirectMove: (unitId: number | string, col: number | string, row: number | string) => {
@@ -410,18 +420,22 @@ export default function Board({
 
     // Fight preview: fightTargets for red outline on enemies within fight range
     let fightTargets: Unit[] = [];
-    if (phase === "fight" && selectedUnit) {
+    if (phase === "fight" && mode === "attackPreview" && selectedUnit) {
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
-      
+
       // Validate CC_RNG is defined
       if (selectedUnit.CC_RNG === undefined || selectedUnit.CC_RNG === null) {
         throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required CC_RNG property for fight phase`);
       }
-      
+
       const fightRange = selectedUnit.CC_RNG;
-      
-      // Use stored charge roll from gameState (rolled when unit was first selected)
-        const chargeDistance = gameState.unitChargeRolls && gameState.unitChargeRolls[Number(selectedUnit.id)];
+
+      // Find all enemies within CC_RNG range
+      fightTargets = units.filter(u =>
+        u.player !== selectedUnit.player &&
+        parseInt(u.HP_CUR) > 0 &&
+        cubeDistance(c1, offsetToCube(u.col, u.row)) <= fightRange
+      );
     }
 
     // ✅ SIMPLIFIED SHOOTING PREVIEW - No animations to prevent re-render loop
@@ -458,30 +472,20 @@ export default function Board({
     }
 
     if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
-      // Use stored charge roll from gameState (rolled when unit was first selected)
-      const chargeDistance = gameState.unitChargeRolls && gameState.unitChargeRolls[selectedUnit.id];
-      
-      if (!chargeDistance) {
-        console.warn(`⚠️ No charge roll found for unit ${selectedUnit.id}, skipping charge preview`);
-        chargeCells = [];
-        chargeTargets = [];
-      } else {
-      // Use authoritative getChargeDestinations function (single source of truth)
-      chargeCells = getChargeDestinations(0); // Stub function returns empty array anyway
+      // AI_TURN.md: Get charge destinations from backend (already rolled and calculated)
+      chargeCells = getChargeDestinations(selectedUnit.id);
 
-          // Red outline: enemy units that can be reached via valid charge movement
-          chargeTargets = units.filter(u => {
-            if (u.player === selectedUnit.player) return false;
-            
-            // Check if any valid charge destination is adjacent to this enemy
-            return chargeCells.some(dest => {
-              const cube1 = offsetToCube(dest.col, dest.row);
-              const cube2 = offsetToCube(u.col, u.row);
-              return cubeDistance(cube1, cube2) === 1;
-            });
-          });
-          
-      }
+      // Red outline: enemy units that can be reached via valid charge movement
+      chargeTargets = units.filter(u => {
+        if (u.player === selectedUnit.player) return false;
+
+        // Check if any valid charge destination is adjacent to this enemy
+        return chargeCells.some(dest => {
+          const cube1 = offsetToCube(dest.col, dest.row);
+          const cube2 = offsetToCube(u.col, u.row);
+          return cubeDistance(cube1, cube2) === 1;
+        });
+      });
     }
 
     // ✅ CALCULATE MOVEMENT PREVIEW BEFORE MAIN DRAWBOARD CALL
@@ -819,6 +823,7 @@ export default function Board({
         : boardConfig;
       // Override availableCells if availableCellsOverride is provided (for replay mode)
       const effectiveAvailableCells = availableCellsOverride || availableCells;
+
       drawBoard(app, boardConfigWithWalls as any, {
         availableCells: effectiveAvailableCells,
         attackCells,
@@ -900,12 +905,7 @@ export default function Board({
             return result;
           }
           // All other phases: use standard eligibility
-          const standardResult = eligibleUnitIds.includes(typeof unit.id === 'number' ? unit.id : parseInt(unit.id as string));
-          // Removed debug log to reduce console flooding
-          // if (unit.id === 8 || unit.id === 9) {
-          //   console.log(`🟢 STANDARD ELIGIBILITY Unit ${unit.id}: ${standardResult}`);
-          // }
-          return standardResult;
+          return eligibleUnitIds.includes(typeof unit.id === 'number' ? unit.id : parseInt(unit.id as string));
         })();
         
         renderUnit({
@@ -1033,7 +1033,7 @@ export default function Board({
       }, [
         // Essential dependencies only - prevent infinite re-renders
         units.length,
-        JSON.stringify(units.map(u => ({ id: u.id, col: u.col, row: u.row, HP_CUR: u.HP_CUR, SHOOT_LEFT: u.SHOOT_LEFT }))), // Track position, HP & shooting changes
+        JSON.stringify(units.map(u => ({ id: u.id, col: u.col, row: u.row, HP_CUR: u.HP_CUR, SHOOT_LEFT: u.SHOOT_LEFT, ATTACK_LEFT: u.ATTACK_LEFT }))), // Track position, HP, shooting & fight changes
         selectedUnitId,
         mode,
         phase,
@@ -1049,7 +1049,9 @@ export default function Board({
         shootingTargetId,
         shootingUnitId,
         // Add wall override for replay mode
-        JSON.stringify(wallHexesOverride)
+        JSON.stringify(wallHexesOverride),
+        // AI_TURN.md: Add charge destinations to trigger re-render when backend returns valid destinations
+        getChargeDestinations
       ]);
 
       // Simple container return - loading/error handled inside useEffect
