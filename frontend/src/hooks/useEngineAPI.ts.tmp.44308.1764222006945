@@ -197,13 +197,9 @@ export const useEngineAPI = () => {
       if (data.action_logs && data.action_logs.length > 0) {
         data.action_logs.forEach((logEntry: any) => {
           // console.log(`🎯 DETAILED BACKEND LOG: ${logEntry.message}`);
-
+          
           // Send detailed log to GameLog component via custom event
-          // AI_TURN.md: Handle both shooting (flat fields) and fight (shootDetails array) formats
-          // Fight handler sends shootDetails array, shooting handler sends flat fields
-          // Extract from shootDetails[0] if shootDetails exists (fight phase)
-          const shootDetail = logEntry.shootDetails?.[0];
-
+          // AI_TURN.md: Handle both shooting (shooterId, hitRoll) and fight (attackerId, hit_roll) formats
           window.dispatchEvent(new CustomEvent('backendLogEvent', {
             detail: {
               type: logEntry.type,
@@ -213,16 +209,12 @@ export const useEngineAPI = () => {
               shooterId: logEntry.shooterId || logEntry.attackerId,  // shooting uses shooterId, fight uses attackerId
               targetId: logEntry.targetId,
               player: logEntry.player,
-              // Extract damage/target_died from shootDetails if present (fight), otherwise use flat fields (shooting)
-              damage: logEntry.damage ?? shootDetail?.damageDealt,
-              target_died: logEntry.target_died ?? shootDetail?.targetDied,
-              // Extract roll data from shootDetails if present (fight), otherwise use flat fields (shooting)
-              hitRoll: logEntry.hitRoll || logEntry.hit_roll || shootDetail?.attackRoll,
-              woundRoll: logEntry.woundRoll || logEntry.wound_roll || shootDetail?.strengthRoll,
-              saveRoll: logEntry.saveRoll || logEntry.save_roll || shootDetail?.saveRoll,
-              saveTarget: logEntry.saveTarget || logEntry.save_target || shootDetail?.saveTarget,
-              // Pass through shootDetails for direct use by getEventTypeClass color logic
-              shootDetails: logEntry.shootDetails,
+              damage: logEntry.damage,
+              target_died: logEntry.target_died,
+              hitRoll: logEntry.hitRoll || logEntry.hit_roll,  // shooting uses hitRoll, fight uses hit_roll
+              woundRoll: logEntry.woundRoll || logEntry.wound_roll,
+              saveRoll: logEntry.saveRoll || logEntry.save_roll,
+              saveTarget: logEntry.saveTarget || logEntry.save_target,
               timestamp: new Date()
             }
           }));
@@ -296,12 +288,12 @@ export const useEngineAPI = () => {
           
           // Process blinking data from backend
           if (data.result?.blinking_units && data.result?.start_blinking) {
-
+            
             // Clear any existing blinking timer
             if (blinkingUnits.blinkTimer) {
               clearInterval(blinkingUnits.blinkTimer);
             }
-
+            
             // Start blinking for all valid targets
             const unitIds = data.result.blinking_units.map((id: string) => parseInt(id));
             const timer = window.setInterval(() => {
@@ -311,11 +303,8 @@ export const useEngineAPI = () => {
                 blinkState: !prev.blinkState
               }));
             }, 500);
-
+            
             setBlinkingUnits({unitIds, blinkTimer: timer, blinkState: false});
-            // AI_TURN.md COMPLIANCE: Clear stale attackPreview when entering attackPreview mode for shooting
-            // This prevents units from rendering at old positions from previous fight phases
-            setAttackPreview(null);
             setMode("attackPreview");
 
             // Force component re-render to ensure props propagate
@@ -324,24 +313,14 @@ export const useEngineAPI = () => {
 
           setGameState(data.game_state);
 
-        // DEBUG: Check what values we have for fight phase detection
-        if (data.game_state?.phase === "fight") {
-          console.log("🔍 FIGHT PHASE RESPONSE DEBUG:", {
-            phase: data.game_state?.phase,
-            waiting_for_player: data.result?.waiting_for_player,
-            has_valid_targets: !!data.result?.valid_targets,
-            valid_targets_length: data.result?.valid_targets?.length,
-            ATTACK_LEFT: data.result?.ATTACK_LEFT
-          });
+        // BUG1 DEBUG: Log unit positions from backend response during shooting phase
+        if (data.game_state?.phase === "shoot") {
+          console.log(`🔍 BUG1 BACKEND RESPONSE (shoot):`, data.game_state.units.map((u: any) => `U${u.id}:(${u.col},${u.row})`).join(' '));
         }
 
         // AI_TURN.md: Handle charge activation response with valid destinations
         // MUST be after setGameState to prevent being overwritten
         if (data.result?.valid_destinations && data.result?.waiting_for_player) {
-          console.log("🎯 CHARGE ACTIVATION: Valid destinations received, switching to chargePreview mode");
-          console.log("🎯 Valid destinations count:", data.result.valid_destinations.length);
-          console.log("🎯 Charge roll:", data.result.charge_roll);
-          console.log("🎯 Setting selectedUnitId to:", data.result.unitId);
           setChargeDestinations(data.result.valid_destinations);
           setSelectedUnitId(parseInt(data.result.unitId));
           setMode("chargePreview");
@@ -351,18 +330,12 @@ export const useEngineAPI = () => {
         // So we check activation_complete AND (current phase is charge OR phase just completed)
         else if (data.result?.activation_complete &&
                  (data.game_state?.phase === "charge" || data.result?.phase_complete)) {
-          console.log("🎯 CHARGE COMPLETE: Resetting to select mode");
           setChargeDestinations([]);
           setSelectedUnitId(null);
           setMode("select");
         }
         // AI_TURN.md: Handle fight phase multi-attack (ATTACK_LEFT > 0, waiting_for_player)
         else if (data.game_state?.phase === "fight" && data.result?.waiting_for_player && data.result?.valid_targets) {
-          console.log("✅ FIGHT CONDITION MATCHED - staying in attackPreview");
-          console.log("🎯 FIGHT ATTACK: Unit still has attacks left, staying in attackPreview mode");
-          console.log("🎯 Valid targets:", data.result.valid_targets);
-          console.log("🎯 ATTACK_LEFT:", data.result.ATTACK_LEFT);
-
           // Keep the attacking unit selected and show valid targets
           const unitId = parseInt(data.result.unitId || data.game_state.active_fight_unit);
           setSelectedUnitId(unitId);
@@ -388,13 +361,6 @@ export const useEngineAPI = () => {
         }
         // AI_TURN.md: Handle fight phase completion (ATTACK_LEFT = 0, activation_ended)
         else if (data.game_state?.phase === "fight" && data.result?.activation_ended) {
-          console.log("🎯 FIGHT COMPLETE: Activation ended, resetting to select mode");
-          console.log("🔍 FIGHT POOLS AFTER ACTIVATION:", {
-            fight_subphase: data.game_state.fight_subphase,
-            charging_pool: data.game_state.charging_activation_pool,
-            non_active_pool: data.game_state.non_active_alternating_activation_pool,
-            active_pool: data.game_state.active_alternating_activation_pool
-          });
           // Clear blinking
           if (blinkingUnits.blinkTimer) {
             clearInterval(blinkingUnits.blinkTimer);
@@ -405,12 +371,8 @@ export const useEngineAPI = () => {
           setMode("select");
         }
         // Set visual state based on shooting activation
-        // AI_TURN.md COMPLIANCE: Clear stale attackPreview from previous fight phases
-        // This prevents Unit 3 (fled) from rendering at old position when Unit 4 (shooter) is activated
-        // Root cause: attackPreview was set during fight phase and never cleared when shooting started
         else if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
           setSelectedUnitId(parseInt(data.game_state.active_shooting_unit));
-          setAttackPreview(null);  // Clear stale attackPreview to prevent ghost rendering
           setMode("attackPreview");
         } else {
           setSelectedUnitId(null);
@@ -987,9 +949,6 @@ export const useEngineAPI = () => {
     },
     onStartAttackPreview: (unitId: number) => {
       setSelectedUnitId(typeof unitId === 'string' ? parseInt(unitId) : unitId);
-      // AI_TURN.md COMPLIANCE: Clear stale attackPreview when entering attackPreview mode
-      // This prevents units from rendering at old positions from previous fight phases
-      setAttackPreview(null);
       setMode("attackPreview");
     },
     onConfirmMove: handleConfirmMove,

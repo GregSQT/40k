@@ -197,13 +197,9 @@ export const useEngineAPI = () => {
       if (data.action_logs && data.action_logs.length > 0) {
         data.action_logs.forEach((logEntry: any) => {
           // console.log(`🎯 DETAILED BACKEND LOG: ${logEntry.message}`);
-
+          
           // Send detailed log to GameLog component via custom event
-          // AI_TURN.md: Handle both shooting (flat fields) and fight (shootDetails array) formats
-          // Fight handler sends shootDetails array, shooting handler sends flat fields
-          // Extract from shootDetails[0] if shootDetails exists (fight phase)
-          const shootDetail = logEntry.shootDetails?.[0];
-
+          // AI_TURN.md: Handle both shooting (shooterId, hitRoll) and fight (attackerId, hit_roll) formats
           window.dispatchEvent(new CustomEvent('backendLogEvent', {
             detail: {
               type: logEntry.type,
@@ -213,16 +209,12 @@ export const useEngineAPI = () => {
               shooterId: logEntry.shooterId || logEntry.attackerId,  // shooting uses shooterId, fight uses attackerId
               targetId: logEntry.targetId,
               player: logEntry.player,
-              // Extract damage/target_died from shootDetails if present (fight), otherwise use flat fields (shooting)
-              damage: logEntry.damage ?? shootDetail?.damageDealt,
-              target_died: logEntry.target_died ?? shootDetail?.targetDied,
-              // Extract roll data from shootDetails if present (fight), otherwise use flat fields (shooting)
-              hitRoll: logEntry.hitRoll || logEntry.hit_roll || shootDetail?.attackRoll,
-              woundRoll: logEntry.woundRoll || logEntry.wound_roll || shootDetail?.strengthRoll,
-              saveRoll: logEntry.saveRoll || logEntry.save_roll || shootDetail?.saveRoll,
-              saveTarget: logEntry.saveTarget || logEntry.save_target || shootDetail?.saveTarget,
-              // Pass through shootDetails for direct use by getEventTypeClass color logic
-              shootDetails: logEntry.shootDetails,
+              damage: logEntry.damage,
+              target_died: logEntry.target_died,
+              hitRoll: logEntry.hitRoll || logEntry.hit_roll,  // shooting uses hitRoll, fight uses hit_roll
+              woundRoll: logEntry.woundRoll || logEntry.wound_roll,
+              saveRoll: logEntry.saveRoll || logEntry.save_roll,
+              saveTarget: logEntry.saveTarget || logEntry.save_target,
               timestamp: new Date()
             }
           }));
@@ -296,12 +288,12 @@ export const useEngineAPI = () => {
           
           // Process blinking data from backend
           if (data.result?.blinking_units && data.result?.start_blinking) {
-
+            
             // Clear any existing blinking timer
             if (blinkingUnits.blinkTimer) {
               clearInterval(blinkingUnits.blinkTimer);
             }
-
+            
             // Start blinking for all valid targets
             const unitIds = data.result.blinking_units.map((id: string) => parseInt(id));
             const timer = window.setInterval(() => {
@@ -311,11 +303,8 @@ export const useEngineAPI = () => {
                 blinkState: !prev.blinkState
               }));
             }, 500);
-
+            
             setBlinkingUnits({unitIds, blinkTimer: timer, blinkState: false});
-            // AI_TURN.md COMPLIANCE: Clear stale attackPreview when entering attackPreview mode for shooting
-            // This prevents units from rendering at old positions from previous fight phases
-            setAttackPreview(null);
             setMode("attackPreview");
 
             // Force component re-render to ensure props propagate
@@ -987,9 +976,6 @@ export const useEngineAPI = () => {
     },
     onStartAttackPreview: (unitId: number) => {
       setSelectedUnitId(typeof unitId === 'string' ? parseInt(unitId) : unitId);
-      // AI_TURN.md COMPLIANCE: Clear stale attackPreview when entering attackPreview mode
-      // This prevents units from rendering at old positions from previous fight phases
-      setAttackPreview(null);
       setMode("attackPreview");
     },
     onConfirmMove: handleConfirmMove,

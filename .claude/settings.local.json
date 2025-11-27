@@ -12,7 +12,8 @@
       "Bash(find:*)",
       "Bash(python:*)",
       "Bash(dir:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

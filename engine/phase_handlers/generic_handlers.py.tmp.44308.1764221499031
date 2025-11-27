@@ -212,6 +212,9 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             non_active_alt_empty = len(game_state["non_active_alternating_activation_pool"]) == 0
 
         pool_empty = charging_empty and active_alt_empty and non_active_alt_empty
+        print(f"    active_alt_empty: {active_alt_empty}")
+        print(f"    non_active_alt_empty: {non_active_alt_empty}")
+        print(f"    pool_empty (phase_complete): {pool_empty}")
     
     if pool_empty:
         response["phase_complete"] = True
@@ -238,6 +241,11 @@ def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
     if "units_charged" not in game_state:
         game_state["units_charged"] = set()
 
+    # DEBUG: Log all tracking sets
+    print(f"    REBUILD DEBUG: current_player={current_player}")
+    print(f"    REBUILD DEBUG: units_charged={game_state['units_charged']}")
+    print(f"    REBUILD DEBUG: units_fought={game_state['units_fought']}")
+
     # Rebuild alternating pools (units NOT in units_charged, adjacent to enemies)
     active_alternating = []
     non_active_alternating = []
@@ -246,25 +254,34 @@ def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
         unit_id = unit["id"]
         hp = unit["HP_CUR"]
         player = unit["player"]
+        col, row = unit["col"], unit["row"]
+
+        print(f"    CHECKING Unit {unit_id}: HP={hp}, player={player}, pos=({col},{row})")
 
         if hp <= 0:
+            print(f"      SKIP: HP <= 0")
             continue
 
         # Skip units that already charged (they had their turn)
         if unit_id in game_state["units_charged"]:
+            print(f"      SKIP: in units_charged")
             continue
 
         # Skip units that already fought
         if unit_id in game_state["units_fought"]:
+            print(f"      SKIP: in units_fought")
             continue
 
         is_adjacent = _is_adjacent_to_enemy_for_fight(game_state, unit)
+        print(f"      is_adjacent_to_enemy: {is_adjacent}")
 
         if is_adjacent:
             if player == current_player:
                 active_alternating.append(unit_id)
+                print(f"      ADDED to active_alternating")
             else:
                 non_active_alternating.append(unit_id)
+                print(f"      ADDED to non_active_alternating")
 
     game_state["active_alternating_activation_pool"] = active_alternating
     game_state["non_active_alternating_activation_pool"] = non_active_alternating

@@ -35,6 +35,26 @@ export function useGameLog(currentTurn?: number) {
   useEffect(() => {
     const handleBackendLog = (event: CustomEvent) => {
       const logData = event.detail;
+
+      // AI_TURN.md: Use shootDetails directly if passed from fight handler,
+      // otherwise build from flat fields (shooting handler format)
+      let shootDetails = logData.shootDetails;
+      if (!shootDetails && logData.hitRoll) {
+        // Build shootDetails from flat fields (shooting phase format)
+        shootDetails = [{
+          shotNumber: 1,
+          attackRoll: logData.hitRoll,
+          strengthRoll: logData.woundRoll,
+          saveRoll: logData.saveRoll,
+          saveTarget: logData.saveTarget,
+          damageDealt: logData.damage,
+          hitResult: logData.hitRoll ? 'HIT' : 'MISS',
+          strengthResult: logData.woundRoll ? 'SUCCESS' : 'FAILED',
+          saveSuccess: logData.saveRoll >= logData.saveTarget,
+          targetDied: logData.target_died || false
+        }];
+      }
+
       addEvent({
         type: logData.type,
         message: logData.message,  // Full detailed message from backend
@@ -46,18 +66,7 @@ export function useGameLog(currentTurn?: number) {
         reward: logData.reward,
         action_name: logData.action_name,
         is_ai_action: logData.is_ai_action,
-        shootDetails: logData.hitRoll ? [{
-          shotNumber: 1,
-          attackRoll: logData.hitRoll,
-          strengthRoll: logData.woundRoll,
-          saveRoll: logData.saveRoll,
-          saveTarget: logData.saveTarget,
-          damageDealt: logData.damage,
-          hitResult: logData.hitRoll ? 'HIT' : 'MISS',
-          strengthResult: logData.woundRoll ? 'SUCCESS' : 'FAILED',
-          saveSuccess: logData.saveRoll >= logData.saveTarget,
-          targetDied: logData.target_died || false
-        }] : undefined
+        shootDetails
       });
     };
 
