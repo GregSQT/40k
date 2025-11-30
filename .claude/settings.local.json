@@ -1,19 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pip freeze:*)",
-      "Bash(requirements.txt)",
-      "Bash(pip show:*)",
-      "Bash(python3.11:*)",
-      "Bash(py:*)",
-      "Bash(source:*)",
-      "Bash(pip install:*)",
-      "Bash(.venv310/Scripts/python.exe:*)",
-      "Bash(find:*)",
-      "Bash(python:*)",
-      "Bash(dir:*)",
-      "Bash(cat:*)",
-      "Bash(git checkout:*)"
+      "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -X utf8 -c:*)"
     ],
     "deny": [],
     "ask": []

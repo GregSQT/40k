@@ -28,8 +28,16 @@ class ActionDecoder:
         eligible_units = self._get_eligible_units_for_current_phase(game_state)
         
         if not eligible_units:
-            # No units can act - only system actions allowed (handled internally)
-            return mask  # All False - no valid actions
+            # No units can act - phase should auto-advance
+            # CRITICAL: Fight phase has no wait action - return all False mask
+            # to trigger auto-advance in w40k_core.step()
+            if current_phase == "fight":
+                # Fight phase with empty pools - return all False mask
+                # This triggers auto-advance in step() function
+                return mask  # All False
+            # For other phases, enable WAIT action to allow phase processing
+            mask[11] = True  # WAIT triggers phase transition when pool is empty
+            return mask
         
         if current_phase == "move":
             # Movement phase: actions 0-3 (movement strategies) + 11 (wait)
@@ -63,7 +71,10 @@ class ActionDecoder:
             mask[[9, 11]] = True
         elif current_phase == "fight":
             # Fight phase: action 10 (fight) only - no wait in fight
-            mask[10] = True
+            # CRITICAL FIX: Only enable fight action if there are eligible units
+            if eligible_units:
+                mask[10] = True
+            # If no eligible units, action mask will be all False - handler will end phase
         
         return mask
     
@@ -95,6 +106,30 @@ class ActionDecoder:
             if "shoot_activation_pool" not in game_state:
                 raise KeyError("game_state missing required 'shoot_activation_pool' field")
             pool_unit_ids = game_state["shoot_activation_pool"]
+            return [get_unit_by_id(uid, game_state) for uid in pool_unit_ids if get_unit_by_id(uid, game_state)]
+        elif current_phase == "charge":
+            # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
+            if "charge_activation_pool" not in game_state:
+                return []  # Phase not initialized yet
+            pool_unit_ids = game_state["charge_activation_pool"]
+            return [get_unit_by_id(uid, game_state) for uid in pool_unit_ids if get_unit_by_id(uid, game_state)]
+        elif current_phase == "fight":
+            # AI_TURN.md: Fight phase has multiple sub-pools
+            # Check all fight pools in priority order
+            subphase = game_state.get("fight_subphase")
+            if subphase == "charging":
+                pool_unit_ids = game_state.get("charging_activation_pool", [])
+            elif subphase == "alternating_active":
+                pool_unit_ids = game_state.get("active_alternating_activation_pool", [])
+            elif subphase in ("alternating_non_active", "alternating"):
+                pool_unit_ids = game_state.get("non_active_alternating_activation_pool", [])
+            else:
+                # Fallback: check all pools
+                pool_unit_ids = (
+                    game_state.get("charging_activation_pool", []) +
+                    game_state.get("active_alternating_activation_pool", []) +
+                    game_state.get("non_active_alternating_activation_pool", [])
+                )
             return [get_unit_by_id(uid, game_state) for uid in pool_unit_ids if get_unit_by_id(uid, game_state)]
         else:
             return []
@@ -136,15 +171,9 @@ class ActionDecoder:
         eligible_units = self._get_eligible_units_for_current_phase(game_state)
         
         if not eligible_units:
+            # No eligible units - signal phase advance needed
             current_phase = game_state["phase"]
-            if current_phase == "move":
-                self._shooting_phase_init()
-                return {"action": "advance_phase", "from": "move", "to": "shoot"}
-            elif current_phase == "shoot":
-                self._advance_to_next_player()
-                return {"action": "advance_phase", "from": "shoot", "to": "move"}
-            else:
-                return {"action": "invalid", "error": "no_eligible_units", "unitId": "SYSTEM"}
+            return {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
         
         # GUARANTEED UNIT SELECTION - use first eligible unit directly
         selected_unit_id = eligible_units[0]["id"]
@@ -221,24 +250,19 @@ class ActionDecoder:
                 return {"action": "wait", "unitId": selected_unit_id}
                 
         elif current_phase == "charge":
-            if action_int == 9:  # Charge action
-                target = self._ai_select_charge_target(selected_unit_id)
+            if action_int == 9:  # Charge action - handler selects target internally
                 return {
-                    "action": "charge", 
-                    "unitId": selected_unit_id, 
-                    "targetId": target
+                    "action": "charge",
+                    "unitId": selected_unit_id
                 }
             elif action_int == 11:  # WAIT - agent chooses not to charge
-                return {"action": "wait", "unitId": selected_unit_id}
+                return {"action": "skip", "unitId": selected_unit_id}
                 
         elif current_phase == "fight":
-            if action_int == 10:  # Fight action - NO WAIT option in fight phase
-                selected_unit = self._ai_select_unit(eligible_units, "fight")
-                target = self._ai_select_combat_target(selected_unit)
+            if action_int == 10:  # Fight action - handler selects target internally
                 return {
-                    "action": "fight", 
-                    "unitId": selected_unit, 
-                    "targetId": target
+                    "action": "fight",
+                    "unitId": selected_unit_id
                 }
         
         valid_actions = self._get_valid_actions_for_phase(current_phase)

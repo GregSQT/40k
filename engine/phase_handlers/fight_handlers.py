@@ -326,10 +326,8 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     EXACT COPY from w40k_engine_save.py working validation with proper LoS
     PERFORMANCE: Uses LoS cache for instant lookups (0.001ms vs 5-10ms)
     """
-    # Enable debug ONLY in debug training config
-    # FIXED: Correct path - training_config_name is stored directly in game_state
-    training_config_name = game_state.get("training_config_name", "")
-    debug_mode = training_config_name == "debug"
+    # Disable debug prints entirely for training performance
+    debug_mode = False
     
     # Range check using proper hex distance
     distance = _calculate_hex_distance(shooter["col"], shooter["row"], target["col"], target["row"])
@@ -1126,14 +1124,59 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             "current_pool": current_pool
         }
 
+    # Check for gym training mode
+    is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
+
+    # GYM TRAINING: Auto-activate unit if not already active
+    active_fight_unit = game_state.get("active_fight_unit")
+    if is_gym_training and not active_fight_unit and action_type == "fight":
+        # Activate the unit first
+        activation_result = _handle_fight_unit_activation(game_state, unit, config)
+        if not activation_result[0]:
+            return activation_result  # Activation failed
+        # Check if activation ended (no targets → end_activation was called)
+        # This happens when unit has no valid targets and was auto-skipped
+        if activation_result[1].get("activation_ended") or activation_result[1].get("phase_complete"):
+            return activation_result
+        # Continue with fight action - targets should now be populated
+
     # AI_TURN.md: Fight phase action routing
     if action_type == "activate_unit":
         return _handle_fight_unit_activation(game_state, unit, config)
 
     elif action_type == "fight":
         # AI_TURN.md: Fight action with target selection
+        # GYM TRAINING: Auto-select target if not provided
         if "targetId" not in action:
-            raise KeyError(f"Fight action missing required 'targetId' field: {action}")
+            if is_gym_training:
+                # Auto-select from valid_fight_targets pool
+                valid_targets = game_state.get("valid_fight_targets", [])
+                if valid_targets:
+                    # Select first target (typically closest/weakest)
+                    # valid_targets may be list of unit dicts or list of unit IDs
+                    first_target = valid_targets[0]
+                    if isinstance(first_target, dict):
+                        action["targetId"] = first_target["id"]
+                    else:
+                        action["targetId"] = first_target  # Already an ID
+                else:
+                    # No targets - skip this unit
+                    result = end_activation(
+                        game_state, unit,
+                        "PASS", 1, "PASS", "FIGHT", 0
+                    )
+                    # CRITICAL: Clear active_fight_unit so next unit can be activated
+                    game_state["active_fight_unit"] = None
+                    game_state["valid_fight_targets"] = []
+
+                    if result.get("phase_complete"):
+                        result.update(_fight_phase_complete(game_state))
+                    else:
+                        _toggle_fight_alternation(game_state)
+                        _update_fight_subphase(game_state)
+                    return True, result
+            else:
+                raise KeyError(f"Fight action missing required 'targetId' field: {action}")
         target_id = action["targetId"]
         return _handle_fight_attack(game_state, unit, target_id, config)
 
@@ -1229,6 +1272,9 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
             "FIGHT",       # Arg4: Remove from fight pool
             0              # Arg5: No error logging
         )
+        # CRITICAL: Clear active_fight_unit so next unit can be activated
+        game_state["active_fight_unit"] = None
+        game_state["valid_fight_targets"] = []
 
         # AI_TURN.md: Check if ALL pools are empty → phase complete
         if result.get("phase_complete"):
@@ -1422,43 +1468,67 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         valid_targets_after = _fight_build_valid_target_pool(game_state, unit)
 
         if valid_targets_after:
-            # More attacks and targets available - continue
-            return True, {
-                "attack_executed": True,
-                "attack_result": attack_result,
-                "unitId": unit["id"],
-                "ATTACK_LEFT": unit["ATTACK_LEFT"],
-                "valid_targets": valid_targets_after,
-                "waiting_for_player": True
-            }
-        else:
-            # No more targets - end activation
-            # AI_TURN.md: ATTACK_LEFT > 0 but no targets → end_activation (ACTION, 1, FIGHT, FIGHT)
-            result = end_activation(
-                game_state, unit,
-                "ACTION",      # Arg1: Log action
-                1,             # Arg2: +1 step
-                "FIGHT",       # Arg3: FIGHT tracking
-                "FIGHT",       # Arg4: Remove from fight pool
-                0              # Arg5: No error logging
-            )
-            result["attack_result"] = attack_result
-            result["reason"] = "no_more_targets"
+            # More attacks and targets available
+            # AI_TURN.md COMPLIANCE: Check if gym training mode - auto-continue attack loop
+            is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
 
-            # AI_TURN.md: Check if ALL pools are empty → phase complete
-            if result.get("phase_complete"):
-                # All fight pools empty - transition to next phase
-                phase_result = _fight_phase_complete(game_state)
-                # Merge phase transition info into result
-                result.update(phase_result)
+            if is_gym_training:
+                # GYM TRAINING: Auto-continue attack loop until ATTACK_LEFT = 0 or no targets
+                # Select next target (use AI selection logic)
+                next_target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets_after)
+                if next_target_id:
+                    # Recursively call to continue the attack loop
+                    return _handle_fight_attack(game_state, unit, next_target_id, config)
+                # No valid target selected - fall through to end activation
+
             else:
-                # More units to activate - toggle alternation and update subphase
-                # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
-                _toggle_fight_alternation(game_state)
-                # CRITICAL: Recalculate fight_subphase after pool changes
-                _update_fight_subphase(game_state)
+                # HUMAN PLAYER: Return waiting_for_player for manual target selection
+                return True, {
+                    "attack_executed": True,
+                    "attack_result": attack_result,
+                    "unitId": unit["id"],
+                    "ATTACK_LEFT": unit["ATTACK_LEFT"],
+                    "valid_targets": valid_targets_after,
+                    "waiting_for_player": True
+                }
+        # No more targets or no valid target selected - fall through to end activation
 
-            return True, result
+        # No more targets - end activation
+        # AI_TURN.md: ATTACK_LEFT > 0 but no targets → end_activation (ACTION, 1, FIGHT, FIGHT)
+        result = end_activation(
+            game_state, unit,
+            "ACTION",      # Arg1: Log action
+            1,             # Arg2: +1 step
+            "FIGHT",       # Arg3: FIGHT tracking
+            "FIGHT",       # Arg4: Remove from fight pool
+            0              # Arg5: No error logging
+        )
+        # CRITICAL: Clear active_fight_unit so next unit can be activated
+        game_state["active_fight_unit"] = None
+        game_state["valid_fight_targets"] = []
+
+        result["action"] = "combat"  # Must be "combat" for step_logger (not "fight")
+        result["phase"] = "fight"  # For metrics tracking
+        result["unitId"] = unit_id  # For step_logger
+        result["targetId"] = target_id  # For reward calculator
+        result["attack_result"] = attack_result
+        result["target_died"] = attack_result.get("target_died", False)  # For metrics tracking
+        result["reason"] = "no_more_targets"
+
+        # AI_TURN.md: Check if ALL pools are empty → phase complete
+        if result.get("phase_complete"):
+            # All fight pools empty - transition to next phase
+            phase_result = _fight_phase_complete(game_state)
+            # Merge phase transition info into result
+            result.update(phase_result)
+        else:
+            # More units to activate - toggle alternation and update subphase
+            # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
+            _toggle_fight_alternation(game_state)
+            # CRITICAL: Recalculate fight_subphase after pool changes
+            _update_fight_subphase(game_state)
+
+        return True, result
     else:
         # ATTACK_LEFT = 0 - end activation
         # AI_TURN.md: end_activation (ACTION, 1, FIGHT, FIGHT)
@@ -1470,7 +1540,16 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             "FIGHT",       # Arg4: Remove from fight pool
             0              # Arg5: No error logging
         )
+        # CRITICAL: Clear active_fight_unit so next unit can be activated
+        game_state["active_fight_unit"] = None
+        game_state["valid_fight_targets"] = []
+
+        result["action"] = "combat"  # Must be "combat" for step_logger (not "fight")
+        result["phase"] = "fight"  # For metrics tracking
+        result["unitId"] = unit_id  # For step_logger
+        result["targetId"] = target_id  # For reward calculator
         result["attack_result"] = attack_result
+        result["target_died"] = attack_result.get("target_died", False)  # For metrics tracking
         result["reason"] = "attacks_complete"
 
         # AI_TURN.md: Check if ALL pools are empty → phase complete
@@ -2189,9 +2268,12 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
     return False
 
 def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
-    """Get unit by ID from game state."""
+    """Get unit by ID from game state.
+
+    CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
+    """
     for unit in game_state["units"]:
-        if unit["id"] == unit_id:
+        if str(unit["id"]) == str(unit_id):
             return unit
     return None
 

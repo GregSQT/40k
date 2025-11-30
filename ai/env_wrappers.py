@@ -93,7 +93,9 @@ class BotControlledEnv(gym.Wrapper):
         valid_actions = [i for i in range(12) if action_mask[i]]
 
         if not valid_actions:
-            return 11
+            # CRITICAL FIX: When no valid actions (fight phase empty pools),
+            # return action 0 (not 11) so step() can detect empty mask and auto-advance
+            return 0
 
         # DIAGNOSTIC: Track shoot phase opportunities
         current_phase = game_state.get("phase", "")
@@ -276,7 +278,10 @@ class SelfPlayWrapper(gym.Wrapper):
             action_mask = self.engine.get_action_mask()
             valid_actions = [i for i in range(12) if action_mask[i]]
             if not valid_actions:
-                return 11  # Wait action
+                # CRITICAL FIX: When no valid actions (fight phase empty pools),
+                # still return a dummy action - the step() function will
+                # auto-advance the phase via its empty mask detection
+                return 0  # Any action - step() will detect empty mask and auto-advance
             return random.choice(valid_actions)
 
         # Use frozen model to predict action WITH action masking

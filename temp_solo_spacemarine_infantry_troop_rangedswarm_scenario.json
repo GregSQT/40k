@@ -1,0 +1,46 @@
+{
+  "metadata": {
+    "template": "solo_spacemarine_infantry_troop_rangedswarm",
+    "player_0_agent": "SpaceMarine_Infantry_Troop_RangedSwarm",
+    "player_1_agent": "SpaceMarine_Infantry_Troop_RangedSwarm",
+    "board_size": [
+      25,
+      21
+    ],
+    "difficulty": "easy",
+    "training_focus": "solo",
+    "generated_timestamp": "20251130_014029",
+    "units_generated": 4,
+    "validation_passed": true
+  },
+  "units": [
+    {
+      "id": 1,
+      "unit_type": "Intercessor",
+      "player": 0,
+      "col": 13,
+      "row": 13
+    },
+    {
+      "id": 2,
+      "unit_type": "Intercessor",
+      "player": 0,
+      "col": 19,
+      "row": 12
+    },
+    {
+      "id": 3,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 11,
+      "row": 6
+    },
+    {
+      "id": 4,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 5,
+      "row": 7
+    }
+  ]
+}

@@ -102,33 +102,25 @@ class RewardMapper:
         if unit["is_melee"]:  # Melee unit charge priorities
             # Priority 1: Can kill in 1 melee phase
             if can_kill_1_phase and self._is_highest_threat_in_range(target, all_targets):
-                if "charge_priority_1" not in unit_rewards:
-                    raise ValueError("charge_priority_1 reward not found in unit rewards config")
-                return base_reward + unit_rewards["charge_priority_1"]
-            
+                return base_reward + unit_rewards.get("charge_priority_1", 0)
+
             # Priority 2: High threat, low HP, HP >= unit's damage
-            if (target["HP_CUR"] >= unit["CC_DMG"] and 
+            if (target["HP_CUR"] >= unit["CC_DMG"] and
                 self._is_highest_threat_in_range(target, all_targets) and
                 self._is_lowest_hp_among_threats(target, all_targets)):
-                if "charge_priority_2" not in unit_rewards:
-                    raise ValueError("charge_priority_2 reward not found in unit rewards config")
-                return base_reward + unit_rewards["charge_priority_2"]
-            
+                return base_reward + unit_rewards.get("charge_priority_2", 0)
+
             # Priority 3: High threat, lowest HP
             if (self._is_highest_threat_in_range(target, all_targets) and
                 self._is_lowest_hp_among_threats(target, all_targets)):
-                if "charge_priority_3" not in unit_rewards:
-                    raise ValueError("charge_priority_3 reward not found in unit rewards config")
-                return base_reward + unit_rewards["charge_priority_3"]
-        
+                return base_reward + unit_rewards.get("charge_priority_3", 0)
+
         else:  # Ranged unit charge priorities (different logic)
-            if (can_kill_1_phase and 
+            if (can_kill_1_phase and
                 self._is_highest_threat_in_range(target, all_targets) and
                 self._is_highest_hp_among_threats(target, all_targets)):
-                if "charge_priority_1" not in unit_rewards:
-                    raise ValueError("charge_priority_1 reward not found in unit rewards config")
-                return base_reward + unit_rewards["charge_priority_1"]
-        
+                return base_reward + unit_rewards.get("charge_priority_1", 0)
+
         return base_reward
     
     def get_combat_priority_reward(self, unit, target, all_targets):
@@ -150,17 +142,15 @@ class RewardMapper:
 
         # Priority 1: Can kill in 1 melee phase with highest threat
         if can_kill_1_phase and self._is_highest_threat_adjacent(target, all_targets):
-            if "attack_priority_1" not in unit_rewards:
-                raise ValueError("attack_priority_1 reward not found in unit rewards config")
-            return base_reward + unit_rewards["attack_priority_1"]
-        
+            priority_bonus = unit_rewards.get("attack_priority_1", 0)
+            return base_reward + priority_bonus
+
         # Priority 2: Highest threat, lowest HP if multiple high threats
         if (self._is_highest_threat_adjacent(target, all_targets) and
             self._is_lowest_hp_among_adjacent_threats(target, all_targets)):
-            if "attack_priority_2" not in unit_rewards:
-                raise ValueError("attack_priority_2 reward not found in unit rewards config")
-            return base_reward + unit_rewards["attack_priority_2"]
-        
+            priority_bonus = unit_rewards.get("attack_priority_2", 0)
+            return base_reward + priority_bonus
+
         return base_reward
     
     def get_kill_bonus_reward(self, unit, target, damage_dealt):

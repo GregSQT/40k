@@ -575,22 +575,22 @@ class ObservationBuilder:
         """
         Build asymmetric egocentric observation vector with R=25 perception radius.
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
-        
-        Structure (295 floats):
-        - [0:10]    Global context (10 floats)
-        - [10:18]   Active unit capabilities (8 floats)
-        - [18:50]   Directional terrain (32 floats: 8 directions × 4 features)
-        - [50:122]  Allied units (72 floats: 6 units × 12 features)
-        - [122:260] Enemy units (138 floats: 6 units × 23 features)
-        - [260:295] Valid targets (35 floats: 5 targets × 7 features)
-        
+
+        Structure (300 floats):
+        - [0:15]    Global context (15 floats) - includes objective control
+        - [15:23]   Active unit capabilities (8 floats)
+        - [23:55]   Directional terrain (32 floats: 8 directions × 4 features)
+        - [55:127]  Allied units (72 floats: 6 units × 12 features)
+        - [127:265] Enemy units (138 floats: 6 units × 23 features)
+        - [265:300] Valid targets (35 floats: 5 targets × 7 features)
+
         Asymmetric design: More complete information about enemies than allies.
         Agent discovers optimal tactical combinations through training.
         """
         # PERFORMANCE: Clear per-observation cache (same pairs recalculated multiple times)
         self._danger_probability_cache = {}
 
-        obs = np.zeros(295, dtype=np.float32)
+        obs = np.zeros(300, dtype=np.float32)
         
         # Get active unit (agent's current unit)
         active_unit = self._get_active_unit_for_observation(game_state)
@@ -598,53 +598,107 @@ class ObservationBuilder:
             # No active unit - return zero observation
             return obs
         
-        # === SECTION 1: Global Context (10 floats) ===
+        # === SECTION 1: Global Context (15 floats) - includes objective control ===
         obs[0] = float(game_state["current_player"])
         obs[1] = {"move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}[game_state["phase"]]
-        obs[2] = min(1.0, game_state["turn"] / 10.0)
+        obs[2] = min(1.0, game_state["turn"] / 5.0)  # Normalized by max 5 turns
         obs[3] = min(1.0, game_state["episode_steps"] / 100.0)
         obs[4] = active_unit["HP_CUR"] / active_unit["HP_MAX"]
         obs[5] = 1.0 if active_unit["id"] in game_state["units_moved"] else 0.0
         obs[6] = 1.0 if active_unit["id"] in game_state["units_shot"] else 0.0
         obs[7] = 1.0 if active_unit["id"] in game_state["units_attacked"] else 0.0
-        
+
         # Count alive units for strategic awareness
-        alive_friendlies = sum(1 for u in game_state["units"] 
+        alive_friendlies = sum(1 for u in game_state["units"]
                               if u["player"] == active_unit["player"] and u["HP_CUR"] > 0)
-        alive_enemies = sum(1 for u in game_state["units"] 
+        alive_enemies = sum(1 for u in game_state["units"]
                            if u["player"] != active_unit["player"] and u["HP_CUR"] > 0)
         max_nearby = self.max_nearby_units
         obs[8] = alive_friendlies / max(1, max_nearby)
         obs[9] = alive_enemies / max(1, max_nearby)
-        
+
+        # Objective control status (5 floats for 5 objectives)
+        # -1.0 = enemy controls, 0.0 = contested/empty, 1.0 = we control
+        self._encode_objective_control(obs, active_unit, game_state, base_idx=10)
+
         # === SECTION 2: Active Unit Capabilities (8 floats) ===
-        obs[10] = active_unit["MOVE"] / 12.0  # Normalize by max expected (bikes)
-        obs[11] = active_unit["RNG_RNG"] / 24.0
-        obs[12] = active_unit["RNG_DMG"] / 5.0
-        obs[13] = active_unit["RNG_NB"] / 10.0
-        obs[14] = active_unit["CC_RNG"] / 6.0
-        obs[15] = active_unit["CC_DMG"] / 5.0
-        obs[16] = active_unit["T"] / 10.0
-        obs[17] = active_unit["ARMOR_SAVE"] / 6.0
-        
+        obs[15] = active_unit["MOVE"] / 12.0  # Normalize by max expected (bikes)
+        obs[16] = active_unit["RNG_RNG"] / 24.0
+        obs[17] = active_unit["RNG_DMG"] / 5.0
+        obs[18] = active_unit["RNG_NB"] / 10.0
+        obs[19] = active_unit["CC_RNG"] / 6.0
+        obs[20] = active_unit["CC_DMG"] / 5.0
+        obs[21] = active_unit["T"] / 10.0
+        obs[22] = active_unit["ARMOR_SAVE"] / 6.0
+
         # === SECTION 3: Directional Terrain Awareness (32 floats) ===
-        self._encode_directional_terrain(obs, active_unit, game_state, base_idx=18)
-        
+        self._encode_directional_terrain(obs, active_unit, game_state, base_idx=23)
+
         # === SECTION 4: Allied Units (72 floats) ===
-        self._encode_allied_units(obs, active_unit, game_state, base_idx=50)
-        
+        self._encode_allied_units(obs, active_unit, game_state, base_idx=55)
+
         # === SECTION 5: Enemy Units (138 floats) ===
-        self._encode_enemy_units(obs, active_unit, game_state, base_idx=122)
-        
+        self._encode_enemy_units(obs, active_unit, game_state, base_idx=127)
+
         # === SECTION 6: Valid Targets (35 floats) ===
-        self._encode_valid_targets(obs, active_unit, game_state, base_idx=260)
+        self._encode_valid_targets(obs, active_unit, game_state, base_idx=265)
         
         return obs
     
     # ============================================================================
     # HELPER METHODS
     # ============================================================================
-    
+
+    def _encode_objective_control(self, obs: np.ndarray, active_unit: Dict[str, Any],
+                                   game_state: Dict[str, Any], base_idx: int):
+        """
+        Encode objective control status for each objective.
+        5 floats for 5 objectives (obs[10:15]).
+
+        Each objective encoded as:
+        - 1.0 = We control this objective
+        - 0.0 = Contested or uncontrolled
+        - -1.0 = Enemy controls this objective
+
+        This lets the agent know the current objective state for strategic planning.
+        """
+        objectives = game_state.get("objectives", [])
+        my_player = active_unit["player"]
+
+        for i in range(5):  # Max 5 objectives
+            if i < len(objectives):
+                objective = objectives[i]
+                obj_hexes = objective.get("hexes", [])
+
+                # Convert hex list to set of tuples for fast lookup
+                hex_set = set(tuple(h) for h in obj_hexes)
+
+                # Calculate OC per player for this objective
+                my_oc = 0
+                enemy_oc = 0
+
+                for unit in game_state["units"]:
+                    if unit["HP_CUR"] <= 0:
+                        continue
+
+                    unit_pos = (unit["col"], unit["row"])
+                    if unit_pos in hex_set:
+                        oc = unit.get("OC", 1)
+                        if unit["player"] == my_player:
+                            my_oc += oc
+                        else:
+                            enemy_oc += oc
+
+                # Determine control status
+                if my_oc > enemy_oc:
+                    obs[base_idx + i] = 1.0  # We control
+                elif enemy_oc > my_oc:
+                    obs[base_idx + i] = -1.0  # Enemy controls
+                else:
+                    obs[base_idx + i] = 0.0  # Contested/empty
+            else:
+                obs[base_idx + i] = 0.0  # No objective in this slot
+
     def _get_active_unit_for_observation(self, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Get the active unit for observation encoding.

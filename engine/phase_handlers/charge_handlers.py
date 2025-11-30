@@ -185,6 +185,21 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return _handle_unit_activation(game_state, active_unit, config)
 
     elif action_type == "charge":
+        # GYM TRAINING: If unit already active and no destCol provided, auto-select destination
+        if is_gym_training and "destCol" not in action:
+            pending_dests = game_state.get("pending_charge_destinations", [])
+            if pending_dests:
+                best_dest = pending_dests[0]  # First = closest to target
+                # pending_charge_destinations are tuples (col, row)
+                action["destCol"], action["destRow"] = best_dest
+                # Find adjacent enemy target
+                target_id = _find_adjacent_enemy_at_destination(game_state, action["destCol"], action["destRow"], active_unit["player"])
+                if not target_id:
+                    return _handle_skip_action(game_state, active_unit, had_valid_destinations=False)
+                action["targetId"] = target_id
+            else:
+                # No valid destinations - skip this unit
+                return _handle_skip_action(game_state, active_unit, had_valid_destinations=False)
         return charge_destination_selection_handler(game_state, unit_id, action)
 
     elif action_type == "skip":
@@ -257,21 +272,32 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
             valid_destinations = execution_result[1]["valid_destinations"]
 
             if valid_destinations:
-                # Store destinations in game_state for agent's action to reference
-                # Agent will choose destination via action 0-3, converted by ActionDecoder
-                game_state["pending_charge_destinations"] = valid_destinations
-                game_state["pending_charge_unit_id"] = unit["id"]
+                # GYM TRAINING: Auto-select best destination (closest to target)
+                # Action space doesn't support destination selection, so handler chooses
+                best_dest = valid_destinations[0]  # First destination (closest to target)
 
-                # Return waiting_for_player=True - agent must now choose destination
-                return True, {
-                    "waiting_for_player": True,
+                # valid_destinations are tuples (col, row)
+                dest_col, dest_row = best_dest
+
+                # Find the adjacent enemy at this destination (target for charge)
+                target_id = _find_adjacent_enemy_at_destination(game_state, dest_col, dest_row, unit["player"])
+                if not target_id:
+                    # No target found - skip
+                    return _handle_skip_action(game_state, unit, had_valid_destinations=False)
+
+                # Execute the charge to the selected destination
+                charge_action = {
+                    "action": "charge",
                     "unitId": unit["id"],
-                    "valid_destinations": valid_destinations,
-                    "action": "waiting_for_charge_choice"
+                    "destCol": dest_col,
+                    "destRow": dest_row,
+                    "targetId": target_id
                 }
+                return charge_destination_selection_handler(game_state, unit["id"], charge_action)
             else:
-                # No valid destinations - auto skip
-                return True, {"action": "skip", "unitId": unit["id"], "reason": "no_valid_charge_targets"}
+                # No valid destinations - auto skip (properly remove from pool)
+                # CRITICAL FIX: Call _handle_skip_action to remove from pool and trigger phase transition
+                return _handle_skip_action(game_state, unit, had_valid_destinations=False)
 
     # All non-gym players (humans AND PvE AI) get normal waiting_for_player response
     return execution_result
@@ -579,6 +605,23 @@ def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, pl
             if enemy_pos in hex_neighbors:
                 return True
     return False
+
+
+def _find_adjacent_enemy_at_destination(game_state: Dict[str, Any], col: int, row: int, player: int) -> Optional[str]:
+    """
+    Find an enemy unit adjacent to the given hex position.
+
+    Used by gym training to auto-select charge target based on destination.
+    Returns the ID of the first adjacent enemy, or None if no adjacent enemy.
+    """
+    hex_neighbors = set(_get_hex_neighbors(col, row))
+
+    for enemy in game_state["units"]:
+        if enemy["player"] != player and enemy["HP_CUR"] > 0:
+            enemy_pos = (enemy["col"], enemy["row"])
+            if enemy_pos in hex_neighbors:
+                return enemy["id"]
+    return None
 
 
 def _build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
@@ -1068,6 +1111,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     # Update result with charge details
     result.update({
         "action": "charge",
+        "phase": "charge",  # For metrics tracking
         "unitId": unit["id"],
         "targetId": target_id,
         "fromCol": orig_col,
@@ -1075,6 +1119,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         "toCol": dest_col,
         "toRow": dest_row,
         "charge_roll": charge_roll,
+        "charge_succeeded": True,  # For metrics tracking - successful charge
         "activation_complete": True
     })
 
@@ -1088,10 +1133,16 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
 
 
 def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """AI_MOVE.md: Simplified flee detection (distance <= 1, no CC_RNG)"""
+    """
+    AI_TURN.md: Simplified flee detection (distance <= 1, no CC_RNG)
+
+    CRITICAL: Uses proper hex distance, not Chebyshev distance.
+    Hexagonal grids require hex distance calculation for accurate adjacency.
+    """
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
+            # AI_TURN.md COMPLIANCE: Use proper hex distance calculation
+            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
             if distance <= 1:
                 return True
     return False
@@ -1172,8 +1223,11 @@ def charge_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
-    """Get unit by ID from game state"""
+    """Get unit by ID from game state.
+
+    CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
+    """
     for unit in game_state["units"]:
-        if unit["id"] == unit_id:
+        if str(unit["id"]) == str(unit_id):
             return unit
     return None

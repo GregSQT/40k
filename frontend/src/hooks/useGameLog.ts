@@ -95,12 +95,13 @@ export function useGameLog(currentTurn?: number) {
   }, [addEvent, currentTurn]);
 
   const logMoveAction = useCallback((
-    unit: Unit, 
-    startCol: number, 
-    startRow: number, 
-    endCol: number, 
+    unit: Unit,
+    startCol: number,
+    startRow: number,
+    endCol: number,
     endRow: number,
-    turnNumber: number
+    turnNumber: number,
+    player?: number
   ) => {
     addEvent({
       type: 'move',
@@ -109,27 +110,30 @@ export function useGameLog(currentTurn?: number) {
       turnNumber: currentTurn ?? turnNumber,
       phase: 'movement',
       startHex: `(${startCol}, ${startRow})`,
-      endHex: `(${endCol}, ${endRow})`
+      endHex: `(${endCol}, ${endRow})`,
+      player: player ?? (unit as any).player
     });
   }, [addEvent, currentTurn]);
 
-  const logNoMoveAction = useCallback((unit: Unit, turnNumber: number) => {
+  const logNoMoveAction = useCallback((unit: Unit, turnNumber: number, player?: number) => {
     addEvent({
       type: 'move',
       message: `${unit.name} chose not to move`,
       unitId: unit.id,
       turnNumber: currentTurn ?? turnNumber,
-      phase: 'movement'
+      phase: 'movement',
+      player: player ?? (unit as any).player
     });
   }, [addEvent, currentTurn]);
 
-  const logMoveCancellation = useCallback((unit: Unit, turnNumber: number) => {
+  const logMoveCancellation = useCallback((unit: Unit, turnNumber: number, player?: number) => {
     addEvent({
       type: 'move_cancel',
       message: `${unit.name} movement cancelled`,
       unitId: unit.id,
       turnNumber: currentTurn ?? turnNumber,
-      phase: 'movement'
+      phase: 'movement',
+      player: player ?? (unit as any).player
     });
   }, [addEvent, currentTurn]);
 
@@ -137,7 +141,8 @@ export function useGameLog(currentTurn?: number) {
     shooter: Unit,
     target: Unit,
     shootDetails: any,
-    turnNumber: number
+    turnNumber: number,
+    player?: number
   ) => {
     addEvent({
       type: 'shoot',
@@ -146,7 +151,8 @@ export function useGameLog(currentTurn?: number) {
       targetId: target.id,
       turnNumber: currentTurn ?? turnNumber,
       phase: 'shooting',
-      shootDetails
+      shootDetails,
+      player: player ?? (shooter as any).player
     });
   }, [addEvent, currentTurn]);
 
@@ -157,7 +163,8 @@ export function useGameLog(currentTurn?: number) {
     startRow: number,
     endCol: number,
     endRow: number,
-    turnNumber: number
+    turnNumber: number,
+    player?: number
   ) => {
     addEvent({
       type: 'charge',
@@ -167,17 +174,19 @@ export function useGameLog(currentTurn?: number) {
       turnNumber: currentTurn ?? turnNumber,
       phase: 'charge',
       startHex: `(${startCol}, ${startRow})`,
-      endHex: `(${endCol}, ${endRow})`
+      endHex: `(${endCol}, ${endRow})`,
+      player: player ?? (unit as any).player
     });
   }, [addEvent, currentTurn]);
 
-  const logChargeCancellation = useCallback((unit: Unit, turnNumber: number) => {
+  const logChargeCancellation = useCallback((unit: Unit, turnNumber: number, player?: number) => {
     addEvent({
       type: 'charge_cancel',
       message: `${unit.name} charge cancelled`,
       unitId: unit.id,
       turnNumber: currentTurn ?? turnNumber,
-      phase: 'charge'
+      phase: 'charge',
+      player: player ?? (unit as any).player
     });
   }, [addEvent, currentTurn]);
 
@@ -185,7 +194,8 @@ export function useGameLog(currentTurn?: number) {
     attacker: Unit,
     target: Unit,
     combatDetails: any,
-    turnNumber: number
+    turnNumber: number,
+    player?: number
   ) => {
     addEvent({
       type: 'combat',
@@ -194,17 +204,19 @@ export function useGameLog(currentTurn?: number) {
       targetId: target.id,
       turnNumber: currentTurn ?? turnNumber,
       phase: 'combat',
-      shootDetails: combatDetails
+      shootDetails: combatDetails,
+      player: player ?? (attacker as any).player
     });
   }, [addEvent, currentTurn]);
 
-  const logUnitDeath = useCallback((unit: Unit, turnNumber: number, phase: string = 'unknown') => {
+  const logUnitDeath = useCallback((unit: Unit, turnNumber: number, phase: string = 'unknown', player?: number) => {
     addEvent({
       type: 'death',
       message: `${unit.name} was destroyed`,
       unitId: unit.id,
       turnNumber: currentTurn ?? turnNumber,
-      phase
+      phase,
+      player: player ?? (unit as any).player
     });
   }, [addEvent, currentTurn]);
 

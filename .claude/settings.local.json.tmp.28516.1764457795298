@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -c:*)",
+      "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -X utf8 -c:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -218,7 +218,7 @@ class EpisodeTerminationCallback(BaseCallback):
                 # Don't stop early - just continue tracking episodes for metrics
                 return True
             else:
-                # Normal mode: Stop when episode count reached
+                # Normal mode: Stop when episode count reached (silent for rotation training)
                 return False
 
         return True
@@ -448,16 +448,19 @@ class MetricsCollectionCallback(BaseCallback):
     
     def _on_training_start(self) -> None:
         """Called when training starts - update metrics_tracker to use model's logger directory."""
-        # CRITICAL FIX: Update metrics_tracker writer to use SB3's actual tensorboard directory
-        # The model's logger is now initialized, so we can get the real directory
-        if hasattr(self.model, 'logger') and self.model.logger:
-            actual_log_dir = self.model.logger.get_dir()
-            
-            # Close old writer and create new one in correct directory
-            self.metrics_tracker.writer.close()
-            from torch.utils.tensorboard import SummaryWriter
-            self.metrics_tracker.writer = SummaryWriter(actual_log_dir)
-            self.metrics_tracker.log_dir = actual_log_dir
+        # CRITICAL FIX: Only update writer on FIRST learn() call, not on rotations
+        # SB3 creates new subdirectories (_1, _2, etc.) on each learn() call
+        # We want ALL metrics in ONE directory for continuous x-axis in TensorBoard
+        if not hasattr(self, '_writer_initialized') or not self._writer_initialized:
+            if hasattr(self.model, 'logger') and self.model.logger:
+                actual_log_dir = self.model.logger.get_dir()
+                if actual_log_dir:
+                    # Close old writer and create new one in SB3's directory
+                    self.metrics_tracker.writer.close()
+                    from torch.utils.tensorboard import SummaryWriter
+                    self.metrics_tracker.writer = SummaryWriter(actual_log_dir)
+                    self.metrics_tracker.log_dir = actual_log_dir
+                    self._writer_initialized = True
     
     def print_final_training_summary(self, model=None, training_config=None, training_config_name=None, rewards_config_name=None):
         """Print comprehensive training summary with final bot evaluation"""
@@ -564,35 +567,61 @@ class MetricsCollectionCallback(BaseCallback):
             if 'rewards' in self.locals:
                 reward = self.locals['rewards'][0] if isinstance(self.locals['rewards'], (list, np.ndarray)) else self.locals['rewards']
                 self.episode_reward += reward
-            
+
             self.episode_length += 1
-            
+
             # Process info dict for action tracking
             if 'infos' in self.locals:
-                for info in self.locals['infos']:
+                for idx, info in enumerate(self.locals['infos']):
                     # Track action validity
                     if 'success' in info:
                         if info['success']:
                             self.episode_tactical_data['valid_actions'] += 1
                         else:
                             self.episode_tactical_data['invalid_actions'] += 1
-                        
+
                         self.episode_tactical_data['total_actions'] += 1
-                    
+
                     # Track wait actions (action type in info)
                     if info.get('action') == 'wait' or info.get('action') == 'skip':
                         self.episode_tactical_data['wait_actions'] += 1
-                    
+
                     # Track damage from combat results
                     if 'totalDamage' in info:
                         damage_dealt = info.get('totalDamage', 0)
                         self.episode_tactical_data['damage_dealt'] += damage_dealt
 
-                    # Handle episode end
-                    # CRITICAL FIX: Prevent double-counting by checking if we already processed episode end this step
-                    if (info.get('episode', False) or info.get('winner') is not None) and self.num_timesteps != self.last_episode_step:
+                    # COMBAT KILL TRACKING: Log kills to metrics tracker
+                    if info.get('target_died', False):
+                        phase = info.get('phase', 'unknown')
+                        if phase == 'shoot':
+                            self.metrics_tracker.log_combat_kill('shoot')
+                        elif phase == 'fight':
+                            self.metrics_tracker.log_combat_kill('melee')
+                        elif phase == 'charge':
+                            # Charge phase kills (rare but possible)
+                            self.metrics_tracker.log_combat_kill('melee')
+
+                    # CHARGE SUCCESS TRACKING: Log successful charges
+                    if info.get('charge_succeeded', False):
+                        self.metrics_tracker.log_combat_kill('charge')
+
+                    # Handle episode end - check BOTH dones array AND info dict
+                    # CRITICAL: SB3's DummyVecEnv sets dones[idx]=True when episode ends
+                    episode_done = False
+                    if 'dones' in self.locals and idx < len(self.locals['dones']):
+                        episode_done = self.locals['dones'][idx]
+
+                    # Also check info dict for episode marker (Monitor wrapper adds this)
+                    if info.get('episode') or info.get('winner') is not None:
+                        episode_done = True
+
+                    if episode_done and self.num_timesteps != self.last_episode_step:
                         self.last_episode_step = self.num_timesteps
                         self._handle_episode_end(info)
+                        # DIAGNOSTIC: Print every 500 episodes to verify detection
+                        if self.episode_count % 500 == 0:
+                            print(f"  [MetricsCallback] Episode {self.episode_count} detected at timestep {self.num_timesteps}")
         
         # NEW: Collect reward decomposition from game_state
         if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
@@ -698,6 +727,10 @@ class MetricsCollectionCallback(BaseCallback):
     def _handle_episode_end(self, info):
         """Handle episode completion and log metrics."""
         self.episode_count += 1
+
+        # CRITICAL: Update step_count BEFORE logging episode metrics
+        # This ensures 0_critical/ metrics use timesteps (not episodes) as x-axis
+        self.metrics_tracker.step_count = self.model.num_timesteps
 
         # Extract episode data
         episode_data = {

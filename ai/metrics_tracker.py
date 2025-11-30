@@ -96,6 +96,14 @@ class W40KMetricsTracker:
             'charge': {'charged': 0, 'skipped': 0},
             'fight': {'fought': 0, 'skipped': 0}
         }
+
+        # NEW: Combat effectiveness metrics (per RL_TRAINING_ROADMAP.md)
+        # These 3 metrics tell you if the agent learns combat properly
+        self.combat_effectiveness = {
+            'shoot_kills': 0,      # Kills from ranged attacks
+            'melee_kills': 0,      # Kills from melee attacks
+            'charge_successes': 0  # Successful charges (reached target)
+        }
         
         # NEW: Hyperparameter tracking for PPO tuning
         self.hyperparameter_tracking = {
@@ -131,7 +139,11 @@ class W40KMetricsTracker:
     def log_episode_end(self, episode_data: Dict[str, Any]):
         """Log core episode metrics - reward, win rate, and episode length"""
         self.episode_count += 1
-        
+
+        # DIAGNOSTIC: Print episode count every 1000 episodes to track progress
+        if self.episode_count % 1000 == 0:
+            print(f"  📊 Metrics: Episode {self.episode_count} logged to TensorBoard (x-axis)")
+
         # Extract data
         total_reward = episode_data.get('total_reward', 0)
         winner = episode_data.get('winner', None)
@@ -409,6 +421,22 @@ class W40KMetricsTracker:
         
         self.writer.add_scalar('game_detailed/reward_mapper_calculation_failures', self.reward_mapper_stats['mapper_failures'], self.episode_count)
     
+    def log_combat_kill(self, kill_type: str):
+        """Log a combat kill for tracking combat effectiveness.
+
+        Args:
+            kill_type: One of 'shoot', 'melee', or 'charge'
+                      - 'shoot': Enemy killed by ranged attack
+                      - 'melee': Enemy killed by melee attack in fight phase
+                      - 'charge': Successful charge that reached target
+        """
+        if kill_type == 'shoot':
+            self.combat_effectiveness['shoot_kills'] += 1
+        elif kill_type == 'melee':
+            self.combat_effectiveness['melee_kills'] += 1
+        elif kill_type == 'charge':
+            self.combat_effectiveness['charge_successes'] += 1
+
     def log_phase_performance(self, phase_data: Dict[str, Any]):
         """Accumulate phase-specific performance metrics during episode.
         
@@ -489,6 +517,18 @@ class W40KMetricsTracker:
             'shooting': {'shot': 0, 'skipped': 0},
             'charge': {'charged': 0, 'skipped': 0},
             'fight': {'fought': 0, 'skipped': 0}
+        }
+
+        # Log combat effectiveness metrics (per RL_TRAINING_ROADMAP.md)
+        self.writer.add_scalar('combat/shoot_kills', self.combat_effectiveness['shoot_kills'], self.episode_count)
+        self.writer.add_scalar('combat/melee_kills', self.combat_effectiveness['melee_kills'], self.episode_count)
+        self.writer.add_scalar('combat/charge_successes', self.combat_effectiveness['charge_successes'], self.episode_count)
+
+        # Reset combat effectiveness for next episode
+        self.combat_effectiveness = {
+            'shoot_kills': 0,
+            'melee_kills': 0,
+            'charge_successes': 0
         }
     
     def log_training_metrics(self, model_stats: Dict[str, Any]):
@@ -614,8 +654,8 @@ class W40KMetricsTracker:
         - 0_critical/bot_eval_combined     - >0.4 → Wins vs bots (objective baseline)
         """
         
-        # Minimum data requirement
-        min_episodes = 20
+        # Minimum data requirement (lowered to 1 for immediate feedback)
+        min_episodes = 1
         if len(self.all_episode_rewards) < min_episodes:
             return  # Not enough data yet
         
@@ -624,61 +664,61 @@ class W40KMetricsTracker:
         # ==========================================
         
         # 1. Win Rate (100-episode rolling window) - SORTS FIRST alphabetically
-        if len(self.win_rate_window) >= 10:
+        if len(self.win_rate_window) >= 1:
             win_rate = np.mean(self.win_rate_window)
-            self.writer.add_scalar('0_critical/b_win_rate_100ep', win_rate, self.episode_count)
-        
-        # 2. Episode Reward (20-episode smooth) - Training signal strength
-        if len(self.all_episode_rewards) >= 20:
-            reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=20)
-            self.writer.add_scalar('0_critical/c_episode_reward_smooth', reward_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/b_win_rate_100ep', win_rate, self.step_count)
 
-        # 3. Position Score (500-move smooth) - Phase 2+ positioning quality
-        if len(self.position_scores) >= 20:
-            position_score_smooth = self._calculate_smoothed_metric(self.position_scores, window_size=500)
-            self.writer.add_scalar('0_critical/d_position_score', position_score_smooth, self.episode_count)
+        # 2. Episode Reward (smoothed) - Training signal strength
+        if len(self.all_episode_rewards) >= 1:
+            reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=20)
+            self.writer.add_scalar('0_critical/c_episode_reward_smooth', reward_smooth, self.step_count)
+
+        # 3. Position Score (smoothed) - Phase 2+ positioning quality
+        if len(self.position_scores) >= 1:
+            position_score_smooth = self._calculate_smoothed_metric(self.position_scores, window_size=100)
+            self.writer.add_scalar('0_critical/d_position_score', position_score_smooth, self.step_count)
 
         # ==========================================
         # PPO HEALTH (5 metrics)
         # ==========================================
-        
-        # 3. Clip Fraction (20-step rolling average) - Policy update scale
-        if len(self.hyperparameter_tracking['clip_fractions']) >= 20:
+
+        # 3. Clip Fraction - Policy update scale
+        if len(self.hyperparameter_tracking['clip_fractions']) >= 1:
             clip_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['clip_fractions'], window_size=20
             )
-            self.writer.add_scalar('0_critical/f_clip_fraction', clip_smooth, self.episode_count)
-        
-        # 4. Approx KL (20-step rolling average) - Policy change magnitude
-        if len(self.hyperparameter_tracking['approx_kls']) >= 20:
+            self.writer.add_scalar('0_critical/f_clip_fraction', clip_smooth, self.step_count)
+
+        # 4. Approx KL - Policy change magnitude
+        if len(self.hyperparameter_tracking['approx_kls']) >= 1:
             kl_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['approx_kls'], window_size=20
             )
-            self.writer.add_scalar('0_critical/g_approx_kl', kl_smooth, self.episode_count)
-        
-        # 5. Explained Variance (20-step rolling average) - Value function quality
-        if len(self.hyperparameter_tracking.get('explained_variances', [])) >= 20:
+            self.writer.add_scalar('0_critical/g_approx_kl', kl_smooth, self.step_count)
+
+        # 5. Explained Variance - Value function quality
+        if len(self.hyperparameter_tracking.get('explained_variances', [])) >= 1:
             ev_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['explained_variances'], window_size=20
             )
-            self.writer.add_scalar('0_critical/e_explained_variance', ev_smooth, self.episode_count)
-        
-        # 6. Entropy Loss (20-step rolling average) - Exploration health
-        if len(self.hyperparameter_tracking['entropy_losses']) >= 20:
+            self.writer.add_scalar('0_critical/e_explained_variance', ev_smooth, self.step_count)
+
+        # 6. Entropy Loss - Exploration health
+        if len(self.hyperparameter_tracking['entropy_losses']) >= 1:
             entropy_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['entropy_losses'], window_size=20
             )
-            self.writer.add_scalar('0_critical/h_entropy_loss', entropy_smooth, self.episode_count)
-        
-        # 7. Loss Mean (combined policy + value loss, 20-step rolling average) - Training stability
-        if (len(self.hyperparameter_tracking['policy_losses']) >= 20 and 
-            len(self.hyperparameter_tracking['value_losses']) >= 20):
+            self.writer.add_scalar('0_critical/h_entropy_loss', entropy_smooth, self.step_count)
+
+        # 7. Loss Mean (combined policy + value loss) - Training stability
+        if (len(self.hyperparameter_tracking['policy_losses']) >= 1 and
+            len(self.hyperparameter_tracking['value_losses']) >= 1):
             # Calculate combined loss
             recent_policy = self.hyperparameter_tracking['policy_losses'][-20:]
             recent_value = self.hyperparameter_tracking['value_losses'][-20:]
             combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
             loss_mean = np.mean(combined_losses)
-            self.writer.add_scalar('0_critical/d_loss_mean', loss_mean, self.episode_count)
+            self.writer.add_scalar('0_critical/d_loss_mean', loss_mean, self.step_count)
         
         # ==========================================
         # TECHNICAL HEALTH (3 metrics)
@@ -686,21 +726,21 @@ class W40KMetricsTracker:
         
         # 8. Gradient Norm (direct value from latest training step) - Technical health
         if hasattr(self, 'latest_gradient_norm') and self.latest_gradient_norm is not None:
-            self.writer.add_scalar('0_critical/i_gradient_norm', self.latest_gradient_norm, self.episode_count)
+            self.writer.add_scalar('0_critical/i_gradient_norm', self.latest_gradient_norm, self.step_count)
         else:
             # Log placeholder if gradient_norm not available from stable-baselines3
             # This keeps the metric visible in TensorBoard even if SB3 doesn't log it
-            if self.episode_count == 1:
-                self.writer.add_scalar('0_critical/i_gradient_norm', 0.0, self.episode_count)
-        
+            if self.step_count <= 1:
+                self.writer.add_scalar('0_critical/i_gradient_norm', 0.0, self.step_count)
+
         # 9. Immediate Reward Ratio (calculate from reward components) - Reward composition
-        if (len(self.reward_components['base_actions']) >= 20 and 
+        if (len(self.reward_components['base_actions']) >= 20 and
             len(self.all_episode_rewards) >= 20):
             recent_base = np.mean(self.reward_components['base_actions'][-20:])
             recent_total = np.mean(self.all_episode_rewards[-20:])
             if abs(recent_total) > 0.01:
                 immediate_ratio = abs(recent_base) / abs(recent_total)
-                self.writer.add_scalar('0_critical/j_immediate_reward_ratio', immediate_ratio, self.episode_count)
+                self.writer.add_scalar('0_critical/j_immediate_reward_ratio', immediate_ratio, self.step_count)
         
         # 10. Bot Evaluation Combined Score (logged immediately in log_bot_evaluations())
         # NOTE: This metric is logged in log_bot_evaluations() to avoid duplicate/stale values
@@ -720,25 +760,25 @@ class W40KMetricsTracker:
     def log_bot_evaluations(self, bot_results: Dict[str, float]):
         """
         Log bot evaluation results to both 0_critical/ and bot_eval/ namespaces.
-        
+
         Args:
             bot_results: Dict with keys 'random', 'greedy', 'defensive', 'combined'
         """
         # Log individual bot results to bot_eval/ namespace
         if 'random' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_random', bot_results['random'], self.episode_count)
+            self.writer.add_scalar('bot_eval/vs_random', bot_results['random'], self.step_count)
         if 'greedy' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_greedy', bot_results['greedy'], self.episode_count)
+            self.writer.add_scalar('bot_eval/vs_greedy', bot_results['greedy'], self.step_count)
         if 'defensive' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_defensive', bot_results['defensive'], self.episode_count)
-        
+            self.writer.add_scalar('bot_eval/vs_defensive', bot_results['defensive'], self.step_count)
+
         # Store combined score and log immediately to both namespaces
         if 'combined' in bot_results:
             self.bot_eval_combined = bot_results['combined']
             # Log to bot_eval/ namespace
-            self.writer.add_scalar('bot_eval/combined', bot_results['combined'], self.episode_count)
+            self.writer.add_scalar('bot_eval/combined', bot_results['combined'], self.step_count)
             # Log IMMEDIATELY to 0_critical/ namespace (don't wait for next episode)
-            self.writer.add_scalar('0_critical/a_bot_eval_combined', bot_results['combined'], self.episode_count)
+            self.writer.add_scalar('0_critical/a_bot_eval_combined', bot_results['combined'], self.step_count)
     
     def _calculate_smoothed_metric(self, values: List[float], window_size: int = 20) -> float:
         """

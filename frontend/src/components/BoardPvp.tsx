@@ -66,6 +66,7 @@ type BoardProps = {
   getChargeDestinations: (unitId: number) => { col: number; row: number }[];
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // For replay mode: override available cells (green highlights)
+  objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
 };
 
 export default function Board({
@@ -118,6 +119,7 @@ export default function Board({
   getChargeDestinations,
   wallHexesOverride,
   availableCellsOverride,
+  objectivesOverride,
 }: BoardProps) {
   React.useEffect(() => {
   }, [phase, mode, selectedUnitId]);
@@ -818,13 +820,28 @@ export default function Board({
 
       // ✅ DRAW BOARD ONCE with populated availableCells
       // Override wall_hexes if wallHexesOverride is provided (for replay mode)
-      const boardConfigWithWalls = wallHexesOverride
-        ? { ...boardConfig, wall_hexes: effectiveWallHexes }
-        : boardConfig;
+      // Override objective_hexes if objectivesOverride is provided (for replay mode)
+      // Convert grouped objectives format to flat hex list for BoardDisplay
+      let effectiveObjectiveHexes: [number, number][] = boardConfig.objective_hexes || [];
+      if (objectivesOverride && objectivesOverride.length > 0) {
+        // Flatten grouped objectives: [{name, hexes: [{col,row}]}] -> [[col,row], ...]
+        effectiveObjectiveHexes = [];
+        for (const obj of objectivesOverride) {
+          for (const hex of obj.hexes) {
+            effectiveObjectiveHexes.push([hex.col, hex.row]);
+          }
+        }
+      }
+
+      const boardConfigWithOverrides = {
+        ...boardConfig,
+        wall_hexes: wallHexesOverride ? effectiveWallHexes : boardConfig.wall_hexes,
+        objective_hexes: effectiveObjectiveHexes
+      };
       // Override availableCells if availableCellsOverride is provided (for replay mode)
       const effectiveAvailableCells = availableCellsOverride || availableCells;
 
-      drawBoard(app, boardConfigWithWalls as any, {
+      drawBoard(app, boardConfigWithOverrides as any, {
         availableCells: effectiveAvailableCells,
         attackCells,
         coverCells,

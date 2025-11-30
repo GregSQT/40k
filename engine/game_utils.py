@@ -11,8 +11,11 @@ def get_unit_by_id(unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[st
     """
     AI_TURN.md COMPLIANCE: Direct lookup from game_state.
     Pure utility function - no dependencies on other modules.
+
+    CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
+    Pool unit IDs are integers, but some lookups pass strings.
     """
     for unit in game_state["units"]:
-        if unit["id"] == str(unit_id):
+        if str(unit["id"]) == str(unit_id):
             return unit
     return None

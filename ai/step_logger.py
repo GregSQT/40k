@@ -73,8 +73,8 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None):
-        """Log episode start with all unit starting positions and walls"""
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None):
+        """Log episode start with all unit starting positions, walls, and objectives"""
         if not self.enabled:
             return
 
@@ -102,6 +102,18 @@ class StepLogger:
                     f.write(f"[{timestamp}] Walls: {wall_coords}\n")
                 else:
                     f.write(f"[{timestamp}] Walls: none\n")
+
+                # Log objectives for replay - format: name:(col,row);(col,row)|name2:(col,row);...
+                if objectives:
+                    obj_strs = []
+                    for obj in objectives:
+                        name = obj.get("name", f"Obj{obj.get('id', '?')}")
+                        hexes = obj.get("hexes", [])
+                        hex_coords = ";".join([f"({h[0]},{h[1]})" for h in hexes])
+                        obj_strs.append(f"{name}:{hex_coords}")
+                    f.write(f"[{timestamp}] Objectives: {'|'.join(obj_strs)}\n")
+                else:
+                    f.write(f"[{timestamp}] Objectives: none\n")
 
                 # Log all unit starting positions
                 for unit in units_data:

@@ -124,85 +124,22 @@ def generate_steplog_and_replay(config, args):
         from ai.scenario_manager import ScenarioManager
         unit_registry = UnitRegistry()
         
-        # Generate dynamic scenario using ScenarioManager
-        scenario_manager = ScenarioManager(config, unit_registry)
-        available_templates = scenario_manager.get_available_templates()
-        
-        if not available_templates:
-            raise RuntimeError("No scenario templates available")
-        
-        # Select template from argument or find compatible one
-        if hasattr(args, 'scenario_template') and args.scenario_template:
-            if args.scenario_template not in available_templates:
-                raise ValueError(f"Scenario template '{args.scenario_template}' not found. Available templates: {available_templates}")
-            template_name = args.scenario_template
-        else:
-            # Extract agent from model filename for template matching
-            agent_name = "Bot"
-            if args.model:
-                model_filename = os.path.basename(args.model)
-                if model_filename.startswith('model_') and model_filename.endswith('.zip'):
-                    agent_name = model_filename[6:-4]  # SpaceMarine_Infantry_Troop_RangedSwar
-            
-            # Find compatible template for this agent
-            compatible_template = None
-            for template in available_templates:
-                try:
-                    template_info = scenario_manager.get_template_info(template)
-                    if agent_name in template_info.agent_compositions:
-                        compatible_template = template
-                        break
-                except:
-                    continue
-            
-            if compatible_template:
-                template_name = compatible_template
-                print(f"Found compatible template: {template_name} for agent: {agent_name}")
-            else:
-                # Try partial matching - look for similar agent patterns
-                agent_parts = agent_name.lower().split('_')
-                for template in available_templates:
-                    template_lower = template.lower()
-                    # Check if template contains key parts of agent name
-                    if any(part in template_lower for part in agent_parts[-3:]):  # Last 3 parts: Troop_RangedSwar
-                        template_name = template
-                        print(f"Using similar template: {template_name} for agent: {agent_name}")
-                        break
-                else:
-                    # Final fallback: use first template and warn user
-                    template_name = available_templates[0]
-                    print(f"WARNING: No compatible template found for agent {agent_name}")
-                    print(f"Using fallback template: {template_name}")
-                    print(f"Available templates: {available_templates}")
-        
-        # Agent name already extracted in template selection above
-        
-        # For solo scenarios, use same agent for both players
-        # For cross scenarios, use agent vs different agent
-        if "solo_" in template_name.lower():
-            player_1_agent = agent_name  # Same agent for solo scenarios
-        else:
-            # For cross scenarios, try to find a different agent
-            template_info = scenario_manager.get_template_info(template_name)
-            available_agents = list(template_info.agent_compositions.keys())
-            if len(available_agents) > 1:
-                # Use a different agent from the template
-                player_1_agent = [a for a in available_agents if a != agent_name][0]
-            else:
-                player_1_agent = agent_name  # Fallback to same agent
+        # Use actual bot scenarios instead of generating dynamic ones
+        # This ensures the scenario matches what the model was trained on
+        from ai.training_utils import get_scenario_list_for_phase
 
-        # Store template name for filename generation
-        extract_scenario_name_for_replay._current_template_name = template_name
-        
-        # Generate scenario with descriptive name
-        scenario_data = scenario_manager.generate_training_scenario(
-            template_name, agent_name, player_1_agent
-        )
-        
-        # Save temporary scenario file
-        temp_scenario_file = f"temp_{template_name}_scenario.json"
-        with open(temp_scenario_file, 'w') as f:
-            json.dump(scenario_data, f, indent=2)
+        agent_name = args.agent
+        scenario_list = get_scenario_list_for_phase(config, agent_name, "bot")
+
+        if not scenario_list:
+            raise RuntimeError(f"No bot scenarios found for agent {agent_name}")
+
+        # Use the first bot scenario
+        temp_scenario_file = scenario_list[0]
+        print(f"Using bot scenario: {os.path.basename(temp_scenario_file)}")
+
+        # Store scenario file path for replay converter
+        convert_to_replay_format._scenario_file = temp_scenario_file
         
         # Load training config to override max_turns for this environment
         # Test-only mode requires agent parameter
@@ -222,18 +159,19 @@ def generate_steplog_and_replay(config, args):
             env = W40KEngine(
                 rewards_config=args.rewards_config,
                 training_config_name=args.training_config,
-                controlled_agent=None,
+                controlled_agent=args.agent,  # Required for agent-specific rewards
                 active_agents=None,
                 scenario_file=temp_scenario_file,
                 unit_registry=unit_registry,
-                quiet=True
+                quiet=True,
+                gym_training_mode=True
             )
         finally:
             # Restore original max_turns after environment creation
             config._cache['game_config']['game_rules']['max_turns'] = original_max_turns
         
-        # Connect step logger
-        env.controller.connect_step_logger(temp_step_logger)
+        # Connect step logger directly to W40KEngine
+        env.step_logger = temp_step_logger
         model = MaskablePPO.load(model_path, env=env)
         
         # Step 3: Run test episodes with step logging
@@ -516,8 +454,11 @@ def convert_to_replay_format(steplog_data):
     board_cols, board_rows = config.get_board_size()
     board_size = [board_cols, board_rows]
     
-    # Load scenario for units data
-    scenario_file = os.path.join(config.config_dir, "scenario.json")
+    # Load scenario for units data - use stored path from generate_steplog_and_replay
+    if hasattr(convert_to_replay_format, '_scenario_file') and convert_to_replay_format._scenario_file:
+        scenario_file = convert_to_replay_format._scenario_file
+    else:
+        scenario_file = os.path.join(config.config_dir, "scenario.json")
     if not os.path.exists(scenario_file):
         raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
     

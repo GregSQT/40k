@@ -155,7 +155,7 @@ def initialize_engine():
         
         # CRITICAL FIX: Add observation_params from training_config (same as w40k_core.py line 81-94)
         obs_params = training_config.get("observation_params", {
-            "obs_size": 295,
+            "obs_size": 300,
             "perception_radius": 25,
             "max_nearby_units": 10,
             "max_valid_targets": 5
@@ -265,7 +265,7 @@ def initialize_pve_engine():
         
         # CRITICAL FIX: Add observation_params from training_config (same as w40k_core.py line 81-94)
         obs_params = training_config.get("observation_params", {
-            "obs_size": 295,
+            "obs_size": 300,
             "perception_radius": 25,
             "max_nearby_units": 10,
             "max_valid_targets": 5

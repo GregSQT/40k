@@ -180,112 +180,237 @@ class GameStateManager:
             if isinstance(scenario_data, dict):
                 if "wall_hexes" in scenario_data:
                     scenario_walls = scenario_data["wall_hexes"]
-                if "objective_hexes" in scenario_data:
+                # Support new grouped objectives structure
+                if "objectives" in scenario_data:
+                    scenario_objectives = scenario_data["objectives"]
+                # Legacy flat list support (deprecated)
+                elif "objective_hexes" in scenario_data:
                     scenario_objectives = scenario_data["objective_hexes"]
 
             # Return dict with units and optional terrain
             return {
                 "units": enhanced_units,
                 "wall_hexes": scenario_walls,
-                "objective_hexes": scenario_objectives
+                "objectives": scenario_objectives
             }
     
     # ============================================================================
     # UTILITIES
     # ============================================================================
-    
+
     def get_unit_by_id(self, unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Get unit by ID from game state."""
+        """Get unit by ID from game state.
+
+        CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
+        """
         for unit in game_state["units"]:
-            if unit["id"] == unit_id:
+            if str(unit["id"]) == str(unit_id):
                 return unit
         return None
-    
+
+    # ============================================================================
+    # OBJECTIVE CONTROL SYSTEM
+    # ============================================================================
+
+    def calculate_objective_control(self, game_state: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
+        """
+        Calculate objective control for each objective.
+
+        Win condition: Control more objectives than opponent at end of turn 5.
+        Control: Sum of OC attribute of units on objective hexes > enemy's sum.
+
+        Returns:
+            Dict[objective_id, {
+                'player_0_oc': int,  # Total OC for player 0
+                'player_1_oc': int,  # Total OC for player 1
+                'controller': int|None  # 0, 1, or None (contested/uncontrolled)
+            }]
+        """
+        objectives = game_state.get("objectives", [])
+        if not objectives:
+            return {}
+
+        result = {}
+
+        for objective in objectives:
+            obj_id = objective["id"]
+            obj_hexes = objective["hexes"]
+
+            # Convert hex list to set of tuples for fast lookup
+            hex_set = set(tuple(h) for h in obj_hexes)
+
+            # Calculate OC per player
+            player_0_oc = 0
+            player_1_oc = 0
+
+            for unit in game_state["units"]:
+                if unit["HP_CUR"] <= 0:
+                    continue  # Dead units don't control
+
+                unit_pos = (unit["col"], unit["row"])
+                if unit_pos in hex_set:
+                    oc = unit.get("OC", 1)  # Default OC=1 if not specified
+                    if unit["player"] == 0:
+                        player_0_oc += oc
+                    else:
+                        player_1_oc += oc
+
+            # Determine controller
+            controller = None
+            if player_0_oc > player_1_oc:
+                controller = 0
+            elif player_1_oc > player_0_oc:
+                controller = 1
+            # If equal (including both 0), no one controls
+
+            result[obj_id] = {
+                "player_0_oc": player_0_oc,
+                "player_1_oc": player_1_oc,
+                "controller": controller
+            }
+
+        return result
+
+    def count_controlled_objectives(self, game_state: Dict[str, Any]) -> Dict[int, int]:
+        """
+        Count objectives controlled by each player.
+
+        Returns:
+            {0: count_for_player_0, 1: count_for_player_1}
+        """
+        control_data = self.calculate_objective_control(game_state)
+
+        counts = {0: 0, 1: 0}
+        for obj_id, data in control_data.items():
+            if data["controller"] is not None:
+                counts[data["controller"]] += 1
+
+        return counts
+
     def check_game_over(self, game_state: Dict[str, Any]) -> bool:
-        """Check if game is over - unit elimination OR turn limit reached."""
-        # Check turn limit first
+        """
+        Check if game is over.
+
+        Game ends when:
+        1. Turn 5 completes (objective-based victory)
+        2. One player has no living units (elimination victory)
+        3. Turn limit reached (training config override)
+        """
+        # Check training turn limit (for RL training - may differ from standard 5 turns)
         if hasattr(self, 'training_config'):
             max_turns = self.training_config.get("max_turns_per_episode")
             if max_turns and game_state["turn"] > max_turns:
                 return True
-        
-        # Check unit elimination
+
+        # Standard W40K: Game ends after turn 5
+        # Check if we've completed turn 5 (turn counter goes to 6)
+        if game_state["turn"] > 5:
+            return True
+
+        # Check unit elimination - game over if any player has no living units
         living_units_by_player = {}
-        
+
         for unit in game_state["units"]:
             if unit["HP_CUR"] > 0:
                 player = unit["player"]
                 if player not in living_units_by_player:
                     living_units_by_player[player] = 0
                 living_units_by_player[player] += 1
-        
+
         # Game is over if any player has no living units
         return len(living_units_by_player) <= 1
     
     def determine_winner(self, game_state: Dict[str, Any]) -> Optional[int]:
-        """Determine winner based on remaining living units or turn limit. Returns -1 for draw."""
+        """
+        Determine winner based on objective control or elimination.
+
+        Victory conditions (in order of priority):
+        1. Elimination: If one player has no living units, opponent wins
+        2. Objective control: At end of turn 5, player controlling more objectives wins
+        3. Tiebreaker: If equal objectives, player with more cumulated VALUE wins
+        4. Draw: If still tied, return -1
+
+        Returns:
+            0 = Player 0 wins
+            1 = Player 1 wins
+            -1 = Draw
+            None = Game still ongoing
+        """
         living_units_by_player = {}
-        
+
         for unit in game_state["units"]:
             if unit["HP_CUR"] > 0:
                 player = unit["player"]
                 if player not in living_units_by_player:
                     living_units_by_player[player] = 0
                 living_units_by_player[player] += 1
-        
-        # DEBUG: Log winner determination details
+
         current_turn = game_state["turn"]
-        max_turns = self.training_config.get("max_turns_per_episode") if hasattr(self, 'training_config') else None
-        
+        max_turns = self.training_config.get("max_turns_per_episode") if hasattr(self, 'training_config') else 5
+
         if not self.quiet:
             print(f"\n🔍 WINNER DETERMINATION DEBUG:")
             print(f"   Current turn: {current_turn}")
             print(f"   Max turns: {max_turns}")
             print(f"   Living units: {living_units_by_player}")
-            print(f"   Has training_config: {hasattr(self, 'training_config')}")
-            if hasattr(self, 'training_config'):
-                print(f"   Turn > max_turns? {current_turn > max_turns if max_turns else 'N/A'}")
-        
-        # Check if game ended due to turn limit
-        if hasattr(self, 'training_config'):
-            max_turns = self.training_config.get("max_turns_per_episode")
-            if max_turns and game_state["turn"] > max_turns:
-                # Turn limit reached - determine winner by remaining units
-                living_players = list(living_units_by_player.keys())
-                if len(living_players) == 1:
-                    if not self.quiet:
-                        print(f"   → Winner: Player {living_players[0]} (elimination after turn limit)")
-                    return living_players[0]
-                elif len(living_players) == 2:
-                    # Both players have units - compare counts
-                    if living_units_by_player[0] > living_units_by_player[1]:
-                        if not self.quiet:
-                            print(f"   → Winner: Player 0 ({living_units_by_player[0]} > {living_units_by_player[1]} units)")
-                        return 0
-                    elif living_units_by_player[1] > living_units_by_player[0]:
-                        if not self.quiet:
-                            print(f"   → Winner: Player 1 ({living_units_by_player[1]} > {living_units_by_player[0]} units)")
-                        return 1
-                    else:
-                        if not self.quiet:
-                            print(f"   → Draw: Equal units ({living_units_by_player[0]} == {living_units_by_player[1]}) - returning -1")
-                        return -1  # Draw - equal units (use -1 to distinguish from None/ongoing)
-                else:
-                    if not self.quiet:
-                        print(f"   → Draw: Unexpected player count ({len(living_players)} players) - returning -1")
-                    return -1  # Draw - no units or other scenario
-        
-        # Normal elimination rules
+
+        # Check elimination first (immediate win condition)
         living_players = list(living_units_by_player.keys())
         if len(living_players) == 1:
+            winner = living_players[0]
             if not self.quiet:
-                print(f"   → Winner: Player {living_players[0]} (elimination)")
-            return living_players[0]
+                print(f"   → Winner: Player {winner} (elimination)")
+            return winner
         elif len(living_players) == 0:
             if not self.quiet:
-                print(f"   → Draw: No survivors - returning -1")
-            return -1  # Draw/no winner
+                print(f"   → Draw: No survivors")
+            return -1
+
+        # Check if game ended due to turn limit (turn 5 end or training config)
+        game_ended_by_turns = False
+        if hasattr(self, 'training_config') and max_turns:
+            game_ended_by_turns = current_turn > max_turns
         else:
+            game_ended_by_turns = current_turn > 5
+
+        if game_ended_by_turns:
+            # OBJECTIVE-BASED VICTORY at turn limit
+            obj_counts = self.count_controlled_objectives(game_state)
+
             if not self.quiet:
-                print(f"   → Game ongoing: {len(living_players)} players with units")
-            return None  # Game still ongoing
+                print(f"   Objective control: P0={obj_counts[0]}, P1={obj_counts[1]}")
+
+            if obj_counts[0] > obj_counts[1]:
+                if not self.quiet:
+                    print(f"   → Winner: Player 0 ({obj_counts[0]} > {obj_counts[1]} objectives)")
+                return 0
+            elif obj_counts[1] > obj_counts[0]:
+                if not self.quiet:
+                    print(f"   → Winner: Player 1 ({obj_counts[1]} > {obj_counts[0]} objectives)")
+                return 1
+            else:
+                # Tiebreaker: More cumulated VALUE of living units wins
+                p0_value = sum(u.get("VALUE", 10) for u in game_state["units"]
+                              if u["player"] == 0 and u["HP_CUR"] > 0)
+                p1_value = sum(u.get("VALUE", 10) for u in game_state["units"]
+                              if u["player"] == 1 and u["HP_CUR"] > 0)
+                if not self.quiet:
+                    print(f"   Equal objectives ({obj_counts[0]}), tiebreaker by VALUE: P0={p0_value}, P1={p1_value}")
+
+                if p0_value > p1_value:
+                    if not self.quiet:
+                        print(f"   → Winner: Player 0 (tiebreaker: {p0_value} > {p1_value} VALUE)")
+                    return 0
+                elif p1_value > p0_value:
+                    if not self.quiet:
+                        print(f"   → Winner: Player 1 (tiebreaker: {p1_value} > {p0_value} VALUE)")
+                    return 1
+                else:
+                    if not self.quiet:
+                        print(f"   → Draw: Equal objectives and VALUE")
+                    return -1
+
+        # Game still ongoing
+        if not self.quiet:
+            print(f"   → Game ongoing: turn {current_turn}, both players have units")
+        return None

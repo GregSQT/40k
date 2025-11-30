@@ -70,12 +70,21 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 base_agent_key = controlled_agent[:-len(phase_suffix)]
                 break
 
-    # MULTI-SCENARIO EVALUATION: Get all available scenarios for this phase
-    scenario_list = get_scenario_list_for_phase(config, base_agent_key, training_config_name)
+    # MULTI-SCENARIO EVALUATION: Get all available bot scenarios
+    # Bot evaluation should always use bot scenarios (not phase-specific scenarios)
+    scenario_list = get_scenario_list_for_phase(config, base_agent_key, "bot")
 
-    # If only one scenario found, fall back to old behavior
+    # If no bot scenarios found, fall back to phase-specific scenarios
     if len(scenario_list) == 0:
-        scenario_list = [get_agent_scenario_file(config, base_agent_key, training_config_name)]
+        scenario_list = get_scenario_list_for_phase(config, base_agent_key, training_config_name)
+
+    # If still nothing found, try single scenario file
+    if len(scenario_list) == 0:
+        try:
+            scenario_list = [get_agent_scenario_file(config, base_agent_key, training_config_name)]
+        except FileNotFoundError:
+            raise FileNotFoundError(f"No scenarios found for agent '{base_agent_key}'. "
+                                    f"Expected bot scenarios at config/agents/{base_agent_key}/scenarios/")
 
     # Calculate episodes per scenario (distribute evenly)
     episodes_per_scenario = max(1, n_episodes // len(scenario_list))

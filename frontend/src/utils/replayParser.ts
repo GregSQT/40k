@@ -54,7 +54,8 @@ export function parse_log_file_from_text(text: string) {
         final_result: null,
         scenario: 'Unknown',
         bot_name: 'Unknown',
-        walls: []
+        walls: [],
+        objectives: []
       };
       continue;
     }
@@ -89,6 +90,34 @@ export function parse_log_file_from_text(text: string) {
               col: parseInt(match[1]),
               row: parseInt(match[2])
             });
+          }
+        }
+      }
+      continue;
+    }
+
+    // Objectives - format: name:(col,row);(col,row)|name2:(col,row);...
+    const objectivesMatch = trimmed.match(/Objectives: (.+)/);
+    if (objectivesMatch) {
+      const objectivesStr = objectivesMatch[1];
+      if (objectivesStr !== 'none') {
+        // Parse format: name:(col,row);(col,row)|name2:(col,row);...
+        const objectiveGroups = objectivesStr.split('|');
+        for (const group of objectiveGroups) {
+          const [name, hexesStr] = group.split(':');
+          if (name && hexesStr) {
+            const hexes: { col: number; row: number }[] = [];
+            const hexCoords = hexesStr.split(';');
+            for (const coord of hexCoords) {
+              const match = coord.match(/\((\d+),(\d+)\)/);
+              if (match) {
+                hexes.push({
+                  col: parseInt(match[1]),
+                  row: parseInt(match[2])
+                });
+              }
+            }
+            currentEpisode.objectives.push({ name, hexes });
           }
         }
       }
@@ -268,6 +297,121 @@ export function parse_log_file_from_text(text: string) {
       continue;
     }
 
+    // Parse CHARGE actions
+    // Format: [timestamp] T1 P0 CHARGE : Unit 2(9, 6) CHARGED unit 8 from (7, 13) to (9, 6) [SUCCESS]
+    // Or: [timestamp] T1 P0 CHARGE : Unit 1(19, 15) WAIT [SUCCESS]
+    const chargeMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+), (\d+)\) (CHARGED|WAIT)/);
+    if (chargeMatch) {
+      const timestamp = chargeMatch[1];
+      const turn = chargeMatch[2];
+      const player = parseInt(chargeMatch[3]);
+      const unitId = parseInt(chargeMatch[4]);
+      const unitCol = parseInt(chargeMatch[5]);
+      const unitRow = parseInt(chargeMatch[6]);
+      const actionType = chargeMatch[7];
+
+      if (actionType === 'CHARGED') {
+        // Parse target unit and positions
+        const targetMatch = trimmed.match(/CHARGED unit (\d+)/);
+        const fromMatch = trimmed.match(/from \((\d+), (\d+)\)/);
+        const toMatch = trimmed.match(/to \((\d+), (\d+)\)/);
+
+        if (targetMatch && fromMatch && toMatch) {
+          const targetId = parseInt(targetMatch[1]);
+          const fromCol = parseInt(fromMatch[1]);
+          const fromRow = parseInt(fromMatch[2]);
+          const toCol = parseInt(toMatch[1]);
+          const toRow = parseInt(toMatch[2]);
+
+          currentEpisode.actions.push({
+            type: 'charge',
+            timestamp,
+            turn,
+            player,
+            unit_id: unitId,
+            target_id: targetId,
+            from: { col: fromCol, row: fromRow },
+            to: { col: toCol, row: toRow }
+          });
+
+          // Update unit position after charge
+          if (currentEpisode.units[unitId]) {
+            currentEpisode.units[unitId].col = toCol;
+            currentEpisode.units[unitId].row = toRow;
+          }
+        }
+      } else if (actionType === 'WAIT') {
+        currentEpisode.actions.push({
+          type: 'charge_wait',
+          timestamp,
+          turn,
+          player,
+          unit_id: unitId,
+          pos: { col: unitCol, row: unitRow }
+        });
+      }
+      continue;
+    }
+
+    // Parse FIGHT actions
+    // Format: [timestamp] T1 P0 FIGHT : Unit 2(9, 6) FOUGHT unit 8 - Hit:3+:2(MISS) [SUCCESS]
+    const fightMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+), (\d+)\) FOUGHT unit (\d+)/);
+    if (fightMatch) {
+      const timestamp = fightMatch[1];
+      const turn = fightMatch[2];
+      const player = parseInt(fightMatch[3]);
+      const attackerId = parseInt(fightMatch[4]);
+      const attackerCol = parseInt(fightMatch[5]);
+      const attackerRow = parseInt(fightMatch[6]);
+      const targetId = parseInt(fightMatch[7]);
+
+      // Parse combat details - Hit:3+:2(MISS/HIT) Wound:4+:5(SUCCESS/FAIL) Save:3+:2(FAIL) Dmg:1HP
+      const hitMatch = trimmed.match(/Hit:(\d+)\+:(\d+)\((HIT|MISS)\)/);
+      const woundMatch = trimmed.match(/Wound:(\d+)\+:(\d+)\((SUCCESS|WOUND|FAIL)\)/);
+      const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)\((FAIL|SAVED?)\)/);
+      const dmgMatch = trimmed.match(/Dmg:(\d+)HP/);
+
+      const action: any = {
+        type: 'fight',
+        timestamp,
+        turn,
+        player,
+        attacker_id: attackerId,
+        attacker_pos: { col: attackerCol, row: attackerRow },
+        target_id: targetId,
+        damage: dmgMatch ? parseInt(dmgMatch[1]) : 0
+      };
+
+      // Add detailed combat rolls if available
+      if (hitMatch) {
+        action.hit_target = parseInt(hitMatch[1]);
+        action.hit_roll = parseInt(hitMatch[2]);
+        action.hit_result = hitMatch[3];
+      }
+      if (woundMatch) {
+        action.wound_target = parseInt(woundMatch[1]);
+        action.wound_roll = parseInt(woundMatch[2]);
+        action.wound_result = woundMatch[3];
+      }
+      if (saveMatch) {
+        action.save_target = parseInt(saveMatch[1]);
+        action.save_roll = parseInt(saveMatch[2]);
+        action.save_result = saveMatch[3];
+      }
+
+      currentEpisode.actions.push(action);
+
+      // Apply damage to target unit
+      const damage = action.damage || 0;
+      if (damage > 0 && currentEpisode.units[targetId]) {
+        currentEpisode.units[targetId].HP_CUR -= damage;
+        if (currentEpisode.units[targetId].HP_CUR < 0) {
+          currentEpisode.units[targetId].HP_CUR = 0;
+        }
+      }
+      continue;
+    }
+
     // Parse EPISODE END line
     const episodeEndMatch = trimmed.match(/EPISODE END: Winner=(-?\d+)/);
     if (episodeEndMatch) {
@@ -307,6 +451,7 @@ export function parse_log_file_from_text(text: string) {
     const initialState = {
       units: initialUnits,
       walls: episode.walls || [],
+      objectives: episode.objectives || [],
       currentTurn: 1,
       currentPlayer: 0,
       phase: 'move'
@@ -341,6 +486,13 @@ export function parse_log_file_from_text(text: string) {
           currentUnits[unitId].col = action.to.col;
           currentUnits[unitId].row = action.to.row;
         }
+      } else if (action.type === 'charge' && action.unit_id) {
+        // Handle charge actions - update unit position
+        const unitId = action.unit_id;
+        if (currentUnits[unitId] && action.to) {
+          currentUnits[unitId].col = action.to.col;
+          currentUnits[unitId].row = action.to.row;
+        }
       } else if (action.type === 'shoot' && action.target_id !== undefined) {
         // Handle shoot actions (even if damage is 0)
         const targetId = action.target_id;
@@ -348,7 +500,30 @@ export function parse_log_file_from_text(text: string) {
 
         if (currentUnits[targetId]) {
           const wasAlive = currentUnits[targetId].HP_CUR > 0;
-          const hpBefore = currentUnits[targetId].HP_CUR;
+
+          // Apply damage
+          if (damage > 0) {
+            currentUnits[targetId].HP_CUR -= damage;
+            if (currentUnits[targetId].HP_CUR < 0) {
+              currentUnits[targetId].HP_CUR = 0;
+            }
+          }
+
+          const hpAfter = currentUnits[targetId].HP_CUR;
+
+          // Check if unit was just killed
+          if (hpAfter <= 0 && wasAlive) {
+            currentUnits[targetId].isJustKilled = true;
+            unitsToRemove.add(targetId);
+          }
+        }
+      } else if (action.type === 'fight' && action.target_id !== undefined) {
+        // Handle fight actions - same damage logic as shoot
+        const targetId = action.target_id;
+        const damage = action.damage || 0;
+
+        if (currentUnits[targetId]) {
+          const wasAlive = currentUnits[targetId].HP_CUR > 0;
 
           // Apply damage
           if (damage > 0) {
@@ -368,6 +543,18 @@ export function parse_log_file_from_text(text: string) {
         }
       }
 
+      // Determine phase from action type
+      let phase = 'move';
+      if (action.type.includes('move')) {
+        phase = 'move';
+      } else if (action.type.includes('shoot')) {
+        phase = 'shoot';
+      } else if (action.type.includes('charge')) {
+        phase = 'charge';
+      } else if (action.type.includes('fight')) {
+        phase = 'fight';
+      }
+
       // Create state with current units (including just-killed units with flag preserved)
       const stateUnits = Object.values(currentUnits).map(u => {
         const unitCopy = { ...u };
@@ -381,9 +568,10 @@ export function parse_log_file_from_text(text: string) {
       states.push({
         units: stateUnits,
         walls: episode.walls || [],
+        objectives: episode.objectives || [],
         currentTurn: 1,
         currentPlayer: action.player,
-        phase: action.type.includes('move') ? 'move' : action.type.includes('shoot') ? 'shoot' : 'move',
+        phase,
         action
       });
     }

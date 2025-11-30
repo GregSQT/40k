@@ -42,10 +42,14 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "action_logs" not in game_state:
             game_state["action_logs"] = []
         
+        # AI_TURN.md COMPLIANCE: Direct field access with validation
+        if "turn" not in game_state:
+            raise KeyError("game_state missing required 'turn' field for wait action logging")
+
         game_state["action_logs"].append({
             "type": "wait",
             "message": f"Unit {unit_id} ({unit['col']}, {unit['row']}) WAIT",
-            "turn": game_state.get("current_turn", 1),
+            "turn": game_state["turn"],
             "phase": game_state["phase"],
             "unitId": unit_id,
             "col": unit["col"],

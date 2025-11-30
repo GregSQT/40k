@@ -144,7 +144,7 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name, scenari
         config: ConfigLoader instance
         agent_key: Agent identifier (e.g., 'SpaceMarine_Infantry_Troop_RangedSwarm')
         training_config_name: Phase name (e.g., 'phase1', 'phase2')
-        scenario_type: Optional filter for specific scenario type (e.g., '1', '2', '3')
+        scenario_type: Optional filter for specific scenario type (e.g., 'bot', 'self', '1')
 
     Returns:
         List of scenario file paths
@@ -158,26 +158,29 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name, scenari
     if not os.path.isdir(scenarios_dir):
         return scenarios
 
-    # Pattern: AgentName_scenario_phase1.json OR AgentName_scenario_phase1-1.json
-    # For phase1: Find phase1.json, phase1-1.json, phase1-2.json, etc.
-    pattern = f"{agent_key}_scenario_{training_config_name}*.json"
-    matching_files = glob.glob(os.path.join(scenarios_dir, pattern))
-
-    # Filter by scenario type if specified
-    if scenario_type:
-        # scenario_type like "bot" matches "phase1-bot1", "phase1-bot2", etc.
-        # scenario_type like "self" matches "phase1-self1", "phase1-self2", etc.
-        # scenario_type like "1" matches "phase1-1", etc.
-        filtered = []
-        for f in matching_files:
-            basename = os.path.basename(f)
-            # Match pattern: phase1-bot1, phase1-bot2, phase1-self1, phase1-1, etc.
-            # Check if the scenario type appears after the phase name with a hyphen
-            if f"-{scenario_type}" in basename:
-                filtered.append(f)
-        scenarios = filtered
-    else:
+    # For "bot" and "self" scenario types, search independently of training config
+    # This allows: AgentName_scenario_bot1.json, AgentName_scenario_bot2.json, etc.
+    if scenario_type in ("bot", "self"):
+        # Pattern: AgentName_scenario_bot*.json (independent of training config)
+        pattern = f"{agent_key}_scenario_{scenario_type}*.json"
+        matching_files = glob.glob(os.path.join(scenarios_dir, pattern))
         scenarios = matching_files
+    else:
+        # Original behavior: Pattern includes training config
+        # AgentName_scenario_phase1.json OR AgentName_scenario_phase1-1.json
+        pattern = f"{agent_key}_scenario_{training_config_name}*.json"
+        matching_files = glob.glob(os.path.join(scenarios_dir, pattern))
+
+        # Filter by scenario type if specified (for numbered scenarios like "1", "2")
+        if scenario_type:
+            filtered = []
+            for f in matching_files:
+                basename = os.path.basename(f)
+                if f"-{scenario_type}" in basename:
+                    filtered.append(f)
+            scenarios = filtered
+        else:
+            scenarios = matching_files
 
     # Sort to ensure deterministic order
     scenarios = sorted(scenarios)

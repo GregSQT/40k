@@ -32,6 +32,14 @@ interface ReplayAction {
   save_roll?: number;
   save_target?: number;
   reward?: number;
+  // Fight action fields
+  attacker_id?: number;
+  attacker_pos?: { col: number; row: number };
+  hit_target?: number;
+  hit_result?: string;
+  wound_target?: number;
+  wound_result?: string;
+  save_result?: string;
 }
 
 interface ReplayEpisode {
@@ -296,12 +304,14 @@ export const BoardReplay: React.FC = () => {
           action.from.row,
           action.to.col,
           action.to.row,
-          turnNumber
+          turnNumber,
+          action.player
         );
       } else if (action.type === 'move_wait' && action.pos) {
         gameLog.logNoMoveAction(
           { id: action.unit_id!, name: `Unit ${action.unit_id}` } as any,
-          turnNumber
+          turnNumber,
+          action.player
         );
       } else if (action.type === 'shoot') {
         // Parse shooting details from log format to match PvP mode
@@ -394,6 +404,110 @@ export const BoardReplay: React.FC = () => {
             turnNumber: turnNumber,
             phase: 'shooting',
             player: action.player  // Use acting player (shooter), not target's player
+          });
+        }
+      } else if (action.type === 'charge' && action.from && action.to) {
+        // Handle charge actions
+        const unitId = action.unit_id!;
+        const targetId = action.target_id;
+
+        gameLog.addEvent({
+          type: 'charge',
+          message: `Unit ${unitId} CHARGED unit ${targetId} from (${action.from.col}, ${action.from.row}) to (${action.to.col}, ${action.to.row})`,
+          unitId: unitId,
+          targetId: targetId,
+          turnNumber: turnNumber,
+          phase: 'charge',
+          player: action.player,
+          startHex: `(${action.from.col}, ${action.from.row})`,
+          endHex: `(${action.to.col}, ${action.to.row})`
+        });
+      } else if (action.type === 'charge_wait') {
+        // Handle charge wait actions
+        const unitId = action.unit_id!;
+        gameLog.addEvent({
+          type: 'move',  // Use move type for display consistency
+          message: `Unit ${unitId} chose not to charge`,
+          unitId: unitId,
+          turnNumber: turnNumber,
+          phase: 'charge',
+          player: action.player
+        });
+      } else if (action.type === 'fight') {
+        // Handle fight actions
+        const attackerId = action.attacker_id!;
+        const targetId = action.target_id!;
+        const attackerPos = action.attacker_pos || { col: 0, row: 0 };
+
+        // Build message based on combat results
+        let message = `Unit ${attackerId} (${attackerPos.col}, ${attackerPos.row}) FOUGHT Unit ${targetId}`;
+        if (action.hit_roll !== undefined) {
+          const hitResult = action.hit_result || (action.hit_roll >= (action.hit_target || 3) ? 'HIT' : 'MISS');
+          message += ` : Hit ${action.hit_roll}(${action.hit_target || 3}+)`;
+          if (hitResult === 'HIT' && action.wound_roll !== undefined) {
+            const woundResult = action.wound_result || (action.wound_roll >= (action.wound_target || 4) ? 'WOUND' : 'FAIL');
+            message += ` - Wound ${action.wound_roll}(${action.wound_target || 4}+)`;
+            if (woundResult === 'WOUND' || woundResult === 'SUCCESS') {
+              if (action.save_roll !== undefined) {
+                message += ` - Save ${action.save_roll}(${action.save_target || 6}+)`;
+              }
+              if (action.damage && action.damage > 0) {
+                message += ` - ${action.damage} DAMAGE DELT !`;
+              }
+            } else {
+              message += ` : FAILED !`;
+            }
+          } else if (hitResult === 'MISS') {
+            message += ` : FAILED !`;
+          }
+        }
+
+        // Get target info for death check
+        const stateAfterAction = currentEpisode.states[i];
+        const target = stateAfterAction?.units?.find((u: any) => u.id === targetId);
+        const stateBeforeAction = i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
+        const targetBefore = stateBeforeAction?.units?.find((u: any) => u.id === targetId);
+        const hpBefore = targetBefore ? (targetBefore as any).HP_CUR : 0;
+        const hpAfter = target ? (target as any).HP_CUR : 0;
+        const targetDied = hpBefore > 0 && hpAfter <= 0;
+
+        // Build shootDetails for color coding
+        const fightDetails = action.hit_roll !== undefined ? [{
+          shotNumber: 1,
+          attackRoll: action.hit_roll,
+          strengthRoll: action.wound_roll || 0,
+          hitResult: action.hit_result || 'MISS',
+          strengthResult: action.wound_result || 'FAILED',
+          saveRoll: action.save_roll,
+          saveTarget: action.save_target,
+          saveSuccess: action.save_roll !== undefined && action.save_target ? action.save_roll >= action.save_target : false,
+          damageDealt: action.damage || 0
+        }] : undefined;
+
+        gameLog.addEvent({
+          type: 'combat',
+          message,
+          unitId: attackerId,
+          targetId: targetId,
+          turnNumber: turnNumber,
+          phase: 'fight',
+          player: action.player,
+          shootDetails: fightDetails,
+          is_ai_action: action.player === 0,
+          reward: action.reward,
+          action_name: 'fight'
+        } as any);
+
+        // Add death event if target died
+        if (targetDied && target) {
+          const targetType = (target as any).type || 'Unknown';
+          gameLog.addEvent({
+            type: 'death',
+            message: `Unit ${targetId} (${targetType}) was DESTROYED!`,
+            unitId: targetId,
+            turnNumber: turnNumber,
+            phase: 'fight',
+            player: action.player
           });
         }
       }
@@ -651,6 +765,7 @@ export const BoardReplay: React.FC = () => {
       shootingUnitId={shootingUnitId}
       movingUnitId={movingUnitId}
       wallHexesOverride={currentState.walls}
+      objectivesOverride={currentState.objectives}
     />
   ) : (
     <div className="replay-empty-state">

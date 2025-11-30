@@ -6,7 +6,13 @@ ai/train.py - Main training script following AI_INSTRUCTIONS.md exactly
 
 import os
 import sys
+import io
 import argparse
+
+# Fix Windows encoding for emoji/Unicode output with line buffering
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 import subprocess
 import json
 import numpy as np
@@ -48,6 +54,7 @@ from config_loader import get_config_loader
 from ai.game_replay_logger import GameReplayIntegration
 import torch
 import time  # Add time import for StepLogger timestamps
+from tqdm import tqdm  # For episode progress bar
 import gymnasium as gym  # For SelfPlayWrapper to inherit from gym.Wrapper
 
 # Environment wrappers (extracted to ai/env_wrappers.py)
@@ -789,7 +796,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         model = MaskablePPO(env=env, **model_params_copy)
     
     # Import metrics tracker
-    from metrics_tracker import W40KMetricsTracker
+    from ai.metrics_tracker import W40KMetricsTracker
 
     # Initialize frozen model for self-play
     # The frozen model is a copy of the learning model used by Player 1
@@ -811,32 +818,35 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # Create metrics tracker for entire rotation training
     metrics_tracker = W40KMetricsTracker(agent_key, model_tensorboard_dir)
     # print(f"📈 Metrics tracking enabled for agent: {agent_key}")
-    
+
     # Create metrics callback ONCE before loop (not inside it)
     from stable_baselines3.common.callbacks import CallbackList
     metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=effective_agent_key)
-    
+
     # Training loop with scenario rotation
     episodes_trained = 0
     cycle = 0
     scenario_idx = 0
 
-    # Global start time for accurate elapsed time tracking across rotations
+    # Global start time for callbacks
     global_start_time = time.time()
+
+    # Progress bar is handled by EpisodeTerminationCallback (shows cycle/scenario info)
 
     while episodes_trained < total_episodes:
         current_scenario = scenario_list[scenario_idx]
         scenario_name = os.path.basename(current_scenario).replace(f"{agent_key}_scenario_", "").replace(".json", "")
-        
+
         # Calculate episodes for this iteration
         episodes_remaining = total_episodes - episodes_trained
         episodes_this_iteration = min(rotation_interval, episodes_remaining)
 
         # EPISODE-BASED ROTATION FIX: Calculate generous timestep budget
         # The EpisodeTerminationCallback will stop at exact episode count
-        # We provide 2x the estimated timesteps to ensure we never run out
-        # (callback stops training when episodes_this_iteration is reached)
-        timesteps_this_iteration = int(episodes_this_iteration * avg_steps_per_episode * 2.0)
+        # CRITICAL: Must be at least 2*n_steps so PPO completes at least one update cycle
+        # We use 4x n_steps to give plenty of buffer for episode variation
+        n_steps = training_config["model_params"]["n_steps"]
+        timesteps_this_iteration = n_steps * 4
         
         # Create new environment with current scenario
         base_env = W40KEngine(
@@ -903,15 +913,16 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         
         # Train on this scenario
         # CRITICAL: reset_num_timesteps=False keeps TensorBoard graph continuous
+        # NOTE: SB3 internally adds num_timesteps to total_timesteps when reset=False
         model.learn(
             total_timesteps=timesteps_this_iteration,
             reset_num_timesteps=(episodes_trained == 0),  # Only reset on first iteration
             tb_log_name=tb_log_name,  # Same name = continuous graph
-            callback=enhanced_callbacks,  # ← CHANGE FROM rotation_callbacks
+            callback=enhanced_callbacks,
             log_interval=timesteps_this_iteration + 1,
-            progress_bar=False
+            progress_bar=False  # Disabled - using episode-based progress below
         )
-        
+
         # Log per-scenario performance after training on this scenario
         if hasattr(metrics_tracker, 'all_episode_rewards') and len(metrics_tracker.all_episode_rewards) > 0:
             # Get rewards from this cycle (last episodes_this_iteration episodes)
@@ -940,7 +951,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         
         # Clean up old environment
         env.close()
-    
+
     # Final save
     model.save(model_path)
     print(f"\n{'='*80}")
@@ -1120,7 +1131,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
     """Execute the training process with metrics tracking."""
     
     # Import metrics tracker
-    from metrics_tracker import W40KMetricsTracker
+    from ai.metrics_tracker import W40KMetricsTracker
     
     # Extract agent name from model path for metrics
     agent_name = "default_agent"
@@ -1195,7 +1206,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
             tb_log_name=tb_log_name,
             callback=enhanced_callbacks,
             log_interval=total_timesteps + 1,
-            progress_bar=False  # Disable step-based progress bar (using episode-based instead)
+            progress_bar=False  # Disabled - scenario mode uses episode-based progress
         )
         
         # Print final training summary with critical metrics and bot evaluation
@@ -1507,8 +1518,18 @@ def main():
             W40KEngine, _ = setup_imports()
             from ai.unit_registry import UnitRegistry
             cfg = get_config_loader()
-            scenario_file = get_agent_scenario_file(cfg, args.agent, args.training_config)
             unit_registry = UnitRegistry()
+
+            # Handle --scenario bot flag for test-only mode
+            if args.scenario == "bot":
+                # Use bot scenarios - get first one from the list
+                scenario_list = get_scenario_list_for_phase(cfg, args.agent, "bot")
+                if not scenario_list:
+                    raise FileNotFoundError(f"No bot scenarios found for agent '{args.agent}'")
+                scenario_file = scenario_list[0]
+                print(f"📋 Using bot scenario: {os.path.basename(scenario_file)}")
+            else:
+                scenario_file = get_agent_scenario_file(cfg, args.agent, args.training_config)
             
             # CRITICAL FIX: Use rewards_config for controlled_agent (includes phase suffix)
             effective_agent_key = args.rewards_config if args.rewards_config else args.agent
@@ -1582,8 +1603,8 @@ def main():
                 # NO FALLBACKS - if no scenarios found, ERROR
                 if len(scenario_list) == 0:
                     raise FileNotFoundError(
-                        f"No {scenario_type_name} scenarios found for {args.training_config}. "
-                        f"Expected files matching: {args.agent}_scenario_{args.training_config}-{'self' if scenario_type_name == 'self-play' else 'bot'}*.json"
+                        f"No {scenario_type_name} scenarios found. "
+                        f"Expected files matching: {args.agent}_scenario_{'self' if scenario_type_name == 'self-play' else 'bot'}*.json"
                     )
 
                 print(f"📋 Found {len(scenario_list)} {scenario_type_name} scenario(s):")
@@ -1600,7 +1621,12 @@ def main():
                     training_config = config.load_agent_training_config(args.agent, args.training_config)
                     if "total_episodes" not in training_config:
                         raise KeyError(f"total_episodes missing from {args.agent} training config phase {args.training_config}")
-                    total_episodes = training_config["total_episodes"]
+                    # CLI argument takes priority over config
+                    if args.total_episodes is not None:
+                        total_episodes = args.total_episodes
+                        print(f"📊 Using total_episodes from CLI: {total_episodes}")
+                    else:
+                        total_episodes = training_config["total_episodes"]
                     
                     # Determine rotation interval
                     config_rotation = training_config.get("rotation_interval", None)

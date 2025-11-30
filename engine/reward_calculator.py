@@ -286,7 +286,7 @@ class RewardCalculator:
         elif action_type == "charge" and "targetId" in result:
             target = get_unit_by_id(str(result["targetId"]), game_state)
             enriched_target = self._enrich_unit_for_reward_mapper(target)
-            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit)]
+            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
             charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets)
             reward_breakdown['base_actions'] = charge_reward
             reward_breakdown['total'] = charge_reward
@@ -301,21 +301,22 @@ class RewardCalculator:
             game_state['last_reward_breakdown'] = reward_breakdown
             return charge_reward
             
-        elif action_type == "fight" and "targetId" in result:
+        elif action_type in ("fight", "combat") and "targetId" in result:
+            # "combat" is the step_logger action type, "fight" is the legacy name
             target = get_unit_by_id(str(result["targetId"]), game_state)
             enriched_target = self._enrich_unit_for_reward_mapper(target)
-            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit)]
+            all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
             fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets)
             reward_breakdown['base_actions'] = fight_reward
             reward_breakdown['total'] = fight_reward
-            
+
             # CRITICAL FIX: Add situational reward if game ended
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
                 reward_breakdown['situational'] = situational_reward
                 fight_reward += situational_reward
                 reward_breakdown['total'] = fight_reward
-            
+
             game_state['last_reward_breakdown'] = reward_breakdown
             return fight_reward
             
@@ -329,17 +330,34 @@ class RewardCalculator:
             reward_breakdown['base_actions'] = wait_reward
             reward_breakdown['penalties'] = wait_reward
             reward_breakdown['total'] = wait_reward
-            
+
             # CRITICAL FIX: Add situational reward if game ended
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
                 reward_breakdown['situational'] = situational_reward
                 wait_reward += situational_reward
                 reward_breakdown['total'] = wait_reward
-            
+
             game_state['last_reward_breakdown'] = reward_breakdown
             return wait_reward
-        
+
+        elif action_type == "pass":
+            # Pass action in fight phase - unit had no valid targets to attack
+            # Treat same as wait (no reward, no penalty)
+            pass_reward = 0.0
+            reward_breakdown['base_actions'] = pass_reward
+            reward_breakdown['total'] = pass_reward
+
+            # CRITICAL FIX: Add situational reward if game ended
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                pass_reward += situational_reward
+                reward_breakdown['total'] = pass_reward
+
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return pass_reward
+
         # NO FALLBACK - Raise error to identify missing action types
         raise ValueError(f"Unhandled action type '{action_type}' in _calculate_reward. Result: {result}")
     
@@ -547,14 +565,24 @@ class RewardCalculator:
         # Load agent-specific FULL rewards config to access system_penalties
         config_loader = get_config_loader()
         full_rewards_config = config_loader.load_agent_rewards_config(base_agent_key)
-        
-        if "system_penalties" not in full_rewards_config:
+
+        # The rewards config has nested structure: {"AgentKey": {"system_penalties": {...}}}
+        # First get the agent-specific section
+        if base_agent_key not in full_rewards_config:
             raise KeyError(
-                f"Missing required 'system_penalties' section in {controlled_agent}_rewards_config.json. "
+                f"Missing agent section '{base_agent_key}' in {base_agent_key}_rewards_config.json. "
+                f"Available keys: {list(full_rewards_config.keys())}"
+            )
+
+        agent_rewards = full_rewards_config[base_agent_key]
+
+        if "system_penalties" not in agent_rewards:
+            raise KeyError(
+                f"Missing required 'system_penalties' section in {base_agent_key}_rewards_config.json['{base_agent_key}']. "
                 "Required structure: {'system_penalties': {'forbidden_action': -1.0, 'invalid_action': -0.9, 'generic_error': -0.1, "
                 "'system_response': 0.0}}"
             )
-        return full_rewards_config["system_penalties"]
+        return agent_rewards["system_penalties"]
     
     # ============================================================================
     # TACTICAL CONTEXT
@@ -1462,6 +1490,21 @@ class RewardCalculator:
         except ValueError as e:
             # AI_TURN.md COMPLIANCE: NO FALLBACKS - propagate the error
             raise ValueError(f"Failed to get reward config key for unit type '{unit_type}': {e}")
+
+    def _get_all_valid_targets(self, acting_unit: Dict[str, Any], game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Get all valid enemy targets for the acting unit."""
+        if not acting_unit or not game_state:
+            return []
+
+        targets = []
+        acting_player = acting_unit.get("player")
+
+        for unit in game_state.get("units", []):
+            # Enemy units that are alive
+            if unit.get("player") != acting_player and unit.get("HP_CUR", 0) > 0:
+                targets.append(unit)
+
+        return targets
 
     # ============================================================================
     # POSITION SCORE CALCULATION (Phase 2 Movement Rewards)

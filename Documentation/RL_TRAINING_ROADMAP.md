@@ -150,35 +150,45 @@ python ai/train.py \
 
 ### The Minimal Reward Approach (RECOMMENDED)
 
-**Only 3 reward signals:**
+**Only 5 reward signals (CANONICAL CONFIG):**
 
 ```json
 {
   "base_actions": {
-    "ranged_attack": 3.0
+    "ranged_attack": 3.0,
+    "melee_attack": 3.0,
+    "charge_success": 3.0
   },
   "result_bonuses": {
-    "damage_target": 6.0,
     "kill_target": 30.0
   },
-  "situational": {
-    "win_bonus": 1000.0,
-    "loss_penalty": -1000.0
+  "situational_modifiers": {
+    "win": 100.0,
+    "lose": -100.0
+  },
+  "system_penalties": {
+    "forbidden_action": -1.0,
+    "invalid_action": -0.5
   }
 }
 ```
 
+**Why equal combat rewards (3.0 each)?**
+- Unit stats (RNG_DMG, CC_DMG) already encode melee vs ranged preference
+- Agent naturally prefers higher-damage attacks based on observation
+- Unequal rewards would force specific behavior instead of letting agent learn
+
 **What's NOT rewarded (agent learns from game state):**
+- ❌ `hit_target`, `wound_target`, `damage_target` - too granular, kill reward is sufficient
 - ❌ Positioning (agent sees walls, LOS in observation)
 - ❌ Objective control (agent sees objectives, learns from win condition)
-- ❌ Survival (agent learns from losing when units die)
-- ❌ Movement quality (agent learns from positioning outcomes)
+- ❌ Target selection bonuses (agent learns from kill outcomes)
 
 **Why this works:**
-1. **Win condition includes objectives** → Agent learns to control them
-2. **Observation includes position data** → Agent learns good positioning
-3. **Kill rewards prevent passivity** → Agent learns combat is necessary
-4. **Only 3 values to tune** → No reward balancing nightmare
+1. **Combat rewards encourage engagement** → Prevents passive waiting
+2. **Kill reward provides clear outcome signal** → Agent learns what leads to kills
+3. **Win/loss provides ultimate objective** → Strategy emerges from winning
+4. **Only 5 values to tune** → No reward balancing nightmare
 
 ---
 
@@ -204,25 +214,31 @@ python ai/train.py \
 
 ### Reward Values Guidelines
 
-**Combat rewards (proven values):**
-- `ranged_attack`: 3.0 (basic shooting action)
-- `hit_target`: 1.2 (landed shot)
-- `wound_target`: 3.0 (passed wound roll)
-- `damage_target`: 6.0 (dealt damage)
-- `kill_target`: 30.0 (eliminated unit)
+**CANONICAL minimal config (use this):**
+- `ranged_attack`: 3.0 (shooting action)
+- `melee_attack`: 3.0 (fight phase attack)
+- `charge_success`: 3.0 (successful charge)
+- `kill_target`: 30.0 (eliminated unit - ANY phase)
+- `win`: 100.0 (episode victory)
+- `lose`: -100.0 (episode defeat)
 
-**Outcome rewards:**
-- `win_bonus`: 1000.0 (episode victory)
-- `loss_penalty`: -1000.0 (episode defeat)
+**System penalties (always include):**
+- `forbidden_action`: -1.0 (action not allowed in current phase)
+- `invalid_action`: -0.5 (malformed action)
 
-**Optional shaping (add only if needed):**
-- `objective_control`: 10.0 (per turn per objective)
-- `move_to_objective`: 2.0 (movement toward objective)
+**REMOVED from minimal config:**
+- ~~`hit_target`: 1.2~~ - Too granular
+- ~~`wound_target`: 3.0~~ - Too granular
+- ~~`damage_target`: 6.0~~ - Too granular (kill is enough)
+- ~~`target_type_bonuses`~~ - Agent should learn from experience
+- ~~`no_overkill`~~ - Strategy shaping, let agent discover
+- ~~`move_*` rewards~~ - Positioning from game outcomes
 
 **Avoid:**
 - ❌ Negative rewards for valid actions (encourages passivity)
-- ❌ Rewards for intermediate steps agent should discover
+- ❌ Intermediate step rewards (hit/wound/damage)
 - ❌ Complex reward formulas (agent exploits them)
+- ❌ Target-specific bonuses (agent overfits to those targets)
 
 ---
 
@@ -371,14 +387,36 @@ python ai/train.py \
    - If >500 → Reduce learning_rate
    - If >1000 → Training unstable, check for bugs
 
-5. **Objectives controlled per game** (Task-specific)
-   - Should increase over training
-   - If flat → Agent ignoring objectives (add objective reward)
+5. **Combat effectiveness metrics** (Phase-specific learning)
+   - `combat/shoot_kills`: Is agent killing with ranged attacks?
+   - `combat/melee_kills`: Is agent killing in fight phase?
+   - `combat/charge_successes`: Is agent learning to charge?
 
 **Ignore during early training:**
 - Clip fraction (low is OK if training progresses)
 - Explained variance (improves naturally with training)
 - Approx KL (PPO handles this automatically)
+
+---
+
+### Bot Hierarchy (for evaluation)
+
+**Use these bots to measure agent progress:**
+
+| Bot | Difficulty | Behavior | Target Win Rate |
+|-----|-----------|----------|-----------------|
+| RandomBot | Easy | Random actions, always shoots when available | >80% |
+| GreedyBot | Medium | Shoots first, moves toward enemies, targets low HP | >60% |
+| DefensiveBot | Medium | Shoots first, maintains distance, retreats when threatened | >50% |
+| TacticalBot | Hard | Full phase awareness, optimal decisions, smart targeting | >40% |
+
+**TacticalBot capabilities:**
+- MOVE: Advances if out of range, retreats if wounded
+- SHOOT: Always shoots, prioritizes killable/wounded/threatening targets
+- CHARGE: Charges if melee is advantageous (high CC_DMG vs target HP)
+- FIGHT: Always fights, same targeting as shooting
+
+**Agent should beat TacticalBot >40% to be considered competent**
 
 ---
 

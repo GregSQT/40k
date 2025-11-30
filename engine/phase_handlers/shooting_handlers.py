@@ -19,15 +19,22 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     AI_Shooting_Phase.md EXACT: Initialize shooting phase and build activation pool
     """
+    global _target_pool_cache
+
     # Set phase
     game_state["phase"] = "shoot"
-    
+
+    # CRITICAL: Clear target pool cache at phase start - targets may have moved
+    # The cache key only includes shooter position, not target positions
+    # So stale cache entries could allow shooting blocked targets
+    _target_pool_cache.clear()
+
     # AI_TURN.md COMPLIANCE: Reset SHOOT_LEFT for all units at phase start
     current_player = game_state["current_player"]
     for unit in game_state["units"]:
         if unit["player"] == current_player and unit["HP_CUR"] > 0:
             unit["SHOOT_LEFT"] = unit["RNG_NB"]
-    
+
     # PERFORMANCE: Build LoS cache once at phase start (10-100x speedup)
     _build_shooting_los_cache(game_state)
     
@@ -281,10 +288,8 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     EXACT COPY from w40k_engine_save.py working validation with proper LoS
     PERFORMANCE: Uses LoS cache for instant lookups (0.001ms vs 5-10ms)
     """
-    # Enable debug ONLY in debug training config
-    # FIXED: Correct path - training_config_name is stored directly in game_state
-    training_config_name = game_state.get("training_config_name", "")
-    debug_mode = training_config_name == "debug"
+    # Disable debug prints entirely for training performance
+    debug_mode = False
     
     # Range check using proper hex distance
     distance = _calculate_hex_distance(shooter["col"], shooter["row"], target["col"], target["row"])
@@ -624,10 +629,10 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
     """
     start_col, start_row = shooter["col"], shooter["row"]
     end_col, end_row = target["col"], target["row"]
-    
+
     # Try multiple sources for wall hexes
     wall_hexes_data = []
-    
+
     # Source 1: Direct in game_state
     if "wall_hexes" in game_state:
         wall_hexes_data = game_state["wall_hexes"]
@@ -1466,6 +1471,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     
     return {
         "action": "shot_executed",
+        "phase": "shoot",  # For metrics tracking
         "shooterId": unit_id,
         "targetId": target_id,
         "attack_result": attack_result,
@@ -1664,9 +1670,12 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
     return False
 
 def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
-    """Get unit by ID from game state."""
+    """Get unit by ID from game state.
+
+    CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
+    """
     for unit in game_state["units"]:
-        if unit["id"] == unit_id:
+        if str(unit["id"]) == str(unit_id):
             return unit
     return None
 

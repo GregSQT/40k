@@ -577,6 +577,12 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     start_col, start_row = unit["col"], unit["row"]
     start_pos = (start_col, start_row)
 
+    # DEBUG: Log board size ONCE per game (disabled by default)
+    _DEBUG_MOVEMENT = False  # Set to True to enable
+    if _DEBUG_MOVEMENT and not game_state.get("_board_size_logged"):
+        print(f"\n[MOVE DEBUG] Board size: {game_state.get('board_cols', 'MISSING')}x{game_state.get('board_rows', 'MISSING')}")
+        game_state["_board_size_logged"] = True
+
     # PERFORMANCE: Pre-compute enemy adjacent hexes once for this BFS
     # This reduces O(n) per hex check to O(1) set lookup
     enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit["player"])
@@ -1031,8 +1037,11 @@ def movement_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
-    """Get unit by ID from game state"""
+    """Get unit by ID from game state.
+
+    CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
+    """
     for unit in game_state["units"]:
-        if unit["id"] == unit_id:
+        if str(unit["id"]) == str(unit_id):
             return unit
     return None

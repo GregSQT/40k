@@ -1,160 +1,10 @@
 {
-  "phase1": {
-    "type": "##### Phase 1 - MODERATE AGGRESSION ###################################################################################################",
-    "total_episodes": 12000,
-    "total_episodes_normal_value": "12000 = 4 scenarios × 1000 episodes × 3 rotations for curriculum learning",
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 16,
-    "rotation_interval": 1000,
-    "rotation_comment": "1000 episodes per scenario = 3 rotations through all bots. Gives agent time to adapt while preventing catastrophic forgetting.",
-    "model_params": {
-      "policy": "MlpPolicy",
-      "learning_rate": 0.0003,
-      "n_steps": 2048,
-      "batch_size": 256,
-      "n_epochs": 6,
-      "gamma": 0.95,
-      "gae_lambda": 0.95,
-      "clip_range": 0.15,
-      "ent_coef": {
-        "start": 0.2,
-        "end": 0.1
-      },
-      "vf_coef": 0.5,
-      "max_grad_norm": 0.3,
-      "target_kl": null,
-      "tensorboard_log": "./tensorboard/",
-      "policy_kwargs": {
-        "net_arch": [320, 320]
-      },
-      "verbose": 0
-    },
-    "callback_params": {
-      "checkpoint_save_freq": 5000,
-      "checkpoint_name_prefix": "ppo_curriculum_p1",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 0,
-      "bot_eval_freq": 200,
-      "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 10,
-      "bot_eval_final": 0
-    },
-    "observation_params": {
-      "obs_size": 295,
-      "perception_radius": 25,
-      "max_nearby_units": 10,
-      "max_valid_targets": 5,
-      "justification": "Phase 1: Learn 'shooting is good' - any target, high exploration. 295 floats = asymmetric obs"
-    }
-
-  },
-  "phase2": {
-    "type": "##### Phase 2 - POSITIONING WITH WALLS #################################################################################################",
-    "total_episodes": 12000,
-    "total_episodes_normal_value": "12000 = 4 scenarios × 1000 episodes × 3 rotations for curriculum learning",
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 16,
-    "rotation_interval": 1000,
-    "rotation_comment": "1000 episodes per scenario = 3 rotations through all bots. Matches Phase 1 successful configuration.",
-    "tactical_positioning": 0.0,
-    "tactical_positioning_comment": "Phase 2: 0.0 = offensive only (no defense vs dumb bots). Phase 3+: 1.0 = balanced with self-play.",
-    "position_reward_scale": 1.0,
-    "position_reward_scale_comment": "INCREASED from 0.20 to 1.0 - position rewards need stronger signal (5x increase to make positioning more salient).",
-    "model_params": {
-      "policy": "MlpPolicy",
-      "learning_rate": 0.0005,
-      "n_steps": 2048,
-      "batch_size": 256,
-      "n_epochs": 6,
-      "gamma": 0.95,
-      "gae_lambda": 0.95,
-      "clip_range": 0.2,
-      "ent_coef": {
-        "start": 0.35,
-        "end": 0.28,
-        "_comment": "INCREASED - previous training showed entropy collapse (0.85). Need more exploration."
-      },
-      "vf_coef": 0.75,
-      "max_grad_norm": 0.3,
-      "target_kl": null,
-      "tensorboard_log": "./tensorboard/",
-      "policy_kwargs": {
-        "net_arch": [320, 320]
-      },
-      "verbose": 0
-    },
-    "callback_params": {
-      "checkpoint_save_freq": 5000,
-      "checkpoint_name_prefix": "ppo_curriculum_p2",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 0,
-      "bot_eval_freq": 200,
-      "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 10,
-      "bot_eval_final": 0
-    },
-    "observation_params": {
-      "obs_size": 295,
-      "perception_radius": 25,
-      "max_nearby_units": 10,
-      "max_valid_targets": 5,
-      "justification": "Phase 2: Learn positioning with walls - move around obstacles for LOS advantage. 295 floats = asymmetric obs"
-    }
-
-  },
-  "phase3": {
-    "type": "##### Phase 3 ###############################################################################################################",
-    "total_episodes": 6000,
-    "total_episodes_normal_value": "1000",
-    "max_turns_per_episode": 5,
-    "max_steps_per_turn": 8,
-    "rotation_interval": 150,
-    "rotation_comment": "Episodes per scenario before rotation. Calculated as total_episodes / (num_scenarios * 10)",    
-    "model_params": {
-      "policy": "MlpPolicy",
-      "learning_rate": 0.0003,
-      "n_steps": 512,
-      "batch_size": 128,
-      "n_epochs": 10,
-      "gamma": 0.95,
-      "gae_lambda": 0.95,
-      "clip_range": 0.2,
-      "ent_coef": 0.10,
-      "vf_coef": 1.0,
-      "max_grad_norm": 0.5,
-      "tensorboard_log": "./tensorboard/",
-      "policy_kwargs": {
-        "net_arch": [320, 320]
-      },
-      "verbose": 0
-    },
-    "callback_params": {
-      "checkpoint_save_freq": 20000,
-      "checkpoint_name_prefix": "ppo_curriculum_p3",
-      "eval_deterministic": true,
-      "eval_render": false,
-      "n_eval_episodes": 0,
-      "bot_eval_freq": 100,
-      "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 5,
-      "bot_eval_final": 50
-    },
-    "observation_params": {
-      "obs_size": 295,
-      "perception_radius": 25,
-      "max_nearby_units": 10,
-      "max_valid_targets": 5,
-      "justification": "Phase 3: Learn full tactical priorities with RewardMapper. 295 floats = asymmetric obs"
-    }
-  },
-  "default": {
+    "default": {
     "type": "################################################### Default ###################################################",
-    "total_episodes": 1000,
+    "total_episodes": 15000,
     "total_episodes_normal": "1000",
     "max_turns_per_episode": 5,
-    "max_steps_per_turn": 8,
+    "max_steps_per_turn": 200,
     "callback_params": {
       "checkpoint_save_freq": 50000,
       "checkpoint_name_prefix": "ppo_checkpoint",
@@ -164,14 +14,14 @@
       "bot_eval_freq": 100,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 5,
-      "bot_eval_final": 50
+      "bot_eval_final": 0
     },
     "observation_params": {
-      "obs_size": 295,
+      "obs_size": 300,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 295 floats = asymmetric obs (72 ally + 138 enemy + 35 targets)"
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 300 floats = 15 global + 8 unit + 32 terrain + 72 ally + 138 enemy + 35 targets"
     },
     "exploration": {
       "initial_epsilon": 0.3,
@@ -181,7 +31,7 @@
     "model_params": {
       "policy": "MlpPolicy",
       "learning_rate": 0.0003,
-      "n_steps": 2048,
+      "n_steps": 256,
       "batch_size": 128,
       "n_epochs": 10,
       "gamma": 0.95,
@@ -217,17 +67,17 @@
       "bot_eval_final": 20
     },
     "observation_params": {
-      "obs_size": 295,
+      "obs_size": 300,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 295 floats = asymmetric obs (72 ally + 138 enemy + 35 targets)"
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 300 floats = 15 global + 8 unit + 32 terrain + 72 ally + 138 enemy + 35 targets"
     },
     "model_params": {
       "policy": "MlpPolicy",
       "learning_rate": 0.0001,
-      "n_steps": 512,
-      "batch_size": 128,
+      "n_steps": 64,
+      "batch_size": 64,
       "n_epochs": 4,
       "gamma": 0.95,
       "gae_lambda": 0.9,
