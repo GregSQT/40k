@@ -273,12 +273,19 @@ class StepLogger:
                     start_col, start_row = details["start_pos"]
                     end_col, end_row = details["end_pos"]
                     # Remove unit names, keep only IDs per your request
-                    return f"Unit {unit_id}{unit_coords} CHARGED unit {target_id} from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+                    base_msg = f"Unit {unit_id}{unit_coords} CHARGED unit {target_id} from ({start_col}, {start_row}) to ({end_col}, {end_row})"
                 else:
-                    return f"Unit {unit_id}{unit_coords} CHARGED unit {target_id}"
+                    base_msg = f"Unit {unit_id}{unit_coords} CHARGED unit {target_id}"
             else:
-                return f"Unit {unit_id}{unit_coords} CHARGED"
-                
+                base_msg = f"Unit {unit_id}{unit_coords} CHARGED"
+
+            # Add reward if available
+            reward = details.get("reward")
+            if reward is not None:
+                base_msg += f" [R:{reward:+.1f}]"
+
+            return base_msg
+
         elif action_type == "combat":
             if "target_id" not in details:
                 return f"Unit {unit_id}{unit_coords} FOUGHT (no target data)"
@@ -320,8 +327,14 @@ class StepLogger:
                         detail_parts.append(f"Dmg:{damage}HP")
             
             detail_msg = f" - {' '.join(detail_parts)}"
+
+            # Add reward if available
+            reward = details.get("reward")
+            if reward is not None:
+                detail_msg += f" [R:{reward:+.1f}]"
+
             return base_msg + detail_msg
-            
+
         elif action_type == "wait":
             return f"Unit {unit_id}{unit_coords} WAIT"
             
@@ -395,15 +408,22 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
     
-    def log_episode_end(self, total_episodes_steps, winner):
-        """Log episode completion summary using replay-style format"""
+    def log_episode_end(self, total_episodes_steps, winner, win_method=None):
+        """Log episode completion summary using replay-style format
+
+        Args:
+            total_episodes_steps: Total steps across all episodes
+            winner: 0, 1, or -1 (draw)
+            win_method: "elimination", "objectives", "value_tiebreaker", or "draw"
+        """
         if not self.enabled:
             return
-            
+
         try:
             with open(self.output_file, 'a') as f:
                 timestamp = time.strftime("%H:%M:%S", time.localtime())
-                f.write(f"[{timestamp}] EPISODE END: Winner={winner}, Actions={self.episode_action_count}, Steps={self.episode_step_count}, Total={total_episodes_steps}\n")
+                method_str = f", Method={win_method}" if win_method else ""
+                f.write(f"[{timestamp}] EPISODE END: Winner={winner}{method_str}, Actions={self.episode_action_count}, Steps={self.episode_step_count}, Total={total_episodes_steps}\n")
                 f.write("=" * 80 + "\n")
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")

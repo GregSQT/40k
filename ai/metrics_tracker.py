@@ -102,8 +102,21 @@ class W40KMetricsTracker:
         self.combat_effectiveness = {
             'shoot_kills': 0,      # Kills from ranged attacks
             'melee_kills': 0,      # Kills from melee attacks
-            'charge_successes': 0  # Successful charges (reached target)
+            'charge_successes': 0, # Successful charges (reached target)
+            'controlled_objectives': 0  # Objectives controlled at episode end
         }
+
+        # Rolling history for smoothed combat metrics
+        self.combat_history = {
+            'shoot_kills': [],
+            'melee_kills': [],
+            'charge_successes': [],
+            'controlled_objectives': []
+        }
+
+        # Flag to track if controlled_objectives should be logged this episode
+        # Only True when game reached turn 5+ (not early elimination)
+        self._should_log_controlled_objectives = False
         
         # NEW: Hyperparameter tracking for PPO tuning
         self.hyperparameter_tracking = {
@@ -139,10 +152,6 @@ class W40KMetricsTracker:
     def log_episode_end(self, episode_data: Dict[str, Any]):
         """Log core episode metrics - reward, win rate, and episode length"""
         self.episode_count += 1
-
-        # DIAGNOSTIC: Print episode count every 1000 episodes to track progress
-        if self.episode_count % 1000 == 0:
-            print(f"  📊 Metrics: Episode {self.episode_count} logged to TensorBoard (x-axis)")
 
         # Extract data
         total_reward = episode_data.get('total_reward', 0)
@@ -437,6 +446,24 @@ class W40KMetricsTracker:
         elif kill_type == 'charge':
             self.combat_effectiveness['charge_successes'] += 1
 
+    def log_controlled_objectives(self, count: int):
+        """Log the number of objectives controlled by the agent at episode end.
+
+        Only called when game reached turn 5+ (natural end, not elimination).
+
+        Args:
+            count: Number of objectives controlled by Player 0 (learning agent)
+        """
+        self.combat_effectiveness['controlled_objectives'] = count
+        self._should_log_controlled_objectives = True
+
+    def skip_controlled_objectives_logging(self):
+        """Mark that controlled_objectives should NOT be logged this episode.
+
+        Called when game ended early (elimination before turn 5).
+        """
+        self._should_log_controlled_objectives = False
+
     def log_phase_performance(self, phase_data: Dict[str, Any]):
         """Accumulate phase-specific performance metrics during episode.
         
@@ -520,16 +547,58 @@ class W40KMetricsTracker:
         }
 
         # Log combat effectiveness metrics (per RL_TRAINING_ROADMAP.md)
-        self.writer.add_scalar('combat/shoot_kills', self.combat_effectiveness['shoot_kills'], self.episode_count)
-        self.writer.add_scalar('combat/melee_kills', self.combat_effectiveness['melee_kills'], self.episode_count)
-        self.writer.add_scalar('combat/charge_successes', self.combat_effectiveness['charge_successes'], self.episode_count)
+        # Store current episode values in history for smoothing
+        # Note: controlled_objectives handled separately (only logged on turn 5+)
+        for key in ['shoot_kills', 'melee_kills', 'charge_successes']:
+            self.combat_history[key].append(self.combat_effectiveness[key])
+            # Keep last 100 episodes
+            if len(self.combat_history[key]) > 100:
+                self.combat_history[key].pop(0)
 
-        # Reset combat effectiveness for next episode
+        # controlled_objectives: Only add to history if game reached turn 5+
+        if self._should_log_controlled_objectives:
+            self.combat_history['controlled_objectives'].append(self.combat_effectiveness['controlled_objectives'])
+            if len(self.combat_history['controlled_objectives']) > 100:
+                self.combat_history['controlled_objectives'].pop(0)
+
+        # Log smoothed combat metrics (20-episode rolling average)
+        # Prefixes control TensorBoard sort order:
+        # a_position_score, b_shoot_kills, c_charge_successes, d_melee_kills, e_controlled_objectives
+        window_size = 20
+
+        # a) Position score (movement quality)
+        if len(self.position_scores) >= 1:
+            position_score_smooth = self._calculate_smoothed_metric(self.position_scores, window_size=100)
+            self.writer.add_scalar('combat/a_position_score', position_score_smooth, self.episode_count)
+
+        # b) Shoot kills
+        if len(self.combat_history['shoot_kills']) >= 1:
+            smoothed_value = self._calculate_smoothed_metric(self.combat_history['shoot_kills'], window_size=window_size)
+            self.writer.add_scalar('combat/b_shoot_kills', smoothed_value, self.episode_count)
+
+        # c) Charge successes
+        if len(self.combat_history['charge_successes']) >= 1:
+            smoothed_value = self._calculate_smoothed_metric(self.combat_history['charge_successes'], window_size=window_size)
+            self.writer.add_scalar('combat/c_charge_successes', smoothed_value, self.episode_count)
+
+        # d) Melee kills
+        if len(self.combat_history['melee_kills']) >= 1:
+            smoothed_value = self._calculate_smoothed_metric(self.combat_history['melee_kills'], window_size=window_size)
+            self.writer.add_scalar('combat/d_melee_kills', smoothed_value, self.episode_count)
+
+        # e) Controlled objectives (only logged if game reached turn 5+)
+        if len(self.combat_history['controlled_objectives']) >= 1:
+            smoothed_value = self._calculate_smoothed_metric(self.combat_history['controlled_objectives'], window_size=window_size)
+            self.writer.add_scalar('combat/e_controlled_objectives', smoothed_value, self.episode_count)
+
+        # Reset combat effectiveness and flags for next episode
         self.combat_effectiveness = {
             'shoot_kills': 0,
             'melee_kills': 0,
-            'charge_successes': 0
+            'charge_successes': 0,
+            'controlled_objectives': 0
         }
+        self._should_log_controlled_objectives = False
     
     def log_training_metrics(self, model_stats: Dict[str, Any]):
         """
@@ -629,29 +698,28 @@ class W40KMetricsTracker:
     
     def log_critical_dashboard(self):
         """
-        🎯 CRITICAL DASHBOARD - 10 Essential Hyperparameter Tuning Metrics
-        
+        🎯 CRITICAL DASHBOARD - 9 Essential Hyperparameter Tuning Metrics
+
         This dashboard contains ONLY the metrics you need to tune PPO hyperparameters.
         All metrics are smoothed (20-episode rolling average) for clear trends.
-        
+
         GAME PERFORMANCE (3 metrics):
         - 0_critical/a_bot_eval_combined    - Primary goal [0-1] (sorts first)
         - 0_critical/b_win_rate_100ep       - Training opponent performance
         - 0_critical/c_episode_reward_smooth  - Learning progress
-        - 0_critical/d_position_score       - Phase 2+ positioning quality (offensive_value)
-        
+
         PPO HEALTH (5 metrics):
-        - 0_critical/clip_fraction         - [0.1-0.3] → Tune learning_rate
-        - 0_critical/approx_kl             - <0.02 → Policy stability
-        - 0_critical/explained_variance    - >0.3 → Value function working
-        - 0_critical/entropy_loss          - [0.5-2.0] → Tune ent_coef
-        - 0_critical/loss_mean             - Overall learning health
-        
-        TECHNICAL HEALTH (3 metrics):
-        - 0_critical/gradient_norm         - <10 → No gradient explosion
-        - 0_critical/immediate_reward_ratio - <0.9 → Reward balance
-        - 0_critical/z_invalid_action_rate   - <0.1 → Action masking works
-        - 0_critical/bot_eval_combined     - >0.4 → Wins vs bots (objective baseline)
+        - 0_critical/d_loss_mean           - Overall learning health
+        - 0_critical/e_explained_variance  - >0.3 → Value function working
+        - 0_critical/f_clip_fraction       - [0.1-0.3] → Tune learning_rate
+        - 0_critical/g_approx_kl           - <0.02 → Policy stability
+        - 0_critical/h_entropy_loss        - [0.5-2.0] → Tune ent_coef
+
+        TECHNICAL HEALTH (2 metrics):
+        - 0_critical/i_gradient_norm       - <10 → No gradient explosion
+        - 0_critical/j_immediate_reward_ratio - <0.9 → Reward balance
+
+        NOTE: position_score moved to combat/ category
         """
         
         # Minimum data requirement (lowered to 1 for immediate feedback)
@@ -666,17 +734,14 @@ class W40KMetricsTracker:
         # 1. Win Rate (100-episode rolling window) - SORTS FIRST alphabetically
         if len(self.win_rate_window) >= 1:
             win_rate = np.mean(self.win_rate_window)
-            self.writer.add_scalar('0_critical/b_win_rate_100ep', win_rate, self.step_count)
+            self.writer.add_scalar('0_critical/b_win_rate_100ep', win_rate, self.episode_count)
 
         # 2. Episode Reward (smoothed) - Training signal strength
         if len(self.all_episode_rewards) >= 1:
             reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=20)
-            self.writer.add_scalar('0_critical/c_episode_reward_smooth', reward_smooth, self.step_count)
+            self.writer.add_scalar('0_critical/c_episode_reward_smooth', reward_smooth, self.episode_count)
 
-        # 3. Position Score (smoothed) - Phase 2+ positioning quality
-        if len(self.position_scores) >= 1:
-            position_score_smooth = self._calculate_smoothed_metric(self.position_scores, window_size=100)
-            self.writer.add_scalar('0_critical/d_position_score', position_score_smooth, self.step_count)
+        # NOTE: position_score moved to combat/ category
 
         # ==========================================
         # PPO HEALTH (5 metrics)
@@ -687,28 +752,28 @@ class W40KMetricsTracker:
             clip_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['clip_fractions'], window_size=20
             )
-            self.writer.add_scalar('0_critical/f_clip_fraction', clip_smooth, self.step_count)
+            self.writer.add_scalar('0_critical/f_clip_fraction', clip_smooth, self.episode_count)
 
         # 4. Approx KL - Policy change magnitude
         if len(self.hyperparameter_tracking['approx_kls']) >= 1:
             kl_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['approx_kls'], window_size=20
             )
-            self.writer.add_scalar('0_critical/g_approx_kl', kl_smooth, self.step_count)
+            self.writer.add_scalar('0_critical/g_approx_kl', kl_smooth, self.episode_count)
 
         # 5. Explained Variance - Value function quality
         if len(self.hyperparameter_tracking.get('explained_variances', [])) >= 1:
             ev_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['explained_variances'], window_size=20
             )
-            self.writer.add_scalar('0_critical/e_explained_variance', ev_smooth, self.step_count)
+            self.writer.add_scalar('0_critical/e_explained_variance', ev_smooth, self.episode_count)
 
         # 6. Entropy Loss - Exploration health
         if len(self.hyperparameter_tracking['entropy_losses']) >= 1:
             entropy_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['entropy_losses'], window_size=20
             )
-            self.writer.add_scalar('0_critical/h_entropy_loss', entropy_smooth, self.step_count)
+            self.writer.add_scalar('0_critical/h_entropy_loss', entropy_smooth, self.episode_count)
 
         # 7. Loss Mean (combined policy + value loss) - Training stability
         if (len(self.hyperparameter_tracking['policy_losses']) >= 1 and
@@ -718,7 +783,7 @@ class W40KMetricsTracker:
             recent_value = self.hyperparameter_tracking['value_losses'][-20:]
             combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
             loss_mean = np.mean(combined_losses)
-            self.writer.add_scalar('0_critical/d_loss_mean', loss_mean, self.step_count)
+            self.writer.add_scalar('0_critical/d_loss_mean', loss_mean, self.episode_count)
         
         # ==========================================
         # TECHNICAL HEALTH (3 metrics)
@@ -726,12 +791,12 @@ class W40KMetricsTracker:
         
         # 8. Gradient Norm (direct value from latest training step) - Technical health
         if hasattr(self, 'latest_gradient_norm') and self.latest_gradient_norm is not None:
-            self.writer.add_scalar('0_critical/i_gradient_norm', self.latest_gradient_norm, self.step_count)
+            self.writer.add_scalar('0_critical/i_gradient_norm', self.latest_gradient_norm, self.episode_count)
         else:
             # Log placeholder if gradient_norm not available from stable-baselines3
             # This keeps the metric visible in TensorBoard even if SB3 doesn't log it
-            if self.step_count <= 1:
-                self.writer.add_scalar('0_critical/i_gradient_norm', 0.0, self.step_count)
+            if self.episode_count <= 1:
+                self.writer.add_scalar('0_critical/i_gradient_norm', 0.0, self.episode_count)
 
         # 9. Immediate Reward Ratio (calculate from reward components) - Reward composition
         if (len(self.reward_components['base_actions']) >= 20 and
@@ -740,7 +805,7 @@ class W40KMetricsTracker:
             recent_total = np.mean(self.all_episode_rewards[-20:])
             if abs(recent_total) > 0.01:
                 immediate_ratio = abs(recent_base) / abs(recent_total)
-                self.writer.add_scalar('0_critical/j_immediate_reward_ratio', immediate_ratio, self.step_count)
+                self.writer.add_scalar('0_critical/j_immediate_reward_ratio', immediate_ratio, self.episode_count)
         
         # 10. Bot Evaluation Combined Score (logged immediately in log_bot_evaluations())
         # NOTE: This metric is logged in log_bot_evaluations() to avoid duplicate/stale values
@@ -766,19 +831,19 @@ class W40KMetricsTracker:
         """
         # Log individual bot results to bot_eval/ namespace
         if 'random' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_random', bot_results['random'], self.step_count)
+            self.writer.add_scalar('bot_eval/vs_random', bot_results['random'], self.episode_count)
         if 'greedy' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_greedy', bot_results['greedy'], self.step_count)
+            self.writer.add_scalar('bot_eval/vs_greedy', bot_results['greedy'], self.episode_count)
         if 'defensive' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_defensive', bot_results['defensive'], self.step_count)
+            self.writer.add_scalar('bot_eval/vs_defensive', bot_results['defensive'], self.episode_count)
 
         # Store combined score and log immediately to both namespaces
         if 'combined' in bot_results:
             self.bot_eval_combined = bot_results['combined']
             # Log to bot_eval/ namespace
-            self.writer.add_scalar('bot_eval/combined', bot_results['combined'], self.step_count)
+            self.writer.add_scalar('bot_eval/combined', bot_results['combined'], self.episode_count)
             # Log IMMEDIATELY to 0_critical/ namespace (don't wait for next episode)
-            self.writer.add_scalar('0_critical/a_bot_eval_combined', bot_results['combined'], self.step_count)
+            self.writer.add_scalar('0_critical/a_bot_eval_combined', bot_results['combined'], self.episode_count)
     
     def _calculate_smoothed_metric(self, values: List[float], window_size: int = 20) -> float:
         """

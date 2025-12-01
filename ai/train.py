@@ -631,16 +631,15 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         Tuple of (success: bool, final_model, final_env)
     """
     print(f"\n{'='*80}")
-    print(f"🔄 SCENARIO ROTATION TRAINING")
+    print(f"🔄 MULTI-SCENARIO TRAINING")
     print(f"{'='*80}")
     print(f"Total episodes: {total_episodes}")
     print(f"Scenarios: {len(scenario_list)}")
     for i, scenario in enumerate(scenario_list, 1):
         scenario_name = os.path.basename(scenario)
         print(f"  {i}. {scenario_name}")
-    print(f"Rotation interval: {rotation_interval} episodes per scenario")
-    total_cycles = total_episodes // (rotation_interval * len(scenario_list))
-    print(f"Total cycles: ~{total_cycles} complete rotations through all scenarios")
+    if len(scenario_list) > 1:
+        print(f"🎲 RANDOM MODE: Each episode randomly selects one of the {len(scenario_list)} scenarios")
     print(f"{'='*80}\n")
     
     # Load agent-specific training config to get model parameters
@@ -689,12 +688,14 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     effective_agent_key = rewards_config_name if rewards_config_name else agent_key
     
     current_scenario = scenario_list[0]
+    # Pass full scenario list for random selection per episode
     base_env = W40KEngine(
         rewards_config=rewards_config_name,
         training_config_name=training_config_name,
         controlled_agent=effective_agent_key,
         active_agents=None,
         scenario_file=current_scenario,
+        scenario_files=scenario_list,  # NEW: Random scenario selection per episode
         unit_registry=unit_registry,
         quiet=True,
         gym_training_mode=True
@@ -841,20 +842,25 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         episodes_remaining = total_episodes - episodes_trained
         episodes_this_iteration = min(rotation_interval, episodes_remaining)
 
-        # EPISODE-BASED ROTATION FIX: Calculate generous timestep budget
-        # The EpisodeTerminationCallback will stop at exact episode count
-        # CRITICAL: Must be at least 2*n_steps so PPO completes at least one update cycle
-        # We use 4x n_steps to give plenty of buffer for episode variation
+        # EPISODE-BASED ROTATION FIX: Calculate timestep budget based on expected episodes
+        # Each episode takes approximately 45-100 steps (depends on game length)
+        # Use conservative estimate of 50 steps/episode with 50% buffer
+        # CRITICAL: Must provide enough timesteps for all expected episodes
         n_steps = training_config["model_params"]["n_steps"]
-        timesteps_this_iteration = n_steps * 4
+        estimated_steps_per_episode = 75  # Conservative estimate with buffer
+        timesteps_this_iteration = max(
+            n_steps * 4,  # Minimum for PPO to complete at least one update cycle
+            episodes_this_iteration * estimated_steps_per_episode
+        )
         
-        # Create new environment with current scenario
+        # Create new environment with scenario list for random selection per episode
         base_env = W40KEngine(
             rewards_config=rewards_config_name,
             training_config_name=training_config_name,
             controlled_agent=effective_agent_key,
             active_agents=None,
             scenario_file=current_scenario,
+            scenario_files=scenario_list,  # NEW: Random scenario selection per episode
             unit_registry=unit_registry,
             quiet=True,
             gym_training_mode=True
@@ -889,7 +895,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         model.set_env(env)
         
         # Create fresh callbacks for this rotation with updated scenario info
-        scenario_display = f"Cycle {cycle + 1} | Scenario: {scenario_name}"
+        scenario_display = f"Random from {len(scenario_list)} scenarios"
         rotation_callbacks = setup_callbacks(
             config=config,
             model_path=model_path,
@@ -923,22 +929,27 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             progress_bar=False  # Disabled - using episode-based progress below
         )
 
+        # Update counters - use ACTUAL episode count from metrics_tracker, not assumed count
+        # CRITICAL FIX: The assumed episodes_this_iteration may not match actual episodes trained
+        # because timesteps_this_iteration may not be enough to complete all expected episodes
+        actual_episodes_this_iteration = metrics_tracker.episode_count - episodes_trained
+        episodes_trained = metrics_tracker.episode_count
+
         # Log per-scenario performance after training on this scenario
         if hasattr(metrics_tracker, 'all_episode_rewards') and len(metrics_tracker.all_episode_rewards) > 0:
-            # Get rewards from this cycle (last episodes_this_iteration episodes)
-            recent_rewards = metrics_tracker.all_episode_rewards[-episodes_this_iteration:] if len(metrics_tracker.all_episode_rewards) >= episodes_this_iteration else metrics_tracker.all_episode_rewards
+            # Get rewards from this cycle (last actual_episodes_this_iteration episodes)
+            recent_count = max(1, actual_episodes_this_iteration)
+            recent_rewards = metrics_tracker.all_episode_rewards[-recent_count:] if len(metrics_tracker.all_episode_rewards) >= recent_count else metrics_tracker.all_episode_rewards
             avg_reward = np.mean(recent_rewards) if len(recent_rewards) > 0 else 0
-            
+
             # Get win rate from this cycle
-            recent_wins = metrics_tracker.all_episode_wins[-episodes_this_iteration:] if len(metrics_tracker.all_episode_wins) >= episodes_this_iteration else metrics_tracker.all_episode_wins
+            recent_wins = metrics_tracker.all_episode_wins[-recent_count:] if len(metrics_tracker.all_episode_wins) >= recent_count else metrics_tracker.all_episode_wins
             win_rate = np.mean(recent_wins) if len(recent_wins) > 0 else 0
-            
-            # Log per-scenario metrics
+
+            # Log per-scenario metrics using actual episode count
             metrics_tracker.writer.add_scalar(f"scenario_performance/{scenario_name}_avg_reward", avg_reward, episodes_trained)
             metrics_tracker.writer.add_scalar(f"scenario_performance/{scenario_name}_win_rate", win_rate, episodes_trained)
-        
-        # Update counters
-        episodes_trained += episodes_this_iteration
+
         scenario_idx = (scenario_idx + 1) % len(scenario_list)
 
         # Check if we completed a full cycle
@@ -1628,18 +1639,20 @@ def main():
                     else:
                         total_episodes = training_config["total_episodes"]
                     
-                    # Determine rotation interval
+                    # Determine checkpoint interval (how often to save model during training)
                     config_rotation = training_config.get("rotation_interval", None)
+                    n_steps = training_config["model_params"].get("n_steps", 256)
                     if args.rotation_interval:
                         rotation_interval = args.rotation_interval
-                        print(f"🔧 Using CLI rotation interval: {rotation_interval}")
+                        print(f"🔧 Using CLI checkpoint interval: {rotation_interval}")
                     else:
                         rotation_interval = calculate_rotation_interval(
-                            total_episodes, 
-                            len(scenario_list), 
-                            config_rotation
+                            total_episodes,
+                            len(scenario_list),
+                            config_rotation,
+                            n_steps=n_steps
                         )
-                        print(f"📊 Calculated rotation interval: {rotation_interval}")
+                        print(f"📊 Checkpoint interval: {rotation_interval} episodes")
                     
                     # Use rotation training
                     success, model, env = train_with_scenario_rotation(

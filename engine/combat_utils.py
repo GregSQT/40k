@@ -10,18 +10,121 @@ from typing import Dict, List, Tuple, Any
 # ============================================================================
 
 def calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
-        """Calculate hex distance using cube coordinates (matching handlers)."""
+        """Calculate hex distance using cube coordinates (matching handlers).
+
+        WARNING: This is straight-line distance, ignoring walls!
+        For pathfinding distance that respects walls, use calculate_pathfinding_distance().
+        """
         # Convert offset to cube
         x1 = col1
         z1 = row1 - ((col1 - (col1 & 1)) >> 1)
         y1 = -x1 - z1
-        
+
         x2 = col2
         z2 = row2 - ((col2 - (col2 & 1)) >> 1)
         y2 = -x2 - z2
-        
+
         # Cube distance
         return max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
+
+
+def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
+                                    game_state: Dict[str, Any],
+                                    max_search_distance: int = 50) -> int:
+    """
+    Calculate actual pathfinding distance using BFS, respecting walls.
+
+    This is the CORRECT distance function for AI decision-making.
+    Returns the number of hexes needed to travel from (col1, row1) to (col2, row2),
+    avoiding walls and impassable terrain.
+
+    Args:
+        col1, row1: Start position
+        col2, row2: End position
+        game_state: Game state with wall_hexes
+        max_search_distance: Maximum BFS depth (performance limit)
+
+    Returns:
+        Actual path distance, or max_search_distance+1 if unreachable
+
+    PERFORMANCE: Uses game_state cache for repeated lookups.
+    Cache key: ((col1, row1), (col2, row2))
+    """
+    # Quick check: same position
+    if col1 == col2 and row1 == row2:
+        return 0
+
+    # Check cache first
+    cache_key = ((col1, row1), (col2, row2))
+    if "pathfinding_distance_cache" in game_state:
+        if cache_key in game_state["pathfinding_distance_cache"]:
+            return game_state["pathfinding_distance_cache"][cache_key]
+
+    # Import here to avoid circular imports
+    from engine.phase_handlers.movement_handlers import _get_hex_neighbors
+
+    # Get wall set for O(1) lookup
+    wall_set = set()
+    if "wall_hexes" in game_state:
+        wall_set = {tuple(w) if isinstance(w, list) else w for w in game_state["wall_hexes"]}
+
+    # BFS to find shortest path
+    start_pos = (col1, row1)
+    end_pos = (col2, row2)
+
+    visited = {start_pos: 0}
+    queue = [(start_pos, 0)]
+
+    while queue:
+        current_pos, current_dist = queue.pop(0)
+
+        # Found target
+        if current_pos == end_pos:
+            # Cache result
+            if "pathfinding_distance_cache" not in game_state:
+                game_state["pathfinding_distance_cache"] = {}
+            game_state["pathfinding_distance_cache"][cache_key] = current_dist
+            return current_dist
+
+        # Stop searching if we've gone too far
+        if current_dist >= max_search_distance:
+            continue
+
+        # Explore neighbors
+        neighbors = _get_hex_neighbors(current_pos[0], current_pos[1])
+
+        for neighbor_col, neighbor_row in neighbors:
+            neighbor_pos = (neighbor_col, neighbor_row)
+
+            # Skip if already visited
+            if neighbor_pos in visited:
+                continue
+
+            # Skip walls
+            if neighbor_pos in wall_set:
+                continue
+
+            # Skip out of bounds (basic check)
+            if neighbor_col < 0 or neighbor_row < 0:
+                continue
+            if "board_cols" in game_state and neighbor_col >= game_state["board_cols"]:
+                continue
+            if "board_rows" in game_state and neighbor_row >= game_state["board_rows"]:
+                continue
+
+            neighbor_dist = current_dist + 1
+            visited[neighbor_pos] = neighbor_dist
+            queue.append((neighbor_pos, neighbor_dist))
+
+    # Target not reachable within max_search_distance
+    unreachable_dist = max_search_distance + 1
+
+    # Cache the unreachable result too
+    if "pathfinding_distance_cache" not in game_state:
+        game_state["pathfinding_distance_cache"] = {}
+    game_state["pathfinding_distance_cache"][cache_key] = unreachable_dist
+
+    return unreachable_dist
 
 
 def get_hex_line(start_col: int, start_row: int, end_col: int, end_row: int) -> List[Tuple[int, int]]:

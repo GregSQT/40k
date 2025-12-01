@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -X utf8 -c:*)"
+      "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -X utf8 -c:*)",
+      "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -c \"import os; [os.remove(f) for f in [''e:/Dropbox/Informatique/Holberton/40k/train_step.log'', ''e:/Dropbox/Informatique/Holberton/40k/charge_debug.log''] if os.path.exists(f)]\")",
+      "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\":*)",
+      "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -c \"import os; [os.remove(f) for f in [''e:/Dropbox/Informatique/Holberton/40k/charge_debug.log'', ''e:/Dropbox/Informatique/Holberton/40k/train_step.log''] if os.path.exists(f)]\")",
+      "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -c:*)",
+      "Bash(npm run dev:*)",
+      "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -X utf8 api/server.py)",
+      "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -X utf8 services/api_server.py)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

@@ -1219,13 +1219,21 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     
     # Execute shooting attack
     attack_result = shooting_attack_controller(game_state, unit_id, selected_target_id)
-    
+
     # Update SHOOT_LEFT and continue loop per AI_TURN.md
     unit["SHOOT_LEFT"] -= 1
-    
+
     # Continue execution loop to check for more shots or end activation
-    result = _shooting_unit_execution_loop(game_state, unit_id, config)
-    return result
+    success, loop_result = _shooting_unit_execution_loop(game_state, unit_id, config)
+
+    # CRITICAL: Merge attack result into loop result for metrics tracking
+    # The callback needs phase="shoot" and target_died to track shoot kills
+    loop_result["phase"] = "shoot"
+    loop_result["target_died"] = attack_result.get("target_died", False)
+    loop_result["damage"] = attack_result.get("damage", 0)
+    loop_result["target_hp_remaining"] = attack_result.get("target_hp_remaining", 0)
+
+    return success, loop_result
 
 
 def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_id: str) -> Dict[str, Any]:

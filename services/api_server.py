@@ -24,6 +24,27 @@ sys.path.insert(0, engine_dir)
 from engine.w40k_core import W40KEngine
 from main import load_config
 
+
+def make_json_serializable(obj):
+    """Recursively convert non-JSON-serializable types to serializable ones."""
+    if isinstance(obj, dict):
+        result = {}
+        for k, v in obj.items():
+            # Convert tuple keys to strings
+            if isinstance(k, tuple):
+                k = ",".join(str(x) for x in k)
+            result[k] = make_json_serializable(v)
+        return result
+    elif isinstance(obj, (list, tuple)):
+        return [make_json_serializable(item) for item in obj]
+    elif isinstance(obj, set):
+        return [make_json_serializable(item) for item in obj]
+    elif hasattr(obj, '__dict__'):
+        # Handle objects with __dict__ (convert to dict)
+        return make_json_serializable(obj.__dict__)
+    else:
+        return obj
+
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend requests
@@ -381,26 +402,18 @@ def start_game():
             print(f"FULL TRACEBACK:\n{traceback.format_exc()}")
             raise
         print("DEBUG: engine.reset() completed successfully")
-        
-        # Convert sets to lists for JSON serialization
-        serializable_state = dict(engine.game_state)
-        for key, value in serializable_state.items():
-            if isinstance(value, set):
-                serializable_state[key] = list(value)
-            # Convert LoS cache (tuple keys) to JSON-serializable format
-            elif key == "los_cache" and isinstance(value, dict):
-                serializable_state[key] = {
-                    f"{k[0]},{k[1]}": v for k, v in value.items()
-                }
-        
+
+        # Convert game state to JSON-serializable format
+        serializable_state = make_json_serializable(dict(engine.game_state))
+
         # Add max_turns from game config
         from config_loader import get_config_loader
         config = get_config_loader()
         serializable_state["max_turns"] = config.get_max_turns()
-        
+
         # Add PvE mode flag to response
         serializable_state["pve_mode"] = getattr(engine, 'is_pve_mode', False)
-        
+
         return jsonify({
             "success": True,
             "game_state": serializable_state,
@@ -442,17 +455,9 @@ def execute_action():
         
         # AI_TURN.md: Route ALL actions through engine consistently
         success, result = engine.execute_semantic_action(action)
-        
-        # Convert sets to lists for JSON serialization
-        serializable_state = dict(engine.game_state)
-        for key, value in serializable_state.items():
-            if isinstance(value, set):
-                serializable_state[key] = list(value)
-            # Convert LoS cache (tuple keys) to JSON-serializable format
-            elif key == "los_cache" and isinstance(value, dict):
-                serializable_state[key] = {
-                    f"{k[0]},{k[1]}": v for k, v in value.items()
-                }
+
+        # Convert game state to JSON-serializable format
+        serializable_state = make_json_serializable(dict(engine.game_state))
         
         # Extract and send detailed action logs to frontend
         action_logs = serializable_state.get("action_logs", [])
@@ -605,17 +610,9 @@ def execute_ai_turn():
                 return jsonify({"success": False, "error": result}), 400
             else:
                 return jsonify({"success": False, "error": result}), 500
-        
-        # Convert sets to lists for JSON serialization
-        serializable_state = dict(engine.game_state)
-        for key, value in serializable_state.items():
-            if isinstance(value, set):
-                serializable_state[key] = list(value)
-            # Convert LoS cache (tuple keys) to JSON-serializable format
-            elif key == "los_cache" and isinstance(value, dict):
-                serializable_state[key] = {
-                    f"{k[0]},{k[1]}": v for k, v in value.items()
-                }
+
+        # Convert game state to JSON-serializable format
+        serializable_state = make_json_serializable(dict(engine.game_state))
         
         # Extract action logs for this specific AI action
         action_logs = serializable_state.get("action_logs", [])

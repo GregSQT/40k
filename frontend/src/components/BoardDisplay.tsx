@@ -1,6 +1,5 @@
 // frontend/src/components/BoardDisplay.tsx
 import * as PIXI from 'pixi.js-legacy';
-import { offsetToCube } from '../utils/gameHelpers';
 
 interface BoardConfig {
   cols: number;
@@ -52,6 +51,11 @@ interface HighlightCell {
   row: number;
 }
 
+// Objective control info - which player controls each hex
+interface ObjectiveControlMap {
+  [hexKey: string]: number | null;  // "col,row" -> 0 (P0), 1 (P1), or null (contested/uncontrolled)
+}
+
 interface DrawBoardOptions {
   availableCells?: HighlightCell[];
   attackCells?: HighlightCell[];
@@ -63,6 +67,7 @@ interface DrawBoardOptions {
   selectedUnitId?: number | null;
   mode?: string;
   showHexCoordinates?: boolean;
+  objectiveControl?: ObjectiveControlMap;  // NEW: Control status for each objective hex
 }
 
 // Helper functions from Board.tsx
@@ -108,18 +113,24 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
     const WALL_COLOR = parseColor(boardConfig.colors.wall!);
 
     // Extract options with defaults for replay viewer compatibility
-    const { 
-      availableCells = [], 
-      attackCells = [], 
-      coverCells = [], 
+    const {
+      availableCells = [],
+      attackCells = [],
+      coverCells = [],
       chargeCells = [],
       blockedTargets = new Set<string>(),
       coverTargets = new Set<string>(),
       phase = "move",
       selectedUnitId = null,
       mode = "select",
-      showHexCoordinates = false
+      showHexCoordinates = false,
+      objectiveControl = {}
     } = options || {};
+
+    // Parse objective control colors
+    const OBJECTIVE_P0_COLOR = parseColor(boardConfig.colors.objective_p0 || '0x4488cc');
+    const OBJECTIVE_P1_COLOR = parseColor(boardConfig.colors.objective_p1 || '0xcc4444');
+    const OBJECTIVE_NEUTRAL_COLOR = parseColor(boardConfig.colors.objective || '0xff9900');
 
     // ✅ OPTIMIZED: Create containers for hex batching - EXACT from Board.tsx
     const baseHexContainer = new PIXI.Container();
@@ -127,36 +138,12 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
     baseHexContainer.name = 'baseHexes';
     highlightContainer.name = 'highlights';
 
-    // New: Compute all objective hexes and their adjacent hexes - EXACT from Board.tsx
+    // Compute all objective hexes - use ONLY hexes from config, no expansion
     const objectiveHexSet = new Set<string>();
     const baseObjectives = boardConfig.objective_hexes || [];
 
-    const cubeDirections = [
-      [1, -1, 0], [1, 0, -1], [0, 1, -1],
-      [-1, 1, 0], [-1, 0, 1], [0, -1, 1]
-    ];
-
     for (const [objCol, objRow] of baseObjectives) {
       objectiveHexSet.add(`${objCol},${objRow}`);
-
-      const cube = offsetToCube(objCol, objRow);
-      for (const [dx, dy, dz] of cubeDirections) {
-        const neighborCube = {
-          x: cube.x + dx,
-          y: cube.y + dy,
-          z: cube.z + dz
-        };
-
-        const adjCol = neighborCube.x;
-        const adjRow = neighborCube.z + ((adjCol - (adjCol & 1)) >> 1);
-
-        if (
-          adjCol >= 0 && adjCol < BOARD_COLS &&
-          adjRow >= 0 && adjRow < BOARD_ROWS
-        ) {
-          objectiveHexSet.add(`${adjCol},${adjRow}`);
-        }
-      }
     }
 
     // Pre-compute wallHexSet
@@ -208,7 +195,16 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
         if (isWallHex) {
           cellColor = WALL_COLOR;
         } else if (objectiveHexSet.has(`${col},${row}`)) {
-          cellColor = parseColor(boardConfig.colors.objective);
+          // Check if this objective hex is controlled by a player
+          const hexKey = `${col},${row}`;
+          const controller = objectiveControl[hexKey];
+          if (controller === 0) {
+            cellColor = OBJECTIVE_P0_COLOR;  // Blue for Player 0
+          } else if (controller === 1) {
+            cellColor = OBJECTIVE_P1_COLOR;  // Red for Player 1
+          } else {
+            cellColor = OBJECTIVE_NEUTRAL_COLOR;  // Yellow/Orange for neutral/contested
+          }
         }
         
         baseCell.beginFill(cellColor, 1.0);

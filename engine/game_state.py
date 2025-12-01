@@ -3,7 +3,7 @@
 game_state.py - Game state initialization and management
 """
 
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import json
 
 class GameStateManager:
@@ -214,10 +214,13 @@ class GameStateManager:
 
     def calculate_objective_control(self, game_state: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
         """
-        Calculate objective control for each objective.
+        Calculate objective control for each objective with PERSISTENT control.
 
         Win condition: Control more objectives than opponent at end of turn 5.
-        Control: Sum of OC attribute of units on objective hexes > enemy's sum.
+        Control rules:
+        - To CAPTURE an objective: Your OC sum must be > opponent's OC sum
+        - Once controlled, you KEEP control until opponent captures it
+        - Equal OC = current controller keeps control (or stays neutral if uncontrolled)
 
         Returns:
             Dict[objective_id, {
@@ -229,6 +232,10 @@ class GameStateManager:
         objectives = game_state.get("objectives", [])
         if not objectives:
             return {}
+
+        # Get persistent control state (initialize if not present)
+        if "objective_controllers" not in game_state:
+            game_state["objective_controllers"] = {}
 
         result = {}
 
@@ -255,18 +262,28 @@ class GameStateManager:
                     else:
                         player_1_oc += oc
 
-            # Determine controller
-            controller = None
+            # Get current controller from persistent state
+            current_controller = game_state["objective_controllers"].get(obj_id, None)
+
+            # Determine new controller with PERSISTENT control rules
+            new_controller = current_controller  # Default: keep current control
+
             if player_0_oc > player_1_oc:
-                controller = 0
+                # P0 has more OC - P0 captures/keeps
+                new_controller = 0
             elif player_1_oc > player_0_oc:
-                controller = 1
-            # If equal (including both 0), no one controls
+                # P1 has more OC - P1 captures/keeps
+                new_controller = 1
+            # If equal OC: current controller keeps control (no change)
+            # This includes 0-0 case where objective stays in its current state
+
+            # Update persistent state
+            game_state["objective_controllers"][obj_id] = new_controller
 
             result[obj_id] = {
                 "player_0_oc": player_0_oc,
                 "player_1_oc": player_1_oc,
-                "controller": controller
+                "controller": new_controller
             }
 
         return result
@@ -414,3 +431,63 @@ class GameStateManager:
         if not self.quiet:
             print(f"   → Game ongoing: turn {current_turn}, both players have units")
         return None
+
+    def determine_winner_with_method(self, game_state: Dict[str, Any]) -> Tuple[Optional[int], Optional[str]]:
+        """
+        Determine winner AND the method of victory.
+
+        Returns:
+            Tuple of (winner, win_method):
+            - winner: 0, 1, -1 (draw), or None (ongoing)
+            - win_method: "elimination", "objectives", "value_tiebreaker", "draw", or None
+        """
+        living_units_by_player = {}
+
+        for unit in game_state["units"]:
+            if unit["HP_CUR"] > 0:
+                player = unit["player"]
+                if player not in living_units_by_player:
+                    living_units_by_player[player] = 0
+                living_units_by_player[player] += 1
+
+        current_turn = game_state["turn"]
+        max_turns = self.training_config.get("max_turns_per_episode") if hasattr(self, 'training_config') else 5
+
+        # Check elimination first (immediate win condition)
+        living_players = list(living_units_by_player.keys())
+        if len(living_players) == 1:
+            return living_players[0], "elimination"
+        elif len(living_players) == 0:
+            return -1, "draw"
+
+        # Check if game ended due to turn limit
+        game_ended_by_turns = False
+        if hasattr(self, 'training_config') and max_turns:
+            game_ended_by_turns = current_turn > max_turns
+        else:
+            game_ended_by_turns = current_turn > 5
+
+        if game_ended_by_turns:
+            # OBJECTIVE-BASED VICTORY at turn limit
+            obj_counts = self.count_controlled_objectives(game_state)
+
+            if obj_counts[0] > obj_counts[1]:
+                return 0, "objectives"
+            elif obj_counts[1] > obj_counts[0]:
+                return 1, "objectives"
+            else:
+                # Tiebreaker: More cumulated VALUE of living units wins
+                p0_value = sum(u.get("VALUE", 10) for u in game_state["units"]
+                              if u["player"] == 0 and u["HP_CUR"] > 0)
+                p1_value = sum(u.get("VALUE", 10) for u in game_state["units"]
+                              if u["player"] == 1 and u["HP_CUR"] > 0)
+
+                if p0_value > p1_value:
+                    return 0, "value_tiebreaker"
+                elif p1_value > p0_value:
+                    return 1, "value_tiebreaker"
+                else:
+                    return -1, "draw"
+
+        # Game still ongoing
+        return None, None

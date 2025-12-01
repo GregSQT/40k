@@ -493,6 +493,8 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
         return False
 
     distance_to_target = _calculate_hex_distance(col, row, target["col"], target["row"])
+    if distance_to_target == 0:
+        return False  # Cannot stand ON enemy
     if distance_to_target > unit["CC_RNG"]:
         return False  # Not adjacent to target
 
@@ -539,7 +541,7 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
             # Check if enemy is within CC_RNG of any reachable hex
             for dest_col, dest_row in reachable_hexes:
                 distance_to_enemy = _calculate_hex_distance(dest_col, dest_row, enemy["col"], enemy["row"])
-                if distance_to_enemy <= cc_range:
+                if 0 < distance_to_enemy <= cc_range:
                     # Found a reachable hex adjacent to this enemy
                     return True
 
@@ -790,7 +792,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             is_adjacent_to_enemy = False
             for enemy in enemies:
                 distance_to_enemy = _calculate_hex_distance(neighbor_col, neighbor_row, enemy["col"], enemy["row"])
-                if distance_to_enemy <= unit["CC_RNG"]:
+                if 0 < distance_to_enemy <= unit["CC_RNG"]:
                     is_adjacent_to_enemy = True
                     break
 

@@ -5,7 +5,7 @@ observation_builder.py - Builds observations from game state
 
 import numpy as np
 from typing import Dict, List, Any, Optional
-from engine.combat_utils import calculate_hex_distance, has_line_of_sight
+from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight
 from engine.game_utils import get_unit_by_id
 from engine.phase_handlers.shooting_handlers import _calculate_save_target, _calculate_wound_target
 
@@ -350,7 +350,7 @@ class ObservationBuilder:
         Works for ANY unit pair (active unit vs enemy, VIP vs enemy, etc.)
 
         Considers:
-        - Distance (can they reach?)
+        - Distance (can they reach?) - uses BFS pathfinding to respect walls
         - Hit/wound/save probabilities
         - Number of attacks
         - Damage output
@@ -366,9 +366,11 @@ class ObservationBuilder:
         if cache_key in self._danger_probability_cache:
             return self._danger_probability_cache[cache_key]
 
-        distance = calculate_hex_distance(
+        # Use BFS pathfinding distance to respect walls for reachability
+        distance = calculate_pathfinding_distance(
             defender["col"], defender["row"],
-            attacker["col"], attacker["row"]
+            attacker["col"], attacker["row"],
+            game_state
         )
 
         # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
@@ -543,16 +545,23 @@ class ObservationBuilder:
             return 0.5
 
     def _can_melee_units_charge_target(self, target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
-        """Check if any friendly melee units can charge this target."""
+        """Check if any friendly melee units can charge this target.
+
+        Uses BFS pathfinding distance to respect walls for charge reachability.
+        """
         current_player = game_state["current_player"]
-        
+
         for unit in game_state["units"]:
-            if (unit["player"] == current_player and 
+            if (unit["player"] == current_player and
                 unit["HP_CUR"] > 0 and
                 unit["CC_DMG"] > 0):  # AI_TURN.md: Direct field access
-                
-                # Simple charge range check (2d6 movement + unit MOVE)
-                distance = calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
+
+                # Charge range check using BFS pathfinding to respect walls
+                distance = calculate_pathfinding_distance(
+                    unit["col"], unit["row"],
+                    target["col"], target["row"],
+                    game_state
+                )
                 if "MOVE" not in unit:
                     raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
                 max_charge_range = unit["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
@@ -1179,23 +1188,25 @@ class ObservationBuilder:
             # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
             if "MOVE" not in active_unit:
                 raise KeyError(f"Active unit missing required 'MOVE' field: {active_unit}")
-            
+
             for enemy in game_state["units"]:
                 # AI_TURN.md COMPLIANCE: Direct field access with validation
                 if "player" not in enemy:
                     raise KeyError(f"Enemy unit missing required 'player' field: {enemy}")
                 if "HP_CUR" not in enemy:
                     raise KeyError(f"Enemy unit missing required 'HP_CUR' field: {enemy}")
-                
+
                 if enemy["player"] != active_unit["player"] and enemy["HP_CUR"] > 0:
                     if "col" not in enemy or "row" not in enemy:
                         raise KeyError(f"Enemy unit missing required position fields: {enemy}")
-                    
-                    distance = calculate_hex_distance(
+
+                    # Use BFS pathfinding distance for charge reachability (respects walls)
+                    distance = calculate_pathfinding_distance(
                         active_unit["col"], active_unit["row"],
-                        enemy["col"], enemy["row"]
+                        enemy["col"], enemy["row"],
+                        game_state
                     )
-                    
+
                     # Max charge = MOVE + 12 (maximum 2d6 roll)
                     max_charge = active_unit["MOVE"] + 12
                     if distance <= max_charge:
@@ -1206,20 +1217,22 @@ class ObservationBuilder:
             # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
             if "CC_RNG" not in active_unit:
                 raise KeyError(f"Active unit missing required 'CC_RNG' field: {active_unit}")
-            
+
             for enemy in game_state["units"]:
                 if "player" not in enemy or "HP_CUR" not in enemy:
                     raise KeyError(f"Enemy unit missing required fields: {enemy}")
-                
+
                 if enemy["player"] != active_unit["player"] and enemy["HP_CUR"] > 0:
                     if "col" not in enemy or "row" not in enemy:
                         raise KeyError(f"Enemy unit missing required position fields: {enemy}")
-                    
+
+                    # CC_RNG is typically 1 (adjacent), so pathfinding vs hex distance
+                    # is equivalent for melee. Use hex distance for performance.
                     distance = calculate_hex_distance(
                         active_unit["col"], active_unit["row"],
                         enemy["col"], enemy["row"]
                     )
-                    
+
                     if distance <= active_unit["CC_RNG"]:
                         valid_targets.append(enemy)
         

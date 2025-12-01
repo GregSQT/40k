@@ -25,6 +25,14 @@ interface UnitRendererProps {
   // Movement indicator (for replay mode boot icon)
   movingUnitId?: number | null;
 
+  // Charge indicator (for replay mode lightning icon)
+  chargingUnitId?: number | null;
+  chargeTargetId?: number | null;
+
+  // Fight indicator (for replay mode crossed swords icon)
+  fightingUnitId?: number | null;
+  fightTargetId?: number | null;
+
   // Board configuration
   boardConfig: any;
   HEX_RADIUS: number;
@@ -142,6 +150,10 @@ export class UnitRenderer {
     this.renderExplosionIcon(iconZIndex);
     this.renderShootingIndicator(iconZIndex);
     this.renderMovementIndicator(iconZIndex);
+    this.renderChargeIndicator(iconZIndex);
+    this.renderChargeTargetIndicator(iconZIndex);
+    this.renderFightIndicator(iconZIndex);
+    this.renderFightTargetIndicator(iconZIndex);
     this.renderAttackCounter(unitIconScale);
   }
   
@@ -553,6 +565,114 @@ export class UnitRenderer {
     movementText.position.set(centerX - offset, centerY + offset);
     movementText.zIndex = iconZIndex + 100; // Above everything
     app.stage.addChild(movementText);
+  }
+
+  private renderChargeIndicator(iconZIndex: number): void {
+    const { unit, chargingUnitId, centerX, centerY, app, HEX_RADIUS } = this.props;
+
+    // Only show charge indicator on the unit that is charging
+    if (!chargingUnitId || unit.id !== chargingUnitId) return;
+
+    // Get icon parameters from CSS variables
+    const iconSize = this.getCSSNumber('--icon-charge-size', 1.2);
+    const iconStroke = this.getCSSColor('--icon-charge-stroke');
+    const iconStrokeThickness = this.getCSSNumber('--icon-charge-stroke-thickness', 3);
+
+    // Create charge indicator text (lightning bolt emoji)
+    const chargeText = new PIXI.Text('⚡', {
+      fontSize: HEX_RADIUS * iconSize,
+      align: 'center',
+      stroke: iconStroke,
+      strokeThickness: iconStrokeThickness,
+    });
+    chargeText.anchor.set(0.5);
+
+    // Position at bottom-left of the unit
+    const offset = HEX_RADIUS * 0.6;
+    chargeText.position.set(centerX - offset, centerY + offset);
+    chargeText.zIndex = iconZIndex + 100; // Above everything
+    app.stage.addChild(chargeText);
+  }
+
+  private renderChargeTargetIndicator(iconZIndex: number): void {
+    const { unit, chargeTargetId, centerX, centerY, app, HEX_RADIUS } = this.props;
+
+    // Only show charge target indicator on the unit being charged at
+    if (!chargeTargetId || unit.id !== chargeTargetId) return;
+
+    // Get icon parameters from CSS variables
+    const iconSize = this.getCSSNumber('--icon-charge-target-size', 1.6);
+    const iconStroke = this.getCSSColor('--icon-charge-target-stroke');
+    const iconStrokeThickness = this.getCSSNumber('--icon-charge-target-stroke-thickness', 3);
+
+    // Create charge target indicator (lightning bolt on target)
+    const chargeTargetText = new PIXI.Text('⚡', {
+      fontSize: HEX_RADIUS * iconSize,
+      align: 'center',
+      stroke: iconStroke,
+      strokeThickness: iconStrokeThickness,
+    });
+    chargeTargetText.anchor.set(0.5);
+
+    // Position at bottom-left of the unit (same as explosion)
+    const offset = HEX_RADIUS * 0.6;
+    chargeTargetText.position.set(centerX - offset, centerY + offset);
+    chargeTargetText.zIndex = iconZIndex + 100; // Above everything
+    app.stage.addChild(chargeTargetText);
+  }
+
+  private renderFightIndicator(iconZIndex: number): void {
+    const { unit, fightingUnitId, centerX, centerY, app, HEX_RADIUS } = this.props;
+
+    // Only show fight indicator on the unit that is fighting
+    if (!fightingUnitId || unit.id !== fightingUnitId) return;
+
+    // Get icon parameters from CSS variables
+    const iconSize = this.getCSSNumber('--icon-fight-size', 1.2);
+    const iconStroke = this.getCSSColor('--icon-fight-stroke');
+    const iconStrokeThickness = this.getCSSNumber('--icon-fight-stroke-thickness', 3);
+
+    // Create fight indicator text (crossed swords emoji)
+    const fightText = new PIXI.Text('⚔️', {
+      fontSize: HEX_RADIUS * iconSize,
+      align: 'center',
+      stroke: iconStroke,
+      strokeThickness: iconStrokeThickness,
+    });
+    fightText.anchor.set(0.5);
+
+    // Position at bottom-left of the unit
+    const offset = HEX_RADIUS * 0.6;
+    fightText.position.set(centerX - offset, centerY + offset);
+    fightText.zIndex = iconZIndex + 100; // Above everything
+    app.stage.addChild(fightText);
+  }
+
+  private renderFightTargetIndicator(iconZIndex: number): void {
+    const { unit, fightTargetId, centerX, centerY, app, HEX_RADIUS } = this.props;
+
+    // Only show fight target indicator on the unit being attacked (explosion like shooting)
+    if (!fightTargetId || unit.id !== fightTargetId) return;
+
+    // Get icon parameters from CSS variables - reuse explosion style
+    const iconSize = this.getCSSNumber('--icon-explosion-size', 1.6);
+    const iconStroke = this.getCSSColor('--icon-explosion-stroke');
+    const iconStrokeThickness = this.getCSSNumber('--icon-explosion-stroke-thickness', 3);
+
+    // Create explosion text (same as shooting target)
+    const explosionText = new PIXI.Text('💥', {
+      fontSize: HEX_RADIUS * iconSize,
+      align: 'center',
+      stroke: iconStroke,
+      strokeThickness: iconStrokeThickness,
+    });
+    explosionText.anchor.set(0.5);
+
+    // Position at bottom-left of the unit
+    const offset = HEX_RADIUS * 0.6;
+    explosionText.position.set(centerX - offset, centerY + offset);
+    explosionText.zIndex = iconZIndex + 100; // Above everything
+    app.stage.addChild(explosionText);
   }
 
   private renderHPBar(unitIconScale: number): void {

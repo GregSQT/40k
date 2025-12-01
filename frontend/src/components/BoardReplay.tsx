@@ -732,6 +732,22 @@ export const BoardReplay: React.FC = () => {
     ? currentAction.unit_id
     : null;
 
+  // Get charging unit ID for lightning icon during charge phase
+  const chargingUnitId = currentAction?.type === 'charge' && currentAction?.unit_id
+    ? currentAction.unit_id
+    : null;
+  const chargeTargetId = currentAction?.type === 'charge' && currentAction?.target_id
+    ? currentAction.target_id
+    : null;
+
+  // Get fighting unit ID for crossed swords icon during fight phase
+  const fightingUnitId = currentAction?.type === 'fight' && currentAction?.attacker_id
+    ? currentAction.attacker_id
+    : null;
+  const fightTargetId = currentAction?.type === 'fight' && currentAction?.target_id
+    ? currentAction.target_id
+    : null;
+
   // For move actions, select the ghost unit to show movement range
   // For shoot actions, select the shooter to show LoS/attack range
   // Ghost unit has ID -1 and is at the starting position
@@ -755,15 +771,19 @@ export const BoardReplay: React.FC = () => {
       onStartAttackPreview={() => {}}
       onConfirmMove={() => {}}
       onCancelMove={() => {}}
-      currentPlayer={(currentAction?.type === 'move' || currentAction?.type === 'shoot') ? (currentAction.player as 0 | 1) : (currentState.currentPlayer || 0)}
+      currentPlayer={(currentAction?.type === 'move' || currentAction?.type === 'shoot' || currentAction?.type === 'charge' || currentAction?.type === 'fight') ? (currentAction.player as 0 | 1) : (currentState.currentPlayer || 0)}
       unitsMoved={[]}
-      phase={currentAction?.type === 'move' ? 'move' : (currentAction?.type === 'shoot' ? 'shoot' : (currentState.phase || 'move'))}
+      phase={currentAction?.type === 'move' ? 'move' : (currentAction?.type === 'shoot' ? 'shoot' : (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' ? 'charge' : (currentAction?.type === 'fight' ? 'fight' : (currentState.phase || 'move'))))}
       onShoot={() => {}}
       gameState={currentState}
       getChargeDestinations={() => []}
       shootingTargetId={shootingTargetId}
       shootingUnitId={shootingUnitId}
       movingUnitId={movingUnitId}
+      chargingUnitId={chargingUnitId}
+      chargeTargetId={chargeTargetId}
+      fightingUnitId={fightingUnitId}
+      fightTargetId={fightTargetId}
       wallHexesOverride={currentState.walls}
       objectivesOverride={currentState.objectives}
     />

@@ -4,7 +4,7 @@ reward_calculator.py - Reward calculation system
 """
 
 from typing import Dict, List, Any, Tuple, Optional
-from engine.combat_utils import calculate_wound_target, calculate_hex_distance, has_line_of_sight
+from engine.combat_utils import calculate_wound_target, calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight
 from engine.phase_handlers.shooting_handlers import _calculate_save_target
 from engine.game_utils import get_unit_by_id
 
@@ -944,18 +944,20 @@ class RewardCalculator:
         """
         Calculate probability that attacker will kill defender on its next turn.
         Works for ANY unit pair (active unit vs enemy, VIP vs enemy, etc.)
-        
+
         Considers:
-        - Distance (can they reach?)
+        - Distance (can they reach?) - uses BFS pathfinding to respect walls
         - Hit/wound/save probabilities
         - Number of attacks
         - Damage output
-        
+
         Returns: 0.0-1.0 probability
         """
-        distance = calculate_hex_distance(
+        # Use BFS pathfinding distance to respect walls for reachability
+        distance = calculate_pathfinding_distance(
             defender["col"], defender["row"],
-            attacker["col"], attacker["row"]
+            attacker["col"], attacker["row"],
+            game_state
         )
         
         if "RNG_RNG" not in attacker:
@@ -1216,7 +1218,10 @@ class RewardCalculator:
         return False
     
     def _moved_to_charge_range(self, unit: Dict[str, Any], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
-        """Check if unit moved to charge range of enemies."""
+        """Check if unit moved to charge range of enemies.
+
+        Uses BFS pathfinding distance to respect walls for charge reachability.
+        """
         # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
         if "CC_DMG" not in unit:
             raise KeyError(f"Unit missing required 'CC_DMG' field: {unit}")
@@ -1229,7 +1234,8 @@ class RewardCalculator:
         max_charge_range = unit["MOVE"] + 12  # Average 2d6 charge distance
 
         for enemy in enemies:
-            distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
+            # Use BFS pathfinding to respect walls for charge reachability
+            distance = calculate_pathfinding_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"], game_state)
             if distance <= max_charge_range:
                 return True
 
@@ -1307,10 +1313,13 @@ class RewardCalculator:
         return (not had_los_before) and has_los_now
     
     def _safe_from_enemy_charges(self, unit: Dict[str, Any], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
-        """Check if unit is safe from enemy MELEE charges (ranged proximity irrelevant)."""
-        enemies = [u for u in game_state["units"] 
+        """Check if unit is safe from enemy MELEE charges (ranged proximity irrelevant).
+
+        Uses BFS pathfinding distance to respect walls for charge reachability.
+        """
+        enemies = [u for u in game_state["units"]
                   if u["player"] != unit["player"] and u["HP_CUR"] > 0]
-        
+
         for enemy in enemies:
             # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
             if "RNG_RNG" not in enemy:
@@ -1321,21 +1330,22 @@ class RewardCalculator:
                 raise KeyError(f"Enemy missing required 'MOVE' field: {enemy}")
             if "CC_DMG" not in enemy:
                 raise KeyError(f"Enemy missing required 'CC_DMG' field: {enemy}")
-            
+
             # CRITICAL: Use same logic as observation encoding
             # Melee unit = RNG_RNG <= CC_RNG (opposite of ranged)
             is_melee_unit = enemy["RNG_RNG"] <= enemy["CC_RNG"]
-            
+
             if is_melee_unit and enemy["CC_DMG"] > 0:
-                distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
-                
+                # Use BFS pathfinding to respect walls for charge reachability
+                distance = calculate_pathfinding_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"], game_state)
+
                 # Max charge distance = MOVE + 9 (2d6 average charge roll)
                 max_charge_distance = enemy["MOVE"] + 9
-                
+
                 # Unsafe if any melee enemy can charge us
                 if distance <= max_charge_distance:
                     return False
-        
+
         # Safe - no melee enemies in charge range
         return True
     

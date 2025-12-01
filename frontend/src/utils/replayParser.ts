@@ -379,7 +379,7 @@ export function parse_log_file_from_text(text: string) {
         attacker_id: attackerId,
         attacker_pos: { col: attackerCol, row: attackerRow },
         target_id: targetId,
-        damage: dmgMatch ? parseInt(dmgMatch[1]) : 0
+        damage: 0  // Will be calculated below based on combat results
       };
 
       // Add detailed combat rolls if available
@@ -397,6 +397,19 @@ export function parse_log_file_from_text(text: string) {
         action.save_target = parseInt(saveMatch[1]);
         action.save_roll = parseInt(saveMatch[2]);
         action.save_result = saveMatch[3];
+      }
+
+      // FIGHT logs don't have Dmg:XHP format - infer damage from combat results
+      // Damage is dealt if: hit succeeded AND wound succeeded AND save failed
+      if (dmgMatch) {
+        // If Dmg:XHP is present, use it (future-proofing)
+        action.damage = parseInt(dmgMatch[1]);
+      } else if (action.hit_result === 'HIT' &&
+                 (action.wound_result === 'WOUND' || action.wound_result === 'SUCCESS') &&
+                 action.save_result === 'FAIL') {
+        // Infer damage: melee attacks typically deal 1 damage
+        // Note: This assumes CC_DMG=1, which is standard for most units
+        action.damage = 1;
       }
 
       currentEpisode.actions.push(action);

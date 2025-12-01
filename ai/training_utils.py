@@ -82,33 +82,36 @@ def setup_imports():
         raise ImportError(f"AI_TURN.md: w40k_engine import failed: {e}")
 
 def make_training_env(rank, scenario_file, rewards_config_name, training_config_name,
-                     controlled_agent_key, unit_registry, step_logger_enabled=False):
+                     controlled_agent_key, unit_registry, step_logger_enabled=False,
+                     scenario_files=None):
     """
     Factory function to create a single W40KEngine instance for vectorization.
-    
+
     Args:
         rank: Environment index (0, 1, 2, 3, ...)
-        scenario_file: Path to scenario JSON file
+        scenario_file: Path to scenario JSON file (used if scenario_files not provided)
         rewards_config_name: Name of rewards configuration
         training_config_name: Name of training configuration
         controlled_agent_key: Agent key for this environment
         unit_registry: Shared UnitRegistry instance
         step_logger_enabled: Whether step logging is enabled (disable for vectorized envs)
-    
+        scenario_files: List of scenario files for random selection per episode
+
     Returns:
         Callable that creates and returns a wrapped environment instance
     """
     def _init():
         # Import environment (inside function to avoid import issues)
         from engine.w40k_core import W40KEngine
-        
-        # Create base environment
+
+        # Create base environment with scenario_files for random selection
         base_env = W40KEngine(
             rewards_config=rewards_config_name,
             training_config_name=training_config_name,
             controlled_agent=controlled_agent_key,
             active_agents=None,
             scenario_file=scenario_file,
+            scenario_files=scenario_files,  # NEW: Pass list for random selection
             unit_registry=unit_registry,
             quiet=True,
             gym_training_mode=True
@@ -253,7 +256,7 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
         f"Tried: agent-specific and fallback scenarios."
     )
 
-def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None):
+def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None, n_steps=256):
     """
     Calculate scenario rotation interval for curriculum learning.
 
@@ -261,6 +264,7 @@ def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None
         total_episodes: Total episodes for this training phase
         num_scenarios: Number of scenarios available
         config_value: Optional config override (if None, uses auto-calculation)
+        n_steps: PPO n_steps parameter (needed to ensure training updates happen)
 
     Returns:
         int: Episodes per scenario rotation
@@ -268,9 +272,18 @@ def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None
     if config_value is not None:
         return config_value
 
+    # CRITICAL: Rotation interval must allow at least one PPO update cycle
+    # PPO requires n_steps before doing a training update
+    # Each episode is ~50-75 steps, so we need ceil(n_steps/50) episodes minimum
+    avg_episode_steps = 50  # Conservative estimate
+    min_episodes_for_update = max(1, (n_steps + avg_episode_steps - 1) // avg_episode_steps)
+
     # Auto-calculate: Aim for ~5-10 rotations through all scenarios
     target_rotations = 7
-    return max(1, total_episodes // (num_scenarios * target_rotations))
+    ideal_interval = max(1, total_episodes // (num_scenarios * target_rotations))
+
+    # Use the larger of ideal and minimum for PPO updates
+    return max(ideal_interval, min_episodes_for_update)
 
 def ensure_scenario():
     """Ensure scenario.json exists."""

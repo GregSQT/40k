@@ -7,7 +7,7 @@ import torch
 import numpy as np
 import os
 from typing import Dict, Any, Tuple, List
-from engine.combat_utils import calculate_hex_distance
+from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance
 
 class PvEController:
     """Controls AI opponent in PvE mode."""
@@ -191,16 +191,17 @@ class PvEController:
             raise ValueError(f"No valid movement destinations for unit {unit_id} - should use WAIT action")
         
         # Strategy: Move toward nearest enemy for aggressive positioning
+        # Uses BFS pathfinding to respect walls when calculating distance
         enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
 
         if enemies:
-            # Find nearest enemy using hex distance
-            nearest_enemy = min(enemies, key=lambda e: calculate_hex_distance(unit["col"], unit["row"], e["col"], e["row"]))
+            # Find nearest enemy using BFS pathfinding distance (respects walls)
+            nearest_enemy = min(enemies, key=lambda e: calculate_pathfinding_distance(unit["col"], unit["row"], e["col"], e["row"], game_state))
             enemy_pos = (nearest_enemy["col"], nearest_enemy["row"])
 
-            # Select move that gets closest to nearest enemy using hex distance
+            # Select move that gets closest to nearest enemy using BFS pathfinding distance
             best_move = min(actual_moves,
-                           key=lambda dest: calculate_hex_distance(dest[0], dest[1], enemy_pos[0], enemy_pos[1]))
+                           key=lambda dest: calculate_pathfinding_distance(dest[0], dest[1], enemy_pos[0], enemy_pos[1], game_state))
             
             # Only log once per movement action
             if not hasattr(self, '_logged_moves'):

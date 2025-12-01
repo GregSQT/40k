@@ -23,7 +23,10 @@
   --icon-charge-color: #ff4444;
   --icon-charge-stroke: #ffffff;
   --icon-charge-stroke-thickness: 3;
-  --icon-charge-size: 1.0;
+  --icon-charge-size: 1.2;
+  --icon-charge-target-stroke: #ffffff;
+  --icon-charge-target-stroke-thickness: 3;
+  --icon-charge-target-size: 1.6;
   --icon-shoot-color: #ffaa00;
   --icon-shoot-stroke: #ffffff;
   --icon-shoot-stroke-thickness: 3;
@@ -35,7 +38,7 @@
   --icon-fight-color: #ff4444;
   --icon-fight-stroke: #ffffff;
   --icon-fight-stroke-thickness: 3;
-  --icon-fight-size: 1.0;
+  --icon-fight-size: 1.2;
   
   /* Background Colors */
   --bg-primary: #222;

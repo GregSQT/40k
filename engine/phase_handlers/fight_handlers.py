@@ -1456,8 +1456,20 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     if target_id not in valid_targets:
         return False, {"error": "invalid_target", "targetId": target_id, "valid_targets": valid_targets}
 
+    # Initialize accumulated attack results list for this unit's activation
+    # This stores ALL attacks made during the CC_NB attack loop
+    if "fight_attack_results" not in game_state:
+        game_state["fight_attack_results"] = []
+
     # Execute attack sequence using CC_* stats
     attack_result = _execute_fight_attack_sequence(game_state, unit, target_id)
+
+    # Store this attack result with metadata for step logging
+    attack_result["attackerId"] = unit_id
+    attack_result["targetId"] = target_id
+    attack_result["attack_number"] = unit["CC_NB"] - unit["ATTACK_LEFT"]  # 1-indexed (before decrement)
+    attack_result["total_attacks"] = unit["CC_NB"]
+    game_state["fight_attack_results"].append(attack_result)
 
     # Decrement ATTACK_LEFT
     unit["ATTACK_LEFT"] -= 1
@@ -1515,6 +1527,11 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         result["target_died"] = attack_result.get("target_died", False)  # For metrics tracking
         result["reason"] = "no_more_targets"
 
+        # Include ALL attack results from this activation for step logging
+        result["all_attack_results"] = game_state.get("fight_attack_results", [attack_result])
+        # Clear accumulated results for next unit
+        game_state["fight_attack_results"] = []
+
         # AI_TURN.md: Check if ALL pools are empty → phase complete
         if result.get("phase_complete"):
             # All fight pools empty - transition to next phase
@@ -1551,6 +1568,11 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         result["attack_result"] = attack_result
         result["target_died"] = attack_result.get("target_died", False)  # For metrics tracking
         result["reason"] = "attacks_complete"
+
+        # Include ALL attack results from this activation for step logging
+        result["all_attack_results"] = game_state.get("fight_attack_results", [attack_result])
+        # Clear accumulated results for next unit
+        game_state["fight_attack_results"] = []
 
         # AI_TURN.md: Check if ALL pools are empty → phase complete
         if result.get("phase_complete"):

@@ -13,6 +13,98 @@ import { offsetToCube, cubeDistance, hasLineOfSight, getHexLine, isUnitInRange }
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
+// Objective control map type - tracks which player controls each objective
+type ObjectiveControllers = { [objectiveName: string]: number | null };
+
+// Calculate objective control with PERSISTENT control rules
+// Once a player controls an objective, they keep it until opponent gets strictly higher OC
+// Returns a map of "col,row" -> controller (0, 1, or null for contested/uncontrolled)
+function calculateObjectiveControl(
+  units: Unit[],
+  objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }> | undefined,
+  flatObjectiveHexes: [number, number][] | undefined,
+  currentControllers: ObjectiveControllers  // Persistent control state
+): { controlMap: { [hexKey: string]: number | null }, updatedControllers: ObjectiveControllers } {
+  const controlMap: { [hexKey: string]: number | null } = {};
+  const updatedControllers: ObjectiveControllers = { ...currentControllers };
+
+  // Build a map of hex -> objective for grouped objectives
+  const hexToObjective = new Map<string, string>();
+
+  if (objectives && objectives.length > 0) {
+    // Grouped format: [{name, hexes: [{col, row}]}]
+    for (const obj of objectives) {
+      for (const hex of obj.hexes) {
+        hexToObjective.set(`${hex.col},${hex.row}`, obj.name);
+      }
+    }
+  } else if (flatObjectiveHexes && flatObjectiveHexes.length > 0) {
+    // Flat format: [[col, row], ...]
+    for (const [col, row] of flatObjectiveHexes) {
+      hexToObjective.set(`${col},${row}`, 'unnamed');
+    }
+  }
+
+  // Group hexes by objective name to calculate control per objective
+  const objectiveGroups = new Map<string, Array<{ col: number; row: number }>>();
+  for (const [hexKey, objName] of hexToObjective.entries()) {
+    const [col, row] = hexKey.split(',').map(Number);
+    if (!objectiveGroups.has(objName)) {
+      objectiveGroups.set(objName, []);
+    }
+    objectiveGroups.get(objName)!.push({ col, row });
+  }
+
+  // Calculate control for each objective group
+  for (const [objName, hexes] of objectiveGroups.entries()) {
+    // Build hex set for this objective
+    const hexSet = new Set(hexes.map(h => `${h.col},${h.row}`));
+
+    // Count OC per player for units on this objective's hexes
+    let p0_oc = 0;
+    let p1_oc = 0;
+
+    for (const unit of units) {
+      if (unit.HP_CUR <= 0) continue; // Dead units don't control
+
+      const unitHex = `${unit.col},${unit.row}`;
+      if (hexSet.has(unitHex)) {
+        const oc = unit.OC ?? 1; // Default OC=1 if not specified
+        if (unit.player === 0) {
+          p0_oc += oc;
+        } else {
+          p1_oc += oc;
+        }
+      }
+    }
+
+    // Get current controller from persistent state
+    const currentController = currentControllers[objName] ?? null;
+
+    // Determine new controller with PERSISTENT control rules
+    let newController: number | null = currentController;  // Default: keep current
+
+    if (p0_oc > p1_oc) {
+      // P0 has more OC - P0 captures/keeps
+      newController = 0;
+    } else if (p1_oc > p0_oc) {
+      // P1 has more OC - P1 captures/keeps
+      newController = 1;
+    }
+    // If equal OC: current controller keeps control (no change)
+
+    // Update persistent state
+    updatedControllers[objName] = newController;
+
+    // Assign control to all hexes in this objective
+    for (const hex of hexes) {
+      controlMap[`${hex.col},${hex.row}`] = newController;
+    }
+  }
+
+  return { controlMap, updatedControllers };
+}
+
 type Mode = "select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview";
 
 type BoardProps = {
@@ -25,6 +117,10 @@ type BoardProps = {
   shootingTargetId?: number | null; // For replay mode: shows explosion icon on target
   shootingUnitId?: number | null; // For replay mode: shows shooting indicator on shooter
   movingUnitId?: number | null; // For replay mode: shows boot icon on moving unit
+  chargingUnitId?: number | null; // For replay mode: shows lightning icon on charging unit
+  chargeTargetId?: number | null; // For replay mode: shows lightning icon on charge target
+  fightingUnitId?: number | null; // For replay mode: shows crossed swords icon on fighting unit
+  fightTargetId?: number | null; // For replay mode: shows explosion icon on fight target
   mode: Mode;
   movePreview: { unitId: number; destCol: number; destRow: number } | null;
   attackPreview: { unitId: number; col: number; row: number } | null;
@@ -79,6 +175,10 @@ export default function Board({
   shootingTargetId,
   shootingUnitId,
   movingUnitId,
+  chargingUnitId,
+  chargeTargetId,
+  fightingUnitId,
+  fightTargetId,
   mode,
   movePreview,
   attackPreview,
@@ -129,7 +229,12 @@ export default function Board({
 
   // ✅ HOOK 1: useRef - ALWAYS called first
   const containerRef = useRef<HTMLDivElement>(null);
-  
+
+  // Persistent objective control state - survives re-renders within an episode
+  const objectiveControllersRef = useRef<ObjectiveControllers>({});
+  // Track last turn to detect episode reset
+  const lastTurnRef = useRef<number | null>(null);
+
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig, loading, error } = useGameConfig();
   // ✅ STABLE CALLBACK REFS - Don't change on every render
@@ -841,6 +946,24 @@ export default function Board({
       // Override availableCells if availableCellsOverride is provided (for replay mode)
       const effectiveAvailableCells = availableCellsOverride || availableCells;
 
+      // Detect episode reset: if turn goes back to 1 (or decreases), reset objective controllers
+      const currentTurn = gameState?.turn ?? gameState?.currentTurn ?? 1;
+      if (lastTurnRef.current !== null && currentTurn < lastTurnRef.current) {
+        // New episode started - reset persistent objective control
+        objectiveControllersRef.current = {};
+      }
+      lastTurnRef.current = currentTurn;
+
+      // Calculate objective control based on unit positions with PERSISTENT control
+      const { controlMap: objectiveControl, updatedControllers } = calculateObjectiveControl(
+        units,
+        objectivesOverride,
+        effectiveObjectiveHexes,
+        objectiveControllersRef.current
+      );
+      // Update persistent state
+      objectiveControllersRef.current = updatedControllers;
+
       drawBoard(app, boardConfigWithOverrides as any, {
         availableCells: effectiveAvailableCells,
         attackCells,
@@ -851,7 +974,8 @@ export default function Board({
         phase,
         selectedUnitId,
         mode,
-        showHexCoordinates
+        showHexCoordinates,
+        objectiveControl
       });
 
       // ✅ SETUP BOARD INTERACTIONS using shared BoardInteractions component
@@ -943,7 +1067,13 @@ export default function Board({
           shootingTargetId,
           shootingUnitId,
           // Pass movement indicator
-          movingUnitId
+          movingUnitId,
+          // Pass charge indicators
+          chargingUnitId,
+          chargeTargetId,
+          // Pass fight indicators
+          fightingUnitId,
+          fightTargetId
         });
       }
 

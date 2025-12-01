@@ -5,6 +5,7 @@ Delegates to specialized modules, orchestrates game flow.
 """
 
 import os
+import copy
 import torch
 import json
 import random
@@ -39,13 +40,33 @@ class W40KEngine(gym.Env):
     # INITIALIZATION (KEEP FROM LINES 42-214)
     # ============================================================================
     
-    def __init__(self, config=None, rewards_config=None, training_config_name=None, 
-                controlled_agent=None, active_agents=None, scenario_file=None, 
+    def __init__(self, config=None, rewards_config=None, training_config_name=None,
+                controlled_agent=None, active_agents=None, scenario_file=None,
+                scenario_files=None,  # NEW: List of scenarios for random selection per episode
                 unit_registry=None, quiet=True, gym_training_mode=False, **kwargs):
-        """Initialize W40K engine with AI_TURN.md compliance - training system compatible."""
-        
+        """Initialize W40K engine with AI_TURN.md compliance - training system compatible.
+
+        Args:
+            scenario_file: Single scenario file path (used if scenario_files not provided)
+            scenario_files: List of scenario file paths for random selection per episode
+        """
+
         # Store gym training mode for handler access
         self.gym_training_mode = gym_training_mode
+
+        # Store scenario files list for random selection during reset
+        # If scenario_files provided, use it; otherwise create single-item list from scenario_file
+        if scenario_files and len(scenario_files) > 0:
+            self._scenario_files = scenario_files
+            self._random_scenario_mode = True
+            # Use first scenario for initial setup
+            scenario_file = scenario_files[0]
+        else:
+            self._scenario_files = [scenario_file] if scenario_file else []
+            self._random_scenario_mode = False
+
+        # Store current scenario file path for reference
+        self._current_scenario_file = scenario_file
         
         # Handle both new engine format (single config) and old training system format
         if config is None:
@@ -320,13 +341,18 @@ class W40KEngine(gym.Env):
     
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
         """Reset game state for new episode - gym.Env interface."""
-        
+
         # Call parent reset for gym compliance
         super().reset(seed=seed)
-        
+
         if seed is not None:
             random.seed(seed)
-        
+
+        # RANDOM SCENARIO SELECTION: Pick a random scenario for this episode
+        if self._random_scenario_mode and len(self._scenario_files) > 1:
+            self._current_scenario_file = random.choice(self._scenario_files)
+            self._reload_scenario(self._current_scenario_file)
+
         # Reset game state
         self.game_state.update({
             "current_player": 0,
@@ -345,9 +371,10 @@ class W40KEngine(gym.Env):
             "charge_range_rolls": {},
             "action_logs": [],  # CRITICAL: Reset action logs for new episode metrics
             "gym_training_mode": self.gym_training_mode,  # ADDED: For handler access
-            "hex_los_cache": {}  # PERFORMANCE: Clear hex-coordinate LoS cache for new episode
+            "hex_los_cache": {},  # PERFORMANCE: Clear hex-coordinate LoS cache for new episode
+            "objective_controllers": {}  # RESET: Clear objective control for new episode
         })
-        
+
         # Reset unit health and positions to original scenario values
         # AI_TURN.md COMPLIANCE: Direct access - units must be provided
         if "units" not in self.config:
@@ -355,11 +382,11 @@ class W40KEngine(gym.Env):
         unit_configs = self.config["units"]
         for unit in self.game_state["units"]:
             unit["HP_CUR"] = unit["HP_MAX"]
-            
+
             # CRITICAL: Reset shooting state per episode
             unit["SHOOT_LEFT"] = unit["RNG_NB"]
             unit["ATTACK_LEFT"] = unit["CC_NB"]
-            
+
             # Find original position from config - match by string conversion
             unit_id_str = str(unit["id"])
             original_config = None
@@ -367,7 +394,7 @@ class W40KEngine(gym.Env):
                 if str(cfg["id"]) == unit_id_str:
                     original_config = cfg
                     break
-            
+
             if original_config:
                 unit["col"] = original_config["col"]
                 unit["row"] = original_config["row"]
@@ -539,7 +566,9 @@ class W40KEngine(gym.Env):
                         }
                 
                     # Add specific data for different action types
-                    if action_type == "move":  # CHANGE 5: Use action_type variable instead of semantic_action
+                    # NOTE: move, shoot, wait use the common logging path below
+                    # charge and combat have their own specialized logging
+                    if action_type == "move":
                         # Use semantic action coordinates for accurate logging
                         start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
                         # CRITICAL: Use semantic action destination, not unit's current position
@@ -552,7 +581,8 @@ class W40KEngine(gym.Env):
                             "col": dest_col,  # Use semantic action destination
                             "row": dest_row   # Use semantic action destination
                         })
-                    elif action_type == "shoot":  # CHANGE 6: Use action_type variable instead of semantic_action
+
+                    if action_type == "shoot":
                         # Add shooting-specific data with correct field names
                         action_details.update({
                             "target_id": semantic_action.get("targetId"),  # StepLogger expects target_id
@@ -561,13 +591,13 @@ class W40KEngine(gym.Env):
                             "save_roll": 0,
                             "damage_dealt": 0,
                             "hit_result": "PENDING",
-                            "wound_result": "PENDING", 
+                            "wound_result": "PENDING",
                             "save_result": "PENDING",
                             "hit_target": 4,  # Default values
                             "wound_target": 4,
                             "save_target": 4
                         })
-                        
+
                         # CRITICAL FIX: Populate with actual attack results from game_state
                         if "last_attack_result" in self.game_state and self.game_state["last_attack_result"]:
                             attack_result = self.game_state["last_attack_result"]
@@ -583,7 +613,9 @@ class W40KEngine(gym.Env):
                                 "wound_target": attack_result.get("wound_target", 4),
                                 "save_target": attack_result.get("save_target", 4)
                             })
-                    elif action_type == "charge":
+
+                    # charge and combat have specialized logging with early return
+                    if action_type == "charge":
                         # Add charge-specific data with position info for step logger
                         start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
                         # Get destination from result (populated by charge handler)
@@ -595,67 +627,135 @@ class W40KEngine(gym.Env):
                             "start_pos": start_pos,
                             "end_pos": end_pos
                         })
-                    elif action_type == "combat":
-                        # Add combat/fight-specific data for step logger
-                        action_details.update({
-                            "target_id": result.get("targetId"),
-                            "hit_roll": 0,
-                            "wound_roll": 0,
-                            "save_roll": 0,
-                            "damage_dealt": 0,
-                            "hit_result": "PENDING",
-                            "wound_result": "PENDING",
-                            "save_result": "PENDING",
-                            "hit_target": 4,
-                            "wound_target": 4,
-                            "save_target": 4
-                        })
-                        # Populate with actual attack results from game_state
-                        if "last_attack_result" in self.game_state and self.game_state["last_attack_result"]:
-                            attack_result = self.game_state["last_attack_result"]
-                            action_details.update({
-                                "hit_roll": attack_result.get("hit_roll", 0),
-                                "wound_roll": attack_result.get("wound_roll", 0),
-                                "save_roll": attack_result.get("save_roll", 0),
-                                "damage_dealt": attack_result.get("damage_dealt", 0),
-                                "hit_result": "HIT" if attack_result.get("hit_success") else "MISS",
-                                "wound_result": "WOUND" if attack_result.get("wound_success") else "FAIL",
-                                "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
-                                "hit_target": attack_result.get("hit_target", 4),
-                                "wound_target": attack_result.get("wound_target", 4),
-                                "save_target": attack_result.get("save_target", 4),
-                                "target_died": attack_result.get("target_died", False)
-                            })
 
-                    # Use pre-captured phase for accurate logging (phase may have changed during action)
-                    # Don't use _get_action_phase_for_logging() as it reads current phase which may be wrong
-                    
-                    # CHANGE 37: For shoot actions, read reward from the action_log entry just created
-                    if semantic_action.get("action") == "shoot":
-                        # Find the most recent shoot log for this unit
-                        action_logs = self.game_state.get("action_logs", [])
-                        step_reward = 0.0
-                        for log in reversed(action_logs):
-                            if (log.get("type") == "shoot" and 
-                                log.get("shooterId") == str(unit_id) and 
-                                "reward" in log):
-                                step_reward = log["reward"]
-                                break
-                        action_details["reward"] = step_reward
-                    else:
-                        # For non-shoot actions, calculate normally
+                        # Add reward and log for charge action
                         step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
                         action_details["reward"] = step_reward
-                    
-                    self.step_logger.log_action(
-                        unit_id=updated_unit["id"],
-                        action_type=action_type,  # CHANGE 4: Use validated action_type variable from line 406
-                        phase=pre_action_phase,  # Use phase captured before action executed
-                        player=pre_action_player,  # Use player captured before action executed
-                        success=success,
-                        step_increment=True,
-                        action_details=action_details
-                    )
+
+                        self.step_logger.log_action(
+                            unit_id=updated_unit["id"],
+                            action_type=action_type,
+                            phase=pre_action_phase,
+                            player=pre_action_player,
+                            success=success,
+                            step_increment=True,
+                            action_details=action_details
+                        )
+
+                    elif action_type == "combat":
+                        # Check if we have multiple attack results from fight phase (CC_NB attacks)
+                        all_attack_results = result.get("all_attack_results", [])
+
+                        if all_attack_results and len(all_attack_results) > 0:
+                            # Log EACH attack individually for proper step log output
+                            step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+
+                            for i, attack_result in enumerate(all_attack_results):
+                                attack_details = {
+                                    "current_turn": self.game_state["turn"],
+                                    "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
+                                    "semantic_action": semantic_action,
+                                    "target_id": attack_result.get("targetId", result.get("targetId")),
+                                    "hit_roll": attack_result.get("hit_roll", 0),
+                                    "wound_roll": attack_result.get("wound_roll", 0),
+                                    "save_roll": attack_result.get("save_roll", 0),
+                                    "damage_dealt": attack_result.get("damage_dealt", 0),
+                                    "hit_result": "HIT" if attack_result.get("hit_success") else "MISS",
+                                    "wound_result": "WOUND" if attack_result.get("wound_success") else "FAIL",
+                                    "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
+                                    "hit_target": attack_result.get("hit_target", 4),
+                                    "wound_target": attack_result.get("wound_target", 4),
+                                    "save_target": attack_result.get("save_target", 4),
+                                    "target_died": attack_result.get("target_died", False),
+                                    "reward": step_reward if i == 0 else 0.0  # Only first attack gets reward
+                                }
+
+                                self.step_logger.log_action(
+                                    unit_id=updated_unit["id"],
+                                    action_type=action_type,
+                                    phase=pre_action_phase,
+                                    player=pre_action_player,
+                                    success=success,
+                                    step_increment=(i == 0),  # Only first attack increments step
+                                    action_details=attack_details
+                                )
+                            # Multi-attack logging complete - skip to replay logging
+                        else:
+                            # Fallback: single attack or no attack results
+                            action_details.update({
+                                "target_id": result.get("targetId"),
+                                "hit_roll": 0,
+                                "wound_roll": 0,
+                                "save_roll": 0,
+                                "damage_dealt": 0,
+                                "hit_result": "PENDING",
+                                "wound_result": "PENDING",
+                                "save_result": "PENDING",
+                                "hit_target": 4,
+                                "wound_target": 4,
+                                "save_target": 4
+                            })
+                            # Populate with actual attack results from game_state
+                            if "last_attack_result" in self.game_state and self.game_state["last_attack_result"]:
+                                attack_result = self.game_state["last_attack_result"]
+                                action_details.update({
+                                    "hit_roll": attack_result.get("hit_roll", 0),
+                                    "wound_roll": attack_result.get("wound_roll", 0),
+                                    "save_roll": attack_result.get("save_roll", 0),
+                                    "damage_dealt": attack_result.get("damage_dealt", 0),
+                                    "hit_result": "HIT" if attack_result.get("hit_success") else "MISS",
+                                    "wound_result": "WOUND" if attack_result.get("wound_success") else "FAIL",
+                                    "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
+                                    "hit_target": attack_result.get("hit_target", 4),
+                                    "wound_target": attack_result.get("wound_target", 4),
+                                    "save_target": attack_result.get("save_target", 4),
+                                    "target_died": attack_result.get("target_died", False)
+                                })
+
+                            # Log single combat action (fallback path)
+                            step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+                            action_details["reward"] = step_reward
+
+                            self.step_logger.log_action(
+                                unit_id=updated_unit["id"],
+                                action_type=action_type,
+                                phase=pre_action_phase,
+                                player=pre_action_player,
+                                success=success,
+                                step_increment=True,
+                                action_details=action_details
+                            )
+                    else:
+                        # Non-specialized actions (move, shoot, wait)
+                        # charge and combat have their own logging above with specialized multi-attack handling
+                        # Use pre-captured phase for accurate logging (phase may have changed during action)
+
+                        # For shoot actions, read reward from the action_log entry just created
+                        if action_type == "shoot":
+                            # Find the most recent shoot log for this unit
+                            action_logs = self.game_state.get("action_logs", [])
+                            step_reward = 0.0
+                            for log in reversed(action_logs):
+                                if (log.get("type") == "shoot" and
+                                    log.get("shooterId") == str(unit_id) and
+                                    "reward" in log):
+                                    step_reward = log["reward"]
+                                    break
+                            action_details["reward"] = step_reward
+                        else:
+                            # For non-shoot actions, calculate normally
+                            step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+                            action_details["reward"] = step_reward
+
+                        self.step_logger.log_action(
+                            unit_id=updated_unit["id"],
+                            action_type=action_type,  # CHANGE 4: Use validated action_type variable from line 406
+                            phase=pre_action_phase,  # Use phase captured before action executed
+                            player=pre_action_player,  # Use player captured before action executed
+                            success=success,
+                            step_increment=True,
+                            action_details=action_details
+                        )
 
         # Log to replay_logger for replay file generation (independent of step_logger)
         # AI_TURN.md: Log action for replay/debugging
@@ -778,8 +878,9 @@ class W40KEngine(gym.Env):
         
         # Add winner info when game ends
         if terminated:
-            winner = self._determine_winner()
+            winner, win_method = self._determine_winner_with_method()
             info["winner"] = winner
+            info["win_method"] = win_method
             
             # CRITICAL: Populate info["episode"] for Stable-Baselines3 MetricsCollectionCallback
             info["episode"] = {
@@ -805,13 +906,20 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['units_lost'] = total_ally_units - surviving_ally_units
             self.episode_tactical_data['units_killed'] = total_enemy_units - surviving_enemy_units
             self.episode_tactical_data['total_enemies'] = total_enemy_units
-            
+
+            # Store turn number for metrics filtering (e.g., objectives only on turn 5+)
+            self.episode_tactical_data['final_turn'] = self.game_state["turn"]
+
+            # Count controlled objectives for Player 0 (learning agent)
+            obj_counts = self.state_manager.count_controlled_objectives(self.game_state)
+            self.episode_tactical_data['controlled_objectives'] = obj_counts.get(0, 0)
+
             # Add tactical data to info
             info["tactical_data"] = self.episode_tactical_data.copy()
             
-            # Log episode end with final stats
+            # Log episode end with final stats and win method
             if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-                self.step_logger.log_episode_end(self.game_state["episode_steps"], winner)
+                self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method)
         else:
             info["winner"] = None
         
@@ -1147,65 +1255,12 @@ class W40KEngine(gym.Env):
     
     
     def _determine_winner(self) -> Optional[int]:
-        """Determine winner based on remaining living units or turn limit. Returns -1 for draw."""
-        living_units_by_player = {}
-        
-        for unit in self.game_state["units"]:
-            if unit["HP_CUR"] > 0:
-                player = unit["player"]
-                if player not in living_units_by_player:
-                    living_units_by_player[player] = 0
-                living_units_by_player[player] += 1
-        
-        # DEBUG: Log winner determination details
-        current_turn = self.game_state["turn"]
-        max_turns = self.training_config.get("max_turns_per_episode") if hasattr(self, 'training_config') else None
-        
-        if not self.quiet:
-            print(f"\n🔍 WINNER DETERMINATION DEBUG:")
-            print(f"   Current turn: {current_turn}")
-            print(f"   Max turns: {max_turns}")
-            print(f"   Game over: {self.game_state.get('game_over')}")
-            print(f"   Living units: {living_units_by_player}")
-            print(f"   Has training_config: {hasattr(self, 'training_config')}")
-        
-        # PRIORITY CHECK: If game_over is True and we're at turn limit, determine winner
-        if self.game_state.get("game_over"):
-            if hasattr(self, 'training_config'):
-                max_turns = self.training_config.get("max_turns_per_episode")
-                if max_turns and self.game_state["turn"] == max_turns:
-                    # Game ended at exactly turn limit
-                    living_players = list(living_units_by_player.keys())
-                    if len(living_players) == 2:
-                        # Both players alive at turn limit - DRAW
-                        if not self.quiet:
-                            print(f"   → Draw: Turn limit reached with both players alive (P0: {living_units_by_player.get(0, 0)} units, P1: {living_units_by_player.get(1, 0)} units)")
-                        return -1
-                    elif len(living_players) == 1:
-                        # One player eliminated at turn limit
-                        if not self.quiet:
-                            print(f"   → Winner: Player {living_players[0]} (elimination at turn limit)")
-                        return living_players[0]
-                    else:
-                        # No survivors at turn limit
-                        if not self.quiet:
-                            print(f"   → Draw: No survivors at turn limit")
-                        return -1
-        
-        # Normal elimination rules
-        living_players = list(living_units_by_player.keys())
-        if len(living_players) == 1:
-            if not self.quiet:
-                print(f"   → Winner: Player {living_players[0]} (elimination)")
-            return living_players[0]
-        elif len(living_players) == 0:
-            if not self.quiet:
-                print(f"   → Draw: No survivors - returning -1")
-            return -1  # Draw/no winner
-        else:
-            if not self.quiet:
-                print(f"   → Game ongoing: {len(living_players)} players with units")
-            return None  # Game still ongoing
+        """Determine winner - delegates to state_manager for full victory logic."""
+        return self.state_manager.determine_winner(self.game_state)
+
+    def _determine_winner_with_method(self) -> tuple:
+        """Determine winner AND win method - delegates to state_manager."""
+        return self.state_manager.determine_winner_with_method(self.game_state)
     
     
     def _get_action_phase_for_logging(self, action_type: str) -> str:
@@ -1278,6 +1333,61 @@ class W40KEngine(gym.Env):
         # Create temporary state_manager just for loading during init
         temp_manager = GameStateManager({"board": {}}, unit_registry)
         return temp_manager.load_units_from_scenario(scenario_file, unit_registry)
+
+    def _reload_scenario(self, scenario_file: str):
+        """Reload scenario data for random scenario selection during training.
+
+        This method is called during reset() when random_scenario_mode is enabled.
+        It reloads units, walls, and objectives from the selected scenario file.
+        """
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        board_config = config_loader.get_board_config()
+
+        # Load scenario data (units + optional terrain)
+        scenario_result = self._load_units_from_scenario(scenario_file, self.unit_registry)
+        scenario_units = scenario_result["units"]
+
+        # Determine wall_hexes: use scenario if provided, otherwise fallback to board config
+        if scenario_result.get("wall_hexes") is not None:
+            self._scenario_wall_hexes = scenario_result["wall_hexes"]
+        else:
+            if "default" in board_config:
+                self._scenario_wall_hexes = board_config["default"].get("wall_hexes", [])
+            else:
+                self._scenario_wall_hexes = board_config.get("wall_hexes", [])
+
+        # Determine objectives: use scenario if provided, otherwise fallback to board config
+        if scenario_result.get("objectives") is not None:
+            self._scenario_objectives = scenario_result["objectives"]
+        else:
+            if "default" in board_config:
+                self._scenario_objectives = board_config["default"].get("objectives", board_config["default"].get("objective_hexes", []))
+            else:
+                self._scenario_objectives = board_config.get("objectives", board_config.get("objective_hexes", []))
+
+        # Extract scenario name from file path for logging
+        scenario_name = scenario_file
+        if scenario_name and "/" in scenario_name:
+            scenario_name = scenario_name.split("/")[-1].replace(".json", "")
+        elif scenario_name and "\\" in scenario_name:
+            scenario_name = scenario_name.split("\\")[-1].replace(".json", "")
+
+        # Update config with new scenario data
+        # CRITICAL: Store ORIGINAL positions in config as a deepcopy (immutable reference)
+        # This prevents position corruption when game_state units are modified during gameplay
+        self.config["units"] = copy.deepcopy(scenario_units)
+        self.config["name"] = scenario_name
+
+        # Reinitialize game_state units with a SEPARATE deepcopy
+        # This ensures game_state["units"] is independent from config["units"]
+        self.game_state["units"] = copy.deepcopy(scenario_units)
+
+        # Update wall_hexes and objectives in game_state if present
+        if "wall_hexes" in self.game_state:
+            self.game_state["wall_hexes"] = self._scenario_wall_hexes
+        if "objectives" in self.game_state:
+            self.game_state["objectives"] = self._scenario_objectives
 
 
 # ============================================================================

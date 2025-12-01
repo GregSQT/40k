@@ -89,6 +89,12 @@ def parse_log(filepath):
         'wounded_enemies': {0: set(), 1: set()},
         # Track unit types for death order display
         'unit_types': {},  # unit_id -> unit_type (e.g., "Termagant", "Intercessor")
+        # Win method tracking
+        'win_methods': {
+            0: {'elimination': 0, 'objectives': 0, 'value_tiebreaker': 0},  # P0 wins by method
+            1: {'elimination': 0, 'objectives': 0, 'value_tiebreaker': 0},  # P1 wins by method
+            -1: {'draw': 0}  # Draws
+        },
     }
 
     current_episode = []
@@ -171,10 +177,20 @@ def parse_log(filepath):
                 if stats['current_episode_deaths']:
                     stats['death_orders'].append(tuple(stats['current_episode_deaths']))
 
-                # Extract winner
+                # Extract winner and win method
                 winner_match = re.search(r'Winner=(-?\d+)', line)
+                method_match = re.search(r'Method=(\w+)', line)
+
                 if winner_match:
                     winner = int(winner_match.group(1))
+                    win_method = method_match.group(1) if method_match else None
+
+                    # Track win method
+                    if win_method:
+                        if winner in stats['win_methods'] and win_method in stats['win_methods'][winner]:
+                            stats['win_methods'][winner][win_method] += 1
+                        elif winner == -1:
+                            stats['win_methods'][-1]['draw'] += 1
 
                     # Save sample games (first of each type) - 20 actions
                     if winner == 0 and not stats['sample_games']['win']:
@@ -351,6 +367,34 @@ def print_statistics(stats):
         avg_length = sum(stats['episode_lengths']) / len(stats['episode_lengths'])
         print(f"Average Actions per Episode: {avg_length:.1f}")
         print(f"Min/Max Actions per Episode: {min(stats['episode_lengths'])}/{max(stats['episode_lengths'])}")
+
+    # WIN METHODS
+    print("\n" + "-" * 80)
+    print("WIN METHODS")
+    print("-" * 80)
+    print(f"{'Method':<20} {'Agent Wins (P0)':>18} {'Bot Wins (P1)':>18}")
+    print("-" * 80)
+
+    # Calculate totals
+    p0_total = sum(stats['win_methods'][0].values())
+    p1_total = sum(stats['win_methods'][1].values())
+    draws = stats['win_methods'][-1]['draw']
+
+    for method in ['elimination', 'objectives', 'value_tiebreaker']:
+        p0_count = stats['win_methods'][0].get(method, 0)
+        p1_count = stats['win_methods'][1].get(method, 0)
+        p0_pct = (p0_count / p0_total * 100) if p0_total > 0 else 0
+        p1_pct = (p1_count / p1_total * 100) if p1_total > 0 else 0
+        method_display = method.replace('_', ' ').title()
+        print(f"{method_display:<20} {p0_count:6d} ({p0_pct:5.1f}%)   {p1_count:6d} ({p1_pct:5.1f}%)")
+
+    print("-" * 80)
+    total_games = p0_total + p1_total + draws
+    p0_pct = (p0_total / total_games * 100) if total_games > 0 else 0
+    p1_pct = (p1_total / total_games * 100) if total_games > 0 else 0
+    draw_pct = (draws / total_games * 100) if total_games > 0 else 0
+    print(f"{'TOTAL WINS':<20} {p0_total:6d} ({p0_pct:5.1f}%)   {p1_total:6d} ({p1_pct:5.1f}%)")
+    print(f"{'DRAWS':<20} {draws:6d} ({draw_pct:5.1f}%)")
 
     print("\n" + "-" * 80)
     print("TURN DISTRIBUTION")

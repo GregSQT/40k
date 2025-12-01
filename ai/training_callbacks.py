@@ -103,7 +103,7 @@ class EpisodeTerminationCallback(BaseCallback):
         """Track episodes and display progress."""
         self.step_count += 1
 
-        # CRITICAL FIX: Detect episodes using MULTIPLE methods
+        # Detect episodes using MULTIPLE methods
         episode_ended = False
 
         # Method 1: Check info dicts for 'episode' key (SB3 standard)
@@ -142,10 +142,11 @@ class EpisodeTerminationCallback(BaseCallback):
             import time
             current_time = time.time()
 
-            # Update progress every 10 episodes
-            if self.episode_count % 10 == 0:
-                # Calculate global progress (across all rotations)
-                global_episode_count = self.global_episode_offset + self.episode_count
+            # Calculate global progress (across all rotations)
+            global_episode_count = self.global_episode_offset + self.episode_count
+
+            # Update progress every 10 episodes (use GLOBAL count, not local)
+            if global_episode_count % 10 == 0 or global_episode_count == 1:
                 global_progress_pct = (global_episode_count / self.total_episodes) * 100
 
                 # Global progress bar (full width)
@@ -201,15 +202,14 @@ class EpisodeTerminationCallback(BaseCallback):
                     speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
                     time_info = f" [{elapsed_str}<{eta_str}, {speed_str}]"
 
-                # Build detailed scenario display with episode range
+                # Build detailed scenario display
                 if self.scenario_info:
-                    # Calculate cycle episode range (e.g., "0-100", "100-200")
-                    cycle_start = self.global_episode_offset
-                    cycle_end = self.global_episode_offset + self.max_episodes
-                    scenario_display = f" | {self.scenario_info} | Episodes {cycle_start}-{cycle_end}/{self.total_episodes}"
+                    scenario_display = f" | {self.scenario_info}"
                 else:
                     scenario_display = ""
-                print(f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{scenario_display}", end='\r', flush=True)
+                # Use \r for overwriting progress, but add spaces to clear previous longer lines
+                progress_line = f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{scenario_display}"
+                print(f"\r{progress_line:<100}", end='', flush=True)
 
         # CRITICAL: Stop when max episodes reached (unless disabled for rotation mode)
         if self.episode_count >= self.max_episodes:
@@ -405,7 +405,6 @@ class MetricsCollectionCallback(BaseCallback):
         self.episode_count = 0
         self.episode_reward = 0
         self.episode_length = 0
-        self.last_episode_step = -1  # Track last step where episode ended to prevent double-counting
         
         # Initialize episode tracking with ALL metrics
         self.episode_tactical_data = {
@@ -447,20 +446,26 @@ class MetricsCollectionCallback(BaseCallback):
         self.max_q_value_history = 100  # Keep last 100 Q-value samples
     
     def _on_training_start(self) -> None:
-        """Called when training starts - update metrics_tracker to use model's logger directory."""
-        # CRITICAL FIX: Only update writer on FIRST learn() call, not on rotations
+        """Called when training starts."""
+        # DO NOT redirect writer to SB3's directory!
         # SB3 creates new subdirectories (_1, _2, etc.) on each learn() call
-        # We want ALL metrics in ONE directory for continuous x-axis in TensorBoard
-        if not hasattr(self, '_writer_initialized') or not self._writer_initialized:
-            if hasattr(self.model, 'logger') and self.model.logger:
-                actual_log_dir = self.model.logger.get_dir()
-                if actual_log_dir:
-                    # Close old writer and create new one in SB3's directory
-                    self.metrics_tracker.writer.close()
-                    from torch.utils.tensorboard import SummaryWriter
-                    self.metrics_tracker.writer = SummaryWriter(actual_log_dir)
-                    self.metrics_tracker.log_dir = actual_log_dir
-                    self._writer_initialized = True
+        # This would fragment our metrics across multiple directories
+        # Keep using metrics_tracker's original directory for all metrics
+        pass
+
+    def _on_rollout_start(self) -> None:
+        """Called at start of rollout - capture training metrics from PREVIOUS policy update.
+
+        SB3 flow: rollout → train() → rollout → train() → ...
+        The train() metrics are available at the START of the next rollout.
+        """
+        if hasattr(self.model, 'logger') and hasattr(self.model.logger, 'name_to_value'):
+            model_stats = self.model.logger.name_to_value
+
+            if len(model_stats) > 0:
+                # Pass complete model stats to metrics tracker
+                self.metrics_tracker.log_training_metrics(model_stats)
+                self.metrics_tracker.step_count = self.model.num_timesteps
     
     def print_final_training_summary(self, model=None, training_config=None, training_config_name=None, rewards_config_name=None):
         """Print comprehensive training summary with final bot evaluation"""
@@ -606,22 +611,9 @@ class MetricsCollectionCallback(BaseCallback):
                     if info.get('charge_succeeded', False):
                         self.metrics_tracker.log_combat_kill('charge')
 
-                    # Handle episode end - check BOTH dones array AND info dict
-                    # CRITICAL: SB3's DummyVecEnv sets dones[idx]=True when episode ends
-                    episode_done = False
-                    if 'dones' in self.locals and idx < len(self.locals['dones']):
-                        episode_done = self.locals['dones'][idx]
-
-                    # Also check info dict for episode marker (Monitor wrapper adds this)
-                    if info.get('episode') or info.get('winner') is not None:
-                        episode_done = True
-
-                    if episode_done and self.num_timesteps != self.last_episode_step:
-                        self.last_episode_step = self.num_timesteps
+                    # Handle episode end - check for 'episode' key (Monitor wrapper adds this)
+                    if 'episode' in info:
                         self._handle_episode_end(info)
-                        # DIAGNOSTIC: Print every 500 episodes to verify detection
-                        if self.episode_count % 500 == 0:
-                            print(f"  [MetricsCallback] Episode {self.episode_count} detected at timestep {self.num_timesteps}")
         
         # NEW: Collect reward decomposition from game_state
         if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
@@ -706,21 +698,8 @@ class MetricsCollectionCallback(BaseCallback):
         if step_data:
             self.metrics_tracker.log_training_step(step_data)
         
-        # NEW: Log PPO hyperparameter metrics from stable-baselines3
-        # Extract all available training metrics for hyperparameter tuning
-        if hasattr(self.model, 'logger') and hasattr(self.model.logger, 'name_to_value'):
-            model_stats = self.model.logger.name_to_value
-            
-            # Only log if there are actual training metrics available
-            # SB3 updates these after each policy update (every n_steps)
-            if len(model_stats) > 0:
-                # Pass complete model stats to metrics tracker
-                # This includes: learning_rate, policy_loss, value_loss, entropy_loss,
-                # clip_fraction, approx_kl, explained_variance, n_updates, fps
-                self.metrics_tracker.log_training_metrics(model_stats)
-                
-                # Update step count for proper metric indexing
-                self.metrics_tracker.step_count = self.model.num_timesteps
+        # NOTE: PPO training metrics are captured in _on_rollout_start()
+        # SB3 only populates model.logger.name_to_value during train() which happens BETWEEN rollouts
         
         return True
     
@@ -773,7 +752,18 @@ class MetricsCollectionCallback(BaseCallback):
         if 'tactical_data' in info:
             # Engine provides complete tactical data - use it directly
             self.episode_tactical_data.update(info['tactical_data'])
-       
+
+            # Log controlled objectives ONLY if game completed turn 5 (turn limit reached)
+            # Early termination (elimination) should not log objectives
+            # The 'turn_limit_reached' flag is set by fight_handlers when game ends due to turn limit
+            turn_limit_reached = info.get('turn_limit_reached', False)
+            if turn_limit_reached:
+                controlled_objectives = info['tactical_data'].get('controlled_objectives', 0)
+                self.metrics_tracker.log_controlled_objectives(controlled_objectives)
+            else:
+                # Game ended early (elimination) - skip objective logging
+                self.metrics_tracker.skip_controlled_objectives_logging()
+
         # Log to metrics tracker (KEEP for state tracking)
         self.metrics_tracker.log_episode_end(episode_data)
         self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
