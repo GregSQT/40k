@@ -625,7 +625,8 @@ class W40KEngine(gym.Env):
                         action_details.update({
                             "target_id": result.get("targetId"),
                             "start_pos": start_pos,
-                            "end_pos": end_pos
+                            "end_pos": end_pos,
+                            "charge_roll": result.get("charge_roll")  # Add the actual 2d6 roll
                         })
 
                         # Add reward and log for charge action

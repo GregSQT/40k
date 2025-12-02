@@ -1221,6 +1221,11 @@ textarea:focus {
   background: rgba(255, 204, 0, 0.1);
 }
 
+.game-log-entry--charge-fail {
+  border-left-color: #dc2626; /* Red - failed charge roll */
+  background: rgba(220, 38, 38, 0.25);
+}
+
 /* Shooting Action Color Coding */
 .game-log-entry--shoot {
   border-left-color: #eab308; /* Default yellow for shooting */

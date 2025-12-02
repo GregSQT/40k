@@ -315,6 +315,8 @@ export function parse_log_file_from_text(text: string) {
         const targetMatch = trimmed.match(/CHARGED unit (\d+)/);
         const fromMatch = trimmed.match(/from \((\d+), (\d+)\)/);
         const toMatch = trimmed.match(/to \((\d+), (\d+)\)/);
+        // Parse actual charge roll (2d6) if available: [Roll:X]
+        const rollMatch = trimmed.match(/\[Roll:(\d+)\]/);
 
         if (targetMatch && fromMatch && toMatch) {
           const targetId = parseInt(targetMatch[1]);
@@ -322,6 +324,27 @@ export function parse_log_file_from_text(text: string) {
           const fromRow = parseInt(fromMatch[2]);
           const toCol = parseInt(toMatch[1]);
           const toRow = parseInt(toMatch[2]);
+
+          // Use actual roll if available, otherwise calculate distance as fallback
+          let chargeRoll: number;
+          if (rollMatch) {
+            chargeRoll = parseInt(rollMatch[1]);
+          } else {
+            // Fallback: Calculate charge distance (for old logs without roll)
+            const offsetToCube = (col: number, row: number) => {
+              const x = col;
+              const z = row - ((col - (col & 1)) >> 1);
+              const y = -x - z;
+              return { x, y, z };
+            };
+            const fromCube = offsetToCube(fromCol, fromRow);
+            const toCube = offsetToCube(toCol, toRow);
+            chargeRoll = Math.max(
+              Math.abs(fromCube.x - toCube.x),
+              Math.abs(fromCube.y - toCube.y),
+              Math.abs(fromCube.z - toCube.z)
+            );
+          }
 
           currentEpisode.actions.push({
             type: 'charge',
@@ -331,7 +354,9 @@ export function parse_log_file_from_text(text: string) {
             unit_id: unitId,
             target_id: targetId,
             from: { col: fromCol, row: fromRow },
-            to: { col: toCol, row: toRow }
+            to: { col: toCol, row: toRow },
+            charge_roll: chargeRoll,  // The actual 2d6 roll
+            charge_success: true
           });
 
           // Update unit position after charge
@@ -341,13 +366,17 @@ export function parse_log_file_from_text(text: string) {
           }
         }
       } else if (actionType === 'WAIT') {
+        // WAIT means the charge roll was too low or unit chose not to charge
+        // We don't know the exact roll, but we can indicate it failed
         currentEpisode.actions.push({
           type: 'charge_wait',
           timestamp,
           turn,
           player,
           unit_id: unitId,
-          pos: { col: unitCol, row: unitRow }
+          pos: { col: unitCol, row: unitRow },
+          charge_roll: 0,  // Unknown roll, but too low
+          charge_success: false
         });
       }
       continue;

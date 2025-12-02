@@ -9,7 +9,7 @@
 import { formatMoveMessage, formatShootingMessage, formatCombatMessage, formatChargeMessage, formatDeathMessage, formatMoveCancelMessage, formatChargeCancelMessage, formatTurnStartMessage, formatPhaseChangeMessage } from './gameLogUtils';
 
 export interface BaseLogEntry {
-  type: 'move' | 'shoot' | 'combat' | 'charge' | 'death' | 'turn_change' | 'phase_change' | 'move_cancel' | 'charge_cancel';
+  type: 'move' | 'shoot' | 'combat' | 'charge' | 'charge_fail' | 'death' | 'turn_change' | 'phase_change' | 'move_cancel' | 'charge_cancel';
   message: string;
   turnNumber?: number;
   phase?: string;
@@ -264,6 +264,7 @@ export function getEventIcon(type: string): string {
     case 'move': return '👟';
     case 'shoot': return '🎯';
     case 'charge': return '⚡';
+    case 'charge_fail': return '⚡';
     case 'combat': return '⚔️';
     case 'death': return '💀';
     case 'move_cancel': return '❌';
@@ -294,6 +295,7 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
       }
       return 'game-log-entry--shoot-failed'; // Yellow - failed during hit or wound rolls
     case 'charge': return 'game-log-entry--charge';
+    case 'charge_fail': return 'game-log-entry--charge-fail';
     case 'combat':
       // Check shootDetails for actual combat results (same logic as shooting)
       if (event.shootDetails && Array.isArray(event.shootDetails)) {

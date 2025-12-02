@@ -12,6 +12,7 @@ import { GameLog } from './GameLog';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
 import { useGameLog } from '../hooks/useGameLog';
 import { initializeUnitRegistry, getUnitClass } from '../data/UnitFactory';
+import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
 
 // Import replay parser types
 interface ReplayAction {
@@ -40,6 +41,9 @@ interface ReplayAction {
   wound_target?: number;
   wound_result?: string;
   save_result?: string;
+  // Charge action fields
+  charge_roll?: number;
+  charge_success?: boolean;
 }
 
 interface ReplayEpisode {
@@ -286,6 +290,21 @@ export const BoardReplay: React.FC = () => {
     }
   }
 
+  // Add ghost unit at starting position for charge actions (like move)
+  if (currentAction?.type === 'charge' && currentAction?.from && currentAction.unit_id) {
+    // Add a ghost unit at the starting position
+    const originalUnit = unitsWithGhost.find((u: any) => u.id === currentAction.unit_id);
+    if (originalUnit) {
+      unitsWithGhost.push({
+        ...originalUnit,
+        id: -2, // Special ID for charge ghost unit (different from move ghost)
+        col: currentAction.from.col,
+        row: currentAction.from.row,
+        isGhost: true // Mark as ghost for special rendering
+      });
+    }
+  }
+
   // Update game log when action index changes
   useEffect(() => {
     if (!currentEpisode) return;
@@ -410,10 +429,12 @@ export const BoardReplay: React.FC = () => {
         // Handle charge actions
         const unitId = action.unit_id!;
         const targetId = action.target_id;
+        const chargeRollValue = action.charge_roll;
+        const rollInfo = chargeRollValue !== undefined ? ` (rolled ${chargeRollValue})` : '';
 
         gameLog.addEvent({
           type: 'charge',
-          message: `Unit ${unitId} CHARGED unit ${targetId} from (${action.from.col}, ${action.from.row}) to (${action.to.col}, ${action.to.row})`,
+          message: `Unit ${unitId} CHARGED unit ${targetId}${rollInfo} from (${action.from.col}, ${action.from.row}) to (${action.to.col}, ${action.to.row})`,
           unitId: unitId,
           targetId: targetId,
           turnNumber: turnNumber,
@@ -423,11 +444,15 @@ export const BoardReplay: React.FC = () => {
           endHex: `(${action.to.col}, ${action.to.row})`
         });
       } else if (action.type === 'charge_wait') {
-        // Handle charge wait actions
+        // Handle charge wait actions (failed charge or chose not to charge)
         const unitId = action.unit_id!;
+        const chargeRollValue = action.charge_roll;
+        const rollMessage = chargeRollValue !== undefined && chargeRollValue > 0
+          ? `Unit ${unitId} failed charge (rolled ${chargeRollValue})`
+          : `Unit ${unitId} chose not to charge`;
         gameLog.addEvent({
-          type: 'move',  // Use move type for display consistency
-          message: `Unit ${unitId} chose not to charge`,
+          type: 'charge_fail',  // Use charge_fail type for red styling
+          message: rollMessage,
           unitId: unitId,
           turnNumber: turnNumber,
           phase: 'charge',
@@ -732,8 +757,8 @@ export const BoardReplay: React.FC = () => {
     ? currentAction.unit_id
     : null;
 
-  // Get charging unit ID for lightning icon during charge phase
-  const chargingUnitId = currentAction?.type === 'charge' && currentAction?.unit_id
+  // Get charging unit ID for lightning icon during charge phase (include charge_wait for failed charge badge)
+  const chargingUnitId = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait') && currentAction?.unit_id
     ? currentAction.unit_id
     : null;
   const chargeTargetId = currentAction?.type === 'charge' && currentAction?.target_id
@@ -748,12 +773,23 @@ export const BoardReplay: React.FC = () => {
     ? currentAction.target_id
     : null;
 
+  // Get charge roll info for badge display
+  const chargeRoll = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait') && currentAction?.charge_roll !== undefined
+    ? currentAction.charge_roll
+    : null;
+  const chargeSuccess = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait')
+    ? currentAction?.charge_success ?? false
+    : false;
+
   // For move actions, select the ghost unit to show movement range
   // For shoot actions, select the shooter to show LoS/attack range
-  // Ghost unit has ID -1 and is at the starting position
+  // For charge actions, select the charging unit to show charge destination
+  // Ghost unit has ID -1 (move) or -2 (charge) and is at the starting position
   const replaySelectedUnitId = currentAction?.type === 'move'
     ? -1
-    : (currentAction?.type === 'shoot' ? currentAction.shooter_id : null);
+    : (currentAction?.type === 'charge'
+      ? currentAction.unit_id  // Select the actual charging unit to trigger getChargeDestinations
+      : (currentAction?.type === 'shoot' ? currentAction.shooter_id : null));
 
   // Center column: Board
   const centerContent = currentState && gameConfig ? (
@@ -776,7 +812,72 @@ export const BoardReplay: React.FC = () => {
       phase={currentAction?.type === 'move' ? 'move' : (currentAction?.type === 'shoot' ? 'shoot' : (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' ? 'charge' : (currentAction?.type === 'fight' ? 'fight' : (currentState.phase || 'move'))))}
       onShoot={() => {}}
       gameState={currentState}
-      getChargeDestinations={() => []}
+      getChargeDestinations={(unitId: number) => {
+        // Calculate ALL valid charge destinations for replay mode
+        if (currentAction?.type === 'charge' && currentAction?.from && currentAction.unit_id === unitId) {
+          const chargeFrom = currentAction.from;
+          const chargeTo = currentAction.to;
+
+          // Calculate charge distance from the actual charge that happened
+          const fromCube = offsetToCube(chargeFrom.col, chargeFrom.row);
+          const toCube = offsetToCube(chargeTo.col, chargeTo.row);
+          const chargeDistance = cubeDistance(fromCube, toCube);
+
+          // Find all enemy units (units from the other player)
+          const chargingUnit = unitsWithGhost.find((u: any) => u.id === unitId);
+          const enemyUnits = unitsWithGhost.filter((u: any) =>
+            u.player !== chargingUnit?.player &&
+            u.id >= 0 && // Not a ghost unit
+            u.HP_CUR > 0
+          );
+
+          // Calculate all valid charge destinations:
+          // A hex is valid if it's within charge distance AND adjacent to an enemy
+          const validDestinations: { col: number; row: number }[] = [];
+          const boardCols = currentState?.board_cols || 25;
+          const boardRows = currentState?.board_rows || 21;
+
+          // Cube directions for adjacency check
+          const cubeDirections = [
+            { x: 1, y: -1, z: 0 }, { x: 1, y: 0, z: -1 }, { x: 0, y: 1, z: -1 },
+            { x: -1, y: 1, z: 0 }, { x: -1, y: 0, z: 1 }, { x: 0, y: -1, z: 1 }
+          ];
+
+          for (let col = 0; col < boardCols; col++) {
+            for (let row = 0; row < boardRows; row++) {
+              const hexCube = offsetToCube(col, row);
+              const distFromStart = cubeDistance(fromCube, hexCube);
+
+              // Must be within charge distance (use the actual charge distance + some margin)
+              // In 40k, charge distance = 2d6, typically 2-12
+              if (distFromStart > 0 && distFromStart <= chargeDistance) {
+                // Check if this hex is adjacent to any enemy
+                const isAdjacentToEnemy = enemyUnits.some((enemy: any) => {
+                  const enemyCube = offsetToCube(enemy.col, enemy.row);
+                  return cubeDistance(hexCube, enemyCube) === 1;
+                });
+
+                // Check if hex is not occupied by another unit
+                const isOccupied = unitsWithGhost.some((u: any) =>
+                  u.col === col && u.row === row && u.id !== unitId && u.id >= 0
+                );
+
+                // Check if hex is not a wall
+                const isWall = currentState?.walls?.some((w: any) =>
+                  w.col === col && w.row === row
+                );
+
+                if (isAdjacentToEnemy && !isOccupied && !isWall) {
+                  validDestinations.push({ col, row });
+                }
+              }
+            }
+          }
+
+          return validDestinations;
+        }
+        return [];
+      }}
       shootingTargetId={shootingTargetId}
       shootingUnitId={shootingUnitId}
       movingUnitId={movingUnitId}
@@ -784,6 +885,8 @@ export const BoardReplay: React.FC = () => {
       chargeTargetId={chargeTargetId}
       fightingUnitId={fightingUnitId}
       fightTargetId={fightTargetId}
+      chargeRoll={chargeRoll}
+      chargeSuccess={chargeSuccess}
       wallHexesOverride={currentState.walls}
       objectivesOverride={currentState.objectives}
     />

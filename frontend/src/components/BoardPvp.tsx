@@ -121,6 +121,9 @@ type BoardProps = {
   chargeTargetId?: number | null; // For replay mode: shows lightning icon on charge target
   fightingUnitId?: number | null; // For replay mode: shows crossed swords icon on fighting unit
   fightTargetId?: number | null; // For replay mode: shows explosion icon on fight target
+  // Charge roll display for replay mode
+  chargeRoll?: number | null; // The charge roll value to display
+  chargeSuccess?: boolean; // Whether the charge was successful
   mode: Mode;
   movePreview: { unitId: number; destCol: number; destRow: number } | null;
   attackPreview: { unitId: number; col: number; row: number } | null;
@@ -179,6 +182,8 @@ export default function Board({
   chargeTargetId,
   fightingUnitId,
   fightTargetId,
+  chargeRoll,
+  chargeSuccess,
   mode,
   movePreview,
   attackPreview,
@@ -578,21 +583,27 @@ export default function Board({
       fightTarget = enemiesInRange[0] || null;
     }
 
-    if (phase === "charge" && mode === "chargePreview" && selectedUnit) {
-      // AI_TURN.md: Get charge destinations from backend (already rolled and calculated)
-      chargeCells = getChargeDestinations(selectedUnit.id);
+    // AI_TURN.md: Show charge destinations in both select and chargePreview modes
+    if (phase === "charge" && (mode === "chargePreview" || mode === "select") && selectedUnit) {
+      // Check if this unit is eligible to charge
+      const isEligible = eligibleUnitIds.includes(typeof selectedUnit.id === 'number' ? selectedUnit.id : parseInt(selectedUnit.id as string));
 
-      // Red outline: enemy units that can be reached via valid charge movement
-      chargeTargets = units.filter(u => {
-        if (u.player === selectedUnit.player) return false;
+      if (isEligible) {
+        // AI_TURN.md: Get charge destinations from backend (already rolled and calculated)
+        chargeCells = getChargeDestinations(selectedUnit.id);
 
-        // Check if any valid charge destination is adjacent to this enemy
-        return chargeCells.some(dest => {
-          const cube1 = offsetToCube(dest.col, dest.row);
-          const cube2 = offsetToCube(u.col, u.row);
-          return cubeDistance(cube1, cube2) === 1;
+        // Red outline: enemy units that can be reached via valid charge movement
+        chargeTargets = units.filter(u => {
+          if (u.player === selectedUnit.player) return false;
+
+          // Check if any valid charge destination is adjacent to this enemy
+          return chargeCells.some(dest => {
+            const cube1 = offsetToCube(dest.col, dest.row);
+            const cube2 = offsetToCube(u.col, u.row);
+            return cubeDistance(cube1, cube2) === 1;
+          });
         });
-      });
+      }
     }
 
     // ✅ CALCULATE MOVEMENT PREVIEW BEFORE MAIN DRAWBOARD CALL
@@ -715,17 +726,19 @@ export default function Board({
           }
         }
 
-      } else {
-        // For other phases (charge, etc), just show green circle on unit's hex
+      } else if (phase !== "charge") {
+        // For other phases (except charge), just show green circle on unit's hex
+        // Charge phase uses chargeCells (orange) for destinations instead
         availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
       }
     }
 
-    // Green circles for all eligible charge units (not just selected)
+    // Green circles for all eligible charge units (except the selected one which shows orange destinations)
     if (phase === "charge" && mode === "select") {
       eligibleUnitIds.forEach(unitId => {
         const eligibleUnit = units.find(u => u.id === unitId);
-        if (eligibleUnit) {
+        // Don't add green highlight for selected unit - it will show orange charge destinations instead
+        if (eligibleUnit && eligibleUnit.id !== selectedUnitId) {
           availableCells.push({ col: eligibleUnit.col, row: eligibleUnit.row });
         }
       });
@@ -1049,8 +1062,22 @@ export default function Board({
           return eligibleUnitIds.includes(typeof unit.id === 'number' ? unit.id : parseInt(unit.id as string));
         })();
         
+        // AI_TURN.md: During charge phase, show selected unit as ghost (darkened) at origin
+        // This indicates the unit is about to move, similar to movement preview
+        // In replay mode, a separate ghost unit is added, so we check if one already exists
+        const hasExistingGhost = units.some((u: any) => u.isGhost && u.id < 0);
+        const isChargeOrigin = phase === "charge" &&
+          mode === "select" &&
+          unit.id === selectedUnitId &&
+          chargeCells.length > 0 &&
+          !hasExistingGhost;  // Don't ghost the real unit if replay mode already added a ghost
+
+        const unitToRender = isChargeOrigin
+          ? { ...unit, isGhost: true } as Unit & { isGhost: boolean }
+          : unit;
+
         renderUnit({
-          unit, centerX, centerY, app,
+          unit: unitToRender, centerX, centerY, app,
           isPreview: false,
           isEligible: isEligibleForRendering || false,
           isShootable,
@@ -1073,7 +1100,10 @@ export default function Board({
           chargeTargetId,
           // Pass fight indicators
           fightingUnitId,
-          fightTargetId
+          fightTargetId,
+          // Pass charge roll info for replay mode
+          chargeRoll,
+          chargeSuccess
         });
       }
 

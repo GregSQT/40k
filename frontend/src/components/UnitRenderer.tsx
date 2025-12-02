@@ -33,6 +33,10 @@ interface UnitRendererProps {
   fightingUnitId?: number | null;
   fightTargetId?: number | null;
 
+  // Charge roll display (for replay mode)
+  chargeRoll?: number | null;
+  chargeSuccess?: boolean;
+
   // Board configuration
   boardConfig: any;
   HEX_RADIUS: number;
@@ -155,6 +159,7 @@ export class UnitRenderer {
     this.renderFightIndicator(iconZIndex);
     this.renderFightTargetIndicator(iconZIndex);
     this.renderAttackCounter(unitIconScale);
+    this.renderChargeRollBadge(unitIconScale, iconZIndex);
   }
   
   private calculateEligibilityCompliant(): boolean {
@@ -984,6 +989,52 @@ export class UnitRenderer {
     attackText.position.set(centerX + scaledOffset, centerY - scaledOffset * 1.1);
     attackText.zIndex = 450;
     app.stage.addChild(attackText);
+  }
+
+  private renderChargeRollBadge(unitIconScale: number, iconZIndex: number): void {
+    const { unit, chargingUnitId, chargeRoll, chargeSuccess, centerX, centerY, app, HEX_RADIUS } = this.props;
+
+    // Only show charge roll badge on the unit that is charging
+    if (!chargingUnitId || unit.id !== chargingUnitId) return;
+
+    // Must have a charge roll value to display
+    if (chargeRoll === undefined || chargeRoll === null) return;
+
+    // Calculate badge position (bottom-right of unit)
+    const scaledOffset = (HEX_RADIUS * unitIconScale) / 2 * 0.8;
+    const badgeX = centerX + scaledOffset;
+    const badgeY = centerY + scaledOffset;
+
+    // Badge colors based on success/failure
+    // Success: light green text (#90EE90) on dark green background (#006400)
+    // Failure: light red text (#FF6B6B) on dark red background (#8B0000)
+    const textColor = chargeSuccess ? 0x90EE90 : 0xFF6B6B;
+    const bgColor = chargeSuccess ? 0x006400 : 0x8B0000;
+
+    // Create badge background (rounded rectangle)
+    const badgeWidth = 28;
+    const badgeHeight = 20;
+    const badgeBg = new PIXI.Graphics();
+    badgeBg.beginFill(bgColor, 0.95);
+    badgeBg.lineStyle(2, chargeSuccess ? 0x00AA00 : 0xAA0000, 1);
+    badgeBg.drawRoundedRect(badgeX - badgeWidth / 2, badgeY - badgeHeight / 2, badgeWidth, badgeHeight, 4);
+    badgeBg.endFill();
+    badgeBg.zIndex = iconZIndex + 150; // Above other indicators
+    app.stage.addChild(badgeBg);
+
+    // Create roll number text
+    const rollText = new PIXI.Text(`${chargeRoll}`, {
+      fontSize: 14,
+      fill: textColor,
+      align: 'center',
+      fontWeight: 'bold',
+      stroke: 0x000000,
+      strokeThickness: 1
+    });
+    rollText.anchor.set(0.5);
+    rollText.position.set(badgeX, badgeY);
+    rollText.zIndex = iconZIndex + 151; // Above badge background
+    app.stage.addChild(rollText);
   }
 }
 

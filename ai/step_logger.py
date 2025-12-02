@@ -272,8 +272,12 @@ class StepLogger:
                 if "start_pos" in details and "end_pos" in details:
                     start_col, start_row = details["start_pos"]
                     end_col, end_row = details["end_pos"]
-                    # Remove unit names, keep only IDs per your request
-                    base_msg = f"Unit {unit_id}{unit_coords} CHARGED unit {target_id} from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+                    # Include charge roll (2d6) if available
+                    charge_roll = details.get("charge_roll")
+                    if charge_roll is not None:
+                        base_msg = f"Unit {unit_id}{unit_coords} CHARGED unit {target_id} from ({start_col}, {start_row}) to ({end_col}, {end_row}) [Roll:{charge_roll}]"
+                    else:
+                        base_msg = f"Unit {unit_id}{unit_coords} CHARGED unit {target_id} from ({start_col}, {start_row}) to ({end_col}, {end_row})"
                 else:
                     base_msg = f"Unit {unit_id}{unit_coords} CHARGED unit {target_id}"
             else:
