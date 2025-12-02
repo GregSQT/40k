@@ -9,7 +9,8 @@
       "Bash(npm run dev:*)",
       "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -X utf8 api/server.py)",
       "Bash(\"e:\\Dropbox\\Informatique\\Holberton\\40k\\.venv310\\Scripts\\python.exe\" -X utf8 services/api_server.py)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(dir:*)"
     ],
     "deny": [],
     "ask": []

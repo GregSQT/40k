@@ -26,17 +26,16 @@
   - [Replay Features](#replay-features)
   - [Log Format Reference](#log-format-reference)
   - [Best Practices](#best-practices)
-- [Curriculum Learning (3-Phase Strategy)](#-curriculum-learning-3-phase-strategy)
-  - [Why Curriculum Learning?](#why-curriculum-learning)
-  - [Phase 1: Learn Shooting Basics](#phase-1-learn-shooting-basics)
-  - [Phase 2: Learn Target Priorities](#phase-2-learn-target-priorities)
-  - [Phase 3: Learn Full Tactics](#phase-3-learn-full-tactics)
+- [Training Strategy](#-training-strategy)
+  - [Unified Training (No Curriculum)](#unified-training-no-curriculum)
+  - [Reward Design Philosophy](#reward-design-philosophy)
+  - [Target Priority & Positioning](#target-priority--positioning)
 - [Configuration Files](#️-configuration-files)
   - [training_config.json Structure](#trainingconfigjson-structure)
   - [rewards_config.json Structure](#rewardsconfigjson-structure)
 - [Monitoring Training](#-monitoring-training)
   - [TensorBoard Metrics](#tensorboard-metrics)
-  - [Phase-Specific Success Indicators](#phase-specific-success-indicators)
+  - [Success Indicators](#success-indicators)
   - [Red Flags (Training Collapse)](#red-flags-training-collapse)
 - [Advanced Metrics & Optimization](#-advanced-metrics--optimization) → **See [AI_METRICS.md](AI_METRICS.md)**
 - [Bot Evaluation System](#-bot-evaluation-system)
@@ -72,23 +71,21 @@
 ### Run Training
 ```bash
 # From project root
-python train.py --config default          # Standard training (1000 episodes)
-python train.py --config debug           # Fast testing (50 episodes)
-python train.py --config phase1          # Curriculum Phase 1
-python train.py --config phase2          # Curriculum Phase 2
-python train.py --config phase3          # Curriculum Phase 3
+python ai/train.py --config default      # Standard training (5000 episodes)
+python ai/train.py --config debug        # Fast testing (50 episodes)
+python ai/train.py --step                # Enable step logging for replay viewer
 ```
 
 ### Continue Existing Model
 ```bash
-python train.py --config phase2 --model ./models/ppo_checkpoint_phase1.zip
+python ai/train.py --config default --model ./models/ppo_checkpoint.zip
 ```
 
 ### Key Paths
-- **Configs**: `config/training_config.json`, `config/rewards_config.json`
+- **Training Configs**: `config/agents/<agent_name>/<agent_name>_training_config.json`
+- **Reward Configs**: `rewards_master.json`
 - **Models**: `./models/` (checkpoints saved here)
 - **Logs**: `./tensorboard/` (TensorBoard data)
-- **Events**: `ai/event_log/` (battle replays)
 - **Step Logs**: `train_step.log` (detailed action logs for replay viewer)
 
 ---
@@ -102,8 +99,8 @@ The Replay Mode allows you to visualize training episodes step-by-step in the fr
 During training or evaluation, a `train_step.log` file is generated containing detailed action logs:
 
 ```bash
-# Training automatically generates train_step.log
-python train.py --config phase1
+# Training with step logging enabled
+python ai/train.py --config default --step
 ```
 
 The log captures:
@@ -143,10 +140,27 @@ The log captures:
 - **Death logs**: Black log entries appear when a unit is destroyed
 - **HP display**: Unit health shown as bars
 
+**Movement Phase Indicators:**
+- **Ghost unit at origin**: Darkened ghost shows where unit started
+- **Orange destination hexes**: All valid movement destinations highlighted
+
+**Charge Phase Indicators:**
+- **Ghost unit at origin**: Darkened ghost shows where charging unit started
+- **Orange destination hexes**: All valid charge destinations (hexes adjacent to enemies within charge roll)
+- **Charge roll badge**: Bottom-right badge on charging unit shows the 2d6 roll result
+  - **Green badge**: Charge roll succeeded (light green text on dark green background)
+  - **Red badge**: Charge roll failed (light red text on dark red background)
+
+**Fight Phase Indicators:**
+- **Crossed swords icon**: Appears on the fighting unit
+- **Explosion icon**: Appears on the target unit
+
 **Game Log Color Coding:**
-- **Yellow**: Failed hit or wound rolls
-- **Orange**: Successful save by target
-- **Red**: Damage dealt to target
+- **Yellow (charge)**: Successful charge action
+- **Red (charge)**: Failed charge (roll too low or chose not to charge)
+- **Yellow (shoot/fight)**: Failed hit or wound rolls
+- **Orange (shoot/fight)**: Successful save by target
+- **Red (shoot/fight)**: Damage dealt to target
 - **Black**: Unit destroyed
 
 **Episode Information:**
@@ -161,97 +175,111 @@ The `train_step.log` uses this format:
 
 ```
 [HH:MM:SS] === EPISODE START ===
-[HH:MM:SS] Scenario: phase1-2
+[HH:MM:SS] Scenario: default
 [HH:MM:SS] Opponent: GreedyBot
 [HH:MM:SS] Unit 1 (Intercessor) P0: Starting position (9, 12)
 [HH:MM:SS] === ACTIONS START ===
 [HH:MM:SS] T1 P0 MOVE : Unit 1(6, 15) MOVED from (9, 12) to (6, 15) [SUCCESS] [STEP: YES]
 [HH:MM:SS] T1 P0 SHOOT : Unit 1(6, 15) SHOT at unit 5 - Hit:3+:6(HIT) Wound:4+:5(SUCCESS) Save:3+:2(FAILED) Dmg:1HP [SUCCESS] [STEP: YES]
+[HH:MM:SS] T1 P0 CHARGE : Unit 2(9, 6) CHARGED unit 8 from (7, 13) to (9, 6) [Roll:7] [R:+3.0] [SUCCESS] [STEP: YES]
+[HH:MM:SS] T1 P0 CHARGE : Unit 3(10, 5) WAIT [SUCCESS] [STEP: YES]
+[HH:MM:SS] T1 P0 FIGHT : Unit 2(9, 6) FOUGHT unit 8 - Hit:3+:5(HIT) Wound:4+:4(SUCCESS) Save:4+:6(SAVED) Dmg:0HP [SUCCESS] [STEP: YES]
 [HH:MM:SS] EPISODE END: Winner=0, Actions=68, Steps=68, Total=138
 ```
+
+#### Action Log Formats
+
+| Action | Format |
+|--------|--------|
+| MOVE | `Unit X(col, row) MOVED from (a, b) to (c, d)` |
+| SHOOT | `Unit X(col, row) SHOT at unit Y - Hit:T+:R(HIT/MISS) Wound:T+:R(SUCCESS/FAIL) Save:T+:R(SAVED/FAILED) Dmg:NHP` |
+| CHARGE | `Unit X(col, row) CHARGED unit Y from (a, b) to (c, d) [Roll:N]` where N is the 2d6 charge roll |
+| CHARGE WAIT | `Unit X(col, row) WAIT` (unit chose not to charge or roll was too low) |
+| FIGHT | `Unit X(col, row) FOUGHT unit Y - Hit:T+:R(HIT/MISS) Wound:T+:R(SUCCESS/FAIL) Save:T+:R(SAVED/FAILED) Dmg:NHP` |
 
 ### Best Practices
 
 1. **Debug unexpected behavior**: Use replay to see exactly what the agent did
 2. **Validate training progress**: Check if agent is making tactical decisions
-3. **Compare phases**: Replay episodes from different training phases to see improvement
+3. **Compare episodes**: Replay episodes from different training stages to see improvement
 4. **Check target selection**: Verify agent is prioritizing correct targets
 
 ---
 
-## 🎓 CURRICULUM LEARNING (3-PHASE STRATEGY)
+## 🎯 TRAINING STRATEGY
 
-### Why Curriculum Learning?
-Teaching complex tactics in one step fails. Instead, we progressively teach:
-1. **Basic mechanics** (shooting is good)
-2. **Target priorities** (weak targets first)
-3. **Full tactics** (positioning, cover, focus fire)
+### Unified Training (No Curriculum)
 
-Each phase uses different reward weights to emphasize current learning goal.
+> **IMPORTANT**: This project uses **unified training from the start** - NO curriculum learning.
+> See [RL_TRAINING_ROADMAP.md](RL_TRAINING_ROADMAP.md) for detailed rationale.
+
+**Why NOT Curriculum Learning?**
+
+Research and testing show curriculum learning **fails** for tactical games like this:
+
+1. **Early phases teach wrong policies**
+   - Phase 1 (simplified): Learns "standing still is optimal"
+   - Phase 2 (full game): Must unlearn Phase 1 habits
+   - Result: Negative transfer, worse performance
+
+2. **Mechanics are interdependent**
+   - Shooting effectiveness depends on positioning
+   - Can't learn optimal shooting without walls/cover
+
+3. **Dense rewards + simple exploration**
+   - Agent gets rewards for shooting, moving, objectives
+   - Random policy can discover basic strategies
+   - No need for staged difficulty
+
+**Evidence from testing:**
+- Curriculum Phase 1→2 training: 18k episodes, 14% win rate
+- Unified from-scratch training: 15k episodes, 50-60% win rate
+- **Curriculum took MORE time and got WORSE results**
 
 ---
 
-### Phase 1: Learn Shooting Basics
-**Goal**: Agent discovers that shooting enemies = positive rewards
+### Reward Design Philosophy
 
-**What Agent Learns:**
-- Shooting is better than waiting
-- Moving into line-of-sight is valuable
-- Kills are highly rewarded
+**Key Principles:**
+- All game mechanics active from episode 1 (MOVE, SHOOT, CHARGE, FIGHT)
+- All unit types in scenarios from start (mixed armies)
+- Objectives active from episode 1
+- Single reward configuration, no phased weights
 
-**Reward Emphasis** (from `rewards_config.json`):
+**Current Reward Structure** (from `rewards_master.json`):
 ```json
-"SpaceMarine_Infantry_Troop_RangedSwarm_phase1": {
-  "base_actions": {
-    "ranged_attack": 5.0,        // High reward for shooting
-    "shoot_wait": -15.0          // Heavy penalty for not shooting
-  },
-  "result_bonuses": {
-    "kill_target": 40.0,         // Massive kill reward
-    "wound_target": 5.0,
-    "damage_target": 10.0
-  },
-  "situational_modifiers": {
-    "win": 75.0,                 // Victory strongly reinforced
-    "lose": -75.0
+{
+  "SpaceMarineRanged": {
+    "move_close": 0.2,
+    "move_away": 0.4,
+    "move_to_safe": 0.6,
+    "move_to_rng": 0.8,
+    "ranged_attack": 0.2,
+    "enemy_killed_r": 0.4,
+    "enemy_killed_lowests_hp_r": 0.6,
+    "charge_success": 0.2,
+    "attack": 0.4,
+    "enemy_killed_m": 0.2,
+    "win": 1,
+    "lose": -1,
+    "wait": -0.9
   }
 }
 ```
 
-**Training Config** (from `training_config.json`):
-- `total_episodes`: 2000
-- `learning_rate`: 0.001 (high for fast learning)
-- `ent_coef`: 0.10 (high exploration)
-- `n_steps`: 512 (smaller batches)
-
-**Success Criteria:**
-- ✅ Win rate > 60% vs Random bot
-- ✅ `shoot_wait` penalty episodes decrease
-- ✅ Average kills per episode > 3
-
-**Advance when**: Agent consistently shoots instead of waiting (3-5 training runs)
-
 ---
 
-### Phase 2: Learn Target Priorities & Positioning
-**Goal**: Agent learns to prioritize targets AND position for maximum effect while minimizing exposure
+### Target Priority & Positioning
 
-**What Agent Learns:**
-- Kill efficiency: prioritize targets by VALUE / turns_to_kill
-- Focus fire on wounded enemies (half the time to kill = double the efficiency)
-- Positioning: shoot high-priority targets while minimizing enemy threat
-- Use walls/cover to reduce enemy line-of-sight
+The agent learns target prioritization through reward signals:
 
----
-
-#### Target Priority Formula
-
+**Target Priority Formula:**
 ```
 target_priority = VALUE / turns_to_kill
 ```
 
 - **VALUE**: W40K point cost from unit profile (e.g., Termagant=6, Intercessor=19, Captain=80)
-- **turns_to_kill**: How many activations needed to kill this target (based on expected damage)
+- **turns_to_kill**: How many activations needed to kill this target
 
 **Example priorities (Intercessor selecting targets):**
 
@@ -261,280 +289,10 @@ target_priority = VALUE / turns_to_kill
 | Intercessor (wounded, 1HP) | 19 | 1 | **19** |
 | Termagant | 6 | 1.35 | **4.4** |
 
-This formula naturally encourages:
+This naturally encourages:
 - High-value targets when killable (Captain > Intercessor)
 - Finishing wounded enemies (faster kill = higher priority)
 - Efficient use of attacks (don't waste on hard-to-kill targets)
-
----
-
-#### Movement Reward Formula (Position Score)
-
-The agent learns to choose positions that maximize offensive potential:
-
-```
-Phase 2:  position_score = offensive_value
-Phase 3+: position_score = offensive_value - (defensive_threat × tactical_positioning)
-
-movement_reward = position_score × position_reward_scale  (ABSOLUTE approach)
-```
-
-**Why ABSOLUTE reward (not delta):**
-- Agent is rewarded for being in a good position, not just for improving
-- Agent at best position should still be rewarded (delta would give 0)
-- Simpler: only 1 calculation instead of 2 (faster training)
-- Conceptually correct: goal is "be in good positions", not "improve position"
-
-**Why Phase 2 ignores defensive_threat:**
-- Bots are dumb (random targeting), so defensive predictions would be wrong
-- Training on wrong predictions = agent learns to ignore the signal
-- Better to stay "naive" about defense than learn incorrect patterns
-- Phase 3 introduces defense with self-play (smart opponents)
-
----
-
-#### Offensive Value
-
-**Goal**: Estimate the total VALUE the unit can secure by shooting from this position.
-
-**Core concept**: The unit has a limited number of attacks (RNG_NB). Each attack can contribute to killing enemies. We want to estimate the total VALUE of enemies that can be killed or partially killed with available attacks.
-
-**Step-by-step calculation:**
-
-1. **Identify visible enemies**: Find all enemy units the unit has line-of-sight (LOS) to from this position.
-
-2. **Calculate attacks needed per target**: For each visible enemy, calculate how many attacks are needed to kill it:
-   - `attacks_needed = turns_to_kill × RNG_NB`
-   - Example: If `turns_to_kill = 0.67` and `RNG_NB = 2`, then `attacks_needed = 1.34`
-
-3. **Sort targets by target_priority** (highest first): `target_priority = VALUE / turns_to_kill`
-   - This prioritizes efficient kills (high value, easy to kill)
-
-4. **Allocate attacks to targets** (greedy allocation):
-   - Start with `attacks_remaining = RNG_NB`
-   - For each target (highest target_priority first):
-     - **If enough attacks to secure the kill** (`attacks_remaining >= attacks_needed`):
-       - Add the target's full **VALUE** to offensive_value
-       - Subtract attacks used: `attacks_remaining -= attacks_needed`
-     - **If NOT enough attacks** (`attacks_remaining < attacks_needed`):
-       - Calculate **kill probability**: `kill_prob = attacks_remaining / attacks_needed`
-       - Add **VALUE × kill_prob** to offensive_value (probabilistic partial kill)
-       - Set `attacks_remaining = 0` (all attacks used)
-
-5. **Result**: Sum of all secured and probabilistic VALUE = **offensive_value**
-
-**Why this works**:
-- Guarantees full VALUE for targets we can definitely kill
-- Gives partial credit for targets we might kill with remaining attacks
-- Naturally prioritizes high-value targets
-- Accounts for attack distribution across multiple targets
-
-**Example**: Intercessor (RNG_NB=2) sees 3 Termagants
-
-| Target | VALUE | turns_to_kill | attacks_needed |
-|--------|-------|---------------|----------------|
-| Termagant 1 | 6 | 0.67 | 1.34 |
-| Termagant 2 | 6 | 0.67 | 1.34 |
-| Termagant 3 | 6 | 0.67 | 1.34 |
-
-Allocation:
-1. Termagant 1: Have 2.0 attacks, need 1.34 → **Secured kill: +6 VALUE**, remaining = 0.66
-2. Termagant 2: Have 0.66 attacks, need 1.34 → kill_prob = 0.66/1.34 = 0.49 → **Probabilistic: +2.9 VALUE**
-3. No attacks remaining
-
-**Offensive value = 8.9** (one guaranteed kill + ~49% chance of second kill)
-
----
-
-#### Defensive Threat
-
-**Goal**: Estimate how much damage this unit will receive at this position, accounting for enemy movement decisions and targeting priorities.
-
-**Core concept**: Enemies are intelligent. They will:
-1. Move toward high-priority targets (not randomly)
-2. Shoot high-priority targets (not randomly)
-
-Therefore, if a high-value friendly unit (like a Captain) is nearby, enemies will likely move toward and shoot the Captain instead of you. This means your actual threat is lower than if you were alone.
-
-**Step-by-step calculation:**
-
-**Step 1: Identify threatening enemies**
-
-For each enemy unit:
-- Find all positions the enemy could reach after moving (within their MOVE range)
-- Check which of those positions give LOS to YOU
-- If at least one position gives LOS → this enemy is a **potential threat**
-
-**Step 2: Determine who the enemy will target**
-
-For each threatening enemy:
-- List ALL friendly units the enemy could potentially see after moving (not just you)
-- Calculate priority for each friendly from the enemy's perspective:
-  - `priority = friendly_VALUE / turns_to_kill_friendly`
-- Rank all reachable friendlies by priority (highest = rank 1)
-- Find YOUR rank in this list
-
-**Step 3: Calculate movement probability**
-
-The enemy will move toward their highest-priority target. If you're not #1, the enemy may not even move toward you:
-
-| Your Rank | Enemy Moves Toward You Probability |
-|-----------|-----------------------------------|
-| 1 (you're top priority) | **100%** - Enemy definitely comes for you |
-| 2 | **30%** - Unlikely, but possible (enemy might have tactical reasons) |
-| 3+ | **10%** - Very unlikely (better targets exist) |
-
-**Step 4: Calculate targeting probability**
-
-Even if the enemy moves to a position where they can see you, they may shoot someone else:
-
-| Your Rank | Enemy Shoots You Probability |
-|-----------|------------------------------|
-| 1 | **100%** - You're the priority |
-| 2 | **50%** - Might shoot you if #1 is harder to kill |
-| 3+ | **25%** - Low chance |
-
-**Step 5: Calculate weighted threat**
-
-For each threatening enemy:
-```
-threat_weight = move_probability × targeting_probability
-threat_from_enemy = enemy_expected_damage × threat_weight
-```
-
-Sum all threats = **defensive_threat**
-
-**Example**: Carnifex evaluating threat to an Intercessor
-
-Carnifex can move and reach LOS to:
-- Captain Gravis (far away, but high VALUE)
-- Intercessor (me, closer)
-- Another Intercessor (nearby)
-
-From Carnifex perspective:
-| Friendly | VALUE | Turns to Kill | Priority | Rank |
-|----------|-------|---------------|----------|------|
-| Captain Gravis | 80 | 2 | 40 | 1 |
-| Intercessor (me) | 19 | 1 | 19 | 2 |
-| Intercessor B | 19 | 1 | 19 | 3 |
-
-**Analysis for "me" (Intercessor):**
-- I'm rank 2
-- Move probability = 30% (Carnifex will likely move toward Captain)
-- Targeting probability = 50%
-- Threat weight = 0.30 × 0.50 = **15%**
-
-If Carnifex expected_damage = 4.0:
-- My threat from Carnifex = 4.0 × 0.15 = **0.6**
-
-Compare to if I were alone (no Captain):
-- I'd be rank 1 → threat weight = 1.0 × 1.0 = 100%
-- My threat from Carnifex = 4.0 × 1.0 = **4.0**
-
-**The Captain's presence reduces my threat by 85%!**
-
----
-
-#### Position Score Summary
-
-```
-Phase 2:  position_score = offensive_value                    (tactical_positioning = 0)
-Phase 3+: position_score = offensive_value - (defensive_threat × tactical_positioning)
-```
-
-**Parameters:**
-- `tactical_positioning`: Hyperparameter controlling defense weight
-  - `0.0` = **Phase 2** (offensive only - no defense vs dumb bots)
-  - `0.5` = aggressive (low defense weight)
-  - `1.0` = balanced (equal weight to offense and defense)
-  - `2.0` = defensive (high defense weight)
-
-**Phase 2 - What the agent learns:**
-- Move to positions with LOS on high-value targets
-- Use walls to get/break LOS for shooting advantage
-
-**Phase 3+ - Additional learning (with self-play):**
-- Avoid positions where you're the top priority for many enemies
-- Stay near high-value allies (they draw enemy attention)
-- Use walls defensively to break enemy LOS
-
-**Reward Emphasis** (from `rewards_config.json`):
-```json
-"SpaceMarine_Infantry_Troop_RangedSwarm_phase2": {
-  "base_actions": {
-    "ranged_attack": 2.0,        // Still good, but not dominant
-    "shoot_wait": -5.0           // Moderate penalty
-  },
-  "result_bonuses": {
-    "kill_target": 5.0,          // Reduced from Phase 1
-    "target_lowest_hp": 15.0     // Priority on wounded/easy targets
-  },
-  "target_type_bonuses": {
-    "vs_swarm": 2.0,             // Unit type bonuses
-    "vs_elite": 1.0,
-    "vs_troop": 0.5
-  }
-}
-```
-
-**Training Config**:
-- `total_episodes`: 4000
-- `learning_rate`: 0.0005 (reduced for refinement)
-- `ent_coef`: 0.05 (less exploration)
-- `n_steps`: 1024 (larger batches)
-
-**Success Criteria:**
-- ✅ Win rate > 70% vs Greedy bot
-- ✅ Average overkill damage < 20% of total damage
-- ✅ Low-HP targets killed before high-HP targets
-
-**Advance when**: Agent demonstrates target prioritization (5-10 training runs)
-
----
-
-### Phase 3: Learn Full Tactics
-**Goal**: Agent masters positioning, cover, and combined tactics
-
-**What Agent Learns:**
-- Move to cover when exposed
-- Maintain line-of-sight advantages
-- Coordinate multiple units
-- Avoid being charged
-
-**Reward Emphasis** (from `rewards_config.json`):
-```json
-"SpaceMarine_Infantry_Troop_RangedSwarm_phase3": {
-  "base_actions": {
-    "ranged_attack": 1.5,
-    "move_to_los": 0.8,          // Strong positioning reward
-    "move_to_charge": 0.6
-  },
-  "tactical_bonuses": {
-    "gained_los_on_target": 0.8, // NEW: Tactical awareness
-    "moved_to_cover": 0.6,
-    "safe_from_charges": 0.5,
-    "safe_from_ranged": 0.4
-  },
-  "adaptive_bonuses": {
-    "step_up_when_covered": 0.2, // NEW: Adaptive behavior
-    "step_down_when_needed": 0.2
-  }
-}
-```
-
-**Training Config**:
-- `total_episodes`: 6000
-- `learning_rate`: 0.0003 (fine-tuning)
-- `ent_coef`: 0.10 (moderate exploration)
-- `n_steps`: 2048 (full batches)
-- `n_epochs`: 10 (deep learning)
-
-**Success Criteria:**
-- ✅ Win rate > 75% vs Tactical bot
-- ✅ Units consistently use cover
-- ✅ Positioning improves over episode
-
-**Complete when**: Agent demonstrates tactical mastery (10-20 training runs)
 
 ---
 
@@ -542,36 +300,39 @@ Phase 3+: position_score = offensive_value - (defensive_threat × tactical_posit
 
 ### training_config.json Structure
 
+Training configs are per-agent at: `config/agents/<agent_name>/<agent_name>_training_config.json`
+
 ```json
 {
-  "phase1": {
-    "total_episodes": 2000,              // How many episodes to train
+  "default": {
+    "total_episodes": 5000,              // How many episodes to train
     "max_turns_per_episode": 5,          // Game length limit
-    "max_steps_per_turn": 8,             // Steps per turn limit
-    
+    "max_steps_per_turn": 200,           // Steps per turn limit
+
     "callback_params": {
-      "checkpoint_save_freq": 2500,      // Save model every N steps
-      "checkpoint_name_prefix": "ppo_curriculum_p1",
-      "n_eval_episodes": 5               // Evaluation frequency
+      "checkpoint_save_freq": 50000,     // Save model every N steps
+      "checkpoint_name_prefix": "ppo_checkpoint",
+      "n_eval_episodes": 5,              // Evaluation frequency
+      "bot_eval_freq": 100               // Bot eval every N episodes
     },
-    
+
     "observation_params": {
-      "obs_size": 295,                   // Total observation vector size
+      "obs_size": 300,                   // Total observation vector size
       "perception_radius": 25,           // Fog of war radius
       "max_nearby_units": 10,            // Max units to observe
       "max_valid_targets": 5             // Max targets to track
     },
     
     "model_params": {
-      "learning_rate": 0.001,            // How fast agent learns
-      "n_steps": 512,                    // Steps before update
+      "learning_rate": 0.0003,           // How fast agent learns
+      "n_steps": 256,                    // Steps before update
       "batch_size": 128,                 // Training batch size
-      "n_epochs": 4,                     // Training epochs per update
+      "n_epochs": 10,                    // Training epochs per update
       "gamma": 0.95,                     // Future reward discount
-      "gae_lambda": 0.9,                 // Advantage estimation
+      "gae_lambda": 0.95,                // Advantage estimation
       "clip_range": 0.2,                 // PPO clipping parameter
       "ent_coef": 0.10,                  // Exploration bonus
-      "vf_coef": 0.5,                    // Value function weight
+      "vf_coef": 1.0,                    // Value function weight
       "max_grad_norm": 0.5,              // Gradient clipping
       "policy_kwargs": {
         "net_arch": [320, 320]           // Neural network size
@@ -593,49 +354,41 @@ Phase 3+: position_score = offensive_value - (defensive_threat × tactical_posit
 
 ---
 
-### rewards_config.json Structure
+### rewards_master.json Structure
 
-Each unit type has reward profiles for:
-- **Base profile**: Default tactical behavior
-- **Phase 1 profile**: Suffix `_phase1` for shooting emphasis
-- **Phase 2 profile**: Suffix `_phase2` for priority targeting
-- **Phase 3 profile**: Suffix `_phase3` for full tactics
+Each unit archetype has a single reward profile. No phased profiles.
 
-**Reward Categories:**
+**Reward Categories** (from `rewards_master.json`):
 
 ```json
 {
-  "base_actions": {
-    // Rewards for action types (move, shoot, charge)
-    "ranged_attack": 0.5,
-    "move_to_los": 0.6,
-    "shoot_wait": -0.9
-  },
-  
-  "result_bonuses": {
-    // Rewards for action outcomes
-    "kill_target": 0.1,
-    "no_overkill": 0.05,
-    "target_lowest_hp": 0.05
-  },
-  
-  "target_type_bonuses": {
-    // Rewards based on target unit type
-    "vs_swarm": 0.2,
-    "vs_elite": 0.0,
-    "vs_vehicle": -0.1
-  },
-  
-  "tactical_bonuses": {
-    // Rewards for tactical positioning
-    "gained_los_on_target": 0.25,
-    "moved_to_cover": 0.15,
-    "safe_from_charges": 0.1
-  },
-  
-  "situational_modifiers": {
-    // Win/loss and special conditions
-    "win": 1.0,
+  "SpaceMarineRanged": {
+    // Movement rewards
+    "move_close": 0.2,           // Moving closer to enemy
+    "move_away": 0.4,            // Moving away (for ranged units)
+    "move_to_safe": 0.6,         // Moving to safety
+    "move_to_rng": 0.8,          // Moving into shooting range
+    "move_to_charge": 0.2,       // Moving into charge range
+
+    // Combat rewards
+    "ranged_attack": 0.2,        // Shooting action
+    "enemy_killed_r": 0.4,       // Kill with ranged
+    "enemy_killed_lowests_hp_r": 0.6,  // Kill lowest HP target
+    "enemy_killed_no_overkill_r": 0.8, // Kill without overkill
+    "charge_success": 0.2,       // Successful charge
+    "attack": 0.4,               // Melee attack
+    "enemy_killed_m": 0.2,       // Kill in melee
+
+    // Penalties
+    "being_charged": -0.4,       // Getting charged
+    "loose_hp": -0.4,            // Taking damage
+    "killed_in_melee": -0.8,     // Dying in melee
+    "atk_wasted_r": -0.8,        // Wasted ranged attack
+    "atk_wasted_m": -0.8,        // Wasted melee attack
+    "wait": -0.9,                // Waiting instead of acting
+
+    // Game outcome
+    "win": 1,
     "lose": -1.0,
     "friendly_fire_penalty": -0.8
   }
@@ -682,7 +435,7 @@ Navigate to the `0_critical/` namespace in TensorBoard - it contains **10 essent
 - `0_critical/b_win_rate_100ep` - Recent 100-episode performance trend
 - `0_critical/g_approx_kl` - Policy stability (<0.02 = healthy)
 - `0_critical/h_entropy_loss` - Exploration level (should decrease gradually)
-- `0_critical/e_explained_variance` - Value function quality (>0.70 Phase 1, >0.85 Phase 2+)
+- `0_critical/e_explained_variance` - Value function quality (target: >0.70 early, >0.85 late training)
 
 **✅ Healthy Training:** All `0_critical/` metrics trending toward targets
 **⚠️ Red Flag:** Any metric outside range for 200+ episodes needs intervention
@@ -707,22 +460,22 @@ Navigate to the `0_critical/` namespace in TensorBoard - it contains **10 essent
 | `bot_eval/` | `vs_defensive` | Performance vs DefensiveBot | Improving |
 | `bot_eval/` | `combined` | Overall bot evaluation | Increasing to 0.70+ |
 
-### Phase-Specific Success Indicators
+### Success Indicators
 
-**Phase 1 - Learning Shooting:**
+**Early Training (0-1000 episodes):**
 - `rollout/ep_rew_mean`: Should increase from negative to positive
-- `shoot_wait` penalties: Should decrease sharply
-- Win rate vs Random bot: 60%+ after 1000 episodes
+- Wait penalties: Should decrease sharply
+- Win rate vs Random bot: 40%+ after 500 episodes
 
-**Phase 2 - Learning Priorities:**
-- `rollout/ep_rew_mean`: Should continue increasing
-- `no_overkill` bonuses: Should increase
-- Win rate vs Greedy bot: 70%+ after 2000 episodes
+**Mid Training (1000-3000 episodes):**
+- `rollout/ep_rew_mean`: Should continue increasing steadily
+- Win rate vs Greedy bot: 50%+ after 2000 episodes
+- Invalid action rate: Should drop below 5%
 
-**Phase 3 - Full Tactics:**
+**Late Training (3000+ episodes):**
 - `rollout/ep_rew_mean`: Steady high values
-- Tactical bonuses: Should increase
-- Win rate vs Tactical bot: 75%+ after 4000 episodes
+- Combined bot evaluation: 60%+
+- Win rate vs Tactical bots: 50%+ after 4000 episodes
 
 ### Red Flags (Training Collapse)
 
@@ -784,21 +537,21 @@ This comprehensive guide covers:
 ### Evaluation Commands
 
 ```bash
-# Automatic evaluation during training (every 5 episodes)
-python train.py --config phase1  # n_eval_episodes: 5
+# Automatic evaluation during training (configured in training_config.json)
+python ai/train.py --config default  # bot_eval_freq: 100 episodes
 
 # Manual evaluation after training
-python evaluation.py --model ./models/ppo_checkpoint_phase1.zip --opponent tactical --episodes 20
+python ai/evaluation.py --model ./models/ppo_checkpoint.zip --opponent tactical --episodes 20
 ```
 
 ### Win Rate Benchmarks
 
 | Training Stage | vs Random | vs Greedy | vs Tactical |
 |----------------|-----------|-----------|-------------|
-| Phase 1 Start  | 30-40%    | 10-20%    | 0-5%        |
-| Phase 1 End    | 80-90%    | 60-70%    | 30-40%      |
-| Phase 2 End    | 95%+      | 80-90%    | 60-70%      |
-| Phase 3 End    | 95%+      | 95%+      | 80-90%      |
+| Start          | 30-40%    | 10-20%    | 0-5%        |
+| 1000 episodes  | 60-70%    | 40-50%    | 20-30%      |
+| 3000 episodes  | 80-90%    | 60-70%    | 40-50%      |
+| 5000 episodes  | 90%+      | 75-85%    | 55-65%      |
 
 ---
 
@@ -850,33 +603,29 @@ bots = {
 
 ### Solution 2: Balanced Reward Penalties (Reduce Over-Aggression)
 
-**Location**: `config/agents/<agent>/<agent>_rewards_config.json`
+**Location**: `rewards_master.json`
 
 **Problem**: Overly harsh penalties force hyper-aggressive play that becomes predictable.
 
-**Changes in Phase 1** (Example for SpaceMarine_Infantry_Troop_RangedSwarm):
+**Example adjustments**:
 ```json
 {
-  "SpaceMarine_Infantry_Troop_RangedSwarm_phase1": {
-    "base_actions": {
-      "shoot_wait": -10.0   // Was -30.0 (too punishing)
-    },
-    "movement_penalties": {
-      "move_away": -1.0     // Was -3.0 (too punishing)
-    }
+  "SpaceMarineRanged": {
+    "wait": -0.9,          // Moderate penalty (not too harsh)
+    "move_away": 0.4       // Allow tactical retreat
   }
 }
 ```
 
 **Why this helps**:
-- Old values forced hyper-aggressive play (always seeking shots)
+- Very harsh wait penalties forced hyper-aggressive play (always seeking shots)
 - Aggressive strategies are predictable and exploitable by random opponents
-- New values allow tactical patience and positional flexibility
+- Moderate values allow tactical patience and positional flexibility
 
-**Tuning recommendations by phase**:
-- **Phase 1**: Focus on learning basics with moderate penalties
-- **Phase 2**: Increase penalties slightly to encourage efficiency
-- **Phase 3**: Use balanced penalties for final tactical polish
+**Tuning recommendations**:
+- **Wait penalty**: -0.5 to -1.0 (avoid -2.0+ which forces reckless play)
+- **Move penalties**: Keep balanced to allow tactical flexibility
+- **Win/lose**: Keep at ±1.0 for stable training
 
 ---
 
@@ -899,17 +648,11 @@ combined_score = 0.35 * random + 0.30 * greedy + 0.35 * defensive
 - Model selection favors agents that handle unpredictability
 - Prevents models that only beat predictable opponents from being saved as "best"
 
-**Tuning recommendations by training stage**:
+**Recommended weighting**:
 
 ```python
-# Early training (Phase 1): Equal weighting
-combined_score = 0.33 * random + 0.33 * greedy + 0.34 * defensive
-
-# Mid training (Phase 2): Balanced (RECOMMENDED)
+# Balanced weighting (RECOMMENDED)
 combined_score = 0.35 * random + 0.30 * greedy + 0.35 * defensive
-
-# Late training (Phase 3): Emphasize advanced tactics
-combined_score = 0.30 * random + 0.25 * greedy + 0.45 * defensive
 ```
 
 ---
@@ -919,7 +662,7 @@ combined_score = 0.30 * random + 0.25 * greedy + 0.45 * defensive
 #### Starting Fresh Training
 
 ```bash
-python ai/train.py --phase phase1 --agent SpaceMarine_Infantry_Troop_RangedSwarm
+python ai/train.py --config default
 ```
 
 The new settings will automatically be used if:
@@ -936,7 +679,7 @@ If your agent already learned bad habits:
    - Takes 500-1000 episodes to adapt
    - Monitor `bot_eval/vs_random` for improvement
 
-2. **Option B: Start fresh from Phase 1** (Recommended)
+2. **Option B: Start fresh** (Recommended)
    - Faster to learn correct patterns
    - Use if current performance vs RandomBot is very poor (<40% win rate)
    - Delete old model and restart training
@@ -1008,13 +751,13 @@ This forces continuous adaptation and prevents exploitation strategies.
 
 **Agent still struggles vs RandomBot after 1000 episodes**:
 - Increase GreedyBot/DefensiveBot randomness to 0.20-0.25
-- Further reduce shoot_wait penalty to -5.0
-- Consider starting fresh training from Phase 1
+- Further reduce wait penalty to -0.5
+- Consider starting fresh training
 - Check that combined_score weights favor RandomBot performance
 
 **Agent becomes too passive**:
-- Reduce shoot_wait penalty (make more negative: -10.0 → -15.0)
-- Check ent_coef isn't too low (should be 0.3-0.4 in Phase 1)
+- Increase wait penalty (make more negative: -0.5 → -1.0)
+- Check ent_coef isn't too low (should be 0.10+)
 - Verify movement rewards aren't too high
 
 **Agent performs poorly against all bots**:
@@ -1049,18 +792,18 @@ This forces continuous adaptation and prevents exploitation strategies.
 2. Increase `n_steps` from 512 → 1024 (more stable updates)
 3. Increase `batch_size` from 64 → 128
 
-**Avoid**: Setting `learning_rate` > 0.001 in later phases
+**Avoid**: Setting `learning_rate` > 0.001
 
 ---
 
 ### When Training Is Too Slow
 
-**Problem**: 50+ hours per phase
+**Problem**: 50+ hours for training run
 
 **Try:**
 1. Reduce `total_episodes` (use debug config first)
 2. Reduce `n_eval_episodes` from 5 → 2
-3. Increase `n_steps` from 512 → 2048 (fewer updates)
+3. Increase `n_steps` from 256 → 1024 (fewer updates)
 4. Use CPU instead of GPU (see Performance section)
 
 **Avoid**: Reducing `batch_size` below 64
@@ -1094,7 +837,7 @@ This forces continuous adaptation and prevents exploitation strategies.
 
 ```bash
 # Force CPU usage
-python train.py --config phase1 --device cpu
+python ai/train.py --config default --device cpu
 ```
 
 ---
@@ -1116,9 +859,9 @@ python train.py --config phase1 --device cpu
 - **Cause**: Old model trained with different observation size
 - **Fix**: Train new model from scratch or update observation_params
 
-**Error**: `Reward key not found: SpaceMarine_Infantry_Troop_RangedSwarm_phase4`
-- **Cause**: Phase suffix doesn't exist in rewards_config.json
-- **Fix**: Use phase1, phase2, or phase3 (no phase4)
+**Error**: `Reward key not found: SpaceMarineXXX`
+- **Cause**: Unit archetype not defined in rewards_master.json
+- **Fix**: Add the missing reward profile to rewards_master.json
 
 **Error**: `CUDA out of memory`
 - **Cause**: Batch size too large for GPU
@@ -1168,28 +911,29 @@ python train.py --config phase1 --device cpu
 
 ```bash
 # Training Commands
-python train.py --config debug              # Fast test (50 episodes)
-python train.py --config phase1             # Curriculum Phase 1
-python train.py --config phase2 --model X   # Continue from checkpoint
-python train.py --config phase3 --device cpu # Force CPU
+python ai/train.py --config debug           # Fast test (50 episodes)
+python ai/train.py --config default         # Standard training (5000 episodes)
+python ai/train.py --config default --model X  # Continue from checkpoint
+python ai/train.py --config default --step  # With step logging for replay
+python ai/train.py --device cpu             # Force CPU
 
 # Monitoring
 tensorboard --logdir=./tensorboard/         # View training metrics
 
 # Evaluation
-python evaluation.py --model X --opponent tactical --episodes 20
+python ai/evaluation.py --model X --opponent tactical --episodes 20
 
 # Key Paths
-config/training_config.json                 # Training parameters
-config/rewards_config.json                  # Reward definitions
+config/agents/<agent>/<agent>_training_config.json  # Training parameters
+rewards_master.json                         # Reward definitions
 ./models/                                   # Saved checkpoints
 ./tensorboard/                              # TensorBoard logs
-ai/event_log/                               # Battle replays
+train_step.log                              # Step log for replay viewer
 
-# Success Criteria
-Phase 1: Win 60%+ vs Random (2000 eps)
-Phase 2: Win 70%+ vs Greedy (4000 eps)
-Phase 3: Win 75%+ vs Tactical (6000 eps)
+# Success Criteria (5000 episodes)
+vs Random: 90%+
+vs Greedy: 75%+
+vs Tactical: 55%+
 ```
 
 ---
@@ -1198,15 +942,17 @@ Phase 3: Win 75%+ vs Tactical (6000 eps)
 
 **This guide focuses on WHAT TO CONFIGURE, not how the system works internally.**
 
+**Key Principle**: Train with full game complexity from the start - NO curriculum learning.
+
 **For implementation details:**
 - Observation system → `w40k_core.py`
 - Reward logic → `reward_mapper.py`
-- Training loop → `train.py`
+- Training loop → `ai/train.py`
 - Game rules → `AI_TURN.md`, `AI_IMPLEMENTATION.md`
 
 **For training configuration:**
 - Read this document (AI_TRAINING.md)
-- Modify `training_config.json` and `rewards_config.json`
+- Modify agent training config and `rewards_master.json`
 - Monitor TensorBoard metrics
 - Adjust hyperparameters based on observed behavior
 

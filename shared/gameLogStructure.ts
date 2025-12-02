@@ -5,6 +5,18 @@
 /**
  * Base log entry interface - used by both PvP and Replay
  * This matches the replay log format exactly
+ *
+ * Event types:
+ * - move: Unit moved to a new position
+ * - shoot: Unit performed a ranged attack
+ * - combat: Unit performed a melee attack
+ * - charge: Unit successfully charged an enemy (includes 2d6 roll)
+ * - charge_fail: Unit failed to charge (roll too low or chose not to charge)
+ * - death: Unit was killed
+ * - turn_change: New turn started
+ * - phase_change: Game phase changed
+ * - move_cancel: Movement was cancelled
+ * - charge_cancel: Charge was cancelled
  */
 import { formatMoveMessage, formatShootingMessage, formatCombatMessage, formatChargeMessage, formatDeathMessage, formatMoveCancelMessage, formatChargeCancelMessage, formatTurnStartMessage, formatPhaseChangeMessage } from './gameLogUtils';
 
