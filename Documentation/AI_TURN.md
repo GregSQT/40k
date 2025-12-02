@@ -1,5 +1,24 @@
 # AI TURN SEQUENCE - Ultimate Claude Understanding Guide (Streamlined)
 
+## AI CODING CONTRACT (OPERATIONAL)
+
+This contract constrains how any assistant or tool is allowed to modify this codebase.
+
+- **Do not assume values**
+  - If a configuration value, parameter, or input is not clearly specified in the config files or documentation, you must stop and request a specification instead of inventing a value.
+
+- **Always raise when required data is missing**
+  - Any missing critical variable, configuration key, or structural field must trigger an explicit error rather than silent substitution or skipping.
+
+- **Do not introduce new constants inside logic**
+  - Any new threshold, scaling factor, reward weight, or similar quantity must be added to the appropriate configuration file (and documented) instead of being inlined in code.
+
+- **Always choose the simplest compliant design**
+  - Prefer the smallest, clearest implementation that follows `AI_TURN.md` and `AI_IMPLEMENTATION.md`. Avoid additional layers or patterns unless they are required by those documents.
+
+- **Refuse changes that violate AI_TURN or AI implementation rules**
+  - If a requested change conflicts with the turn rules or architecture guidelines, explicitly call this out and ask for clarification instead of implementing it.
+
 ## Claude Search Optimization
 
 **Search Terms**: turn sequence, phase management, eligibility rules, step counting, unit activation, movement phase, shooting phase, charge phase, fight phase, tracking sets, phase transitions, decision logic, game state management

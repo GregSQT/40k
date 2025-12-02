@@ -1,10 +1,149 @@
 # AI_TURN.md Compliant Architecture - Implementation Plan
 
+## CORE AI CODING RULES
+
+These rules constrain any change proposed or implemented in this repository (by humans or AI).  
+They apply to **backend**, **engine**, **training scripts**, **frontend**, and **tools/scripts**.
+
+- **No implicit recovery when data is missing**
+  - Forbidden: silently continuing when required data, configuration, or inputs are absent or invalid.
+  - Required: immediately raise a clear, explicit error when required data is missing or inconsistent.
+
+- **No temporary or “hacky” solutions**
+  - Forbidden: code or comments describing “quick fix”, “temporary solution”, or similar approaches that are not production-ready.
+  - Required: always implement the simplest clear design that directly solves the problem and fits this architecture.
+
+- **No hidden or implicit values**
+  - Forbidden: introducing new constants or parameters directly in logic without going through the explicit configuration or domain model.
+  - Required: any tunable value (thresholds, scales, weights, limits, etc.) must be defined in configuration files or well-documented domain objects.
+
+- **No silent defaults**
+  - Forbidden: assigning a value when configuration or data is missing without an explicit design decision.
+  - Required: when a value or key is not defined, the code must raise an error and request that the value be added to configuration before continuing.
+
+- **Always raise on missing or invalid data**
+  - Required: any missing critical variable, configuration key, or structural field must trigger a fail-fast error.
+  - Required: validation must run early (on load / on entry) and stop execution with a clear message if conditions are not met.
+
+- **Always prefer simple and efficient designs**
+  - Required: choose the smallest, clearest implementation that meets requirements and fits `AI_TURN.md` / this document.
+  - Forbidden: adding layers, abstractions, or indirections that are not justified by concrete requirements.
+
+- **Always respect AI_TURN.md and AI implementation rules**
+  - Required: every new function, class, or module must be checked against `AI_TURN.md` and this document.
+  - Required: if required behavior is not fully specified, stop and obtain a design clarification before writing code.
+
+---
+
+## AI AGENT OPERATING RULES (Cursor / Claude / GPT)
+
+These rules define how the AI assistant must work when editing this repository.
+
+- **Always consult this document**
+  - The assistant must treat `AI_IMPLEMENTATION.md` as the **single source of truth** for coding rules.
+  - The assistant must treat **CORE AI CODING RULES** and the **AI Architecture Compliance Checklist** as mandatory.
+
+- **Validation helpers are mandatory**
+  - When adding or modifying Python code that accesses required configuration or required external data, the assistant must:
+    - Import from `shared.data_validation`.
+    - Use `require_key` for required configuration keys.
+    - Use `require_present` for required external values.
+
+- **Automated checks after edits**
+  - After each non-trivial batch of edits (one or more files changed), the assistant must:
+    - Run: `python scripts/check_ai_rules.py`.
+    - If violations are reported, fix any violations introduced by the assistant or clearly mark them as pre-existing before presenting the work as complete.
+
+- **Checklist enforcement**
+  - For every non-trivial change, the assistant must mentally apply the **AI Architecture Compliance Checklist** (at the end of this document) before considering the task done.
+
+Any change to this section overrides previous agent-process instructions for future sessions.
+
 ## EXECUTIVE SUMMARY
 
 This document describes the current modular architecture of the W40K game engine. The engine implements AI_TURN.md compliance rules while maintaining clean separation of concerns across specialized modules.
 
 **Core Principle:** Single source of truth (game_state) with pure delegation to specialized modules.
+
+---
+
+## AUTOMATED AI RULE CHECKS
+
+To support the rules above, the repository includes a lightweight rule checker:
+
+- **Script:** `scripts/check_ai_rules.py`
+- **Responsibility:** scan the working tree for textual patterns that indicate violations of the AI coding rules (for example, language suggesting ad‑hoc fixes or implicit recovery logic).
+- **Behavior:** prints file/line for each violation and exits with a non‑zero status when any are found.
+
+### Usage
+
+- **Manual run (local):**
+
+  ```bash
+  python scripts/check_ai_rules.py
+  ```
+
+- **Git pre‑commit hook (local suggestion):**
+  - Create `.git/hooks/pre-commit` (no extension) with:
+
+    ```bash
+    #!/usr/bin/env bash
+    python scripts/check_ai_rules.py || exit 1
+    ```
+
+  - Make it executable (on systems where this applies):
+
+    ```bash
+    chmod +x .git/hooks/pre-commit
+    ```
+
+- **CI integration (conceptual):**
+  - Add a job in the CI pipeline that runs:
+
+    ```bash
+    python scripts/check_ai_rules.py
+    ```
+
+  - Configure the pipeline so that any non‑zero exit code fails the build and blocks merges.
+
+---
+
+## DATA AND CONFIGURATION VALIDATION PATTERN
+
+To guarantee that missing or invalid data never passes silently, the backend exposes
+explicit validation helpers:
+
+- **Module:** `shared/validation.py`
+- **Helpers:**
+  - `require_present(value, name)` → raises if the value is `None`.
+  - `require_key(mapping, key)` → raises if the key is absent from the mapping.
+
+### Expected usage
+
+- **Configuration access (Python example):**
+
+  ```python
+  from shared.validation import require_key
+
+  learning_rate = require_key(training_config, "learning_rate")
+  max_steps = require_key(training_config, "max_steps_per_episode")
+  ```
+
+- **External data / optional fields:**
+
+  ```python
+  from shared.validation import require_present
+
+  agent_name = require_present(raw_agent_name, "agent_name")
+  scenario_id = require_present(request.params.get("scenarioId"), "scenarioId")
+  ```
+
+Rules:
+
+- Direct dictionary access for required configuration keys (`config["key"]`) must be
+  migrated over time to `require_key`.
+- Any value that is required by design (for example, IDs, critical flags, thresholds)
+  must be passed through `require_present` at the boundary where it first enters the system.
 
 ---
 
@@ -819,6 +958,34 @@ Overall 4.7x training speedup (66 → 311 it/s). Debug config (50 episodes) runs
 ---
 
 ## SUMMARY
+
+### AI Architecture Compliance Checklist
+
+This checklist must be mentally (or explicitly) applied for every substantial change
+to the codebase, whether proposed by a human or an assistant:
+
+- **Rule alignment**
+  - The change respects all items in **Core AI Coding Rules** (top of this document).
+  - The change does not introduce any logic that contradicts `AI_TURN.md`.
+
+- **Configuration discipline**
+  - All new tunable values (thresholds, weights, limits) are defined in configuration
+    files instead of being inlined in code.
+  - Any new configuration keys are documented in `Documentation/CONFIG_FILES.md` or
+    the relevant configuration guide.
+
+- **Validation discipline**
+  - All newly added required configuration accesses use `shared.validation.require_key`.
+  - All newly added required external values use `shared.validation.require_present`.
+
+- **Error handling**
+  - Missing or structurally invalid data results in explicit, fail-fast errors.
+  - No new code silently replaces missing values or skips checks.
+
+- **Complexity and architecture**
+  - The chosen design is the simplest solution that satisfies the requirements.
+  - New modules and functions integrate cleanly into the architecture described
+    in this document, without duplicating responsibilities.
 
 The W40K engine uses modular architecture with clear separation of concerns. Core engine (`w40k_core.py`) owns game_state and orchestrates flow. Specialized modules handle observation, rewards, actions, and combat. Phase handlers implement game rules. All modules follow AI_TURN.md compliance: single source of truth, sequential activation, UPPERCASE fields, no wrappers.
 
