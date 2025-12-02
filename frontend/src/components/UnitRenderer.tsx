@@ -370,7 +370,10 @@ export class UnitRenderer {
         // Use red border icon for Player 2 units
         const iconPath = unit.player === 1 ? unit.ICON.replace('.webp', '_red.webp') : unit.ICON;
         
-        const texture = PIXI.Texture.from(iconPath, isPreview ? { resourceOptions: { crossorigin: 'anonymous' } } : undefined);
+        // Get or create texture (PIXI.Texture.from uses cache if available)
+        // This ensures textures are reused from cache, preventing black flashing
+        let texture = PIXI.Texture.from(iconPath, isPreview ? { resourceOptions: { crossorigin: 'anonymous' } } : undefined);
+        
         const sprite = new PIXI.Sprite(texture);
         sprite.anchor.set(0.5);
         sprite.position.set(centerX, centerY);
@@ -388,6 +391,16 @@ export class UnitRenderer {
         // Just-killed unit rendering (show as dark grey before removal)
         if ((unit as any).isJustKilled) {
           sprite.alpha = 0.4;
+          sprite.tint = 0x444444;
+        }
+
+        // Ghost unit rendering (for replay move visualization)
+        if ((unit as any).isGhost) {
+          sprite.tint = 0x666666;
+        }
+
+        // Just-killed unit rendering (show as dark grey before removal)
+        if ((unit as any).isJustKilled) {
           sprite.tint = 0x444444;
         }
 
@@ -525,7 +538,7 @@ export class UnitRenderer {
       borderRadius
     );
     squareBg.endFill();
-    squareBg.zIndex = iconZIndex + 100;
+    squareBg.zIndex = iconZIndex + 1000; // Very high z-index to be on top of everything
     app.stage.addChild(squareBg);
 
     // Create target emoji text (🎯) - keep emoji for targets
@@ -536,7 +549,7 @@ export class UnitRenderer {
     });
     iconText.anchor.set(0.5);
     iconText.position.set(positionX, positionY);
-    iconText.zIndex = iconZIndex + 101;
+    iconText.zIndex = iconZIndex + 1001; // Very high z-index to be on top of everything
     app.stage.addChild(iconText);
   }
 
@@ -582,7 +595,7 @@ export class UnitRenderer {
       borderRadius
     );
     squareBg.endFill();
-    squareBg.zIndex = iconZIndex + 100;
+    squareBg.zIndex = iconZIndex + 1000; // Very high z-index to be on top of everything
     app.stage.addChild(squareBg);
 
     // Load and create icon sprite
@@ -593,7 +606,7 @@ export class UnitRenderer {
     const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
     iconSprite.width = iconDisplaySize;
     iconSprite.height = iconDisplaySize;
-    iconSprite.zIndex = iconZIndex + 101;
+    iconSprite.zIndex = iconZIndex + 1001; // Very high z-index to be on top of everything
     app.stage.addChild(iconSprite);
   }
 
@@ -625,7 +638,7 @@ export class UnitRenderer {
     circleBg.lineStyle(borderWidth, whiteBorderColor, borderAlpha); // White border
     circleBg.drawCircle(positionX, positionY, circleRadius);
     circleBg.endFill();
-    circleBg.zIndex = iconZIndex + 100;
+    circleBg.zIndex = iconZIndex + 1000; // Very high z-index to be on top of everything
     app.stage.addChild(circleBg);
 
     // Load and create icon sprite
@@ -636,7 +649,7 @@ export class UnitRenderer {
     const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
     iconSprite.width = iconDisplaySize;
     iconSprite.height = iconDisplaySize;
-    iconSprite.zIndex = iconZIndex + 101;
+    iconSprite.zIndex = iconZIndex + 1001; // Very high z-index to be on top of everything
     app.stage.addChild(iconSprite);
   }
 

@@ -1196,15 +1196,18 @@ export default function Board({
         cleanupBoardInteractions(app);
         
         if (app && app.stage) {
-          // Destroy all sprites completely
+          // Destroy all sprites but preserve textures in cache to prevent black flashing
+          // Textures will be reused from cache on next render
           app.stage.children.forEach(child => {
             if (child.destroy) {
-              child.destroy({ children: true, texture: true, baseTexture: true });
+              // Don't destroy textures - they should remain in cache for reuse
+              child.destroy({ children: true, texture: false, baseTexture: false });
             }
           });
           app.stage.removeChildren();
         }
-        app.destroy(true, { children: true, texture: true, baseTexture: true });
+        // Don't destroy textures when destroying app - preserve cache
+        app.destroy(true, { children: true, texture: false, baseTexture: false });
       };
 
       }, [
