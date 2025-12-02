@@ -151,13 +151,11 @@ export class UnitRenderer {
     this.renderGreenActivationCircle(isEligible, unitIconScale);
     this.renderHPBar(unitIconScale);
     this.renderShootingCounter(unitIconScale);
-    this.renderExplosionIcon(iconZIndex);
+    this.renderTargetIndicator(iconZIndex); // Shows 🎯 for all targets (shoot, charge, fight)
     this.renderShootingIndicator(iconZIndex);
     this.renderMovementIndicator(iconZIndex);
     this.renderChargeIndicator(iconZIndex);
-    this.renderChargeTargetIndicator(iconZIndex);
     this.renderFightIndicator(iconZIndex);
-    this.renderFightTargetIndicator(iconZIndex);
     this.renderAttackCounter(unitIconScale);
     this.renderChargeRollBadge(unitIconScale, iconZIndex);
   }
@@ -489,31 +487,157 @@ export class UnitRenderer {
     }
   }
 
-  private renderExplosionIcon(iconZIndex: number): void {
-    const { unit, shootingTargetId, centerX, centerY, app, HEX_RADIUS } = this.props;
+  private renderTargetIndicator(iconZIndex: number): void {
+    const { unit, shootingTargetId, chargeTargetId, fightTargetId, centerX, centerY, app, HEX_RADIUS } = this.props;
 
-    // Only show explosion on the unit being shot at
-    if (!shootingTargetId || unit.id !== shootingTargetId) return;
+    // Show target indicator (🎯) on units that are targets of any action
+    const isTarget = (shootingTargetId && unit.id === shootingTargetId) ||
+                    (chargeTargetId && unit.id === chargeTargetId) ||
+                    (fightTargetId && unit.id === fightTargetId);
+    
+    if (!isTarget) return;
 
-    // Get icon parameters from CSS variables
-    const iconSize = this.getCSSNumber('--icon-explosion-size', 1.6);
-    const iconStroke = this.getCSSColor('--icon-explosion-stroke');
-    const iconStrokeThickness = this.getCSSNumber('--icon-explosion-stroke-thickness', 3);
-
-    // Create explosion text (using emoji)
-    const explosionText = new PIXI.Text('💥', {
-      fontSize: HEX_RADIUS * iconSize,
-      align: 'center',
-      stroke: iconStroke,
-      strokeThickness: iconStrokeThickness,
-    });
-    explosionText.anchor.set(0.5);
-
-    // Position at bottom-left of the unit
+    const iconSize = this.getCSSNumber('--icon-target-size', 1.6);
+    const squareSizeRatio = this.getCSSNumber('--icon-target-square-size', 0.5);
     const offset = HEX_RADIUS * 0.6;
-    explosionText.position.set(centerX - offset, centerY + offset);
-    explosionText.zIndex = iconZIndex + 100; // Above everything
-    app.stage.addChild(explosionText);
+    const positionX = centerX - offset;
+    const positionY = centerY + offset;
+
+    // Get values from CSS variables
+    const bgColor = this.getCSSColor('--icon-target-bg-color');
+    const whiteBorderColor = this.getCSSColor('--icon-square-border-color');
+    const bgAlpha = this.getCSSNumber('--icon-square-bg-alpha', 1.0);
+    const borderAlpha = this.getCSSNumber('--icon-square-border-alpha', 1.0);
+    const borderWidth = this.getCSSNumber('--icon-square-border-width', 2);
+    const borderRadius = this.getCSSNumber('--icon-square-border-radius', 4);
+    const iconScale = this.getCSSNumber('--icon-square-icon-scale', 0.7);
+    
+    // Create square background - size based on CSS variable
+    const squareSize = HEX_RADIUS * squareSizeRatio;
+    const squareBg = new PIXI.Graphics();
+    squareBg.beginFill(bgColor, bgAlpha);
+    squareBg.lineStyle(borderWidth, whiteBorderColor, borderAlpha); // White border
+    squareBg.drawRoundedRect(
+      positionX - squareSize / 2,
+      positionY - squareSize / 2,
+      squareSize,
+      squareSize,
+      borderRadius
+    );
+    squareBg.endFill();
+    squareBg.zIndex = iconZIndex + 100;
+    app.stage.addChild(squareBg);
+
+    // Create target emoji text (🎯) - keep emoji for targets
+    const iconText = new PIXI.Text('🎯', {
+      fontSize: HEX_RADIUS * iconSize * iconScale,
+      align: 'center',
+      fill: 0xffffff,
+    });
+    iconText.anchor.set(0.5);
+    iconText.position.set(positionX, positionY);
+    iconText.zIndex = iconZIndex + 101;
+    app.stage.addChild(iconText);
+  }
+
+  private renderExplosionIcon(iconZIndex: number): void {
+    // DEPRECATED: Replaced by renderTargetIndicator
+    // Keep for backward compatibility but redirect to target indicator
+    this.renderTargetIndicator(iconZIndex);
+  }
+
+  private renderActionIconInSquare(
+    iconZIndex: number,
+    iconPath: string, // Path to icon image file
+    bgColorVar: string, // CSS variable name for background color
+    borderColorVar: string, // CSS variable name for border color
+    iconSizeVar: string, // CSS variable name for icon size
+    squareSizeVar: string, // CSS variable name for square size ratio
+    positionX: number,
+    positionY: number
+  ): void {
+    const { app, HEX_RADIUS } = this.props;
+    
+    // Get values from CSS variables
+    const bgColor = this.getCSSColor(bgColorVar);
+    const whiteBorderColor = this.getCSSColor('--icon-square-border-color');
+    const iconSize = this.getCSSNumber(iconSizeVar, 1.0);
+    const squareSizeRatio = this.getCSSNumber(squareSizeVar, 0.5);
+    const bgAlpha = this.getCSSNumber('--icon-square-bg-alpha', 1.0);
+    const borderAlpha = this.getCSSNumber('--icon-square-border-alpha', 1.0);
+    const borderWidth = this.getCSSNumber('--icon-square-border-width', 2);
+    const borderRadius = this.getCSSNumber('--icon-square-border-radius', 4);
+    const iconScale = this.getCSSNumber('--icon-square-icon-scale', 0.7);
+    
+    // Create square background - size based on CSS variable
+    const squareSize = HEX_RADIUS * squareSizeRatio;
+    const squareBg = new PIXI.Graphics();
+    squareBg.beginFill(bgColor, bgAlpha);
+    squareBg.lineStyle(borderWidth, whiteBorderColor, borderAlpha); // White border
+    squareBg.drawRoundedRect(
+      positionX - squareSize / 2,
+      positionY - squareSize / 2,
+      squareSize,
+      squareSize,
+      borderRadius
+    );
+    squareBg.endFill();
+    squareBg.zIndex = iconZIndex + 100;
+    app.stage.addChild(squareBg);
+
+    // Load and create icon sprite
+    const texture = PIXI.Texture.from(iconPath);
+    const iconSprite = new PIXI.Sprite(texture);
+    iconSprite.anchor.set(0.5);
+    iconSprite.position.set(positionX, positionY);
+    const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
+    iconSprite.width = iconDisplaySize;
+    iconSprite.height = iconDisplaySize;
+    iconSprite.zIndex = iconZIndex + 101;
+    app.stage.addChild(iconSprite);
+  }
+
+  private renderActionIconInCircle(
+    iconZIndex: number,
+    iconPath: string, // Path to icon image file
+    bgColorVar: string, // CSS variable name for background color
+    iconSizeVar: string, // CSS variable name for icon size
+    circleSizeVar: string, // CSS variable name for circle size ratio
+    positionX: number,
+    positionY: number
+  ): void {
+    const { app, HEX_RADIUS } = this.props;
+    
+    // Get values from CSS variables
+    const bgColor = this.getCSSColor(bgColorVar);
+    const whiteBorderColor = this.getCSSColor('--icon-square-border-color');
+    const iconSize = this.getCSSNumber(iconSizeVar, 1.0);
+    const circleSizeRatio = this.getCSSNumber(circleSizeVar, 0.5);
+    const bgAlpha = this.getCSSNumber('--icon-square-bg-alpha', 1.0);
+    const borderAlpha = this.getCSSNumber('--icon-square-border-alpha', 1.0);
+    const borderWidth = this.getCSSNumber('--icon-square-border-width', 2);
+    const iconScale = this.getCSSNumber('--icon-square-icon-scale', 0.7);
+    
+    // Create circle background - size based on CSS variable
+    const circleRadius = (HEX_RADIUS * circleSizeRatio) / 2;
+    const circleBg = new PIXI.Graphics();
+    circleBg.beginFill(bgColor, bgAlpha);
+    circleBg.lineStyle(borderWidth, whiteBorderColor, borderAlpha); // White border
+    circleBg.drawCircle(positionX, positionY, circleRadius);
+    circleBg.endFill();
+    circleBg.zIndex = iconZIndex + 100;
+    app.stage.addChild(circleBg);
+
+    // Load and create icon sprite
+    const texture = PIXI.Texture.from(iconPath);
+    const iconSprite = new PIXI.Sprite(texture);
+    iconSprite.anchor.set(0.5);
+    iconSprite.position.set(positionX, positionY);
+    const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
+    iconSprite.width = iconDisplaySize;
+    iconSprite.height = iconDisplaySize;
+    iconSprite.zIndex = iconZIndex + 101;
+    app.stage.addChild(iconSprite);
   }
 
   private renderShootingIndicator(iconZIndex: number): void {
@@ -522,25 +646,22 @@ export class UnitRenderer {
     // Only show shooting indicator on the unit that is shooting
     if (!shootingUnitId || unit.id !== shootingUnitId) return;
 
-    // Get icon parameters from CSS variables
     const iconSize = this.getCSSNumber('--icon-shoot-size', 1.2);
-    const iconStroke = this.getCSSColor('--icon-shoot-stroke');
-    const iconStrokeThickness = this.getCSSNumber('--icon-shoot-stroke-thickness', 3);
-
-    // Create shooting indicator text (using crosshair emoji)
-    const shootingText = new PIXI.Text('🎯', {
-      fontSize: HEX_RADIUS * iconSize,
-      align: 'center',
-      stroke: iconStroke,
-      strokeThickness: iconStrokeThickness,
-    });
-    shootingText.anchor.set(0.5);
-
-    // Position at bottom-left of the unit (same position as explosion but on shooter)
     const offset = HEX_RADIUS * 0.6;
-    shootingText.position.set(centerX - offset, centerY + offset);
-    shootingText.zIndex = iconZIndex + 100; // Above everything
-    app.stage.addChild(shootingText);
+    const positionX = centerX - offset;
+    const positionY = centerY + offset;
+
+    // Yellow/Orange background for shooting (uses standard size)
+    this.renderActionIconInSquare(
+      iconZIndex,
+      '/icons/Action_Logo/3 - Shooting.png',
+      '--icon-shoot-bg-color',
+      '--icon-shoot-color',
+      '--icon-shoot-size',
+      '--icon-square-standard-size', // Use standard size
+      positionX,
+      positionY
+    );
   }
 
   private renderMovementIndicator(iconZIndex: number): void {
@@ -549,27 +670,21 @@ export class UnitRenderer {
     // Only show movement indicator on the unit that is moving
     if (!movingUnitId || unit.id !== movingUnitId) return;
 
-    // Get icon parameters from CSS variables
-    const iconColor = this.getCSSColor('--icon-move-color');
-    const iconStroke = this.getCSSColor('--icon-move-stroke');
-    const iconStrokeThickness = this.getCSSNumber('--icon-move-stroke-thickness', 3);
     const iconSize = this.getCSSNumber('--icon-move-size', 1.0);
-
-    // Create movement indicator text (arrow for move phase)
-    const movementText = new PIXI.Text('➤', {
-      fontSize: HEX_RADIUS * iconSize,
-      fill: iconColor,
-      align: 'center',
-      stroke: iconStroke,
-      strokeThickness: iconStrokeThickness,
-    });
-    movementText.anchor.set(0.5);
-
-    // Position at bottom-left of the unit (same position as shooting indicator)
     const offset = HEX_RADIUS * 0.6;
-    movementText.position.set(centerX - offset, centerY + offset);
-    movementText.zIndex = iconZIndex + 100; // Above everything
-    app.stage.addChild(movementText);
+    const positionX = centerX - offset;
+    const positionY = centerY + offset;
+
+    // Green circle for movement (uses standard size for consistency)
+    this.renderActionIconInCircle(
+      iconZIndex,
+      '/icons/Action_Logo/2 - Movemement.png',
+      '--icon-move-bg-color',
+      '--icon-move-size',
+      '--icon-square-standard-size', // Use standard size for consistency
+      positionX,
+      positionY
+    );
   }
 
   private renderChargeIndicator(iconZIndex: number): void {
@@ -578,53 +693,26 @@ export class UnitRenderer {
     // Only show charge indicator on the unit that is charging
     if (!chargingUnitId || unit.id !== chargingUnitId) return;
 
-    // Get icon parameters from CSS variables
     const iconSize = this.getCSSNumber('--icon-charge-size', 1.2);
-    const iconStroke = this.getCSSColor('--icon-charge-stroke');
-    const iconStrokeThickness = this.getCSSNumber('--icon-charge-stroke-thickness', 3);
-
-    // Create charge indicator text (lightning bolt emoji)
-    const chargeText = new PIXI.Text('⚡', {
-      fontSize: HEX_RADIUS * iconSize,
-      align: 'center',
-      stroke: iconStroke,
-      strokeThickness: iconStrokeThickness,
-    });
-    chargeText.anchor.set(0.5);
-
-    // Position at bottom-left of the unit
     const offset = HEX_RADIUS * 0.6;
-    chargeText.position.set(centerX - offset, centerY + offset);
-    chargeText.zIndex = iconZIndex + 100; // Above everything
-    app.stage.addChild(chargeText);
+    const positionX = centerX - offset;
+    const positionY = centerY + offset;
+
+    // Purple background for charge (uses standard size)
+    this.renderActionIconInSquare(
+      iconZIndex,
+      '/icons/Action_Logo/4 - Charge.png',
+      '--icon-charge-bg-color',
+      '--icon-charge-color',
+      '--icon-charge-size',
+      '--icon-square-standard-size', // Use standard size
+      positionX,
+      positionY
+    );
   }
 
-  private renderChargeTargetIndicator(iconZIndex: number): void {
-    const { unit, chargeTargetId, centerX, centerY, app, HEX_RADIUS } = this.props;
-
-    // Only show charge target indicator on the unit being charged at
-    if (!chargeTargetId || unit.id !== chargeTargetId) return;
-
-    // Get icon parameters from CSS variables
-    const iconSize = this.getCSSNumber('--icon-charge-target-size', 1.6);
-    const iconStroke = this.getCSSColor('--icon-charge-target-stroke');
-    const iconStrokeThickness = this.getCSSNumber('--icon-charge-target-stroke-thickness', 3);
-
-    // Create charge target indicator (lightning bolt on target)
-    const chargeTargetText = new PIXI.Text('⚡', {
-      fontSize: HEX_RADIUS * iconSize,
-      align: 'center',
-      stroke: iconStroke,
-      strokeThickness: iconStrokeThickness,
-    });
-    chargeTargetText.anchor.set(0.5);
-
-    // Position at bottom-left of the unit (same as explosion)
-    const offset = HEX_RADIUS * 0.6;
-    chargeTargetText.position.set(centerX - offset, centerY + offset);
-    chargeTargetText.zIndex = iconZIndex + 100; // Above everything
-    app.stage.addChild(chargeTargetText);
-  }
+  // DEPRECATED: renderChargeTargetIndicator - replaced by renderTargetIndicator
+  // Charge targets now show 🎯 icon via renderTargetIndicator
 
   private renderFightIndicator(iconZIndex: number): void {
     const { unit, fightingUnitId, centerX, centerY, app, HEX_RADIUS } = this.props;
@@ -632,53 +720,26 @@ export class UnitRenderer {
     // Only show fight indicator on the unit that is fighting
     if (!fightingUnitId || unit.id !== fightingUnitId) return;
 
-    // Get icon parameters from CSS variables
     const iconSize = this.getCSSNumber('--icon-fight-size', 1.2);
-    const iconStroke = this.getCSSColor('--icon-fight-stroke');
-    const iconStrokeThickness = this.getCSSNumber('--icon-fight-stroke-thickness', 3);
-
-    // Create fight indicator text (crossed swords emoji)
-    const fightText = new PIXI.Text('⚔️', {
-      fontSize: HEX_RADIUS * iconSize,
-      align: 'center',
-      stroke: iconStroke,
-      strokeThickness: iconStrokeThickness,
-    });
-    fightText.anchor.set(0.5);
-
-    // Position at bottom-left of the unit
     const offset = HEX_RADIUS * 0.6;
-    fightText.position.set(centerX - offset, centerY + offset);
-    fightText.zIndex = iconZIndex + 100; // Above everything
-    app.stage.addChild(fightText);
+    const positionX = centerX - offset;
+    const positionY = centerY + offset;
+
+    // Red background for combat/fight (uses larger size)
+    this.renderActionIconInSquare(
+      iconZIndex,
+      '/icons/Action_Logo/5 - Fight.png',
+      '--icon-fight-bg-color',
+      '--icon-fight-color',
+      '--icon-fight-size',
+      '--icon-fight-square-size',
+      positionX,
+      positionY
+    );
   }
 
-  private renderFightTargetIndicator(iconZIndex: number): void {
-    const { unit, fightTargetId, centerX, centerY, app, HEX_RADIUS } = this.props;
-
-    // Only show fight target indicator on the unit being attacked (explosion like shooting)
-    if (!fightTargetId || unit.id !== fightTargetId) return;
-
-    // Get icon parameters from CSS variables - reuse explosion style
-    const iconSize = this.getCSSNumber('--icon-explosion-size', 1.6);
-    const iconStroke = this.getCSSColor('--icon-explosion-stroke');
-    const iconStrokeThickness = this.getCSSNumber('--icon-explosion-stroke-thickness', 3);
-
-    // Create explosion text (same as shooting target)
-    const explosionText = new PIXI.Text('💥', {
-      fontSize: HEX_RADIUS * iconSize,
-      align: 'center',
-      stroke: iconStroke,
-      strokeThickness: iconStrokeThickness,
-    });
-    explosionText.anchor.set(0.5);
-
-    // Position at bottom-left of the unit
-    const offset = HEX_RADIUS * 0.6;
-    explosionText.position.set(centerX - offset, centerY + offset);
-    explosionText.zIndex = iconZIndex + 100; // Above everything
-    app.stage.addChild(explosionText);
-  }
+  // DEPRECATED: renderFightTargetIndicator - replaced by renderTargetIndicator
+  // Fight targets now show 🎯 icon via renderTargetIndicator
 
   private renderHPBar(unitIconScale: number): void {
     const { unit, centerX, centerY, app, targetPreview, units, boardConfig, parseColor, mode,

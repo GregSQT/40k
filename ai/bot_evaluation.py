@@ -96,6 +96,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     completed_episodes = 0
     start_time = time.time() if show_progress else None
 
+    total_expected_episodes = len(bots) * len(scenario_list) * episodes_per_scenario
+    total_failed_episodes = 0
+
     for bot_name, bot in bots.items():
         wins = 0
         losses = 0
@@ -213,8 +216,10 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
                     bot_env.close()
                 except Exception as e:
+                    total_failed_episodes += 1
                     if show_progress:
-                        print(f"\n⚠️  Episode error: {e}")
+                        print(f"\n❌ Bot evaluation episode failed for {bot_name} on scenario {scenario_name}: {e}")
+                    # Do not treat this as a valid game; skip win/loss counting
                     continue
 
         # Calculate win rate across ALL scenarios
@@ -241,6 +246,17 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     if show_progress:
         print("\r" + " " * 120)  # Clear the progress bar line
         print()  # New line after clearing
+
+    # AI_IMPLEMENTATION.md: No silent evaluation degradation.
+    # If any episodes failed to run, surface this explicitly and avoid logging
+    # potentially misleading combined metrics.
+    if total_failed_episodes > 0:
+        success_episodes = total_episodes - total_failed_episodes
+        raise RuntimeError(
+            f"Bot evaluation aborted: {total_failed_episodes} out of {total_episodes} "
+            f"episodes failed. Successful episodes: {success_episodes}. "
+            f"Fix environment/scenario issues before relying on evaluation metrics."
+        )
 
     # Combined score with improved weighting: RandomBot 35%, GreedyBot 30%, DefensiveBot 35%
     # Increased RandomBot weight to prevent overfitting to predictable patterns

@@ -273,15 +273,16 @@ export function getEventIcon(type: string): string {
   switch (type) {
     case 'turn_change': return '🔄';
     case 'phase_change': return '⏭️';
-    case 'move': return '👟';
-    case 'shoot': return '🎯';
-    case 'charge': return '⚡';
-    case 'charge_fail': return '⚡';
-    case 'combat': return '⚔️';
+    case 'move': return '→'; // Arrow for movement
+    case 'shoot': return '◎'; // Target circle for shooting
+    case 'charge': return '⚡'; // Lightning for charge
+    case 'charge_fail': return '⚡'; // Lightning (same, but will have red background)
+    case 'combat': return '⚔'; // Crossed swords for combat/fight
     case 'death': return '💀';
-    case 'move_cancel': return '❌';
-    case 'charge_cancel': return '❌';
-    default: return '📝';
+    case 'move_cancel': return '✕'; // X for cancellation
+    case 'charge_cancel': return '✕'; // X for cancellation
+    case 'wait': return '⏸'; // Pause icon for wait
+    default: return '•'; // Bullet point for unknown
   }
 }
 

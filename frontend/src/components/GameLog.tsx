@@ -78,13 +78,32 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
               overflow: 'auto'
             }}
           >
-            {displayedEvents.map((event) => (
+            {displayedEvents.map((event) => {
+              // Check if this is a wait/skip action
+              // Multiple detection methods:
+              // 1. Check action_name field
+              const actionName = (event as any).action_name || (event as any).actionName;
+              const hasWaitActionName = actionName && (actionName.toLowerCase() === 'wait' || actionName.toLowerCase() === 'skip');
+              
+              // 2. Check event type (backend logs wait actions as type "wait")
+              const isWaitType = (event as any).type === 'wait';
+              
+              // 3. Check message content (frontend logs "chose not to move")
+              const message = event.message || '';
+              const hasWaitMessage = message.toLowerCase().includes('chose not to move') || 
+                                    message.toLowerCase().includes('chose not to charge') ||
+                                    message.toLowerCase().endsWith(' wait');
+              
+              const isWaitAction = hasWaitActionName || isWaitType || hasWaitMessage;
+              const waitClass = isWaitAction ? 'game-log-entry--wait' : '';
+              
+              return (
               <div 
                 key={event.id} 
-                className={`game-log-entry ${getEventTypeClass(event)}`}
+                className={`game-log-entry ${getEventTypeClass(event)} ${waitClass}`}
               >
                 <div className="game-log-entry__single-line">
-                  <span className="game-log-entry__icon">
+                  <span className={`game-log-entry__icon game-log-entry__icon--${event.type}`}>
                     {getEventIcon(event.type)}
                   </span>
                   <span className="game-log-entry__time">
@@ -120,7 +139,8 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
                   )}
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>

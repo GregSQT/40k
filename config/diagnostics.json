@@ -1,0 +1,11 @@
+{
+  "episode_tracker": {
+    "indent_size": 2
+  },
+  "rotation": {
+    "avg_episode_steps": 75,
+    "target_rotations": 7
+  }
+}
+
+

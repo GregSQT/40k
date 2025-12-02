@@ -83,7 +83,6 @@ class SelectiveEpisodeTracker:
         # Memory management - keep only promising candidates
         if len(self.episode_candidates) > self.max_candidates:
             self._prune_candidates()
-        pass
     
     def _prune_candidates(self):
         """Keep only the most promising episodes to manage memory."""
@@ -124,19 +123,31 @@ class SelectiveEpisodeTracker:
                 
                 # Save replay data to file with JSON serialization fix
                 os.makedirs(output_dir, exist_ok=True)
-                try:
-                    # Convert numpy arrays to lists for JSON serialization
-                    serializable_data = self._make_json_serializable(episode.replay_data)
-                    config_loader = get_config_loader()
-                    full_config = get_config_loader().get_training_config()
-                    shared_config = full_config["shared_parameters"]
-                    indent_size = shared_config["json_output"]["indent_size"]
-                    with open(filepath, 'w', encoding='utf-8') as f:
-                        json.dump(serializable_data, f, indent=indent_size)
-                    
-                    saved_files.append(filepath)
-                except Exception as e:
-                    pass  # Silent failure for replay saving
+
+                # Convert numpy arrays to lists for JSON serialization
+                serializable_data = self._make_json_serializable(episode.replay_data)
+
+                # NOTE: get_training_config() is deprecated in ConfigLoader; selective
+                # replay saving is an offline diagnostic and must not bypass the
+                # global AI rules. We therefore require an explicit JSON formatting
+                # configuration in a dedicated diagnostics section, instead of
+                # silently falling back to any legacy training_config.json.
+                config_loader = get_config_loader()
+                diagnostics_config = config_loader.load_config("diagnostics", force_reload=False)
+                if "episode_tracker" not in diagnostics_config:
+                    raise KeyError(
+                        "diagnostics.json missing required 'episode_tracker' section for selective replay saving"
+                    )
+                if "indent_size" not in diagnostics_config["episode_tracker"]:
+                    raise KeyError(
+                        "diagnostics.episode_tracker missing required 'indent_size' key for selective replay saving"
+                    )
+                indent_size = diagnostics_config["episode_tracker"]["indent_size"]
+
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(serializable_data, f, indent=indent_size)
+
+                saved_files.append(filepath)
         
         return saved_files
     

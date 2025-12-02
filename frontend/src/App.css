@@ -15,30 +15,75 @@
   --hp-bar-lost: #444444;
   --hp-bar-damage-preview: #444444;
 
-  /* Replay Mode Icons */
-  --icon-move-color: #6622bb;
+  /* Replay Mode Icons - Centralized configuration */
+  /* All icon parameters are defined here and used by both UnitRenderer (board) and GameLog */
+  
+  /* Movement icon - CIRCLE (not square) */
+  --icon-move-color: #00cc66;
+  --icon-move-bg-color: #00cc66;
+  --icon-move-bg-rgb: 0, 204, 102; /* RGB values for rgba() in CSS */
   --icon-move-stroke: #ffffff;
   --icon-move-stroke-thickness: 3;
-  --icon-move-size: 1.0;
-  --icon-charge-color: #ff4444;
+  --icon-move-size: 1.3;
+  --icon-move-circle-size: 0.75;
+  
+  /* Shooting icon - SQUARE with pistol icon */
+  --icon-shoot-color: #eab308;
+  --icon-shoot-bg-color: #eab308;
+  --icon-shoot-bg-rgb: 234, 179, 8; /* RGB values for rgba() in CSS */
+  --icon-shoot-stroke: #ffffff;
+  --icon-shoot-stroke-thickness: 3;
+  --icon-shoot-size: 1.5;
+  --icon-shoot-square-size: 0.75;
+  
+  /* Charge icon - SQUARE with purple background */
+  --icon-charge-color: #9966cc;
+  --icon-charge-bg-color: #9966cc;
+  --icon-charge-bg-rgb: 153, 102, 204; /* Purple RGB values */
   --icon-charge-stroke: #ffffff;
   --icon-charge-stroke-thickness: 3;
-  --icon-charge-size: 1.2;
+  --icon-charge-size: 1.5;
+  --icon-charge-square-size: 0.75;
+  
+  /* Charge target (deprecated - use target icon) */
   --icon-charge-target-stroke: #ffffff;
   --icon-charge-target-stroke-thickness: 3;
   --icon-charge-target-size: 1.6;
-  --icon-shoot-color: #ffaa00;
-  --icon-shoot-stroke: #ffffff;
-  --icon-shoot-stroke-thickness: 3;
-  --icon-shoot-size: 1.2;
+  
+  /* Fight/Combat icon - LARGER SQUARE */
+  --icon-fight-color: #ff4444;
+  --icon-fight-bg-color: #ff4444;
+  --icon-fight-bg-rgb: 255, 68, 68; /* RGB values for rgba() in CSS */
+  --icon-fight-stroke: #ffffff;
+  --icon-fight-stroke-thickness: 3;
+  --icon-fight-size: 1.5;
+  --icon-fight-square-size: 0.75;
+  
+  /* Target icon (for all action targets: shoot, charge, fight) */
+  --icon-target-color: #ea580c;
+  --icon-target-bg-color: #ea580c;
+  --icon-target-bg-rgb: 234, 88, 12; /* RGB values for rgba() in CSS */
+  --icon-target-stroke: #ffffff;
+  --icon-target-stroke-thickness: 3;
+  --icon-target-size: 1.8;
+  --icon-target-square-size: 0.75;
+  
+  /* Explosion icon (deprecated - use target icon) */
   --icon-explosion-color: #ff6600;
   --icon-explosion-stroke: #ffffff;
   --icon-explosion-stroke-thickness: 3;
   --icon-explosion-size: 1.6;
-  --icon-fight-color: #ff4444;
-  --icon-fight-stroke: #ffffff;
-  --icon-fight-stroke-thickness: 3;
-  --icon-fight-size: 1.2;
+  
+  /* Square icon settings (for both board and game log) */
+  --icon-square-bg-alpha: 1.0; /* Opaque background for board icons */
+  --icon-square-bg-alpha-gamelog: 0.3; /* Slightly transparent for game log */
+  --icon-square-border-alpha: 1.0; /* Opaque border for board */
+  --icon-square-border-alpha-gamelog: 0.8; /* Slightly transparent for game log */
+  --icon-square-border-width: 2;
+  --icon-square-border-color: #ffffff; /* White border for all squares */
+  --icon-square-border-radius: 4;
+  --icon-square-icon-scale: 0.85; /* Icon size relative to square */
+  --icon-square-standard-size: 0.75; /* Standard size for all squares */
   
   /* Background Colors */
   --bg-primary: #222;
@@ -1158,8 +1203,72 @@ textarea:focus {
 
 .game-log-entry__icon {
   font-size: 14px;
-  width: 20px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--icon-square-border-radius, 4)px;
   text-align: center;
+  flex-shrink: 0;
+}
+
+/* Icon squares with colored backgrounds - Uses centralized CSS variables */
+.game-log-entry__icon--move {
+  background: rgba(var(--icon-move-bg-rgb), var(--icon-square-bg-alpha-gamelog));
+  border: var(--icon-square-border-width)px solid rgba(var(--icon-move-bg-rgb), var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius)px;
+}
+
+.game-log-entry__icon--shoot {
+  background: rgba(var(--icon-shoot-bg-rgb), var(--icon-square-bg-alpha-gamelog));
+  border: var(--icon-square-border-width)px solid rgba(var(--icon-shoot-bg-rgb), var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius)px;
+}
+
+.game-log-entry__icon--charge {
+  background: rgba(var(--icon-charge-bg-rgb), var(--icon-square-bg-alpha-gamelog));
+  border: var(--icon-square-border-width)px solid rgba(var(--icon-charge-bg-rgb), var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius)px;
+}
+
+.game-log-entry__icon--charge_fail {
+  background: rgba(220, 38, 38, var(--icon-square-bg-alpha-gamelog)); /* Red for failed charge */
+  border: var(--icon-square-border-width)px solid rgba(220, 38, 38, var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius)px;
+}
+
+.game-log-entry__icon--combat {
+  background: rgba(var(--icon-fight-bg-rgb), var(--icon-square-bg-alpha-gamelog));
+  border: var(--icon-square-border-width)px solid rgba(var(--icon-fight-bg-rgb), var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius)px;
+}
+
+.game-log-entry__icon--death {
+  background: rgba(0, 0, 0, 0.4); /* Dark for death */
+  border: 1px solid rgba(0, 0, 0, 0.7);
+}
+
+.game-log-entry__icon--move_cancel,
+.game-log-entry__icon--charge_cancel {
+  background: rgba(153, 153, 153, 0.3); /* Gray for cancellations */
+  border: 1px solid rgba(153, 153, 153, 0.6);
+}
+
+.game-log-entry__icon--turn_change {
+  background: rgba(30, 144, 255, 0.3); /* Blue for turn changes */
+  border: 1px solid rgba(30, 144, 255, 0.6);
+}
+
+.game-log-entry__icon--phase_change {
+  background: rgba(153, 102, 204, 0.3); /* Purple for phase changes */
+  border: 1px solid rgba(153, 102, 204, 0.6);
+}
+
+.game-log-entry__icon--wait {
+  background: rgba(128, 128, 128, var(--icon-square-bg-alpha-gamelog)); /* Gray for wait */
+  border: var(--icon-square-border-width)px solid rgba(128, 128, 128, var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius)px;
 }
 
 .game-log-entry__time {
@@ -1294,6 +1403,17 @@ textarea:focus {
 }
 
 .game-log-entry--cancel .game-log-entry__message {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* Wait/Skip Action - Gray background (higher specificity to override other event types) */
+.game-log-entry.game-log-entry--wait {
+  border-left-color: #666 !important;
+  background: rgba(128, 128, 128, 0.25) !important;
+}
+
+.game-log-entry.game-log-entry--wait .game-log-entry__message {
   color: var(--text-secondary);
   font-style: italic;
 }

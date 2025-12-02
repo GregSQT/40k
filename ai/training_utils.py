@@ -208,23 +208,28 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
     # If specific scenario requested, try to find it
     if scenario_override and scenario_override != "all":
         if agent_key:
-            # Agent-specific scenario
-            scenario_path = os.path.join(
+            # Agent-specific scenario with explicit override
+            explicit_candidates = []
+            explicit_candidates.append(os.path.join(
                 config.config_dir, "agents", agent_key, "scenarios",
                 f"{agent_key}_scenario_{scenario_override}.json"
-            )
-            if os.path.isfile(scenario_path):
-                return scenario_path
-
-            # Try without agent prefix (e.g., user passed "phase2-3" instead of full name)
-            scenario_path = os.path.join(
+            ))
+            explicit_candidates.append(os.path.join(
                 config.config_dir, "agents", agent_key, "scenarios",
                 f"{agent_key}_scenario_{training_config_name}-{scenario_override}.json"
-            )
-            if os.path.isfile(scenario_path):
-                return scenario_path
+            ))
 
-    # Try agent-specific scenario first
+            found_explicit = [p for p in explicit_candidates if os.path.isfile(p)]
+            if len(found_explicit) == 1:
+                return found_explicit[0]
+            elif len(found_explicit) > 1:
+                raise FileNotFoundError(
+                    f"Ambiguous scenario_override '{scenario_override}' for agent '{agent_key}' "
+                    f"and phase '{training_config_name}'. Candidates: {found_explicit}. "
+                    f"Please specify an exact scenario file name."
+                )
+
+    # Try agent-specific scenario first (single, unambiguous file)
     if agent_key:
         agent_scenario_path = os.path.join(
             config.config_dir, "agents", agent_key, "scenarios",
@@ -233,27 +238,27 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
         if os.path.isfile(agent_scenario_path):
             return agent_scenario_path
 
-        # Try variants for any phase (phase1-bot1, phase1-self1, phase2-1, etc.)
-        # Use glob to find any file matching the pattern
+        # Try variants for this phase (phase1-bot1, phase1-self1, phase2-1, etc.)
+        # Use glob to find any file matching the pattern, but do not silently pick one.
         scenarios_dir = os.path.join(config.config_dir, "agents", agent_key, "scenarios")
         pattern = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-*.json")
         matching_files = sorted(glob.glob(pattern))
-        if matching_files:
-            variant_name = os.path.basename(matching_files[0]).replace(f"{agent_key}_scenario_", "").replace(".json", "")
-            print(f"ℹ️  {training_config_name} has multiple scenarios. Using first variant: {variant_name}")
+        if len(matching_files) == 1:
+            # Exactly one variant → unambiguous
             return matching_files[0]
-
-    # Fall back to default scenarios
-    fallback_path = os.path.join(
-        config.config_dir, "scenarios", f"scenario_{training_config_name}.json"
-    )
-    if os.path.isfile(fallback_path):
-        return fallback_path
+        elif len(matching_files) > 1:
+            # Multiple variants for this phase → require explicit override
+            variant_names = [os.path.basename(f) for f in matching_files]
+            raise FileNotFoundError(
+                f"Multiple scenario variants found for agent '{agent_key}' and phase '{training_config_name}': "
+                f"{variant_names}. You must specify --scenario with an explicit variant name "
+                f"(e.g., 'phase2-1', 'phase2-bot1')."
+            )
 
     # No valid scenario found
     raise FileNotFoundError(
         f"No scenario file found for agent '{agent_key}' with phase '{training_config_name}'. "
-        f"Tried: agent-specific and fallback scenarios."
+        f"Tried: agent-specific explicit scenario and phase-specific variants."
     )
 
 def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None, n_steps=256):
@@ -272,14 +277,30 @@ def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None
     if config_value is not None:
         return config_value
 
-    # CRITICAL: Rotation interval must allow at least one PPO update cycle
-    # PPO requires n_steps before doing a training update
-    # Each episode is ~50-75 steps, so we need ceil(n_steps/50) episodes minimum
-    avg_episode_steps = 50  # Conservative estimate
+    # Load diagnostics configuration for rotation heuristics so that no magic
+    # numbers are hidden in code. This keeps all tunable values in JSON.
+    from config_loader import get_config_loader
+    cfg = get_config_loader()
+    diagnostics = cfg.load_config("diagnostics", force_reload=False)
+
+    if "rotation" not in diagnostics:
+        raise KeyError("diagnostics.json missing required 'rotation' section for rotation interval calculation")
+    rotation_cfg = diagnostics["rotation"]
+
+    if "avg_episode_steps" not in rotation_cfg:
+        raise KeyError("diagnostics.rotation missing required 'avg_episode_steps' key")
+    if "target_rotations" not in rotation_cfg:
+        raise KeyError("diagnostics.rotation missing required 'target_rotations' key")
+
+    avg_episode_steps = rotation_cfg["avg_episode_steps"]
+    target_rotations = rotation_cfg["target_rotations"]
+
+    # CRITICAL: Rotation interval must allow at least one PPO update cycle.
+    # PPO requires n_steps before doing a training update, and we approximate
+    # episodes per update based on configured avg_episode_steps.
     min_episodes_for_update = max(1, (n_steps + avg_episode_steps - 1) // avg_episode_steps)
 
-    # Auto-calculate: Aim for ~5-10 rotations through all scenarios
-    target_rotations = 7
+    # Auto-calculate: Aim for ~target_rotations passes through all scenarios.
     ideal_interval = max(1, total_episodes // (num_scenarios * target_rotations))
 
     # Use the larger of ideal and minimum for PPO updates

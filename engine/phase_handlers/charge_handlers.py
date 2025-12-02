@@ -796,9 +796,22 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                     is_adjacent_to_enemy = True
                     break
 
-            # Only add as destination if adjacent to an enemy
+            # CRITICAL: Only add as destination if adjacent to an enemy AND NOT OCCUPIED
+            # Double-check occupation against actual game state (not just cached set)
             if is_adjacent_to_enemy and neighbor_pos != start_pos:
-                valid_destinations.append(neighbor_pos)
+                # Verify hex is not occupied by checking actual game state
+                hex_is_occupied = False
+                for check_unit in game_state["units"]:
+                    if (check_unit["id"] != unit["id"] and
+                        check_unit["HP_CUR"] > 0 and
+                        check_unit["col"] == neighbor_col and
+                        check_unit["row"] == neighbor_row):
+                        hex_is_occupied = True
+                        break
+                
+                # Only add if NOT occupied
+                if not hex_is_occupied:
+                    valid_destinations.append(neighbor_pos)
 
             # Continue exploring (charges can move through enemy-adjacent hexes)
             queue.append((neighbor_pos, neighbor_dist))

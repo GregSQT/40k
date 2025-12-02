@@ -13,6 +13,13 @@ import argparse
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+
+# Suppress NumPy MINGW-W64 warnings on Windows (MUST be before numpy import)
+import warnings
+warnings.filterwarnings('ignore')  # Suppress all warnings
+import os
+os.environ['PYTHONWARNINGS'] = 'ignore'
+
 import subprocess
 import json
 import numpy as np
@@ -834,6 +841,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # Progress bar is handled by EpisodeTerminationCallback (shows cycle/scenario info)
 
+    # PPO requires n_steps rollouts before each update; we use this as a natural chunk size
+    # for our episode-budgeted outer loop.
+    n_steps = training_config["model_params"]["n_steps"]
+    chunk_timesteps = n_steps * 4  # 4 updates per chunk for stable gradients
+
     while episodes_trained < total_episodes:
         current_scenario = scenario_list[scenario_idx]
         scenario_name = os.path.basename(current_scenario).replace(f"{agent_key}_scenario_", "").replace(".json", "")
@@ -841,17 +853,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # Calculate episodes for this iteration
         episodes_remaining = total_episodes - episodes_trained
         episodes_this_iteration = min(rotation_interval, episodes_remaining)
-
-        # EPISODE-BASED ROTATION FIX: Calculate timestep budget based on expected episodes
-        # Each episode takes approximately 45-100 steps (depends on game length)
-        # Use conservative estimate of 50 steps/episode with 50% buffer
-        # CRITICAL: Must provide enough timesteps for all expected episodes
-        n_steps = training_config["model_params"]["n_steps"]
-        estimated_steps_per_episode = 75  # Conservative estimate with buffer
-        timesteps_this_iteration = max(
-            n_steps * 4,  # Minimum for PPO to complete at least one update cycle
-            episodes_this_iteration * estimated_steps_per_episode
-        )
         
         # Create new environment with scenario list for random selection per episode
         base_env = W40KEngine(
@@ -917,21 +918,32 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # Combine all callbacks
         enhanced_callbacks = CallbackList(rotation_callbacks + [metrics_callback])
         
-        # Train on this scenario
-        # CRITICAL: reset_num_timesteps=False keeps TensorBoard graph continuous
-        # NOTE: SB3 internally adds num_timesteps to total_timesteps when reset=False
-        model.learn(
-            total_timesteps=timesteps_this_iteration,
-            reset_num_timesteps=(episodes_trained == 0),  # Only reset on first iteration
-            tb_log_name=tb_log_name,  # Same name = continuous graph
-            callback=enhanced_callbacks,
-            log_interval=timesteps_this_iteration + 1,
-            progress_bar=False  # Disabled - using episode-based progress below
-        )
+        # Train on this scenario using an EPISODE-BUDGETED wrapper around SB3.learn().
+        #
+        # SB3 only exposes a timestep budget, so we:
+        # - repeatedly call learn() with a small, fixed chunk of timesteps
+        # - after each chunk, check how many episodes actually completed (via metrics_tracker)
+        # - stop when we reach the exact desired episode count for this scenario
+        target_episodes_for_iteration = episodes_trained + episodes_this_iteration
 
-        # Update counters - use ACTUAL episode count from metrics_tracker, not assumed count
-        # CRITICAL FIX: The assumed episodes_this_iteration may not match actual episodes trained
-        # because timesteps_this_iteration may not be enough to complete all expected episodes
+        # CRITICAL: reset_num_timesteps=False keeps TensorBoard graph continuous across chunks.
+        # We only allow SB3 to reset its internal counter at the very start of rotation training.
+        while metrics_tracker.episode_count < target_episodes_for_iteration:
+            remaining_episodes = target_episodes_for_iteration - metrics_tracker.episode_count
+
+            # As a safety guard, if we are within a very small number of episodes from the target
+            # we still use the same chunk_timesteps. EpisodeTerminationCallback is responsible for
+            # stopping promptly when the episode budget is reached.
+            model.learn(
+                total_timesteps=chunk_timesteps,
+                reset_num_timesteps=(episodes_trained == 0 and metrics_tracker.episode_count == 0),
+                tb_log_name=tb_log_name,  # Same name = continuous graph
+                callback=enhanced_callbacks,
+                log_interval=chunk_timesteps + 1,
+                progress_bar=False  # Disabled - using episode-based progress below
+            )
+
+        # Update counters - use ACTUAL episode count from metrics_tracker
         actual_episodes_this_iteration = metrics_tracker.episode_count - episodes_trained
         episodes_trained = metrics_tracker.episode_count
 
