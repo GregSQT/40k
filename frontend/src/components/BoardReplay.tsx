@@ -582,6 +582,11 @@ export const BoardReplay: React.FC = () => {
         const hpAfter = target ? (target as any).HP_CUR : 0;
         const targetDied = hpBefore > 0 && hpAfter <= 0;
 
+        // Determine the correct player to attribute this combat action to:
+        // use the attacker unit's player, not the current turn player.
+        const attackerUnitBefore = stateBeforeAction?.units?.find((u: any) => u.id === attackerId);
+        const attackerPlayer = attackerUnitBefore ? attackerUnitBefore.player : action.player;
+
         // Build shootDetails for color coding
         const fightDetails = action.hit_roll !== undefined ? [{
           shotNumber: 1,
@@ -602,7 +607,7 @@ export const BoardReplay: React.FC = () => {
           targetId: targetId,
           turnNumber: turnNumber,
           phase: 'fight',
-          player: action.player,
+          player: attackerPlayer,
           shootDetails: fightDetails,
           is_ai_action: action.player === 0,
           reward: action.reward,
@@ -618,7 +623,8 @@ export const BoardReplay: React.FC = () => {
             unitId: targetId,
             turnNumber: turnNumber,
             phase: 'fight',
-            player: action.player
+            // Attribute death to the attacker player for consistency
+            player: attackerPlayer
           });
         }
       }

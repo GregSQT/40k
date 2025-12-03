@@ -98,7 +98,7 @@ const UnitRow = memo<UnitRowProps>(({ unit, isSelected, isClicked, onSelect }) =
       
       {/* RNG_AP (Ranged AP) */}
       <td className="unit-status-cell unit-status-cell--stat">
-        -{unit.RNG_AP}
+        {unit.RNG_AP}
       </td>
       
       {/* RNG_DMG (Ranged Damage) */}
@@ -123,7 +123,7 @@ const UnitRow = memo<UnitRowProps>(({ unit, isSelected, isClicked, onSelect }) =
       
       {/* CC_AP (Close Combat AP) */}
       <td className="unit-status-cell unit-status-cell--stat">
-        -{unit.CC_AP}
+        {unit.CC_AP}
       </td>
       
       {/* CC_DMG (Close Combat Damage) */}
