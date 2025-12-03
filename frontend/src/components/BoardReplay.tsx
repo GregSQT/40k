@@ -309,6 +309,40 @@ export const BoardReplay: React.FC = () => {
       const shootLeft = Math.max(0, rngNb - shotsFired);
       return { ...u, SHOOT_LEFT: shootLeft };
     }
+
+    // During fight action, compute ATTACK_LEFT only for the active attacker,
+    // mirroring PvP: counter shows attacks remaining *before* current swing.
+    if (currentAction?.type === 'fight' && currentEpisode && currentActionIndex > 0 && u.id === currentAction.attacker_id) {
+      const ccNb = u.CC_NB || 0;
+      const attackerId = currentAction.attacker_id;
+
+      const lastCompletedIndex = currentActionIndex - 2;
+      if (lastCompletedIndex < 0) {
+        return { ...u, ATTACK_LEFT: ccNb };
+      }
+
+      // Fight phase is delimited by non-fight actions
+      let fightPhaseStart = 0;
+      for (let i = lastCompletedIndex; i >= 0; i--) {
+        const action = currentEpisode.actions[i];
+        if (action.type !== 'fight') {
+          fightPhaseStart = i + 1;
+          break;
+        }
+      }
+
+      let attacksUsed = 0;
+      for (let i = fightPhaseStart; i <= lastCompletedIndex && i < currentEpisode.actions.length; i++) {
+        const action = currentEpisode.actions[i];
+        if (action.type === 'fight' && action.attacker_id === attackerId) {
+          attacksUsed++;
+        }
+      }
+
+      const attacksLeft = Math.max(0, ccNb - attacksUsed);
+      return { ...u, ATTACK_LEFT: attacksLeft };
+    }
+
     return u;
   }) : [];
   if (currentAction?.type === 'move' && currentAction?.from && currentAction.unit_id) {

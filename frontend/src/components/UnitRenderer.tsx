@@ -1049,7 +1049,8 @@ export class UnitRenderer {
     });
     shootText.anchor.set(0.1);
     shootText.position.set(centerX + scaledOffset, centerY - scaledOffset * 1.1);
-    shootText.zIndex = 450;
+    // Ensure shooting counter is always on top of other elements
+    shootText.zIndex = 10000;
     app.stage.addChild(shootText);
   }
   
@@ -1068,7 +1069,10 @@ export class UnitRenderer {
       // Not actively attacking - check if eligible in current subphase pool
       let shouldShowIfEligible = false;
 
-      if (fightSubPhase === "charging") {
+      // In replay mode (no fightSubPhase), allow counter for any eligible unit
+      if (!fightSubPhase) {
+        shouldShowIfEligible = true;
+      } else if (fightSubPhase === "charging") {
         shouldShowIfEligible = unit.player === currentPlayer;
       } else if (fightSubPhase === "alternating_non_active" || fightSubPhase === "cleanup_non_active") {
         shouldShowIfEligible = unit.player !== currentPlayer;
@@ -1111,7 +1115,8 @@ export class UnitRenderer {
     });
     attackText.anchor.set(0.1);
     attackText.position.set(centerX + scaledOffset, centerY - scaledOffset * 1.1);
-    attackText.zIndex = 450;
+    // Ensure attack counter is always on top of other elements
+    attackText.zIndex = 10000;
     app.stage.addChild(attackText);
   }
 
