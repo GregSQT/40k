@@ -268,11 +268,46 @@ export const BoardReplay: React.FC = () => {
     : null;
 
   // Add ghost unit at starting position for move actions
-  // For shoot actions, ensure shooter has SHOOT_LEFT > 0 for LoS calculation
+  // For shoot actions, compute SHOOT_LEFT for the active shooter exactly like PvP,
+  // based on RNG_NB and the number of shots already fired in the current shooting phase.
   const unitsWithGhost = currentState?.units ? [...currentState.units].map((u: any) => {
-    // During shoot action, ensure shooter has SHOOT_LEFT > 0 to trigger LoS display
-    if (currentAction?.type === 'shoot' && u.id === currentAction.shooter_id) {
-      return { ...u, SHOOT_LEFT: Math.max(u.SHOOT_LEFT || 0, 1) };
+    // During shoot action, adjust SHOOT_LEFT only for the active shooting unit
+    // EXACT mirror of PvP behavior: counter shows shots remaining *before* current shot.
+    if (currentAction?.type === 'shoot' && currentEpisode && currentActionIndex > 0 && u.id === currentAction.shooter_id) {
+      const rngNb = u.RNG_NB || 0;
+      const shooterId = currentAction.shooter_id;
+
+      // Index of the last *completed* action before the current one
+      const lastCompletedIndex = currentActionIndex - 2; // actions are 0-based, state index is +1
+      if (lastCompletedIndex < 0) {
+        // No previous actions in this phase: full shots available
+        return { ...u, SHOOT_LEFT: rngNb };
+      }
+
+      // Find the start of the current shooting phase by scanning backwards
+      // from the last completed action until we hit a non-shoot action.
+      let shootingPhaseStart = 0;
+      for (let i = lastCompletedIndex; i >= 0; i--) {
+        const action = currentEpisode.actions[i];
+        if (action.type !== 'shoot' && action.type !== 'shoot_wait') {
+          shootingPhaseStart = i + 1;
+          break;
+        }
+      }
+
+      // Count how many shots this unit has fired in the current shooting phase
+      let shotsFired = 0;
+      for (let i = shootingPhaseStart; i <= lastCompletedIndex && i < currentEpisode.actions.length; i++) {
+        const action = currentEpisode.actions[i];
+        if (action.type === 'shoot' && action.shooter_id === shooterId) {
+          shotsFired++;
+        }
+      }
+
+      // Counter shows remaining shots *before* current shot:
+      // first shot: RNG_NB, second: RNG_NB-1, etc.
+      const shootLeft = Math.max(0, rngNb - shotsFired);
+      return { ...u, SHOOT_LEFT: shootLeft };
     }
     return u;
   }) : [];
