@@ -786,7 +786,8 @@ export const BoardReplay: React.FC = () => {
   const chargingUnitId = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail') && currentAction?.unit_id
     ? currentAction.unit_id
     : null;
-  const chargeTargetId = currentAction?.type === 'charge' && currentAction?.target_id
+  // Get charge target ID for target logo (include charge_fail and charge_wait so logo appears even when charge fails)
+  const chargeTargetId = (currentAction?.type === 'charge' || currentAction?.type === 'charge_fail' || currentAction?.type === 'charge_wait') && currentAction?.target_id
     ? currentAction.target_id
     : null;
 
