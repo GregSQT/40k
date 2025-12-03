@@ -127,6 +127,26 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
     game_state["non_active_alternating_activation_pool"] = non_active_alternating
     game_state["console_logs"].append(f"ALTERNATING POOLS: active={len(active_alternating)}, non_active={len(non_active_alternating)}")
 
+
+def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str) -> None:
+    """
+    CRITICAL: Immediately remove a dead unit from all fight activation pools.
+    
+    This must be called as soon as a unit dies to prevent it from being activated
+    in subsequent sub-phases of the same fight phase.
+    """
+    # Remove from charging pool
+    if "charging_activation_pool" in game_state and unit_id in game_state["charging_activation_pool"]:
+        game_state["charging_activation_pool"].remove(unit_id)
+    
+    # Remove from active alternating pool
+    if "active_alternating_activation_pool" in game_state and unit_id in game_state["active_alternating_activation_pool"]:
+        game_state["active_alternating_activation_pool"].remove(unit_id)
+    
+    # Remove from non-active alternating pool
+    if "non_active_alternating_activation_pool" in game_state and unit_id in game_state["non_active_alternating_activation_pool"]:
+        game_state["non_active_alternating_activation_pool"].remove(unit_id)
+
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
     AI_TURN.md: Check if unit is adjacent to at least one enemy within CC_RNG.
@@ -1100,11 +1120,16 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if unit is None:
         if "unitId" not in action:
             # Auto-select first unit from current pool for gym training
-            if current_pool:
-                unit_id = current_pool[0]
+            # CRITICAL: Filter out dead units from pool before selection
+            alive_units_in_pool = [uid for uid in current_pool if _get_unit_by_id(game_state, uid) and _get_unit_by_id(game_state, uid)["HP_CUR"] > 0]
+            if alive_units_in_pool:
+                unit_id = alive_units_in_pool[0]
                 unit = _get_unit_by_id(game_state, unit_id)
                 if not unit:
                     return False, {"error": "unit_not_found", "unitId": unit_id}
+                # Remove dead units from pool
+                for dead_unit_id in set(current_pool) - set(alive_units_in_pool):
+                    _remove_dead_unit_from_fight_pools(game_state, dead_unit_id)
             else:
                 return True, fight_phase_end(game_state)
         else:
@@ -1721,6 +1746,8 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                 target_died = target["HP_CUR"] <= 0
 
                 if target_died:
+                    # CRITICAL: Immediately remove dead unit from fight activation pools
+                    _remove_dead_unit_from_fight_pools(game_state, target_id)
                     attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} dealt : Unit {target_id} DIED !"
                 else:
                     attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DEALT !"

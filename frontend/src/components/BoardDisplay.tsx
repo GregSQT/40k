@@ -108,6 +108,7 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
     const HEX_VERT_SPACING = HEX_HEIGHT;
 
     // Parse colors from config
+    const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight!);
     const ATTACK_COLOR = parseColor(boardConfig.colors.attack!);
     const CHARGE_COLOR = parseColor(boardConfig.colors.charge!);
     const WALL_COLOR = parseColor(boardConfig.colors.wall!);
@@ -236,7 +237,7 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
           } else if (isInCover) {
             highlightCell.beginFill(CHARGE_COLOR, 0.5); // Orange for targets in cover (reuse CHARGE_COLOR)
           } else if (isAvailable) {
-            highlightCell.beginFill(0x00FF00, 0.5);
+            highlightCell.beginFill(HIGHLIGHT_COLOR, 0.5);
           }
           
           highlightCell.drawPolygon(points);

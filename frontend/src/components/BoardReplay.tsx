@@ -813,64 +813,139 @@ export const BoardReplay: React.FC = () => {
       onShoot={() => {}}
       gameState={currentState}
       getChargeDestinations={(unitId: number) => {
-        // Calculate ALL valid charge destinations for replay mode
+        // Calculate ALL valid charge destinations for replay mode using BFS
         if (currentAction?.type === 'charge' && currentAction?.from && currentAction.unit_id === unitId) {
           const chargeFrom = currentAction.from;
-          const chargeTo = currentAction.to;
-
-          // Calculate charge distance from the actual charge that happened
-          const fromCube = offsetToCube(chargeFrom.col, chargeFrom.row);
-          const toCube = offsetToCube(chargeTo.col, chargeTo.row);
-          const chargeDistance = cubeDistance(fromCube, toCube);
+          // Use the charge_roll from the action, not the actual distance traveled
+          const chargeRoll = currentAction.charge_roll;
+          
+          if (!chargeRoll || chargeRoll <= 0) {
+            return [];
+          }
 
           // Find all enemy units (units from the other player)
           const chargingUnit = unitsWithGhost.find((u: any) => u.id === unitId);
+          if (!chargingUnit) {
+            return [];
+          }
+
           const enemyUnits = unitsWithGhost.filter((u: any) =>
             u.player !== chargingUnit?.player &&
             u.id >= 0 && // Not a ghost unit
             u.HP_CUR > 0
           );
 
-          // Calculate all valid charge destinations:
-          // A hex is valid if it's within charge distance AND adjacent to an enemy
+          if (enemyUnits.length === 0) {
+            return [];
+          }
+
+          // Helper function to get hex neighbors (6 directions)
+          const getHexNeighbors = (col: number, row: number): { col: number; row: number }[] => {
+            const parity = col & 1; // 0 for even, 1 for odd
+            if (parity === 0) { // Even column
+              return [
+                { col, row: row - 1 },      // N
+                { col: col + 1, row: row - 1 }, // NE
+                { col: col + 1, row },     // SE
+                { col, row: row + 1 },      // S
+                { col: col - 1, row },      // SW
+                { col: col - 1, row: row - 1 } // NW
+              ];
+            } else { // Odd column
+              return [
+                { col, row: row - 1 },      // N
+                { col: col + 1, row },      // NE
+                { col: col + 1, row: row + 1 }, // SE
+                { col, row: row + 1 },      // S
+                { col: col - 1, row: row + 1 }, // SW
+                { col: col - 1, row }       // NW
+              ];
+            }
+          };
+
+          // Helper function to check if hex is traversable
+          const isTraversable = (col: number, row: number): boolean => {
+            const boardCols = currentState?.board_cols || 25;
+            const boardRows = currentState?.board_rows || 21;
+            
+            // Check bounds
+            if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
+              return false;
+            }
+            
+            // Check walls
+            if (currentState?.walls?.some((w: any) => w.col === col && w.row === row)) {
+              return false;
+            }
+            
+            // Check if occupied by another unit (excluding the charging unit)
+            if (unitsWithGhost.some((u: any) =>
+              u.col === col && u.row === row && u.id !== unitId && u.id >= 0 && u.HP_CUR > 0
+            )) {
+              return false;
+            }
+            
+            return true;
+          };
+
+          // Helper function to check if hex is adjacent to an enemy
+          const isAdjacentToEnemy = (col: number, row: number): boolean => {
+            const hexCube = offsetToCube(col, row);
+            return enemyUnits.some((enemy: any) => {
+              const enemyCube = offsetToCube(enemy.col, enemy.row);
+              return cubeDistance(hexCube, enemyCube) === 1;
+            });
+          };
+
+          // BFS to find all reachable hexes within charge_roll distance
           const validDestinations: { col: number; row: number }[] = [];
-          const boardCols = currentState?.board_cols || 25;
-          const boardRows = currentState?.board_rows || 21;
+          const visited = new Set<string>();
+          const queue: Array<{ col: number; row: number; distance: number }> = [];
+          
+          const startKey = `${chargeFrom.col},${chargeFrom.row}`;
+          visited.add(startKey);
+          queue.push({ col: chargeFrom.col, row: chargeFrom.row, distance: 0 });
 
-          // Cube directions for adjacency check
-          const cubeDirections = [
-            { x: 1, y: -1, z: 0 }, { x: 1, y: 0, z: -1 }, { x: 0, y: 1, z: -1 },
-            { x: -1, y: 1, z: 0 }, { x: -1, y: 0, z: 1 }, { x: 0, y: -1, z: 1 }
-          ];
+          while (queue.length > 0) {
+            const current = queue.shift()!;
+            
+            // If we've reached max charge range, don't explore further
+            if (current.distance >= chargeRoll) {
+              continue;
+            }
 
-          for (let col = 0; col < boardCols; col++) {
-            for (let row = 0; row < boardRows; row++) {
-              const hexCube = offsetToCube(col, row);
-              const distFromStart = cubeDistance(fromCube, hexCube);
+            // Explore all 6 hex neighbors
+            const neighbors = getHexNeighbors(current.col, current.row);
+            
+            for (const neighbor of neighbors) {
+              const neighborKey = `${neighbor.col},${neighbor.row}`;
+              
+              // Skip if already visited
+              if (visited.has(neighborKey)) {
+                continue;
+              }
 
-              // Must be within charge distance (use the actual charge distance + some margin)
-              // In 40k, charge distance = 2d6, typically 2-12
-              if (distFromStart > 0 && distFromStart <= chargeDistance) {
-                // Check if this hex is adjacent to any enemy
-                const isAdjacentToEnemy = enemyUnits.some((enemy: any) => {
-                  const enemyCube = offsetToCube(enemy.col, enemy.row);
-                  return cubeDistance(hexCube, enemyCube) === 1;
-                });
+              // Check if traversable
+              if (!isTraversable(neighbor.col, neighbor.row)) {
+                continue;
+              }
 
-                // Check if hex is not occupied by another unit
-                const isOccupied = unitsWithGhost.some((u: any) =>
-                  u.col === col && u.row === row && u.id !== unitId && u.id >= 0
-                );
+              // Mark as visited
+              visited.add(neighborKey);
+              const neighborDistance = current.distance + 1;
 
-                // Check if hex is not a wall
-                const isWall = currentState?.walls?.some((w: any) =>
-                  w.col === col && w.row === row
-                );
-
-                if (isAdjacentToEnemy && !isOccupied && !isWall) {
-                  validDestinations.push({ col, row });
+              // Check if this hex is adjacent to an enemy (valid destination)
+              if (isAdjacentToEnemy(neighbor.col, neighbor.row)) {
+                // Double-check that the destination hex is not occupied
+                if (!unitsWithGhost.some((u: any) =>
+                  u.col === neighbor.col && u.row === neighbor.row && u.id !== unitId && u.id >= 0 && u.HP_CUR > 0
+                )) {
+                  validDestinations.push({ col: neighbor.col, row: neighbor.row });
                 }
               }
+
+              // Continue exploring (charges can move through enemy-adjacent hexes)
+              queue.push({ col: neighbor.col, row: neighbor.row, distance: neighborDistance });
             }
           }
 

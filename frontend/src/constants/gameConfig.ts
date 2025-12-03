@@ -10,8 +10,8 @@ export const calculateHexConfig = (hexRadius: number) => ({
 
 // Colors
 export const COLORS = {
-  HIGHLIGHT: 0x80ff80,     // Green for movement
-  ATTACK: 0xff4444,        // Red for attacks
+  HIGHLIGHT: 0x90d090,     // Light green for movement (less intense)
+  ATTACK: 0xd0b0b0,        // Very light pink-gray for attacks (much less intense, lighter for dark background)
   CHARGE: 0xff9900,        // Orange for charges
   SELECTION: 0xffd700,     // Gold for selection
   ELIGIBLE: 0x00ff00,      // Green for eligible units

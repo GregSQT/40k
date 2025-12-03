@@ -343,20 +343,6 @@ class GameStateManager:
         # Check if any player has no living units (elimination condition)
         players_with_no_living_units = [pid for pid, count in living_units_by_player.items() if count == 0]
         game_over_by_elimination = len(players_with_no_living_units) > 0
-        
-        # Debug: Log unit counts if game is ending
-        if game_over_by_elimination:
-            if not self.quiet:
-                print(f"\n🔍 GAME OVER CHECK (elimination):")
-                for player_id in sorted(set(list(living_units_by_player.keys()) + list(dead_units_by_player.keys()))):
-                    living = living_units_by_player.get(player_id, 0)
-                    dead = dead_units_by_player.get(player_id, 0)
-                    print(f"   Player {player_id}: {living} living, {dead} dead units")
-                    # Show unit details for debugging
-                    for unit in game_state["units"]:
-                        if unit["player"] == player_id:
-                            status = "ALIVE" if unit["HP_CUR"] > 0 else "DEAD"
-                            print(f"      Unit {unit.get('id', '?')} ({unit.get('name', '?')}): HP={unit.get('HP_CUR', 0)}/{unit.get('HP_MAX', 0)} [{status}]")
 
         # Game is over if any player has no living units
         return game_over_by_elimination
