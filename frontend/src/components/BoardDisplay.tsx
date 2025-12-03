@@ -239,14 +239,32 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
         if (isChargeable || isAttackable || isInCover || isAvailable) {
           const highlightCell = new PIXI.Graphics();
 
-          if (isChargeable) {
-            highlightCell.beginFill(CHARGE_COLOR, 0.5);
-          } else if (isAttackable) {
-            highlightCell.beginFill(ATTACK_COLOR, 0.5); // Red for clear line of sight
-          } else if (isInCover) {
-            highlightCell.beginFill(CHARGE_COLOR, 0.5); // Orange for targets in cover (reuse CHARGE_COLOR)
-          } else if (isAvailable) {
-            highlightCell.beginFill(HIGHLIGHT_COLOR, 0.5);
+          // Shooting phase: use unified vivid blue tones for attack preview
+          if (phase === "shoot") {
+            if (isAttackable) {
+              // Vivid medium blue for clear line of sight (plus bleu, même luminosité)
+              highlightCell.beginFill(0x4f8bff, 0.4);
+            } else if (isInCover) {
+              // Vivid light blue for targets in cover
+              highlightCell.beginFill(0x9ec5ff, 0.4);
+            } else if (isChargeable) {
+              // Charge destinations: use violet
+              highlightCell.beginFill(0x9f7aea, 0.4);
+            } else if (isAvailable) {
+              highlightCell.beginFill(HIGHLIGHT_COLOR, 0.4);
+            }
+          } else {
+            // Other phases keep existing colors
+            if (isChargeable) {
+              // Charge destinations: use violet
+              highlightCell.beginFill(0x9f7aea, 0.5);
+            } else if (isAttackable) {
+              highlightCell.beginFill(ATTACK_COLOR, 0.5);
+            } else if (isInCover) {
+              highlightCell.beginFill(CHARGE_COLOR, 0.5);
+            } else if (isAvailable) {
+              highlightCell.beginFill(HIGHLIGHT_COLOR, 0.5);
+            }
           }
           
           highlightCell.drawPolygon(points);

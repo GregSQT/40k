@@ -93,10 +93,35 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
               const hasWaitMessage = message.toLowerCase().includes('chose not to move') || 
                                     message.toLowerCase().includes('chose not to charge') ||
                                     message.toLowerCase().endsWith(' wait');
-              
+
               const isWaitAction = hasWaitActionName || isWaitType || hasWaitMessage;
               const waitClass = isWaitAction ? 'game-log-entry--wait' : '';
-              
+
+              // Shooting / combat outcome badge (MISS / SAVED / DMG)
+              let outcomeLabel: string | null = null;
+              let outcomeClass: 'miss' | 'saved' | 'damage' | null = null;
+              const shootDetails: any[] | undefined = (event as any).shootDetails;
+
+              if ((event.type === 'shoot' || event.type === 'combat') && Array.isArray(shootDetails) && shootDetails.length > 0) {
+                const targetDied = shootDetails.some((shot) => shot.targetDied === true);
+                const hasDamage = shootDetails.some((shot) => shot.damageDealt && shot.damageDealt > 0);
+                const hasSave = shootDetails.some((shot) => shot.saveSuccess === true);
+
+                if (hasDamage) {
+                  // Sum total damage for display
+                  const totalDamage = shootDetails.reduce((sum, shot) => sum + (shot.damageDealt || 0), 0);
+                  outcomeLabel = totalDamage > 0 ? `DMG ${totalDamage}` : 'DMG';
+                  outcomeClass = 'damage';
+                } else if (hasSave) {
+                  outcomeLabel = 'SAVED';
+                  outcomeClass = 'saved';
+                } else if (!targetDied) {
+                  // No damage and no successful save => pure miss / failed to wound
+                  outcomeLabel = 'MISS';
+                  outcomeClass = 'miss';
+                }
+              }
+
               return (
               <div 
                 key={event.id} 
@@ -122,6 +147,11 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
                   <span className="game-log-entry__message">
                     {event.message}
                   </span>
+                  {outcomeLabel && outcomeClass && (
+                    <span className={`game-log-entry__outcome game-log-entry__outcome--${outcomeClass}`}>
+                      {outcomeLabel}
+                    </span>
+                  )}
                   {/* NEW: Debug mode reward display for AI actions */}
                   {debugMode && (event as any).is_ai_action && (event as any).reward !== undefined && (
                     <span className="game-log-entry__reward">

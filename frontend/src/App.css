@@ -27,10 +27,10 @@
   --icon-move-size: 1.3;
   --icon-move-circle-size: 0.75;
   
-  /* Shooting icon - SQUARE with pistol icon */
-  --icon-shoot-color: #eab308;
-  --icon-shoot-bg-color: #eab308;
-  --icon-shoot-bg-rgb: 234, 179, 8; /* RGB values for rgba() in CSS */
+  /* Shooting icon - SQUARE with pistol icon (blue tones) */
+  --icon-shoot-color: #2563eb;
+  --icon-shoot-bg-color: #2563eb;
+  --icon-shoot-bg-rgb: 37, 99, 235; /* RGB values for rgba() in CSS */
   --icon-shoot-stroke: #ffffff;
   --icon-shoot-stroke-thickness: 3;
   --icon-shoot-size: 1.5;
@@ -76,9 +76,9 @@
   
   /* Square icon settings (for both board and game log) */
   --icon-square-bg-alpha: 1.0; /* Opaque background for board icons */
-  --icon-square-bg-alpha-gamelog: 0.3; /* Slightly transparent for game log */
+  --icon-square-bg-alpha-gamelog: 0.6; /* Plus opaque pour les icônes du game log */
   --icon-square-border-alpha: 1.0; /* Opaque border for board */
-  --icon-square-border-alpha-gamelog: 0.8; /* Slightly transparent for game log */
+  --icon-square-border-alpha-gamelog: 1.0; /* Bord plus visible pour les icônes du game log */
   --icon-square-border-width: 2;
   --icon-square-border-color: #ffffff; /* White border for all squares */
   --icon-square-border-radius: 4;
@@ -1279,9 +1279,9 @@ textarea:focus {
 
 .game-log-entry__turn {
   font-size: var(--font-size-sm);
-  color: var(--color-accent);
+  color: #ffffff; /* Texte du tour plus blanc et contrasté */
   font-weight: var(--font-weight-bold);
-  background: rgba(30, 144, 255, 0.2);
+  background: rgba(30, 144, 255, 0.5);
   padding: 1px 4px;
   border-radius: var(--radius-sm);
 }
@@ -1309,87 +1309,117 @@ textarea:focus {
   flex: 1;
 }
 
+/* Outcome badges for shooting / combat */
+.game-log-entry__outcome {
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-left: 4px;
+  min-width: 40px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.game-log-entry__outcome--miss {
+  color: #9ca3af;
+  background: rgba(55, 65, 81, 0.8); /* Dark gray */
+  border: 1px solid #4b5563;
+}
+
+.game-log-entry__outcome--saved {
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.4); /* same base bleu que l'ancien DMG */
+  border: 1px solid rgba(37, 99, 235, 0.9);
+}
+
+.game-log-entry__outcome--damage {
+  color: #dbeafe;
+  background: rgba(15, 23, 42, 0.85); /* bleu très foncé (type navy / slate) */
+  border: 1px solid rgba(15, 23, 42, 1);
+}
+
 /* Event Type Specific Styles */
 .game-log-entry--turn {
   border-left-color: var(--color-accent);
-  background: rgba(30, 144, 255, 0.1);
+  background: rgba(30, 144, 255, 0.40);
 }
 
 .game-log-entry--phase {
   border-left-color: #9966cc;
-  background: rgba(153, 102, 204, 0.1);
+  background: rgba(153, 102, 204, 0.40);
 }
 
 .game-log-entry--move {
   border-left-color: #00cc66;
-  background: rgba(0, 204, 102, 0.1);
+  background: rgba(0, 204, 102, 0.40);
 }
 
 .game-log-entry--charge {
   border-left-color: #9966cc; /* Purple - successful charge */
-  background: rgba(153, 102, 204, 0.15); /* Regular purple background */
+  background: rgba(109, 76, 190, 0.45); /* Violet encore un peu plus foncé pour charge réussie */
 }
 
 .game-log-entry--charge-fail {
   border-left-color: #9966cc; /* Purple - failed charge */
-  background: rgba(153, 102, 204, 0.08); /* Light purple background for failed charge */
+  background: rgba(192, 132, 252, 0.35); /* Violet plus clair pour charge ratée */
 }
 
-/* Shooting Action Color Coding */
+/* Shooting Action Color Coding - BLUE palette */
 .game-log-entry--shoot {
-  border-left-color: #eab308; /* Default yellow for shooting */
-  background: rgba(234, 179, 8, 0.15);
+  border-left-color: #2563eb; /* Default blue for shooting */
+  background: rgba(37, 99, 255, 0.40); /* Bleu pur/vif pour tir générique */
 }
 
 .game-log-entry--shoot-failed {
-  border-left-color: #eab308; /* Yellow - failed during hit or wound rolls */
-  background: rgba(234, 179, 8, 0.20);
+  border-left-color: #3b82f6; /* Lighter blue - failed hit/wound */
+  background: rgba(147, 197, 253, 0.40); /* Bleu clair mais plus saturé (MISS) */
 }
 
 .game-log-entry--shoot-saved {
-  border-left-color: #ea580c; /* Orange - target succeeded save roll */
-  background: rgba(234, 88, 12, 0.20);
+  border-left-color: #0ea5e9; /* Cyan/sky blue - target succeeded save roll */
+  background: rgba(96, 165, 250, 0.40); /* Bleu moyen (SAVED / pas de dégâts) */
 }
 
 .game-log-entry--shoot-damage {
-  border-left-color: #dc2626; /* Red - target loses HP */
-  background: rgba(220, 38, 38, 0.25);
+  border-left-color: #1d4ed8; /* Darker blue - target loses HP */
+  background: rgba(30, 64, 175, 0.40); /* Bleu foncé (DMG) */
 }
 
 .game-log-entry--shoot-no-damage {
-  border-left-color: #ea580c; /* Orange - hits but no damage (same as saved) */
-  background: rgba(234, 88, 12, 0.20);
+  border-left-color: #0ea5e9; /* Same as saved - hits but no damage */
+  background: rgba(96, 165, 250, 0.40); /* Même bleu moyen que SAVED pour "pas de dégâts" */
 }
 
 /* Combat Action Color Coding (same as shooting) */
 .game-log-entry--combat {
   border-left-color: #eab308; /* Default yellow for combat */
-  background: rgba(234, 179, 8, 0.15);
+  background: rgba(234, 179, 8, 0.40);
 }
 
 .game-log-entry--combat-failed {
   border-left-color: #eab308; /* Yellow - failed during hit or wound rolls */
-  background: rgba(234, 179, 8, 0.20);
+  background: rgba(234, 179, 8, 0.40);
 }
 
 .game-log-entry--combat-saved {
   border-left-color: #ea580c; /* Orange - target succeeded save roll */
-  background: rgba(234, 88, 12, 0.20);
+  background: rgba(234, 88, 12, 0.40);
 }
 
 .game-log-entry--combat-damage {
   border-left-color: #dc2626; /* Red - target loses HP */
-  background: rgba(220, 38, 38, 0.25);
+  background: rgba(220, 38, 38, 0.40);
 }
 
 .game-log-entry--combat-no-damage {
   border-left-color: #ea580c; /* Orange - hits but no damage (same as saved) */
-  background: rgba(234, 88, 12, 0.20);
+  background: rgba(234, 88, 12, 0.40);
 }
 
 .game-log-entry--death {
   border-left-color: #000000; /* Black border for death */
-  background: rgba(0, 0, 0, 0.2); /* Dark background */
+  background: rgba(0, 0, 0, 0.65); /* Dark background plus opaque pour bien ressortir */
 }
 
 .game-log-entry--death .game-log-entry__message {
@@ -1399,7 +1429,7 @@ textarea:focus {
 
 .game-log-entry--cancel {
   border-left-color: #999;
-  background: rgba(153, 153, 153, 0.1);
+  background: rgba(153, 153, 153, 0.40);
 }
 
 .game-log-entry--cancel .game-log-entry__message {
@@ -1410,7 +1440,7 @@ textarea:focus {
 /* Wait/Skip Action - Gray background (higher specificity to override other event types) */
 .game-log-entry.game-log-entry--wait {
   border-left-color: #666 !important;
-  background: rgba(128, 128, 128, 0.25) !important;
+  background: rgba(128, 128, 128, 0.40) !important;
 }
 
 .game-log-entry.game-log-entry--wait .game-log-entry__message {
@@ -1421,7 +1451,7 @@ textarea:focus {
 /* Default/Unknown Event Type */
 .game-log-entry--default {
   border-left-color: #555;
-  background: rgba(85, 85, 85, 0.1);
+  background: rgba(85, 85, 85, 0.40);
 }
 
 .game-log-entry--default .game-log-entry__message {
