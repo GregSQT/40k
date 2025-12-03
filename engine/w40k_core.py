@@ -422,13 +422,38 @@ class W40KEngine(gym.Env):
         
         # Log episode start with all unit positions, walls, and objectives
         if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-            scenario_name = self.config.get("name", "Unknown Scenario")
+            # Extract scenario name: prefer config "name", fallback to filename pattern
+            scenario_name = self.config.get("name")
+            if not scenario_name or scenario_name == "Unknown Scenario":
+                # Extract from filename: AgentName_scenario_phase1-bot3.json -> phase1-bot3
+                if hasattr(self, '_current_scenario_file') and self._current_scenario_file:
+                    import os
+                    filename = os.path.basename(self._current_scenario_file)
+                    # Match pattern: *_scenario_*.json
+                    import re
+                    match = re.search(r'_scenario_(.+?)\.json$', filename)
+                    if match:
+                        scenario_name = match.group(1)
+                    else:
+                        # Fallback: use filename without extension
+                        scenario_name = os.path.splitext(filename)[0]
+                else:
+                    scenario_name = "Unknown Scenario"
+            
+            # Determine bot_name for self-play (default to "SelfPlay" if not set)
+            bot_name = None
+            if hasattr(self.step_logger, 'current_bot_name') and self.step_logger.current_bot_name:
+                bot_name = self.step_logger.current_bot_name
+            else:
+                # In self-play mode, use a default name
+                bot_name = "SelfPlay"
+            
             # Use _scenario_wall_hexes (set during scenario loading) - convert to step_logger format
             raw_walls = self._scenario_wall_hexes if self._scenario_wall_hexes is not None else []
             walls = [{"col": w[0], "row": w[1]} for w in raw_walls] if raw_walls else []
             # Use _scenario_objectives (set during scenario loading)
             objectives = self._scenario_objectives if hasattr(self, '_scenario_objectives') else None
-            self.step_logger.log_episode_start(self.game_state["units"], scenario_name, walls=walls, objectives=objectives)
+            self.step_logger.log_episode_start(self.game_state["units"], scenario_name, bot_name=bot_name, walls=walls, objectives=objectives)
         
         observation = self.obs_builder.build_observation(self.game_state)
         info = {"phase": self.game_state["phase"]}

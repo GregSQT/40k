@@ -388,9 +388,11 @@ python ai/train.py \
    - If >1000 → Training unstable, check for bugs
 
 5. **Combat effectiveness metrics** (Phase-specific learning)
-   - `combat/shoot_kills`: Is agent killing with ranged attacks?
-   - `combat/melee_kills`: Is agent killing in fight phase?
-   - `combat/charge_successes`: Is agent learning to charge?
+   - `combat/a_position_score`: Is agent positioning effectively?
+   - `combat/b_shoot_kills`: Is agent killing with ranged attacks?
+   - `combat/c_charge_successes`: Is agent learning to charge?
+   - `combat/d_melee_kills`: Is agent killing in fight phase?
+   - `combat/e_controlled_objectives`: Is agent controlling objectives? (Only logged if game reached turn 5+)
 
 **Ignore during early training:**
 - Clip fraction (low is OK if training progresses)

@@ -89,7 +89,6 @@ from ai.training_utils import (
     make_training_env,
     get_agent_scenario_file,
     get_scenario_list_for_phase,
-    calculate_rotation_interval,
     ensure_scenario
 )
 
@@ -618,17 +617,16 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     return model, env, training_config, model_path
 
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
-                                 scenario_list, rotation_interval, total_episodes,
+                                 scenario_list, total_episodes,
                                  new_model=False, append_training=False, use_bots=False):
-    """Train model with automatic scenario rotation for curriculum learning.
+    """Train model with random scenario selection per episode.
     
     Args:
         config: ConfigLoader instance
         agent_key: Agent identifier
         training_config_name: Phase name (e.g., 'phase2')
         rewards_config_name: Rewards config name
-        scenario_list: List of scenario file paths to rotate through
-        rotation_interval: Episodes per scenario before rotation
+        scenario_list: List of scenario file paths (randomly selected per episode)
         total_episodes: Total episodes for entire training
         new_model: Whether to create new model
         append_training: Whether to continue from existing model
@@ -831,156 +829,115 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     from stable_baselines3.common.callbacks import CallbackList
     metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=effective_agent_key)
 
-    # Training loop with scenario rotation
+    # Training loop with random scenario selection per episode
     episodes_trained = 0
-    cycle = 0
-    scenario_idx = 0
 
     # Global start time for callbacks
     global_start_time = time.time()
 
-    # Progress bar is handled by EpisodeTerminationCallback (shows cycle/scenario info)
+    # Progress bar is handled by EpisodeTerminationCallback
 
     # PPO requires n_steps rollouts before each update; we use this as a natural chunk size
     # for our episode-budgeted outer loop.
     n_steps = training_config["model_params"]["n_steps"]
     chunk_timesteps = n_steps * 4  # 4 updates per chunk for stable gradients
 
-    while episodes_trained < total_episodes:
-        current_scenario = scenario_list[scenario_idx]
-        scenario_name = os.path.basename(current_scenario).replace(f"{agent_key}_scenario_", "").replace(".json", "")
+    # Use first scenario for initial setup (scenario selection is random per episode)
+    initial_scenario = scenario_list[0]
+    
+    # Create environment with scenario list for random selection per episode
+    base_env = W40KEngine(
+        rewards_config=rewards_config_name,
+        training_config_name=training_config_name,
+        controlled_agent=effective_agent_key,
+        active_agents=None,
+        scenario_file=initial_scenario,
+        scenario_files=scenario_list,  # Random scenario selection per episode
+        unit_registry=unit_registry,
+        quiet=True,
+        gym_training_mode=True
+    )
 
-        # Calculate episodes for this iteration
-        episodes_remaining = total_episodes - episodes_trained
-        episodes_this_iteration = min(rotation_interval, episodes_remaining)
-        
-        # Create new environment with scenario list for random selection per episode
-        base_env = W40KEngine(
-            rewards_config=rewards_config_name,
-            training_config_name=training_config_name,
-            controlled_agent=effective_agent_key,
-            active_agents=None,
-            scenario_file=current_scenario,
-            scenario_files=scenario_list,  # NEW: Random scenario selection per episode
-            unit_registry=unit_registry,
-            quiet=True,
-            gym_training_mode=True
+    # Wrap environment with action masking first
+    masked_env = ActionMasker(base_env, mask_fn)
+
+    # For bot training, use BotControlledEnv to handle Player 1's bot actions
+    if use_bots:
+        bot_env = BotControlledEnv(masked_env, training_bot, unit_registry)
+        env = Monitor(bot_env)
+    else:
+        # CRITICAL: Update frozen model periodically for proper self-play
+        if episodes_trained - last_frozen_model_update >= frozen_model_update_frequency or frozen_model is None:
+            # Save current model to temp file and load as frozen copy
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as f:
+                temp_path = f.name
+            model.save(temp_path)
+            frozen_model = MaskablePPO.load(temp_path)
+            os.unlink(temp_path)  # Clean up temp file
+            last_frozen_model_update = episodes_trained
+            if episodes_trained > 0:
+                print(f"  🔄 Self-play: Updated frozen opponent (Episode {episodes_trained})")
+
+        # Wrap with SelfPlayWrapper for proper self-play training
+        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=frozen_model, update_frequency=frozen_model_update_frequency)
+        env = Monitor(selfplay_env)
+    
+    # Update model's environment
+    model.set_env(env)
+    
+    # Create callbacks for training
+    scenario_display = f"Random from {len(scenario_list)} scenarios"
+    training_callbacks = setup_callbacks(
+        config=config,
+        model_path=model_path,
+        training_config=training_config,
+        training_config_name=training_config_name,
+        metrics_tracker=metrics_tracker,
+        total_episodes_override=total_episodes,
+        max_episodes_override=total_episodes,  # Train directly to total_episodes
+        scenario_info=scenario_display,
+        global_episode_offset=0,
+        global_start_time=global_start_time
+    )
+    
+    # Link metrics_tracker to bot evaluation callback
+    for callback in training_callbacks:
+        if hasattr(callback, '__class__') and callback.__class__.__name__ == 'BotEvaluationCallback':
+            callback.metrics_tracker = metrics_tracker
+    
+    # Combine all callbacks
+    enhanced_callbacks = CallbackList(training_callbacks + [metrics_callback])
+    
+    # Train directly to total_episodes using an EPISODE-BUDGETED wrapper around SB3.learn().
+    #
+    # SB3 only exposes a timestep budget, so we:
+    # - repeatedly call learn() with a small, fixed chunk of timesteps
+    # - after each chunk, check how many episodes actually completed (via metrics_tracker)
+    # - stop when we reach the exact desired episode count (total_episodes)
+
+    # CRITICAL: reset_num_timesteps=False keeps TensorBoard graph continuous across chunks.
+    # We only allow SB3 to reset its internal counter at the very start of training.
+    while metrics_tracker.episode_count < total_episodes:
+        # As a safety guard, we still use the same chunk_timesteps. 
+        # EpisodeTerminationCallback is responsible for stopping promptly when the episode budget is reached.
+        model.learn(
+            total_timesteps=chunk_timesteps,
+            reset_num_timesteps=(metrics_tracker.episode_count == 0),
+            tb_log_name=tb_log_name,  # Same name = continuous graph
+            callback=enhanced_callbacks,
+            log_interval=chunk_timesteps + 1,
+            progress_bar=False  # Disabled - using episode-based progress
         )
 
-        # Wrap environment with action masking first
-        masked_env = ActionMasker(base_env, mask_fn)
-
-        # For bot training, use BotControlledEnv to handle Player 1's bot actions
-        if use_bots:
-            bot_env = BotControlledEnv(masked_env, training_bot, unit_registry)
-            env = Monitor(bot_env)
-        else:
-            # CRITICAL: Update frozen model periodically for proper self-play
-            if episodes_trained - last_frozen_model_update >= frozen_model_update_frequency or frozen_model is None:
-                # Save current model to temp file and load as frozen copy
-                import tempfile
-                with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as f:
-                    temp_path = f.name
-                model.save(temp_path)
-                frozen_model = MaskablePPO.load(temp_path)
-                os.unlink(temp_path)  # Clean up temp file
-                last_frozen_model_update = episodes_trained
-                if episodes_trained > 0:
-                    print(f"  🔄 Self-play: Updated frozen opponent (Episode {episodes_trained})")
-
-            # Wrap with SelfPlayWrapper for proper self-play training
-            selfplay_env = SelfPlayWrapper(masked_env, frozen_model=frozen_model, update_frequency=frozen_model_update_frequency)
-            env = Monitor(selfplay_env)
-        
-        # Update model's environment
-        model.set_env(env)
-        
-        # Create fresh callbacks for this rotation with updated scenario info
-        scenario_display = f"Random from {len(scenario_list)} scenarios"
-        rotation_callbacks = setup_callbacks(
-            config=config,
-            model_path=model_path,
-            training_config=training_config,
-            training_config_name=training_config_name,
-            metrics_tracker=metrics_tracker,
-            total_episodes_override=total_episodes,
-            max_episodes_override=episodes_this_iteration,
-            scenario_info=scenario_display,
-            global_episode_offset=episodes_trained,
-            global_start_time=global_start_time
-        )
-        
-        # Link metrics_tracker to bot evaluation callback
-        for callback in rotation_callbacks:
-            if hasattr(callback, '__class__') and callback.__class__.__name__ == 'BotEvaluationCallback':
-                callback.metrics_tracker = metrics_tracker
-        
-        # Combine all callbacks
-        enhanced_callbacks = CallbackList(rotation_callbacks + [metrics_callback])
-        
-        # Train on this scenario using an EPISODE-BUDGETED wrapper around SB3.learn().
-        #
-        # SB3 only exposes a timestep budget, so we:
-        # - repeatedly call learn() with a small, fixed chunk of timesteps
-        # - after each chunk, check how many episodes actually completed (via metrics_tracker)
-        # - stop when we reach the exact desired episode count for this scenario
-        target_episodes_for_iteration = episodes_trained + episodes_this_iteration
-
-        # CRITICAL: reset_num_timesteps=False keeps TensorBoard graph continuous across chunks.
-        # We only allow SB3 to reset its internal counter at the very start of rotation training.
-        while metrics_tracker.episode_count < target_episodes_for_iteration:
-            remaining_episodes = target_episodes_for_iteration - metrics_tracker.episode_count
-
-            # As a safety guard, if we are within a very small number of episodes from the target
-            # we still use the same chunk_timesteps. EpisodeTerminationCallback is responsible for
-            # stopping promptly when the episode budget is reached.
-            model.learn(
-                total_timesteps=chunk_timesteps,
-                reset_num_timesteps=(episodes_trained == 0 and metrics_tracker.episode_count == 0),
-                tb_log_name=tb_log_name,  # Same name = continuous graph
-                callback=enhanced_callbacks,
-                log_interval=chunk_timesteps + 1,
-                progress_bar=False  # Disabled - using episode-based progress below
-            )
-
-        # Update counters - use ACTUAL episode count from metrics_tracker
-        actual_episodes_this_iteration = metrics_tracker.episode_count - episodes_trained
-        episodes_trained = metrics_tracker.episode_count
-
-        # Log per-scenario performance after training on this scenario
-        if hasattr(metrics_tracker, 'all_episode_rewards') and len(metrics_tracker.all_episode_rewards) > 0:
-            # Get rewards from this cycle (last actual_episodes_this_iteration episodes)
-            recent_count = max(1, actual_episodes_this_iteration)
-            recent_rewards = metrics_tracker.all_episode_rewards[-recent_count:] if len(metrics_tracker.all_episode_rewards) >= recent_count else metrics_tracker.all_episode_rewards
-            avg_reward = np.mean(recent_rewards) if len(recent_rewards) > 0 else 0
-
-            # Get win rate from this cycle
-            recent_wins = metrics_tracker.all_episode_wins[-recent_count:] if len(metrics_tracker.all_episode_wins) >= recent_count else metrics_tracker.all_episode_wins
-            win_rate = np.mean(recent_wins) if len(recent_wins) > 0 else 0
-
-            # Log per-scenario metrics using actual episode count
-            metrics_tracker.writer.add_scalar(f"scenario_performance/{scenario_name}_avg_reward", avg_reward, episodes_trained)
-            metrics_tracker.writer.add_scalar(f"scenario_performance/{scenario_name}_win_rate", win_rate, episodes_trained)
-
-        scenario_idx = (scenario_idx + 1) % len(scenario_list)
-
-        # Check if we completed a full cycle
-        if scenario_idx == 0:
-            cycle += 1
-        
-        # Save checkpoint
-        checkpoint_path = model_path.replace('.zip', f'_ep{episodes_trained}.zip')
-        model.save(checkpoint_path)
-        
-        # Clean up old environment
-        env.close()
+    # Final episode count
+    episodes_trained = metrics_tracker.episode_count
 
     # Final save
     model.save(model_path)
     print(f"\n{'='*80}")
-    print(f"✅ ROTATION TRAINING COMPLETE")
+    print(f"✅ TRAINING COMPLETE")
     print(f"   Total episodes trained: {episodes_trained}")
-    print(f"   Complete cycles: {cycle}")
     print(f"   Final model: {model_path}")
     print(f"{'='*80}\n")
 
@@ -1437,8 +1394,6 @@ def main():
                        help="Scenario template name from scenario_templates.json for replay generation")
     parser.add_argument("--scenario", type=str, default=None,
                        help="Specific scenario to use (e.g., 'phase2-3') or 'all' for rotation through all scenarios")
-    parser.add_argument("--rotation-interval", type=int, default=None,
-                       help="Episodes per scenario before rotation (overrides config file value)")
     
     args = parser.parse_args()
     
@@ -1651,29 +1606,13 @@ def main():
                     else:
                         total_episodes = training_config["total_episodes"]
                     
-                    # Determine checkpoint interval (how often to save model during training)
-                    config_rotation = training_config.get("rotation_interval", None)
-                    n_steps = training_config["model_params"].get("n_steps", 256)
-                    if args.rotation_interval:
-                        rotation_interval = args.rotation_interval
-                        print(f"🔧 Using CLI checkpoint interval: {rotation_interval}")
-                    else:
-                        rotation_interval = calculate_rotation_interval(
-                            total_episodes,
-                            len(scenario_list),
-                            config_rotation,
-                            n_steps=n_steps
-                        )
-                        print(f"📊 Checkpoint interval: {rotation_interval} episodes")
-                    
-                    # Use rotation training
+                    # Use multi-scenario training with random selection per episode
                     success, model, env = train_with_scenario_rotation(
                         config=config,
                         agent_key=args.agent,
                         training_config_name=args.training_config,
                         rewards_config_name=args.rewards_config,
                         scenario_list=scenario_list,
-                        rotation_interval=rotation_interval,
                         total_episodes=total_episodes,
                         new_model=args.new,
                         append_training=args.append,

@@ -370,6 +370,123 @@ These metrics compare agent performance against scripted opponents.
 
 ---
 
+### Combat Effectiveness Metrics
+
+These metrics measure the agent's tactical combat performance across different phases of gameplay. They use alphabetical prefixes (a-e) to control TensorBoard sort order and are smoothed using rolling averages.
+
+#### `combat/a_position_score`
+**What it is:** Quality of unit positioning during movement phase (smoothed over 100 episodes)
+
+**Why it matters:** Measures tactical positioning skills - agent's ability to move to advantageous positions.
+
+**Interpretation:**
+- **Increasing:** Agent learning better positioning
+- **Stable high:** Good positioning habits established
+- **Decreasing or low:** Agent not learning positioning tactics
+
+**Action triggers:**
+- Not increasing → Increase positioning rewards in rewards_config.json
+- Consistently low → Check if movement rewards are balanced
+
+---
+
+#### `combat/b_shoot_kills`
+**What it is:** Number of enemy units killed by ranged attacks per episode (smoothed over 20 episodes)
+
+**Why it matters:** Measures ranged combat effectiveness - primary damage dealing method.
+
+**Interpretation:**
+- **Should increase over time** as agent learns target selection
+- **High values:** Agent effectively using ranged weapons
+- **Low or decreasing:** Agent not prioritizing ranged combat or poor target selection
+
+**Phase targets:**
+- Phase 1: 0.5+ kills per episode (learning basics)
+- Phase 2: 1.0+ kills per episode (competent)
+- Phase 3: 1.5+ kills per episode (expert)
+
+**Action triggers:**
+- Not increasing → Increase shoot/kill rewards
+- Decreasing → Check if agent is avoiding combat
+
+---
+
+#### `combat/c_charge_successes`
+**What it is:** Number of successful charge attempts per episode (smoothed over 20 episodes)
+
+**Why it matters:** Measures charge phase effectiveness - agent's ability to close distance and engage in melee.
+
+**Interpretation:**
+- **Should increase over time** as agent learns charge mechanics
+- **High values:** Agent effectively using charges to engage
+- **Low or zero:** Agent not attempting charges or failing charge rolls
+
+**Phase targets:**
+- Phase 1: 0.0-0.2 charges per episode (learning)
+- Phase 2: 0.3-0.5 charges per episode (competent)
+- Phase 3: 0.5+ charges per episode (expert)
+
+**Action triggers:**
+- Consistently zero → Increase charge rewards or check charge mechanics
+- Not increasing → Agent may be too passive or charge distance too restrictive
+
+---
+
+#### `combat/d_melee_kills`
+**What it is:** Number of enemy units killed in fight phase per episode (smoothed over 20 episodes)
+
+**Why it matters:** Measures melee combat effectiveness - agent's ability to finish fights.
+
+**Interpretation:**
+- **Should increase over time** as agent learns melee tactics
+- **High values:** Agent effectively using melee combat
+- **Low or zero:** Agent not engaging in melee or losing melee fights
+
+**Phase targets:**
+- Phase 1: 0.0-0.3 kills per episode (learning)
+- Phase 2: 0.3-0.7 kills per episode (competent)
+- Phase 3: 0.7+ kills per episode (expert)
+
+**Action triggers:**
+- Consistently zero → Increase melee/combat rewards
+- Not increasing → Agent may be avoiding melee or losing fights
+
+---
+
+#### `combat/e_controlled_objectives`
+**What it is:** Number of objectives controlled by Player 0 (learning agent) at episode end (smoothed over 20 episodes)
+
+**Why it matters:** Measures strategic objective control - agent's ability to position units to control victory points.
+
+**Important:** This metric is **only logged when the game reaches turn 5 or the configured turn limit** (objective-based victory condition). Episodes ending early by elimination do not contribute to this metric.
+
+**Interpretation:**
+- **Higher values:** Agent controlling more objectives (better strategic positioning)
+- **Increasing trend:** Agent learning objective control
+- **Stable high:** Good objective control habits established
+- **Low or decreasing:** Agent not prioritizing objectives
+
+**Phase targets:**
+- Phase 1: 0.0-1.0 objectives (learning basics)
+- Phase 2: 1.0-2.0 objectives (competent)
+- Phase 3: 2.0+ objectives (expert, controlling majority)
+
+**Special considerations:**
+- **Only appears in TensorBoard for episodes that reached turn 5+**
+- **Missing data points are normal** - indicates early eliminations
+- **Compare with win rate** - high objective control should correlate with wins
+
+**Action triggers:**
+- Consistently low → Increase objective control rewards
+- Not increasing → Agent may be prioritizing combat over objectives
+- High but losing → Check if agent is controlling wrong objectives or losing units
+
+**Relationship to other metrics:**
+- Should correlate with `a_position_score` (good positioning = better objective control)
+- May trade off with `b_shoot_kills` and `d_melee_kills` (aggressive play vs. defensive positioning)
+
+---
+
 ## METRIC RELATIONSHIPS
 
 ### Correlation Patterns

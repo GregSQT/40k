@@ -8,7 +8,6 @@ Contains:
 - make_training_env: Create training environment with proper configuration
 - get_agent_scenario_file: Get scenario file path for agent-specific training
 - get_scenario_list_for_phase: Get all available scenarios for a training phase
-- calculate_rotation_interval: Calculate scenario rotation interval
 - ensure_scenario: Ensure scenario file exists for agent
 
 Extracted from ai/train.py during refactoring (2025-01-21)
@@ -30,7 +29,6 @@ __all__ = [
     'make_training_env',
     'get_agent_scenario_file',
     'get_scenario_list_for_phase',
-    'calculate_rotation_interval',
     'ensure_scenario'
 ]
 
@@ -261,50 +259,6 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
         f"Tried: agent-specific explicit scenario and phase-specific variants."
     )
 
-def calculate_rotation_interval(total_episodes, num_scenarios, config_value=None, n_steps=256):
-    """
-    Calculate scenario rotation interval for curriculum learning.
-
-    Args:
-        total_episodes: Total episodes for this training phase
-        num_scenarios: Number of scenarios available
-        config_value: Optional config override (if None, uses auto-calculation)
-        n_steps: PPO n_steps parameter (needed to ensure training updates happen)
-
-    Returns:
-        int: Episodes per scenario rotation
-    """
-    if config_value is not None:
-        return config_value
-
-    # Load diagnostics configuration for rotation heuristics so that no magic
-    # numbers are hidden in code. This keeps all tunable values in JSON.
-    from config_loader import get_config_loader
-    cfg = get_config_loader()
-    diagnostics = cfg.load_config("diagnostics", force_reload=False)
-
-    if "rotation" not in diagnostics:
-        raise KeyError("diagnostics.json missing required 'rotation' section for rotation interval calculation")
-    rotation_cfg = diagnostics["rotation"]
-
-    if "avg_episode_steps" not in rotation_cfg:
-        raise KeyError("diagnostics.rotation missing required 'avg_episode_steps' key")
-    if "target_rotations" not in rotation_cfg:
-        raise KeyError("diagnostics.rotation missing required 'target_rotations' key")
-
-    avg_episode_steps = rotation_cfg["avg_episode_steps"]
-    target_rotations = rotation_cfg["target_rotations"]
-
-    # CRITICAL: Rotation interval must allow at least one PPO update cycle.
-    # PPO requires n_steps before doing a training update, and we approximate
-    # episodes per update based on configured avg_episode_steps.
-    min_episodes_for_update = max(1, (n_steps + avg_episode_steps - 1) // avg_episode_steps)
-
-    # Auto-calculate: Aim for ~target_rotations passes through all scenarios.
-    ideal_interval = max(1, total_episodes // (num_scenarios * target_rotations))
-
-    # Use the larger of ideal and minimum for PPO updates
-    return max(ideal_interval, min_episodes_for_update)
 
 def ensure_scenario():
     """Ensure scenario.json exists."""

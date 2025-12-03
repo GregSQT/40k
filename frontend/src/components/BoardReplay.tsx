@@ -691,9 +691,17 @@ export const BoardReplay: React.FC = () => {
             >
               <option value="">Select Episode</option>
               {replayData.episodes.map((ep) => {
-                // Extract scenario identifier (e.g., "phase1-bot3" from "..._scenario_phase1-bot3")
-                const scenarioMatch = ep.scenario.match(/_scenario_(.+)$/);
-                const scenarioId = scenarioMatch ? scenarioMatch[1] : '';
+                // Extract scenario identifier (e.g., "phase1-bot3" from "..._scenario_phase1-bot3" or just "phase1-bot3")
+                let scenarioId = '';
+                if (ep.scenario) {
+                  const scenarioMatch = ep.scenario.match(/_scenario_(.+)$/);
+                  if (scenarioMatch) {
+                    scenarioId = scenarioMatch[1];
+                  } else {
+                    // If no _scenario_ prefix, use the scenario name as-is (but avoid "Unknown Scenario")
+                    scenarioId = ep.scenario !== 'Unknown Scenario' ? ep.scenario : '';
+                  }
+                }
                 return (
                   <option key={ep.episode_num} value={ep.episode_num}>
                     Episode {ep.episode_num} - {scenarioId || 'Unknown'} - {ep.bot_name || 'Unknown'} - {ep.final_result || 'Unknown'}

@@ -128,10 +128,19 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
       objectiveControl = {}
     } = options || {};
 
-    // Parse objective control colors
-    const OBJECTIVE_P0_COLOR = parseColor(boardConfig.colors.objective_p0 || '0x4488cc');
-    const OBJECTIVE_P1_COLOR = parseColor(boardConfig.colors.objective_p1 || '0xcc4444');
-    const OBJECTIVE_NEUTRAL_COLOR = parseColor(boardConfig.colors.objective || '0xff9900');
+    // Parse objective control colors - use same colors as player units
+    if (!boardConfig.colors.player_0) {
+      throw new Error('Missing required configuration value: boardConfig.colors.player_0');
+    }
+    if (!boardConfig.colors.player_1) {
+      throw new Error('Missing required configuration value: boardConfig.colors.player_1');
+    }
+    if (!boardConfig.colors.objective) {
+      throw new Error('Missing required configuration value: boardConfig.colors.objective');
+    }
+    const OBJECTIVE_P0_COLOR = parseColor(boardConfig.colors.player_0);
+    const OBJECTIVE_P1_COLOR = parseColor(boardConfig.colors.player_1);
+    const OBJECTIVE_NEUTRAL_COLOR = parseColor(boardConfig.colors.objective);
 
     // ✅ OPTIMIZED: Create containers for hex batching - EXACT from Board.tsx
     const baseHexContainer = new PIXI.Container();
