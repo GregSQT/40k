@@ -1243,16 +1243,40 @@ class W40KEngine(gym.Env):
         
         # Check unit elimination
         living_units_by_player = {}
+        dead_units_by_player = {}
         
         for unit in self.game_state["units"]:
+            player = unit["player"]
+            if player not in living_units_by_player:
+                living_units_by_player[player] = 0
+            if player not in dead_units_by_player:
+                dead_units_by_player[player] = 0
+            
             if unit["HP_CUR"] > 0:
-                player = unit["player"]
-                if player not in living_units_by_player:
-                    living_units_by_player[player] = 0
                 living_units_by_player[player] += 1
+            else:
+                dead_units_by_player[player] += 1
+        
+        # Check if any player has no living units (elimination condition)
+        players_with_no_living_units = [pid for pid, count in living_units_by_player.items() if count == 0]
+        game_over_by_elimination = len(players_with_no_living_units) > 0
+        
+        # Debug: Log unit counts if game is ending prematurely
+        if game_over_by_elimination:
+            print(f"\n⚠️ GAME OVER CHECK (turn {self.game_state.get('turn', '?')}, phase {self.game_state.get('phase', '?')}):")
+            for player_id in sorted(set(list(living_units_by_player.keys()) + list(dead_units_by_player.keys()))):
+                living = living_units_by_player.get(player_id, 0)
+                dead = dead_units_by_player.get(player_id, 0)
+                print(f"   Player {player_id}: {living} living, {dead} dead units")
+                # Show unit details for debugging
+                for unit in self.game_state["units"]:
+                    if unit["player"] == player_id:
+                        status = "ALIVE" if unit["HP_CUR"] > 0 else "DEAD"
+                        unit_name = unit.get("name", unit.get("unitType", "Unknown"))
+                        print(f"      Unit {unit.get('id', '?')} ({unit_name}): HP={unit.get('HP_CUR', 0)}/{unit.get('HP_MAX', 0)} [{status}]")
         
         # Game is over if any player has no living units
-        return len(living_units_by_player) <= 1
+        return game_over_by_elimination
     
     
     def _determine_winner(self) -> Optional[int]:
