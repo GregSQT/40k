@@ -565,7 +565,7 @@ class W40KEngine(gym.Env):
            
             # CHANGE 3: STRICT validation - only log if action_type in StepLogger whitelist
             # Prevents "Unknown action_type 'activate_unit'" errors
-            valid_action_types = ["move", "shoot", "charge", "combat", "wait"]
+            valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait"]
             if (action_type in valid_action_types and
                 unit_id and unit_id != "none" and unit_id != "SYSTEM"):
                
@@ -665,6 +665,28 @@ class W40KEngine(gym.Env):
                             player=pre_action_player,
                             success=success,
                             step_increment=True,
+                            action_details=action_details
+                        )
+
+                    elif action_type == "charge_fail":
+                        # Add charge_fail-specific data for step logger
+                        action_details.update({
+                            "target_id": result.get("targetId"),
+                            "charge_roll": result.get("charge_roll"),
+                            "charge_failed_reason": result.get("charge_failed_reason", "roll_too_low")
+                        })
+
+                        # Add reward and log for failed charge action
+                        step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+                        action_details["reward"] = step_reward
+
+                        self.step_logger.log_action(
+                            unit_id=updated_unit["id"],
+                            action_type=action_type,
+                            phase=pre_action_phase,
+                            player=pre_action_player,
+                            success=False,  # charge_fail is always a failure
+                            step_increment=True,  # Still increments step (action was attempted)
                             action_details=action_details
                         )
 
@@ -795,7 +817,7 @@ class W40KEngine(gym.Env):
             if not unit_id:
                 unit_id = semantic_action.get("unitId") if isinstance(semantic_action, dict) else None
 
-            valid_action_types = ["move", "shoot", "charge", "combat", "wait"]
+            valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait"]
             if action_type in valid_action_types and unit_id and unit_id != "none" and unit_id != "SYSTEM":
                 updated_unit = self._get_unit_by_id(str(unit_id)) if unit_id else None
                 if updated_unit:

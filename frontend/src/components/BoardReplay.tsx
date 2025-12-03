@@ -451,9 +451,26 @@ export const BoardReplay: React.FC = () => {
           ? `Unit ${unitId} failed charge (rolled ${chargeRollValue})`
           : `Unit ${unitId} chose not to charge`;
         gameLog.addEvent({
-          type: 'charge_fail',  // Use charge_fail type for red styling
+          type: 'charge_fail',  // Use charge_fail type for light purple styling
           message: rollMessage,
           unitId: unitId,
+          turnNumber: turnNumber,
+          phase: 'charge',
+          player: action.player
+        });
+      } else if (action.type === 'charge_fail') {
+        // Handle explicit charge_fail actions (from train_step.log)
+        const unitId = action.unit_id!;
+        const targetId = action.target_id;
+        const chargeRollValue = action.charge_roll || 0;
+        const rollMessage = targetId
+          ? `Unit ${unitId} FAILED charge to unit ${targetId} (Roll: ${chargeRollValue})`
+          : `Unit ${unitId} FAILED charge (Roll: ${chargeRollValue})`;
+        gameLog.addEvent({
+          type: 'charge_fail',  // Use charge_fail type for light purple styling
+          message: rollMessage,
+          unitId: unitId,
+          targetId: targetId,
           turnNumber: turnNumber,
           phase: 'charge',
           player: action.player
@@ -765,8 +782,8 @@ export const BoardReplay: React.FC = () => {
     ? currentAction.unit_id
     : null;
 
-  // Get charging unit ID for lightning icon during charge phase (include charge_wait for failed charge badge)
-  const chargingUnitId = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait') && currentAction?.unit_id
+  // Get charging unit ID for lightning icon during charge phase (include charge_wait and charge_fail for failed charge badge)
+  const chargingUnitId = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail') && currentAction?.unit_id
     ? currentAction.unit_id
     : null;
   const chargeTargetId = currentAction?.type === 'charge' && currentAction?.target_id
@@ -782,11 +799,11 @@ export const BoardReplay: React.FC = () => {
     : null;
 
   // Get charge roll info for badge display
-  const chargeRoll = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait') && currentAction?.charge_roll !== undefined
+  const chargeRoll = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail') && currentAction?.charge_roll !== undefined
     ? currentAction.charge_roll
     : null;
-  const chargeSuccess = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait')
-    ? currentAction?.charge_success ?? false
+  const chargeSuccess = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail')
+    ? (currentAction?.charge_success !== false && currentAction?.type !== 'charge_fail')  // charge_fail is always false
     : false;
 
   // For move actions, select the ghost unit to show movement range
@@ -817,7 +834,7 @@ export const BoardReplay: React.FC = () => {
       onCancelMove={() => {}}
       currentPlayer={(currentAction?.type === 'move' || currentAction?.type === 'shoot' || currentAction?.type === 'charge' || currentAction?.type === 'fight') ? (currentAction.player as 0 | 1) : (currentState.currentPlayer || 0)}
       unitsMoved={[]}
-      phase={currentAction?.type === 'move' ? 'move' : (currentAction?.type === 'shoot' ? 'shoot' : (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' ? 'charge' : (currentAction?.type === 'fight' ? 'fight' : (currentState.phase || 'move'))))}
+      phase={currentAction?.type === 'move' ? 'move' : (currentAction?.type === 'shoot' ? 'shoot' : (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail' ? 'charge' : (currentAction?.type === 'fight' ? 'fight' : (currentState.phase || 'move'))))}
       onShoot={() => {}}
       gameState={currentState}
       getChargeDestinations={(unitId: number) => {

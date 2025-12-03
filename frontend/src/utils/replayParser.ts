@@ -300,7 +300,8 @@ export function parse_log_file_from_text(text: string) {
     // Parse CHARGE actions
     // Format: [timestamp] T1 P0 CHARGE : Unit 2(9, 6) CHARGED unit 8 from (7, 13) to (9, 6) [SUCCESS]
     // Or: [timestamp] T1 P0 CHARGE : Unit 1(19, 15) WAIT [SUCCESS]
-    const chargeMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+), (\d+)\) (CHARGED|WAIT)/);
+    // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED charge to unit 7 [Roll:5] [FAILED: roll_too_low] [FAILED]
+    const chargeMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+), (\d+)\) (CHARGED|WAIT|FAILED charge)/);
     if (chargeMatch) {
       const timestamp = chargeMatch[1];
       const turn = chargeMatch[2];
@@ -377,6 +378,28 @@ export function parse_log_file_from_text(text: string) {
           pos: { col: unitCol, row: unitRow },
           charge_roll: 0,  // Unknown roll, but too low
           charge_success: false
+        });
+      } else if (actionType === 'FAILED charge') {
+        // FAILED charge - parse target and roll
+        const targetMatch = trimmed.match(/FAILED charge to unit (\d+)/);
+        const rollMatch = trimmed.match(/\[Roll:(\d+)\]/);
+        const failedReasonMatch = trimmed.match(/\[FAILED: (.+?)\]/);
+        
+        const targetId = targetMatch ? parseInt(targetMatch[1]) : undefined;
+        const chargeRoll = rollMatch ? parseInt(rollMatch[1]) : 0;
+        const failedReason = failedReasonMatch ? failedReasonMatch[1] : 'roll_too_low';
+        
+        currentEpisode.actions.push({
+          type: 'charge_fail',
+          timestamp,
+          turn,
+          player,
+          unit_id: unitId,
+          target_id: targetId,
+          pos: { col: unitCol, row: unitRow },
+          charge_roll: chargeRoll,
+          charge_success: false,
+          charge_failed_reason: failedReason
         });
       }
       continue;

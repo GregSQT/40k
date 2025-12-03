@@ -1233,8 +1233,8 @@ textarea:focus {
 }
 
 .game-log-entry__icon--charge_fail {
-  background: rgba(220, 38, 38, var(--icon-square-bg-alpha-gamelog)); /* Red for failed charge */
-  border: var(--icon-square-border-width)px solid rgba(220, 38, 38, var(--icon-square-border-alpha-gamelog));
+  background: rgba(153, 102, 204, calc(var(--icon-square-bg-alpha-gamelog) * 0.5)); /* Light purple for failed charge */
+  border: var(--icon-square-border-width)px solid rgba(153, 102, 204, calc(var(--icon-square-border-alpha-gamelog) * 0.5));
   border-radius: var(--icon-square-border-radius)px;
 }
 
@@ -1326,13 +1326,13 @@ textarea:focus {
 }
 
 .game-log-entry--charge {
-  border-left-color: #ffcc00;
-  background: rgba(255, 204, 0, 0.1);
+  border-left-color: #9966cc; /* Purple - successful charge */
+  background: rgba(153, 102, 204, 0.15); /* Regular purple background */
 }
 
 .game-log-entry--charge-fail {
-  border-left-color: #dc2626; /* Red - failed charge roll */
-  background: rgba(220, 38, 38, 0.25);
+  border-left-color: #9966cc; /* Purple - failed charge */
+  background: rgba(153, 102, 204, 0.08); /* Light purple background for failed charge */
 }
 
 /* Shooting Action Color Coding */

@@ -346,43 +346,93 @@ def _ai_select_charge_target_pve(game_state: Dict[str, Any], unit: Dict[str, Any
 
 def charge_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> None:
     """
-    AI_TURN.md: Charge unit activation initialization with 2d6 roll.
-
-    CRITICAL: Roll 2d6 at activation start and store in charge_roll_values.
-    This roll determines the maximum charge distance for this activation.
+    Charge unit activation initialization - NO ROLL YET.
+    
+    NEW RULE: At activation, unit can wait or choose a target.
+    The charge roll is performed ONLY AFTER target selection.
     """
-    import random
-
-    # AI_TURN.md: Roll 2d6 immediately at activation start
-    charge_roll = random.randint(1, 6) + random.randint(1, 6)
-    game_state["charge_roll_values"][unit_id] = charge_roll
-
     game_state["valid_charge_destinations_pool"] = []
     game_state["preview_hexes"] = []
     game_state["active_charge_unit"] = unit_id
+    # Do NOT roll 2d6 here - roll happens after target selection
 
 
 def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_TURN.md: Single charge execution.
-
-    Uses 2d6 roll from charge_roll_values to determine charge_range.
+    Charge unit execution loop - show all possible targets (targets can be at distance 13).
+    
+    NEW RULE: At activation, show all possible charge targets without rolling.
+    The roll happens AFTER target selection.
+    
+    NOTE: Target can be at distance 13 because charge of 12 can reach adjacent to target at 13.
     """
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
 
-    # AI_TURN.md: Get charge roll for this unit (rolled at activation start)
-    if unit_id not in game_state["charge_roll_values"]:
-        raise KeyError(f"Unit {unit_id} missing charge_roll_values - activation start not called")
-    charge_roll = game_state["charge_roll_values"][unit_id]
-
-    # Build valid charge destinations using this roll
-    charge_build_valid_destinations_pool(game_state, unit_id, charge_roll)
+    # NEW RULE: Build valid destinations using MAX charge distance (12) to show all possible targets
+    # No roll yet - roll happens after target selection
+    # Target can be at distance 13 because charge ends adjacent to target
+    CHARGE_MAX_DISTANCE = 12
+    charge_build_valid_destinations_pool(game_state, unit_id, CHARGE_MAX_DISTANCE)
+    
+    # Also add destinations adjacent to enemies at distance 13 (charge of 12 can reach them)
+    # Use BFS to check if these destinations are actually reachable in 12 moves
+    enemies = [u for u in game_state["units"]
+               if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+    
+    # Get all hexes reachable in 12 moves via BFS (already computed above)
+    reachable_hexes = set(game_state["valid_charge_destinations_pool"])
+    
+    for enemy in enemies:
+        distance_to_enemy = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+        if distance_to_enemy == 13:
+            # Check if any hex adjacent to this enemy is reachable in 12 moves via pathfinding
+            enemy_neighbors = _get_hex_neighbors(enemy["col"], enemy["row"])
+            for neighbor_col, neighbor_row in enemy_neighbors:
+                # Check if this neighbor is traversable
+                if not _is_traversable_hex(game_state, neighbor_col, neighbor_row, unit):
+                    continue
+                
+                # Check if this neighbor is reachable in 12 moves using BFS
+                # We need to check if there's a path from unit to this neighbor within 12 moves
+                # Use BFS to find shortest path
+                start_pos = (unit["col"], unit["row"])
+                target_pos = (neighbor_col, neighbor_row)
+                
+                # BFS to find shortest path
+                visited = {start_pos: 0}
+                queue = [(start_pos, 0)]
+                found = False
+                
+                while queue:
+                    current_pos, current_dist = queue.pop(0)
+                    if current_pos == target_pos:
+                        if current_dist <= CHARGE_MAX_DISTANCE:
+                            found = True
+                        break
+                    
+                    if current_dist >= CHARGE_MAX_DISTANCE:
+                        continue
+                    
+                    current_col, current_row = current_pos
+                    neighbors = _get_hex_neighbors(current_col, current_row)
+                    for n_col, n_row in neighbors:
+                        n_pos = (n_col, n_row)
+                        if n_pos in visited:
+                            continue
+                        if not _is_traversable_hex(game_state, n_col, n_row, unit):
+                            continue
+                        visited[n_pos] = current_dist + 1
+                        queue.append((n_pos, current_dist + 1))
+                
+                if found and target_pos not in reachable_hexes:
+                    game_state["valid_charge_destinations_pool"].append(target_pos)
+                    reachable_hexes.add(target_pos)
 
     # Check if valid destinations exist
     if not game_state["valid_charge_destinations_pool"]:
-        # AI_TURN.md Line 518: No valid destinations - pass (no step increment, no tracking)
+        # No valid destinations - pass (no step increment, no tracking)
         return _handle_skip_action(game_state, unit, had_valid_destinations=False)
 
     # Generate preview
@@ -392,7 +442,7 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     return True, {
         "unit_activated": True,
         "unitId": unit_id,
-        "charge_roll": charge_roll,  # Include roll value in response
+        "charge_roll": None,  # No roll yet - will be rolled after target selection
         "valid_destinations": game_state["valid_charge_destinations_pool"],
         "preview_data": preview_data,
         "waiting_for_player": True
@@ -514,9 +564,13 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
     CRITICAL: Must use BFS pathfinding distance, not straight-line distance.
     Build reachable hexes within max charge distance and check if any enemy
     is adjacent to those hexes.
+    
+    NOTE: Target can be at distance 13 because charge of 12 can reach adjacent to target at 13.
     """
-    # AI_TURN.md: Maximum possible charge distance is 12 hexes (2d6 max roll)
+    # Maximum possible charge distance is 12 hexes (2d6 max roll)
+    # But target can be at distance 13 because charge ends adjacent to target
     CHARGE_MAX_DISTANCE = 12
+    TARGET_MAX_DISTANCE = 13  # Target can be 1 hex further (charge ends adjacent)
 
     # AI_TURN.md COMPLIANCE: Direct field access with validation
     if "CC_RNG" not in unit:
@@ -544,6 +598,21 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
                 if 0 < distance_to_enemy <= cc_range:
                     # Found a reachable hex adjacent to this enemy
                     return True
+            
+            # NEW: Also check if enemy is at distance 13 (charge of 12 can reach adjacent to target at 13)
+            # Calculate distance from unit to enemy
+            distance_to_enemy = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+            if distance_to_enemy == TARGET_MAX_DISTANCE:
+                # Check if there's a path of 12 hexes that can reach adjacent to this enemy
+                # This means we need to check if any hex adjacent to enemy is reachable in 12 moves
+                enemy_neighbors = _get_hex_neighbors(enemy["col"], enemy["row"])
+                for neighbor_col, neighbor_row in enemy_neighbors:
+                    # Check if this neighbor is reachable in 12 moves from unit
+                    neighbor_distance = _calculate_hex_distance(unit["col"], unit["row"], neighbor_col, neighbor_row)
+                    if neighbor_distance <= CHARGE_MAX_DISTANCE:
+                        # Check if this neighbor is in reachable hexes (pathfinding check)
+                        if (neighbor_col, neighbor_row) in reachable_hexes:
+                            return True
 
     return False
 
@@ -986,7 +1055,11 @@ def charge_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[
         return True, {"action": "continue_selection"}
 
 def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """AI_TURN.md: Handle charge destination selection and execute charge"""
+    """
+    Handle charge destination selection and execute charge.
+    
+    NEW RULE: Roll 2d6 AFTER target selection, then check if charge can reach target.
+    """
     # AI_TURN.md COMPLIANCE: Direct field access with validation
     if "destCol" not in action:
         raise KeyError(f"Action missing required 'destCol' field: {action}")
@@ -1002,26 +1075,88 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     if dest_col is None or dest_row is None or target_id is None:
         return False, {"error": "missing_destination_or_target"}
 
-    # Get charge roll for validation
-    if unit_id not in game_state["charge_roll_values"]:
-        raise KeyError(f"Unit {unit_id} missing charge_roll_values")
-    charge_roll = game_state["charge_roll_values"][unit_id]
-
-    # Rebuild pool fresh to ensure synchronization
-    charge_build_valid_destinations_pool(game_state, unit_id, charge_roll)
-
-    if "valid_charge_destinations_pool" not in game_state:
-        raise KeyError("game_state missing required 'valid_charge_destinations_pool' field")
-    valid_pool = game_state["valid_charge_destinations_pool"]
-
-    # Validate destination in valid pool
-    if (dest_col, dest_row) not in valid_pool:
-        return False, {"error": "invalid_charge_destination", "destination": (dest_col, dest_row)}
-
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
 
+    # NEW RULE: Roll 2d6 AFTER target selection
+    import random
+    charge_roll = random.randint(1, 6) + random.randint(1, 6)
+    game_state["charge_roll_values"][unit_id] = charge_roll
+
+    # Check if charge roll allows reaching the target destination
+    # Calculate distance from unit to destination
+    distance_to_dest = _calculate_hex_distance(unit["col"], unit["row"], dest_col, dest_row)
+    
+    # Check if destination is reachable within charge_roll distance via pathfinding
+    charge_build_valid_destinations_pool(game_state, unit_id, charge_roll)
+    
+    if "valid_charge_destinations_pool" not in game_state:
+        raise KeyError("game_state missing required 'valid_charge_destinations_pool' field")
+    valid_pool = game_state["valid_charge_destinations_pool"]
+
+    # Check if destination is in valid pool (reachable with this roll)
+    if (dest_col, dest_row) not in valid_pool:
+        # Charge roll too low - charge failed
+        # Log failure in action_logs
+        if "action_logs" not in game_state:
+            game_state["action_logs"] = []
+        
+        if "current_turn" not in game_state:
+            current_turn = 1
+        else:
+            current_turn = game_state["current_turn"]
+        
+        game_state["action_logs"].append({
+            "type": "charge_fail",
+            "message": f"Unit {unit['id']} ({unit['col']}, {unit['row']}) FAILED charge to target {target_id} (Roll: {charge_roll}, needed: {distance_to_dest}+)",
+            "turn": current_turn,
+            "phase": "charge",
+            "unitId": unit["id"],
+            "player": unit["player"],
+            "targetId": target_id,
+            "charge_roll": charge_roll,
+            "charge_failed": True,
+            "timestamp": "server_time"
+        })
+        
+        # Clear charge roll after use
+        if unit_id in game_state["charge_roll_values"]:
+            del game_state["charge_roll_values"][unit_id]
+        
+        # Clear preview
+        charge_clear_preview(game_state)
+        
+        # End activation with failure
+        result = end_activation(
+            game_state, unit,
+            "PASS",        # Arg1: Pass logging (charge failed)
+            1,             # Arg2: +1 step increment (action was attempted)
+            "PASS",        # Arg3: NO tracking (charge didn't happen)
+            "CHARGE",      # Arg4: Remove from charge_activation_pool
+            0              # Arg5: No error logging
+        )
+        
+        result.update({
+            "action": "charge_fail",
+            "unitId": unit["id"],
+            "targetId": target_id,
+            "charge_roll": charge_roll,
+            "charge_failed": True,
+            "charge_failed_reason": "roll_too_low",
+            "activation_complete": True,
+            # CRITICAL: Include action_logs in result so they're sent to frontend
+            "action_logs": game_state.get("action_logs", [])
+        })
+        
+        # Check if pool is now empty after removing this unit
+        if not game_state["charge_activation_pool"]:
+            phase_end_result = charge_phase_end(game_state)
+            result.update(phase_end_result)
+        
+        return True, result
+
+    # Charge roll is sufficient - execute charge
     # Execute charge using _attempt_charge_to_destination
     config = {}
     charge_success, charge_result = _attempt_charge_to_destination(game_state, unit, dest_col, dest_row, target_id, config)

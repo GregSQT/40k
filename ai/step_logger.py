@@ -290,6 +290,24 @@ class StepLogger:
 
             return base_msg
 
+        elif action_type == "charge_fail" and details:
+            # Charge failed because roll was too low
+            target_id = details.get("target_id", "unknown")
+            charge_roll = details.get("charge_roll")
+            charge_failed_reason = details.get("charge_failed_reason", "roll_too_low")
+            
+            if charge_roll is not None:
+                base_msg = f"Unit {unit_id}{unit_coords} FAILED charge to unit {target_id} [Roll:{charge_roll}] [FAILED: {charge_failed_reason}]"
+            else:
+                base_msg = f"Unit {unit_id}{unit_coords} FAILED charge to unit {target_id} [FAILED: {charge_failed_reason}]"
+
+            # Add reward if available (should be negative penalty)
+            reward = details.get("reward")
+            if reward is not None:
+                base_msg += f" [R:{reward:+.1f}]"
+
+            return base_msg
+
         elif action_type == "combat":
             if "target_id" not in details:
                 return f"Unit {unit_id}{unit_coords} FOUGHT (no target data)"

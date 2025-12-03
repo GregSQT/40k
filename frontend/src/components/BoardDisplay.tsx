@@ -271,9 +271,21 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
     }
 
     // ✅ AGGRESSIVE STAGE CLEANUP - Destroy everything first, then clear - EXACT from Board.tsx
-    const childrenToDestroy = [...app.stage.children];
-    app.stage.removeChildren();
+    // BUT: Preserve the UI elements container (target logos, charge badges) - it's never cleaned up
+    const childrenToDestroy: PIXI.DisplayObject[] = [];
+    
+    // Identify which children to destroy (skip the UI elements container)
+    for (const child of app.stage.children) {
+      // NEVER destroy the UI elements container - it persists across all renders
+      if (child.name === 'ui-elements-container') {
+        continue; // Skip the UI container
+      }
+      childrenToDestroy.push(child);
+    }
+    
+    // Remove and destroy only the children to destroy
     childrenToDestroy.forEach(child => {
+      app.stage.removeChild(child);
       if (child.destroy) {
         child.destroy({ children: true, texture: false, baseTexture: false });
       }

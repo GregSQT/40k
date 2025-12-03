@@ -80,7 +80,7 @@ class RewardCalculator:
         # CRITICAL FIX: Check if this is actually an action result with phase transition attached
         # If result has 'action' field with move/shoot/etc, it's an action - NOT a system response
         # Position data (fromCol/toCol) confirms it's a completed action, not just a prompt
-        is_action_result = result.get("action") in ["move", "shoot", "wait", "flee", "charge", "fight"]
+        is_action_result = result.get("action") in ["move", "shoot", "wait", "flee", "charge", "charge_fail", "fight"]
         has_position_data = any(ind in result for ind in ["fromCol", "toCol", "fromRow", "toRow"])
 
         matching_indicators = [ind for ind in system_response_indicators if ind in result]
@@ -357,6 +357,26 @@ class RewardCalculator:
 
             game_state['last_reward_breakdown'] = reward_breakdown
             return pass_reward
+
+        elif action_type == "charge_fail":
+            # Charge failed because roll was too low
+            # Give a small penalty (less than wait, since agent at least tried)
+            # Use system penalty for failed actions
+            system_penalties = self._get_system_penalties()
+            charge_fail_reward = system_penalties.get('failed_action', -0.1)  # Small penalty for failed charge
+            reward_breakdown['base_actions'] = charge_fail_reward
+            reward_breakdown['penalties'] = charge_fail_reward
+            reward_breakdown['total'] = charge_fail_reward
+
+            # CRITICAL FIX: Add situational reward if game ended
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                charge_fail_reward += situational_reward
+                reward_breakdown['total'] = charge_fail_reward
+
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return charge_fail_reward
 
         # NO FALLBACK - Raise error to identify missing action types
         raise ValueError(f"Unhandled action type '{action_type}' in _calculate_reward. Result: {result}")

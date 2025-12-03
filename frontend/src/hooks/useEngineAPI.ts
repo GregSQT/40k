@@ -112,6 +112,11 @@ export const useEngineAPI = () => {
   // State for multi-unit HP bar blinking
   const [blinkingUnits, setBlinkingUnits] = useState<{unitIds: number[], blinkTimer: number | null, blinkState: boolean}>({unitIds: [], blinkTimer: null, blinkState: false});
   
+  // State for failed charge roll display
+  const [failedChargeRoll, setFailedChargeRoll] = useState<{unitId: number, roll: number, targetId?: number} | null>(null);
+  // State for successful charge target display
+  const [successfulChargeTarget, setSuccessfulChargeTarget] = useState<{unitId: number, targetId: number} | null>(null);
+  
   // Load config values
   useEffect(() => {
     getMaxTurnsFromConfig().then(setMaxTurnsFromConfig);
@@ -346,12 +351,47 @@ export const useEngineAPI = () => {
           setSelectedUnitId(parseInt(data.result.unitId));
           setMode("chargePreview");
         }
+        // NEW RULE: Handle charge failure - show failed roll badge
+        // Use EXACT same logic as successful charges: reset mode immediately, store targetId
+        else if (data.result?.charge_failed && data.result?.charge_roll !== undefined) {
+          console.log("🎯 CHARGE FAILED: Roll too low", data.result.charge_roll);
+          const failedUnitId = parseInt(data.result.unitId || "0");
+          const targetId = data.result.targetId ? parseInt(data.result.targetId) : undefined;
+          // Store failed charge info for badge display
+          setFailedChargeRoll({ unitId: failedUnitId, roll: data.result.charge_roll });
+          // Store target separately (EXACT same as successful charges) for target icon display
+          if (targetId) {
+            setSuccessfulChargeTarget({ unitId: failedUnitId, targetId });
+            // Clear after a delay to show target icon (EXACT same as successful charges)
+            setTimeout(() => {
+              setSuccessfulChargeTarget(null);
+            }, 2000);
+          }
+          // CRITICAL: Reset mode immediately (EXACT same as successful charges) so logo renders in stable state
+          setChargeDestinations([]);
+          setSelectedUnitId(null);
+          setMode("select");
+          // Clear failedChargeRoll after delay to show badge
+          setTimeout(() => {
+            setFailedChargeRoll(null); // Clear after display
+          }, 2000); // Show badge for 2 seconds
+        }
         // AI_TURN.md: Handle charge completion - reset to select mode
         // CRITICAL FIX: When phase_complete=true, backend has already transitioned to next phase
         // So we check activation_complete AND (current phase is charge OR phase just completed)
         else if (data.result?.activation_complete &&
                  (data.game_state?.phase === "charge" || data.result?.phase_complete)) {
           console.log("🎯 CHARGE COMPLETE: Resetting to select mode");
+          // Store successful charge target for target icon display
+          if (data.result?.targetId && data.result?.unitId) {
+            const chargerId = parseInt(data.result.unitId);
+            const targetId = parseInt(data.result.targetId);
+            setSuccessfulChargeTarget({ unitId: chargerId, targetId });
+            // Clear after a delay to show target icon
+            setTimeout(() => {
+              setSuccessfulChargeTarget(null);
+            }, 2000);
+          }
           setChargeDestinations([]);
           setSelectedUnitId(null);
           setMode("select");
@@ -1010,6 +1050,18 @@ onLogChargeRoll: () => {},
     blinkingUnits: blinkingUnits.unitIds,
     isBlinkingActive: blinkingUnits.blinkTimer !== null,
     blinkState: blinkingUnits.blinkState,
+    // Export charge roll info for failed charge display
+    chargingUnitId: failedChargeRoll ? failedChargeRoll.unitId : null,
+    chargeRoll: failedChargeRoll ? failedChargeRoll.roll : null,
+    chargeSuccess: failedChargeRoll ? false : undefined,
+    // Export charge target ID for target icon display (for both successful and failed charges)
+    chargeTargetId: (() => {
+      const targetId = failedChargeRoll?.targetId || successfulChargeTarget?.targetId || null;
+      if (targetId) {
+        console.log("🎯 Exporting chargeTargetId:", targetId, "from failedChargeRoll:", failedChargeRoll?.targetId, "from successfulChargeTarget:", successfulChargeTarget?.targetId);
+      }
+      return targetId;
+    })(),
     // Add AI turn execution for PvE mode
     executeAITurn: async () => {
       if (aiTurnInProgress) {

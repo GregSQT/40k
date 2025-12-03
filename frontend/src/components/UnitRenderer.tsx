@@ -8,6 +8,7 @@ interface UnitRendererProps {
   centerX: number;
   centerY: number;
   app: PIXI.Application;
+  uiElementsContainer?: PIXI.Container; // Persistent container for UI elements (target logos, badges) that should never be cleaned up
   isPreview?: boolean;
   previewType?: 'move' | 'attack';
   isEligible?: boolean; // Add eligibility as a prop instead of calculating it
@@ -120,6 +121,7 @@ export class UnitRenderer {
     this.cleanupExistingBlinkIntervals();
 
     const { unit } = this.props;
+    console.log(`🟢 UnitRenderer.render: Starting render for unit ${unit.id}`);
 
     // AI_TURN.md COMPLIANCE: Dead units don't render - UNLESS just killed (show as grey ghost)
     // Just-killed units are shown in grey, then removed in the next action
@@ -501,14 +503,36 @@ export class UnitRenderer {
   }
 
   private renderTargetIndicator(iconZIndex: number): void {
-    const { unit, shootingTargetId, chargeTargetId, fightTargetId, centerX, centerY, app, HEX_RADIUS } = this.props;
+    const { unit, shootingTargetId, chargeTargetId, fightTargetId, centerX, centerY, app, HEX_RADIUS, uiElementsContainer, phase } = this.props;
+    
+    // Use persistent UI container if available (for all phases - it survives drawBoard cleanup)
+    // Otherwise fall back to stage (for backward compatibility)
+    const targetContainer = uiElementsContainer || app.stage;
+    
+    console.log(`🎯 renderTargetIndicator: unit ${unit.id}, phase=${phase}, hasUIContainer=${!!uiElementsContainer}, using ${targetContainer === uiElementsContainer ? 'UI container' : 'stage'}`);
 
     // Show target indicator (🎯) on units that are targets of any action
-    const isTarget = (shootingTargetId && unit.id === shootingTargetId) ||
-                    (chargeTargetId && unit.id === chargeTargetId) ||
-                    (fightTargetId && unit.id === fightTargetId);
+    // CRITICAL: Compare as numbers to handle string/number mismatches
+    const unitIdNum = typeof unit.id === 'string' ? parseInt(unit.id) : unit.id;
+    const chargeTargetIdNum = chargeTargetId ? (typeof chargeTargetId === 'string' ? parseInt(chargeTargetId) : chargeTargetId) : null;
     
-    if (!isTarget) return;
+    // Debug logging
+    if (chargeTargetIdNum) {
+      console.log("🎯 renderTargetIndicator: unitIdNum =", unitIdNum, "chargeTargetIdNum =", chargeTargetIdNum, "match =", unitIdNum === chargeTargetIdNum);
+    }
+    
+    const isTarget = (shootingTargetId && unitIdNum === (typeof shootingTargetId === 'string' ? parseInt(shootingTargetId) : shootingTargetId)) ||
+                    (chargeTargetIdNum && unitIdNum === chargeTargetIdNum) ||
+                    (fightTargetId && unitIdNum === (typeof fightTargetId === 'string' ? parseInt(fightTargetId) : fightTargetId));
+    
+    if (!isTarget) {
+      if (chargeTargetIdNum) {
+        console.log("🎯 renderTargetIndicator: NOT a target - unitIdNum =", unitIdNum, "chargeTargetIdNum =", chargeTargetIdNum);
+      }
+      return;
+    }
+    
+    console.log("🎯 renderTargetIndicator: IS a target - rendering for unit", unitIdNum);
 
     const iconSize = this.getCSSNumber('--icon-target-size', 1.6);
     const squareSizeRatio = this.getCSSNumber('--icon-target-square-size', 0.5);
@@ -538,8 +562,32 @@ export class UnitRenderer {
       borderRadius
     );
     squareBg.endFill();
+    // Clean up any existing target indicator for this unit from the container
+    // This prevents duplicate logos when re-rendering
+    if (targetContainer === uiElementsContainer) {
+      const existingElements = uiElementsContainer.children.filter((child: any) => 
+        child.name === `target-indicator-${unitIdNum}-bg` || child.name === `target-indicator-${unitIdNum}-text`
+      );
+      existingElements.forEach((child: any) => {
+        uiElementsContainer.removeChild(child);
+        if (child.destroy) child.destroy();
+      });
+    } else {
+      // For stage, also clean up existing elements
+      const existingElements = app.stage.children.filter((child: any) => 
+        (child instanceof PIXI.Graphics || child instanceof PIXI.Text) &&
+        (child.name === `target-indicator-${unitIdNum}-bg` || child.name === `target-indicator-${unitIdNum}-text`)
+      );
+      existingElements.forEach((child: any) => {
+        app.stage.removeChild(child);
+        if (child.destroy) child.destroy();
+      });
+    }
+    
+    squareBg.name = `target-indicator-${unitIdNum}-bg`;
     squareBg.zIndex = iconZIndex + 1000; // Very high z-index to be on top of everything
-    app.stage.addChild(squareBg);
+    targetContainer.addChild(squareBg);
+    console.log(`🎯 renderTargetIndicator: Added squareBg to ${uiElementsContainer ? 'UI container' : 'stage'} for unit ${unitIdNum} zIndex: ${squareBg.zIndex} position: ${positionX} ${positionY} visible: ${squareBg.visible} alpha: ${squareBg.alpha}`);
 
     // Create target emoji text (🎯) - keep emoji for targets
     const iconText = new PIXI.Text('🎯', {
@@ -549,8 +597,10 @@ export class UnitRenderer {
     });
     iconText.anchor.set(0.5);
     iconText.position.set(positionX, positionY);
+    iconText.name = `target-indicator-${unitIdNum}-text`;
     iconText.zIndex = iconZIndex + 1001; // Very high z-index to be on top of everything
-    app.stage.addChild(iconText);
+    targetContainer.addChild(iconText);
+    console.log(`🎯 renderTargetIndicator: Added iconText to ${uiElementsContainer ? 'UI container' : 'stage'} for unit ${unitIdNum} zIndex: ${iconText.zIndex} position: ${positionX} ${positionY} visible: ${iconText.visible} alpha: ${iconText.alpha} fontSize: ${iconText.style.fontSize}`);
   }
 
   private renderExplosionIcon(iconZIndex: number): void {
@@ -1066,13 +1116,31 @@ export class UnitRenderer {
   }
 
   private renderChargeRollBadge(unitIconScale: number, iconZIndex: number): void {
-    const { unit, chargingUnitId, chargeRoll, chargeSuccess, centerX, centerY, app, HEX_RADIUS } = this.props;
+    const { unit, chargingUnitId, chargeRoll, chargeSuccess, centerX, centerY, app, HEX_RADIUS, uiElementsContainer } = this.props;
+    
+    // Use persistent UI container if provided, otherwise fall back to stage
+    const targetContainer = uiElementsContainer || app.stage;
 
-    // Only show charge roll badge on the unit that is charging
-    if (!chargingUnitId || unit.id !== chargingUnitId) return;
+    // Show charge roll badge ONLY on the unit that is charging or failed charging
+    // CRITICAL: Only show badge if this is the charging unit (identified by chargingUnitId)
+    if (!chargingUnitId || unit.id !== chargingUnitId) {
+      return; // Not the charging unit, don't show badge
+    }
 
     // Must have a charge roll value to display
     if (chargeRoll === undefined || chargeRoll === null) return;
+    
+    // Clean up any existing charge badge for this unit from the container
+    const unitIdNum = typeof unit.id === 'string' ? parseInt(unit.id) : unit.id;
+    if (uiElementsContainer) {
+      const existingElements = uiElementsContainer.children.filter((child: any) => 
+        child.name === `charge-badge-${unitIdNum}`
+      );
+      existingElements.forEach((child: any) => {
+        uiElementsContainer.removeChild(child);
+        if (child.destroy) child.destroy();
+      });
+    }
 
     // Calculate badge position (bottom-right of unit)
     const scaledOffset = (HEX_RADIUS * unitIconScale) / 2 * 0.8;
@@ -1093,8 +1161,9 @@ export class UnitRenderer {
     badgeBg.lineStyle(2, chargeSuccess ? 0x00AA00 : 0xAA0000, 1);
     badgeBg.drawRoundedRect(badgeX - badgeWidth / 2, badgeY - badgeHeight / 2, badgeWidth, badgeHeight, 4);
     badgeBg.endFill();
+    badgeBg.name = `charge-badge-${unitIdNum}-bg`;
     badgeBg.zIndex = iconZIndex + 150; // Above other indicators
-    app.stage.addChild(badgeBg);
+    targetContainer.addChild(badgeBg);
 
     // Create roll number text
     const rollText = new PIXI.Text(`${chargeRoll}`, {
@@ -1107,8 +1176,9 @@ export class UnitRenderer {
     });
     rollText.anchor.set(0.5);
     rollText.position.set(badgeX, badgeY);
+    rollText.name = `charge-badge-${unitIdNum}-text`;
     rollText.zIndex = iconZIndex + 151; // Above badge background
-    app.stage.addChild(rollText);
+    targetContainer.addChild(rollText);
   }
 }
 

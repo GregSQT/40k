@@ -239,6 +239,9 @@ export default function Board({
   const objectiveControllersRef = useRef<ObjectiveControllers>({});
   // Track last turn to detect episode reset
   const lastTurnRef = useRef<number | null>(null);
+  
+  // Persistent container for UI elements (target logos, charge badges) that should never be cleaned up
+  const uiElementsContainerRef = useRef<PIXI.Container | null>(null);
 
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig, loading, error } = useGameConfig();
@@ -465,6 +468,22 @@ export default function Board({
 
     const app = new PIXI.Application(pixiConfig);
     app.stage.sortableChildren = true;
+
+    // ✅ CREATE PERSISTENT UI CONTAINER for target logos, charge badges, etc.
+    // This container is NEVER cleaned up by drawBoard()
+    // Always recreate/re-add to ensure it's on the stage
+    if (!uiElementsContainerRef.current || !app.stage.children.includes(uiElementsContainerRef.current)) {
+      // Remove old container if it exists but is not on stage
+      if (uiElementsContainerRef.current && !app.stage.children.includes(uiElementsContainerRef.current)) {
+        uiElementsContainerRef.current = null;
+      }
+      // Create new container
+      uiElementsContainerRef.current = new PIXI.Container();
+      uiElementsContainerRef.current.name = 'ui-elements-container';
+      uiElementsContainerRef.current.zIndex = 10000; // Very high z-index to be on top
+      app.stage.addChild(uiElementsContainerRef.current);
+      console.log(`🟢 BoardPvp: Created UI container and added to stage. Stage now has ${app.stage.children.length} children`);
+    }
 
     // ✅ CANVAS STYLING FROM CONFIG - EXACT BOARDREPLAY MATCH
     const canvas = app.view as HTMLCanvasElement;
@@ -734,11 +753,13 @@ export default function Board({
     }
 
     // Green circles for all eligible charge units (except the selected one which shows orange destinations)
+    // CRITICAL: Only add units from the current player to avoid highlighting enemy units
     if (phase === "charge" && mode === "select") {
       eligibleUnitIds.forEach(unitId => {
         const eligibleUnit = units.find(u => u.id === unitId);
         // Don't add green highlight for selected unit - it will show orange charge destinations instead
-        if (eligibleUnit && eligibleUnit.id !== selectedUnitId) {
+        // CRITICAL: Also check that unit belongs to current player to avoid highlighting enemy units
+        if (eligibleUnit && eligibleUnit.id !== selectedUnitId && eligibleUnit.player === currentPlayer) {
           availableCells.push({ col: eligibleUnit.col, row: eligibleUnit.row });
         }
       });
@@ -1009,6 +1030,7 @@ export default function Board({
 
       // ✅ UNIFIED UNIT RENDERING USING COMPONENT
       for (const unit of units) {
+        console.log(`🟢 BoardPvp: Rendering unit ${unit.id} (HP: ${unit.HP_CUR}, player: ${unit.player})`);
         const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
         const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
@@ -1078,6 +1100,7 @@ export default function Board({
 
         renderUnit({
           unit: unitToRender, centerX, centerY, app,
+          uiElementsContainer: uiElementsContainerRef.current!, // Pass persistent UI container
           isPreview: false,
           isEligible: isEligibleForRendering || false,
           isShootable,
@@ -1097,7 +1120,15 @@ export default function Board({
           movingUnitId,
           // Pass charge indicators
           chargingUnitId,
-          chargeTargetId,
+          // Calculate chargeTargetId: prioritize props (for failed/successful charges) over chargeTargets (for preview)
+          // CRITICAL: chargeTargetId from props takes precedence as it comes from actual charge result
+          chargeTargetId: (() => {
+            const finalTargetId = chargeTargetId ?? (chargeTargets.length > 0 ? chargeTargets[0].id : null);
+            if (finalTargetId) {
+              console.log("🎯 BoardPvp: Passing chargeTargetId to UnitRenderer:", finalTargetId, "for unit:", unitToRender.id);
+            }
+            return finalTargetId;
+          })(),
           // Pass fight indicators
           fightingUnitId,
           fightTargetId,
@@ -1228,6 +1259,9 @@ export default function Board({
         // Add shooting indicators to trigger re-render
         shootingTargetId,
         shootingUnitId,
+        // Add charge indicators to trigger re-render when charge target changes
+        chargeTargetId,
+        chargingUnitId,
         // Add wall override for replay mode
         JSON.stringify(wallHexesOverride),
         // AI_TURN.md: Add charge destinations to trigger re-render when backend returns valid destinations
