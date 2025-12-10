@@ -17,6 +17,7 @@
     "react-router-dom": "^7.8.2"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.3.8",
     "@eslint/js": "^9.33.0",
     "@tailwindcss/postcss": "^4.1.13",
     "@types/react": "^19.1.10",
