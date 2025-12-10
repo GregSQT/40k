@@ -1,6 +1,6 @@
 // frontend/src/roster/tyranid/units/Genestealer.ts
 
-import { TyranidInfantryEliteMeleeElite } from "../Classes/TyranidInfantryEliteMeleeElite";
+import { TyranidInfantryEliteMeleeElite } from "../classes/TyranidInfantryEliteMeleeElite";
 
 export class GenestealerPrime extends TyranidInfantryEliteMeleeElite {
   static NAME = "GenestealerPrime";

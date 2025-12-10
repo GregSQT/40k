@@ -1,6 +1,6 @@
 // frontend/src/roster/tyranid/units/Carnifex.ts
 
-import { TyranidInfantryEliteMeleeElite } from "../Classes/TyranidInfantryEliteMeleeElite";
+import { TyranidInfantryEliteMeleeElite } from "../classes/TyranidInfantryEliteMeleeElite";
 
 export class Carnifex extends TyranidInfantryEliteMeleeElite {
   static NAME = "Carnifex";

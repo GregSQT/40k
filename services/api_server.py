@@ -691,6 +691,40 @@ def get_default_replay_log():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/replay/file/<filename>', methods=['GET'])
+def get_replay_log_file(filename):
+    """
+    Get a specific replay log file content by filename.
+
+    Args:
+        filename: Name of the log file (e.g., "train_step.log")
+
+    Returns:
+        Raw text content of the log file
+    """
+    try:
+        # Security: Only allow .log files in current directory
+        if not filename.endswith('.log'):
+            return jsonify({"error": "Only .log files are allowed"}), 400
+        
+        if '..' in filename or '/' in filename or '\\' in filename:
+            return jsonify({"error": "Invalid filename"}), 400
+
+        log_path = filename
+
+        if not os.path.exists(log_path):
+            return jsonify({"error": f"Log file not found: {filename}"}), 404
+
+        with open(log_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Return as plain text for frontend parsing
+        from flask import Response
+        return Response(content, mimetype='text/plain')
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/replay/list', methods=['GET'])
 def list_replay_logs():

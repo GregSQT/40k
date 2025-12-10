@@ -72,6 +72,7 @@ export const BoardReplay: React.FC = () => {
   const [selectedFileName, setSelectedFileName] = useState<string>('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [unitRegistryReady, setUnitRegistryReady] = useState<boolean>(false);
+  const [availableLogFiles, setAvailableLogFiles] = useState<Array<{name: string, size: number, modified: string}>>([]);
 
   // Playback state
   const [currentActionIndex, setCurrentActionIndex] = useState<number>(0);
@@ -93,6 +94,23 @@ export const BoardReplay: React.FC = () => {
       }
     };
     initRegistry();
+  }, []);
+
+  // Load available log files from server on mount
+  useEffect(() => {
+    const loadAvailableFiles = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/replay/list');
+        if (response.ok) {
+          const data = await response.json();
+          setAvailableLogFiles(data.logs || []);
+        }
+      } catch (error) {
+        console.error('Failed to load available log files:', error);
+      }
+    };
+
+    loadAvailableFiles();
   }, []);
 
   // Auto-load train_step.log on mount
@@ -175,15 +193,20 @@ export const BoardReplay: React.FC = () => {
     });
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const handleFileSelectFromServer = async (filename: string) => {
+    if (!filename) return;
 
-    setSelectedFileName(file.name);
+    setSelectedFileName(filename);
+    setLoadError(null);
 
     try {
-      // Read file content
-      const text = await file.text();
+      // Load file content from server
+      const response = await fetch(`http://localhost:5000/api/replay/file/${encodeURIComponent(filename)}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load file: ${response.statusText}`);
+      }
+
+      const text = await response.text();
 
       // Parse it directly on frontend
       const { parse_log_file_from_text } = await import('../utils/replayParser');
@@ -196,7 +219,7 @@ export const BoardReplay: React.FC = () => {
       setLoadError(null);
     } catch (error: any) {
       console.error('Failed to parse replay:', error);
-      setLoadError(`Failed to parse file: ${error.message}`);
+      setLoadError(`Failed to load file: ${error.message}`);
       setSelectedFileName('');
     }
   };
@@ -758,20 +781,25 @@ export const BoardReplay: React.FC = () => {
       {/* File and Episode selector - single line */}
       <div className="replay-file-selector-container">
         <div className="replay-selector-row">
-          {/* Left: Browse button + Select file text */}
+          {/* Left: File dropdown (loads from server) */}
           <div className="replay-browse-group">
-            <label className="replay-browse-btn">
-              Browse
-              <input
-                type="file"
-                accept=".log"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-            </label>
-            <span className="replay-file-status">
-              {selectedFileName ? `File selected: ${selectedFileName}` : 'Select file'}
-            </span>
+            <select
+              value={selectedFileName || ''}
+              onChange={(e) => handleFileSelectFromServer(e.target.value)}
+              className="replay-file-select"
+            >
+              <option value="">Select log file from server...</option>
+              {availableLogFiles.map((log) => (
+                <option key={log.name} value={log.name}>
+                  {log.name} ({Math.round(log.size / 1024)}KB, {log.modified})
+                </option>
+              ))}
+            </select>
+            {selectedFileName && (
+              <span className="replay-file-status">
+                Loaded: {selectedFileName}
+              </span>
+            )}
           </div>
 
           {/* Right: Episode dropdown (only visible after file selected) */}

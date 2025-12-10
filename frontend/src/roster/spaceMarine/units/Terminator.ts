@@ -1,6 +1,6 @@
 // frontend/src/roster/spaceMarine/units/CaptainGravis.ts
 
-import { SpaceMarineInfantryEliteMeleeElite } from "../Classes/SpaceMarineInfantryEliteMeleeElite";
+import { SpaceMarineInfantryEliteMeleeElite } from "../classes/SpaceMarineInfantryEliteMeleeElite";
 
 export class Terminator extends SpaceMarineInfantryEliteMeleeElite {
   static NAME = "Terminator";

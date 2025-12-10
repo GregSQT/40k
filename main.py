@@ -63,15 +63,9 @@ def load_unit_definitions_from_ts(unit_registry):
     unit_definitions = {}
     
     for unit_name, faction in unit_registry["units"].items():
-        # Registry values now match directory names directly
-        faction_dir = faction
-        
-        # Registry contains complete path: "SpaceMarine/Units/Intercessor"
+        # Registry contains complete path relative to frontend/src/roster/
+        # e.g., "spaceMarine/units/Intercessor"
         ts_file_path = f"frontend/src/roster/{faction}.ts"
-        
-        if not os.path.exists(ts_file_path):
-            print(f"Warning: Unit file not found: {ts_file_path}")
-            continue
         
         if not os.path.exists(ts_file_path):
             print(f"Warning: Unit file not found: {ts_file_path}")

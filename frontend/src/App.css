@@ -493,7 +493,31 @@ body {
   gap: var(--spacing-md);
 }
 
-/* Replay Browse Button */
+/* Replay File Select Dropdown */
+.replay-file-select {
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  background-color: #d4a843;
+  color: #1f2937;
+  border-radius: 6px;
+  border: 1px solid #b8942f;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: all 0.15s ease;
+  padding: 4px 12px;
+  min-width: 250px;
+}
+
+.replay-file-select:hover {
+  background-color: #e5b94d;
+}
+
+.replay-file-select:focus {
+  outline: none;
+  border-color: #9a7a25;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 0 0 2px rgba(212, 168, 67, 0.3);
+}
+
+/* Replay Browse Button (kept for backward compatibility) */
 .replay-browse-btn {
   font-size: var(--font-size-sm);
   cursor: pointer;
