@@ -20,7 +20,7 @@ const getMaxTurnsFromConfig = async (): Promise<number> => {
   }
 };
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = 'http://localhost:5001/api';
 
 // Prevent duplicate AI turn calls
 let aiTurnInProgress = false;

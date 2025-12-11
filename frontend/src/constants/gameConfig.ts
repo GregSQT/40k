@@ -68,8 +68,8 @@ export const API_CONFIG = {
   BASE_URL: (() => {
     const apiUrl = import.meta.env?.VITE_API_URL;
     if (!apiUrl) {
-      console.warn('VITE_API_URL not set, defaulting to http://localhost:5000');
-      return 'http://localhost:5000';
+      console.warn('VITE_API_URL not set, defaulting to http://localhost:5001');
+      return 'http://localhost:5001';
     }
     return apiUrl;
   })(),

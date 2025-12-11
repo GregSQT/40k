@@ -772,7 +772,7 @@ def serve_frontend():
     """Serve frontend instructions."""
     return jsonify({
         "message": "W40K Engine API Server",
-        "frontend_url": "http://localhost:5173",
+        "frontend_url": "http://localhost:5175",
         "api_endpoints": {
             "health": "/api/health",
             "start_game": "/api/game/start",
@@ -788,8 +788,8 @@ def serve_frontend():
         },
         "instructions": [
             "1. Start frontend: cd frontend && npm run dev",
-            "2. API server runs on http://localhost:5000",
-            "3. Frontend runs on http://localhost:5173",
+            "2. API server runs on http://localhost:5001",
+            "3. Frontend runs on http://localhost:5175",
             "4. POST /api/game/start with pve_mode:true for AI",
             "5. POST /api/game/action with semantic actions",
             "6. POST /api/game/ai-turn to execute AI Player 2 turn"
@@ -798,7 +798,7 @@ def serve_frontend():
 
 if __name__ == '__main__':
     print("🚀 Starting W40K Engine API Server...")
-    print("📡 Server will run on http://localhost:5000")
+    print("📡 Server will run on http://localhost:5001")
     print("🎮 Frontend should connect to this API")
     print("✨ Use AI_TURN.md compliant semantic actions")
     
@@ -808,4 +808,4 @@ if __name__ == '__main__':
     else:
         print("⚠️  Engine initialization failed - will retry on first request")
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=True)

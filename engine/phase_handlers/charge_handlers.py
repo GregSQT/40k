@@ -427,8 +427,20 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
                         queue.append((n_pos, current_dist + 1))
                 
                 if found and target_pos not in reachable_hexes:
-                    game_state["valid_charge_destinations_pool"].append(target_pos)
-                    reachable_hexes.add(target_pos)
+                    # CRITICAL: Verify hex is not occupied before adding to pool
+                    hex_is_occupied = False
+                    for check_unit in game_state["units"]:
+                        if (check_unit["id"] != unit["id"] and
+                            check_unit["HP_CUR"] > 0 and
+                            check_unit["col"] == neighbor_col and
+                            check_unit["row"] == neighbor_row):
+                            hex_is_occupied = True
+                            break
+                    
+                    # Only add if NOT occupied
+                    if not hex_is_occupied:
+                        game_state["valid_charge_destinations_pool"].append(target_pos)
+                        reachable_hexes.add(target_pos)
 
     # Check if valid destinations exist
     if not game_state["valid_charge_destinations_pool"]:

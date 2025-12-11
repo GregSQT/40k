@@ -198,12 +198,11 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         else:
             charging_empty = len(game_state["charging_activation_pool"]) == 0
 
-        # CRITICAL FIX: If charging pool just became empty AND unit was removed from charging pool,
-        # we need to REBUILD alternating pools BEFORE checking if phase is complete.
-        # Units that were NOT adjacent at fight_phase_start may NOW be adjacent after being charged.
-        if charging_empty and response.get("removed_from_charging_pool"):
-            # Rebuild alternating pools to capture charge targets
-            _rebuild_alternating_pools_for_fight(game_state)
+        # CRITICAL FIX: Rebuild alternating pools after EVERY activation in fight phase.
+        # This ensures all eligible units are captured, even if they weren't in the initial pools
+        # or became eligible after other units died or changed status.
+        # Example: Unit 4 is adjacent to Unit 5 but wasn't in the initial pool - it will now be added.
+        _rebuild_alternating_pools_for_fight(game_state)
 
         if "active_alternating_activation_pool" not in game_state:
             active_alt_empty = True
@@ -225,10 +224,11 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
 
 def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
     """
-    Rebuild alternating activation pools after charging sub-phase completes.
+    Rebuild alternating activation pools after each activation in fight phase.
 
-    CRITICAL: This function is called when the last charging unit finishes its activation.
-    Units that were NOT adjacent at fight_phase_start may NOW be adjacent after being charged.
+    CRITICAL: This function is called after EVERY activation in the fight phase.
+    This ensures all eligible units are captured, even if they weren't in the initial pools
+    or became eligible after other units died or changed status.
 
     This must be called BEFORE checking if the phase is complete.
     """

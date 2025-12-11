@@ -831,6 +831,9 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         game_state["phase"] = "move"  # AI_TURN.md: Actually transition phase
 
         # AI_TURN.md: Initialize movement phase pools for P1
+        # CRITICAL: movement_phase_start() resets ALL tracking sets (units_fought, units_charged, etc.)
+        # This ensures P1 starts with clean state, allowing units that fought in P0's fight phase
+        # to fight again in P1's fight phase if they remain adjacent
         from engine.phase_handlers import movement_handlers
         movement_handlers.movement_phase_start(game_state)
 
@@ -867,14 +870,9 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             game_state["current_player"] = 0
             game_state["phase"] = "move"  # AI_TURN.md: Actually transition phase
 
-            # AI_TURN.md: Clear ALL tracking sets at turn start (P0 movement phase beginning)
-            game_state["units_moved"] = set()
-            game_state["units_fled"] = set()
-            game_state["units_shot"] = set()
-            game_state["units_charged"] = set()
-            game_state["units_fought"] = set()
-
             # AI_TURN.md: Initialize movement phase pools for P0
+            # CRITICAL: movement_phase_start() resets ALL tracking sets (units_fought, units_charged, etc.)
+            # This ensures P0 starts with clean state at the beginning of each turn
             from engine.phase_handlers import movement_handlers
             movement_handlers.movement_phase_start(game_state)
 
