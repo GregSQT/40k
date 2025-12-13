@@ -11,12 +11,13 @@ from engine.game_utils import get_unit_by_id
 class RewardCalculator:
     """Calculates rewards for actions."""
     
-    def __init__(self, config: Dict[str, Any], rewards_config: Dict[str, Any], unit_registry=None):
+    def __init__(self, config: Dict[str, Any], rewards_config: Dict[str, Any], unit_registry=None, state_manager=None):
         self.config = config
         self.rewards_config = rewards_config
         self._reward_mapper = None
         self.quiet = config.get("quiet", True)
         self.unit_registry = unit_registry
+        self.state_manager = state_manager
     
     # ============================================================================
     # MAIN REWARD
@@ -540,26 +541,99 @@ class RewardCalculator:
 
         try:
             unit_rewards = self._get_unit_reward_config(acting_unit)
-            if "situational_modifiers" not in unit_rewards:
-                return 0.0
+            
+            # Calculate base win/lose/draw reward (if situational_modifiers exists)
+            base_reward = 0.0
+            if "situational_modifiers" in unit_rewards:
+                modifiers = unit_rewards["situational_modifiers"]
+                winner = self._determine_winner(game_state)
 
-            modifiers = unit_rewards["situational_modifiers"]
-            winner = self._determine_winner(game_state)
+                # CRITICAL FIX: Learning agent is Player 0!
+                # winner == 0 means Player 0 (learning agent) wins
+                # winner == 1 means Player 1 (opponent) wins, so learning agent loses
+                if winner == 0:  # Learning agent wins
+                    base_reward = modifiers.get("win", 0.0)
+                elif winner == 1:  # Learning agent loses
+                    base_reward = modifiers.get("lose", 0.0)
+                elif winner == -1:  # Draw
+                    base_reward = modifiers.get("draw", 0.0)
 
-            # CRITICAL FIX: Learning agent is Player 0!
-            # winner == 0 means Player 0 (learning agent) wins
-            # winner == 1 means Player 1 (opponent) wins, so learning agent loses
-            if winner == 0:  # Learning agent wins
-                return modifiers.get("win", 0.0)
-            elif winner == 1:  # Learning agent loses
-                return modifiers.get("lose", 0.0)
-            elif winner == -1:  # Draw
-                return modifiers.get("draw", 0.0)
-
-            return 0.0
+            # Add objective control reward at end of turn 5
+            # CRITICAL: Calculate objective reward even if situational_modifiers is missing
+            objective_reward = self._calculate_objective_reward_turn5(game_state, unit_rewards)
+            
+            # Diagnostic logging (only if not quiet)
+            if not self.quiet and objective_reward > 0:
+                current_turn = game_state.get("turn", 0)
+                obj_counts = self.state_manager.count_controlled_objectives(game_state) if self.state_manager else {}
+                print(f"🎯 OBJECTIVE REWARD: Turn={current_turn}, P0 objectives={obj_counts.get(0, 0)}, Reward={objective_reward:.1f}")
+            
+            return base_reward + objective_reward
         except (KeyError, ValueError) as e:
-            # Silently return 0 if reward config unavailable
+            # Log error but return 0 to avoid breaking training
+            if not self.quiet:
+                print(f"⚠️  WARNING: Failed to calculate situational reward: {e}")
             return 0.0
+    
+    def _calculate_objective_reward_turn5(self, game_state: Dict[str, Any], unit_rewards: Dict[str, Any]) -> float:
+        """
+        Calculate reward for objective control at end of turn 5.
+        
+        Simple approach: Reward per objective controlled by Player 0 (learning agent).
+        Only applies when game ends at turn 5 (not elimination).
+        Reward value is read from config: objective_rewards.reward_per_objective_turn5
+        
+        Returns:
+            Reward value (reward_per_objective * number of objectives controlled by P0)
+        """
+        # Only apply at end of turn 5 (not elimination)
+        current_turn = game_state.get("turn", 0)
+        turn_limit_reached = game_state.get("turn_limit_reached", False)
+        
+        # Check if game ended at turn 5
+        # Either: turn_limit_reached is True (P1 just completed turn 5)
+        # Or: turn > 5 (standard end of turn 5)
+        is_turn5_end = turn_limit_reached or (current_turn > 5)
+        
+        if not is_turn5_end:
+            return 0.0
+        
+        # Check if game ended by elimination (not turn limit)
+        # If winner is determined by elimination, don't give objective rewards
+        # (objectives only matter when game ends at turn 5)
+        living_units_by_player = {}
+        for unit in game_state["units"]:
+            if unit["HP_CUR"] > 0:
+                player = unit["player"]
+                if player not in living_units_by_player:
+                    living_units_by_player[player] = 0
+                living_units_by_player[player] += 1
+        
+        # If one player has no living units, game ended by elimination (not turn 5)
+        if len(living_units_by_player) < 2:
+            return 0.0
+        
+        # Both players still alive - game ended at turn 5
+        # Calculate objectives controlled by Player 0
+        if not self.state_manager:
+            return 0.0
+        
+        obj_counts = self.state_manager.count_controlled_objectives(game_state)
+        p0_objectives = obj_counts.get(0, 0)
+        
+        # Get reward per objective from config (REQUIRED - raise error if missing)
+        if "objective_rewards" not in unit_rewards:
+            raise KeyError(f"Unit rewards missing required 'objective_rewards' section")
+        
+        objective_rewards = unit_rewards["objective_rewards"]
+        if "reward_per_objective_turn5" not in objective_rewards:
+            raise KeyError(f"Objective rewards missing required 'reward_per_objective_turn5' value")
+        
+        reward_per_objective = objective_rewards["reward_per_objective_turn5"]
+        
+        total_reward = reward_per_objective * p0_objectives
+        
+        return total_reward
     
     def _get_system_penalties(self):
         """Get system penalty values from rewards config."""
@@ -1411,9 +1485,20 @@ class RewardCalculator:
         return RewardMapper(self.rewards_config)
 
     def _determine_winner(self, game_state: Dict[str, Any]) -> Optional[int]:
-        """Determine winner based on remaining living units or turn limit. Returns -1 for draw."""
-        living_units_by_player = {}
+        """
+        Determine winner based on objective control or elimination.
         
+        CRITICAL FIX: Now delegates to state_manager to support
+        objective-based victory at turn 5 (same logic as game_state.py).
+        """
+        if self.state_manager:
+            # Use state_manager's determine_winner (supports objectives at turn 5)
+            winner, _ = self.state_manager.determine_winner_with_method(game_state)
+            return winner
+        
+        # Fallback for backward compatibility (should not happen in normal usage)
+        # This is the old logic that ignores objectives
+        living_units_by_player = {}
         for unit in game_state["units"]:
             if unit["HP_CUR"] > 0:
                 player = unit["player"]
@@ -1421,35 +1506,13 @@ class RewardCalculator:
                     living_units_by_player[player] = 0
                 living_units_by_player[player] += 1
         
-        # Check if game ended due to turn limit
-        training_config = self.config.get("training_config", {})
-        max_turns = training_config.get("max_turns_per_episode")
-        current_turn = game_state["turn"]
-        
-        if max_turns and current_turn > max_turns:
-            # Turn limit reached - determine winner by remaining units
-            living_players = list(living_units_by_player.keys())
-            if len(living_players) == 1:
-                return living_players[0]
-            elif len(living_players) == 2:
-                # Both players have units - compare counts
-                if living_units_by_player[0] > living_units_by_player[1]:
-                    return 0
-                elif living_units_by_player[1] > living_units_by_player[0]:
-                    return 1
-                else:
-                    return -1  # Draw - equal units
-            else:
-                return -1  # Draw - no units or other scenario
-        
-        # Normal elimination rules
         living_players = list(living_units_by_player.keys())
         if len(living_players) == 1:
             return living_players[0]
         elif len(living_players) == 0:
-            return -1  # Draw/no winner
+            return -1
         else:
-            return None  # Game still ongoing
+            return None
     
     def _get_reward_mapper_unit_rewards(self, unit: Dict[str, Any]) -> Dict[str, Any]:
         """Get unit-specific rewards config for reward_mapper."""

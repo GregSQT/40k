@@ -471,11 +471,14 @@ class GameStateManager:
             return -1, "draw"
 
         # Check if game ended due to turn limit
+        # CRITICAL: Only check objectives if game ended by turn limit (not elimination)
+        # This happens when P1 completes turn 5 and turn_limit_reached flag is set
         game_ended_by_turns = False
-        if hasattr(self, 'training_config') and max_turns:
-            game_ended_by_turns = current_turn > max_turns
-        else:
-            game_ended_by_turns = current_turn > 5
+        if len(living_players) == 2:  # Both players still alive
+            # Check if turn_limit_reached flag is set (set by fight_handlers when P1 completes turn 5)
+            if game_state.get("turn_limit_reached", False):
+                game_ended_by_turns = True
+            # Note: We don't check turn number as fallback - only when flag is explicitly set
 
         if game_ended_by_turns:
             # OBJECTIVE-BASED VICTORY at turn limit
@@ -500,4 +503,15 @@ class GameStateManager:
                     return -1, "draw"
 
         # Game still ongoing
-        return None, None
+        # CRITICAL: If game_over is True, we should never reach here
+        # This indicates a bug - log it but return None to indicate the issue
+        if game_state.get("game_over", False):
+            # BUG: Game is over but no winner determined
+            # This should not happen - log error but don't crash
+            import warnings
+            warnings.warn(f"BUG: game_over=True but no winner determined. Turn={current_turn}, Living players={living_players}")
+            # Return draw as fallback to prevent None win_method
+            return -1, "draw"
+        else:
+            # Game still ongoing - this is normal
+            return None, None

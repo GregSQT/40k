@@ -23,6 +23,9 @@
       "lose": -100.0,
       "draw": 0.0
     },
+    "objective_rewards": {
+      "reward_per_objective_turn5": 20.0
+    },
     "system_penalties": {
       "forbidden_action": -1.0,
       "invalid_action": -0.5,

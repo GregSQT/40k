@@ -175,19 +175,10 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     done = False
                     step_count = 0
 
-                    # Calculate max_eval_steps from training_config
-                    env_config = base_env.unwrapped.config if hasattr(base_env, 'unwrapped') else base_env.config
-                    training_cfg = env_config.get('training_config', {})
-                    max_turns = training_cfg.get('max_turns_per_episode', 5)
-
-                    # Calculate expected steps per episode
-                    steps_per_turn = 8
-                    expected_max_steps = max_turns * steps_per_turn
-
-                    # Add 100% buffer for slow/suboptimal play
-                    max_eval_steps = expected_max_steps * 2
-
-                    while not done and step_count < max_eval_steps:
+                    # Episodes terminate naturally when game conditions are met:
+                    # - All enemy units eliminated, OR
+                    # - Turn 5 completed (objective-based victory)
+                    while not done:
                         action_masks = bot_env.engine.get_action_mask()
                         action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
 

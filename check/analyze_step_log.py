@@ -95,6 +95,10 @@ def parse_log(filepath):
             1: {'elimination': 0, 'objectives': 0, 'value_tiebreaker': 0},  # P1 wins by method
             -1: {'draw': 0}  # Draws
         },
+        # Track episodes that started but never ended
+        'episodes_without_end': [],
+        # Track episodes without win_method
+        'episodes_without_method': [],
     }
 
     current_episode = []
@@ -117,6 +121,14 @@ def parse_log(filepath):
             # Episode start
             if '=== EPISODE START ===' in line:
                 if current_episode:
+                    # Previous episode ended without EPISODE END line
+                    stats['episodes_without_end'].append({
+                        'episode_num': current_episode_num,
+                        'actions': episode_actions,
+                        'turn': episode_turn,
+                        'last_line': current_episode[-1][:100] if current_episode else 'N/A'
+                    })
+                    
                     # Save death order for this episode
                     if stats['current_episode_deaths']:
                         stats['death_orders'].append(tuple(stats['current_episode_deaths']))
@@ -185,12 +197,20 @@ def parse_log(filepath):
                     winner = int(winner_match.group(1))
                     win_method = method_match.group(1) if method_match else None
 
-                    # Track win method
+                    # Track win method (NO DEFAULT - log what's actually there)
                     if win_method:
                         if winner in stats['win_methods'] and win_method in stats['win_methods'][winner]:
                             stats['win_methods'][winner][win_method] += 1
                         elif winner == -1:
                             stats['win_methods'][-1]['draw'] += 1
+                    else:
+                        # Track episodes without win_method for debugging
+                        if 'episodes_without_method' not in stats:
+                            stats['episodes_without_method'] = []
+                        stats['episodes_without_method'].append({
+                            'winner': winner,
+                            'line': line.strip()[:100]  # First 100 chars for debugging
+                        })
 
                     # Save sample games (first of each type) - 20 actions
                     if winner == 0 and not stats['sample_games']['win']:
@@ -202,6 +222,8 @@ def parse_log(filepath):
 
                 stats['current_episode_deaths'] = []
                 stats['wounded_enemies'] = {0: set(), 1: set()}
+                # CRITICAL FIX: Reset current_episode after EPISODE END to prevent false positives
+                current_episode = []
                 continue
 
             # Parse action line: [timestamp] TX PX PHASE : Action [SUCCESS] [STEP: YES]
@@ -352,6 +374,15 @@ def parse_log(filepath):
                     stats['actions_by_player'][player][action_type] += 1
 
                 current_episode.append(line.strip())
+    
+    # Check if last episode ended without EPISODE END
+    if current_episode:
+        stats['episodes_without_end'].append({
+            'episode_num': current_episode_num,
+            'actions': episode_actions,
+            'turn': episode_turn,
+            'last_line': current_episode[-1][:100] if current_episode else 'N/A'
+        })
 
     return stats
 
@@ -395,6 +426,28 @@ def print_statistics(stats):
     draw_pct = (draws / total_games * 100) if total_games > 0 else 0
     print(f"{'TOTAL WINS':<20} {p0_total:6d} ({p0_pct:5.1f}%)   {p1_total:6d} ({p1_pct:5.1f}%)")
     print(f"{'DRAWS':<20} {draws:6d} ({draw_pct:5.1f}%)")
+    
+    # Display episodes without win_method if any
+    if 'episodes_without_method' in stats and stats['episodes_without_method']:
+        print("\n" + "-" * 80)
+        print("⚠️  EPISODES WITHOUT WIN_METHOD (BUG DETECTED)")
+        print("-" * 80)
+        print(f"Total: {len(stats['episodes_without_method'])} episodes")
+        for i, ep in enumerate(stats['episodes_without_method'][:5]):  # Show first 5
+            print(f"  {i+1}. Winner={ep['winner']}, Line: {ep['line']}")
+        if len(stats['episodes_without_method']) > 5:
+            print(f"  ... and {len(stats['episodes_without_method']) - 5} more")
+    
+    # Display episodes without EPISODE END if any
+    if 'episodes_without_end' in stats and stats['episodes_without_end']:
+        print("\n" + "-" * 80)
+        print("⚠️  EPISODES WITHOUT EPISODE END (INCOMPLETE EPISODES)")
+        print("-" * 80)
+        print(f"Total: {len(stats['episodes_without_end'])} episodes")
+        for i, ep in enumerate(stats['episodes_without_end'][:5]):  # Show first 5
+            print(f"  {i+1}. Episode #{ep['episode_num']}, Actions={ep['actions']}, Turn={ep['turn']}, Last: {ep['last_line']}")
+        if len(stats['episodes_without_end']) > 5:
+            print(f"  ... and {len(stats['episodes_without_end']) - 5} more")
 
     print("\n" + "-" * 80)
     print("TURN DISTRIBUTION")

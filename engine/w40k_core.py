@@ -273,7 +273,7 @@ class W40KEngine(gym.Env):
         self.action_decoder = ActionDecoder(self.config)
         # Use rewards_config from config dict if not already loaded
         rewards_cfg = getattr(self, 'rewards_config', self.config.get("rewards_config", {}))
-        self.reward_calculator = RewardCalculator(self.config, self.rewards_config, self.unit_registry)
+        self.reward_calculator = RewardCalculator(self.config, self.rewards_config, self.unit_registry, self.state_manager)
         self.pve_controller = PvEController(self.config)
         
         # Initialize units from config AFTER game_state exists
@@ -469,8 +469,26 @@ class W40KEngine(gym.Env):
             max_turns = self.training_config.get("max_turns_per_episode")
             if max_turns and self.game_state["turn"] > max_turns:
                 # Turn limit exceeded - return terminated episode immediately
+                # CRITICAL: Set turn_limit_reached flag in game_state for winner determination
+                self.game_state["turn_limit_reached"] = True
                 observation = self.obs_builder.build_observation(self.game_state)
-                info = {"turn_limit_exceeded": True, "winner": self._determine_winner()}
+                winner, win_method = self._determine_winner_with_method()
+                
+                # CRITICAL: win_method should never be None when game is terminated
+                if win_method is None:
+                    import warnings
+                    warnings.warn(f"BUG: win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}")
+                    if winner == -1:
+                        win_method = "draw"
+                    else:
+                        win_method = "elimination"  # Default fallback
+                
+                info = {"turn_limit_exceeded": True, "winner": winner, "win_method": win_method}
+                
+                # Log episode end if step_logger is enabled
+                if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
+                    self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method)
+                
                 return observation, 0.0, True, False, info
 
         # Check for game termination before action
@@ -489,10 +507,32 @@ class W40KEngine(gym.Env):
             observation = self.obs_builder.build_observation(self.game_state)
             # Check if game ended after phase transition
             self.game_state["game_over"] = self._check_game_over()
+            
+            # CRITICAL: Copy turn_limit_reached from result to game_state if present
+            if isinstance(result, dict) and result.get("turn_limit_reached", False):
+                self.game_state["turn_limit_reached"] = True
+            
             terminated = self.game_state["game_over"]
             info = {"phase_auto_advanced": True, "previous_phase": current_phase}
             if terminated:
-                info["winner"] = self._determine_winner()
+                winner, win_method = self._determine_winner_with_method()
+                
+                # CRITICAL: win_method should never be None when game is terminated
+                if win_method is None:
+                    import warnings
+                    warnings.warn(f"BUG: win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}")
+                    if winner == -1:
+                        win_method = "draw"
+                    else:
+                        win_method = "elimination"  # Default fallback
+                
+                info["winner"] = winner
+                info["win_method"] = win_method
+                
+                # Log episode end if step_logger is enabled
+                if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
+                    self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method)
+            
             return observation, 0.0, terminated, False, info
         
         # Convert gym integer action to semantic action
@@ -914,6 +954,11 @@ class W40KEngine(gym.Env):
         info = result.copy() if isinstance(result, dict) else {}
         info["success"] = success
         
+        # CRITICAL: Copy turn_limit_reached from result to game_state if present
+        # This must happen BEFORE calling _determine_winner_with_method()
+        if isinstance(result, dict) and result.get("turn_limit_reached", False):
+            self.game_state["turn_limit_reached"] = True
+        
         # Accumulate episode-level metrics
         self.episode_reward_accumulator += reward
         self.episode_length_accumulator += 1
@@ -927,6 +972,16 @@ class W40KEngine(gym.Env):
         # Add winner info when game ends
         if terminated:
             winner, win_method = self._determine_winner_with_method()
+            
+            # CRITICAL: win_method should never be None when game is terminated
+            if win_method is None:
+                import warnings
+                warnings.warn(f"BUG: win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}")
+                if winner == -1:
+                    win_method = "draw"
+                else:
+                    win_method = "elimination"  # Default fallback
+            
             info["winner"] = winner
             info["win_method"] = win_method
             

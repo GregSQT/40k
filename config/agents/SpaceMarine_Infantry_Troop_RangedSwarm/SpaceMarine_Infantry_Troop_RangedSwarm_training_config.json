@@ -1,7 +1,7 @@
 {
     "default": {
     "type": "################################################### Default ###################################################",
-    "total_episodes": 3000,
+    "total_episodes": 5000,
     "total_episodes_normal": "1000 - 100 ep / minute -> 6k ep / hour",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 200,
@@ -33,7 +33,7 @@
       "learning_rate": 0.0001,
       "n_steps": 256,
       "batch_size": 256,
-      "n_epochs": 15,
+      "n_epochs": 10,
       "gamma": 0.95,
       "gae_lambda": 0.95,
       "clip_range": 0.2,
