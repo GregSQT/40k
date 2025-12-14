@@ -121,26 +121,44 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         # Units can only be in ONE pool at a time (verified via AI_TURN.md lines 717-718, 730-731)
         removed = False
 
+        # CRITICAL: Normalize unit_id to string for comparison (pools contain strings)
+        unit_id_str = str(unit_id)
+
         # Sub-phase 1: Charging pool (current player's charging units)
-        if "charging_activation_pool" in game_state and unit_id in game_state["charging_activation_pool"]:
-            game_state["charging_activation_pool"].remove(unit_id)
-            response["removed_from_charging_pool"] = True
-            removed = True
+        if "charging_activation_pool" in game_state:
+            # Convert pool to list of strings for comparison
+            pool_str = [str(id) for id in game_state["charging_activation_pool"]]
+            if unit_id_str in pool_str:
+                game_state["charging_activation_pool"] = [id for id in game_state["charging_activation_pool"] if str(id) != unit_id_str]
+                response["removed_from_charging_pool"] = True
+                removed = True
 
         # Sub-phase 2: Active alternating pool (current player's non-charging units)
-        if not removed and "active_alternating_activation_pool" in game_state and unit_id in game_state["active_alternating_activation_pool"]:
-            game_state["active_alternating_activation_pool"].remove(unit_id)
-            response["removed_from_active_alternating_pool"] = True
-            removed = True
+        if not removed and "active_alternating_activation_pool" in game_state:
+            pool_str = [str(id) for id in game_state["active_alternating_activation_pool"]]
+            if unit_id_str in pool_str:
+                game_state["active_alternating_activation_pool"] = [id for id in game_state["active_alternating_activation_pool"] if str(id) != unit_id_str]
+                response["removed_from_active_alternating_pool"] = True
+                removed = True
 
         # Sub-phase 2: Non-active alternating pool (opponent's units)
-        if not removed and "non_active_alternating_activation_pool" in game_state and unit_id in game_state["non_active_alternating_activation_pool"]:
-            game_state["non_active_alternating_activation_pool"].remove(unit_id)
-            response["removed_from_non_active_alternating_pool"] = True
-            removed = True
+        if not removed and "non_active_alternating_activation_pool" in game_state:
+            pool_before = list(game_state["non_active_alternating_activation_pool"])
+            pool_str = [str(id) for id in pool_before]
+            print(f"🔍 [END_ACTIVATION] Checking non_active pool: unit_id_str={unit_id_str}, pool_before={pool_before}, pool_str={pool_str}")
+            if unit_id_str in pool_str:
+                game_state["non_active_alternating_activation_pool"] = [id for id in game_state["non_active_alternating_activation_pool"] if str(id) != unit_id_str]
+                pool_after = list(game_state["non_active_alternating_activation_pool"])
+                print(f"✅ [END_ACTIVATION] Removed unit {unit_id_str} from non_active pool: {pool_before} → {pool_after}")
+                response["removed_from_non_active_alternating_pool"] = True
+                removed = True
 
         if removed:
             response["removed_from_fight_pool"] = True  # Generic flag for compatibility
+            print(f"✅ [END_ACTIVATION] Unit {unit_id} ({unit_id_str}) successfully removed from fight pool")
+        else:
+            print(f"⚠️ [END_ACTIVATION] Unit {unit_id} ({unit_id_str}) not found in any fight pool")
+            print(f"⚠️ [END_ACTIVATION] Available pools: charging={game_state.get('charging_activation_pool', [])}, active={game_state.get('active_alternating_activation_pool', [])}, non_active={game_state.get('non_active_alternating_activation_pool', [])}")
     
     # ├── Arg5 = 1 ?
     # │   ├── YES → log the error
@@ -198,11 +216,14 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         else:
             charging_empty = len(game_state["charging_activation_pool"]) == 0
 
-        # CRITICAL FIX: Rebuild alternating pools after EVERY activation in fight phase.
-        # This ensures all eligible units are captured, even if they weren't in the initial pools
-        # or became eligible after other units died or changed status.
-        # Example: Unit 4 is adjacent to Unit 5 but wasn't in the initial pool - it will now be added.
-        _rebuild_alternating_pools_for_fight(game_state)
+        # AI_TURN.md line 727: "All charging units processed → GO TO STEP : ATLERNATE_FIGHT"
+        # AI_TURN.md lines 731-755: Build alternating pools ONLY when transitioning from charging to alternating
+        # This happens when charging pool becomes empty AND we're removing a unit from charging pool
+        # We do NOT rebuild after every activation - only when entering alternating phase
+        if charging_empty and response.get("removed_from_charging_pool"):
+            # Charging phase just completed - build alternating pools for the first time
+            # AI_TURN.md lines 731-755: ACTIVE PLAYER ELIGIBILITY CHECK and NON-ACTIVE PLAYER ELIGIBILITY CHECK
+            _rebuild_alternating_pools_for_fight(game_state)
 
         if "active_alternating_activation_pool" not in game_state:
             active_alt_empty = True
@@ -280,10 +301,9 @@ def _is_adjacent_to_enemy_for_fight(game_state: Dict[str, Any], unit: Dict[str, 
 
     Used for fight phase eligibility - unit must be within melee range of an enemy.
     """
-    if "CC_RNG" not in unit:
-        raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
-
-    cc_range = unit["CC_RNG"]
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of CC_RNG
+    from engine.utils.weapon_helpers import get_melee_range
+    cc_range = get_melee_range()  # Always 1
     unit_col, unit_row = unit["col"], unit["row"]
 
     for enemy in game_state["units"]:

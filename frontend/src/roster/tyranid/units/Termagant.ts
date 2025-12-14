@@ -1,6 +1,7 @@
 // frontend/src/roster/tyranid/units/Termagant.ts
 //
 import { TyranidInfantrySwarmRangedSwarm } from "../classes/TyranidInfantrySwarmRangedSwarm";
+import { getWeapons } from "../armory";
 
 export class Termagant extends TyranidInfantrySwarmRangedSwarm {
   static NAME = "Termagant";
@@ -13,20 +14,12 @@ export class Termagant extends TyranidInfantrySwarmRangedSwarm {
   static LD = 8;               // Leadership score
   static OC = 2;               // Operative Control
   static VALUE = 6;            // Unit value (W40K points cost)
-  // RANGE WEAPON
-  static RNG_RNG = 18;         // Range attack : range
-  static RNG_NB = 1;           // Range attack : number of attacks
-  static RNG_ATK = 4;          // Range attack : To Hit score
-  static RNG_STR = 5;          // Range attack Strength
-  static RNG_AP = 0;           // Range attack Armor penetration
-  static RNG_DMG = 1;          // Range attack : damages
-  // MELEE WEAPON
-  static CC_NB = 1;            // Melee attack : number of attacks
-  static CC_RNG = 1;           // Melee attack : range
-  static CC_ATK = 4;           // Melee attack : score
-  static CC_STR = 3;           // Melee attack Strength
-  static CC_AP = 0;            // Melee attack Armor penetration
-  static CC_DMG = 1;           // Melee attack : damages
+  
+  // WEAPONS
+  static RNG_WEAPON_CODES = ["fleshborer"];
+  static RNG_WEAPONS = getWeapons(Termagant.RNG_WEAPON_CODES);
+  static CC_WEAPON_CODES = ["flesh_hooks"];
+  static CC_WEAPONS = getWeapons(Termagant.CC_WEAPON_CODES);
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Swarm";      // Swarm: 1 wound, fragile

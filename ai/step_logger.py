@@ -203,7 +203,12 @@ class StepLogger:
             wound_target = details["wound_target"]
             save_target = details["save_target"]
             
-            base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}"
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
+            weapon_name = details.get("weapon_name", "")
+            if weapon_name:
+                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id} with [{weapon_name}]"
+            else:
+                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}"
             detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
             
             # Add reward if available
@@ -331,7 +336,12 @@ class StepLogger:
             wound_target = details["wound_target"]
             save_target = details["save_target"]
             
-            base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id}"
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
+            weapon_name = details.get("weapon_name", "")
+            if weapon_name:
+                base_msg = f"Unit {unit_id}{unit_coords} ATTACKED unit {target_id} with [{weapon_name}]"
+            else:
+                base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id}"
             
             # Apply truncation logic like shooting phase - stop after first failure
             detail_parts = [f"Hit:{hit_target}+:{hit_roll}({hit_result})"]
@@ -384,7 +394,12 @@ class StepLogger:
                 wound_target = details["wound_target"]
                 save_target = details["save_target"]
                 
-                base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks})"
+                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
+                weapon_name = details.get("weapon_name", "")
+                if weapon_name:
+                    base_msg = f"Unit {unit_id}{unit_coords} ATTACKED unit {target_id} with [{weapon_name}] (Attack {attack_num}/{total_attacks})"
+                else:
+                    base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks})"
                 if hit_result == "MISS":
                     detail_msg = f" - Hit:{hit_target}+:{hit_roll}(MISS)"
                 elif wound_result == "FAIL":
@@ -395,7 +410,11 @@ class StepLogger:
                     detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
                 return base_msg + detail_msg
             else:
-                return f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks}) - MISS"
+                weapon_name = details.get("weapon_name", "")
+                if weapon_name:
+                    return f"Unit {unit_id}{unit_coords} ATTACKED unit {target_id} with [{weapon_name}] (Attack {attack_num}/{total_attacks}) - MISS"
+                else:
+                    return f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks}) - MISS"
                 
         elif action_type == "combat_summary":
             # Summary of multi-attack sequence

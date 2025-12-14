@@ -65,14 +65,12 @@ export const BoardWithAPI: React.FC = () => {
     let hasEligibleAIUnits = false;
     
     if (currentPhase === 'move') {
-      // Move phase: Check move activation pool for AI eligibility
-      if (apiProps.gameState.move_activation_pool) {
-        hasEligibleAIUnits = apiProps.gameState.move_activation_pool.some(unitId => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = apiProps.gameState.units.find((u: any) => String(u.id) === String(unitId));
-          return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
-        });
-      }
+      // Check if any AI units haven't moved yet
+      hasEligibleAIUnits = apiProps.gameState.units.some(unit => 
+        unit.player === 1 && 
+        (unit.HP_CUR ?? unit.HP_MAX) > 0 && 
+        !apiProps.unitsMoved.includes(typeof unit.id === 'string' ? parseInt(unit.id) : unit.id)
+      );
     } else if (currentPhase === 'shoot') {
       // Let backend handle shooting phase logic - it will auto-advance if no valid targets
       hasEligibleAIUnits = apiProps.gameState.units.some(unit => 
@@ -80,117 +78,33 @@ export const BoardWithAPI: React.FC = () => {
         (unit.HP_CUR ?? unit.HP_MAX) > 0
       );
     } else if (currentPhase === 'charge') {
-      // Charge phase: Check charge activation pool for AI eligibility
-      if (apiProps.gameState.charge_activation_pool) {
-        hasEligibleAIUnits = apiProps.gameState.charge_activation_pool.some(unitId => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = apiProps.gameState.units.find((u: any) => String(u.id) === String(unitId));
-          return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
-        });
-      }
+      // Check if any AI units can charge
+      hasEligibleAIUnits = apiProps.gameState.units.some(unit => 
+        unit.player === 1 && 
+        (unit.HP_CUR ?? unit.HP_MAX) > 0 && 
+        !apiProps.unitsCharged.includes(typeof unit.id === 'string' ? parseInt(unit.id) : unit.id)
+      );
     } else if (currentPhase === 'fight') {
-      // Fight phase: Check fight subphase pools for AI eligibility
-      // Try both apiProps.fightSubPhase and apiProps.gameState.fight_subphase
-      const fightSubphase = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase;
-      console.log(`🔍 [BOARD_WITH_API] Fight phase check:`, {
-        fightSubphase_from_props: apiProps.fightSubPhase,
-        fight_subphase_from_gameState: apiProps.gameState?.fight_subphase,
-        fightSubphase_used: fightSubphase,
-        gameState_keys: apiProps.gameState ? Object.keys(apiProps.gameState) : 'gameState is null'
-      });
-      console.log(`🔍 [BOARD_WITH_API] Available pools:`, {
-        charging: apiProps.gameState?.charging_activation_pool,
-        non_active: apiProps.gameState?.non_active_alternating_activation_pool,
-        active: apiProps.gameState?.active_alternating_activation_pool,
-        pools_length: {
-          charging: apiProps.gameState?.charging_activation_pool?.length || 0,
-          non_active: apiProps.gameState?.non_active_alternating_activation_pool?.length || 0,
-          active: apiProps.gameState?.active_alternating_activation_pool?.length || 0
-        }
-      });
-      
-      let fightPool: string[] = [];
-      if (fightSubphase === 'charging' && apiProps.gameState.charging_activation_pool) {
-        fightPool = apiProps.gameState.charging_activation_pool;
-      } else if (fightSubphase === 'alternating_non_active' && apiProps.gameState.non_active_alternating_activation_pool) {
-        fightPool = apiProps.gameState.non_active_alternating_activation_pool;
-      } else if (fightSubphase === 'alternating_active' && apiProps.gameState.active_alternating_activation_pool) {
-        fightPool = apiProps.gameState.active_alternating_activation_pool;
-      } else if (fightSubphase === 'cleanup_non_active' && apiProps.gameState.non_active_alternating_activation_pool) {
-        fightPool = apiProps.gameState.non_active_alternating_activation_pool;
-      } else if (fightSubphase === 'cleanup_active' && apiProps.gameState.active_alternating_activation_pool) {
-        fightPool = apiProps.gameState.active_alternating_activation_pool;
-      }
-      
-      console.log(`🔍 [BOARD_WITH_API] Selected fight pool: ${fightPool.length} units`, fightPool);
-      
-      hasEligibleAIUnits = fightPool.some(unitId => {
-        // Normalize comparison: pools contain strings, unit.id might be number
-        const unit = apiProps.gameState.units.find((u: any) => String(u.id) === String(unitId));
-        const isAI = unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
-        if (unit) {
-          console.log(`🔍 [BOARD_WITH_API] Checking unit: poolId=${unitId} (${typeof unitId}), unit.id=${unit.id} (${typeof unit.id}), player=${unit.player}, HP=${unit.HP_CUR}, isAI=${isAI}`);
-        } else {
-          console.log(`🔍 [BOARD_WITH_API] Unit not found for poolId=${unitId} (${typeof unitId}). Available unit IDs:`, apiProps.gameState.units.map((u: any) => `${u.id} (${typeof u.id})`));
-        }
-        return isAI;
-      });
-      
-      console.log(`🔍 [BOARD_WITH_API] hasEligibleAIUnits=${hasEligibleAIUnits} for fight phase`);
+      // Check if any AI units can fight
+      hasEligibleAIUnits = apiProps.gameState.units.some(unit => 
+        unit.player === 1 && 
+        (unit.HP_CUR ?? unit.HP_MAX) > 0 && 
+        !apiProps.unitsAttacked.includes(typeof unit.id === 'string' ? parseInt(unit.id) : unit.id)
+      );
     }
     
-    // CRITICAL: In fight phase, currentPlayer stays 0, but AI can still act in alternating phase
-    const fightSubphaseForCheck = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase;
-    const isAITurn = currentPhase === 'fight' 
-      ? hasEligibleAIUnits && (fightSubphaseForCheck === 'alternating_non_active' || 
-                               fightSubphaseForCheck === 'cleanup_non_active' ||
-                               (fightSubphaseForCheck === 'charging' && apiProps.gameState?.currentPlayer === 1))
-      : apiProps.gameState?.currentPlayer === 1;
-    
-    console.log(`🔍 [BOARD_WITH_API] AI turn check:`, {
-      currentPhase,
-      currentPlayer: apiProps.gameState.currentPlayer,
-      fight_subphase: apiProps.gameState.fight_subphase,
-      hasEligibleAIUnits,
-      isAITurn,
-      isPvEMode,
-      isAIProcessing: isAIProcessingRef.current,
-      gameNotOver
-    });
-    
-    const fightSubphaseForKey = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase || '';
-    const turnKey = `${apiProps.gameState?.currentPlayer}-${currentPhase}-${fightSubphaseForKey}-${apiProps.gameState?.currentTurn || 1}`;
-    
-    // Reset lastProcessedTurn if turn/phase has changed (prevents blocking on failed AI turns)
-    // Extract turn/phase from lastProcessedTurn to compare
-    if (lastProcessedTurn) {
-      const lastParts = lastProcessedTurn.split('-');
-      const currentTurn = apiProps.gameState?.currentTurn || 1;
-      const lastTurn = lastParts.length >= 4 ? parseInt(lastParts[3]) : null;
-      const lastPhase = lastParts.length >= 2 ? lastParts[1] : null;
-      
-      // If turn or phase changed, reset lastProcessedTurn
-      if (lastTurn !== currentTurn || lastPhase !== currentPhase) {
-        console.log(`🔄 [BOARD_WITH_API] Turn/phase changed (turn: ${lastTurn}→${currentTurn}, phase: ${lastPhase}→${currentPhase}), resetting lastProcessedTurn`);
-        setLastProcessedTurn('');
-      }
-    }
-    
-    // Allow multiple AI activations in same phase if there are still eligible units
-    // Don't use lastProcessedTurn to block - rely on isAIProcessingRef and hasEligibleAIUnits
-    // lastProcessedTurn is only used to detect turn/phase changes for reset
+    const turnKey = `${apiProps.gameState.currentPlayer}-${currentPhase}-${apiProps.gameState.currentTurn || 1}`;
     const shouldTriggerAI = isPvEMode && 
-                           isAITurn && 
+                           apiProps.gameState.currentPlayer === 1 && 
                            !isAIProcessingRef.current && 
                            gameNotOver && 
-                           hasEligibleAIUnits;
-    
-    console.log(`🔍 [BOARD_WITH_API] shouldTriggerAI=${shouldTriggerAI}, lastProcessedTurn=${lastProcessedTurn}, turnKey=${turnKey}`);
+                           hasEligibleAIUnits &&
+                           lastProcessedTurn !== turnKey;
     
     if (shouldTriggerAI) {
       console.log(`Triggering AI turn for Player 1 (AI) - Phase: ${currentPhase}, Eligible AI units: ${hasEligibleAIUnits}`);
       isAIProcessingRef.current = true;
-      // Don't set lastProcessedTurn here - wait until AI completes successfully
+      setLastProcessedTurn(turnKey);
       
       // Small delay to ensure UI updates are complete
       setTimeout(async () => {
@@ -200,8 +114,6 @@ export const BoardWithAPI: React.FC = () => {
             console.log('Calling executeAITurn...');
             await apiProps.executeAITurn();
             console.log('AI turn completed');
-            // Don't set lastProcessedTurn here - allow multiple activations in same phase
-            // lastProcessedTurn will be set when phase actually changes (via useEffect dependency)
           } else {
             console.error('executeAITurn function not available, type:', typeof apiProps.executeAITurn);
             setAiError('AI function not available');
@@ -213,42 +125,10 @@ export const BoardWithAPI: React.FC = () => {
           isAIProcessingRef.current = false;
         }
       }, 1500);
-    } else if (isPvEMode && isAITurn && !hasEligibleAIUnits) {
-      console.log(`⚠️ [BOARD_WITH_API] AI turn skipped - Phase: ${currentPhase}, No eligible AI units in activation pool`);
-    } else if (isPvEMode && !shouldTriggerAI) {
-      console.log(`⚠️ [BOARD_WITH_API] AI turn NOT triggered. Reasons:`, {
-        isPvEMode,
-        isAITurn,
-        isAIProcessing: isAIProcessingRef.current,
-        gameNotOver,
-        hasEligibleAIUnits,
-        lastProcessedTurn,
-        turnKey,
-        turnKeyMatches: lastProcessedTurn === turnKey
-      });
+    } else if (isPvEMode && apiProps.gameState.currentPlayer === 1 && !hasEligibleAIUnits) {
+      console.log(`AI turn skipped - Phase: ${currentPhase}, No eligible AI units in activation pool`);
     }
-  }, [isPvE, apiProps.gameState?.currentPlayer, apiProps.gameState?.phase, apiProps.gameState?.fight_subphase, apiProps.gameState?.pve_mode, apiProps.gameState?.move_activation_pool, apiProps.gameState?.charge_activation_pool, apiProps.gameState?.non_active_alternating_activation_pool, apiProps.gameState?.active_alternating_activation_pool, apiProps.gameState?.charging_activation_pool, apiProps.unitsMoved, apiProps.unitsCharged, apiProps.unitsAttacked, apiProps.gameState?.units, apiProps.executeAITurn, lastProcessedTurn]);
-  
-  // Update lastProcessedTurn when phase/turn changes (to track phase transitions)
-  useEffect(() => {
-    if (!apiProps.gameState) return;
-    const fightSubphaseForKey = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase || '';
-    const currentTurnKey = `${apiProps.gameState?.currentPlayer}-${apiProps.gameState?.phase}-${fightSubphaseForKey}-${apiProps.gameState?.currentTurn || 1}`;
-    
-    // Only update if phase/turn actually changed (not just on every render)
-    if (lastProcessedTurn && lastProcessedTurn !== currentTurnKey) {
-      // Phase/turn changed - reset to allow new AI activations
-      const lastParts = lastProcessedTurn.split('-');
-      const currentTurn = apiProps.gameState?.currentTurn || 1;
-      const lastTurn = lastParts.length >= 4 ? parseInt(lastParts[3]) : null;
-      const lastPhase = lastParts.length >= 2 ? lastParts[1] : null;
-      
-      if (lastTurn !== currentTurn || lastPhase !== apiProps.gameState?.phase) {
-        console.log(`🔄 [BOARD_WITH_API] Phase/turn changed, clearing lastProcessedTurn`);
-        setLastProcessedTurn('');
-      }
-    }
-  }, [apiProps.gameState?.phase, apiProps.gameState?.currentTurn, apiProps.gameState?.currentPlayer, apiProps.fightSubPhase, apiProps.gameState?.fight_subphase, lastProcessedTurn]);
+  }, [isPvE, apiProps.gameState?.currentPlayer, apiProps.gameState?.phase, apiProps.gameState?.pve_mode, apiProps.unitsMoved, apiProps.unitsCharged, apiProps.unitsAttacked, apiProps.gameState?.units, apiProps.executeAITurn]);
 
   // Calculate available height for GameLog dynamically
   useEffect(() => {

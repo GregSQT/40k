@@ -765,6 +765,8 @@ class RewardCalculator:
         Calculate unit's combat preference based on ACTUAL expected damage
         against their favorite target types (from unitType).
         
+        MULTIPLE_WEAPONS_IMPLEMENTATION.md: Uses max expected damage from all weapons.
+        
         Returns 0.1-0.9:
         - 0.1-0.3: Melee specialist (CC damage >> RNG damage)
         - 0.4-0.6: Balanced combatant
@@ -795,36 +797,44 @@ class RewardCalculator:
             target_save = 3
             target_invul = 7  # No invul
         
-        # Validate required UPPERCASE fields
-        required_fields = ["RNG_NB", "RNG_ATK", "RNG_STR", "RNG_AP", "RNG_DMG",
-                          "CC_NB", "CC_ATK", "CC_STR", "CC_AP", "CC_DMG"]
-        for field in required_fields:
-            if field not in unit:
-                raise KeyError(f"Unit missing required '{field}' field: {unit}")
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate max expected damage from all weapons
+        from shared.data_validation import require_key
         
-        # Calculate EXPECTED ranged damage per turn
-        ranged_expected = self._calculate_expected_damage(
-            num_attacks=unit["RNG_NB"],
-            to_hit_stat=unit["RNG_ATK"],
-            strength=unit["RNG_STR"],
-            target_toughness=target_T,
-            ap=unit["RNG_AP"],
-            target_save=target_save,
-            target_invul=target_invul,
-            damage_per_wound=unit["RNG_DMG"]
-        )
+        # Calculate max EXPECTED ranged damage from all ranged weapons
+        ranged_expected_list = []
+        rng_weapons = unit.get("RNG_WEAPONS", [])
+        for weapon in rng_weapons:
+            expected = self._calculate_expected_damage(
+                num_attacks=require_key(weapon, "NB"),
+                to_hit_stat=require_key(weapon, "ATK"),
+                strength=require_key(weapon, "STR"),
+                target_toughness=target_T,
+                ap=require_key(weapon, "AP"),
+                target_save=target_save,
+                target_invul=target_invul,
+                damage_per_wound=require_key(weapon, "DMG")
+            )
+            ranged_expected_list.append(expected)
         
-        # Calculate EXPECTED melee damage per turn
-        melee_expected = self._calculate_expected_damage(
-            num_attacks=unit["CC_NB"],
-            to_hit_stat=unit["CC_ATK"],
-            strength=unit["CC_STR"],
-            target_toughness=target_T,
-            ap=unit["CC_AP"],
-            target_save=target_save,
-            target_invul=target_invul,
-            damage_per_wound=unit["CC_DMG"]
-        )
+        ranged_expected = max(ranged_expected_list) if ranged_expected_list else 0.0
+        
+        # Calculate max EXPECTED melee damage from all melee weapons
+        melee_expected_list = []
+        cc_weapons = unit.get("CC_WEAPONS", [])
+        for weapon in cc_weapons:
+            expected = self._calculate_expected_damage(
+                num_attacks=require_key(weapon, "NB"),
+                to_hit_stat=require_key(weapon, "ATK"),
+                strength=require_key(weapon, "STR"),
+                target_toughness=target_T,
+                ap=require_key(weapon, "AP"),
+                target_save=target_save,
+                target_invul=target_invul,
+                damage_per_wound=require_key(weapon, "DMG")
+            )
+            melee_expected_list.append(expected)
+        
+        melee_expected = max(melee_expected_list) if melee_expected_list else 0.0
         
         total_expected = ranged_expected + melee_expected
         
@@ -988,32 +998,46 @@ class RewardCalculator:
         """
         current_phase = game_state["phase"]
         
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or best weapon
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
+        from engine.ai.weapon_selector import get_best_weapon_for_target
+        
         if current_phase == "shoot":
-            if "RNG_ATK" not in shooter or "RNG_STR" not in shooter or "RNG_DMG" not in shooter:
-                raise KeyError(f"Shooter missing required ranged stats: {shooter}")
-            if "RNG_NB" not in shooter:
-                raise KeyError(f"Shooter missing required 'RNG_NB' field: {shooter}")
+            # Get best weapon for this target
+            best_weapon_idx, _ = get_best_weapon_for_target(shooter, target, game_state, is_ranged=True)
+            if best_weapon_idx >= 0 and shooter.get("RNG_WEAPONS"):
+                weapon = shooter["RNG_WEAPONS"][best_weapon_idx]
+            else:
+                # Fallback to selected weapon
+                weapon = get_selected_ranged_weapon(shooter)
+                if not weapon and shooter.get("RNG_WEAPONS"):
+                    weapon = shooter["RNG_WEAPONS"][0]  # Fallback to first weapon
+                if not weapon:
+                    return 0.0
             
-            hit_target = shooter["RNG_ATK"]
-            strength = shooter["RNG_STR"]
-            damage = shooter["RNG_DMG"]
-            num_attacks = shooter["RNG_NB"]
-            if "RNG_AP" not in shooter:
-                raise KeyError(f"Shooter missing required 'RNG_AP' field: {shooter}")
-            ap = shooter["RNG_AP"]
+            hit_target = weapon["ATK"]
+            strength = weapon["STR"]
+            damage = weapon["DMG"]
+            num_attacks = weapon["NB"]
+            ap = weapon["AP"]
         else:
-            if "CC_ATK" not in shooter or "CC_STR" not in shooter or "CC_DMG" not in shooter:
-                raise KeyError(f"Shooter missing required melee stats: {shooter}")
-            if "CC_NB" not in shooter:
-                raise KeyError(f"Shooter missing required 'CC_NB' field: {shooter}")
+            # Get best weapon for this target
+            best_weapon_idx, _ = get_best_weapon_for_target(shooter, target, game_state, is_ranged=False)
+            if best_weapon_idx >= 0 and shooter.get("CC_WEAPONS"):
+                weapon = shooter["CC_WEAPONS"][best_weapon_idx]
+            else:
+                # Fallback to selected weapon
+                weapon = get_selected_melee_weapon(shooter)
+                if not weapon and shooter.get("CC_WEAPONS"):
+                    weapon = shooter["CC_WEAPONS"][0]  # Fallback to first weapon
+                if not weapon:
+                    return 0.0
             
-            hit_target = shooter["CC_ATK"]
-            strength = shooter["CC_STR"]
-            damage = shooter["CC_DMG"]
-            num_attacks = shooter["CC_NB"]
-            if "CC_AP" not in shooter:
-                raise KeyError(f"Shooter missing required 'CC_AP' field: {shooter}")
-            ap = shooter["CC_AP"]
+            hit_target = weapon["ATK"]
+            strength = weapon["STR"]
+            damage = weapon["DMG"]
+            num_attacks = weapon["NB"]
+            ap = weapon["AP"]
         
         p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
         
@@ -1054,50 +1078,66 @@ class RewardCalculator:
             game_state
         )
         
-        if "RNG_RNG" not in attacker:
-            raise KeyError(f"Attacker missing required 'RNG_RNG' field: {attacker}")
-        if "CC_RNG" not in attacker:
-            raise KeyError(f"Attacker missing required 'CC_RNG' field: {attacker}")
-        can_use_ranged = distance <= attacker["RNG_RNG"]
-        can_use_melee = distance <= attacker["CC_RNG"]
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from weapons
+        from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+        max_ranged_range = get_max_ranged_range(attacker)
+        melee_range = get_melee_range()  # Always 1
+        
+        can_use_ranged = max_ranged_range > 0 and distance <= max_ranged_range
+        can_use_melee = distance <= melee_range
 
         if not can_use_ranged and not can_use_melee:
             return 0.0
 
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use best weapon for attacker against defender
+        from engine.ai.weapon_selector import get_best_weapon_for_target
+        
+        weapon = None
         if can_use_ranged and not can_use_melee:
-            if "RNG_ATK" not in attacker:
-                raise KeyError(f"Attacker missing required 'RNG_ATK' field: {attacker}")
-            if "RNG_STR" not in attacker:
-                raise KeyError(f"Attacker missing required 'RNG_STR' field: {attacker}")
-            if "RNG_DMG" not in attacker:
-                raise KeyError(f"Attacker missing required 'RNG_DMG' field: {attacker}")
-            if "RNG_NB" not in attacker:
-                raise KeyError(f"Attacker missing required 'RNG_NB' field: {attacker}")
-            if "RNG_AP" not in attacker:
-                raise KeyError(f"Attacker missing required 'RNG_AP' field: {attacker}")
-
-            hit_target = attacker["RNG_ATK"]
-            strength = attacker["RNG_STR"]
-            damage = attacker["RNG_DMG"]
-            num_attacks = attacker["RNG_NB"]
-            ap = attacker["RNG_AP"]
+            # Only ranged available
+            best_weapon_idx, _ = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=True)
+            if best_weapon_idx >= 0 and attacker.get("RNG_WEAPONS"):
+                weapon = attacker["RNG_WEAPONS"][best_weapon_idx]
+            else:
+                # Fallback to selected or first weapon
+                from engine.utils.weapon_helpers import get_selected_ranged_weapon
+                weapon = get_selected_ranged_weapon(attacker)
+                if not weapon and attacker.get("RNG_WEAPONS"):
+                    weapon = attacker["RNG_WEAPONS"][0]
+        elif can_use_melee and not can_use_ranged:
+            # Only melee available
+            best_weapon_idx, _ = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=False)
+            if best_weapon_idx >= 0 and attacker.get("CC_WEAPONS"):
+                weapon = attacker["CC_WEAPONS"][best_weapon_idx]
+            else:
+                # Fallback to selected or first weapon
+                from engine.utils.weapon_helpers import get_selected_melee_weapon
+                weapon = get_selected_melee_weapon(attacker)
+                if not weapon and attacker.get("CC_WEAPONS"):
+                    weapon = attacker["CC_WEAPONS"][0]
         else:
-            if "CC_ATK" not in attacker:
-                raise KeyError(f"Attacker missing required 'CC_ATK' field: {attacker}")
-            if "CC_STR" not in attacker:
-                raise KeyError(f"Attacker missing required 'CC_STR' field: {attacker}")
-            if "CC_DMG" not in attacker:
-                raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker}")
-            if "CC_NB" not in attacker:
-                raise KeyError(f"Attacker missing required 'CC_NB' field: {attacker}")
-            if "CC_AP" not in attacker:
-                raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker}")
-
-            hit_target = attacker["CC_ATK"]
-            strength = attacker["CC_STR"]
-            damage = attacker["CC_DMG"]
-            num_attacks = attacker["CC_NB"]
-            ap = attacker["CC_AP"]
+            # Both available - choose best overall
+            best_rng_idx, rng_kill_prob = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=True)
+            best_cc_idx, cc_kill_prob = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=False)
+            
+            if rng_kill_prob >= cc_kill_prob and best_rng_idx >= 0 and attacker.get("RNG_WEAPONS"):
+                weapon = attacker["RNG_WEAPONS"][best_rng_idx]
+            elif best_cc_idx >= 0 and attacker.get("CC_WEAPONS"):
+                weapon = attacker["CC_WEAPONS"][best_cc_idx]
+            else:
+                # Fallback to selected ranged or melee
+                from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
+                weapon = get_selected_ranged_weapon(attacker) or get_selected_melee_weapon(attacker)
+        
+        if not weapon:
+            return 0.0
+        
+        from shared.data_validation import require_key
+        hit_target = require_key(weapon, "ATK")
+        strength = require_key(weapon, "STR")
+        damage = require_key(weapon, "DMG")
+        num_attacks = require_key(weapon, "NB")
+        ap = require_key(weapon, "AP")
         
         if num_attacks == 0:
             return 0.0
@@ -1233,22 +1273,22 @@ class RewardCalculator:
         new_unit_state["col"] = new_pos[0]
         new_unit_state["row"] = new_pos[1]
         
+        from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+        
         for enemy in enemies:
-            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-            if "RNG_RNG" not in enemy:
-                raise KeyError(f"Enemy missing required 'RNG_RNG' field: {enemy}")
-            if "CC_RNG" not in enemy:
-                raise KeyError(f"Enemy missing required 'CC_RNG' field: {enemy}")
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+            max_rng_range = get_max_ranged_range(enemy)
+            melee_range = get_melee_range()  # Always 1
             
             # CRITICAL: Use same logic as observation encoding
-            # Ranged unit = RNG_RNG > CC_RNG (matches offensive_type calculation)
-            is_ranged_unit = enemy["RNG_RNG"] > enemy["CC_RNG"]
+            # Ranged unit = has ranged weapons with range > melee range
+            is_ranged_unit = max_rng_range > melee_range
             
-            if is_ranged_unit and enemy["RNG_RNG"] > 0:
+            if is_ranged_unit and max_rng_range > 0:
                 distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
                 
                 # Enemy in shooting range and has LoS?
-                if distance <= enemy["RNG_RNG"]:
+                if distance <= max_rng_range:
                     if has_line_of_sight(enemy, new_unit_state, game_state):
                         ranged_enemies_with_los += 1
         
@@ -1284,16 +1324,14 @@ class RewardCalculator:
         CRITICAL: Must check BOTH range AND line of sight.
         A position is only optimal if the unit can actually shoot from there.
         """
-        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-        if "RNG_RNG" not in unit:
-            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
-        if unit["RNG_RNG"] <= 0:
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+        from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+        
+        max_range = get_max_ranged_range(unit)
+        if max_range <= 0:
             return False
-
-        max_range = unit["RNG_RNG"]
-        if "CC_RNG" not in unit:
-            raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
-        min_range = unit["CC_RNG"]  # Minimum engagement distance
+        
+        min_range = get_melee_range()  # Minimum engagement distance (always 1)
         enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
 
         # Create temporary unit state at new position for LOS check
@@ -1316,10 +1354,15 @@ class RewardCalculator:
 
         Uses BFS pathfinding distance to respect walls for charge reachability.
         """
-        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-        if "CC_DMG" not in unit:
-            raise KeyError(f"Unit missing required 'CC_DMG' field: {unit}")
-        if unit["CC_DMG"] <= 0:
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
+        cc_weapons = unit.get("CC_WEAPONS", [])
+        if not cc_weapons:
+            return False
+        
+        # Check if any melee weapon has damage > 0
+        from shared.data_validation import require_key
+        has_melee_damage = any(require_key(w, "DMG") > 0 for w in cc_weapons)
+        if not has_melee_damage:
             return False
 
         enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
@@ -1343,15 +1386,15 @@ class RewardCalculator:
         if not enemies:
             return False
 
+        from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+        
         for enemy in enemies:
             # Check if moved out of enemy threat range
             distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
-            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-            if "RNG_RNG" not in enemy:
-                raise KeyError(f"Enemy unit missing required 'RNG_RNG' field: {enemy}")
-            if "CC_RNG" not in enemy:
-                raise KeyError(f"Enemy unit missing required 'CC_RNG' field: {enemy}")
-            enemy_threat_range = max(enemy["RNG_RNG"], enemy["CC_RNG"])
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+            max_rng_range = get_max_ranged_range(enemy)
+            melee_range = get_melee_range()  # Always 1
+            enemy_threat_range = max(max_rng_range, melee_range)
 
             if distance > enemy_threat_range:
                 return True
@@ -1361,10 +1404,11 @@ class RewardCalculator:
     def _gained_los_on_priority_target(self, unit: Dict[str, Any], old_pos: Tuple[int, int], game_state: Dict[str, Any], 
                                        new_pos: Tuple[int, int]) -> bool:
         """Check if unit gained LoS on its highest-priority target."""
-        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-        if "RNG_RNG" not in unit:
-            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
-        if unit["RNG_RNG"] <= 0:
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+        from engine.utils.weapon_helpers import get_max_ranged_range
+        
+        max_range = get_max_ranged_range(unit)
+        if max_range <= 0:
             return False
         
         # Get all enemies in shooting range
@@ -1378,7 +1422,7 @@ class RewardCalculator:
                     raise KeyError(f"Enemy unit missing required position fields: {enemy}")
                 
                 distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
-                if distance <= unit["RNG_RNG"]:
+                if distance <= max_range:
                     enemies_in_range.append(enemy)
         
         if not enemies_in_range:
@@ -1414,22 +1458,26 @@ class RewardCalculator:
         enemies = [u for u in game_state["units"]
                   if u["player"] != unit["player"] and u["HP_CUR"] > 0]
 
+        from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+        
         for enemy in enemies:
-            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-            if "RNG_RNG" not in enemy:
-                raise KeyError(f"Enemy missing required 'RNG_RNG' field: {enemy}")
-            if "CC_RNG" not in enemy:
-                raise KeyError(f"Enemy missing required 'CC_RNG' field: {enemy}")
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
             if "MOVE" not in enemy:
                 raise KeyError(f"Enemy missing required 'MOVE' field: {enemy}")
-            if "CC_DMG" not in enemy:
-                raise KeyError(f"Enemy missing required 'CC_DMG' field: {enemy}")
-
+            
+            max_rng_range = get_max_ranged_range(enemy)
+            melee_range = get_melee_range()  # Always 1
+            cc_weapons = enemy.get("CC_WEAPONS", [])
+            
             # CRITICAL: Use same logic as observation encoding
-            # Melee unit = RNG_RNG <= CC_RNG (opposite of ranged)
-            is_melee_unit = enemy["RNG_RNG"] <= enemy["CC_RNG"]
+            # Melee unit = has melee weapons and max ranged range <= melee range
+            is_melee_unit = len(cc_weapons) > 0 and max_rng_range <= melee_range
+            
+            # Check if any melee weapon has damage > 0
+            from shared.data_validation import require_key
+            has_melee_damage = any(require_key(w, "DMG") > 0 for w in cc_weapons) if cc_weapons else False
 
-            if is_melee_unit and enemy["CC_DMG"] > 0:
+            if is_melee_unit and has_melee_damage:
                 # Use BFS pathfinding to respect walls for charge reachability
                 distance = calculate_pathfinding_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"], game_state)
 
@@ -1451,22 +1499,22 @@ class RewardCalculator:
         safe_distance_count = 0
         total_ranged_enemies = 0
         
+        from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+        
         for enemy in enemies:
-            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-            if "RNG_RNG" not in enemy:
-                raise KeyError(f"Enemy missing required 'RNG_RNG' field: {enemy}")
-            if "CC_RNG" not in enemy:
-                raise KeyError(f"Enemy missing required 'CC_RNG' field: {enemy}")
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+            max_rng_range = get_max_ranged_range(enemy)
+            melee_range = get_melee_range()  # Always 1
             
             # Only consider ranged units (matches observation encoding)
-            is_ranged_unit = enemy["RNG_RNG"] > enemy["CC_RNG"]
+            is_ranged_unit = max_rng_range > melee_range
             
-            if is_ranged_unit and enemy["RNG_RNG"] > 0:
+            if is_ranged_unit and max_rng_range > 0:
                 total_ranged_enemies += 1
                 distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
                 
                 # Safe if beyond their shooting range
-                if distance > enemy["RNG_RNG"]:
+                if distance > max_rng_range:
                     safe_distance_count += 1
         
         if total_ranged_enemies == 0:
@@ -1544,28 +1592,32 @@ class RewardCalculator:
         # CRITICAL: Set the agent type as unitType for reward config lookup
         enriched["unitType"] = agent_key
         
-        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - NO DEFAULTS
-        if "RNG_RNG" not in unit:
-            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
-        if "CC_RNG" not in unit:
-            raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+        from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+        
+        max_rng_range = get_max_ranged_range(unit)
+        melee_range = get_melee_range()  # Always 1
         
         # Add required tactical flags based on unit stats
-        enriched["is_ranged"] = unit["RNG_RNG"] > unit["CC_RNG"]
+        enriched["is_ranged"] = max_rng_range > melee_range
         enriched["is_melee"] = not enriched["is_ranged"]
         
         # AI_TURN.md COMPLIANCE: Direct field access for required fields
         if "unitType" not in unit:
             raise KeyError(f"Unit missing required 'unitType' field: {unit}")
-        if "RNG_DMG" not in unit:
-            raise KeyError(f"Unit missing required 'RNG_DMG' field: {unit}")
-        if "CC_DMG" not in unit:
-            raise KeyError(f"Unit missing required 'CC_DMG' field: {unit}")
+        
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get max damage from all weapons
+        from shared.data_validation import require_key
+        rng_weapons = unit.get("RNG_WEAPONS", [])
+        cc_weapons = unit.get("CC_WEAPONS", [])
+        
+        rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
+        cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
         
         # Map UPPERCASE fields to lowercase for reward_mapper compatibility
         enriched["name"] = unit["unitType"]
-        enriched["rng_dmg"] = unit["RNG_DMG"]
-        enriched["cc_dmg"] = unit["CC_DMG"]
+        enriched["rng_dmg"] = rng_dmg
+        enriched["cc_dmg"] = cc_dmg
         
         return enriched
     
@@ -1649,9 +1701,12 @@ class RewardCalculator:
         temp_unit["col"] = col
         temp_unit["row"] = row
 
-        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-        if "RNG_RNG" not in unit:
-            raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+        from engine.utils.weapon_helpers import get_max_ranged_range, get_selected_ranged_weapon
+        
+        max_range = get_max_ranged_range(unit)
+        if max_range <= 0:
+            return 0.0
 
         # Get all visible enemies
         visible_enemies = []
@@ -1660,15 +1715,19 @@ class RewardCalculator:
                 if has_line_of_sight(temp_unit, enemy, game_state):
                     # Check if in range
                     distance = calculate_hex_distance(col, row, enemy["col"], enemy["row"])
-                    if distance <= unit["RNG_RNG"]:
+                    if distance <= max_range:
                         visible_enemies.append(enemy)
 
         if not visible_enemies:
             return 0.0
 
-        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-        if "RNG_NB" not in unit:
-            raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get selected weapon's NB
+        selected_weapon = get_selected_ranged_weapon(unit)
+        if not selected_weapon:
+            return 0.0
+        
+        from shared.data_validation import require_key
+        num_attacks = require_key(selected_weapon, "NB")
 
         # Calculate attacks_needed and VALUE for each target
         targets_data = []
@@ -1677,7 +1736,7 @@ class RewardCalculator:
                 raise KeyError(f"Enemy missing required 'VALUE' field: {enemy}")
             value = enemy["VALUE"]
             turns_to_kill = self._calculate_turns_to_kill(unit, enemy, game_state)
-            attacks_needed = turns_to_kill * unit["RNG_NB"]
+            attacks_needed = turns_to_kill * num_attacks
             targets_data.append({
                 "enemy": enemy,
                 "value": value,
@@ -1690,7 +1749,7 @@ class RewardCalculator:
         targets_data.sort(key=lambda x: x["value"] / x["turns_to_kill"] if x["turns_to_kill"] > 0 else x["value"] * 100, reverse=True)
 
         # Greedy allocation
-        attacks_remaining = float(unit["RNG_NB"])
+        attacks_remaining = float(num_attacks)
         offensive_value = 0.0
 
         for target in targets_data:
@@ -1756,13 +1815,13 @@ class RewardCalculator:
                 temp_unit["col"] = col
                 temp_unit["row"] = row
 
-                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-                if "RNG_RNG" not in enemy:
-                    raise KeyError(f"Enemy missing required 'RNG_RNG' field: {enemy}")
+                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+                from engine.utils.weapon_helpers import get_max_ranged_range
+                max_rng_range = get_max_ranged_range(enemy)
 
                 if has_line_of_sight(temp_enemy, temp_unit, game_state):
                     distance = calculate_hex_distance(reachable_pos[0], reachable_pos[1], col, row)
-                    if distance <= enemy["RNG_RNG"]:
+                    if distance <= max_rng_range:
                         can_reach_me = True
 
                 # Check all friendlies this enemy could see
@@ -1770,7 +1829,7 @@ class RewardCalculator:
                     if has_line_of_sight(temp_enemy, friendly, game_state):
                         distance = calculate_hex_distance(reachable_pos[0], reachable_pos[1],
                                                          friendly["col"], friendly["row"])
-                        if distance <= enemy["RNG_RNG"]:
+                        if distance <= max_rng_range:
                             if friendly["id"] not in [f["id"] for f in reachable_friendlies]:
                                 reachable_friendlies.append(friendly)
 
@@ -1916,30 +1975,34 @@ class RewardCalculator:
                                             game_state: Dict[str, Any]) -> float:
         """
         Calculate expected damage from attacker against defender in one activation.
-        Uses ranged stats (assuming shooting phase context).
+        MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or best weapon
 
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults on unit stats.
         """
-        # Validate required attacker ranged stats
-        if "RNG_NB" not in attacker:
-            raise KeyError(f"Attacker missing required 'RNG_NB' field: {attacker}")
-        num_attacks = attacker["RNG_NB"]
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or best weapon
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon
+        from engine.ai.weapon_selector import get_best_weapon_for_target
+        
+        # Get best weapon for this defender
+        best_weapon_idx, _ = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=True)
+        if best_weapon_idx >= 0 and attacker.get("RNG_WEAPONS"):
+            weapon = attacker["RNG_WEAPONS"][best_weapon_idx]
+        else:
+            # Fallback to selected weapon
+            weapon = get_selected_ranged_weapon(attacker)
+            if not weapon and attacker.get("RNG_WEAPONS"):
+                weapon = attacker["RNG_WEAPONS"][0]  # Fallback to first weapon
+            if not weapon:
+                return 0.0
+        
+        num_attacks = weapon["NB"]
         if num_attacks == 0:
             return 0.0
 
-        if "RNG_ATK" not in attacker:
-            raise KeyError(f"Attacker missing required 'RNG_ATK' field: {attacker}")
-        if "RNG_STR" not in attacker:
-            raise KeyError(f"Attacker missing required 'RNG_STR' field: {attacker}")
-        if "RNG_AP" not in attacker:
-            raise KeyError(f"Attacker missing required 'RNG_AP' field: {attacker}")
-        if "RNG_DMG" not in attacker:
-            raise KeyError(f"Attacker missing required 'RNG_DMG' field: {attacker}")
-
-        to_hit = attacker["RNG_ATK"]
-        strength = attacker["RNG_STR"]
-        ap = attacker["RNG_AP"]
-        damage = attacker["RNG_DMG"]
+        to_hit = weapon["ATK"]
+        strength = weapon["STR"]
+        ap = weapon["AP"]
+        damage = weapon["DMG"]
 
         # Validate required defender stats
         if "T" not in defender:

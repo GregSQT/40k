@@ -10,6 +10,7 @@ const setupBoardInteractions = (app: any, boardConfig: any, config: any) => {};
 const cleanupBoardInteractions = (app: any) => {};
 import { renderUnit } from './UnitRenderer';
 import { offsetToCube, cubeDistance, hasLineOfSight, getHexLine, isUnitInRange } from '../utils/gameHelpers';
+import { getMaxRangedRange, getSelectedRangedWeapon, getMeleeRange, getSelectedMeleeWeapon } from '../utils/weaponHelpers';
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
@@ -554,12 +555,14 @@ export default function Board({
     if (phase === "fight" && mode === "attackPreview" && selectedUnit) {
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
 
-      // Validate CC_RNG is defined
-      if (selectedUnit.CC_RNG === undefined || selectedUnit.CC_RNG === null) {
-        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required CC_RNG property for fight phase`);
+      // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers (imported at top)
+      
+      // Check if unit has melee weapons
+      if (!selectedUnit.CC_WEAPONS || selectedUnit.CC_WEAPONS.length === 0) {
+        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) has no melee weapons for fight phase`);
       }
 
-      const fightRange = selectedUnit.CC_RNG;
+      const fightRange = getMeleeRange(); // Always 1
 
       // Find all enemies within CC_RNG range
       fightTargets = units.filter(u =>
@@ -572,16 +575,18 @@ export default function Board({
     // ✅ SIMPLIFIED SHOOTING PREVIEW - No animations to prevent re-render loop
     let shootingTarget: Unit | null = null;
     if (phase === "shoot" && mode === "attackPreview" && selectedUnit && attackPreview) {
-      // Validate RNG_RNG is defined
-      if (selectedUnit.RNG_RNG === undefined || selectedUnit.RNG_RNG === null) {
-        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required RNG_RNG property for shooting phase`);
+      // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers (imported at top)
+      
+      // Check if unit has ranged weapons
+      if (!selectedUnit.RNG_WEAPONS || selectedUnit.RNG_WEAPONS.length === 0) {
+        throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) has no ranged weapons for shooting phase`);
       }
       
       // Simple target identification - no state changes here
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
       const enemiesInRange = units.filter(u =>
         u.player !== selectedUnit.player &&
-        cubeDistance(c1, offsetToCube(u.col, u.row)) <= selectedUnit.RNG_RNG
+        cubeDistance(c1, offsetToCube(u.col, u.row)) <= getMaxRangedRange(selectedUnit)
       );
       
       // Use the first valid target or null
@@ -781,7 +786,7 @@ export default function Board({
         
         for (const enemy of enemyUnits) {
           const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
-          if (distance <= (selectedUnit.RNG_RNG || 0)) {
+          if (distance <= (getMaxRangedRange(selectedUnit) || 0)) {
             const lineOfSight = hasLineOfSight(
               { col: selectedUnit.col, row: selectedUnit.row },
               { col: enemy.col, row: enemy.row },
@@ -835,7 +840,7 @@ export default function Board({
             const enemyUnits = units.filter(u => u.player !== previewUnit!.player);
             for (const enemy of enemyUnits) {
               const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
-              if (distance <= (previewUnit.RNG_RNG || 0)) {
+              if (distance <= (getMaxRangedRange(previewUnit) || 0)) {
                 const lineOfSight = hasLineOfSight(
                   { col: attackFromCol, row: attackFromRow },
                   { col: enemy.col, row: enemy.row },
@@ -852,12 +857,15 @@ export default function Board({
           }
           
           // Validate required range properties are defined and get range
+          // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers (imported at top)
+          
           let range: number;
           if (phase === "fight") {
-            if (previewUnit.CC_RNG === undefined || previewUnit.CC_RNG === null) {
-              throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required CC_RNG property for fight phase preview`);
+            // Check if unit has melee weapons
+            if (!previewUnit.CC_WEAPONS || previewUnit.CC_WEAPONS.length === 0) {
+              throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) has no melee weapons for fight phase preview`);
             }
-            range = previewUnit.CC_RNG;
+            range = getMeleeRange(); // Always 1
             // For fight phase, show all hexes in range (original behavior)
             for (let col = 0; col < BOARD_COLS; col++) {
               for (let row = 0; row < BOARD_ROWS; row++) {
@@ -869,10 +877,11 @@ export default function Board({
               }
             }
           } else {
-            if (previewUnit.RNG_RNG === undefined || previewUnit.RNG_RNG === null) {
-              throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) is missing required RNG_RNG property for shooting phase preview`);
+            // Check if unit has ranged weapons
+            if (!previewUnit.RNG_WEAPONS || previewUnit.RNG_WEAPONS.length === 0) {
+              throw new Error(`Unit ${previewUnit.id} (${previewUnit.type || 'unknown'}) has no ranged weapons for shooting phase preview`);
             }
-            range = previewUnit.RNG_RNG;
+            range = getMaxRangedRange(previewUnit);
             
             // During shooting phase, show different colored hexes based on line of sight
             if (phase === "shoot") {
@@ -1060,8 +1069,8 @@ export default function Board({
             const cube2 = offsetToCube(unit.col, unit.row);
             distance = cubeDistance(cube1, cube2);
           }
-          const inRangeResult = selectedUnit && selectedUnit.RNG_RNG 
-            ? isUnitInRange(selectedUnit, unit, selectedUnit.RNG_RNG) 
+          const inRangeResult = selectedUnit && selectedUnit.RNG_WEAPONS && selectedUnit.RNG_WEAPONS.length > 0
+            ? isUnitInRange(selectedUnit, unit, getMaxRangedRange(selectedUnit))
             : false;
         }
         // AI_TURN.md: Calculate queue-based eligibility during shooting phase

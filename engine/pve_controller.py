@@ -93,28 +93,92 @@ class PvEController:
         prediction_result = self.ai_model.predict(obs, deterministic=True)
         
         if isinstance(prediction_result, tuple) and len(prediction_result) >= 1:
-            action_int = prediction_result[0]
+            predicted_action = prediction_result[0]
         elif hasattr(prediction_result, 'item'):
-            action_int = prediction_result.item()
+            predicted_action = prediction_result.item()
         else:
-            action_int = int(prediction_result)
+            predicted_action = int(prediction_result)
+        
+        # Apply action mask like in training - force valid action if predicted action is invalid
+        action_mask = engine.action_decoder.get_action_mask(game_state)
+        if not action_mask[predicted_action]:
+            # Find first valid action in mask (same logic as training)
+            valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
+            if valid_actions:
+                action_int = valid_actions[0]
+                print(f"🔍 [AI_DECISION] Predicted action {predicted_action} was invalid, using first valid action: {action_int}")
+            else:
+                # No valid actions - should not happen, but fallback to wait
+                action_int = 11
+                print(f"⚠️ [AI_DECISION] No valid actions in mask, using wait action")
+        else:
+            action_int = predicted_action
         
         # Convert to semantic action using engine's method
         semantic_action = engine.action_decoder.convert_gym_action(action_int, game_state)
+        print(f"🔍 [AI_DECISION] Model predicted action_int={predicted_action}, masked to {action_int}, phase={game_state.get('phase')}")
+        print(f"🔍 [AI_DECISION] convert_gym_action returned: {semantic_action}")
         
         # Ensure AI player context
         current_player = game_state["current_player"]
         if current_player == 1:  # AI player
             # Get eligible units from current phase pool
             current_phase = game_state["phase"]
+            print(f"🔍 [AI_DECISION] Current phase: {current_phase}, player: {current_player}")
             if current_phase == "move":
+                print(f"🔍 [AI_DECISION] Move phase detected")
                 if "move_activation_pool" not in game_state:
                     raise KeyError("game_state missing required 'move_activation_pool' field")
                 eligible_pool = game_state["move_activation_pool"]
+                print(f"🔍 [AI_DECISION] Move activation pool: {eligible_pool}")
             elif current_phase == "shoot":
+                print(f"🔍 [AI_DECISION] Shoot phase detected")
                 if "shoot_activation_pool" not in game_state:
                     raise KeyError("game_state missing required 'shoot_activation_pool' field")
                 eligible_pool = game_state["shoot_activation_pool"]
+                print(f"🔍 [AI_DECISION] Shoot activation pool: {eligible_pool}")
+                if "shoot_activation_pool" not in game_state:
+                    raise KeyError("game_state missing required 'shoot_activation_pool' field")
+                eligible_pool = game_state["shoot_activation_pool"]
+            elif current_phase == "fight":
+                # AI_TURN.md: Fight phase has 3 sub-phases with different pools
+                fight_subphase = game_state.get("fight_subphase")
+                
+                if fight_subphase == "charging":
+                    # Sub-Phase 1: Charging units (current player's charged units)
+                    if "charging_activation_pool" not in game_state:
+                        raise KeyError("game_state missing required 'charging_activation_pool' field")
+                    eligible_pool = game_state["charging_activation_pool"]
+                elif fight_subphase == "alternating_active":
+                    # Sub-Phase 2: Active player's turn in alternating
+                    if "active_alternating_activation_pool" not in game_state:
+                        raise KeyError("game_state missing required 'active_alternating_activation_pool' field")
+                    eligible_pool = game_state["active_alternating_activation_pool"]
+                elif fight_subphase == "alternating_non_active":
+                    # Sub-Phase 2: Non-active player's turn in alternating
+                    if "non_active_alternating_activation_pool" not in game_state:
+                        raise KeyError("game_state missing required 'non_active_alternating_activation_pool' field")
+                    eligible_pool = game_state["non_active_alternating_activation_pool"]
+                elif fight_subphase == "cleanup_active":
+                    # Sub-Phase 3: Cleanup - only active pool has units left
+                    if "active_alternating_activation_pool" not in game_state:
+                        raise KeyError("game_state missing required 'active_alternating_activation_pool' field")
+                    eligible_pool = game_state["active_alternating_activation_pool"]
+                elif fight_subphase == "cleanup_non_active":
+                    # Sub-Phase 3: Cleanup - only non-active pool has units left
+                    if "non_active_alternating_activation_pool" not in game_state:
+                        raise KeyError("game_state missing required 'non_active_alternating_activation_pool' field")
+                    eligible_pool = game_state["non_active_alternating_activation_pool"]
+                else:
+                    # No subphase set or unknown subphase - no eligible units
+                    eligible_pool = []
+            elif current_phase == "charge":
+                # Charge phase
+                print(f"🔍 [AI_DECISION] Charge phase detected")
+                if "charge_activation_pool" not in game_state:
+                    raise KeyError("game_state missing required 'charge_activation_pool' field")
+                eligible_pool = game_state["charge_activation_pool"]
+                print(f"🔍 [AI_DECISION] Charge activation pool: {eligible_pool}")
             else:
                 eligible_pool = []
             
@@ -128,7 +192,11 @@ class PvEController:
             
             if ai_unit_id:
                 semantic_action["unitId"] = ai_unit_id
+                print(f"🔍 [AI_DECISION] Found AI unit in pool: {ai_unit_id}")
+            else:
+                print(f"⚠️ [AI_DECISION] No AI unit found in eligible pool: {eligible_pool}")
             
+            print(f"🔍 [AI_DECISION] Final semantic_action: {semantic_action}")
         return semantic_action
     
     def ai_select_unit(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:

@@ -85,12 +85,14 @@ class TargetSelector:
         score += self.weights.get("kill_probability", 2.0) * kill_prob
         
         # Component 2: Threat level
-        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-        if "RNG_DMG" not in target:
-            raise KeyError(f"Target missing required 'RNG_DMG' field: {target}")
-        if "CC_DMG" not in target:
-            raise KeyError(f"Target missing required 'CC_DMG' field: {target}")
-        threat = max(target["RNG_DMG"], target["CC_DMG"]) / 5.0
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max damage from all weapons
+        from shared.data_validation import require_key
+        rng_weapons = target.get("RNG_WEAPONS", [])
+        cc_weapons = target.get("CC_WEAPONS", [])
+        
+        max_rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
+        max_cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
+        threat = max(max_rng_dmg, max_cc_dmg) / 5.0
         score += self.weights.get("threat_level", 1.5) * threat
         
         # Component 3: HP ratio (prefer wounded)
@@ -148,13 +150,16 @@ class TargetSelector:
     def _calculate_army_threat(self, target: Dict[str, Any],
                                game_state: Dict[str, Any]) -> float:
         """Calculate threat to entire friendly army."""
-        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
-        if "RNG_RNG" not in target:
-            raise KeyError(f"Target missing required 'RNG_RNG' field: {target}")
-        if "RNG_DMG" not in target:
-            raise KeyError(f"Target missing required 'RNG_DMG' field: {target}")
-        if "CC_DMG" not in target:
-            raise KeyError(f"Target missing required 'CC_DMG' field: {target}")
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+        from engine.utils.weapon_helpers import get_max_ranged_range
+        from shared.data_validation import require_key
+        
+        max_rng_range = get_max_ranged_range(target)
+        rng_weapons = target.get("RNG_WEAPONS", [])
+        cc_weapons = target.get("CC_WEAPONS", [])
+        
+        max_rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
+        max_cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
 
         my_player = game_state["current_player"]
         friendly_units = [u for u in game_state["units"]
@@ -173,9 +178,9 @@ class TargetSelector:
             distance = calculate_hex_distance(friendly["col"], friendly["row"], target["col"], target["row"])
 
             # Threat only if in range
-            if distance <= target["RNG_RNG"]:
+            if distance <= max_rng_range:
                 unit_value = friendly["VALUE"]
-                threat_factor = max(target["RNG_DMG"], target["CC_DMG"]) / 5.0
+                threat_factor = max(max_rng_dmg, max_cc_dmg) / 5.0
                 total_threat += unit_value * threat_factor / max(1, distance)
 
         return min(1.0, total_threat / 100.0)  # Normalize to 0-1

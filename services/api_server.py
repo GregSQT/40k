@@ -150,11 +150,14 @@ def initialize_engine():
         for agent_key in agent_keys:
             try:
                 agent_rewards = config_loader.load_agent_rewards_config(agent_key)
-                agent_training = config_loader.load_agent_training_config(agent_key)
+                # Load entire config file (contains "default" and "debug" phases)
+                agent_training_full = config_loader.load_agent_training_config(agent_key)
+                # Load "default" phase for observation params
+                agent_training_default = config_loader.load_agent_training_config(agent_key, "default")
                 
                 # Store agent-specific configs
                 all_rewards_configs[agent_key] = agent_rewards
-                all_training_configs[agent_key] = agent_training
+                all_training_configs[agent_key] = agent_training_full  # Store full config for engine
                 
                 print(f"✅ Loaded configs for agent: {agent_key}")
             except FileNotFoundError as e:
@@ -167,21 +170,25 @@ def initialize_engine():
         
         # Use first agent's training config for observation params (all agents should match)
         first_agent = list(agent_keys)[0]
-        training_config = all_training_configs[first_agent]
+        training_config_default = config_loader.load_agent_training_config(first_agent, "default")
         
         # Add configs to main config
         config["rewards_configs"] = all_rewards_configs  # Multi-agent support
         config["training_configs"] = all_training_configs  # Multi-agent support
         config["agent_keys"] = list(agent_keys)  # Track which agents are active
         
-        # CRITICAL FIX: Add observation_params from training_config (same as w40k_core.py line 81-94)
-        obs_params = training_config.get("observation_params", {
-            "obs_size": 300,
-            "perception_radius": 25,
-            "max_nearby_units": 10,
-            "max_valid_targets": 5
-        })
-        config["observation_params"] = obs_params
+        # CRITICAL FIX: Add observation_params from training_config "default" phase
+        obs_params = training_config_default.get("observation_params", {})
+        
+        # Validation stricte: obs_size DOIT être présent
+        if "obs_size" not in obs_params:
+            raise KeyError(
+                f"training_config missing required 'obs_size' in observation_params. "
+                f"Must be defined in training_config.json 'default' phase. "
+                f"Config: {first_agent}"
+            )
+        
+        config["observation_params"] = obs_params  # Inclut obs_size validé
         
         # Create engine with proper parameters
         engine = W40KEngine(
@@ -259,11 +266,12 @@ def initialize_pve_engine():
         for agent_key in agent_keys:
             try:
                 agent_rewards = config_loader.load_agent_rewards_config(agent_key)
-                agent_training = config_loader.load_agent_training_config(agent_key)
+                # Load entire config file (contains "default" and "debug" phases)
+                agent_training_full = config_loader.load_agent_training_config(agent_key)
                 
                 # Store agent-specific configs
                 all_rewards_configs[agent_key] = agent_rewards
-                all_training_configs[agent_key] = agent_training
+                all_training_configs[agent_key] = agent_training_full  # Store full config for engine
                 
                 print(f"✅ Loaded configs for agent: {agent_key}")
             except FileNotFoundError as e:
@@ -276,7 +284,7 @@ def initialize_pve_engine():
         
         # Use first agent's training config for observation params
         first_agent = list(agent_keys)[0]
-        training_config = all_training_configs[first_agent]
+        training_config_default = config_loader.load_agent_training_config(first_agent, "default")
         
         # Create engine with PvE configuration - set pve_mode in config
         config["pve_mode"] = True
@@ -284,14 +292,18 @@ def initialize_pve_engine():
         config["training_configs"] = all_training_configs  # Multi-agent support
         config["agent_keys"] = list(agent_keys)  # Track which agents are active
         
-        # CRITICAL FIX: Add observation_params from training_config (same as w40k_core.py line 81-94)
-        obs_params = training_config.get("observation_params", {
-            "obs_size": 300,
-            "perception_radius": 25,
-            "max_nearby_units": 10,
-            "max_valid_targets": 5
-        })
-        config["observation_params"] = obs_params
+        # CRITICAL FIX: Add observation_params from training_config "default" phase
+        obs_params = training_config_default.get("observation_params", {})
+        
+        # Validation stricte: obs_size DOIT être présent
+        if "obs_size" not in obs_params:
+            raise KeyError(
+                f"training_config missing required 'obs_size' in observation_params. "
+                f"Must be defined in training_config.json 'default' phase. "
+                f"Config: {first_agent}"
+            )
+        
+        config["observation_params"] = obs_params  # Inclut obs_size validé
         
         engine = W40KEngine(
             config=config,
@@ -606,6 +618,7 @@ def execute_ai_turn():
         
         if not success:
             error_type = result.get("error", "unknown_error")
+            print(f"❌ [API] execute_ai_turn failed: error_type={error_type}, result={result}")
             if error_type in ["not_pve_mode", "not_ai_player_turn"]:
                 return jsonify({"success": False, "error": result}), 400
             else:

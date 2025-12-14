@@ -28,6 +28,14 @@ class ObservationBuilder:
         self.perception_radius = obs_params["perception_radius"]  # ✓ CHANGE 3: No default fallback
         self.max_nearby_units = obs_params.get("max_nearby_units", 10)  # ✓ CHANGE 3: Cache for line 553
         self.max_valid_targets = obs_params.get("max_valid_targets", 5)  # ✓ CHANGE 3: Cache for future use
+        
+        # CRITIQUE: obs_size depuis config, NO DEFAULT - raise error si manquant
+        if "obs_size" not in obs_params:
+            raise KeyError(
+                f"Config missing required 'obs_size' in observation_params. "
+                f"Must be defined in training_config.json. Current obs_params: {obs_params}"
+            )
+        self.obs_size = obs_params["obs_size"]  # Source unique de vérité
 
         # PERFORMANCE: Per-observation cache for danger probability calculations
         # Cleared at start of each build_observation() call
@@ -72,36 +80,38 @@ class ObservationBuilder:
             target_save = 3
             target_invul = 7  # No invul
         
-        # Validate required UPPERCASE fields
-        required_fields = ["RNG_NB", "RNG_ATK", "RNG_STR", "RNG_AP", "RNG_DMG",
-                          "CC_NB", "CC_ATK", "CC_STR", "CC_AP", "CC_DMG"]
-        for field in required_fields:
-            if field not in unit:
-                raise KeyError(f"Unit missing required '{field}' field: {unit}")
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate max expected damage from all weapons
+        # Calculate EXPECTED ranged damage per turn (max from all ranged weapons)
+        ranged_expected = 0.0
+        if unit.get("RNG_WEAPONS"):
+            for weapon in unit["RNG_WEAPONS"]:
+                weapon_expected = self._calculate_expected_damage(
+                    num_attacks=weapon.get("NB", 0),
+                    to_hit_stat=weapon.get("ATK", 0),
+                    strength=weapon.get("STR", 0),
+                    target_toughness=target_T,
+                    ap=weapon.get("AP", 0),
+                    target_save=target_save,
+                    target_invul=target_invul,
+                    damage_per_wound=weapon.get("DMG", 0)
+                )
+                ranged_expected = max(ranged_expected, weapon_expected)
         
-        # Calculate EXPECTED ranged damage per turn
-        ranged_expected = self._calculate_expected_damage(
-            num_attacks=unit["RNG_NB"],
-            to_hit_stat=unit["RNG_ATK"],
-            strength=unit["RNG_STR"],
-            target_toughness=target_T,
-            ap=unit["RNG_AP"],
-            target_save=target_save,
-            target_invul=target_invul,
-            damage_per_wound=unit["RNG_DMG"]
-        )
-        
-        # Calculate EXPECTED melee damage per turn
-        melee_expected = self._calculate_expected_damage(
-            num_attacks=unit["CC_NB"],
-            to_hit_stat=unit["CC_ATK"],
-            strength=unit["CC_STR"],
-            target_toughness=target_T,
-            ap=unit["CC_AP"],
-            target_save=target_save,
-            target_invul=target_invul,
-            damage_per_wound=unit["CC_DMG"]
-        )
+        # Calculate EXPECTED melee damage per turn (max from all melee weapons)
+        melee_expected = 0.0
+        if unit.get("CC_WEAPONS"):
+            for weapon in unit["CC_WEAPONS"]:
+                weapon_expected = self._calculate_expected_damage(
+                    num_attacks=weapon.get("NB", 0),
+                    to_hit_stat=weapon.get("ATK", 0),
+                    strength=weapon.get("STR", 0),
+                    target_toughness=target_T,
+                    ap=weapon.get("AP", 0),
+                    target_save=target_save,
+                    target_invul=target_invul,
+                    damage_per_wound=weapon.get("DMG", 0)
+                )
+                melee_expected = max(melee_expected, weapon_expected)
         
         total_expected = ranged_expected + melee_expected
         
@@ -286,44 +296,59 @@ class ObservationBuilder:
     def _calculate_kill_probability(self, shooter: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
         """
         Calculate actual probability to kill target this turn considering W40K dice mechanics.
-        
+        MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or best weapon
+
         Considers:
-        - Hit probability (RNG_ATK vs d6)
-        - Wound probability (RNG_STR vs target T)
-        - Save failure probability (target saves vs RNG_AP)
-        - Number of shots (RNG_NB)
-        - Damage per successful wound (RNG_DMG)
-        
+        - Hit probability (weapon.ATK vs d6)
+        - Wound probability (weapon.STR vs target T)
+        - Save failure probability (target saves vs weapon.AP)
+        - Number of attacks (weapon.NB)
+        - Damage per successful wound (weapon.DMG)
+
         Returns: 0.0-1.0 probability
         """
         current_phase = game_state["phase"]
         
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or best weapon
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
+        from engine.ai.weapon_selector import get_best_weapon_for_target
+
         if current_phase == "shoot":
-            if "RNG_ATK" not in shooter or "RNG_STR" not in shooter or "RNG_DMG" not in shooter:
-                raise KeyError(f"Shooter missing required ranged stats: {shooter}")
-            if "RNG_NB" not in shooter:
-                raise KeyError(f"Shooter missing required 'RNG_NB' field: {shooter}")
+            # Get best weapon for this target
+            best_weapon_idx, _ = get_best_weapon_for_target(shooter, target, game_state, is_ranged=True)
+            if best_weapon_idx >= 0 and shooter.get("RNG_WEAPONS"):
+                weapon = shooter["RNG_WEAPONS"][best_weapon_idx]
+            else:
+                # Fallback to selected weapon
+                weapon = get_selected_ranged_weapon(shooter)
+                if not weapon and shooter.get("RNG_WEAPONS"):
+                    weapon = shooter["RNG_WEAPONS"][0]  # Fallback to first weapon
+                if not weapon:
+                    return 0.0
             
-            hit_target = shooter["RNG_ATK"]
-            strength = shooter["RNG_STR"]
-            damage = shooter["RNG_DMG"]
-            num_attacks = shooter["RNG_NB"]
-            if "RNG_AP" not in shooter:
-                raise KeyError(f"Shooter missing required 'RNG_AP' field: {shooter}")
-            ap = shooter["RNG_AP"]
+            hit_target = weapon["ATK"]
+            strength = weapon["STR"]
+            damage = weapon["DMG"]
+            num_attacks = weapon["NB"]
+            ap = weapon["AP"]
         else:
-            if "CC_ATK" not in shooter or "CC_STR" not in shooter or "CC_DMG" not in shooter:
-                raise KeyError(f"Shooter missing required melee stats: {shooter}")
-            if "CC_NB" not in shooter:
-                raise KeyError(f"Shooter missing required 'CC_NB' field: {shooter}")
+            # Get best weapon for this target
+            best_weapon_idx, _ = get_best_weapon_for_target(shooter, target, game_state, is_ranged=False)
+            if best_weapon_idx >= 0 and shooter.get("CC_WEAPONS"):
+                weapon = shooter["CC_WEAPONS"][best_weapon_idx]
+            else:
+                # Fallback to selected weapon
+                weapon = get_selected_melee_weapon(shooter)
+                if not weapon and shooter.get("CC_WEAPONS"):
+                    weapon = shooter["CC_WEAPONS"][0]  # Fallback to first weapon
+                if not weapon:
+                    return 0.0
             
-            hit_target = shooter["CC_ATK"]
-            strength = shooter["CC_STR"]
-            damage = shooter["CC_DMG"]
-            num_attacks = shooter["CC_NB"]
-            if "CC_AP" not in shooter:
-                raise KeyError(f"Shooter missing required 'CC_AP' field: {shooter}")
-            ap = shooter["CC_AP"]
+            hit_target = weapon["ATK"]
+            strength = weapon["STR"]
+            damage = weapon["DMG"]
+            num_attacks = weapon["NB"]
+            ap = weapon["AP"]
         
         p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
         
@@ -373,53 +398,53 @@ class ObservationBuilder:
             game_state
         )
 
-        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
-        if "RNG_RNG" not in attacker:
-            raise KeyError(f"Attacker missing required 'RNG_RNG' field: {attacker}")
-        if "CC_RNG" not in attacker:
-            raise KeyError(f"Attacker missing required 'CC_RNG' field: {attacker}")
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from weapons
+        from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+        max_ranged_range = get_max_ranged_range(attacker)
+        melee_range = get_melee_range()  # Always 1
 
-        can_use_ranged = distance <= attacker["RNG_RNG"]
-        can_use_melee = distance <= attacker["CC_RNG"]
+        can_use_ranged = max_ranged_range > 0 and distance <= max_ranged_range
+        can_use_melee = distance <= melee_range
 
         if not can_use_ranged and not can_use_melee:
             self._danger_probability_cache[cache_key] = 0.0
             return 0.0
 
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use best weapon for this defender
+        from engine.ai.weapon_selector import get_best_weapon_for_target
+        
         if can_use_ranged and not can_use_melee:
-            if "RNG_ATK" not in attacker:
-                raise KeyError(f"Attacker missing required 'RNG_ATK' field: {attacker}")
-            if "RNG_STR" not in attacker:
-                raise KeyError(f"Attacker missing required 'RNG_STR' field: {attacker}")
-            if "RNG_DMG" not in attacker:
-                raise KeyError(f"Attacker missing required 'RNG_DMG' field: {attacker}")
-            if "RNG_NB" not in attacker:
-                raise KeyError(f"Attacker missing required 'RNG_NB' field: {attacker}")
-            if "RNG_AP" not in attacker:
-                raise KeyError(f"Attacker missing required 'RNG_AP' field: {attacker}")
-
-            hit_target = attacker["RNG_ATK"]
-            strength = attacker["RNG_STR"]
-            damage = attacker["RNG_DMG"]
-            num_attacks = attacker["RNG_NB"]
-            ap = attacker["RNG_AP"]
+            # Use best ranged weapon
+            best_weapon_idx, _ = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=True)
+            if best_weapon_idx >= 0 and attacker.get("RNG_WEAPONS"):
+                weapon = attacker["RNG_WEAPONS"][best_weapon_idx]
+            elif attacker.get("RNG_WEAPONS"):
+                weapon = attacker["RNG_WEAPONS"][0]  # Fallback to first weapon
+            else:
+                self._danger_probability_cache[cache_key] = 0.0
+                return 0.0
+            
+            hit_target = weapon["ATK"]
+            strength = weapon["STR"]
+            damage = weapon["DMG"]
+            num_attacks = weapon["NB"]
+            ap = weapon["AP"]
         else:
-            if "CC_ATK" not in attacker:
-                raise KeyError(f"Attacker missing required 'CC_ATK' field: {attacker}")
-            if "CC_STR" not in attacker:
-                raise KeyError(f"Attacker missing required 'CC_STR' field: {attacker}")
-            if "CC_DMG" not in attacker:
-                raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker}")
-            if "CC_NB" not in attacker:
-                raise KeyError(f"Attacker missing required 'CC_NB' field: {attacker}")
-            if "CC_AP" not in attacker:
-                raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker}")
-
-            hit_target = attacker["CC_ATK"]
-            strength = attacker["CC_STR"]
-            damage = attacker["CC_DMG"]
-            num_attacks = attacker["CC_NB"]
-            ap = attacker["CC_AP"]
+            # Use best melee weapon (or if both available, prefer melee if in range)
+            best_weapon_idx, _ = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=False)
+            if best_weapon_idx >= 0 and attacker.get("CC_WEAPONS"):
+                weapon = attacker["CC_WEAPONS"][best_weapon_idx]
+            elif attacker.get("CC_WEAPONS"):
+                weapon = attacker["CC_WEAPONS"][0]  # Fallback to first weapon
+            else:
+                self._danger_probability_cache[cache_key] = 0.0
+                return 0.0
+            
+            hit_target = weapon["ATK"]
+            strength = weapon["STR"]
+            damage = weapon["DMG"]
+            num_attacks = weapon["NB"]
+            ap = weapon["AP"]
         
         if num_attacks == 0:
             self._danger_probability_cache[cache_key] = 0.0
@@ -552,9 +577,15 @@ class ObservationBuilder:
         current_player = game_state["current_player"]
 
         for unit in game_state["units"]:
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
+            has_melee = False
+            if unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
+                # Check if any melee weapon has DMG > 0
+                has_melee = any(w.get("DMG", 0) > 0 for w in unit["CC_WEAPONS"])
+            
             if (unit["player"] == current_player and
                 unit["HP_CUR"] > 0 and
-                unit["CC_DMG"] > 0):  # AI_TURN.md: Direct field access
+                has_melee):  # Has melee capability
 
                 # Charge range check using BFS pathfinding to respect walls
                 distance = calculate_pathfinding_distance(
@@ -585,13 +616,13 @@ class ObservationBuilder:
         Build asymmetric egocentric observation vector with R=25 perception radius.
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
 
-        Structure (300 floats):
+        Structure (313 floats):
         - [0:15]    Global context (15 floats) - includes objective control
-        - [15:23]   Active unit capabilities (8 floats)
-        - [23:55]   Directional terrain (32 floats: 8 directions × 4 features)
-        - [55:127]  Allied units (72 floats: 6 units × 12 features)
-        - [127:265] Enemy units (138 floats: 6 units × 23 features)
-        - [265:300] Valid targets (35 floats: 5 targets × 7 features)
+        - [15:37]   Active unit capabilities (22 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md
+        - [37:69]   Directional terrain (32 floats: 8 directions × 4 features)
+        - [69:141]  Allied units (72 floats: 6 units × 12 features)
+        - [141:273] Enemy units (132 floats: 6 units × 22 features) - OPTIMISÉ
+        - [273:313] Valid targets (40 floats: 5 targets × 8 features)
 
         Asymmetric design: More complete information about enemies than allies.
         Agent discovers optimal tactical combinations through training.
@@ -599,7 +630,7 @@ class ObservationBuilder:
         # PERFORMANCE: Clear per-observation cache (same pairs recalculated multiple times)
         self._danger_probability_cache = {}
 
-        obs = np.zeros(300, dtype=np.float32)
+        obs = np.zeros(self.obs_size, dtype=np.float32)
         
         # Get active unit (agent's current unit)
         active_unit = self._get_active_unit_for_observation(game_state)
@@ -630,27 +661,78 @@ class ObservationBuilder:
         # -1.0 = enemy controls, 0.0 = contested/empty, 1.0 = we control
         self._encode_objective_control(obs, active_unit, game_state, base_idx=10)
 
-        # === SECTION 2: Active Unit Capabilities (8 floats) ===
-        obs[15] = active_unit["MOVE"] / 12.0  # Normalize by max expected (bikes)
-        obs[16] = active_unit["RNG_RNG"] / 24.0
-        obs[17] = active_unit["RNG_DMG"] / 5.0
-        obs[18] = active_unit["RNG_NB"] / 10.0
-        obs[19] = active_unit["CC_RNG"] / 6.0
-        obs[20] = active_unit["CC_DMG"] / 5.0
-        obs[21] = active_unit["T"] / 10.0
-        obs[22] = active_unit["ARMOR_SAVE"] / 6.0
+        # === SECTION 2: Active Unit Capabilities (22 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md ===
+        obs[15] = active_unit.get("MOVE", 0) / 12.0
+
+        # RNG_WEAPONS[0] (3 floats: RNG, DMG, NB)
+        rng_weapons = active_unit.get("RNG_WEAPONS", [])
+        if len(rng_weapons) > 0:
+            obs[16] = rng_weapons[0].get("RNG", 0) / 24.0
+            obs[17] = rng_weapons[0].get("DMG", 0) / 5.0
+            obs[18] = rng_weapons[0].get("NB", 0) / 10.0
+        else:
+            obs[16] = obs[17] = obs[18] = 0.0
+
+        # RNG_WEAPONS[1] (3 floats)
+        if len(rng_weapons) > 1:
+            obs[19] = rng_weapons[1].get("RNG", 0) / 24.0
+            obs[20] = rng_weapons[1].get("DMG", 0) / 5.0
+            obs[21] = rng_weapons[1].get("NB", 0) / 10.0
+        else:
+            obs[19] = obs[20] = obs[21] = 0.0
+
+        # RNG_WEAPONS[2] (3 floats)
+        if len(rng_weapons) > 2:
+            obs[22] = rng_weapons[2].get("RNG", 0) / 24.0
+            obs[23] = rng_weapons[2].get("DMG", 0) / 5.0
+            obs[24] = rng_weapons[2].get("NB", 0) / 10.0
+        else:
+            obs[22] = obs[23] = obs[24] = 0.0
+
+        # CC_WEAPONS[0] (5 floats: NB, ATK, STR, AP, DMG)
+        cc_weapons = active_unit.get("CC_WEAPONS", [])
+        if len(cc_weapons) > 0:
+            obs[25] = cc_weapons[0].get("NB", 0) / 10.0
+            obs[26] = cc_weapons[0].get("ATK", 0) / 6.0
+            obs[27] = cc_weapons[0].get("STR", 0) / 10.0
+            obs[28] = cc_weapons[0].get("AP", 0) / 6.0
+            obs[29] = cc_weapons[0].get("DMG", 0) / 5.0
+        else:
+            obs[25] = obs[26] = obs[27] = obs[28] = obs[29] = 0.0
+
+        # CC_WEAPONS[1] (5 floats)
+        if len(cc_weapons) > 1:
+            obs[30] = cc_weapons[1].get("NB", 0) / 10.0
+            obs[31] = cc_weapons[1].get("ATK", 0) / 6.0
+            obs[32] = cc_weapons[1].get("STR", 0) / 10.0
+            obs[33] = cc_weapons[1].get("AP", 0) / 6.0
+            obs[34] = cc_weapons[1].get("DMG", 0) / 5.0
+        else:
+            obs[30] = obs[31] = obs[32] = obs[33] = obs[34] = 0.0
+
+        obs[35] = active_unit.get("T", 0) / 10.0
+        obs[36] = active_unit.get("ARMOR_SAVE", 0) / 6.0
 
         # === SECTION 3: Directional Terrain Awareness (32 floats) ===
-        self._encode_directional_terrain(obs, active_unit, game_state, base_idx=23)
+        # Global Context: [0:15] = 15 floats
+        # Active Unit Capabilities: [15:37] = 22 floats
+        # base_idx = 15 + 22 = 37
+        self._encode_directional_terrain(obs, active_unit, game_state, base_idx=37)
 
         # === SECTION 4: Allied Units (72 floats) ===
-        self._encode_allied_units(obs, active_unit, game_state, base_idx=55)
+        # Directional Terrain: [37:69] = 32 floats
+        # base_idx = 37 + 32 = 69
+        self._encode_allied_units(obs, active_unit, game_state, base_idx=69)
 
-        # === SECTION 5: Enemy Units (138 floats) ===
-        self._encode_enemy_units(obs, active_unit, game_state, base_idx=127)
+        # === SECTION 5: Enemy Units (132 floats) ===
+        # Allied Units: [69:141] = 72 floats
+        # base_idx = 69 + 72 = 141
+        self._encode_enemy_units(obs, active_unit, game_state, base_idx=141)
 
-        # === SECTION 6: Valid Targets (35 floats) ===
-        self._encode_valid_targets(obs, active_unit, game_state, base_idx=265)
+        # === SECTION 6: Valid Targets (40 floats) ===
+        # Enemy Units: [141:273] = 132 floats (6 × 22 features)
+        # base_idx = 141 + 132 = 273
+        self._encode_valid_targets(obs, active_unit, game_state, base_idx=273)
         
         return obs
     
@@ -886,11 +968,11 @@ class ObservationBuilder:
     def _encode_enemy_units(self, obs: np.ndarray, active_unit: Dict[str, Any], game_state: Dict[str, Any], base_idx: int):
         """
         Encode up to 6 enemy units within perception radius.
-        138 floats = 6 units × 23 features per unit.
+        132 floats = 6 units × 22 features per unit. - MULTIPLE_WEAPONS_IMPLEMENTATION.md
         
         Asymmetric design: MORE complete information about enemies for tactical decisions.
         
-        Features per enemy (23 floats):
+        Features per enemy (22 floats):
         0. relative_col, 1. relative_row (egocentric position)
         2. distance_normalized (distance / perception_radius)
         3. hp_ratio (HP_CUR / HP_MAX)
@@ -898,18 +980,16 @@ class ObservationBuilder:
         5. has_moved, 6. movement_direction (temporal behavior)
         7. has_shot, 8. has_charged, 9. has_attacked
         10. is_valid_target (1.0 if can be shot/attacked now)
-        11. kill_probability (0.0-1.0: chance I kill them this turn)
-        12. danger_to_me (0.0-1.0: chance they kill ME next turn)
-        13. visibility_to_allies (how many allies can see this enemy)
-        14. combined_friendly_threat (total threat from all allies to this enemy)
-        15. can_be_charged_by_melee (1.0 if friendly melee can reach)
-        16. target_type_match (0.0-1.0: matchup quality)
-        17. can_be_meleed (1.0 if I can melee them now)
-        18. is_adjacent (1.0 if within melee range)
-        19. is_in_range (1.0 if within my weapon range)
-        20. combat_mix_score (enemy's ranged/melee preference)
-        21. ranged_favorite_target (enemy's preferred ranged target)
-        22. melee_favorite_target (enemy's preferred melee target)
+        11. best_weapon_index (0-2, normalized / 2.0) - NOUVEAU
+        12. best_kill_probability (0.0-1.0) - NOUVEAU
+        13. danger_to_me (0.0-1.0: chance they kill ME next turn) - DÉCALÉ
+        14. visibility_to_allies (how many allies can see this enemy) - DÉCALÉ
+        15. combined_friendly_threat (total threat from all allies to this enemy) - DÉCALÉ
+        16. melee_charge_preference (0.0-1.0: TTK melee vs range for best ally) - AMÉLIORÉ POST-ÉTAPE 9
+        17. target_efficiency (0.0-1.0: TTK with best weapon) - AMÉLIORÉ POST-ÉTAPE 9
+        18. is_adjacent (1.0 if within melee range) - INCHANGÉ
+        19. combat_mix_score (enemy's ranged/melee preference) - DÉCALÉ
+        20. favorite_target (enemy's preferred target type) - DÉCALÉ
         
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
         """
@@ -945,11 +1025,16 @@ class ObservationBuilder:
             hp_ratio = unit["HP_CUR"] / max(1, unit["HP_MAX"])
 
             # Check if enemy can attack me
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from weapons
+            from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
             can_attack = 0.0
-            if "RNG_RNG" in unit and distance <= unit["RNG_RNG"]:
+            max_range = get_max_ranged_range(unit)
+            if max_range > 0 and distance <= max_range:
                 can_attack = 1.0
-            elif "CC_RNG" in unit and distance <= unit["CC_RNG"]:
-                can_attack = 1.0
+            else:
+                melee_range = get_melee_range()  # Always 1
+                if distance <= melee_range:
+                    can_attack = 1.0
 
             # Priority: wounded (highest), can attack (high), closer (low)
             # More wounded = HIGHER priority for focus fire learning
@@ -965,7 +1050,7 @@ class ObservationBuilder:
         # Encode up to 6 enemies
         max_encoded = 6
         for i in range(max_encoded):
-            feature_base = base_idx + i * 23
+            feature_base = base_idx + i * 22  # Changed from 23 to 22 (removed 2 features)
             
             if i < len(enemies):
                 distance, enemy = enemies[i]
@@ -993,17 +1078,28 @@ class ObservationBuilder:
                 # Feature 10: Is valid target (basic check)
                 current_phase = game_state["phase"]
                 is_valid = 0.0
-                if current_phase == "shoot" and "RNG_RNG" in active_unit:
-                    is_valid = 1.0 if distance <= active_unit["RNG_RNG"] else 0.0
-                elif current_phase == "fight" and "CC_RNG" in active_unit:
-                    is_valid = 1.0 if distance <= active_unit["CC_RNG"] else 0.0
+                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from weapons
+                from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+                if current_phase == "shoot":
+                    max_range = get_max_ranged_range(active_unit)
+                    is_valid = 1.0 if distance <= max_range else 0.0
+                elif current_phase == "fight":
+                    melee_range = get_melee_range()  # Always 1
+                    is_valid = 1.0 if distance <= melee_range else 0.0
                 obs[feature_base + 10] = is_valid
                 
-                # Feature 11-12: Kill probability and danger
-                obs[feature_base + 11] = self._calculate_kill_probability(active_unit, enemy, game_state)
-                obs[feature_base + 12] = self._calculate_danger_probability(active_unit, enemy, game_state)
+                # Feature 11-12: best_weapon_index + best_kill_probability (NOUVEAU)
+                from engine.ai.weapon_selector import get_best_weapon_for_target
+                best_weapon_idx, best_kill_prob = get_best_weapon_for_target(
+                    active_unit, enemy, game_state, is_ranged=True
+                )
+                obs[feature_base + 11] = best_weapon_idx / 2.0 if best_weapon_idx >= 0 else 0.0
+                obs[feature_base + 12] = best_kill_prob
                 
-                # Feature 13-14: Allied coordination
+                # Feature 13: danger_to_me (était feature 12) - DÉCALÉ
+                obs[feature_base + 13] = self._calculate_danger_probability(active_unit, enemy, game_state)
+                
+                # Features 14-16: Allied coordination (3 floats, était 13-15) - DÉCALÉ
                 visibility = 0.0
                 combined_threat = 0.0
                 for ally in game_state["units"]:
@@ -1011,31 +1107,105 @@ class ObservationBuilder:
                         if self._check_los_cached(ally, enemy, game_state) > 0.5:
                             visibility += 1.0
                         combined_threat += self._calculate_danger_probability(enemy, ally, game_state)
-                obs[feature_base + 13] = min(1.0, visibility / 6.0)
-                obs[feature_base + 14] = min(1.0, combined_threat / 5.0)
+                obs[feature_base + 14] = min(1.0, visibility / 6.0)  # visibility_to_allies (était feature 13)
+                obs[feature_base + 15] = min(1.0, combined_threat / 5.0)  # combined_friendly_threat (était feature 14)
                 
-                # Feature 15-19: Tactical flags
-                obs[feature_base + 15] = 1.0 if self._can_melee_units_charge_target(enemy, game_state) else 0.0
-                obs[feature_base + 16] = self._calculate_target_type_match(active_unit, enemy)
-                obs[feature_base + 17] = 1.0 if ("CC_RNG" in active_unit and distance <= active_unit["CC_RNG"]) else 0.0
+                # Feature 16: melee_charge_preference (0.0-1.0) - AMÉLIORÉ POST-ÉTAPE 9
+                # Compare TTK melee vs TTK range pour le meilleur allié melee
+                # 1.0 = melee est beaucoup plus efficace (charge préféré)
+                # 0.0 = range est plus efficace (ne chargerait pas)
+                # 0.5 = équivalent
+                from engine.ai.weapon_selector import get_best_weapon_for_target, calculate_ttk_with_weapon
+                best_melee_ally = None
+                best_melee_ttk = float('inf')
+                best_range_ttk = float('inf')
+                
+                current_player = game_state["current_player"]
+                for ally in game_state["units"]:
+                    if (ally["player"] == current_player and 
+                        ally["HP_CUR"] > 0 and
+                        ally.get("CC_WEAPONS") and len(ally["CC_WEAPONS"]) > 0 and  # A des armes melee
+                        ally.get("RNG_WEAPONS") and len(ally["RNG_WEAPONS"]) > 0):  # A aussi des armes range
+                        
+                        # Vérifier si peut charger (distance)
+                        ally_distance = calculate_pathfinding_distance(
+                            ally["col"], ally["row"],
+                            enemy["col"], enemy["row"],
+                            game_state
+                        )
+                        if "MOVE" not in ally:
+                            raise KeyError(f"Unit missing required 'MOVE' field: {ally}")
+                        max_charge_range = ally["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
+                        
+                        if ally_distance <= max_charge_range:
+                            # TTK avec meilleure arme melee
+                            best_melee_weapon_idx, _ = get_best_weapon_for_target(
+                                ally, enemy, game_state, is_ranged=False
+                            )
+                            melee_ttk = 100.0
+                            if best_melee_weapon_idx >= 0:
+                                melee_weapon = ally["CC_WEAPONS"][best_melee_weapon_idx]
+                                melee_ttk = calculate_ttk_with_weapon(ally, melee_weapon, enemy, game_state)
+                            
+                            # TTK avec meilleure arme range
+                            best_range_weapon_idx, _ = get_best_weapon_for_target(
+                                ally, enemy, game_state, is_ranged=True
+                            )
+                            range_ttk = 100.0
+                            if best_range_weapon_idx >= 0:
+                                range_weapon = ally["RNG_WEAPONS"][best_range_weapon_idx]
+                                range_ttk = calculate_ttk_with_weapon(ally, range_weapon, enemy, game_state)
+                            
+                            if melee_ttk < best_melee_ttk:
+                                best_melee_ally = ally
+                                best_melee_ttk = melee_ttk
+                                best_range_ttk = range_ttk
+                
+                if best_melee_ally and best_range_ttk > 0:
+                    # Normaliser: 1.0 si melee 2x plus rapide, 0.0 si range 2x plus rapide
+                    ratio = best_range_ttk / best_melee_ttk if best_melee_ttk > 0 else 0.0
+                    # Ratio > 1.0 = melee plus rapide (préféré)
+                    # Ratio < 1.0 = range plus rapide (ne chargerait pas)
+                    # Normaliser: (ratio - 0.5) * 2.0 maps 0.5->0.0, 1.0->1.0, 2.0->3.0 (clamp to 1.0)
+                    obs[feature_base + 16] = min(1.0, max(0.0, (ratio - 0.5) * 2.0))
+                else:
+                    obs[feature_base + 16] = 0.0  # Pas d'allié melee ou pas de comparaison possible
+                
+                # Feature 17: target_efficiency (0.0-1.0) - AMÉLIORÉ POST-ÉTAPE 9
+                # TTK avec ma meilleure arme contre cette cible
+                # Normalisé: 1.0 = je peux tuer en 1 tour, 0.0 = je ne peux pas tuer (ou très lent)
+                best_weapon_idx, _ = get_best_weapon_for_target(
+                    active_unit, enemy, game_state, is_ranged=True
+                )
+                
+                if best_weapon_idx >= 0 and active_unit.get("RNG_WEAPONS"):
+                    weapon = active_unit["RNG_WEAPONS"][best_weapon_idx]
+                    ttk = calculate_ttk_with_weapon(active_unit, weapon, enemy, game_state)
+                    # Normaliser: 1.0 = ttk ≤ 1, 0.0 = ttk ≥ 5
+                    obs[feature_base + 17] = max(0.0, min(1.0, 1.0 - (ttk - 1.0) / 4.0))
+                else:
+                    # Pas d'armes ranged, essayer melee
+                    best_melee_weapon_idx, _ = get_best_weapon_for_target(
+                        active_unit, enemy, game_state, is_ranged=False
+                    )
+                    if best_melee_weapon_idx >= 0 and active_unit.get("CC_WEAPONS"):
+                        weapon = active_unit["CC_WEAPONS"][best_melee_weapon_idx]
+                        ttk = calculate_ttk_with_weapon(active_unit, weapon, enemy, game_state)
+                        obs[feature_base + 17] = max(0.0, min(1.0, 1.0 - (ttk - 1.0) / 4.0))
+                    else:
+                        obs[feature_base + 17] = 0.0  # Pas d'armes disponibles
+                
+                # Feature 18: is_adjacent (était feature 18 originale) - INCHANGÉ
                 obs[feature_base + 18] = 1.0 if distance <= 1 else 0.0
                 
-                in_range = 0.0
-                if "RNG_RNG" in active_unit and distance <= active_unit["RNG_RNG"]:
-                    in_range = 1.0
-                elif "CC_RNG" in active_unit and distance <= active_unit["CC_RNG"]:
-                    in_range = 1.0
-                obs[feature_base + 19] = in_range
-                
-                # Feature 20-22: Enemy capabilities
-                obs[feature_base + 20] = self._calculate_combat_mix_score(enemy)
-                # PERFORMANCE: Calculate once, use twice (was called twice per enemy)
+                # Features 19-20: Enemy capabilities (2 floats, était 20-22) - DÉCALÉ
+                obs[feature_base + 19] = self._calculate_combat_mix_score(enemy)
+                # PERFORMANCE: Calculate once, use once (was used twice, now only once)
                 enemy_fav_target = self._calculate_favorite_target(enemy)
-                obs[feature_base + 21] = enemy_fav_target
-                obs[feature_base + 22] = enemy_fav_target
+                obs[feature_base + 20] = enemy_fav_target
             else:
                 # Padding for empty slots
-                for j in range(23):
+                for j in range(22):  # Changed from 23 to 22 (removed 2 features)
                     obs[feature_base + j] = 0.0
         # Get all units within perception radius
         nearby_units = []
@@ -1092,14 +1262,16 @@ class ObservationBuilder:
                 is_enemy = 1.0 if unit["player"] != active_unit["player"] else 0.0
                 
                 # Threat calculation (potential damage to active unit)
-                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-                if "RNG_DMG" not in unit:
-                    raise KeyError(f"Nearby unit missing required 'RNG_DMG' field: {unit}")
-                if "CC_DMG" not in unit:
-                    raise KeyError(f"Nearby unit missing required 'CC_DMG' field: {unit}")
+                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max damage from all weapons
+                from shared.data_validation import require_key
+                rng_weapons = unit.get("RNG_WEAPONS", [])
+                cc_weapons = unit.get("CC_WEAPONS", [])
+                
+                max_rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
+                max_cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
                 
                 if is_enemy > 0.5:
-                    threat = max(unit["RNG_DMG"], unit["CC_DMG"]) / 5.0
+                    threat = max(max_rng_dmg, max_cc_dmg) / 5.0
                 else:
                     threat = 0.0
                 
@@ -1107,13 +1279,12 @@ class ObservationBuilder:
                 defensive_type = self._encode_defensive_type(unit)
                 
                 # Offensive type encoding (Melee=0.0, Ranged=1.0)
-                # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-                if "RNG_RNG" not in unit:
-                    raise KeyError(f"Nearby unit missing required 'RNG_RNG' field: {unit}")
-                if "CC_RNG" not in unit:
-                    raise KeyError(f"Nearby unit missing required 'CC_RNG' field: {unit}")
+                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+                from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
+                max_rng_range = get_max_ranged_range(unit)
+                melee_range = get_melee_range()  # Always 1
                 
-                offensive_type = 1.0 if unit["RNG_RNG"] > unit["CC_RNG"] else 0.0
+                offensive_type = 1.0 if max_rng_range > melee_range else 0.0
                 
                 # LoS check using cache
                 has_los = self._check_los_cached(active_unit, unit, game_state)
@@ -1140,26 +1311,25 @@ class ObservationBuilder:
     def _encode_valid_targets(self, obs: np.ndarray, active_unit: Dict[str, Any], game_state: Dict[str, Any], base_idx: int):
         """
         Encode valid targets with EXPLICIT action-target correspondence and W40K probabilities.
-        35 floats = 5 actions × 7 features per action
+        40 floats = 5 actions × 8 features per action - MULTIPLE_WEAPONS_IMPLEMENTATION.md
         
-        SIMPLIFIED from 9 to 7 features (removed redundant features with enemy section).
-        
-        CRITICAL DESIGN: obs[260 + action_offset*7] directly corresponds to action (4 + action_offset)
+        CRITICAL DESIGN: obs[273 + action_offset*8] directly corresponds to action (4 + action_offset)
         Example: 
-        - obs[260:267] = features for what happens if agent presses action 4
-        - obs[267:274] = features for what happens if agent presses action 5
+        - obs[273:281] = features for what happens if agent presses action 4
+        - obs[281:289] = features for what happens if agent presses action 5
         
         This creates DIRECT causal relationship for RL learning:
-        "When obs[261]=1.0 (high kill_probability), pressing action 4 gives high reward"
+        "When obs[274]=1.0 (high kill_probability), pressing action 4 gives high reward"
         
-        Features per action slot (7 floats) - CORE TACTICAL ESSENTIALS:
+        Features per action slot (8 floats) - CORE TACTICAL ESSENTIALS:
         0. is_valid (1.0 = target exists, 0.0 = no target in this slot)
-        1. kill_probability (0.0-1.0, probability to kill target this turn considering dice)
-        2. danger_to_me (0.0-1.0, probability target kills ME next turn)
-        3. enemy_index (0-5: which enemy in obs[122:260] this action targets)
-        4. distance_normalized (hex_distance / perception_radius)
-        5. is_priority_target (1.0 if moved toward me, high threat)
-        6. coordination_bonus (1.0 if friendly melee can charge after I shoot)
+        1. best_weapon_index (0-2, normalisé / 2.0) - NOUVEAU
+        2. best_kill_probability (0.0-1.0) - NOUVEAU, remplace ancien feature 1
+        3. danger_to_me (0.0-1.0, probability target kills ME next turn) - DÉCALÉ
+        4. enemy_index (0-5: which enemy in obs[141:273] this action targets) - DÉCALÉ
+        5. distance_normalized (hex_distance / perception_radius) - DÉCALÉ
+        6. is_priority_target (1.0 if moved toward me, high threat) - DÉCALÉ
+        7. coordination_bonus (1.0 if friendly melee can charge after I shoot) - DÉCALÉ
         """
         perception_radius = self.perception_radius
         
@@ -1213,10 +1383,10 @@ class ObservationBuilder:
                         valid_targets.append(enemy)
         
         elif current_phase == "fight":
-            # Get valid melee targets (enemies within CC_RNG)
-            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-            if "CC_RNG" not in active_unit:
-                raise KeyError(f"Active unit missing required 'CC_RNG' field: {active_unit}")
+            # Get valid melee targets (enemies within melee range)
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
+            from engine.utils.weapon_helpers import get_melee_range
+            melee_range = get_melee_range()  # Always 1
 
             for enemy in game_state["units"]:
                 if "player" not in enemy or "HP_CUR" not in enemy:
@@ -1226,14 +1396,14 @@ class ObservationBuilder:
                     if "col" not in enemy or "row" not in enemy:
                         raise KeyError(f"Enemy unit missing required position fields: {enemy}")
 
-                    # CC_RNG is typically 1 (adjacent), so pathfinding vs hex distance
+                    # Melee range is always 1 (adjacent), so pathfinding vs hex distance
                     # is equivalent for melee. Use hex distance for performance.
                     distance = calculate_hex_distance(
                         active_unit["col"], active_unit["row"],
                         enemy["col"], enemy["row"]
                     )
 
-                    if distance <= active_unit["CC_RNG"]:
+                    if distance <= melee_range:
                         valid_targets.append(enemy)
         
         # Sort by priority: VALUE / turns_to_kill (strategic efficiency)
@@ -1251,22 +1421,30 @@ class ObservationBuilder:
             target_value = target["VALUE"]
 
             # Calculate activations needed to kill this target
-            if "RNG_NB" not in active_unit:
-                raise KeyError(f"Active unit missing required 'RNG_NB' field: {active_unit}")
-            if "RNG_ATK" not in active_unit:
-                raise KeyError(f"Active unit missing required 'RNG_ATK' field: {active_unit}")
-            if "RNG_STR" not in active_unit:
-                raise KeyError(f"Active unit missing required 'RNG_STR' field: {active_unit}")
-            if "RNG_AP" not in active_unit:
-                raise KeyError(f"Active unit missing required 'RNG_AP' field: {active_unit}")
-            if "RNG_DMG" not in active_unit:
-                raise KeyError(f"Active unit missing required 'RNG_DMG' field: {active_unit}")
-
-            unit_attacks = active_unit["RNG_NB"]
-            unit_bs = active_unit["RNG_ATK"]
-            unit_s = active_unit["RNG_STR"]
-            unit_ap = active_unit["RNG_AP"]
-            unit_dmg = active_unit["RNG_DMG"]
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or best weapon for target
+            from engine.utils.weapon_helpers import get_selected_ranged_weapon
+            from engine.ai.weapon_selector import get_best_weapon_for_target
+            
+            # Get best weapon for this target (for priority calculation)
+            best_weapon_idx, _ = get_best_weapon_for_target(active_unit, target, game_state, is_ranged=True)
+            if best_weapon_idx >= 0 and active_unit.get("RNG_WEAPONS"):
+                weapon = active_unit["RNG_WEAPONS"][best_weapon_idx]
+            else:
+                # Fallback to selected weapon or first weapon
+                selected_weapon = get_selected_ranged_weapon(active_unit)
+                if selected_weapon:
+                    weapon = selected_weapon
+                elif active_unit.get("RNG_WEAPONS"):
+                    weapon = active_unit["RNG_WEAPONS"][0]
+                else:
+                    # No ranged weapons - can't calculate priority
+                    return 0.0
+            
+            unit_attacks = weapon["NB"]
+            unit_bs = weapon["ATK"]
+            unit_s = weapon["STR"]
+            unit_ap = weapon["AP"]
+            unit_dmg = weapon["DMG"]
 
             if "T" not in target:
                 raise KeyError(f"Target missing required 'T' field: {target}")
@@ -1336,10 +1514,10 @@ class ObservationBuilder:
         for idx, enemy in enumerate(enemy_list[:6]):
             enemy_index_map[enemy["id"]] = idx
         
-        # Encode up to max_valid_targets (5 targets × 7 features = 35 floats)
+        # Encode up to max_valid_targets (5 targets × 8 features = 40 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md
         max_encoded = 5
         for i in range(max_encoded):
-            feature_base = base_idx + i * 7
+            feature_base = base_idx + i * 8
             
             if i < len(valid_targets):
                 target = valid_targets[i]
@@ -1347,38 +1525,44 @@ class ObservationBuilder:
                 # Feature 0: Action validity (CRITICAL - tells agent this action works)
                 obs[feature_base + 0] = 1.0
                 
-                # Feature 1: Kill probability (W40K dice mechanics)
-                kill_prob = self._calculate_kill_probability(active_unit, target, game_state)
-                obs[feature_base + 1] = kill_prob
+                # Feature 1: best_weapon_index (NOUVEAU, 0-2, normalisé / 2.0)
+                from engine.ai.weapon_selector import get_best_weapon_for_target
+                best_weapon_idx, best_kill_prob = get_best_weapon_for_target(
+                    active_unit, target, game_state, is_ranged=True
+                )
+                obs[feature_base + 1] = best_weapon_idx / 2.0 if best_weapon_idx >= 0 else 0.0
                 
-                # Feature 2: Danger to me (probability target kills ME next turn)
+                # Feature 2: best_kill_probability (NOUVEAU, remplace ancien feature 1)
+                obs[feature_base + 2] = best_kill_prob
+                
+                # Feature 3: Danger to me (probability target kills ME next turn) - DÉCALÉ
                 danger_prob = self._calculate_danger_probability(active_unit, target, game_state)
-                obs[feature_base + 2] = danger_prob
+                obs[feature_base + 3] = danger_prob
                 
-                # Feature 3: Enemy index (reference to obs[122:260])
+                # Feature 4: Enemy index (reference to obs[141:273]) - DÉCALÉ
                 enemy_idx = enemy_index_map.get(target["id"], 0)
-                obs[feature_base + 3] = enemy_idx / 5.0
+                obs[feature_base + 4] = enemy_idx / 5.0
                 
-                # Feature 4: Distance (accessibility)
+                # Feature 5: Distance (accessibility) - DÉCALÉ
                 distance = calculate_hex_distance(
                     active_unit["col"], active_unit["row"],
                     target["col"], target["row"]
                 )
-                obs[feature_base + 4] = distance / perception_radius
+                obs[feature_base + 5] = distance / perception_radius
                 
-                # Feature 5: Is priority target (moved toward me + high threat)
+                # Feature 6: Is priority target (moved toward me + high threat) - DÉCALÉ
                 movement_dir = self._calculate_movement_direction(target, active_unit)
                 is_approaching = 1.0 if movement_dir > 0.75 else 0.0
                 danger = self._calculate_danger_probability(active_unit, target, game_state)
                 is_priority = 1.0 if (is_approaching > 0.5 and danger > 0.5) else 0.0
-                obs[feature_base + 5] = is_priority
+                obs[feature_base + 6] = is_priority
                 
-                # Feature 6: Coordination bonus (can friendly melee charge after I shoot)
+                # Feature 7: Coordination bonus (can friendly melee charge after I shoot) - DÉCALÉ
                 can_be_charged = 1.0 if self._can_melee_units_charge_target(target, game_state) else 0.0
-                obs[feature_base + 6] = can_be_charged
+                obs[feature_base + 7] = can_be_charged
             else:
                 # Padding for empty slots
-                for j in range(7):
+                for j in range(8):
                     obs[feature_base + j] = 0.0
     
     def _encode_defensive_type(self, unit: Dict[str, Any]) -> float:

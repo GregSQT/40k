@@ -37,6 +37,7 @@ class LogEntryParams(TypedDict, total=False):
     shootDetails: Optional[List[Dict]]
     reward: Optional[float]
     actionName: Optional[str]
+    weaponName: Optional[str]  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
 
 class BaseLogEntry:
     """Base log entry structure - used by both PvP and Replay"""
@@ -79,7 +80,7 @@ class BaseLogEntry:
         optional_fields = [
             "turnNumber", "phase", "unitType", "unitId", 
             "targetUnitType", "targetUnitId", "player", 
-            "startHex", "endHex", "shootDetails"
+            "startHex", "endHex", "shootDetails", "weaponName"  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
         ]
         
         for field in optional_fields:

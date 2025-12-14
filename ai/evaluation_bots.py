@@ -485,7 +485,9 @@ class TacticalBot:
     def _find_best_offensive_position(self, unit: Dict, destinations: List[Tuple[int, int]],
                                        target: Dict, game_state: Dict) -> Tuple[int, int]:
         """Find position closest to target but within shooting range."""
-        rng_rng = unit.get('RNG_RNG', 12)
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+        from engine.utils.weapon_helpers import get_max_ranged_range
+        rng_rng = get_max_ranged_range(unit) if unit.get('RNG_WEAPONS') else 0
         best_pos = destinations[0]
         best_dist = float('inf')
 

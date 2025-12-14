@@ -591,10 +591,15 @@ obs[36] = active_unit.get("ARMOR_SAVE", 0) / 6.0
 - Features 11-12: `best_weapon_index` + `best_kill_probability` (2 floats) - **NOUVEAU, REMPLACE feature 11**
 - Feature 13: `danger_to_me` (était feature 12) - **DÉCALÉ**
 - Features 14-16: Allied coordination (3 floats, était 13-15) - **DÉCALÉ**
-- Feature 17: `can_melee_units_charge_target` (était feature 15) - **DÉCALÉ**
-- Feature 18: `target_type_match` (était feature 16) - **DÉCALÉ**
-- Feature 19: `is_adjacent` (était feature 18) - **DÉCALÉ**
-- Features 20-21: Enemy capabilities (2 floats, était 20-22) - **DÉCALÉ**
+  - Feature 14: `visibility_to_allies` (était feature 13)
+  - Feature 15: `combined_friendly_threat` (était feature 14)
+  - Feature 16: `melee_charge_preference` (était feature 15 `can_be_charged_by_melee`) - **AMÉLIORÉ POST-ÉTAPE 9**
+- ~~Feature 17 originale: `can_melee_units_charge_target`~~ - **SUPPRIMÉ** (redondant avec Feature 16 améliorée)
+- Feature 17: `target_efficiency` (était feature 16 `target_type_match`) - **AMÉLIORÉ POST-ÉTAPE 9**
+- Feature 18: `is_adjacent` (était feature 18 originale) - **INCHANGÉ**
+- Features 19-20: Enemy capabilities (2 floats, était 20-22) - **DÉCALÉ**
+
+**Note:** Features 16 et 17 seront améliorées après l'étape 9 (voir section "AMÉLIORATIONS POST-ÉTAPE 9" ci-dessous).
 
 **Modifications:**
 - [ ] **Ligne 968:** Changer `feature_base = base_idx + i * 23` → `feature_base = base_idx + i * 22`
@@ -613,10 +618,200 @@ obs[36] = active_unit.get("ARMOR_SAVE", 0) / 6.0
 - [ ] **Réindexer toutes les features suivantes:**
   - Feature 12 (`danger_to_me`) → Feature 13
   - Features 13-15 (Allied coordination) → Features 14-16
-  - Feature 15 (`can_melee_units_charge_target`) → Feature 17
-  - Feature 16 (`target_type_match`) → Feature 18
-  - Feature 18 (`is_adjacent`) → Feature 19
-  - Features 20-22 (Enemy capabilities) → Features 20-21
+    - Feature 13 → Feature 14 (`visibility_to_allies`)
+    - Feature 14 → Feature 15 (`combined_friendly_threat`)
+    - Feature 15 → Feature 16 (`melee_charge_preference`, amélioré post-étape 9)
+  - Feature 17 originale (`can_melee_units_charge_target`) → **SUPPRIMÉ** (redondant avec Feature 16 améliorée)
+  - Feature 16 (`target_type_match`) → Feature 17 (`target_efficiency`, amélioré post-étape 9)
+  - Feature 18 (`is_adjacent`) → Feature 18 (inchangé)
+  - Features 20-22 (Enemy capabilities) → Features 19-20 (2 floats)
+
+#### ⚠️ AMÉLIORATIONS POST-ÉTAPE 9 (À FAIRE APRÈS CRÉATION DE `weapon_selector.py`)
+
+**Note:** Ces améliorations nécessitent `weapon_selector.py` (créé à l'étape 7) et les fonctions de calcul TTK. Elles doivent être implémentées **APRÈS** l'étape 9 (calculateur de récompenses) car elles utilisent `_calculate_turns_to_kill()` de `reward_calculator.py`.
+
+##### Feature 16: `melee_charge_preference` (remplace `can_be_charged_by_melee`)
+
+**Problème actuel:** Feature 15 originale (`can_be_charged_by_melee`) vérifie uniquement si un allié melee peut charger (distance), mais ne vérifie pas si l'allié est vraiment melee ou si charger est tactiquement avantageux.
+
+**Amélioration proposée:** Comparer Time-To-Kill (TTK) melee vs range pour le meilleur allié melee, pour déterminer si charger est préféré.
+
+**Code à implémenter:**
+```python
+# Feature 16: melee_charge_preference (0.0-1.0)
+# Compare TTK melee vs TTK range pour le meilleur allié melee
+# 1.0 = melee est beaucoup plus efficace (charge préféré)
+# 0.0 = range est plus efficace (ne chargerait pas)
+# 0.5 = équivalent
+
+from engine.utils.weapon_helpers import get_selected_melee_weapon, get_selected_ranged_weapon
+from engine.ai.weapon_selector import get_best_weapon_for_target
+from engine.reward_calculator import RewardCalculator
+from engine.combat_utils import calculate_pathfinding_distance
+
+reward_calc = RewardCalculator()  # Instance pour accès à _calculate_turns_to_kill
+best_melee_ally = None
+best_melee_ttk = float('inf')
+best_range_ttk = float('inf')
+
+current_player = game_state["current_player"]
+for ally in game_state["units"]:
+    if (ally["player"] == current_player and 
+        ally["HP_CUR"] > 0 and
+        ally.get("CC_WEAPONS") and len(ally["CC_WEAPONS"]) > 0 and  # A des armes melee
+        ally.get("RNG_WEAPONS") and len(ally["RNG_WEAPONS"]) > 0):  # A aussi des armes range
+        
+        # Vérifier si peut charger (distance)
+        distance = calculate_pathfinding_distance(
+            ally["col"], ally["row"],
+            enemy["col"], enemy["row"],
+            game_state
+        )
+        if "MOVE" not in ally:
+            raise KeyError(f"Unit missing required 'MOVE' field: {ally}")
+        max_charge_range = ally["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
+        
+        if distance <= max_charge_range:
+            # TTK avec meilleure arme melee
+            best_melee_weapon_idx, _ = get_best_weapon_for_target(
+                ally, enemy, game_state, is_ranged=False
+            )
+            if best_melee_weapon_idx >= 0:
+                melee_weapon = ally["CC_WEAPONS"][best_melee_weapon_idx]
+                # Calculer expected damage avec arme melee
+                # Utiliser calculate_kill_probability pour obtenir expected_damage
+                from engine.ai.weapon_selector import calculate_kill_probability
+                # Note: calculate_kill_probability retourne probabilité, pas TTK
+                # Utiliser reward_calc._calculate_turns_to_kill() avec arme temporaire
+                # OU créer fonction calculate_ttk_with_weapon(unit, weapon, target, game_state)
+                melee_ttk = reward_calc._calculate_turns_to_kill(ally, enemy, game_state)
+                # TODO: Adapter pour utiliser arme melee spécifique
+                
+            # TTK avec meilleure arme range
+            best_range_weapon_idx, _ = get_best_weapon_for_target(
+                ally, enemy, game_state, is_ranged=True
+            )
+            if best_range_weapon_idx >= 0:
+                range_ttk = reward_calc._calculate_turns_to_kill(ally, enemy, game_state)
+                # TODO: Adapter pour utiliser arme range spécifique
+            
+            if melee_ttk < best_melee_ttk:
+                best_melee_ally = ally
+                best_melee_ttk = melee_ttk
+                best_range_ttk = range_ttk
+
+if best_melee_ally and best_range_ttk > 0:
+    # Normaliser: 1.0 si melee 2x plus rapide, 0.0 si range 2x plus rapide
+    ratio = best_range_ttk / best_melee_ttk if best_melee_ttk > 0 else 0.0
+    # Ratio > 1.0 = melee plus rapide (préféré)
+    # Ratio < 1.0 = range plus rapide (ne chargerait pas)
+    obs[feature_base + 16] = min(1.0, max(0.0, (ratio - 0.5) * 2.0))
+else:
+    obs[feature_base + 16] = 0.0  # Pas d'allié melee ou pas de comparaison possible
+```
+
+**Note d'implémentation:** 
+- Nécessite fonction `calculate_ttk_with_weapon(unit, weapon, target, game_state)` dans `weapon_selector.py` ou `reward_calculator.py`
+- Alternative: Créer fonction helper qui calcule TTK avec une arme spécifique (pas juste l'arme sélectionnée)
+
+##### Feature 17: `target_efficiency` (remplace `target_type_match`)
+
+**Problème actuel:** Feature 16 originale (`target_type_match`) parse `unitType` statiquement (ex: "RangedSwarm" → préfère swarm), ne tient pas compte de l'état réel (HP, distance, armes disponibles).
+
+**Amélioration proposée:** Utiliser Time-To-Kill (TTK) avec la meilleure arme contre cette cible pour mesurer l'efficacité réelle.
+
+**Code à implémenter:**
+```python
+# Feature 17: target_efficiency (0.0-1.0)
+# TTK avec ma meilleure arme contre cette cible
+# Normalisé: 1.0 = je peux tuer en 1 tour, 0.0 = je ne peux pas tuer (ou très lent)
+
+from engine.ai.weapon_selector import get_best_weapon_for_target, calculate_kill_probability
+from engine.reward_calculator import RewardCalculator
+
+reward_calc = RewardCalculator()
+
+best_weapon_idx, best_kill_prob = get_best_weapon_for_target(
+    active_unit, enemy, game_state, is_ranged=True
+)
+
+if best_weapon_idx >= 0:
+    weapon = active_unit["RNG_WEAPONS"][best_weapon_idx]
+    
+    # Calculer TTK avec cette arme spécifique
+    # Option 1: Utiliser calculate_kill_probability pour obtenir expected_damage
+    kill_prob = calculate_kill_probability(active_unit, weapon, enemy, game_state)
+    
+    # Option 2: Calculer expected_damage directement depuis weapon stats
+    # (même logique que calculate_kill_probability mais retourner expected_damage)
+    # OU créer fonction calculate_expected_damage_with_weapon(weapon, target, game_state)
+    
+    # Pour l'instant, utiliser reward_calc._calculate_turns_to_kill() avec arme temporaire
+    # TODO: Créer fonction calculate_ttk_with_weapon(unit, weapon, target, game_state)
+    ttk = reward_calc._calculate_turns_to_kill(active_unit, enemy, game_state)
+    # TODO: Adapter pour utiliser weapon spécifique
+    
+    # Normaliser: 1.0 = ttk ≤ 1, 0.0 = ttk ≥ 5
+    obs[feature_base + 17] = max(0.0, min(1.0, 1.0 - (ttk - 1.0) / 4.0))
+else:
+    obs[feature_base + 17] = 0.0  # Pas d'armes disponibles
+```
+
+**Note d'implémentation:**
+- Nécessite fonction `calculate_ttk_with_weapon(unit, weapon, target, game_state)` dans `weapon_selector.py` ou `reward_calculator.py`
+- Alternative: Utiliser `calculate_kill_probability` pour obtenir expected_damage, puis calculer TTK = `target["HP_CUR"] / expected_damage`
+
+**Fonction helper recommandée à ajouter dans `weapon_selector.py`:**
+```python
+def calculate_ttk_with_weapon(unit: Dict[str, Any], weapon: Dict[str, Any],
+                              target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
+    """
+    Calculate Time-To-Kill (turns) for a specific weapon against a target.
+    Returns: Number of turns (activations) needed to kill target, or 100.0 if can't kill.
+    """
+    from shared.data_validation import require_key
+    
+    # Calculer expected_damage avec cette arme
+    hit_target = require_key(weapon, "ATK")
+    strength = require_key(weapon, "STR")
+    damage = require_key(weapon, "DMG")
+    num_attacks = require_key(weapon, "NB")
+    ap = require_key(weapon, "AP")
+    
+    # Calculs W40K standard
+    p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
+    
+    toughness = require_key(target, "T")
+    if strength >= toughness * 2:
+        p_wound = 5/6
+    elif strength > toughness:
+        p_wound = 4/6
+    elif strength == toughness:
+        p_wound = 3/6
+    else:
+        p_wound = 2/6
+    
+    armor_save = target.get("ARMOR_SAVE", 7)
+    invul_save = target.get("INVUL_SAVE", 7)
+    save_target = min(armor_save - ap, invul_save)
+    p_fail_save = max(0.0, min(1.0, (save_target - 1) / 6.0))
+    
+    # Expected damage
+    p_damage_per_attack = p_hit * p_wound * p_fail_save
+    expected_damage = num_attacks * p_damage_per_attack * damage
+    
+    if expected_damage <= 0:
+        return 100.0  # Can't kill
+    
+    hp_cur = require_key(target, "HP_CUR")
+    return hp_cur / expected_damage
+```
+
+**Ordre d'implémentation:**
+1. ✅ Créer `weapon_selector.py` avec `calculate_kill_probability()` (étape 7)
+2. ✅ Créer `calculate_ttk_with_weapon()` dans `weapon_selector.py` (après étape 7)
+3. ✅ Implémenter Feature 16 améliorée (`melee_charge_preference`) dans `observation_builder.py` (après étape 9)
+4. ✅ Implémenter Feature 17 améliorée (`target_efficiency`) dans `observation_builder.py` (après étape 9)
 
 #### Valid Targets [273:313] - 40 floats (5 cibles × 8 features)
 
@@ -1306,6 +1501,62 @@ obs[base + 7] = coordination_bonus
 - ✅ Réutilisable partout
 - ✅ Pas de dépendance sur RewardCalculator ou ObservationBuilder
 - ✅ Code complet fourni
+
+### Enemy Units Features - Améliorations Tactiques
+**Décision:** Améliorer Feature 16 et Feature 17 (anciennes Features 15 et 16) avec calculs Time-To-Kill (TTK) au lieu de valeurs statiques.
+
+#### Feature 16: `melee_charge_preference` (remplace `can_be_charged_by_melee`)
+**Problème identifié:**
+- Feature 15 originale (`can_be_charged_by_melee`) vérifiait uniquement si un allié melee peut charger (distance)
+- Ne vérifiait pas si l'allié est vraiment melee (peut avoir `CC_DMG > 0` mais être principalement ranged)
+- Ne vérifiait pas si charger est tactiquement avantageux
+
+**Choix fait:**
+- ✅ Remplacer par comparaison TTK melee vs range pour le meilleur allié melee
+- ✅ Indique si charger est préféré (1.0 = melee beaucoup plus efficace, 0.0 = range plus efficace)
+- ✅ Plus informatif: indique l'avantage tactique réel, pas juste la possibilité
+- ✅ Plus précis: filtre les unités vraiment melee
+
+**Implémentation:**
+- Nécessite `weapon_selector.py` (créé étape 7) et fonctions TTK de `reward_calculator.py`
+- À implémenter **APRÈS étape 9** (calculateur de récompenses)
+- Code complet fourni dans section 8 "AMÉLIORATIONS POST-ÉTAPE 9"
+
+#### Feature 17: `target_efficiency` (remplace `target_type_match`)
+**Problème identifié:**
+- Feature 16 originale (`target_type_match`) parse `unitType` statiquement (ex: "RangedSwarm" → préfère swarm)
+- Ne tient pas compte de l'état réel (HP, distance, armes disponibles)
+- Valeur binaire (1.0 ou 0.3) basée uniquement sur type d'unité
+
+**Choix fait:**
+- ✅ Remplacer par TTK avec la meilleure arme contre cette cible
+- ✅ Plus dynamique: s'adapte à la situation réelle
+- ✅ Plus précis: tient compte des armes disponibles et de l'état de la cible
+- ✅ Valeur continue (0.0-1.0) normalisée: 1.0 = tuer en 1 tour, 0.0 = très lent/impossible
+
+**Implémentation:**
+- Nécessite `weapon_selector.py` (créé étape 7) et fonctions TTK de `reward_calculator.py`
+- À implémenter **APRÈS étape 9** (calculateur de récompenses)
+- Code complet fourni dans section 8 "AMÉLIORATIONS POST-ÉTAPE 9"
+
+#### Feature 17 originale: `can_melee_units_charge_target`
+**Choix fait:**
+- ✅ **SUPPRIMÉ** (redondant avec Feature 16 améliorée)
+- Feature 16 améliorée (`melee_charge_preference`) fournit déjà l'information nécessaire
+- Feature 19 (`is_adjacent`) indique déjà si l'unité est en portée de mêlée
+
+#### Stratégie d'implémentation
+**Choix fait: Option A - Implémentation progressive**
+- ✅ Phase 0: Garder structure actuelle avec placeholders
+- ✅ Après étape 9: Implémenter les améliorations Feature 16 et Feature 17
+- ✅ Avantages:
+  - Évite dette technique (pas de fonctions temporaires)
+  - Implémentation propre avec toutes les dépendances disponibles
+  - Pas de code à refactoriser plus tard
+
+**Fonction helper requise:**
+- `calculate_ttk_with_weapon(unit, weapon, target, game_state)` dans `weapon_selector.py`
+- Code complet fourni dans section 8 "AMÉLIORATIONS POST-ÉTAPE 9"
 
 ---
 

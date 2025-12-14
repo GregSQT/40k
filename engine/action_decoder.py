@@ -291,7 +291,9 @@ class ActionDecoder:
         for unit in game_state["units"]:
             if (unit["player"] == current_player and 
                 unit["HP_CUR"] > 0 and
-                unit["CC_DMG"] > 0):  # AI_TURN.md: Direct field access
+                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
+                (unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0 and
+                 any(w.get("DMG", 0) > 0 for w in unit["CC_WEAPONS"]))):  # Has melee capability
                 
                 # Simple charge range check (2d6 movement + unit MOVE)
                 distance = calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])

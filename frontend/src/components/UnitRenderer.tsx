@@ -2,6 +2,7 @@
 import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview, FightSubPhase, PlayerId } from "../types/game";
 import { areUnitsAdjacent, offsetToCube, cubeDistance } from '../utils/gameHelpers';
+import { getSelectedRangedWeapon, getSelectedMeleeWeapon, getMeleeRange } from '../utils/weaponHelpers';
 
 interface UnitRendererProps {
   unit: Unit;
@@ -178,7 +179,9 @@ export class UnitRenderer {
         // AI_TURN.md: Queue-based eligibility during active shooting phase
         // Type-safe checks with proper fallbacks
         if (unitsFled && unitsFled.includes(unit.id)) return false;
-        if (unit.RNG_NB === undefined || unit.RNG_NB <= 0) return false;
+        // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has ranged weapons (imported at top)
+        const selectedRngWeapon = getSelectedRangedWeapon(unit);
+        if (!selectedRngWeapon || selectedRngWeapon.NB <= 0) return false;
         // Simplified check - parent should provide queue membership
         return this.props.isEligible || false;
       case "charge":
@@ -203,11 +206,15 @@ export class UnitRenderer {
     
     if (isPreview) return;
     
-    // Grey-out enemies adjacent to any friendly unit during shooting phase
-    // Also grey-out enemies with no line of sight
-    if (phase === "shoot" && unit.player !== currentPlayer) {
-      const friendlies = units.filter(u2 => u2.player === currentPlayer);
-      if (friendlies.some(fu => areUnitsAdjacent(unit, fu))) {
+    // Grey-out enemies that are NOT valid shooting targets during shooting phase
+    // ONLY when a unit is selected and in shooting mode
+    // Use isShootable prop (from backend's validTargets) or blinkingUnits to determine validity
+    if (phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null) {
+      const isShootable = this.props.isShootable !== undefined 
+        ? this.props.isShootable 
+        : (this.props.blinkingUnits?.includes(unit.id) ?? false);
+      
+      if (!isShootable) {
         const grey = 0x888888;
         const g = new PIXI.Graphics();
         g.beginFill(grey);
@@ -324,7 +331,9 @@ export class UnitRenderer {
             if (e.button === 2 && phase === "shoot" && mode === "attackPreview" && selectedUnitId === unit.id) {
               // AI_TURN.md: Right click behavior depends on SHOOT_LEFT
               const shootLeft = unit.SHOOT_LEFT || 0;
-              const rngNb = unit.RNG_NB || 0;
+              // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
+              const selectedRngWeapon = getSelectedRangedWeapon(unit);
+              const rngNb = selectedRngWeapon?.NB || 0;
               
               if (shootLeft === rngNb) {
                 // SHOOT_LEFT = RNG_NB: Cancel activation (WAIT)
@@ -363,7 +372,7 @@ export class UnitRenderer {
   
   private renderUnitIcon(iconZIndex: number): void {
     const { unit, centerX, centerY, app, isPreview, previewType, HEX_RADIUS,
-             ICON_SCALE, phase, currentPlayer, units, onConfirmMove } = this.props;
+             ICON_SCALE, phase, currentPlayer, units, onConfirmMove, selectedUnitId } = this.props;
     
     const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
     
@@ -419,10 +428,15 @@ export class UnitRenderer {
             sprite.alpha = 0.8;
           }
         }
-        // Grey-out enemies adjacent to any friendly unit during shooting phase
-        if (!isPreview && phase === "shoot" && unit.player !== currentPlayer) {
-          const friendlies = units.filter(u2 => u2.player === currentPlayer);
-          if (friendlies.some(fu => areUnitsAdjacent(unit, fu))) {
+        // Grey-out enemies that are NOT valid shooting targets during shooting phase
+        // ONLY when a unit is selected and in shooting mode
+        // Use isShootable prop (from backend's validTargets) or blinkingUnits to determine validity
+        if (!isPreview && phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null) {
+          const isShootable = this.props.isShootable !== undefined 
+            ? this.props.isShootable 
+            : (this.props.blinkingUnits?.includes(unit.id) ?? false);
+          
+          if (!isShootable) {
             sprite.alpha = 0.5;
             sprite.tint  = 0x888888;
           }
@@ -1034,9 +1048,11 @@ export class UnitRenderer {
     // AI_TURN.md: Show counter only for eligible units with shots remaining
     if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) return;
     if (!isEligible) return;
-    
-    const shotsLeft = unit.SHOOT_LEFT !== undefined ? unit.SHOOT_LEFT : unit.RNG_NB || 0;
-    const totalShots = unit.RNG_NB || 0;
+
+    // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
+    const selectedRngWeapon = getSelectedRangedWeapon(unit);
+    const totalShots = selectedRngWeapon?.NB || 0;
+    const shotsLeft = unit.SHOOT_LEFT !== undefined ? unit.SHOOT_LEFT : totalShots;
     const scaledOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
     
     const shootText = new PIXI.Text(`${shotsLeft}/${totalShots}`, {
@@ -1085,7 +1101,8 @@ export class UnitRenderer {
     
     // NEW: Only show attack counter for units that have enemies in melee range
     const enemies = units.filter(u => u.player !== unit.player);
-    const fightRange = unit.CC_RNG || 1;
+    // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use getMeleeRange() (always 1, imported at top)
+    const fightRange = getMeleeRange();
     const hasEnemiesInMeleeRange = enemies.some(enemy => {
       const cube1 = offsetToCube(unit.col, unit.row);
       const cube2 = offsetToCube(enemy.col, enemy.row);
@@ -1100,9 +1117,11 @@ export class UnitRenderer {
       return;
     }
     
+    // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
+    const selectedCcWeapon = getSelectedMeleeWeapon(unit);
+    const totalAttacks = selectedCcWeapon?.NB || 0;
     const attacksLeft = unit.ATTACK_LEFT !== undefined ? 
-      unit.ATTACK_LEFT : unit.CC_NB || 0;
-    const totalAttacks = unit.CC_NB || 0;
+      unit.ATTACK_LEFT : totalAttacks;
     const scaledOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
     
     const attackText = new PIXI.Text(`${attacksLeft}/${totalAttacks}`, {

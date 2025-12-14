@@ -27,10 +27,13 @@ def main():
 
     obs, info = engine.reset()
 
+    # Utiliser obs_size depuis engine (pas hardcodé)
+    expected_size = engine.observation_space.shape[0]
     print(f'[OK] Observation shape: {obs.shape}')
-    print(f'[OK] Expected: (300,)')
+    print(f'[OK] Expected: ({expected_size},)')
+    print(f'[OK] obs_size from config: {expected_size}')
 
-    assert obs.shape == (300,), f'ERROR: Shape mismatch! Got {obs.shape}'
+    assert obs.shape == (expected_size,), f'ERROR: Shape mismatch! Got {obs.shape}, expected ({expected_size},)'
 
     print('[OK] Pure RL observation system verified!')
     print(f'[OK] Observation breakdown:')
@@ -39,7 +42,7 @@ def main():
     print(f'   [23:55]    Directional terrain:               32 floats')
     print(f'   [55:127]   Allied units:                      72 floats (6x12)')
     print(f'   [127:265]  Enemy units:                      138 floats (6x23)')
-    print(f'   [265:300]  Valid targets:                     35 floats (5x7)')
+    print(f'   [273:313]  Valid targets:                     40 floats (5x8)')
     print(f'   Total: {obs.shape[0]} floats [OK]')
 
 if __name__ == "__main__":

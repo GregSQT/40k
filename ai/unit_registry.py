@@ -109,16 +109,22 @@ class UnitRegistry:
                 'file_path': str(ts_file)
             }
             
-            # Extract static numeric properties
-            static_props = self._extract_static_properties(content)
+            # Extract static numeric properties and weapons
+            static_props = self._extract_static_properties(content, faction_name)
             unit_data.update(static_props)
             
             # Validate essential properties
-            required_props = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG']
+            required_props = ['HP_MAX', 'MOVE']
             for prop in required_props:
                 if prop not in unit_data:
                     print(f"    ⚠️ Missing {prop} for {unit_type}")
                     return None
+            
+            # Validate at least one weapon type exists
+            if (not unit_data.get("RNG_WEAPONS") or len(unit_data.get("RNG_WEAPONS", [])) == 0) and \
+               (not unit_data.get("CC_WEAPONS") or len(unit_data.get("CC_WEAPONS", [])) == 0):
+                print(f"    ⚠️ Unit {unit_type} must have at least RNG_WEAPONS or CC_WEAPONS")
+                return None
             
             return unit_data
             
@@ -157,34 +163,73 @@ class UnitRegistry:
         
         return faction, role
     
-    def _extract_static_properties(self, content: str) -> Dict:
-        """Extract all static properties from TypeScript class."""
+    def _extract_static_properties(self, content: str, faction_name: str) -> Dict:
+        """Extract all static properties from TypeScript class, including weapons."""
+        from engine.roster.spaceMarine.armory import get_weapons as get_sm_weapons
+        from engine.roster.tyranid.armory import get_weapons as get_ty_weapons
+        
         properties = {}
         
-        # Pattern to match static properties
-        static_pattern = r'static\s+(\w+)\s*=\s*([^;]+);'
+        # Pattern 1: Static properties simples (HP_MAX, MOVE, etc.)
+        static_pattern = r'static\s+([A-Z_]+)\s*=\s*([^;]+);'
         matches = re.findall(static_pattern, content)
         
         for prop_name, prop_value in matches:
             # Clean up the value
-            prop_value = prop_value.strip()
-
+            prop_value = prop_value.strip().strip('"\'')
+            
             # Try to convert to appropriate type
-            if prop_value.startswith('"') or prop_value.startswith("'"):
-                # String value
-                properties[prop_name] = prop_value.strip('"\'')
-            elif re.match(r'^-?\d+$', prop_value):
-                # Integer value (including negative numbers like -1, -2)
+            if prop_value.isdigit() or (prop_value.startswith('-') and prop_value[1:].isdigit()):
                 properties[prop_name] = int(prop_value)
-            elif re.match(r'^-?\d+\.\d+$', prop_value):
-                # Float value (including negative floats)
+            elif prop_value.replace('.', '').isdigit():
                 properties[prop_name] = float(prop_value)
-            elif prop_value.lower() in ['true', 'false']:
-                # Boolean value
-                properties[prop_name] = prop_value.lower() == 'true'
             else:
-                # Keep as string
                 properties[prop_name] = prop_value
+        
+        # Pattern 2: RNG_WEAPON_CODES = ["code1", "code2"] ou [] (robuste)
+        rng_codes_match = re.search(
+            r'static\s+RNG_WEAPON_CODES\s*=\s*\[([^\]]*)\];',
+            content,
+            re.MULTILINE | re.DOTALL  # Support multi-lignes
+        )
+        if rng_codes_match:
+            codes_str = rng_codes_match.group(1).strip()
+            if codes_str:
+                # Gérer guillemets simples ET doubles
+                codes = re.findall(r'["\']([^"\']+)["\']', codes_str)
+            else:
+                codes = []  # Array vide
+            
+            # Détection faction robuste avec faction_name (pas path)
+            # faction_name est le nom du répertoire (ex: "spaceMarine" ou "tyranid")
+            if faction_name.lower() in ['spacemarine', 'spacemarines']:
+                properties["RNG_WEAPONS"] = get_sm_weapons(codes)
+            elif faction_name.lower() == 'tyranid':
+                properties["RNG_WEAPONS"] = get_ty_weapons(codes)
+        
+        # Pattern 3: CC_WEAPON_CODES (même logique)
+        cc_codes_match = re.search(
+            r'static\s+CC_WEAPON_CODES\s*=\s*\[([^\]]*)\];',
+            content,
+            re.MULTILINE | re.DOTALL
+        )
+        if cc_codes_match:
+            codes_str = cc_codes_match.group(1).strip()
+            if codes_str:
+                codes = re.findall(r'["\']([^"\']+)["\']', codes_str)
+            else:
+                codes = []
+            
+            if faction_name.lower() in ['spacemarine', 'spacemarines']:
+                properties["CC_WEAPONS"] = get_sm_weapons(codes)
+            elif faction_name.lower() == 'tyranid':
+                properties["CC_WEAPONS"] = get_ty_weapons(codes)
+        
+        # Initialiser selectedWeaponIndex
+        if properties.get("RNG_WEAPONS"):
+            properties["selectedRngWeaponIndex"] = 0
+        if properties.get("CC_WEAPONS"):
+            properties["selectedCcWeaponIndex"] = 0
         
         return properties
     

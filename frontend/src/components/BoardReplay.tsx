@@ -13,6 +13,7 @@ import { TurnPhaseTracker } from './TurnPhaseTracker';
 import { useGameLog } from '../hooks/useGameLog';
 import { initializeUnitRegistry, getUnitClass } from '../data/UnitFactory';
 import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
+import { getSelectedRangedWeapon, getSelectedMeleeWeapon } from '../utils/weaponHelpers';
 
 // Import replay parser types
 interface ReplayAction {
@@ -172,17 +173,11 @@ export const BoardReplay: React.FC = () => {
           MOVE: UnitClass.MOVE || 0,
           T: UnitClass.T || 0,
           ARMOR_SAVE: UnitClass.ARMOR_SAVE || 0,
-          RNG_RNG: UnitClass.RNG_RNG || 0,
-          RNG_NB: UnitClass.RNG_NB || 0,
-          RNG_ATK: UnitClass.RNG_ATK || 0,
-          RNG_STR: UnitClass.RNG_STR || 0,
-          RNG_AP: UnitClass.RNG_AP || 0,
-          RNG_DMG: UnitClass.RNG_DMG || 0,
-          CC_NB: UnitClass.CC_NB || 0,
-          CC_ATK: UnitClass.CC_ATK || 0,
-          CC_STR: UnitClass.CC_STR || 0,
-          CC_AP: UnitClass.CC_AP || 0,
-          CC_DMG: UnitClass.CC_DMG || 0,
+          // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract from weapons arrays
+          RNG_WEAPONS: UnitClass.RNG_WEAPONS || [],
+          CC_WEAPONS: UnitClass.CC_WEAPONS || [],
+          selectedRngWeaponIndex: UnitClass.RNG_WEAPONS && UnitClass.RNG_WEAPONS.length > 0 ? 0 : undefined,
+          selectedCcWeaponIndex: UnitClass.CC_WEAPONS && UnitClass.CC_WEAPONS.length > 0 ? 0 : undefined,
           ICON: UnitClass.ICON || '',
           ICON_SCALE: UnitClass.ICON_SCALE || 1
         };
@@ -297,7 +292,9 @@ export const BoardReplay: React.FC = () => {
     // During shoot action, adjust SHOOT_LEFT only for the active shooting unit
     // EXACT mirror of PvP behavior: counter shows shots remaining *before* current shot.
     if (currentAction?.type === 'shoot' && currentEpisode && currentActionIndex > 0 && u.id === currentAction.shooter_id) {
-      const rngNb = u.RNG_NB || 0;
+      // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
+      const selectedRngWeapon = getSelectedRangedWeapon(u);
+      const rngNb = selectedRngWeapon?.NB || 0;
       const shooterId = currentAction.shooter_id;
 
       // Index of the last *completed* action before the current one
@@ -336,7 +333,9 @@ export const BoardReplay: React.FC = () => {
     // During fight action, compute ATTACK_LEFT only for the active attacker,
     // mirroring PvP: counter shows attacks remaining *before* current swing.
     if (currentAction?.type === 'fight' && currentEpisode && currentActionIndex > 0 && u.id === currentAction.attacker_id) {
-      const ccNb = u.CC_NB || 0;
+      // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
+      const selectedCcWeapon = getSelectedMeleeWeapon(u);
+      const ccNb = selectedCcWeapon?.NB || 0;
       const attackerId = currentAction.attacker_id;
 
       const lastCompletedIndex = currentActionIndex - 2;
@@ -914,11 +913,11 @@ export const BoardReplay: React.FC = () => {
   // For shoot actions, select the shooter to show LoS/attack range
   // For charge actions, select the charging unit to show charge destination
   // Ghost unit has ID -1 (move) or -2 (charge) and is at the starting position
-  const replaySelectedUnitId = currentAction?.type === 'move'
+  const replaySelectedUnitId: number | null = currentAction?.type === 'move'
     ? -1
     : (currentAction?.type === 'charge'
-      ? currentAction.unit_id  // Select the actual charging unit to trigger getChargeDestinations
-      : (currentAction?.type === 'shoot' ? currentAction.shooter_id : null));
+      ? (currentAction.unit_id ?? null)  // Select the actual charging unit to trigger getChargeDestinations
+      : (currentAction?.type === 'shoot' ? (currentAction.shooter_id ?? null) : null));
 
   // Center column: Board
   const centerContent = currentState && gameConfig ? (

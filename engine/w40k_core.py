@@ -180,6 +180,33 @@ class W40KEngine(gym.Env):
 
             # CRITICAL: Extract rewards_config from config dict for module initialization
             self.rewards_config = config.get("rewards_config", {})
+            
+            # CRITICAL: Extract training_config from config dict for observation_params access
+            # API server provides training_configs dict with agent keys, or training_config_name to select phase
+            if "training_configs" in config and training_config_name:
+                # Multi-agent config: extract specific agent's training config
+                first_agent = list(config.get("agent_keys", []))[0] if config.get("agent_keys") else None
+                if first_agent and first_agent in config["training_configs"]:
+                    full_training_config = config["training_configs"][first_agent]
+                    # Extract the specific phase (e.g., "default")
+                    self.training_config = full_training_config.get(training_config_name, {})
+                    self.training_config_name = training_config_name
+                else:
+                    self.training_config = None
+            elif "training_config" in config:
+                # Direct training_config provided
+                self.training_config = config["training_config"]
+                self.training_config_name = training_config_name if training_config_name else "default"
+            else:
+                # Try to construct from observation_params if available
+                if "observation_params" in config:
+                    # Create minimal training_config structure for observation_params access
+                    self.training_config = {
+                        "observation_params": config["observation_params"]
+                    }
+                    self.training_config_name = training_config_name if training_config_name else "default"
+                else:
+                    self.training_config = None
 
             # No scenario loaded - use board config for terrain (set to None for fallback logic)
             self._scenario_wall_hexes = None
@@ -285,21 +312,32 @@ class W40KEngine(gym.Env):
         self._current_valid_actions = list(range(12))  # Will be masked dynamically
         
         # Observation space: Asymmetric egocentric perception with R=25 radius
-        # 300 floats = 15 global (incl. objectives) + 8 unit + 32 terrain + 72 allies + 138 enemies + 35 targets
-        # Asymmetric design: More complete information about enemies than allies
-        # Covers MOVE(12) + MAX_CHARGE(12) + ENEMY_OFFSET(1) = 25 hex strategic reach
-        obs_size = 300  # Asymmetric observation - rich enemy intel + objective control
+        # Size is now configurable via training_config.json observation_params.obs_size
+        # Default was 300 floats = 15 global (incl. objectives) + 8 unit + 32 terrain + 72 allies + 138 enemies + 35 targets
+        # New size: 313 floats = 15 global + 22 unit capabilities + 32 terrain + 72 allies + 132 enemies + 40 targets
         
         # Load perception parameters from training config if available
         if hasattr(self, 'training_config') and self.training_config:
             obs_params = self.training_config.get("observation_params", {})
+            
+            # Validation stricte: obs_size DOIT être présent
+            if "obs_size" not in obs_params:
+                raise KeyError(
+                    f"training_config missing required 'obs_size' in observation_params. "
+                    f"Must be defined in training_config.json. "
+                    f"Config: {self.training_config_name if hasattr(self, 'training_config_name') else 'unknown'}"
+                )
+            
+            obs_size = obs_params["obs_size"]  # NO DEFAULT - raise error si manquant
             self.perception_radius = obs_params.get("perception_radius", 25)
             self.max_nearby_units = obs_params.get("max_nearby_units", 10)
             self.max_valid_targets = obs_params.get("max_valid_targets", 5)
         else:
-            self.perception_radius = 25
-            self.max_nearby_units = 10
-            self.max_valid_targets = 5
+            # Pas de config = erreur (pas de fallback)
+            raise ValueError(
+                "W40KEngine requires training_config with observation_params.obs_size. "
+                "No default value allowed."
+            )
         
         self.observation_space = gym.spaces.Box(
             low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32
@@ -384,8 +422,26 @@ class W40KEngine(gym.Env):
             unit["HP_CUR"] = unit["HP_MAX"]
 
             # CRITICAL: Reset shooting state per episode
-            unit["SHOOT_LEFT"] = unit["RNG_NB"]
-            unit["ATTACK_LEFT"] = unit["CC_NB"]
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or first weapon
+            from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
+            
+            # Initialize SHOOT_LEFT from selected ranged weapon
+            selected_rng_weapon = get_selected_ranged_weapon(unit)
+            if selected_rng_weapon:
+                unit["SHOOT_LEFT"] = selected_rng_weapon["NB"]
+            elif unit.get("RNG_WEAPONS") and len(unit["RNG_WEAPONS"]) > 0:
+                unit["SHOOT_LEFT"] = unit["RNG_WEAPONS"][0]["NB"]
+            else:
+                unit["SHOOT_LEFT"] = 0
+            
+            # Initialize ATTACK_LEFT from selected melee weapon
+            selected_cc_weapon = get_selected_melee_weapon(unit)
+            if selected_cc_weapon:
+                unit["ATTACK_LEFT"] = selected_cc_weapon["NB"]
+            elif unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
+                unit["ATTACK_LEFT"] = unit["CC_WEAPONS"][0]["NB"]
+            else:
+                unit["ATTACK_LEFT"] = 0
 
             # Find original position from config - match by string conversion
             unit_id_str = str(unit["id"])
@@ -676,7 +732,8 @@ class W40KEngine(gym.Env):
                                 "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
                                 "hit_target": attack_result.get("hit_target", 4),
                                 "wound_target": attack_result.get("wound_target", 4),
-                                "save_target": attack_result.get("save_target", 4)
+                                "save_target": attack_result.get("save_target", 4),
+                                "weapon_name": attack_result.get("weapon_name", "")  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
                             })
 
                     # charge and combat have specialized logging with early return
@@ -797,7 +854,8 @@ class W40KEngine(gym.Env):
                                     "hit_target": attack_result.get("hit_target", 4),
                                     "wound_target": attack_result.get("wound_target", 4),
                                     "save_target": attack_result.get("save_target", 4),
-                                    "target_died": attack_result.get("target_died", False)
+                                    "target_died": attack_result.get("target_died", False),
+                                    "weapon_name": attack_result.get("weapon_name", "")  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
                                 })
 
                             # Log single combat action (fallback path)
@@ -1064,10 +1122,46 @@ class W40KEngine(gym.Env):
             return False, {"error": "not_pve_mode"}
         
         current_player = self.game_state["current_player"]
-        if current_player != 1:  # AI is player 1
-            return False, {"error": "not_ai_player_turn", "current_player": current_player}
-        
         current_phase = self.game_state["phase"]
+        
+        # CRITICAL: In fight phase, current_player can be 0 but AI can still act in alternating phase
+        # Only check current_player for non-fight phases
+        if current_phase != "fight" and current_player != 1:  # AI is player 1
+            return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase}
+        
+        # For fight phase, check if AI has eligible units in the appropriate pool
+        if current_phase == "fight":
+            fight_subphase = self.game_state.get("fight_subphase")
+            print(f"🔍 [AI_TURN] Fight phase check: fight_subphase={fight_subphase}, current_player={current_player}")
+            # Check if AI has eligible units in the current fight subphase pool
+            has_eligible_ai = False
+            pool_to_check = []
+            
+            if fight_subphase == "charging" and self.game_state.get("charging_activation_pool"):
+                pool_to_check = self.game_state.get("charging_activation_pool", [])
+                print(f"🔍 [AI_TURN] Using charging_activation_pool: {pool_to_check}")
+            elif fight_subphase in ["alternating_non_active", "cleanup_non_active"] and self.game_state.get("non_active_alternating_activation_pool"):
+                pool_to_check = list(self.game_state.get("non_active_alternating_activation_pool", []))  # Make a copy to avoid reference issues
+                print(f"🔍 [AI_TURN] Using non_active_alternating_activation_pool: {pool_to_check} (original in game_state: {self.game_state.get('non_active_alternating_activation_pool')})")
+            elif fight_subphase in ["alternating_active", "cleanup_active"] and self.game_state.get("active_alternating_activation_pool"):
+                pool_to_check = self.game_state.get("active_alternating_activation_pool", [])
+                print(f"🔍 [AI_TURN] Using active_alternating_activation_pool: {pool_to_check}")
+            else:
+                print(f"⚠️ [AI_TURN] No pool found for fight_subphase={fight_subphase}")
+            
+            # Check if any unit in the pool is an AI unit (player 1)
+            print(f"🔍 [AI_TURN] Checking {len(pool_to_check)} units in pool")
+            for unit_id in pool_to_check:
+                unit = self._get_unit_by_id(str(unit_id))
+                print(f"🔍 [AI_TURN] Checking unit_id={unit_id} (str), unit={unit}, player={unit.get('player') if unit else None}")
+                if unit and unit.get("player") == 1:
+                    has_eligible_ai = True
+                    print(f"✅ [AI_TURN] Found eligible AI unit: {unit_id}")
+                    break
+            
+            if not has_eligible_ai:
+                print(f"❌ [AI_TURN] No eligible AI units found in pool. Returning error.")
+                return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": fight_subphase, "reason": "no_eligible_ai_units_in_pool", "pool_checked": pool_to_check}
         
         # Check AI model availability
         if not hasattr(self, '_ai_model') or not self._ai_model:
@@ -1075,12 +1169,19 @@ class W40KEngine(gym.Env):
         
         # Make AI decision - replaces human click
         try:
+            print(f"🔍 [AI_TURN] execute_ai_turn called: phase={current_phase}, player={current_player}, fight_subphase={self.game_state.get('fight_subphase')}")
             ai_semantic_action = self.pve_controller.make_ai_decision(self.game_state, self)
+            print(f"🔍 [AI_TURN] make_ai_decision returned: {ai_semantic_action}")
             
             # Execute through SAME path as humans
-            return self._process_semantic_action(ai_semantic_action)
+            result = self._process_semantic_action(ai_semantic_action)
+            print(f"🔍 [AI_TURN] _process_semantic_action returned: success={result[0]}")
+            return result
             
         except Exception as e:
+            print(f"❌ [AI_TURN] Exception: {e}")
+            import traceback
+            traceback.print_exc()
             return False, {"error": "ai_decision_failed", "message": str(e)}
     
     

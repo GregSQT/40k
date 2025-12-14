@@ -9,6 +9,14 @@ ZERO TOLERANCE for state storage or wrapper patterns
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
+from . import shooting_handlers
+
+# Import functions from shooting_handlers for cross-phase functionality
+_cache_size_limit = shooting_handlers._cache_size_limit
+_shooting_phase_complete = shooting_handlers._shooting_phase_complete
+_ai_select_shooting_target = shooting_handlers._ai_select_shooting_target
+_invalidate_los_cache_for_unit = shooting_handlers._invalidate_los_cache_for_unit
+shooting_build_activation_pool = shooting_handlers.shooting_build_activation_pool
 
 
 def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -26,6 +34,10 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # AI_TURN.md: Build ALL fight pools (charging + alternating for both players)
     # NOTE: ATTACK_LEFT is NOT set at phase start - it's set per unit activation
     fight_build_activation_pools(game_state)
+    
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Pre-compute kill probability cache
+    from engine.ai.weapon_selector import precompute_kill_probability_cache
+    precompute_kill_probability_cache(game_state, "fight")
 
     # Console log
     if "console_logs" not in game_state:
@@ -149,14 +161,13 @@ def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str)
 
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
-    AI_TURN.md: Check if unit is adjacent to at least one enemy within CC_RNG.
+    AI_TURN.md: Check if unit is adjacent to at least one enemy within melee range.
 
     Used for fight phase eligibility - unit must be within melee range of an enemy.
+    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
     """
-    if "CC_RNG" not in unit:
-        raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
-
-    cc_range = unit["CC_RNG"]
+    from engine.utils.weapon_helpers import get_melee_range
+    cc_range = get_melee_range()  # Always 1
     unit_col, unit_row = unit["col"], unit["row"]
 
     if "console_logs" not in game_state:
@@ -165,12 +176,12 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             distance = _calculate_hex_distance(unit_col, unit_row, enemy["col"], enemy["row"])
-            game_state["console_logs"].append(f"FIGHT CHECK: Unit {unit['id']} @ ({unit_col},{unit_row}) CC_RNG={cc_range} | Enemy {enemy['id']} @ ({enemy['col']},{enemy['row']}) distance={distance}")
+            game_state["console_logs"].append(f"FIGHT CHECK: Unit {unit['id']} @ ({unit_col},{unit_row}) melee_range={cc_range} | Enemy {enemy['id']} @ ({enemy['col']},{enemy['row']}) distance={distance}")
             if distance <= cc_range:
-                game_state["console_logs"].append(f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy['id']} (dist {distance} <= CC_RNG {cc_range})")
+                game_state["console_logs"].append(f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy['id']} (dist {distance} <= melee_range {cc_range})")
                 return True
 
-    game_state["console_logs"].append(f"FIGHT NOT ELIGIBLE: Unit {unit['id']} has no enemies within CC_RNG {cc_range}")
+    game_state["console_logs"].append(f"FIGHT NOT ELIGIBLE: Unit {unit['id']} has no enemies within melee_range {cc_range}")
     return False
 
 
@@ -240,11 +251,17 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     debug_mode = False  # Set to True only for manual debugging
     
     if debug_mode:
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers for debug
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_max_ranged_range, get_melee_range
+        selected_rng = get_selected_ranged_weapon(unit)
+        rng_nb_debug = selected_rng.get('NB', 0) if selected_rng else 0
+        max_rng_debug = get_max_ranged_range(unit)
+        melee_range_debug = get_melee_range()
         print(f"\n🔍 ELIGIBILITY CHECK: Unit {unit['id']} @ ({unit['col']}, {unit['row']})")
         print(f"   Player: {unit['player']}, Current Player: {current_player}")
         print(f"   HP: {unit['HP_CUR']}/{unit['HP_MAX']}")
-        print(f"   RNG_NB: {unit.get('RNG_NB', 'MISSING')}, RNG_RNG: {unit.get('RNG_RNG', 'MISSING')}")
-        print(f"   CC_RNG: {unit.get('CC_RNG', 'MISSING')}")
+        print(f"   RNG_NB: {rng_nb_debug}, RNG_RNG: {max_rng_debug}")
+        print(f"   CC_RNG: {melee_range_debug}")
     
     # unit.HP_CUR > 0?
     if unit["HP_CUR"] <= 0:
@@ -279,10 +296,14 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
             if "CC_RNG" not in unit:
                 raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
             
-            if debug_mode:
-                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): distance={distance}, CC_RNG={unit['CC_RNG']}")
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of CC_RNG
+            from engine.utils.weapon_helpers import get_melee_range
+            melee_range = get_melee_range()  # Always 1
             
-            if distance <= unit["CC_RNG"]:
+            if debug_mode:
+                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): distance={distance}, melee_range={melee_range}")
+            
+            if distance <= melee_range:
                 adjacent_enemies.append(f"{enemy['id']}@dist={distance}")
                 if debug_mode:
                     print(f"         ⚠️ Enemy {enemy['id']} IS ADJACENT (distance={distance} <= CC_RNG={unit['CC_RNG']})")
@@ -297,12 +318,17 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
         print(f"   ✅ No adjacent enemies found")
         
     # unit.RNG_NB > 0?
-    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-    if "RNG_NB" not in unit:
-        raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
-    if unit["RNG_NB"] <= 0:
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_NB
+    from engine.utils.weapon_helpers import get_selected_ranged_weapon
+    selected_weapon = get_selected_ranged_weapon(unit)
+    if not selected_weapon:
         if debug_mode:
-            print(f"   ❌ BLOCKED: No ranged attacks (RNG_NB={unit['RNG_NB']})")
+            print(f"   ❌ BLOCKED: No ranged weapons")
+        return False
+    rng_nb = selected_weapon.get("NB", 0)
+    if rng_nb <= 0:
+        if debug_mode:
+            print(f"   ❌ BLOCKED: No ranged attacks (RNG_NB={rng_nb})")
         return False
     
     if debug_mode:
@@ -372,12 +398,12 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
         return False
     
     # Adjacent check - can't shoot at adjacent enemies (melee range)
-    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-    if "CC_RNG" not in shooter:
-        raise KeyError(f"Shooter missing required 'CC_RNG' field: {shooter}")
-    if distance <= shooter["CC_RNG"]:
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
+    from engine.utils.weapon_helpers import get_melee_range
+    melee_range = get_melee_range()  # Always 1
+    if distance <= melee_range:
         if debug_mode:
-            print(f"         ❌ Too close: dist={distance} <= CC_RNG={shooter['CC_RNG']}")
+            print(f"         ❌ Too close: dist={distance} <= melee_range={melee_range}")
         return False
     
     # PERFORMANCE: Use LoS cache if available (instant lookup)
@@ -417,12 +443,19 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # action_logs must accumulate for entire episode, only cleared in __init__ and reset()
     
     # AI_TURN.md initialization
-    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-    if "RNG_NB" not in unit:
-        raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
+    from engine.utils.weapon_helpers import get_selected_ranged_weapon
+    rng_weapons = unit.get("RNG_WEAPONS", [])
+    if rng_weapons:
+        selected_idx = unit.get("selectedRngWeaponIndex", 0)
+        if selected_idx < 0 or selected_idx >= len(rng_weapons):
+            raise IndexError(f"Invalid selectedRngWeaponIndex {selected_idx} for unit {unit['id']}")
+        weapon = rng_weapons[selected_idx]
+        unit["SHOOT_LEFT"] = weapon["NB"]
+    else:
+        unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
     unit["valid_target_pool"] = []
     unit["TOTAL_ATTACK_LOG"] = ""
-    unit["SHOOT_LEFT"] = unit["RNG_NB"]
     unit["selected_target_id"] = None  # For two-click confirmation
     
     # CRITICAL: Capture unit's current location for shooting phase tracking
@@ -494,24 +527,22 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         raise KeyError(f"Unit missing required 'T' field: {unit}")
     if "ARMOR_SAVE" not in unit:
         raise KeyError(f"Unit missing required 'ARMOR_SAVE' field: {unit}")
-    if "RNG_NB" not in unit:
-        raise KeyError(f"Unit missing required 'RNG_NB' field: {unit}")
-    if "RNG_ATK" not in unit:
-        raise KeyError(f"Unit missing required 'RNG_ATK' field: {unit}")
-    if "RNG_STR" not in unit:
-        raise KeyError(f"Unit missing required 'RNG_STR' field: {unit}")
-    if "RNG_AP" not in unit:
-        raise KeyError(f"Unit missing required 'RNG_AP' field: {unit}")
     if "unitType" not in unit:
         raise KeyError(f"Unit missing required 'unitType' field: {unit}")
 
     # Cache unit stats for priority calculations
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or first weapon
+    from engine.utils.weapon_helpers import get_selected_ranged_weapon
+    selected_weapon = get_selected_ranged_weapon(unit)
+    if not selected_weapon and unit.get("RNG_WEAPONS"):
+        selected_weapon = unit["RNG_WEAPONS"][0]  # Fallback to first weapon
+    
     unit_t = unit["T"]
     unit_save = unit["ARMOR_SAVE"]
-    unit_attacks = unit["RNG_NB"]
-    unit_bs = unit["RNG_ATK"]
-    unit_s = unit["RNG_STR"]
-    unit_ap = unit["RNG_AP"]
+    unit_attacks = selected_weapon.get("NB", 0) if selected_weapon else 0
+    unit_bs = selected_weapon.get("ATK", 0) if selected_weapon else 0
+    unit_s = selected_weapon.get("STR", 0) if selected_weapon else 0
+    unit_ap = selected_weapon.get("AP", 0) if selected_weapon else 0
     unit_type = unit["unitType"]
 
     # Determine preferred target type from unit name (ONCE)
@@ -539,14 +570,10 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
 
         # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
-        if "RNG_NB" not in target:
-            raise KeyError(f"Target missing required 'RNG_NB' field: {target}")
-        if "RNG_ATK" not in target:
-            raise KeyError(f"Target missing required 'RNG_ATK' field: {target}")
-        if "RNG_STR" not in target:
-            raise KeyError(f"Target missing required 'RNG_STR' field: {target}")
-        if "RNG_AP" not in target:
-            raise KeyError(f"Target missing required 'RNG_AP' field: {target}")
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_* fields
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon
+        from shared.data_validation import require_key
+        
         if "T" not in target:
             raise KeyError(f"Target missing required 'T' field: {target}")
         if "ARMOR_SAVE" not in target:
@@ -557,10 +584,22 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
             raise KeyError(f"Target missing required 'HP_MAX' field: {target}")
 
         # Step 1: Calculate target's threat to us (probability to wound per turn)
-        target_attacks = target["RNG_NB"]
-        target_bs = target["RNG_ATK"]
-        target_s = target["RNG_STR"]
-        target_ap = target["RNG_AP"]
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected ranged weapon or best weapon
+        target_rng_weapon = get_selected_ranged_weapon(target)
+        if not target_rng_weapon and target.get("RNG_WEAPONS"):
+            target_rng_weapon = target["RNG_WEAPONS"][0]  # Fallback to first weapon
+        
+        if not target_rng_weapon:
+            # Target has no ranged weapons, use default values (threat = 0)
+            target_attacks = 0
+            target_bs = 7  # Can't hit
+            target_s = 0
+            target_ap = 0
+        else:
+            target_attacks = require_key(target_rng_weapon, "NB")
+            target_bs = require_key(target_rng_weapon, "ATK")
+            target_s = require_key(target_rng_weapon, "STR")
+            target_ap = require_key(target_rng_weapon, "AP")
 
         # Hit probability
         hit_prob = (7 - target_bs) / 6.0
@@ -993,8 +1032,11 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     
     # AI_TURN.md: valid_target_pool NOT empty?
     if len(valid_targets) == 0:
-        # SHOOT_LEFT = RNG_NB?
-        if unit["SHOOT_LEFT"] == unit["RNG_NB"]:
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if SHOOT_LEFT equals selected weapon NB
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon
+        selected_weapon = get_selected_ranged_weapon(unit)
+        selected_nb = selected_weapon.get("NB", 0) if selected_weapon else 0
+        if unit["SHOOT_LEFT"] == selected_nb:
             # No targets at activation
             result = _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
             return True, result
@@ -1084,21 +1126,61 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
         # Determine which pool to use based on whose turn it is
         current_turn = game_state["fight_alternating_turn"]
+        current_player = game_state.get("current_player", 0)
 
         if current_turn == "non_active" and non_active_alternating:
             current_sub_phase = "alternating_non_active"
             current_pool = non_active_alternating
+            # CRITICAL: non_active pool contains units of OPPOSITE player
+            # Check if there are units for the non-active player (opposite of current_player)
+            opposite_player = 1 - current_player
+            eligible_units = [uid for uid in current_pool 
+                            if _get_unit_by_id(game_state, uid) 
+                            and _get_unit_by_id(game_state, uid).get("player") == opposite_player]
+            if not eligible_units and active_alternating:
+                # Non-active player has no units, but active pool has units → switch to active
+                current_sub_phase = "alternating_active"
+                current_pool = active_alternating
+            elif not eligible_units:
+                # Neither player has units → end phase
+                return True, fight_phase_end(game_state)
         elif current_turn == "active" and active_alternating:
             current_sub_phase = "alternating_active"
             current_pool = active_alternating
+            # CRITICAL: active pool contains units of CURRENT player
+            eligible_units = [uid for uid in current_pool 
+                            if _get_unit_by_id(game_state, uid) 
+                            and _get_unit_by_id(game_state, uid).get("player") == current_player]
+            if not eligible_units and non_active_alternating:
+                # Active player has no units, but non_active pool has units → switch to non_active
+                current_sub_phase = "alternating_non_active"
+                current_pool = non_active_alternating
+            elif not eligible_units:
+                # Neither player has units → end phase
+                return True, fight_phase_end(game_state)
         elif non_active_alternating:
-            # Active pool empty but non-active has units → Sub-phase 3
+            # Active pool empty but non_active has units → Sub-phase 3 (cleanup)
             current_sub_phase = "cleanup_non_active"
             current_pool = non_active_alternating
+            # CRITICAL: non_active pool contains units of OPPOSITE player
+            opposite_player = 1 - current_player
+            eligible_units = [uid for uid in current_pool 
+                            if _get_unit_by_id(game_state, uid) 
+                            and _get_unit_by_id(game_state, uid).get("player") == opposite_player]
+            if not eligible_units:
+                # Non-active player has no units in cleanup pool → end phase
+                return True, fight_phase_end(game_state)
         elif active_alternating:
-            # Non-active pool empty but active has units → Sub-phase 3
+            # Non-active pool empty but active has units → Sub-phase 3 (cleanup)
             current_sub_phase = "cleanup_active"
             current_pool = active_alternating
+            # CRITICAL: active pool contains units of CURRENT player
+            eligible_units = [uid for uid in current_pool 
+                            if _get_unit_by_id(game_state, uid) 
+                            and _get_unit_by_id(game_state, uid).get("player") == current_player]
+            if not eligible_units:
+                # Active player has no units in cleanup pool → end phase
+                return True, fight_phase_end(game_state)
         else:
             # Both pools empty
             return True, fight_phase_end(game_state)
@@ -1147,14 +1229,18 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             "current_pool": current_pool
         }
 
-    # Check for gym training mode
+    # Check for gym training mode and PvE AI mode
     is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
+    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
+    
+    print(f"🔍 [FIGHT_HANDLER] execute_action: action={action.get('action')}, unit={unit['id'] if unit else None}, is_gym_training={is_gym_training}, is_pve_ai={is_pve_ai}")
 
-    # GYM TRAINING: Auto-activate unit if not already active
+    # GYM TRAINING / PvE AI: Auto-activate unit if not already active
     active_fight_unit = game_state.get("active_fight_unit")
-    if is_gym_training and not active_fight_unit and action_type == "fight":
-        # Activate the unit first
+    if (is_gym_training or is_pve_ai) and not active_fight_unit and action_type == "fight":
+        print(f"🔍 [FIGHT_HANDLER] Auto-activating unit {unit['id']}")
         activation_result = _handle_fight_unit_activation(game_state, unit, config)
+        print(f"🔍 [FIGHT_HANDLER] Activation result: success={activation_result[0]}")
         if not activation_result[0]:
             return activation_result  # Activation failed
         # Check if activation ended (no targets → end_activation was called)
@@ -1163,26 +1249,40 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             return activation_result
         # Continue with fight action - targets should now be populated
 
+    # NOTE: AI_TURN.md line 667 specifies invalid actions should call end_activation (ERROR, 0, PASS, FIGHT)
+    # We follow this rule strictly - invalid actions are not converted to valid actions
+
     # AI_TURN.md: Fight phase action routing
     if action_type == "activate_unit":
         return _handle_fight_unit_activation(game_state, unit, config)
 
     elif action_type == "fight":
+        print(f"🔍 [FIGHT_HANDLER] Processing 'fight' action")
         # AI_TURN.md: Fight action with target selection
-        # GYM TRAINING: Auto-select target if not provided
+        # GYM TRAINING / PvE AI: Auto-select target if not provided
         if "targetId" not in action:
-            if is_gym_training:
-                # Auto-select from valid_fight_targets pool
+            if is_gym_training or is_pve_ai:
+                print(f"🔍 [FIGHT_HANDLER] Auto-select enabled for {'gym_training' if is_gym_training else 'pve_ai'}")
                 valid_targets = game_state.get("valid_fight_targets", [])
+                print(f"🔍 [FIGHT_HANDLER] Valid targets: {valid_targets}")
                 if valid_targets:
-                    # Select first target (typically closest/weakest)
-                    # valid_targets may be list of unit dicts or list of unit IDs
-                    first_target = valid_targets[0]
-                    if isinstance(first_target, dict):
-                        action["targetId"] = first_target["id"]
+                    if is_pve_ai:
+                        # Use AI target selection for PvE AI
+                        print(f"🔍 [FIGHT_HANDLER] Using AI target selection for PvE AI")
+                        target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets)
+                        print(f"🔍 [FIGHT_HANDLER] AI selected target: {target_id}")
+                        if target_id:
+                            action["targetId"] = target_id
+                        else:
+                            # Fallback to first target if AI selection failed
+                            first_target = valid_targets[0]
+                            action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
                     else:
-                        action["targetId"] = first_target  # Already an ID
+                        # Gym training: select first target
+                        first_target = valid_targets[0]
+                        action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
                 else:
+                    print(f"⚠️ [FIGHT_HANDLER] No valid targets available")
                     # No targets - skip this unit
                     result = end_activation(
                         game_state, unit,
@@ -1199,8 +1299,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                         _update_fight_subphase(game_state)
                     return True, result
             else:
+                print(f"❌ [FIGHT_HANDLER] Fight action missing targetId and not gym/pve mode!")
                 raise KeyError(f"Fight action missing required 'targetId' field: {action}")
+        else:
+            print(f"🔍 [FIGHT_HANDLER] Action already has targetId: {action.get('targetId')}")
+        
         target_id = action["targetId"]
+        print(f"🔍 [FIGHT_HANDLER] Executing fight attack: unit={unit['id']}, target={target_id}")
         return _handle_fight_attack(game_state, unit, target_id, config)
 
     elif action_type == "postpone":
@@ -1229,12 +1334,14 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return _handle_fight_postpone(game_state, unit)
 
     elif action_type == "invalid":
-        # AI_TURN.md: Invalid actions during fight phase
+        # AI_TURN.md line 667: INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, FIGHT)
+        # We follow AI_TURN.md strictly. The _rebuild_alternating_pools_for_fight call in end_activation
+        # is skipped for this case to prevent the unit from being re-added to the pool.
         result = end_activation(
             game_state, unit,
-            "SKIP",        # Arg1: Skip logging
-            1,             # Arg2: +1 step increment
-            "PASS",        # Arg3: No tracking
+            "ERROR",       # Arg1: ERROR logging (per AI_TURN.md line 667)
+            0,             # Arg2: NO step increment (per AI_TURN.md line 667)
+            "PASS",        # Arg3: PASS tracking (per AI_TURN.md line 667)
             "FIGHT",       # Arg4: Remove from fight pool
             1              # Arg5: Error logging
         )
@@ -1277,9 +1384,17 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
     unit_id = unit["id"]
 
     # AI_TURN.md: Set ATTACK_LEFT = CC_NB at activation start
-    if "CC_NB" not in unit:
-        raise KeyError(f"Unit missing required 'CC_NB' field: {unit}")
-    unit["ATTACK_LEFT"] = unit["CC_NB"]
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon
+    from engine.utils.weapon_helpers import get_selected_melee_weapon
+    cc_weapons = unit.get("CC_WEAPONS", [])
+    if cc_weapons:
+        selected_idx = unit.get("selectedCcWeaponIndex", 0)
+        if selected_idx < 0 or selected_idx >= len(cc_weapons):
+            raise IndexError(f"Invalid selectedCcWeaponIndex {selected_idx} for unit {unit['id']}")
+        weapon = cc_weapons[selected_idx]
+        unit["ATTACK_LEFT"] = weapon["NB"]
+    else:
+        unit["ATTACK_LEFT"] = 0  # Pas d'armes melee
 
     # Build valid target pool (enemies adjacent within CC_RNG)
     valid_targets = _fight_build_valid_target_pool(game_state, unit)
@@ -1314,7 +1429,18 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
 
         return True, result
 
-    # Targets exist - return waiting_for_player
+    # Check for PvE AI auto-execution (similar to shooting phase)
+    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
+    
+    if is_pve_ai and valid_targets:
+        # AUTO-FIGHT: PvE AI auto-selects target and executes attack
+        target_id = _ai_select_fight_target(game_state, unit_id, valid_targets)
+        if target_id:
+            # Execute fight attack directly and return result
+            return _handle_fight_attack(game_state, unit, target_id, config)
+        # No valid target selected - fall through to waiting_for_player
+
+    # Targets exist - return waiting_for_player (for human players or if AI selection failed)
     game_state["active_fight_unit"] = unit_id
     game_state["valid_fight_targets"] = valid_targets
 
@@ -1420,14 +1546,13 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
     Valid targets:
     - Enemy units
     - HP_CUR > 0
-    - Adjacent to attacker (within CC_RNG distance)
+    - Adjacent to attacker (within melee range distance)
 
     NO LINE OF SIGHT CHECK (fight doesn't need LoS)
+    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
     """
-    if "CC_RNG" not in unit:
-        raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
-
-    cc_range = unit["CC_RNG"]
+    from engine.utils.weapon_helpers import get_melee_range
+    cc_range = get_melee_range()  # Always 1
     unit_col, unit_row = unit["col"], unit["row"]
     unit_player = unit["player"]
 
@@ -1442,7 +1567,7 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
         if target["HP_CUR"] <= 0:
             continue
 
-        # AI_TURN.md: Adjacent check (within CC_RNG)
+        # AI_TURN.md: Adjacent check (within melee range)
         distance = _calculate_hex_distance(unit_col, unit_row, target["col"], target["row"])
         if distance > cc_range:
             continue
@@ -1478,20 +1603,47 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     valid_targets = _fight_build_valid_target_pool(game_state, unit)
     if target_id not in valid_targets:
         return False, {"error": "invalid_target", "targetId": target_id, "valid_targets": valid_targets}
+    
+    # === MULTIPLE_WEAPONS_IMPLEMENTATION.md: Sélection d'arme pour cette cible ===
+    target = _get_unit_by_id(game_state, target_id)
+    if not target:
+        return False, {"error": "target_not_found", "targetId": target_id}
+    
+    from engine.ai.weapon_selector import select_best_melee_weapon
+    best_weapon_idx = select_best_melee_weapon(unit, target, game_state)
+    
+    if best_weapon_idx >= 0:
+        unit["selectedCcWeaponIndex"] = best_weapon_idx
+        # Mettre à jour ATTACK_LEFT avec la nouvelle arme (si pas déjà initialisé ou si arme change)
+        weapon = unit["CC_WEAPONS"][best_weapon_idx]
+        current_attack_left = unit.get("ATTACK_LEFT", 0)
+        # Si ATTACK_LEFT n'est pas encore initialisé, réinitialiser
+        if current_attack_left == 0:
+            unit["ATTACK_LEFT"] = weapon["NB"]
+    else:
+        # Pas d'armes disponibles
+        unit["ATTACK_LEFT"] = 0
+        return False, {"error": "no_weapons_available", "unitId": unit["id"]}
+    # === FIN NOUVEAU ===
 
     # Initialize accumulated attack results list for this unit's activation
-    # This stores ALL attacks made during the CC_NB attack loop
+    # This stores ALL attacks made during the weapon NB attack loop
     if "fight_attack_results" not in game_state:
         game_state["fight_attack_results"] = []
 
-    # Execute attack sequence using CC_* stats
+    # Execute attack sequence using selected weapon
     attack_result = _execute_fight_attack_sequence(game_state, unit, target_id)
 
     # Store this attack result with metadata for step logging
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
+    from engine.utils.weapon_helpers import get_selected_melee_weapon
+    selected_weapon = get_selected_melee_weapon(unit)
+    total_attacks = selected_weapon["NB"] if selected_weapon else 0
+    
     attack_result["attackerId"] = unit_id
     attack_result["targetId"] = target_id
-    attack_result["attack_number"] = unit["CC_NB"] - unit["ATTACK_LEFT"]  # 1-indexed (before decrement)
-    attack_result["total_attacks"] = unit["CC_NB"]
+    attack_result["attack_number"] = total_attacks - unit["ATTACK_LEFT"]  # 1-indexed (before decrement)
+    attack_result["total_attacks"] = total_attacks
     game_state["fight_attack_results"].append(attack_result)
 
     # Decrement ATTACK_LEFT
@@ -1504,11 +1656,12 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
 
         if valid_targets_after:
             # More attacks and targets available
-            # AI_TURN.md COMPLIANCE: Check if gym training mode - auto-continue attack loop
+            # AI_TURN.md COMPLIANCE: Check if gym training mode or PvE AI - auto-continue attack loop
             is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
+            is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
 
-            if is_gym_training:
-                # GYM TRAINING: Auto-continue attack loop until ATTACK_LEFT = 0 or no targets
+            if is_gym_training or is_pve_ai:
+                # GYM TRAINING / PvE AI: Auto-continue attack loop until ATTACK_LEFT = 0 or no targets
                 # Select next target (use AI selection logic)
                 next_target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets_after)
                 if next_target_id:
@@ -1622,13 +1775,17 @@ def _handle_fight_postpone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
     """
     unit_id = unit["id"]
 
-    # AI_TURN.md: Check ATTACK_LEFT = CC_NB?
+    # AI_TURN.md: Check ATTACK_LEFT = weapon NB?
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
     if "ATTACK_LEFT" not in unit:
         raise KeyError(f"Unit missing required 'ATTACK_LEFT' field: {unit}")
-    if "CC_NB" not in unit:
-        raise KeyError(f"Unit missing required 'CC_NB' field: {unit}")
-
-    if unit["ATTACK_LEFT"] == unit["CC_NB"]:
+    
+    from engine.utils.weapon_helpers import get_selected_melee_weapon
+    selected_weapon = get_selected_melee_weapon(unit)
+    if not selected_weapon:
+        return False, {"error": "no_melee_weapon", "unitId": unit["id"]}
+    
+    if unit["ATTACK_LEFT"] == selected_weapon["NB"]:
         # AI_TURN.md: YES → Postpone allowed
         # Do NOT call end_activation - just return postpone signal
         # Unit stays in pool for later activation
@@ -1654,8 +1811,13 @@ def _handle_fight_unit_switch(game_state: Dict[str, Any], current_unit: Dict[str
     Can only switch if current unit has ATTACK_LEFT = CC_NB (hasn't attacked yet).
     Otherwise must complete current unit's activation.
     """
-    # Check if postpone is allowed for current unit
-    postpone_allowed = (current_unit["ATTACK_LEFT"] == current_unit["CC_NB"])
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if postpone is allowed using selected weapon
+    from engine.utils.weapon_helpers import get_selected_melee_weapon
+    selected_weapon = get_selected_melee_weapon(current_unit)
+    if not selected_weapon:
+        postpone_allowed = False
+    else:
+        postpone_allowed = (current_unit["ATTACK_LEFT"] == selected_weapon["NB"])
 
     if postpone_allowed:
         # Switch to new unit
@@ -1676,28 +1838,19 @@ def _handle_fight_unit_switch(game_state: Dict[str, Any], current_unit: Dict[str
 def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[str, Any], target_id: str) -> Dict[str, Any]:
     """
     AI_TURN.md EXACT: attack_sequence(CC) using close combat stats.
-
-    CRITICAL: Uses CC_* stats (not RNG_*):
-    - CC_ATK (to-hit roll)
-    - CC_STR (wound calculation)
-    - CC_AP (armor penetration)
-    - CC_DMG (damage dealt)
+    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon
     """
     import random
+    from engine.utils.weapon_helpers import get_selected_melee_weapon
 
     target = _get_unit_by_id(game_state, target_id)
     if not target:
         raise ValueError(f"Target unit not found: {target_id}")
 
-    # AI_TURN.md: Validate required CC_* fields
-    if "CC_ATK" not in attacker:
-        raise KeyError(f"Attacker missing required 'CC_ATK' field: {attacker}")
-    if "CC_STR" not in attacker:
-        raise KeyError(f"Attacker missing required 'CC_STR' field: {attacker}")
-    if "CC_AP" not in attacker:
-        raise KeyError(f"Attacker missing required 'CC_AP' field: {attacker}")
-    if "CC_DMG" not in attacker:
-        raise KeyError(f"Attacker missing required 'CC_DMG' field: {attacker}")
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get selected weapon
+    weapon = get_selected_melee_weapon(attacker)
+    if not weapon:
+        raise ValueError(f"Attacker {attacker['id']} has no selected melee weapon")
 
     attacker_id = attacker["id"]
 
@@ -1711,44 +1864,56 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
     damage_dealt = 0
     target_died = False
 
-    # Hit roll → hit_roll >= attacker.CC_ATK
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name in attack_log
+    weapon_name = weapon.get("display_name", "")
+    weapon_prefix = f" with [{weapon_name}]" if weapon_name else ""
+    
+    # Hit roll → hit_roll >= weapon.ATK
     hit_roll = random.randint(1, 6)
-    hit_target = attacker["CC_ATK"]
+    hit_target = weapon["ATK"]
     hit_success = hit_roll >= hit_target
 
     if not hit_success:
         # MISS case
-        attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id} : Hit {hit_roll}({hit_target}+) : MISSED !"
+        attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) : MISSED !"
     else:
         # HIT → Continue to wound roll
         wound_roll = random.randint(1, 6)
-        wound_target = _calculate_wound_target(attacker["CC_STR"], target["T"])
+        wound_target = _calculate_wound_target(weapon["STR"], target["T"])
         wound_success = wound_roll >= wound_target
 
         if not wound_success:
             # FAIL TO WOUND case
-            attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) : FAILED !"
+            attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) : FAILED !"
         else:
             # WOUND → Continue to save roll
             save_roll = random.randint(1, 6)
-            save_target = _calculate_save_target(target, attacker["CC_AP"])
+            save_target = _calculate_save_target(target, weapon["AP"])
             save_success = save_roll >= save_target
 
             if save_success:
                 # SAVED case
-                attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) : SAVED !"
+                attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) : SAVED !"
             else:
                 # DAMAGE case - apply damage
-                damage_dealt = attacker["CC_DMG"]
+                damage_dealt = weapon["DMG"]
                 target["HP_CUR"] = max(0, target["HP_CUR"] - damage_dealt)
+                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Invalidate kill probability cache for target
+                from engine.ai.weapon_selector import invalidate_cache_for_target
+                cache = game_state.get("kill_probability_cache", {})
+                invalidate_cache_for_target(cache, str(target["id"]))
+                
                 target_died = target["HP_CUR"] <= 0
 
                 if target_died:
                     # CRITICAL: Immediately remove dead unit from fight activation pools
                     _remove_dead_unit_from_fight_pools(game_state, target_id)
-                    attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} dealt : Unit {target_id} DIED !"
+                    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Invalidate cache for dead unit
+                    from engine.ai.weapon_selector import invalidate_cache_for_unit
+                    invalidate_cache_for_unit(cache, str(target["id"]))
+                    attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} dealt : Unit {target_id} DIED !"
                 else:
-                    attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DEALT !"
+                    attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DEALT !"
 
     # AI_TURN.md COMPLIANCE: Log ALL attacks to action_logs (not just damage)
     if "action_logs" not in game_state:
@@ -1760,8 +1925,10 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
 
     # AI_TURN.md COMPLIANCE: shootDetails array matches frontend gameLogStructure.ts ShootDetail interface
     # Fields: targetDied, damageDealt, saveSuccess (camelCase to match frontend)
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon_name in action_logs
     game_state["action_logs"].append({
         "type": "combat",  # Must match frontend gameLogStructure.ts type
+        "weaponName": weapon_name if weapon_name else None,
         "message": attack_log,
         "turn": game_state["turn"],
         "phase": "fight",
@@ -2299,10 +2466,11 @@ def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id
 
 
 def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """Cube coordinate range check"""
-    if "RNG_RNG" not in unit:
-        raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
-    rng_rng = unit["RNG_RNG"]
+    """Cube coordinate range check
+    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_RNG
+    """
+    from engine.utils.weapon_helpers import get_max_ranged_range
+    rng_rng = get_max_ranged_range(unit)
     if rng_rng <= 0:
         return False
     
@@ -2348,18 +2516,32 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     return pool
 
 def _calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
-    """Calculate target priority score using AI_GAME_OVERVIEW.md logic."""
+    """Calculate target priority score using AI_GAME_OVERVIEW.md logic.
+    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_DMG/CC_DMG
+    """
     
-    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-    if "RNG_DMG" not in target:
-        raise KeyError(f"Target missing required 'RNG_DMG' field: {target}")
-    if "CC_DMG" not in target:
-        raise KeyError(f"Target missing required 'CC_DMG' field: {target}")
-    if "RNG_DMG" not in unit:
-        raise KeyError(f"Unit missing required 'RNG_DMG' field: {unit}")
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max DMG from all weapons
+    from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
     
-    threat_level = max(target["RNG_DMG"], target["CC_DMG"])
-    can_kill_1_phase = target["HP_CUR"] <= unit["RNG_DMG"]
+    # Calculate max threat from target's weapons
+    target_rng_weapon = get_selected_ranged_weapon(target)
+    target_cc_weapon = get_selected_melee_weapon(target)
+    target_rng_dmg = target_rng_weapon.get("DMG", 0) if target_rng_weapon else 0
+    target_cc_dmg = target_cc_weapon.get("DMG", 0) if target_cc_weapon else 0
+    # Also check all weapons for max threat
+    if target.get("RNG_WEAPONS"):
+        target_rng_dmg = max(target_rng_dmg, max(w.get("DMG", 0) for w in target["RNG_WEAPONS"]))
+    if target.get("CC_WEAPONS"):
+        target_cc_dmg = max(target_cc_dmg, max(w.get("DMG", 0) for w in target["CC_WEAPONS"]))
+    
+    threat_level = max(target_rng_dmg, target_cc_dmg)
+    
+    # Calculate if unit can kill target in 1 phase (use selected weapon or first weapon)
+    unit_rng_weapon = get_selected_ranged_weapon(unit)
+    if not unit_rng_weapon and unit.get("RNG_WEAPONS"):
+        unit_rng_weapon = unit["RNG_WEAPONS"][0]
+    unit_rng_dmg = unit_rng_weapon.get("DMG", 0) if unit_rng_weapon else 0
+    can_kill_1_phase = target["HP_CUR"] <= unit_rng_dmg
     
     # Priority 1: High threat that melee can charge but won't kill (score: 1000)
     if threat_level >= 3:  # High threat threshold
@@ -2402,19 +2584,29 @@ def _enrich_unit_for_reward_mapper(unit: Dict[str, Any], game_state: Dict[str, A
     enriched = unit.copy()
     
     # AI_TURN.md COMPLIANCE: All required fields must be present
-    if "CC_DMG" not in unit:
-        raise KeyError(f"Unit missing required 'CC_DMG' field: {unit}")
-    if "RNG_DMG" not in unit:
-        raise KeyError(f"Unit missing required 'RNG_DMG' field: {unit}")
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of CC_DMG/RNG_DMG
+    from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
+    
     if "HP_CUR" not in unit:
         raise KeyError(f"Unit missing required 'HP_CUR' field: {unit}")
+    
+    # Get max DMG from weapons
+    unit_rng_weapon = get_selected_ranged_weapon(unit)
+    unit_cc_weapon = get_selected_melee_weapon(unit)
+    rng_dmg = unit_rng_weapon.get("DMG", 0) if unit_rng_weapon else 0
+    cc_dmg = unit_cc_weapon.get("DMG", 0) if unit_cc_weapon else 0
+    # Also check all weapons for max DMG
+    if unit.get("RNG_WEAPONS"):
+        rng_dmg = max(rng_dmg, max(w.get("DMG", 0) for w in unit["RNG_WEAPONS"]))
+    if unit.get("CC_WEAPONS"):
+        cc_dmg = max(cc_dmg, max(w.get("DMG", 0) for w in unit["CC_WEAPONS"]))
     
     enriched.update({
         "controlled_agent": controlled_agent,
         "unitType": controlled_agent,  # Use controlled_agent as unitType
         "name": unit["name"] if "name" in unit else f"Unit_{unit['id']}",
-        "cc_dmg": unit["CC_DMG"],
-        "rng_dmg": unit["RNG_DMG"],
+        "cc_dmg": cc_dmg,
+        "rng_dmg": rng_dmg,
         "CUR_HP": unit["HP_CUR"]
     })
     
@@ -2427,10 +2619,14 @@ def _check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any
     for unit in game_state["units"]:
         if (unit["player"] == current_player and 
             unit["HP_CUR"] > 0):
-            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-            if "CC_DMG" not in unit:
-                raise KeyError(f"Unit missing required 'CC_DMG' field: {unit}")
-            if unit["CC_DMG"] > 0:  # Has melee capability
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
+            from engine.utils.weapon_helpers import get_selected_melee_weapon
+            has_melee = False
+            if unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
+                melee_weapon = get_selected_melee_weapon(unit)
+                if melee_weapon and melee_weapon.get("DMG", 0) > 0:
+                    has_melee = True
+            if has_melee:  # Has melee capability
                 
                 # Estimate charge range (unit move + average 2d6)
                 distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])

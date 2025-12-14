@@ -1,7 +1,7 @@
 {
     "default": {
     "type": "################################################### Default ###################################################",
-    "total_episodes": 5000,
+    "total_episodes": 4000,
     "total_episodes_normal": "1000 - 100 ep / minute -> 6k ep / hour",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 200,
@@ -17,11 +17,11 @@
       "bot_eval_final": 0
     },
     "observation_params": {
-      "obs_size": 300,
+      "obs_size": 313,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 300 floats = 15 global + 8 unit + 32 terrain + 72 ally + 138 enemy + 35 targets"
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 313 floats = 15 global + 22 unit capabilities + 32 terrain + 72 ally + 132 enemy (6×22) + 40 targets (5×8) - MULTIPLE_WEAPONS_IMPLEMENTATION.md"
     },
     "exploration": {
       "initial_epsilon": 0.3,
@@ -67,11 +67,11 @@
       "bot_eval_final": 20
     },
     "observation_params": {
-      "obs_size": 300,
+      "obs_size": 313,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 300 floats = 15 global + 8 unit + 32 terrain + 72 ally + 138 enemy + 35 targets"
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 313 floats = 15 global + 22 unit capabilities + 32 terrain + 72 ally + 132 enemy (6×22) + 40 targets (5×8) - MULTIPLE_WEAPONS_IMPLEMENTATION.md"
     },
     "model_params": {
       "policy": "MlpPolicy",

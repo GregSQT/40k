@@ -19,6 +19,17 @@ export interface Position {
   row: number;
 }
 
+export interface Weapon {
+  code_name: string;        // Nom utilisé dans le tableau de l'unité
+  display_name: string;     // Nom affiché dans l'UI
+  RNG?: number;             // Portée (armes à distance uniquement)
+  NB: number;               // Nombre d'attaques
+  ATK: number;              // Cible de toucher
+  STR: number;              // Force
+  AP: number;               // Pénétration d'armure
+  DMG: number;              // Dégâts
+}
+
 export interface Unit {
   id: UnitId;
   name?: string;
@@ -40,21 +51,11 @@ export interface Unit {
   OC?: number;
   VALUE?: number;
   
-  // Ranged combat (UPPERCASE per AI_TURN.md)
-  RNG_NB?: number;
-  RNG_RNG: number;
-  RNG_ATK?: number;
-  RNG_STR?: number;
-  RNG_DMG: number;
-  RNG_AP?: number;
-  
-  // Close combat (UPPERCASE per AI_TURN.md)
-  CC_NB?: number;
-  CC_RNG?: number;
-  CC_ATK?: number;
-  CC_STR?: number;
-  CC_DMG: number;
-  CC_AP?: number;
+  // Multiple weapons system (MULTIPLE_WEAPONS_IMPLEMENTATION.md)
+  RNG_WEAPONS: Weapon[];           // Armes à distance (max 3)
+  CC_WEAPONS: Weapon[];             // Armes de mêlée (max 2)
+  selectedRngWeaponIndex?: number;  // Index de l'arme ranged sélectionnée
+  selectedCcWeaponIndex?: number;   // Index de l'arme melee sélectionnée
   
   // Display properties
   ICON: string;
@@ -155,9 +156,17 @@ export interface GameState {
   
   // Engine specific
   move_activation_pool?: string[];
+  shoot_activation_pool?: string[];
+  charge_activation_pool?: string[];
   board_width?: number;
   board_height?: number;
   wall_hexes?: number[][];
+  
+  // Fight phase pools (AI_TURN.md)
+  fight_subphase?: FightSubPhase;
+  charging_activation_pool?: string[];
+  active_alternating_activation_pool?: string[];
+  non_active_alternating_activation_pool?: string[];
   
   // Frontend specific
   mode?: GameMode;

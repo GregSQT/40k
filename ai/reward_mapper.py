@@ -5,6 +5,7 @@ using existing parameter unitTypes from rewards_config.json
 """
 
 from typing import Dict, List, Any, Tuple
+from engine.utils.weapon_helpers import get_max_ranged_damage, get_max_melee_damage, get_selected_ranged_weapon, get_selected_melee_weapon
 
 class RewardMapper:
     """Maps AI_GAME_OVERVIEW.md tactical priorities to existing reward parameters."""
@@ -12,21 +13,52 @@ class RewardMapper:
     def __init__(self, rewards_config):
         self.rewards_config = rewards_config
     
+    def _get_unit_threat(self, unit: Dict[str, Any]) -> float:
+        """
+        Calculate unit threat score (max of ranged and melee damage potential).
+        MULTIPLE_WEAPONS_IMPLEMENTATION.md: Replaces old RNG_DMG/CC_DMG fields.
+        """
+        rng_dmg = get_max_ranged_damage(unit)
+        cc_dmg = get_max_melee_damage(unit)
+        return max(rng_dmg, cc_dmg)
+    
+    def _can_unit_kill_target_in_one_phase(self, unit: Dict[str, Any], target: Dict[str, Any], is_ranged: bool) -> bool:
+        """
+        Check if unit can kill target in one phase.
+        MULTIPLE_WEAPONS_IMPLEMENTATION.md: Uses weapon arrays instead of single damage fields.
+        """
+        target_hp = target.get("HP_CUR", 0)
+        if target_hp <= 0:
+            return True
+        
+        if is_ranged:
+            weapon = get_selected_ranged_weapon(unit)
+            if not weapon:
+                return False
+            max_damage = weapon.get("NB", 0) * weapon.get("DMG", 0)
+        else:
+            weapon = get_selected_melee_weapon(unit)
+            if not weapon:
+                return False
+            max_damage = weapon.get("NB", 0) * weapon.get("DMG", 0)
+        
+        return target_hp <= max_damage
+    
     def get_shooting_priority_reward(self, unit, target, all_targets, can_melee_charge_target):
         """
         Calculate shooting reward based on AI_GAME_OVERVIEW.md priority system:
         
-        1. Enemy unit at RNG_RNG range:
-           - with highest RNG_DMG or CC_DMG score
+        1. Enemy unit at ranged range:
+           - with highest threat score (max of ranged/melee damage)
            - that one or more of our melee units can charge
            - would not kill in 1 melee phase
         
-        2. Enemy unit at RNG_RNG range:
-           - with highest RNG_DMG or CC_DMG score
+        2. Enemy unit at ranged range:
+           - with highest threat score (max of ranged/melee damage)
            - can be killed by active unit in 1 shooting phase
         
-        3. Enemy unit at RNG_RNG range:
-           - with highest RNG_DMG or CC_DMG score
+        3. Enemy unit at ranged range:
+           - with highest threat score (max of ranged/melee damage)
            - having the less HP
            - can be killed by active unit in 1 shooting phase
         """
@@ -36,15 +68,9 @@ class RewardMapper:
             raise ValueError("ranged_attack reward not found in unit rewards config")
         base_reward = base_actions["ranged_attack"]
         
-        # Calculate target threat score (highest RNG_DMG or CC_DMG)
-        if "RNG_DMG" not in target:
-            raise ValueError(f"target.RNG_DMG is required for unit {target['unitType']}")
-        if "CC_DMG" not in target:
-            raise ValueError(f"target.CC_DMG is required for unit {target['unitType']}")
-        target_threat = max(target["RNG_DMG"], target["CC_DMG"])
-        if "RNG_DMG" not in unit:
-            raise ValueError(f"unit.RNG_DMG is required for unit {unit.get('unitType', 'unknown')}")
-        can_kill_1_phase = target["HP_CUR"] <= unit["RNG_DMG"]
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate target threat using weapon arrays
+        target_threat = self._get_unit_threat(target)
+        can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True)
         
         # Priority 1: High threat target that melee can charge but won't kill in 1 melee phase
         if can_melee_charge_target:
@@ -76,7 +102,7 @@ class RewardMapper:
         
         For melee units:
         1. Enemy with highest threat score that can be killed in 1 melee phase
-        2. Enemy with highest threat score, less current HP, HP >= unit's CC_DMG
+        2. Enemy with highest threat score, less current HP, HP >= unit's melee damage
         3. Enemy with highest threat score and less current HP
         
         For ranged units:
@@ -88,14 +114,9 @@ class RewardMapper:
             raise ValueError("charge_success reward not found in unit rewards config")
         base_reward = base_actions["charge_success"]
 
-        if "RNG_DMG" not in target:
-            raise ValueError(f"target.RNG_DMG is required for unit {target['unitType']}")
-        if "CC_DMG" not in target:
-            raise ValueError(f"target.CC_DMG is required for unit {target['unitType']}")
-        target_threat = max(target["RNG_DMG"], target["CC_DMG"])
-        if "CC_DMG" not in unit:
-            raise ValueError(f"unit.CC_DMG is required for unit {unit.get('unitType', 'unknown')}")
-        can_kill_1_phase = target["HP_CUR"] <= unit["CC_DMG"]
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate target threat using weapon arrays
+        target_threat = self._get_unit_threat(target)
+        can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False)
         
         if "is_melee" not in unit:
             raise ValueError(f"unit.is_melee is required for unit {unit.get('unitType', 'unknown')}")
@@ -105,7 +126,10 @@ class RewardMapper:
                 return base_reward + unit_rewards.get("charge_priority_1", 0)
 
             # Priority 2: High threat, low HP, HP >= unit's damage
-            if (target["HP_CUR"] >= unit["CC_DMG"] and
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use melee weapon damage
+            melee_weapon = get_selected_melee_weapon(unit)
+            unit_melee_dmg = (melee_weapon.get("NB", 0) * melee_weapon.get("DMG", 0)) if melee_weapon else 0
+            if (target["HP_CUR"] >= unit_melee_dmg and
                 self._is_highest_threat_in_range(target, all_targets) and
                 self._is_lowest_hp_among_threats(target, all_targets)):
                 return base_reward + unit_rewards.get("charge_priority_2", 0)
@@ -136,9 +160,8 @@ class RewardMapper:
             raise ValueError("melee_attack reward not found in unit rewards config")
         base_reward = base_actions["melee_attack"]
 
-        if "CC_DMG" not in unit:
-            raise ValueError(f"unit.CC_DMG is required for unit {unit.get('unitType', 'unknown')}")
-        can_kill_1_phase = target["HP_CUR"] <= unit["CC_DMG"]
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use melee weapon damage
+        can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False)
 
         # Priority 1: Can kill in 1 melee phase with highest threat
         if can_kill_1_phase and self._is_highest_threat_adjacent(target, all_targets):
@@ -340,51 +363,35 @@ class RewardMapper:
     
     def _is_highest_threat_in_range(self, target, all_targets):
         """Check if target has highest threat score among all targets in range."""
-        if "RNG_DMG" not in target:
-            raise ValueError(f"target.RNG_DMG is required for unit {target['unitType']}")
-        if "CC_DMG" not in target:
-            raise ValueError(f"target.CC_DMG is required for unit {target['unitType']}")
-        target_threat = max(target["RNG_DMG"], target["CC_DMG"])
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon arrays for threat calculation
+        target_threat = self._get_unit_threat(target)
         for other in all_targets:
             if other != target:
-                if "RNG_DMG" not in other or "CC_DMG" not in other:
-                    raise ValueError(f"other target missing required damage fields: {other['unitType']}")
-                other_threat = max(other["RNG_DMG"], other["CC_DMG"])
+                other_threat = self._get_unit_threat(other)
                 if other_threat > target_threat:
                     return False
         return True
     
     def _is_highest_threat_adjacent(self, target, adjacent_targets):
         """Check if target has highest threat score among adjacent targets."""
-        if "RNG_DMG" not in target:
-            raise ValueError(f"target.RNG_DMG is required for unit {target['unitType']}")
-        if "CC_DMG" not in target:
-            raise ValueError(f"target.CC_DMG is required for unit {target['unitType']}")
-        target_threat = max(target["RNG_DMG"], target["CC_DMG"])
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon arrays for threat calculation
+        target_threat = self._get_unit_threat(target)
         for other in adjacent_targets:
             if other != target:
-                if "RNG_DMG" not in other or "CC_DMG" not in other:
-                    raise ValueError(f"other target missing required damage fields: {other['unitType']}")
-                other_threat = max(other["RNG_DMG"], other["CC_DMG"])
+                other_threat = self._get_unit_threat(other)
                 if other_threat > target_threat:
                     return False
         return True
     
     def _is_lowest_hp_high_threat(self, target, all_targets):
         """Check if target has lowest HP among high threat targets."""
-        if "RNG_DMG" not in target:
-            raise ValueError(f"target.RNG_DMG is required for unit {target['unitType']}")
-        if "CC_DMG" not in target:
-            raise ValueError(f"target.CC_DMG is required for unit {target['unitType']}")
-        target_threat = max(target["RNG_DMG"], target["CC_DMG"])
-        max_threat = max(max(t["RNG_DMG"], t["CC_DMG"]) for t in all_targets 
-                        if "RNG_DMG" in t and "CC_DMG" in t)
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon arrays for threat calculation
+        target_threat = self._get_unit_threat(target)
+        max_threat = max(self._get_unit_threat(t) for t in all_targets)
         
         if target_threat == max_threat:
             for other in all_targets:
-                if "RNG_DMG" not in other or "CC_DMG" not in other:
-                    raise ValueError(f"other target missing required damage fields: {other['unitType']}")
-                other_threat = max(other["RNG_DMG"], other["CC_DMG"])
+                other_threat = self._get_unit_threat(other)
                 if other_threat == max_threat and other["HP_CUR"] < target["HP_CUR"]:
                     return False
             return True
@@ -392,46 +399,31 @@ class RewardMapper:
     
     def _is_lowest_hp_among_threats(self, target, all_targets):
         """Check if target has lowest HP among targets of same threat level.""" 
-        if "RNG_DMG" not in target:
-            raise ValueError(f"target.RNG_DMG is required for unit {target['unitType']}")
-        if "CC_DMG" not in target:
-            raise ValueError(f"target.CC_DMG is required for unit {target['unitType']}")
-        target_threat = max(target["RNG_DMG"], target["CC_DMG"])
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon arrays for threat calculation
+        target_threat = self._get_unit_threat(target)
         for other in all_targets:
-            if "RNG_DMG" not in other or "CC_DMG" not in other:
-                raise ValueError(f"other target missing required damage fields: {other.get('unitType', 'unknown')}")
-            other_threat = max(other["RNG_DMG"], other["CC_DMG"])
+            other_threat = self._get_unit_threat(other)
             if other_threat == target_threat and other["HP_CUR"] < target["HP_CUR"]:
                 return False
         return True
     
     def _is_highest_hp_among_threats(self, target, all_targets):
         """Check if target has highest HP among targets of same threat level."""
-        if "RNG_DMG" not in target:
-            raise ValueError(f"target.RNG_DMG is required for unit {target['unitType']}")
-        if "CC_DMG" not in target:
-            raise ValueError(f"target.CC_DMG is required for unit {target['unitType']}")
-        target_threat = max(target["RNG_DMG"], target["CC_DMG"])
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon arrays for threat calculation
+        target_threat = self._get_unit_threat(target)
         for other in all_targets:
-            if "RNG_DMG" not in other or "CC_DMG" not in other:
-                raise ValueError(f"other target missing required damage fields: {other.get('unitType', 'unknown')}")
-            other_threat = max(other["RNG_DMG"], other["CC_DMG"])
+            other_threat = self._get_unit_threat(other)
             if other_threat == target_threat and other["HP_CUR"] > target["HP_CUR"]:
                 return False
         return True
     
     def _is_lowest_hp_among_adjacent_threats(self, target, adjacent_targets):
         """Check if target has lowest HP among adjacent targets of same threat level."""
-        if "RNG_DMG" not in target:
-            raise ValueError(f"target.RNG_DMG is required for unit {target['unitType']}")
-        if "CC_DMG" not in target:
-            raise ValueError(f"target.CC_DMG is required for unit {target['unitType']}")
-        target_threat = max(target["RNG_DMG"], target["CC_DMG"])
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon arrays for threat calculation
+        target_threat = self._get_unit_threat(target)
         for other in adjacent_targets:
             if other != target:
-                if "RNG_DMG" not in other or "CC_DMG" not in other:
-                    raise ValueError(f"other target missing required damage fields: {other['unitType']}")
-                other_threat = max(other["RNG_DMG"], other["CC_DMG"])
+                other_threat = self._get_unit_threat(other)
                 if other_threat == target_threat and other["HP_CUR"] < target["HP_CUR"]:
                     return False
         return True

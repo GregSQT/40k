@@ -1,6 +1,7 @@
 // frontend/src/roster/tyranid/units/Carnifex.ts
 
 import { TyranidInfantryEliteMeleeElite } from "../classes/TyranidInfantryEliteMeleeElite";
+import { getWeapons } from "../armory";
 
 export class Carnifex extends TyranidInfantryEliteMeleeElite {
   static NAME = "Carnifex";
@@ -13,20 +14,12 @@ export class Carnifex extends TyranidInfantryEliteMeleeElite {
   static LD = 8;               // Leadership score
   static OC = 3;               // Operative Control
   static VALUE = 125;          // Unit value (W40K points cost)
-  // RANGE WEAPON
-  static RNG_RNG = 24;         // Range attack : range
-  static RNG_NB = 6;           // Range attack : number of attacks - 6
-  static RNG_ATK = 4;          // Range attack : To Hit score
-  static RNG_STR = 7;          // Range attack Strength
-  static RNG_AP = -2;          // Range attack Armor penetration
-  static RNG_DMG = 1;          // Range attack : damages
-  // MELEE WEAPON
-  static CC_NB = 6;            // Melee attack : number of attacks - 6
-  static CC_RNG = 1;           // Melee attack : range
-  static CC_ATK = 4;           // Melee attack : score
-  static CC_STR = 9;           // Melee attack Strength
-  static CC_AP = -2;           // Melee attack Armor penetration
-  static CC_DMG = 3;           // Melee attack : damages
+  
+  // WEAPONS
+  static RNG_WEAPON_CODES = ["venom_cannon"];
+  static RNG_WEAPONS = getWeapons(Carnifex.RNG_WEAPON_CODES);
+  static CC_WEAPON_CODES = ["monstrous_scything_talons"];
+  static CC_WEAPONS = getWeapons(Carnifex.CC_WEAPON_CODES);
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Elite";      // Elite: 8 wounds, 2+ save - heavy armor

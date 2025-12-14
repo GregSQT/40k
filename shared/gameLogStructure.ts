@@ -33,6 +33,7 @@ export interface BaseLogEntry {
   startHex?: string;
   endHex?: string;
   shootDetails?: ShootDetail[];
+  weaponName?: string;  // MULTIPLE_WEAPONS_IMPLEMENTATION.md
 }
 
 /**
@@ -91,6 +92,7 @@ export interface LogEntryParams {
   // Training-only fields
   reward?: number;
   actionName?: string;
+  weaponName?: string;  // MULTIPLE_WEAPONS_IMPLEMENTATION.md
 }
 
 /**

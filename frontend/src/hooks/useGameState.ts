@@ -69,13 +69,24 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       setGameState(prev => ({
         ...prev,
         units: initialUnits.map(unit => {
-          // Ensure required UPPERCASE fields with fallbacks
-          if (unit.RNG_NB === undefined) {
-            throw new Error(`Unit ${unit.id} missing required RNG_NB field`);
+          // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate weapons arrays
+          if (!unit.RNG_WEAPONS || unit.RNG_WEAPONS.length === 0) {
+            // Unit must have at least one weapon type (ranged or melee)
+            if (!unit.CC_WEAPONS || unit.CC_WEAPONS.length === 0) {
+              throw new Error(`Unit ${unit.id} missing required weapons (must have RNG_WEAPONS or CC_WEAPONS)`);
+            }
+            return {
+              ...unit,
+              SHOOT_LEFT: 0, // No ranged weapons
+              HP_CUR: unit.HP_CUR ?? unit.HP_MAX
+            };
           }
+          // Get NB from selected or first weapon
+          const { getSelectedRangedWeapon } = require('../utils/weaponHelpers');
+          const selectedWeapon = getSelectedRangedWeapon(unit) || unit.RNG_WEAPONS[0];
           return {
             ...unit,
-            SHOOT_LEFT: unit.RNG_NB,
+            SHOOT_LEFT: selectedWeapon?.NB || 0,
             HP_CUR: unit.HP_CUR ?? unit.HP_MAX
           };
         })
@@ -124,10 +135,18 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     setGameState(prev => ({
       ...prev,
       units: prev.units.map(unit => {
-        if (unit.RNG_NB === undefined) {
-          throw new Error('unit.RNG_NB is required');
+        // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate weapons arrays
+        if (!unit.RNG_WEAPONS || unit.RNG_WEAPONS.length === 0) {
+          // Unit must have at least one weapon type (ranged or melee)
+          if (!unit.CC_WEAPONS || unit.CC_WEAPONS.length === 0) {
+            throw new Error('unit must have RNG_WEAPONS or CC_WEAPONS');
+          }
+          return { ...unit, SHOOT_LEFT: 0 };
         }
-        return { ...unit, SHOOT_LEFT: unit.RNG_NB };
+        // Get NB from selected or first weapon
+        const { getSelectedRangedWeapon } = require('../utils/weaponHelpers');
+        const selectedWeapon = getSelectedRangedWeapon(unit) || unit.RNG_WEAPONS[0];
+        return { ...unit, SHOOT_LEFT: selectedWeapon?.NB || 0 };
       })
     }));
   }, []);

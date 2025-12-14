@@ -59,13 +59,14 @@ def load_config(scenario_path=None):
 def load_unit_definitions_from_ts(unit_registry):
     """Load unit definitions by parsing TypeScript static class properties."""
     import re
+    import os
+    from engine.roster.spaceMarine.armory import get_weapons as get_sm_weapons
+    from engine.roster.tyranid.armory import get_weapons as get_ty_weapons
     
     unit_definitions = {}
     
-    for unit_name, faction in unit_registry["units"].items():
-        # Registry contains complete path relative to frontend/src/roster/
-        # e.g., "spaceMarine/units/Intercessor"
-        ts_file_path = f"frontend/src/roster/{faction}.ts"
+    for unit_name, faction_path in unit_registry["units"].items():
+        ts_file_path = f"frontend/src/roster/{faction_path}.ts"
         
         if not os.path.exists(ts_file_path):
             print(f"Warning: Unit file not found: {ts_file_path}")
@@ -75,18 +76,14 @@ def load_unit_definitions_from_ts(unit_registry):
             with open(ts_file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # Extract static properties using regex
             unit_stats = {}
             
-            # Pattern to match: static FIELD_NAME = value;
+            # Pattern 1: Static properties simples (HP_MAX, MOVE, etc.)
             static_pattern = r'static\s+([A-Z_]+)\s*=\s*([^;]+);'
             matches = re.findall(static_pattern, content)
             
             for field_name, value_str in matches:
-                # Clean and convert the value
                 value_str = value_str.strip().strip('"\'')
-                
-                # Convert to appropriate type
                 if value_str.isdigit() or (value_str.startswith('-') and value_str[1:].isdigit()):
                     unit_stats[field_name] = int(value_str)
                 elif value_str.replace('.', '').isdigit():
@@ -94,8 +91,55 @@ def load_unit_definitions_from_ts(unit_registry):
                 else:
                     unit_stats[field_name] = value_str
             
-            # No default values - unit files must be complete
-            # If fields are missing, engine validation will catch this
+            # Pattern 2: RNG_WEAPON_CODES = ["code1", "code2"] ou [] (robuste)
+            rng_codes_match = re.search(
+                r'static\s+RNG_WEAPON_CODES\s*=\s*\[([^\]]*)\];',
+                content,
+                re.MULTILINE | re.DOTALL  # Support multi-lignes
+            )
+            if rng_codes_match:
+                codes_str = rng_codes_match.group(1).strip()
+                if codes_str:
+                    # Gérer guillemets simples ET doubles
+                    codes = re.findall(r'["\']([^"\']+)["\']', codes_str)
+                else:
+                    codes = []  # Array vide
+                
+                # Détection faction robuste
+                if faction_path.startswith('spaceMarine/'):
+                    unit_stats["RNG_WEAPONS"] = get_sm_weapons(codes)
+                elif faction_path.startswith('tyranid/'):
+                    unit_stats["RNG_WEAPONS"] = get_ty_weapons(codes)
+                else:
+                    raise ValueError(f"Unknown faction in path: {faction_path}")
+            
+            # Pattern 3: CC_WEAPON_CODES (même logique)
+            cc_codes_match = re.search(
+                r'static\s+CC_WEAPON_CODES\s*=\s*\[([^\]]*)\];',
+                content,
+                re.MULTILINE | re.DOTALL
+            )
+            if cc_codes_match:
+                codes_str = cc_codes_match.group(1).strip()
+                if codes_str:
+                    codes = re.findall(r'["\']([^"\']+)["\']', codes_str)
+                else:
+                    codes = []
+                
+                if faction_path.startswith('spaceMarine/'):
+                    unit_stats["CC_WEAPONS"] = get_sm_weapons(codes)
+                elif faction_path.startswith('tyranid/'):
+                    unit_stats["CC_WEAPONS"] = get_ty_weapons(codes)
+            
+            # Validation: Au moins une arme requise
+            if not unit_stats.get("RNG_WEAPONS") and not unit_stats.get("CC_WEAPONS"):
+                raise ValueError(f"Unit {unit_name} must have at least RNG_WEAPONS or CC_WEAPONS")
+            
+            # Initialiser selectedWeaponIndex
+            if unit_stats.get("RNG_WEAPONS"):
+                unit_stats["selectedRngWeaponIndex"] = 0
+            if unit_stats.get("CC_WEAPONS"):
+                unit_stats["selectedCcWeaponIndex"] = 0
             
             unit_definitions[unit_name] = unit_stats
             
@@ -143,6 +187,17 @@ def load_scenario_units(unit_definitions, scenario_path=None):
         
         # Get unit definition and merge with scenario position data
         unit_def = unit_definitions[unit_type]
+        
+        # Extract SHOOT_LEFT from RNG_WEAPONS[0] if exists
+        shoot_left = 0
+        if unit_def.get("RNG_WEAPONS") and len(unit_def["RNG_WEAPONS"]) > 0:
+            shoot_left = unit_def["RNG_WEAPONS"][0].get("NB", 0)
+        
+        # Extract ATTACK_LEFT from CC_WEAPONS[0] if exists
+        attack_left = 0
+        if unit_def.get("CC_WEAPONS") and len(unit_def["CC_WEAPONS"]) > 0:
+            attack_left = unit_def["CC_WEAPONS"][0].get("NB", 0)
+        
         created_unit = {
             **unit_def,
             "id": str(scenario_unit["id"]),  # Ensure string ID for consistency
@@ -151,8 +206,8 @@ def load_scenario_units(unit_definitions, scenario_path=None):
             "row": scenario_unit["row"],
             "unitType": unit_type,
             "HP_CUR": unit_def.get("HP_MAX", unit_def.get("HP_MAX", 1)),
-            "SHOOT_LEFT": unit_def.get("RNG_NB", 0),
-            "ATTACK_LEFT": unit_def.get("CC_NB", 0)
+            "SHOOT_LEFT": shoot_left,
+            "ATTACK_LEFT": attack_left
         }
         
         units.append(created_unit)

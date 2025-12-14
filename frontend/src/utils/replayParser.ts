@@ -144,21 +144,13 @@ export function parse_log_file_from_text(text: string) {
         row: row,
         HP_CUR: unitHP,
         HP_MAX: unitHP,
+        // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Replace single weapon fields with arrays
         // Add placeholder stats - will be filled from gameConfig later
         MOVE: 0,
         T: 0,
         ARMOR_SAVE: 0,
-        RNG_RNG: 0,
-        RNG_NB: 0,
-        RNG_ATK: 0,
-        RNG_STR: 0,
-        RNG_AP: 0,
-        RNG_DMG: 0,
-        MEL_NB: 0,
-        MEL_ATK: 0,
-        MEL_STR: 0,
-        MEL_AP: 0,
-        MEL_DMG: 0
+        RNG_WEAPONS: [],
+        CC_WEAPONS: []
       };
       currentEpisode.initial_positions[unitId] = { col, row };
       continue;

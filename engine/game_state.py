@@ -31,6 +31,28 @@ class GameStateManager:
     
     def create_unit(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Create unit with AI_TURN.md compliant fields."""
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
+        rng_weapons = config.get("RNG_WEAPONS", [])
+        cc_weapons = config.get("CC_WEAPONS", [])
+        
+        if not rng_weapons and not cc_weapons:
+            raise ValueError(f"Unit {config.get('id', 'unknown')} must have at least RNG_WEAPONS or CC_WEAPONS")
+        
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Initialize selected weapon indices
+        selected_rng_weapon_index = 0 if rng_weapons else None
+        selected_cc_weapon_index = 0 if cc_weapons else None
+        
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract SHOOT_LEFT and ATTACK_LEFT from selected weapons
+        shoot_left = 0
+        if rng_weapons and selected_rng_weapon_index is not None:
+            selected_weapon = rng_weapons[selected_rng_weapon_index]
+            shoot_left = selected_weapon.get("NB", 0)
+        
+        attack_left = 0
+        if cc_weapons and selected_cc_weapon_index is not None:
+            selected_weapon = cc_weapons[selected_cc_weapon_index]
+            attack_left = selected_weapon.get("NB", 0)
+        
         return {
             # Identity
             "id": config["id"],
@@ -49,21 +71,11 @@ class GameStateManager:
             "ARMOR_SAVE": config["ARMOR_SAVE"],
             "INVUL_SAVE": config["INVUL_SAVE"],
             
-            # Ranged fight stats - NO DEFAULTS
-            "RNG_NB": config["RNG_NB"],
-            "RNG_RNG": config["RNG_RNG"],
-            "RNG_ATK": config["RNG_ATK"],
-            "RNG_STR": config["RNG_STR"],
-            "RNG_DMG": config["RNG_DMG"],
-            "RNG_AP": config["RNG_AP"],
-            
-            # Close fight stats - NO DEFAULTS
-            "CC_NB": config["CC_NB"],
-            "CC_RNG": config["CC_RNG"],
-            "CC_ATK": config["CC_ATK"],
-            "CC_STR": config["CC_STR"],
-            "CC_DMG": config["CC_DMG"],
-            "CC_AP": config["CC_AP"],
+            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Multiple weapons system
+            "RNG_WEAPONS": rng_weapons,
+            "CC_WEAPONS": cc_weapons,
+            "selectedRngWeaponIndex": selected_rng_weapon_index,
+            "selectedCcWeaponIndex": selected_cc_weapon_index,
             
             # Required stats - NO DEFAULTS
             "LD": config["LD"],
@@ -73,16 +85,16 @@ class GameStateManager:
             "ICON_SCALE": config["ICON_SCALE"],
             
             # AI_TURN.md action tracking fields
-            "SHOOT_LEFT": config["SHOOT_LEFT"],
-            "ATTACK_LEFT": config["ATTACK_LEFT"]
+            "SHOOT_LEFT": shoot_left,
+            "ATTACK_LEFT": attack_left
         }
     
     def validate_uppercase_fields(self, unit: Dict[str, Any]):
         """Validate unit uses UPPERCASE field naming convention."""
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate weapons instead of individual weapon fields
         required_uppercase = {
             "HP_CUR", "HP_MAX", "MOVE", "T", "ARMOR_SAVE", "INVUL_SAVE",
-            "RNG_NB", "RNG_RNG", "RNG_ATK", "RNG_STR", "RNG_DMG", "RNG_AP",
-            "CC_NB", "CC_RNG", "CC_ATK", "CC_STR", "CC_DMG", "CC_AP",
+            "RNG_WEAPONS", "CC_WEAPONS",
             "LD", "OC", "VALUE", "ICON", "ICON_SCALE",
             "SHOOT_LEFT", "ATTACK_LEFT"
         }
@@ -90,6 +102,12 @@ class GameStateManager:
         for field in required_uppercase:
             if field not in unit:
                 raise ValueError(f"Unit {unit['id']} missing required UPPERCASE field: {field}")
+        
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
+        rng_weapons = unit.get("RNG_WEAPONS", [])
+        cc_weapons = unit.get("CC_WEAPONS", [])
+        if not rng_weapons and not cc_weapons:
+            raise ValueError(f"Unit {unit['id']} must have at least RNG_WEAPONS or CC_WEAPONS")
     
     def load_units_from_scenario(self, scenario_file, unit_registry):
             """Load units from scenario file - NO FALLBACKS ALLOWED."""
@@ -137,6 +155,29 @@ class GameStateManager:
                     if field not in unit_data:
                         raise KeyError(f"Unit missing required field '{field}': {unit_data}")
                 
+                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract RNG_WEAPONS and CC_WEAPONS
+                rng_weapons = full_unit_data.get("RNG_WEAPONS", [])
+                cc_weapons = full_unit_data.get("CC_WEAPONS", [])
+                
+                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
+                if not rng_weapons and not cc_weapons:
+                    raise ValueError(f"Unit {unit_type} must have at least RNG_WEAPONS or CC_WEAPONS")
+                
+                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Initialize selected weapon indices
+                selected_rng_weapon_index = 0 if rng_weapons else None
+                selected_cc_weapon_index = 0 if cc_weapons else None
+                
+                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract SHOOT_LEFT and ATTACK_LEFT from selected weapons
+                shoot_left = 0
+                if rng_weapons and selected_rng_weapon_index is not None:
+                    selected_weapon = rng_weapons[selected_rng_weapon_index]
+                    shoot_left = selected_weapon.get("NB", 0)
+                
+                attack_left = 0
+                if cc_weapons and selected_cc_weapon_index is not None:
+                    selected_weapon = cc_weapons[selected_cc_weapon_index]
+                    attack_left = selected_weapon.get("NB", 0)
+                
                 enhanced_unit = {
                     "id": str(unit_data["id"]),
                     "player": unit_data["player"],
@@ -149,25 +190,18 @@ class GameStateManager:
                     "T": full_unit_data["T"],
                     "ARMOR_SAVE": full_unit_data["ARMOR_SAVE"],
                     "INVUL_SAVE": full_unit_data["INVUL_SAVE"],
-                    "RNG_NB": full_unit_data["RNG_NB"],
-                    "RNG_RNG": full_unit_data["RNG_RNG"],
-                    "RNG_ATK": full_unit_data["RNG_ATK"],
-                    "RNG_STR": full_unit_data["RNG_STR"],
-                    "RNG_DMG": full_unit_data["RNG_DMG"],
-                    "RNG_AP": full_unit_data["RNG_AP"],
-                    "CC_NB": full_unit_data["CC_NB"],
-                    "CC_RNG": full_unit_data["CC_RNG"],
-                    "CC_ATK": full_unit_data["CC_ATK"],
-                    "CC_STR": full_unit_data["CC_STR"],
-                    "CC_DMG": full_unit_data["CC_DMG"],
-                    "CC_AP": full_unit_data["CC_AP"],
+                    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Multiple weapons system
+                    "RNG_WEAPONS": rng_weapons,
+                    "CC_WEAPONS": cc_weapons,
+                    "selectedRngWeaponIndex": selected_rng_weapon_index,
+                    "selectedCcWeaponIndex": selected_cc_weapon_index,
                     "LD": full_unit_data["LD"],
                     "OC": full_unit_data["OC"],
                     "VALUE": full_unit_data["VALUE"],
                     "ICON": full_unit_data["ICON"],
                     "ICON_SCALE": full_unit_data["ICON_SCALE"],
-                    "SHOOT_LEFT": full_unit_data["RNG_NB"],
-                    "ATTACK_LEFT": full_unit_data["CC_NB"]
+                    "SHOOT_LEFT": shoot_left,
+                    "ATTACK_LEFT": attack_left
                 }
                 
                 enhanced_units.append(enhanced_unit)

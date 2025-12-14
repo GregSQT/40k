@@ -407,8 +407,10 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     CRITICAL FIX: Use proper hexagonal distance, not Chebyshev distance.
     For CC_RNG=1 (typical), this means checking if enemy is in 6 neighbors.
     For CC_RNG>1, use hex distance calculation.
+    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1.
     """
-    cc_range = unit["CC_RNG"]
+    from engine.utils.weapon_helpers import get_melee_range
+    cc_range = get_melee_range()  # Always 1
     unit_col, unit_row = unit["col"], unit["row"]
 
     # Optimization: For CC_RNG=1 (most common), check 6 neighbors directly
@@ -683,6 +685,7 @@ def _select_strategic_destination(
         Selected destination (col, row)
     """
     from engine.combat_utils import has_line_of_sight
+    from engine.utils.weapon_helpers import get_max_ranged_range
 
     # AI_TURN.md: Direct field access with validation
     if "units" not in game_state:
@@ -691,8 +694,9 @@ def _select_strategic_destination(
         raise KeyError(f"Unit missing required position fields: {unit}")
     if "player" not in unit:
         raise KeyError(f"Unit missing required 'player' field: {unit}")
-    if "RNG_RNG" not in unit:
-        raise KeyError(f"Unit missing required 'RNG_RNG' field: {unit}")
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_RNG
+    if not unit.get("RNG_WEAPONS") and not unit.get("CC_WEAPONS"):
+        raise KeyError(f"Unit missing required 'RNG_WEAPONS' or 'CC_WEAPONS' field: {unit}")
 
     # If no destinations, return current position
     if not valid_destinations:
@@ -723,7 +727,8 @@ def _select_strategic_destination(
 
     # STRATEGY 1: TACTICAL - Move to position with most enemies in shooting range
     elif strategy_id == 1:
-        weapon_range = unit["RNG_RNG"]
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max ranged range from weapons
+        weapon_range = get_max_ranged_range(unit)
         best_dest = valid_destinations[0]
         max_targets = 0
 

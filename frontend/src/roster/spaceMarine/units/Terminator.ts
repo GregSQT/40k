@@ -1,6 +1,7 @@
-// frontend/src/roster/spaceMarine/units/CaptainGravis.ts
+// frontend/src/roster/spaceMarine/units/Terminator.ts
 
 import { SpaceMarineInfantryEliteMeleeElite } from "../classes/SpaceMarineInfantryEliteMeleeElite";
+import { getWeapons } from "../armory";
 
 export class Terminator extends SpaceMarineInfantryEliteMeleeElite {
   static NAME = "Terminator";
@@ -14,20 +15,12 @@ export class Terminator extends SpaceMarineInfantryEliteMeleeElite {
   static LD = 6;               // Leadership score
   static OC = 1;               // Operative Control
   static VALUE = 80;           // Unit value (W40K points cost)
-  // RANGE WEAPON
-  static RNG_RNG = 24;         // Range attack : range - 12
-  static RNG_NB = 2;           // Range attack : number of attacks - 3
-  static RNG_ATK = 3;          // Range attack : To Hit score
-  static RNG_STR = 4;          // Range attack Strength
-  static RNG_AP = 0;          // Range attack Armor penetration
-  static RNG_DMG = 1;          // Range attack : damages
-  // MELEE WEAPON
-  static CC_NB = 3;            // Melee attack : number of attacks - 5
-  static CC_RNG = 1;           // Melee attack : range
-  static CC_ATK = 3;           // Melee attack : score
-  static CC_STR = 8;           // Melee attack Strength
-  static CC_AP = -2;           // Melee attack Armor penetration
-  static CC_DMG = 2;           // Melee attack : damages
+  
+  // WEAPONS
+  static RNG_WEAPON_CODES = ["storm_bolter"];
+  static RNG_WEAPONS = getWeapons(Terminator.RNG_WEAPON_CODES);
+  static CC_WEAPON_CODES = ["power_fist_terminator"];
+  static CC_WEAPONS = getWeapons(Terminator.CC_WEAPON_CODES);
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Elite"; // Elite: 6+ wounds, 3+ save + invul

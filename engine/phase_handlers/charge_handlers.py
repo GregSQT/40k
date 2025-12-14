@@ -62,7 +62,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     - HP_CUR > 0
     - player === current_player
     - NOT in units_charged
-    - NOT adjacent to enemy (distance > CC_RNG to all enemies)
+    - NOT adjacent to enemy (distance > melee_range to all enemies)
     - NOT in units_fled
     - Has valid charge target (enemy within charge range via pathfinding)
 
@@ -309,32 +309,33 @@ def _ai_select_charge_target_pve(game_state: Dict[str, Any], unit: Dict[str, Any
 
     Priority order:
     1. Enemy closest to death (lowest HP_CUR)
-    2. Highest threat (max of CC_STR × CC_NB or RNG_STR × RNG_NB)
+    2. Highest threat (max of all weapons: STR × NB)
     """
     if not valid_targets:
         return None
 
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
-    for target in valid_targets:
-        if "HP_CUR" not in target:
-            raise KeyError(f"Target missing required 'HP_CUR' field: {target}")
-        if "CC_STR" not in target:
-            raise KeyError(f"Target missing required 'CC_STR' field: {target}")
-        if "CC_NB" not in target:
-            raise KeyError(f"Target missing required 'CC_NB' field: {target}")
-        if "RNG_STR" not in target:
-            raise KeyError(f"Target missing required 'RNG_STR' field: {target}")
-        if "RNG_NB" not in target:
-            raise KeyError(f"Target missing required 'RNG_NB' field: {target}")
-
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate threat from all weapons
     # Calculate priority score for each target
     def priority_score(t):
         # Priority 1: Lowest HP (higher priority = lower HP)
         hp_priority = -t["HP_CUR"]  # Negative so lower HP = higher score
 
         # Priority 2: Highest threat
-        melee_threat = t["CC_STR"] * t["CC_NB"]
-        ranged_threat = t["RNG_STR"] * t["RNG_NB"]
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate threat from all weapons
+        melee_threat = 0.0
+        if t.get("CC_WEAPONS"):
+            # Calculate max threat from all melee weapons
+            for weapon in t["CC_WEAPONS"]:
+                threat = weapon.get("STR", 0) * weapon.get("NB", 0)
+                melee_threat = max(melee_threat, threat)
+        
+        ranged_threat = 0.0
+        if t.get("RNG_WEAPONS"):
+            # Calculate max threat from all ranged weapons
+            for weapon in t["RNG_WEAPONS"]:
+                threat = weapon.get("STR", 0) * weapon.get("NB", 0)
+                ranged_threat = max(ranged_threat, threat)
+        
         threat = max(melee_threat, ranged_threat)
 
         return (hp_priority, threat)
@@ -526,7 +527,7 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
     - Within board bounds
     - NOT a wall
     - NOT occupied by another unit
-    - Adjacent to target enemy (distance <= CC_RNG from target)
+    - Adjacent to target enemy (distance <= melee_range from target)
     - Reachable within charge_range (2d6 roll) via BFS pathfinding
 
     CRITICAL: Unlike movement, charges MUST end adjacent to enemy.
@@ -557,7 +558,10 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
     distance_to_target = _calculate_hex_distance(col, row, target["col"], target["row"])
     if distance_to_target == 0:
         return False  # Cannot stand ON enemy
-    if distance_to_target > unit["CC_RNG"]:
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
+    from engine.utils.weapon_helpers import get_melee_range
+    melee_range = get_melee_range()  # Always 1
+    if distance_to_target > melee_range:
         return False  # Not adjacent to target
 
     # AI_TURN.md: Must be reachable within charge_range via pathfinding
@@ -584,10 +588,9 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
     CHARGE_MAX_DISTANCE = 12
     TARGET_MAX_DISTANCE = 13  # Target can be 1 hex further (charge ends adjacent)
 
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
-    if "CC_RNG" not in unit:
-        raise KeyError(f"Unit {unit['id']} missing required 'CC_RNG' field")
-
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+    from engine.utils.weapon_helpers import get_melee_range
+    
     try:
         # Build all hexes reachable via BFS within max charge distance
         # Use the existing charge_build_valid_destinations_pool with max roll
@@ -599,8 +602,8 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
         game_state["console_logs"].append(f"ERROR: BFS failed for unit {unit['id']}: {str(e)}")
         return False
 
-    # Check if any enemy is within CC_RNG of any reachable hex
-    cc_range = unit["CC_RNG"]
+    # Check if any enemy is within melee range of any reachable hex
+    cc_range = get_melee_range()  # Always 1
 
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
@@ -636,13 +639,13 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     Check if unit is adjacent to enemy (used for charge eligibility).
 
     CRITICAL: Use proper hexagonal distance, not Chebyshev distance.
-    For CC_RNG=1 (typical), this means checking if enemy is in 6 neighbors.
-    For CC_RNG>1, use hex distance calculation.
+    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
     """
-    cc_range = unit["CC_RNG"]
+    from engine.utils.weapon_helpers import get_melee_range
+    cc_range = get_melee_range()  # Always 1
     unit_col, unit_row = unit["col"], unit["row"]
 
-    # Optimization: For CC_RNG=1 (most common), check 6 neighbors directly
+    # Optimization: Melee range is always 1, check 6 neighbors directly
     if cc_range == 1:
         hex_neighbors = set(_get_hex_neighbors(unit_col, unit_row))
         for enemy in game_state["units"]:
@@ -814,7 +817,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     CRITICAL: Charge destinations must:
     - Be reachable within charge_roll distance (2d6) via BFS
-    - End adjacent to at least one enemy (within CC_RNG)
+    - End adjacent to at least one enemy (within melee range)
     - Not be blocked by walls or units
 
     Unlike movement, charges CAN move through hexes adjacent to enemies.
@@ -871,9 +874,11 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
             # AI_TURN.md: Check if this hex is adjacent to any enemy
             is_adjacent_to_enemy = False
+            from engine.utils.weapon_helpers import get_melee_range
+            melee_range = get_melee_range()  # Always 1
             for enemy in enemies:
                 distance_to_enemy = _calculate_hex_distance(neighbor_col, neighbor_row, enemy["col"], enemy["row"])
-                if 0 < distance_to_enemy <= unit["CC_RNG"]:
+                if 0 < distance_to_enemy <= melee_range:
                     is_adjacent_to_enemy = True
                     break
 
@@ -986,7 +991,9 @@ def _select_strategic_destination(
 
     # STRATEGY 1: TACTICAL - Move to position with most enemies in shooting range
     elif strategy_id == 1:
-        weapon_range = unit["RNG_RNG"]
+        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+        from engine.utils.weapon_helpers import get_max_ranged_range
+        weapon_range = get_max_ranged_range(unit)
         best_dest = valid_destinations[0]
         max_targets = 0
 

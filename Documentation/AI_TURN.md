@@ -165,9 +165,11 @@ game_state ← Single authoritative object
 
 **Field Categories:**
 - **Movement**: MOVE, col, row
-- **Shooting**: RNG_NB, RNG_RNG, RNG_ATK, RNG_STR, RNG_DMG, RNG_AP
-- **Fight**: CC_NB, CC_RNG, CC_ATK, CC_STR, CC_DMG, CC_AP  
+- **Shooting**: RNG_WEAPONS[], selectedRngWeaponIndex, SHOOT_LEFT
+- **Fight**: CC_WEAPONS[], selectedCcWeaponIndex, ATTACK_LEFT  
 - **Defense**: HP_CUR, HP_MAX, T, ARMOR_SAVE, INVUL_SAVE
+
+**⚠️ MULTIPLE_WEAPONS_IMPLEMENTATION.md**: Units now have weapon arrays instead of single weapon fields. Use `engine.utils.weapon_helpers` functions to access weapon data.
 
 **⚠️ CRITICAL**: Must use UPPERCASE field names consistently across all components.
 
@@ -205,10 +207,10 @@ end_activation (Arg1, Arg2, Arg3, Arg4, Arg5)
 ATTACK ACTION
 attack_sequence(Arg)
 ├── Arg = RNG ?
-│   └── Rempace all <OFF> occurences by RNG
+│   └── Use selected ranged weapon from attacker.RNG_WEAPONS[selectedRngWeaponIndex]
 ├── Arg = CC ?
-│   └── Rempace all <OFF> occurences by CC
-├── Hit roll → hit_roll >= attacker.<OFF>_ATK
+│   └── Use selected melee weapon from attacker.CC_WEAPONS[selectedCcWeaponIndex]
+├── Hit roll → hit_roll >= selected_weapon.ATK
 │   ├── MISS
 │   │   ├── Arg = RNG ?
 │   │   │   └── ATTACK_LOG = "Unit <activeUnit ID> SHOT Unit <selectedTarget unit ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) : MISSED !"
@@ -230,20 +232,20 @@ attack_sequence(Arg)
 │               │   │       └── ATTACK_LOG = "Unit <activeUnit ID> FOUGHT Unit <selectedTarget ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) : SAVED !"
 │               │   └── FAIL → failed_saves++ → Continue to damage
 │               └── Damage application:
-│                   ├── damage_dealt = attacker.<OFF>_DMG
+│                   ├── damage_dealt = selected_weapon.DMG
 │                   ├── total_damage += damage_dealt
 │                   ├── ⚡ IMMEDIATE UPDATE: selected_target.HP_CUR -= damage_dealt
 │                   └── selected_target.HP_CUR <= 0 ?
 │                       ├── NO
 │                           ├── Arg = RNG ?
-│                           │   └── ATTACK_LOG = "Unit <activeUnit ID> SHOT Unit <selectedTarget ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <OFF>_DMG DAMAGE DELT !"
+│                           │   └── ATTACK_LOG = "Unit <activeUnit ID> SHOT Unit <selectedTarget ID> with <weapon_name> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <DMG> DAMAGE DELT !"
 │                           └── Arg = CC ?
-│                               └── ATTACK_LOG = "Unit <activeUnit ID> FOUGHT Unit <selectedTarget ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <OFF>_DMG DAMAGE DELT !"
+│                               └── ATTACK_LOG = "Unit <activeUnit ID> FOUGHT Unit <selectedTarget ID> with <weapon_name> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <DMG> DAMAGE DELT !"
 │                       └── YES → current_target.alive = False
 │                           ├── Arg = RNG ?
-│                           │   └── ATTACK_LOG = "Unit <activeUnit ID> SHOT Unit <selectedTarget ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <OFF>_DMG delt : Unit <selectedTarget ID> DIED !"
+│                           │   └── ATTACK_LOG = "Unit <activeUnit ID> SHOT Unit <selectedTarget ID> with <weapon_name> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <DMG> delt : Unit <selectedTarget ID> DIED !"
 │                           └── Arg = CC ?
-│                               └── ATTACK_LOG = "Unit <activeUnit ID> FOUGHT Unit <selectedTarget ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <OFF>_DMG delt : Unit <selectedTarget ID> DIED !"
+│                               └── ATTACK_LOG = "Unit <activeUnit ID> FOUGHT Unit <selectedTarget ID> with <weapon_name> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <DMG> delt : Unit <selectedTarget ID> DIED !"
 └── Return: TOTAL_ATTACK_LOG
 ```
 
@@ -365,11 +367,11 @@ For each PLAYER unit
 │   │   └── NO → ❌ Wrong player (Skip, no log)
 │   ├── units_fled.includes(unit.id)?
 │   │   └── YES → ❌ Fled unit (Skip, no log)
-│   ├── Adjacent to enemy unit within CC_RNG?
+│   ├── Adjacent to enemy unit within melee range (1 hex)?
 │   │   └── YES → ❌ In fight (Skip, no log)
-│   ├── unit.RNG_NB > 0?
+│   ├── unit.RNG_WEAPONS.length > 0?
 │   │   └── NO → ❌ No ranged weapon (Skip, no log)
-│   ├── Has LOS to enemies within RNG_RNG?
+│   ├── Has LOS to enemies within max_ranged_range (from RNG_WEAPONS)?
 │   │   └── NO → ❌ No valid targets (Skip, no log)
 │   └── ALL conditions met → ✅ Add to shoot_activation_pool → Highlight the unit with a green circle around its icon
 │
@@ -468,7 +470,7 @@ For each PLAYER unit
 ### Multiple Shots Logic
 
 **Multi-Shot Rules:**
-- **All shots in one action**: RNG_NB shots fired as single activation
+- **All shots in one action**: Selected ranged weapon's NB shots fired as single activation
 - **Dynamic targeting**: Each shot can target different valid enemies
 - **Sequential resolution**: Resolve each shot completely before next
 - **Target death handling**: If target dies, remaining shots can retarget
@@ -482,14 +484,14 @@ For each PLAYER unit
 
 **Example 1:**
 ```
-Marine (RNG_NB = 2) faces two wounded Orks (both HP_CUR 1)
+Marine (selected ranged weapon: NB = 2) faces two wounded Orks (both HP_CUR 1)
 Shot 1: Target Ork A, kill it
 Shot 2: Retarget to Ork B, kill it
 Result: Eliminate two threats in one action through dynamic targeting
 ```
 **Example 2:**
 ```
-Marine (RNG_NB = 2) faces one wounded Orks (HP_CUR 1) which is the only "Valid target"
+Marine (selected ranged weapon: NB = 2) faces one wounded Ork (HP_CUR 1) which is the only "Valid target"
 Shot 1: Target the Ork, kill it
 Shot 2: No more "Valid target" available, remaining shots are cancelled
 Result: Avoid a shooting unit to be stuck because it as no more "Valid target" while having remaining shots to perform

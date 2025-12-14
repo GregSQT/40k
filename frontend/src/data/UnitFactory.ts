@@ -1,6 +1,8 @@
 // frontend/src/data/UnitFactory.ts
 // AI_TURN.md compliant dynamic unit factory - zero hardcoding
 
+import type { Unit } from '../types/game';
+
 // Dynamic unit registry - populated by directory scanning  
 let unitClassMap: Record<string, any> = {};
 let availableUnitTypes: string[] = [];
@@ -36,12 +38,19 @@ async function initializeUnitRegistry(): Promise<void> {
         }
         
         // AI_TURN.md: Validate required UPPERCASE properties
-        const requiredProps = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG', 'ICON'];
+        // MULTIPLE_WEAPONS_IMPLEMENTATION.md: At least one weapon required (RNG_WEAPONS or CC_WEAPONS)
+        const requiredProps = ['HP_MAX', 'MOVE', 'ICON'];
         requiredProps.forEach(prop => {
           if (UnitClass[prop] === undefined) {
             throw new Error(`Unit ${unitType} missing required UPPERCASE property: ${prop}`);
           }
         });
+        
+        // Validate at least one weapon type exists
+        if ((!UnitClass.RNG_WEAPONS || UnitClass.RNG_WEAPONS.length === 0) &&
+            (!UnitClass.CC_WEAPONS || UnitClass.CC_WEAPONS.length === 0)) {
+          throw new Error(`Unit ${unitType} must have at least RNG_WEAPONS or CC_WEAPONS`);
+        }
         
         unitClassMap[unitType] = UnitClass;
         availableUnitTypes.push(unitType);
@@ -58,41 +67,6 @@ async function initializeUnitRegistry(): Promise<void> {
     console.error('❌ Failed to initialize unit registry:', error);
     throw error;
   }
-}
-
-// AI_TURN.md: Unit interface with UPPERCASE field compliance
-export interface Unit {
-  id: number;
-  name: string;
-  type: string;
-  player: 0 | 1;
-  col: number;
-  row: number;
-  color: number;
-  // AI_TURN.md: Required UPPERCASE fields
-  MOVE: number;
-  HP_MAX: number;
-  RNG_RNG: number;
-  RNG_DMG: number;
-  CC_DMG: number;
-  CC_RNG?: number;
-  ICON: string;
-  ICON_SCALE?: number;
-  HP_CUR?: number;
-  RNG_NB?: number;
-  RNG_ATK?: number;
-  RNG_STR?: number;
-  RNG_AP?: number;
-  CC_NB?: number;
-  CC_ATK?: number;
-  CC_STR?: number;
-  CC_AP?: number;
-  T?: number;
-  ARMOR_SAVE?: number;
-  INVUL_SAVE?: number;
-  LD?: number;
-  OC?: number;
-  VALUE?: number;
 }
 
 export function getAvailableUnitTypes(): string[] {
@@ -128,12 +102,25 @@ export function createUnit(params: {
   const UnitClass = getUnitClass(params.type);
   
   // AI_TURN.md: Validate all UPPERCASE fields exist
-  const requiredFields = ['HP_MAX', 'MOVE', 'RNG_RNG', 'RNG_DMG', 'CC_DMG'];
+  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: At least one weapon required
+  const requiredFields = ['HP_MAX', 'MOVE', 'ICON'];
   for (const field of requiredFields) {
     if (UnitClass[field] === undefined) {
       throw new Error(`Unit class ${params.type} missing required UPPERCASE field: ${field}`);
     }
   }
+  
+  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
+  const rngWeapons = UnitClass.RNG_WEAPONS || [];
+  const ccWeapons = UnitClass.CC_WEAPONS || [];
+  
+  if (rngWeapons.length === 0 && ccWeapons.length === 0) {
+    throw new Error(`Unit class ${params.type} must have at least RNG_WEAPONS or CC_WEAPONS`);
+  }
+  
+  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Initialize selected weapon indices
+  const selectedRngWeaponIndex = rngWeapons.length > 0 ? 0 : undefined;
+  const selectedCcWeaponIndex = ccWeapons.length > 0 ? 0 : undefined;
   
   return {
     id: params.id,
@@ -146,27 +133,20 @@ export function createUnit(params: {
     // AI_TURN.md: UPPERCASE field compliance
     MOVE: UnitClass.MOVE,
     HP_MAX: UnitClass.HP_MAX,
-    RNG_RNG: UnitClass.RNG_RNG,
-    RNG_DMG: UnitClass.RNG_DMG,
-    CC_DMG: UnitClass.CC_DMG,
-    CC_RNG: UnitClass.CC_RNG,
     ICON: UnitClass.ICON,
     ICON_SCALE: UnitClass.ICON_SCALE,
     HP_CUR: UnitClass.HP_MAX, // AI_TURN.md: Start at full health
-    RNG_NB: UnitClass.RNG_NB,
-    RNG_ATK: UnitClass.RNG_ATK,
-    RNG_STR: UnitClass.RNG_STR,
-    RNG_AP: UnitClass.RNG_AP,
-    CC_NB: UnitClass.CC_NB,
-    CC_ATK: UnitClass.CC_ATK,
-    CC_STR: UnitClass.CC_STR,
-    CC_AP: UnitClass.CC_AP,
     T: UnitClass.T,
     ARMOR_SAVE: UnitClass.ARMOR_SAVE,
     INVUL_SAVE: UnitClass.INVUL_SAVE,
     LD: UnitClass.LD,
     OC: UnitClass.OC,
     VALUE: UnitClass.VALUE,
+    // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Multiple weapons system
+    RNG_WEAPONS: rngWeapons,
+    CC_WEAPONS: ccWeapons,
+    selectedRngWeaponIndex,
+    selectedCcWeaponIndex,
   };
 }
 
