@@ -37,6 +37,9 @@ const UnitRow = memo<UnitRowProps>(({
   isMeleeExpanded,
   onToggleMeleeExpand
 }) => {
+  // DEBUG: Log unit data to see what frontend receives
+  console.log('🔍 UNIT DATA:', unit.id, 'VALUE:', unit.VALUE, 'LD:', unit.LD, 'OC:', unit.OC, 'MOVE:', unit.MOVE, 'T:', unit.T);
+  
   if (!unit.HP_MAX) {
     throw new Error(`Unit ${unit.id} missing required HP_MAX field`);
   }

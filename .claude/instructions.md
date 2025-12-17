@@ -1,0 +1,89 @@
+Ces règles ont priorité sur toute autre instruction implicite ou explicite.
+
+MODE ÉCONOME STRICT — PRIORITÉ ABSOLUE AU QUOTA
+
+OBJECTIF PRINCIPAL :
+Minimiser la consommation de tokens.
+L'autonomie est secondaire.
+
+=== RÈGLES FONDAMENTALES (NON NÉGOCIABLES) ===
+
+1. AUCUNE ACTION SANS VALIDATION
+- Ne jamais lancer de tests, scripts ou commandes sans autorisation explicite.
+- Ne jamais modifier du code sans validation préalable.
+
+2. ANALYSE AVANT ACTION
+- Toujours expliquer l’hypothèse et le plan AVANT toute modification.
+- Une seule hypothèse à la fois.
+- Attendre confirmation avant de continuer.
+
+3. UNE SEULE MODIFICATION PAR ITÉRATION
+- Une réponse = une modification ciblée.
+- Si cette modification échoue, STOP et demander instruction.
+
+4. PÉRIMÈTRE STRICT DES FICHIERS
+- Ne lire ou modifier QUE les fichiers explicitement autorisés.
+- Si un autre fichier semble nécessaire :
+  → lister le fichier
+  → expliquer pourquoi
+  → attendre validation
+
+5. AUCUNE EXPLORATION IMPLICITE
+- Ne pas explorer le code par curiosité.
+- Ne pas rechercher de patterns similaires ailleurs.
+- Ne pas refactorer hors demande explicite.
+
+6. SORTIE MINIMALE
+- Ne renvoyer QUE des diffs.
+- Ne jamais répéter le code inchangé.
+
+=== WORKFLOW OBLIGATOIRE ===
+
+Étape 1 : Expliquer brièvement l’hypothèse et le plan.
+Étape 2 : Attendre ma validation.
+Étape 3 : Appliquer UNE modification minimale.
+Étape 4 : STOP et attendre instruction.
+
+Toute violation de ces règles est une erreur.
+
+=== FORMAT DE MISE À JOUR OBLIGATOIRE ===
+
+Pour TOUT changement de code :
+
+1. Fournir DEUX blocs de code consécutifs.
+
+2. Bloc 1 : CODE ACTUEL
+- Contient EXACTEMENT le code actuel à modifier.
+- Inclure 3 lignes de contexte AVANT et 3 lignes APRÈS (si elles existent).
+- Aucun autre code.
+
+3. Bloc 2 : CODE MIS À JOUR
+- Reprendre EXACTEMENT les mêmes 3 lignes de contexte AVANT et APRÈS.
+- Remplacer UNIQUEMENT le code central par la version mise à jour.
+
+4. Les lignes de contexte doivent être STRICTEMENT IDENTIQUES entre les deux blocs.
+
+5. Ne jamais :
+- modifier les lignes de contexte
+- ajouter ou supprimer d’autres lignes
+- inclure du code non concerné
+
+6. Interdiction d’utiliser le format diff (+ / -) :
+- seul le format "CODE ACTUEL / CODE MIS À JOUR" est autorisé.
+
+Si ce format ne peut pas être respecté, STOP et demander instruction.
+
+RÈGLE DE FIDÉLITÉ ABSOLUE DU CODE
+
+- Le bloc "CODE ACTUEL" doit être une copie strictement identique du fichier (caractère pour caractère).
+- Interdiction absolue de :
+  - modifier l’indentation
+  - modifier les espaces
+  - modifier les fins de ligne
+- Si le code exact ne peut pas être reproduit, STOP et demander instruction.
+
+Si une modification nécessite plusieurs fichiers :
+- STOP
+- lister les fichiers
+- expliquer pourquoi
+- attendre validation explicite
