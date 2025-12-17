@@ -165,9 +165,14 @@ class UnitRegistry:
     
     def _extract_static_properties(self, content: str, faction_name: str) -> Dict:
         """Extract all static properties from TypeScript class, including weapons."""
-        from engine.weapons import get_weapons
-        
         properties = {}
+        
+        # Try to import get_weapons, but continue if it fails (standalone mode)
+        try:
+            from engine.weapons import get_weapons
+            weapons_available = True
+        except ImportError:
+            weapons_available = False
         
         # Pattern 1: Static properties simples (HP_MAX, MOVE, etc.)
         static_pattern = r'static\s+([A-Z_]+)\s*=\s*([^;]+);'
@@ -186,6 +191,12 @@ class UnitRegistry:
                 properties[prop_name] = prop_value
         
         # Pattern 2: RNG_WEAPON_CODES = ["code1", "code2"] ou [] (robuste)
+        # Only process weapons if import succeeded
+        if not weapons_available:
+            properties["RNG_WEAPONS"] = []
+            properties["CC_WEAPONS"] = []
+            return properties
+        
         rng_codes_match = re.search(
             r'static\s+RNG_WEAPON_CODES\s*=\s*\[([^\]]*)\];',
             content,

@@ -48,9 +48,21 @@ const UnitRow = memo<UnitRowProps>(({
   const unitName = unit.name || unit.type || `Unit ${unit.id}`;
   
   return (
-    <div style={{ marginBottom: '12px' }}>
+    <div style={{ marginBottom: '2px' }}>
       {/* Unit Attributes Table */}
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: '40px' }} />
+          <col style={{ width: '40px' }} />
+          <col style={{ width: 'auto' }} />
+          <col style={{ width: '60px' }} />
+          <col style={{ width: '70px' }} />
+          <col style={{ width: '50px' }} />
+          <col style={{ width: '50px' }} />
+          <col style={{ width: '50px' }} />
+          <col style={{ width: '50px' }} />
+          <col style={{ width: '50px' }} />
+        </colgroup>
         <tbody>
           <tr 
             className={`unit-status-row ${isSelected ? 'unit-status-row--selected' : ''} ${isClicked ? 'unit-status-row--clicked' : ''}`}
@@ -99,48 +111,48 @@ const UnitRow = memo<UnitRowProps>(({
             </td>
             
             {/* ID */}
-            <td className="unit-status-cell unit-status-cell--number" style={{ textAlign: 'center', fontWeight: 'bold', padding: '4px 8px', backgroundColor: '#222', borderRight: '1px solid #333' }}>
+            <td className="unit-status-cell unit-status-cell--number" style={{ textAlign: 'center', fontWeight: 'bold', padding: '4px 8px', backgroundColor: '#222', borderRight: '1px solid #333', fontSize: '12px' }}>
               {unit.id}
             </td>
           
             {/* Name */}
-            <td className="unit-status-cell unit-status-cell--type" style={{ fontWeight: 'bold', textAlign: 'left', padding: '4px 8px' }}>
+            <td className="unit-status-cell unit-status-cell--type" style={{ fontWeight: 'bold', textAlign: 'left', padding: '4px 8px', backgroundColor: '#222', fontSize: '12px' }}>
               {unitName}
             </td>
           
             {/* VALUE */}
-            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px' }}>
-              {unit.VALUE !== undefined && unit.VALUE !== null ? unit.VALUE : '-'}
+            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px', backgroundColor: '#222', fontSize: '12px' }}>
+              {unit.VALUE || '-'}
             </td>
           
             {/* HP */}
-            <td className="unit-status-cell unit-status-cell--hp" style={{ textAlign: 'center', padding: '4px 8px' }}>
+            <td className="unit-status-cell unit-status-cell--hp" style={{ textAlign: 'center', padding: '4px 8px', backgroundColor: '#222', fontSize: '12px' }}>
               {currentHP}/{unit.HP_MAX}
             </td>
           
             {/* M (Movement) */}
-            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px', borderRight: '1px solid #333' }}>
+            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px', backgroundColor: '#222', borderRight: '1px solid #333', fontSize: '12px' }}>
               {unit.MOVE}
             </td>
           
             {/* T (Toughness) */}
-            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px' }}>
+            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px', backgroundColor: '#222', fontSize: '12px' }}>
               {unit.T || '-'}
             </td>
           
             {/* SV (Save Value) */}
-            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px' }}>
+            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px', backgroundColor: '#222', fontSize: '12px' }}>
               {unit.ARMOR_SAVE ? `${unit.ARMOR_SAVE}+` : '-'}
             </td>
           
             {/* LD (Leadership) */}
-            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px' }}>
-              {unit.LD !== undefined && unit.LD !== null ? unit.LD : '-'}
+            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px', backgroundColor: '#222', fontSize: '12px' }}>
+              {unit.LD || '-'}
             </td>
           
             {/* OC (Objective Control) */}
-            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px' }}>
-              {unit.OC !== undefined && unit.OC !== null ? unit.OC : '-'}
+            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px', backgroundColor: '#222', fontSize: '12px' }}>
+              {unit.OC || '-'}
             </td>
           </tr>
         </tbody>
@@ -151,7 +163,16 @@ const UnitRow = memo<UnitRowProps>(({
         <div style={{ marginTop: '4px', marginLeft: '16px' }}>
           {/* RANGE WEAPON(S) Table */}
           {rngWeapons.length > 0 && (
-            <table style={{ width: 'calc(100% - 16px)', borderCollapse: 'collapse', marginBottom: '4px' }}>
+            <table style={{ width: 'calc(100% - 16px)', borderCollapse: 'collapse', marginBottom: '4px', tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '200px' }} />
+                <col style={{ width: '60px' }} />
+                <col style={{ width: '50px' }} />
+                <col style={{ width: '50px' }} />
+                <col style={{ width: '50px' }} />
+                <col style={{ width: '50px' }} />
+                <col style={{ width: '60px' }} />
+              </colgroup>
               <thead>
                 <tr 
                   className="unit-status-row unit-status-row--section-header"
@@ -168,10 +189,7 @@ const UnitRow = memo<UnitRowProps>(({
                       backgroundColor: 'rgba(50, 150, 200, 0.2)', 
                       color: '#ffffff', 
                       textAlign: 'left',
-                      padding: '4px 8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px'
+                      padding: '4px 8px'
                     }}
                   >
                     <button
@@ -187,13 +205,15 @@ const UnitRow = memo<UnitRowProps>(({
                         fontWeight: 'bold',
                         cursor: 'pointer',
                         padding: '2px 5px',
-                        display: 'flex',
+                        display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         minWidth: '20px',
                         minHeight: '20px',
                         borderRadius: '3px',
-                        transition: 'all 0.2s ease'
+                        transition: 'all 0.2s ease',
+                        marginRight: '8px',
+                        verticalAlign: 'middle'
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.background = 'rgba(100, 150, 200, 0.5)';
@@ -205,24 +225,23 @@ const UnitRow = memo<UnitRowProps>(({
                     >
                       {isRangedExpanded ? '−' : '+'}
                     </button>
-                    RANGE WEAPON(S)
+                    <span style={{ fontSize: '11px' }}>RANGE WEAPON(S)</span>
                   </th>
                 </tr>
                 {isRangedExpanded && (
                   <tr 
                     className="unit-status-row unit-status-row--sub-header"
                     style={{ 
-                      backgroundColor: 'rgba(100, 150, 200, 0.08)',
-                      fontSize: '0.85em'
+                      backgroundColor: 'rgba(100, 150, 200, 0.08)'
                     }}
                   >
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>Name</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>Rng</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>A</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>BS</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>S</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>AP</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>DMG</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px', width: 'auto' }}>Name</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>Rng</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>A</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>BS</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>S</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px', borderRight: '1px solid #333' }}>AP</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>DMG</th>
                   </tr>
                 )}
               </thead>
@@ -236,28 +255,28 @@ const UnitRow = memo<UnitRowProps>(({
                         backgroundColor: idx % 2 === 0 ? 'rgba(0, 0, 0, 0.1)' : 'transparent'
                       }}
                     >
-                      <td className="unit-status-cell" style={{ padding: '4px 8px', textAlign: 'left' }}>
+                      <td className="unit-status-cell" style={{ padding: '4px 8px', textAlign: 'right', fontSize: '12px' }}>
                         {weapon.display_name}
                         {idx === (unit.selectedRngWeaponIndex ?? 0) && (
                           <span style={{ marginLeft: '8px', color: '#64c8ff', fontSize: '0.9em' }}>●</span>
                         )}
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
                         {weapon.RNG ? `${weapon.RNG}\"` : '/'}
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
                         {weapon.NB || 0}
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
                         {weapon.ATK ? `${weapon.ATK}+` : '-'}
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
                         {weapon.STR || '-'}
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px', borderRight: '1px solid #333' }}>
                         {weapon.AP || '-'}
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
                         {weapon.DMG || '-'}
                       </td>
                     </tr>
@@ -269,7 +288,16 @@ const UnitRow = memo<UnitRowProps>(({
           
           {/* MELEE WEAPON(S) Table */}
           {ccWeapons.length > 0 && (
-            <table style={{ width: 'calc(100% - 16px)', borderCollapse: 'collapse' }}>
+            <table style={{ width: 'calc(100% - 16px)', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '200px' }} />
+                <col style={{ width: '60px' }} />
+                <col style={{ width: '50px' }} />
+                <col style={{ width: '50px' }} />
+                <col style={{ width: '50px' }} />
+                <col style={{ width: '50px' }} />
+                <col style={{ width: '60px' }} />
+              </colgroup>
               <thead>
                 <tr 
                   className="unit-status-row unit-status-row--section-header"
@@ -286,10 +314,7 @@ const UnitRow = memo<UnitRowProps>(({
                       backgroundColor: 'rgba(200, 50, 50, 0.2)', 
                       color: '#ffffff', 
                       textAlign: 'left',
-                      padding: '4px 8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px'
+                      padding: '4px 8px'
                     }}
                   >
                     <button
@@ -305,13 +330,15 @@ const UnitRow = memo<UnitRowProps>(({
                         fontWeight: 'bold',
                         cursor: 'pointer',
                         padding: '2px 5px',
-                        display: 'flex',
+                        display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         minWidth: '20px',
                         minHeight: '20px',
                         borderRadius: '3px',
-                        transition: 'all 0.2s ease'
+                        transition: 'all 0.2s ease',
+                        marginRight: '8px',
+                        verticalAlign: 'middle'
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.background = 'rgba(200, 100, 150, 0.5)';
@@ -323,24 +350,23 @@ const UnitRow = memo<UnitRowProps>(({
                     >
                       {isMeleeExpanded ? '−' : '+'}
                     </button>
-                    MELEE WEAPON(S)
+                    <span style={{ fontSize: '11px' }}>MELEE WEAPON(S)</span>
                   </th>
                 </tr>
                 {isMeleeExpanded && (
                   <tr 
                     className="unit-status-row unit-status-row--sub-header"
                     style={{ 
-                      backgroundColor: 'rgba(200, 100, 150, 0.08)',
-                      fontSize: '0.85em'
+                      backgroundColor: 'rgba(200, 100, 150, 0.08)'
                     }}
                   >
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>Name</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>Rng</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>A</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>CC</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>S</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>AP</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold' }}>DMG</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px', width: 'auto' }}>Name</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>Rng</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>A</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>CC</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>S</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px', borderRight: '1px solid #333' }}>AP</th>
+                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>DMG</th>
                   </tr>
                 )}
               </thead>
@@ -354,28 +380,28 @@ const UnitRow = memo<UnitRowProps>(({
                         backgroundColor: idx % 2 === 0 ? 'rgba(0, 0, 0, 0.1)' : 'transparent'
                       }}
                     >
-                      <td className="unit-status-cell" style={{ padding: '4px 8px', textAlign: 'left' }}>
+                      <td className="unit-status-cell" style={{ padding: '4px 8px', textAlign: 'right', fontSize: '12px' }}>
                         {weapon.display_name}
                         {idx === (unit.selectedCcWeaponIndex ?? 0) && (
                           <span style={{ marginLeft: '8px', color: '#ff96c8', fontSize: '0.9em' }}>●</span>
                         )}
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
                         /
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
                         {weapon.NB || 0}
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
                         {weapon.ATK ? `${weapon.ATK}+` : '-'}
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
                         {weapon.STR || '-'}
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px', borderRight: '1px solid #333' }}>
                         {weapon.AP || '-'}
                       </td>
-                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px' }}>
+                      <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
                         {weapon.DMG || '-'}
                       </td>
                     </tr>
@@ -499,103 +525,103 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
   return (
     <div className="unit-status-table-container">
       <div className="unit-status-table-wrapper">
-        <table className="unit-status-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <colgroup>
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-          </colgroup>
-          <thead>
-            <tr className="unit-status-player-row">
-              <th 
-                className={`unit-status-player-header ${player === 1 ? 'unit-status-player-header--red' : ''}`} 
-                colSpan={10}
-                style={{
-                  backgroundColor: player === 1 ? 'rgba(200, 50, 50, 0.2)' : 'rgba(50, 150, 200, 0.2)',
-                  padding: '8px',
-                  textAlign: 'left',
-                  fontWeight: 'bold',
-                  border: '1px solid rgba(0, 0, 0, 0.2)',
-                  width: '100%'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button
-                    onClick={() => {
-                      const newCollapsed = !isCollapsed;
-                      setIsCollapsed(newCollapsed);
-                      onCollapseChange?.(newCollapsed);
-                    }}
-                    style={{
-                      background: 'rgba(0, 0, 0, 0.2)',
-                      border: '1px solid rgba(0, 0, 0, 0.3)',
-                      color: 'inherit',
-                      fontSize: '16px',
-                      fontWeight: 'bold',
-                      cursor: 'pointer',
-                      padding: '4px 8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      minWidth: '24px',
-                      minHeight: '24px',
-                      borderRadius: '4px',
-                      transition: 'all 0.2s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'rgba(0, 0, 0, 0.2)';
-                    }}
-                    aria-label={isCollapsed ? 'Expand table' : 'Collapse table'}
-                  >
-                    {isCollapsed ? '+' : '−'}
-                  </button>
-                  <span>{getPlayerTypeLabel(player)}</span>
-                </div>
-              </th>
-            </tr>
-            {!isCollapsed && (
+        {/* Player Header */}
+        <div 
+          className={`unit-status-player-header ${player === 1 ? 'unit-status-player-header--red' : ''}`}
+          style={{
+            backgroundColor: player === 1 ? 'var(--hp-bar-player1)' : 'var(--hp-bar-player0)',
+            padding: '4px 8px',
+            textAlign: 'left',
+            fontWeight: 'bold',
+            border: '1px solid rgba(0, 0, 0, 0.2)',
+            marginBottom: '4px'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={() => {
+                const newCollapsed = !isCollapsed;
+                setIsCollapsed(newCollapsed);
+                onCollapseChange?.(newCollapsed);
+              }}
+              style={{
+                background: 'rgba(0, 0, 0, 0.2)',
+                border: '1px solid rgba(0, 0, 0, 0.3)',
+                color: 'inherit',
+                fontSize: '16px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                padding: '4px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minWidth: '24px',
+                minHeight: '24px',
+                borderRadius: '4px',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.2)';
+              }}
+              aria-label={isCollapsed ? 'Expand table' : 'Collapse table'}
+            >
+              {isCollapsed ? '+' : '−'}
+            </button>
+            <span style={{ fontSize: '16px' }}>{getPlayerTypeLabel(player)}</span>
+          </div>
+        </div>
+
+        {/* Column Headers */}
+        {!isCollapsed && (
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2px', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '40px' }} />
+              <col style={{ width: '40px' }} />
+              <col style={{ width: 'auto' }} />
+              <col style={{ width: '60px' }} />
+              <col style={{ width: '70px' }} />
+              <col style={{ width: '50px' }} />
+              <col style={{ width: '50px' }} />
+              <col style={{ width: '50px' }} />
+              <col style={{ width: '50px' }} />
+              <col style={{ width: '50px' }} />
+            </colgroup>
+            <thead>
               <tr className="unit-status-header">
-                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)' }}></th>
-                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', borderRight: '1px solid rgba(0, 0, 0, 0.1)' }}>ID</th>
-                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)' }}>Name</th>
-                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)' }}>VALUE</th>
-                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)' }}>HP</th>
-                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', borderRight: '1px solid rgba(0, 0, 0, 0.1)' }} title="Movement">M</th>
-                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)' }} title="Toughness">T</th>
-                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)' }} title="Save Value">SV</th>
-                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)' }} title="Leadership">LD</th>
-                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)' }} title="Objective Control">OC</th>
+                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }}></th>
+                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', borderRight: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }}>ID</th>
+                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }}>Name</th>
+                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }}>VAL</th>
+                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }}>HP</th>
+                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', borderRight: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }} title="Movement">M</th>
+                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }} title="Toughness">T</th>
+                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }} title="Save Value">SV</th>
+                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }} title="Leadership">LD</th>
+                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }} title="Objective Control">OC</th>
               </tr>
-            )}
-          </thead>
-          <tbody>
-            {!isCollapsed && playerUnits.map(unit => (
-              <UnitRow
-                key={unit.id}
-                unit={unit}
-                isSelected={selectedUnitId === unit.id}
-                isClicked={clickedUnitId === unit.id && selectedUnitId !== unit.id}
-                onSelect={onSelectUnit}
-                isUnitExpanded={expandedUnits.has(unit.id)}
-                onToggleUnitExpand={toggleUnitExpand}
-                isRangedExpanded={expandedRanged.has(unit.id)}
-                onToggleRangedExpand={toggleRangedExpand}
-                isMeleeExpanded={expandedMelee.has(unit.id)}
-                onToggleMeleeExpand={toggleMeleeExpand}
-              />
-            ))}
-          </tbody>
-        </table>
+            </thead>
+          </table>
+        )}
+
+        {/* Units List */}
+        {!isCollapsed && playerUnits.map(unit => (
+          <UnitRow
+            key={unit.id}
+            unit={unit}
+            isSelected={selectedUnitId === unit.id}
+            isClicked={clickedUnitId === unit.id && selectedUnitId !== unit.id}
+            onSelect={onSelectUnit}
+            isUnitExpanded={expandedUnits.has(unit.id)}
+            onToggleUnitExpand={toggleUnitExpand}
+            isRangedExpanded={expandedRanged.has(unit.id)}
+            onToggleRangedExpand={toggleRangedExpand}
+            isMeleeExpanded={expandedMelee.has(unit.id)}
+            onToggleMeleeExpand={toggleMeleeExpand}
+          />
+        ))}
       </div>
     </div>
   );
