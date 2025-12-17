@@ -812,6 +812,7 @@ class W40KEngine(gym.Env):
                                     "wound_target": attack_result.get("wound_target", 4),
                                     "save_target": attack_result.get("save_target", 4),
                                     "target_died": attack_result.get("target_died", False),
+                                    "weapon_name": attack_result.get("weapon_name", ""),  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
                                     "reward": step_reward if i == 0 else 0.0  # Only first attack gets reward
                                 }
 

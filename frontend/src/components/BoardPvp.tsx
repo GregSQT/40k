@@ -614,7 +614,22 @@ export default function Board({
 
       if (isEligible) {
         // AI_TURN.md: Get charge destinations from backend (already rolled and calculated)
-        chargeCells = getChargeDestinations(selectedUnit.id);
+        const rawChargeCells = getChargeDestinations(selectedUnit.id);
+        
+        // CRITICAL FIX: Filter out occupied hexes - occupied hexes should NEVER be valid destinations
+        // Even though backend filters these, add defensive check here
+        chargeCells = rawChargeCells.filter(dest => {
+          // Check if any unit occupies this hex
+          const isOccupied = units.some(u => 
+            u.col === dest.col && 
+            u.row === dest.row && 
+            u.HP_CUR > 0
+          );
+          if (isOccupied) {
+            console.log(`🛡️ CHARGE FIX: Filtered out occupied hex at (${dest.col}, ${dest.row})`);
+          }
+          return !isOccupied;  // Only include if NOT occupied
+        });
 
         // Red outline: enemy units that can be reached via valid charge movement
         chargeTargets = units.filter(u => {
@@ -1050,15 +1065,13 @@ export default function Board({
         // AI_TURN.md: Use backend's blinkingUnits list for shootability (authoritative LoS calculation)
         // Backend has already calculated valid targets with proper LoS checks
         let isShootable = true;
-        if (phase === "shoot" && unit.player !== currentPlayer) {
-          // During shooting phase, ONLY units in blinkingUnits are shootable
-          // blinkingUnits comes from backend's validTargets list
-          if (blinkingUnits && blinkingUnits.length > 0) {
-            isShootable = blinkingUnits.includes(unit.id);
-          } else {
-            // No blinking units = no valid targets
-            isShootable = false;
-          }
+        // ONLY apply greying in PvP mode when we have actual blinking data
+        // - Replay mode: blinkingUnits is undefined → skip greying
+        // - PvP mode before backend responds: blinkingUnits is [] → skip greying (prevents grey flash)
+        // - PvP mode with targets: blinkingUnits has IDs → apply greying
+        if (phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null && blinkingUnits && blinkingUnits.length > 0) {
+          // Only grey out units that are NOT in the blinkingUnits list
+          isShootable = blinkingUnits.includes(unit.id);
         }
         
         // Debug only for key units - EXACT UnitRenderer.tsx logic check

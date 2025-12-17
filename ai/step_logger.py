@@ -26,6 +26,7 @@ class StepLogger:
         # Per-episode counters
         self.episode_step_count = 0
         self.episode_action_count = 0
+        self.episode_number = 0  # Track episode number for logging
         
         if self.enabled:
             # Clear existing log file
@@ -78,6 +79,9 @@ class StepLogger:
         if not self.enabled:
             return
 
+        # Increment episode number
+        self.episode_number += 1
+        
         # Reset per-episode counters
         self.episode_step_count = 0
         self.episode_action_count = 0
@@ -88,7 +92,7 @@ class StepLogger:
         try:
             with open(self.output_file, 'a') as f:
                 timestamp = time.strftime("%H:%M:%S", time.localtime())
-                f.write(f"\n[{timestamp}] === EPISODE START ===\n")
+                f.write(f"\n[{timestamp}] === EPISODE {self.episode_number} START ===\n")
 
                 if scenario_info:
                     f.write(f"[{timestamp}] Scenario: {scenario_info}\n")

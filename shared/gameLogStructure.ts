@@ -294,33 +294,29 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
     case 'phase_change': return 'game-log-entry--phase';
     case 'move': return 'game-log-entry--move';
     case 'shoot':
-      // Check shootDetails for actual shooting results (same logic as BoardReplay.tsx)
+      // Check shootDetails for actual shooting results
+      // Note: Death is handled by separate 'death' event type, not here
       if (event.shootDetails && Array.isArray(event.shootDetails)) {
-        const targetDied = event.shootDetails.some((shot: any) => shot.targetDied === true);
         const hasWounds = event.shootDetails.some((shot: any) => shot.damageDealt && shot.damageDealt > 0);
         const hasSaves = event.shootDetails.some((shot: any) => shot.saveSuccess === true);
 
-        if (targetDied) {
-          return 'game-log-entry--death'; // Black - target died
-        } else if (hasWounds) {
-          return 'game-log-entry--shoot-damage'; // Red - target loses HP
+        if (hasWounds) {
+          return 'game-log-entry--shoot-damage'; // Dark blue - target loses HP
         } else if (hasSaves) {
-          return 'game-log-entry--shoot-saved'; // Orange - target succeeded save roll
+          return 'game-log-entry--shoot-saved'; // Cyan - target succeeded save roll
         }
       }
-      return 'game-log-entry--shoot-failed'; // Yellow - failed during hit or wound rolls
+      return 'game-log-entry--shoot-failed'; // Light blue - failed during hit or wound rolls
     case 'charge': return 'game-log-entry--charge';
     case 'charge_fail': return 'game-log-entry--charge-fail';
     case 'combat':
-      // Check shootDetails for actual combat results (same logic as shooting)
+      // Check shootDetails for actual combat results
+      // Note: Death is handled by separate 'death' event type, not here
       if (event.shootDetails && Array.isArray(event.shootDetails)) {
-        const targetDied = event.shootDetails.some((shot: any) => shot.targetDied === true);
         const hasWounds = event.shootDetails.some((shot: any) => shot.damageDealt && shot.damageDealt > 0);
         const hasSaves = event.shootDetails.some((shot: any) => shot.saveSuccess === true);
 
-        if (targetDied) {
-          return 'game-log-entry--death'; // Black - target died
-        } else if (hasWounds) {
+        if (hasWounds) {
           return 'game-log-entry--combat-damage'; // Red - target loses HP
         } else if (hasSaves) {
           return 'game-log-entry--combat-saved'; // Orange - target succeeded save roll

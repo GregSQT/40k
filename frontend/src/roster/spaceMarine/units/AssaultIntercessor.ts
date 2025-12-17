@@ -18,7 +18,7 @@ export class AssaultIntercessor extends SpaceMarineInfantryTroopMeleeTroop {
   // WEAPONS
   static RNG_WEAPON_CODES = ["bolt_pistol"];
   static RNG_WEAPONS = getWeapons(AssaultIntercessor.RNG_WEAPON_CODES);
-  static CC_WEAPON_CODES = ["chainsword"];
+  static CC_WEAPON_CODES = ["assault_intercessor_chainsword"];
   static CC_WEAPONS = getWeapons(AssaultIntercessor.CC_WEAPON_CODES);
 
   // AI CLASSIFICATION

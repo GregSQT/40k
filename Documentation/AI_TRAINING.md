@@ -156,12 +156,23 @@ The log captures:
 - **Explosion icon**: Appears on the target unit
 
 **Game Log Color Coding:**
-- **Yellow (charge)**: Successful charge action
-- **Red (charge)**: Failed charge (roll too low or chose not to charge)
-- **Yellow (shoot/fight)**: Failed hit or wound rolls
-- **Orange (shoot/fight)**: Successful save by target
-- **Red (shoot/fight)**: Damage dealt to target
-- **Black**: Unit destroyed
+
+*Charge Actions:*
+- **Purple**: Successful charge action
+- **Light Purple**: Failed charge (roll too low or chose not to charge)
+
+*Shooting Actions (Blue Palette):*
+- **Light Blue**: Failed hit or wound rolls (MISS)
+- **Cyan**: Target succeeded save roll (SAVED)
+- **Dark Blue**: Damage dealt to target (DMG)
+
+*Combat/Fight Actions (Warm Palette):*
+- **Yellow**: Failed hit or wound rolls
+- **Orange**: Target succeeded save roll
+- **Red**: Damage dealt to target
+
+*Death:*
+- **Black**: Unit destroyed (separate event after damage)
 
 **Episode Information:**
 - Bot opponent name (e.g., GreedyBot, RandomBot)

@@ -16,9 +16,9 @@ export class Intercessor extends SpaceMarineInfantryTroopRangedSwarm {
   static VALUE = 19;           // Unit value (W40K points cost)
   
   // WEAPONS
-  static RNG_WEAPON_CODES = ["bolt_rifle"];
+  static RNG_WEAPON_CODES = ["bolt_rifle", "bolt_pistol"];
   static RNG_WEAPONS = getWeapons(Intercessor.RNG_WEAPON_CODES);
-  static CC_WEAPON_CODES = ["close_combat_weapon"];
+  static CC_WEAPON_CODES = ["intercessor_chainsword"];
   static CC_WEAPONS = getWeapons(Intercessor.CC_WEAPON_CODES);
 
   // AI CLASSIFICATION

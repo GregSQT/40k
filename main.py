@@ -60,8 +60,7 @@ def load_unit_definitions_from_ts(unit_registry):
     """Load unit definitions by parsing TypeScript static class properties."""
     import re
     import os
-    from engine.roster.spaceMarine.armory import get_weapons as get_sm_weapons
-    from engine.roster.tyranid.armory import get_weapons as get_ty_weapons
+    from engine.weapons import get_weapons
     
     unit_definitions = {}
     
@@ -107,11 +106,13 @@ def load_unit_definitions_from_ts(unit_registry):
                 
                 # Détection faction robuste
                 if faction_path.startswith('spaceMarine/'):
-                    unit_stats["RNG_WEAPONS"] = get_sm_weapons(codes)
+                    faction = 'SpaceMarine'
                 elif faction_path.startswith('tyranid/'):
-                    unit_stats["RNG_WEAPONS"] = get_ty_weapons(codes)
+                    faction = 'Tyranid'
                 else:
                     raise ValueError(f"Unknown faction in path: {faction_path}")
+                
+                unit_stats["RNG_WEAPONS"] = get_weapons(faction, codes)
             
             # Pattern 3: CC_WEAPON_CODES (même logique)
             cc_codes_match = re.search(
@@ -127,9 +128,13 @@ def load_unit_definitions_from_ts(unit_registry):
                     codes = []
                 
                 if faction_path.startswith('spaceMarine/'):
-                    unit_stats["CC_WEAPONS"] = get_sm_weapons(codes)
+                    faction = 'SpaceMarine'
                 elif faction_path.startswith('tyranid/'):
-                    unit_stats["CC_WEAPONS"] = get_ty_weapons(codes)
+                    faction = 'Tyranid'
+                else:
+                    raise ValueError(f"Unknown faction in path: {faction_path}")
+                
+                unit_stats["CC_WEAPONS"] = get_weapons(faction, codes)
             
             # Validation: Au moins une arme requise
             if not unit_stats.get("RNG_WEAPONS") and not unit_stats.get("CC_WEAPONS"):

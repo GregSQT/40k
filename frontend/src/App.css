@@ -615,6 +615,39 @@ body {
   font-size: 12px;
   background: var(--bg-primary);
   min-width: 800px;
+  table-layout: fixed;
+}
+
+/* CRITICAL: Use colgroup for column widths with table-layout: fixed */
+/* Column widths: Button=6%, ID=6%, Name=18%, Stats=70% */
+/* With table-layout: fixed, widths MUST be set on <col> elements, NOT on <td> elements */
+/* Requirement: Weapon stats (cols 4-9) must span same width as unit stats (cols 4-10) */
+/* This means cols 4-9 should align with the right edge where col 10 ends */
+/* Calculation: Remaining space = 100% - 6% - 6% - 18% = 70% */
+/* To align with right edge: cols 4-9 must span full 70% + col 10's 10% = 80% */
+/* Therefore: cols 4-9 = 80% / 6 = 13.33% each, col 10 = 10% */
+/* This makes weapon stats cols 4-9 total 80% (6 × 13.33% = 79.98%) */
+/* And unit stats cols 4-10 total 80% (6 × 13.33% + 10% = 89.98%, but col 10 is separate) */
+/* Actually, to match exactly: if cols 4-10 = 70%, then cols 4-9 should also = 70% */
+/* So: cols 4-9 = 11.67% each (70% total), but then col 10 makes unit stats 80% */
+/* The solution: Make cols 4-9 wider to compensate - they should span 70% + 10% = 80% */
+.unit-status-table colgroup col:nth-child(1) { width: 6%; }  /* Button column - wider to fit buttons */
+.unit-status-table colgroup col:nth-child(2) { width: 6%; }  /* ID column - wider to fit buttons */
+.unit-status-table colgroup col:nth-child(3) { width: 18%; }  /* Name column - wider for longer names */
+.unit-status-table colgroup col:nth-child(4) { width: 13.33%; }  /* Stat column - weapon stats (Rng) */
+.unit-status-table colgroup col:nth-child(5) { width: 13.33%; }  /* Stat column - weapon stats (A) */
+.unit-status-table colgroup col:nth-child(6) { width: 13.33%; }  /* Stat column - weapon stats (BS/CC) */
+.unit-status-table colgroup col:nth-child(7) { width: 13.33%; }  /* Stat column - weapon stats (S) */
+.unit-status-table colgroup col:nth-child(8) { width: 13.33%; }  /* Stat column - weapon stats (AP) */
+.unit-status-table colgroup col:nth-child(9) { width: 13.33%; }  /* Stat column - weapon stats (DMG) */
+.unit-status-table colgroup col:nth-child(10) { width: 10%; }  /* OC column - unit stats only */
+
+/* Column 3: Name - Allow text wrapping (width is set by colgroup) */
+.unit-status-table .unit-status-cell:nth-child(3),
+.unit-status-table .unit-status-cell--type {
+  white-space: normal; /* Allow wrapping for long names */
+  overflow: visible; /* Show full text */
+  text-overflow: clip; /* Don't truncate */
 }
 
 .turn-phase-tracker-spacing {
@@ -694,7 +727,7 @@ body {
   border-right: 1px solid #444;
   white-space: nowrap;
   font-size: 11px;
-  max-width: 24px;
+  /* max-width removed to allow inline width styles to work */
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -730,10 +763,12 @@ body {
   border-right: 1px solid #333;
   white-space: nowrap;
   vertical-align: middle;
-  max-width: 24px;
+  /* max-width removed to allow inline width styles to work */
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Name column text wrapping is handled above */
 
 .unit-status-cell:last-child {
   border-right: none;
@@ -742,24 +777,22 @@ body {
 .unit-status-cell--number {
   font-weight: var(--font-weight-bold);
   color: var(--text-accent);
-  width: 28px;
+  /* width removed to allow inline width styles to work */
 }
 
 .unit-status-cell--type {
   font-weight: var(--font-weight-medium);
   text-align: left;
-  width: 90px;
-  min-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* width and min-width removed to allow inline width styles to work */
+  /* overflow and text-overflow removed - handled by column width rules */
 }
 
 .unit-status-cell--hp {
-  width: 60px;
+  /* width removed to allow inline width styles to work */
 }
 
 .unit-status-cell--stat {
-  width: 30px;
+  /* width removed to allow inline width styles to work */
   font-family: 'Courier New', monospace;
   font-weight: var(--font-weight-medium);
 }
@@ -947,12 +980,11 @@ body {
   }
   
   .unit-status-cell--stat {
-    width: 35px;
+    /* width removed to allow inline width styles to work */
   }
   
   .unit-status-cell--type {
-    width: 95px;
-    min-width: 95px;
+    /* width and min-width removed to allow inline width styles to work */
   }
 }
 

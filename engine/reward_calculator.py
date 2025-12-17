@@ -195,9 +195,10 @@ class RewardCalculator:
                         # Unknown action_name - log warning and count as base
                         print(f"⚠️ Unknown action_name '{action_name}' in shoot log, counting as base_action")
                         base_action_reward += reward_value
-                        
-                # Stop if we hit a different action type
-                elif log.get("type") != "shoot":
+                
+                # Skip non-shoot logs (e.g., death logs) - don't break, continue searching
+                # Only break if we hit a shoot log from a different shooter
+                elif log.get("type") == "shoot" and log.get("shooterId") != shooter_id:
                     break
             
             # Validate we found at least one shoot action LOG (not just non-zero rewards)

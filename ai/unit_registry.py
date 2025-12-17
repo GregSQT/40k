@@ -165,8 +165,7 @@ class UnitRegistry:
     
     def _extract_static_properties(self, content: str, faction_name: str) -> Dict:
         """Extract all static properties from TypeScript class, including weapons."""
-        from engine.roster.spaceMarine.armory import get_weapons as get_sm_weapons
-        from engine.roster.tyranid.armory import get_weapons as get_ty_weapons
+        from engine.weapons import get_weapons
         
         properties = {}
         
@@ -202,10 +201,15 @@ class UnitRegistry:
             
             # Détection faction robuste avec faction_name (pas path)
             # faction_name est le nom du répertoire (ex: "spaceMarine" ou "tyranid")
+            # Normalize faction name for armory parser (spaceMarine -> SpaceMarine)
             if faction_name.lower() in ['spacemarine', 'spacemarines']:
-                properties["RNG_WEAPONS"] = get_sm_weapons(codes)
+                faction = 'SpaceMarine'
             elif faction_name.lower() == 'tyranid':
-                properties["RNG_WEAPONS"] = get_ty_weapons(codes)
+                faction = 'Tyranid'
+            else:
+                faction = faction_name
+            
+            properties["RNG_WEAPONS"] = get_weapons(faction, codes)
         
         # Pattern 3: CC_WEAPON_CODES (même logique)
         cc_codes_match = re.search(
@@ -220,10 +224,15 @@ class UnitRegistry:
             else:
                 codes = []
             
+            # Normalize faction name for armory parser (spaceMarine -> SpaceMarine)
             if faction_name.lower() in ['spacemarine', 'spacemarines']:
-                properties["CC_WEAPONS"] = get_sm_weapons(codes)
+                faction = 'SpaceMarine'
             elif faction_name.lower() == 'tyranid':
-                properties["CC_WEAPONS"] = get_ty_weapons(codes)
+                faction = 'Tyranid'
+            else:
+                faction = faction_name
+            
+            properties["CC_WEAPONS"] = get_weapons(faction, codes)
         
         # Initialiser selectedWeaponIndex
         if properties.get("RNG_WEAPONS"):

@@ -1,6 +1,7 @@
 // frontend/src/hooks/useGameActions.ts - AI_TURN.md Compliant Version
 import { useCallback } from 'react';
 import type { GameState, UnitId, Unit } from '../types/game';
+import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
 
 interface UseGameActionsParams {
   gameState: GameState;
@@ -55,7 +56,21 @@ interface UseGameActionsParams {
       case "move":
         return !unitsMoved.includes(unit.id);
       case "shoot":
-        return !unitsMoved.includes(unit.id) && !unitsFled.includes(unit.id);
+        // Check basic eligibility first
+        if (unitsMoved.includes(unit.id) || unitsFled.includes(unit.id)) return false;
+        
+        // AI_TURN.md: Units adjacent to enemies (melee range = 1) cannot shoot
+        // This matches backend logic in shooting_handlers.py _has_valid_shooting_targets
+        const hasAdjacentEnemy = gameState.units.some(enemy =>
+          enemy.player !== unit.player &&
+          (enemy.HP_CUR ?? enemy.HP_MAX) > 0 &&
+          cubeDistance(
+            offsetToCube(unit.col, unit.row), 
+            offsetToCube(enemy.col, enemy.row)
+          ) <= 1
+        );
+        
+        return !hasAdjacentEnemy;
       case "charge":
         return !unitsCharged.includes(unit.id) && !unitsFled.includes(unit.id);
       case "fight":

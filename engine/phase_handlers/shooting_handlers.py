@@ -191,35 +191,13 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
 def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any], current_player: int) -> bool:
     """
     EXACT COPY from w40k_engine_save.py _has_valid_shooting_targets logic
-    WITH ALWAYS-ON DEBUG LOGGING
     """
-    # FIXED: Disable debug output completely during training
-    # Enable debug for unit 2 to diagnose shooting issues
-    debug_mode = True  # Set to True only for manual debugging
-    
-    if debug_mode:
-        print(f"\n🔍 ELIGIBILITY CHECK: Unit {unit['id']} @ ({unit['col']}, {unit['row']})")
-        print(f"   Player: {unit['player']}, Current Player: {current_player}")
-        print(f"   HP: {unit['HP_CUR']}/{unit['HP_MAX']}")
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
-        from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_max_ranged_range, get_melee_range
-        selected_rng = get_selected_ranged_weapon(unit)
-        rng_nb_debug = selected_rng.get('NB', 0) if selected_rng else 0
-        max_rng_debug = get_max_ranged_range(unit)
-        melee_range_debug = get_melee_range()
-        print(f"   RNG_NB: {rng_nb_debug}, RNG_RNG: {max_rng_debug}")
-        print(f"   CC_RNG: {melee_range_debug}")
-    
     # unit.HP_CUR > 0?
     if unit["HP_CUR"] <= 0:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: Unit is dead (HP_CUR={unit['HP_CUR']})")
         return False
         
     # unit.player === current_player?
     if unit["player"] != current_player:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: Wrong player (unit.player={unit['player']} != current_player={current_player})")
         return False
         
     # units_fled.includes(unit.id)?
@@ -227,8 +205,6 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     if "units_fled" not in game_state:
         raise KeyError("game_state missing required 'units_fled' field")
     if unit["id"] in game_state["units_fled"]:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: Unit has fled")
         return False
     
     # CRITICAL FIX: Add missing adjacency check - units in melee cannot shoot
@@ -237,85 +213,30 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     from engine.utils.weapon_helpers import get_melee_range
     melee_range = get_melee_range()  # Always 1
     
-    if debug_mode:
-        print(f"   Checking for adjacent enemies (melee_range={melee_range})...")
-    
-    adjacent_enemies = []
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
-            
-            if debug_mode:
-                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): distance={distance}, melee_range={melee_range}")
-            
             if distance <= melee_range:
-                adjacent_enemies.append(f"{enemy['id']}@dist={distance}")
-                if debug_mode:
-                    print(f"         ⚠️ Enemy {enemy['id']} IS ADJACENT (distance={distance} <= melee_range={melee_range})")
-    
-    if adjacent_enemies:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: Adjacent enemies found: {adjacent_enemies}")
-            print(f"   RESULT: Unit {unit['id']} CANNOT SHOOT (W40K rule: engaged in melee)")
-        return False
-    
-    if debug_mode:
-        print(f"   ✅ No adjacent enemies found")
+                return False
         
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has ranged weapons
-    from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_max_ranged_range
+    from engine.utils.weapon_helpers import get_selected_ranged_weapon
     selected_weapon = get_selected_ranged_weapon(unit)
     if not selected_weapon:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: No ranged weapons")
         return False
     
     from shared.data_validation import require_key
     rng_nb = require_key(selected_weapon, "NB")
     if rng_nb <= 0:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: No ranged attacks (RNG_NB={rng_nb})")
         return False
     
-    max_rng_range = get_max_ranged_range(unit)
-    if debug_mode:
-        print(f"   ✅ Unit has ranged attacks (RNG_NB={rng_nb})")
-        print(f"   Checking for valid ranged targets (RNG_RNG={max_rng_range})...")
-    
-    # Check for valid targets with detailed debugging
-    valid_targets_found = []
-    
+    # Check for valid targets
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
-            is_valid = _is_valid_shooting_target(game_state, unit, enemy)
-            
-            if debug_mode:
-                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
-                from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
-                max_rng_debug = get_max_ranged_range(unit)
-                melee_range_debug = get_melee_range()
-                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): dist={distance}, RNG_RNG={max_rng_debug}, valid={is_valid}")
-                if not is_valid:
-                    if distance > max_rng_debug:
-                        print(f"         ❌ OUT OF RANGE")
-                    elif distance <= melee_range_debug:
-                        print(f"         ❌ TOO CLOSE (melee range)")
-                    else:
-                        print(f"         ❌ NO LINE OF SIGHT")
-            
-            if is_valid:
-                valid_targets_found.append(enemy["id"])
-                if debug_mode:
-                    print(f"         ✅ VALID TARGET")
+            if _is_valid_shooting_target(game_state, unit, enemy):
+                return True
     
-    if debug_mode:
-        if len(valid_targets_found) > 0:
-            print(f"   ✅ RESULT: {len(valid_targets_found)} valid targets found: {valid_targets_found}")
-        else:
-            print(f"   ❌ RESULT: NO valid targets found")
-    
-    return len(valid_targets_found) > 0
+    return False
 
 
 def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
@@ -323,30 +244,20 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     EXACT COPY from w40k_engine_save.py working validation with proper LoS
     PERFORMANCE: Uses LoS cache for instant lookups (0.001ms vs 5-10ms)
     """
-    # Disable debug prints entirely for training performance
-    # Enable debug for unit 2 to diagnose shooting issues
-    debug_mode = True
-    
     # Range check using proper hex distance
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from all ranged weapons
     distance = _calculate_hex_distance(shooter["col"], shooter["row"], target["col"], target["row"])
     from engine.utils.weapon_helpers import get_max_ranged_range
     max_range = get_max_ranged_range(shooter)
     if distance > max_range:
-        if debug_mode:
-            print(f"         ❌ Out of range: dist={distance} > max_range={max_range}")
         return False
         
     # Dead target check
     if target["HP_CUR"] <= 0:
-        if debug_mode:
-            print(f"         ❌ Target is dead: HP_CUR={target['HP_CUR']}")
         return False
         
     # Friendly fire check
     if target["player"] == shooter["player"]:
-        if debug_mode:
-            print(f"         ❌ Friendly fire: target.player={target['player']} == shooter.player={shooter['player']}")
         return False
     
     # Adjacent check - can't shoot at adjacent enemies (melee range)
@@ -354,22 +265,18 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     from engine.utils.weapon_helpers import get_melee_range
     melee_range = get_melee_range()
     if distance <= melee_range:
-        if debug_mode:
-            print(f"         ❌ Too close: dist={distance} <= CC_RNG={melee_range}")
         return False
 
     # W40K RULE: Cannot shoot at enemy engaged in melee with friendly units
     # Check if target is adjacent to any friendly unit (same player as shooter)
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
-    from engine.utils.weapon_helpers import get_melee_range
     target_cc_range = get_melee_range()  # Always 1
 
     for friendly in game_state["units"]:
         if friendly["player"] == shooter["player"] and friendly["HP_CUR"] > 0 and friendly["id"] != shooter["id"]:
             friendly_distance = _calculate_hex_distance(target["col"], target["row"], friendly["col"], friendly["row"])
+            
             if friendly_distance <= target_cc_range:
-                if debug_mode:
-                    print(f"         ❌ Target engaged with friendly: {friendly['id']} at distance {friendly_distance}")
                 return False
 
     # PERFORMANCE: Use LoS cache if available (instant lookup)
@@ -387,12 +294,6 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     else:
         # No cache: fall back to direct calculation (pre-phase-start calls)
         has_los = _has_line_of_sight(game_state, shooter, target)
-    
-    if debug_mode:
-        if has_los:
-            print(f"         ✅ VALID TARGET: dist={distance}, LoS=clear")
-        else:
-            print(f"         ❌ No LoS: blocked by terrain")
     
     return has_los
 
@@ -1379,18 +1280,21 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     if "action_logs" not in game_state:
         game_state["action_logs"] = []
     
-    # Enhanced message format including shooter position per movement phase integration
-    enhanced_message = f"Unit {unit_id} ({shooter['col']}, {shooter['row']}) SHOT Unit {target_id} ({target['col']}, {target['row']}) : {attack_result['attack_log'].split(' : ', 1)[1] if ' : ' in attack_result['attack_log'] else attack_result['attack_log']}"
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get weapon_name before building message
+    weapon_name = attack_result.get("weapon_name", "")
+    weapon_suffix = f" with [{weapon_name}]" if weapon_name else ""
+    
+    # Enhanced message format including shooter position and weapon name per movement phase integration
+    attack_log_part = attack_result['attack_log'].split(' : ', 1)[1] if ' : ' in attack_result['attack_log'] else attack_result['attack_log']
+    enhanced_message = f"Unit {unit_id} ({shooter['col']}, {shooter['row']}) SHOT Unit {target_id} ({target['col']}, {target['row']}){weapon_suffix} : {attack_log_part}"
 
     # CRITICAL FIX: Append action_log BEFORE reward calculation
     # This ensures the log exists even if reward calculation fails
     action_reward = 0.0
     action_name = "ranged_attack"
-
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon_name in action_logs
-    weapon_name = attack_result.get("weapon_name", "")
     
-    game_state["action_logs"].append({
+    # Create shoot log entry (will be appended after reward calculation)
+    shoot_log_entry = {
         "type": "shoot",
         "message": enhanced_message,
         "turn": game_state["turn"],
@@ -1413,7 +1317,10 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "action_name": action_name,
         "reward": 0.0,  # Will be updated after reward calculation
         "is_ai_action": shooter["player"] == 1
-    })
+    }
+    
+    # Append the shoot log entry immediately
+    game_state["action_logs"].append(shoot_log_entry)
 
     # Calculate reward for this action using progressive bonus system
     # OPTIMIZATION: Only calculate rewards for controlled player's units
@@ -1574,14 +1481,23 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
                 print(f"   controlled_player={config.get('controlled_player', 'not_set')}")
             raise
 
-    # Update the action_log entry with calculated reward and action_name
+    # Update the shoot log entry with calculated reward and action_name
     logged_reward = round(action_reward, 2)
-
-    if game_state["action_logs"]:
-        last_log = game_state["action_logs"][-1]
-        if last_log.get("shooterId") == unit_id and last_log.get("type") == "shoot":
-            last_log["reward"] = logged_reward
-            last_log["action_name"] = action_name
+    shoot_log_entry["reward"] = logged_reward
+    shoot_log_entry["action_name"] = action_name
+    
+    # Add separate death log event if target was killed (AFTER shoot log)
+    if attack_result.get("target_died", False):
+        game_state["action_logs"].append({
+            "type": "death",
+            "message": f"Unit {target_id} was destroyed",
+            "turn": game_state["turn"],
+            "phase": "shoot",
+            "targetId": target_id,
+            "unitId": target_id,
+            "player": target["player"],
+            "timestamp": "server_time"
+        })
     
     # Store attack result for engine access
     game_state["last_attack_result"] = attack_result

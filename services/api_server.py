@@ -689,7 +689,9 @@ def get_default_replay_log():
         Raw text content of train_step.log
     """
     try:
-        log_path = 'train_step.log'
+        # Look in project root (one directory up from services/)
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        log_path = os.path.join(project_root, 'train_step.log')
 
         if not os.path.exists(log_path):
             return jsonify({"error": "train_step.log not found"}), 404
@@ -716,14 +718,16 @@ def get_replay_log_file(filename):
         Raw text content of the log file
     """
     try:
-        # Security: Only allow .log files in current directory
+        # Security: Only allow .log files, no path traversal
         if not filename.endswith('.log'):
             return jsonify({"error": "Only .log files are allowed"}), 400
         
         if '..' in filename or '/' in filename or '\\' in filename:
             return jsonify({"error": "Invalid filename"}), 400
 
-        log_path = filename
+        # Look in project root (one directory up from services/)
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        log_path = os.path.join(project_root, filename)
 
         if not os.path.exists(log_path):
             return jsonify({"error": f"Log file not found: {filename}"}), 404
@@ -754,25 +758,31 @@ def list_replay_logs():
     """
     try:
         logs = []
+        
+        # Look in project root (one directory up from services/)
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        # Check for train_step.log
-        if os.path.exists('train_step.log'):
-            stats = os.stat('train_step.log')
+        # Check for train_step.log in project root
+        train_step_path = os.path.join(project_root, 'train_step.log')
+        if os.path.exists(train_step_path):
+            stats = os.stat(train_step_path)
             logs.append({
                 'name': 'train_step.log',
                 'size': stats.st_size,
                 'modified': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stats.st_mtime))
             })
 
-        # Check for other .log files in current directory
-        for filename in os.listdir('.'):
+        # Check for other .log files in project root
+        for filename in os.listdir(project_root):
             if filename.endswith('.log') and filename != 'train_step.log':
-                stats = os.stat(filename)
-                logs.append({
-                    'name': filename,
-                    'size': stats.st_size,
-                    'modified': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stats.st_mtime))
-                })
+                file_path = os.path.join(project_root, filename)
+                if os.path.isfile(file_path):
+                    stats = os.stat(file_path)
+                    logs.append({
+                        'name': filename,
+                        'size': stats.st_size,
+                        'modified': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stats.st_mtime))
+                    })
 
         return jsonify({'logs': logs})
 

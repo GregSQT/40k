@@ -158,6 +158,7 @@ Rules:
   - [reward_calculator.py](#reward_calculatorpy---reward-computation)
   - [action_decoder.py](#action_decoderpy---action-masking--decoding)
   - [combat_utils.py](#combat_utilspy---combat-calculations)
+  - [weapons/](#weapons---weapon-system)
   - [pve_controller.py](#pve_controllerpy---pve-ai-opponent)
   - [phase_handlers/](#phase_handlers---phase-specific-logic)
 - [How Everything Works Together](#how-everything-works-together)
@@ -199,6 +200,27 @@ All unit stats use UPPERCASE naming (`HP_CUR`, `ARMOR_SAVE`, `RNG_ATK`, `CC_STR`
 
 `W40KEngine` directly implements `gym.Env`. No wrapper classes that might copy state.
 
+### TypeScript → Python Parsing Pattern
+
+**Single Source of Truth for Game Data**: Units and weapons are declared **ONCE** in TypeScript files. Python parses these files at runtime - no duplicate Python declarations needed.
+
+**Architecture**:
+- **TypeScript files** (single source of truth):
+  - Units: `frontend/src/roster/{faction}/units/*.ts`
+  - Weapons: `frontend/src/roster/{faction}/armory.ts`
+- **Python parsers** (runtime parsing):
+  - Units: `ai/unit_registry.py` parses TypeScript unit files
+  - Weapons: `engine/weapons/parser.py` parses TypeScript armory files
+
+**Benefits**:
+- ✅ No sync issues between TypeScript and Python
+- ✅ Fail-fast validation (errors raised immediately on load)
+- ✅ No silent defaults (missing weapons/units = error)
+- ✅ DRY principle (Don't Repeat Yourself)
+- ✅ Type safety (TypeScript ensures correctness)
+
+**Validation**: All referenced weapons must exist in armory files. Missing weapons raise `KeyError` on load. All unit weapon references validated during initialization.
+
 ---
 
 ## CODE ORGANIZATION
@@ -206,7 +228,7 @@ All unit stats use UPPERCASE naming (`HP_CUR`, `ARMOR_SAVE`, `RNG_ATK`, `CC_STR`
 ### File Structure
 
 ```
-ai/engine/
+engine/
 ├── w40k_core.py              # Core engine (gym.Env)
 ├── game_state.py             # State initialization & validation
 ├── game_utils.py             # Pure utility functions
@@ -215,6 +237,10 @@ ai/engine/
 ├── action_decoder.py        # Action masking & decoding
 ├── combat_utils.py          # Combat calculations
 ├── pve_controller.py        # PvE AI opponent
+├── weapons/                  # Weapon system (TypeScript parsing)
+│   ├── __init__.py          # Public API
+│   ├── parser.py            # Parse TypeScript armory files
+│   └── rules.py             # Weapon rules system
 └── phase_handlers/          # Phase-specific logic
     ├── movement_handlers.py
     ├── shooting_handlers.py
@@ -444,6 +470,48 @@ ai/engine/
 - W40K wound table implementation
 - Delegation to phase handlers for validation
 - LoS cache integration
+
+---
+
+### weapons/ - Weapon System
+
+**Module:** `engine/weapons/`
+
+**Purpose**: Parse TypeScript armory files (single source of truth) and provide weapon data to the engine.
+
+**Key Classes/Functions:**
+- `ArmoryParser` - Parse TypeScript armory files at runtime
+- `get_armory_parser()` - Get parser singleton
+- `get_weapon(faction, code_name)` - Get single weapon by code
+- `get_weapons(faction, code_names)` - Get multiple weapons (raises on missing)
+- `WeaponRulesRegistry` - Manage weapon rules (RAPID_FIRE, MELTA, etc.)
+- `validate_weapon_rules_field()` - Validate WEAPON_RULES on load
+
+**Architecture Pattern:**
+- **Single source of truth**: Weapons declared once in TypeScript (`frontend/src/roster/{faction}/armory.ts`)
+- **Runtime parsing**: Python parses TypeScript files dynamically (no duplicate Python declarations)
+- **Fail-fast validation**: Missing weapons raise `KeyError` immediately
+- **No silent defaults**: Invalid weapon references fail on load
+
+**Usage:**
+```python
+from engine.weapons import get_weapons
+
+# Load weapons for a unit (called during unit initialization)
+rng_weapons = get_weapons("SpaceMarine", ["bolt_rifle", "bolt_pistol"])
+# Raises KeyError if any weapon code is missing from armory
+```
+
+**Integration Points:**
+- `ai/unit_registry.py` - Uses `get_weapons()` when parsing unit definitions
+- `main.py` - Loads unit definitions which reference weapons
+- `game_state.py` - Units include `RNG_WEAPONS` and `CC_WEAPONS` arrays
+
+**Responsibilities:**
+- Parse TypeScript armory files
+- Validate weapon definitions (required fields, valid rules)
+- Provide weapon data to unit initialization
+- Enforce single source of truth pattern (no Python duplicates)
 
 ---
 
@@ -954,6 +1022,7 @@ Overall 4.7x training speedup (66 → 311 it/s). Debug config (50 episodes) runs
 2. [AI_TRAINING.md](AI_TRAINING.md) - PPO training integration
 3. [AI_OBSERVATION.md](AI_OBSERVATION.md) - Egocentric observation system
 4. [AI_TARGET_SELECTION.md](AI_TARGET_SELECTION.md) - Target selection and prioritization
+5. [WEAPONS.md](WEAPONS.md) - Weapons system technical documentation
 
 ---
 

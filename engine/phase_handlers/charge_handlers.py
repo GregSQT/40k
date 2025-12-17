@@ -371,77 +371,11 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
 
-    # NEW RULE: Build valid destinations using MAX charge distance (12) to show all possible targets
+    # Build valid destinations using MAX charge distance (12) to show all possible targets
     # No roll yet - roll happens after target selection
-    # Target can be at distance 13 because charge ends adjacent to target
+    # BFS pathfinding naturally includes hexes adjacent to enemies at any reachable distance
     CHARGE_MAX_DISTANCE = 12
     charge_build_valid_destinations_pool(game_state, unit_id, CHARGE_MAX_DISTANCE)
-    
-    # Also add destinations adjacent to enemies at distance 13 (charge of 12 can reach them)
-    # Use BFS to check if these destinations are actually reachable in 12 moves
-    enemies = [u for u in game_state["units"]
-               if u["player"] != unit["player"] and u["HP_CUR"] > 0]
-    
-    # Get all hexes reachable in 12 moves via BFS (already computed above)
-    reachable_hexes = set(game_state["valid_charge_destinations_pool"])
-    
-    for enemy in enemies:
-        distance_to_enemy = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
-        if distance_to_enemy == 13:
-            # Check if any hex adjacent to this enemy is reachable in 12 moves via pathfinding
-            enemy_neighbors = _get_hex_neighbors(enemy["col"], enemy["row"])
-            for neighbor_col, neighbor_row in enemy_neighbors:
-                # Check if this neighbor is traversable
-                if not _is_traversable_hex(game_state, neighbor_col, neighbor_row, unit):
-                    continue
-                
-                # Check if this neighbor is reachable in 12 moves using BFS
-                # We need to check if there's a path from unit to this neighbor within 12 moves
-                # Use BFS to find shortest path
-                start_pos = (unit["col"], unit["row"])
-                target_pos = (neighbor_col, neighbor_row)
-                
-                # BFS to find shortest path
-                visited = {start_pos: 0}
-                queue = [(start_pos, 0)]
-                found = False
-                
-                while queue:
-                    current_pos, current_dist = queue.pop(0)
-                    if current_pos == target_pos:
-                        if current_dist <= CHARGE_MAX_DISTANCE:
-                            found = True
-                        break
-                    
-                    if current_dist >= CHARGE_MAX_DISTANCE:
-                        continue
-                    
-                    current_col, current_row = current_pos
-                    neighbors = _get_hex_neighbors(current_col, current_row)
-                    for n_col, n_row in neighbors:
-                        n_pos = (n_col, n_row)
-                        if n_pos in visited:
-                            continue
-                        if not _is_traversable_hex(game_state, n_col, n_row, unit):
-                            continue
-                        visited[n_pos] = current_dist + 1
-                        queue.append((n_pos, current_dist + 1))
-                
-                if found and target_pos not in reachable_hexes:
-                    # CRITICAL: Verify hex is not occupied before adding to pool
-                    hex_is_occupied = False
-                    for check_unit in game_state["units"]:
-                        if (check_unit["id"] != unit["id"] and
-                            check_unit["HP_CUR"] > 0 and
-                            check_unit["col"] == neighbor_col and
-                            check_unit["row"] == neighbor_row):
-                            hex_is_occupied = True
-                            break
-                    
-                    # Only add if NOT occupied
-                    if not hex_is_occupied:
-                        game_state["valid_charge_destinations_pool"].append(target_pos)
-                        reachable_hexes.add(target_pos)
 
     # Check if valid destinations exist
     if not game_state["valid_charge_destinations_pool"]:

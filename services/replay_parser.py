@@ -31,8 +31,8 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
 
-            # Episode start
-            if "=== EPISODE START ===" in line:
+            # Episode start - matches both "=== EPISODE START ===" and "=== EPISODE 1 START ==="
+            if "=== EPISODE" in line and "START ===" in line:
                 if current_episode:
                     episodes.append(current_episode)
 

@@ -236,6 +236,8 @@ export const useEngineAPI = () => {
               woundRoll: logEntry.woundRoll || logEntry.wound_roll || shootDetail?.strengthRoll,
               saveRoll: logEntry.saveRoll || logEntry.save_roll || shootDetail?.saveRoll,
               saveTarget: logEntry.saveTarget || logEntry.save_target || shootDetail?.saveTarget,
+              // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Pass through weapon name
+              weaponName: logEntry.weaponName,
               // Pass through shootDetails for direct use by getEventTypeClass color logic
               shootDetails: logEntry.shootDetails,
               timestamp: new Date()
@@ -253,8 +255,24 @@ export const useEngineAPI = () => {
               data.game_state.shoot_activation_pool.length === 0) {
             console.log("🔥 EMPTY SHOOTING POOL DETECTED - Auto-advancing phase");
             setTimeout(async () => {
-              await executeAction({ action: "advance_phase", phase: "shoot" });
+              await executeAction({ action: "advance_phase", from: "shoot" });
             }, 100);
+          }
+          
+          // CRITICAL: Handle empty fight phase pools - all 3 pools must be empty
+          if (data.game_state?.phase === "fight") {
+            const chargingPool = Array.isArray(data.game_state.charging_activation_pool) ? data.game_state.charging_activation_pool : [];
+            const activePool = Array.isArray(data.game_state.active_alternating_activation_pool) ? data.game_state.active_alternating_activation_pool : [];
+            const nonActivePool = Array.isArray(data.game_state.non_active_alternating_activation_pool) ? data.game_state.non_active_alternating_activation_pool : [];
+            
+            const allPoolsEmpty = chargingPool.length === 0 && activePool.length === 0 && nonActivePool.length === 0;
+            
+            if (allPoolsEmpty) {
+              console.log("🔥 EMPTY FIGHT POOLS DETECTED - Auto-advancing phase");
+              setTimeout(async () => {
+                await executeAction({ action: "advance_phase", from: "fight" });
+              }, 100);
+            }
           }
           
           // Process backend cleanup signals FIRST
@@ -1429,6 +1447,7 @@ onLogChargeRoll: () => {},
                   woundRoll: logEntry.woundRoll,
                   saveRoll: logEntry.saveRoll,
                   saveTarget: logEntry.saveTarget,
+                  weaponName: logEntry.weaponName,  // MULTIPLE_WEAPONS_IMPLEMENTATION.md
                   action_name: logEntry.action_name,
                   reward: logEntry.reward,
                   is_ai_action: logEntry.is_ai_action,
@@ -1563,6 +1582,7 @@ onLogChargeRoll: () => {},
                       woundRoll: logEntry.woundRoll,
                       saveRoll: logEntry.saveRoll,
                       saveTarget: logEntry.saveTarget,
+                      weaponName: logEntry.weaponName,  // MULTIPLE_WEAPONS_IMPLEMENTATION.md
                       action_name: logEntry.action_name,
                       reward: logEntry.reward,
                       is_ai_action: logEntry.is_ai_action,

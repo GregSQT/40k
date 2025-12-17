@@ -143,22 +143,14 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
 
         # Sub-phase 2: Non-active alternating pool (opponent's units)
         if not removed and "non_active_alternating_activation_pool" in game_state:
-            pool_before = list(game_state["non_active_alternating_activation_pool"])
-            pool_str = [str(id) for id in pool_before]
-            print(f"🔍 [END_ACTIVATION] Checking non_active pool: unit_id_str={unit_id_str}, pool_before={pool_before}, pool_str={pool_str}")
+            pool_str = [str(id) for id in game_state["non_active_alternating_activation_pool"]]
             if unit_id_str in pool_str:
                 game_state["non_active_alternating_activation_pool"] = [id for id in game_state["non_active_alternating_activation_pool"] if str(id) != unit_id_str]
-                pool_after = list(game_state["non_active_alternating_activation_pool"])
-                print(f"✅ [END_ACTIVATION] Removed unit {unit_id_str} from non_active pool: {pool_before} → {pool_after}")
                 response["removed_from_non_active_alternating_pool"] = True
                 removed = True
 
         if removed:
             response["removed_from_fight_pool"] = True  # Generic flag for compatibility
-            print(f"✅ [END_ACTIVATION] Unit {unit_id} ({unit_id_str}) successfully removed from fight pool")
-        else:
-            print(f"⚠️ [END_ACTIVATION] Unit {unit_id} ({unit_id_str}) not found in any fight pool")
-            print(f"⚠️ [END_ACTIVATION] Available pools: charging={game_state.get('charging_activation_pool', [])}, active={game_state.get('active_alternating_activation_pool', [])}, non_active={game_state.get('non_active_alternating_activation_pool', [])}")
     
     # ├── Arg5 = 1 ?
     # │   ├── YES → log the error

@@ -207,12 +207,14 @@ export class UnitRenderer {
     if (isPreview) return;
     
     // Grey-out enemies that are NOT valid shooting targets during shooting phase
-    // ONLY when a unit is selected and in shooting mode
-    // Use isShootable prop (from backend's validTargets) or blinkingUnits to determine validity
-    if (phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null) {
+    // ONLY apply when we have actual blinking data (prevents grey flash during loading)
+    // - Replay mode: blinkingUnits is undefined → skip greying
+    // - PvP mode before backend responds: blinkingUnits is [] or undefined → skip greying
+    // - PvP mode with targets: blinkingUnits has IDs → apply greying
+    if (phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
       const isShootable = this.props.isShootable !== undefined 
         ? this.props.isShootable 
-        : (this.props.blinkingUnits?.includes(unit.id) ?? false);
+        : (this.props.blinkingUnits.includes(unit.id));
       
       if (!isShootable) {
         const grey = 0x888888;
@@ -307,18 +309,25 @@ export class UnitRenderer {
         addClickHandler = false;
       }
       
-      if (phase === "shoot" && mode === "attackPreview" && unit.player !== currentPlayer && selectedUnitId !== null) {
+      // CRITICAL FIX: Block enemy unit clicks during movement and charge phases
+      // AI_TURN.md: In movement/charge phases, only destinations are clickable, NOT units
+      // Clicking enemy units during these phases breaks the game
+      if ((phase === "move" || phase === "charge") && unit.player !== currentPlayer) {
+        addClickHandler = false;
+      }
+      
+      if (phase === "shoot" && mode === "attackPreview" && unit.player !== currentPlayer && selectedUnitId !== null && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
         const selectedUnit = units.find(u => u.id === selectedUnitId);
         if (selectedUnit && !this.props.isShootable) {
           addClickHandler = false;
         }
       }
       if (addClickHandler) {
-        // Check if unit is shootable during shooting phase
+        // Check if unit is shootable during shooting phase (only in PvP mode with actual targets)
         const isShootableUnit = this.props.isShootable !== false;
         
-        if (phase === "shoot" && unit.player !== currentPlayer && !isShootableUnit) {
-          // Unit is blocked by LoS - no click handler, no hand cursor
+        if (phase === "shoot" && unit.player !== currentPlayer && !isShootableUnit && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
+          // Unit is blocked by LoS in PvP mode - no click handler, no hand cursor
           unitCircle.eventMode = 'none';
           unitCircle.cursor = "default";
         } else {
@@ -429,12 +438,11 @@ export class UnitRenderer {
           }
         }
         // Grey-out enemies that are NOT valid shooting targets during shooting phase
-        // ONLY when a unit is selected and in shooting mode
-        // Use isShootable prop (from backend's validTargets) or blinkingUnits to determine validity
-        if (!isPreview && phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null) {
+        // ONLY apply when we have actual blinking data (prevents grey flash during loading)
+        if (!isPreview && phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
           const isShootable = this.props.isShootable !== undefined 
             ? this.props.isShootable 
-            : (this.props.blinkingUnits?.includes(unit.id) ?? false);
+            : (this.props.blinkingUnits.includes(unit.id));
           
           if (!isShootable) {
             sprite.alpha = 0.5;
@@ -859,16 +867,20 @@ export class UnitRenderer {
         if (targetPreview.currentBlinkStep === 0) {
           displayHP = currentHP;
         } else {
-          // ✅ FIX: Use CC_DMG for fight phase, RNG_DMG for shooting phase
+          // ✅ FIX: Get selected weapon and calculate damage per attack (DMG only, not DMG * NB)
+          let totalDamage = 0;
           if (this.props.phase === 'fight') {
-            if (shooter.CC_DMG === undefined) throw new Error(`shooter.CC_DMG is undefined for unit ${shooter.name || shooter.id}`);
-            const totalDamage = targetPreview.currentBlinkStep * shooter.CC_DMG;
-            displayHP = Math.max(0, currentHP - totalDamage);
+            const weapon = getSelectedMeleeWeapon(shooter);
+            if (weapon) {
+              totalDamage = targetPreview.currentBlinkStep * weapon.DMG;
+            }
           } else {
-            if (shooter.RNG_DMG === undefined) throw new Error(`shooter.RNG_DMG is undefined for unit ${shooter.name || shooter.id}`);
-            const totalDamage = targetPreview.currentBlinkStep * shooter.RNG_DMG;
-            displayHP = Math.max(0, currentHP - totalDamage);
+            const weapon = getSelectedRangedWeapon(shooter);
+            if (weapon) {
+              totalDamage = targetPreview.currentBlinkStep * weapon.DMG;
+            }
           }
+          displayHP = Math.max(0, currentHP - totalDamage);
         }
       }
     }
@@ -901,15 +913,38 @@ export class UnitRenderer {
         // Highlight HP slice for damage preview
         const highlightSlice = new PIXI.Graphics();
         // Calculate damage for both targetPreview and multi-unit blinking
+        // ✅ FIX: Get selected weapon and calculate damage per attack (DMG only, not DMG * NB)
         let shooterDamage = 0;
         if (targetPreview) {
           const previewShooter = units.find(u => u.id === targetPreview.shooterId);
-          shooterDamage = this.props.phase === 'fight' ? (previewShooter?.CC_DMG || 0) : (previewShooter?.RNG_DMG || 0);
+          if (previewShooter) {
+            if (this.props.phase === 'fight') {
+              const weapon = getSelectedMeleeWeapon(previewShooter);
+              if (weapon) {
+                shooterDamage = weapon.DMG;
+              }
+            } else {
+              const weapon = getSelectedRangedWeapon(previewShooter);
+              if (weapon) {
+                shooterDamage = weapon.DMG;
+              }
+            }
+          }
         } else if (shouldBlink) {
-          const activeShooterId = this.props.gameState?.active_shooting_unit || this.props.selectedUnitId;
+          const activeShooterId = this.props.gameState?.active_shooting_unit || this.props.gameState?.active_fight_unit || this.props.selectedUnitId;
           const activeShooter = this.props.units.find(u => u.id === activeShooterId);
           if (activeShooter) {
-            shooterDamage = this.props.phase === 'fight' ? (activeShooter.CC_DMG || 0) : (activeShooter.RNG_DMG || 0);
+            if (this.props.phase === 'fight') {
+              const weapon = getSelectedMeleeWeapon(activeShooter);
+              if (weapon) {
+                shooterDamage = weapon.DMG;
+              }
+            } else {
+              const weapon = getSelectedRangedWeapon(activeShooter);
+              if (weapon) {
+                shooterDamage = weapon.DMG;
+              }
+            }
           }
         }
         const wouldBeDamaged = i >= (currentHP - shooterDamage) && i < currentHP;

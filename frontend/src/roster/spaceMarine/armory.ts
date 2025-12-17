@@ -1,10 +1,13 @@
 /**
  * Space Marine Armory - Centralized weapon definitions.
  * 
+ * SINGLE SOURCE OF TRUTH: This is the ONLY place where weapons are declared.
+ * Python parses this file dynamically using engine/armory_parser.py
+ * 
  * AI_IMPLEMENTATION.md COMPLIANCE:
  * - NO DEFAULT: getWeapon() raises error if weapon missing (pas de fallback)
  * - Validation stricte: toutes les armes référencées doivent exister
- * - Même structure que armory Python (synchronisation manuelle requise)
+ * - No duplicate Python armory needed - parsed at runtime
  */
 
 import type { Weapon } from '../../types/game';
@@ -14,9 +17,47 @@ import type { Weapon } from '../../types/game';
 // ============================================================================
 
 export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
-  // Ranged Weapons
+  // #########################################################################################
+  // #################################### Debug Weapons ######################################
+  // #########################################################################################
+  SM_RNG_killer: {
+    display_name: "SM_RNG_killer",
+    RNG: 24,
+    NB: 1,
+    ATK: 3,
+    STR: 5,
+    AP: -3,
+    DMG: 2,
+  },
+  Termagant_RNG_killer: {
+    display_name: "Termagant_RNG_killer",
+    RNG: 24,
+    NB: 5,
+    ATK: 3,
+    STR: 3,
+    AP: 0,
+    DMG: 1,
+  },
+  SM_CC_killer: {
+    display_name: "SM_CC_killer",
+    NB: 1,
+    ATK: 3,
+    STR: 5,
+    AP: -3,
+    DMG: 2,
+  },
+  Termagant_CC_killer: {
+    display_name: "Termagant_CC_killer",
+    NB: 5,
+    ATK: 3,
+    STR: 3,
+    AP: 0,
+    DMG: 1,
+  },
+  // #########################################################################################
+  // #################################### Range Weapons ######################################
+  // #########################################################################################
   bolt_rifle: {
-    code_name: "bolt_rifle",
     display_name: "Bolt Rifle",
     RNG: 24,
     NB: 2,
@@ -26,17 +67,15 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     DMG: 1,
   },
   bolt_pistol: {
-    code_name: "bolt_pistol",
     display_name: "Bolt Pistol",
-    RNG: 18,
+    RNG: 12,
     NB: 1,
     ATK: 3,
     STR: 4,
-    AP: -1,
+    AP: 0,
     DMG: 1,
   },
   storm_bolter: {
-    code_name: "storm_bolter",
     display_name: "Storm Bolter",
     RNG: 24,
     NB: 2,
@@ -46,7 +85,6 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     DMG: 1,
   },
   master_crafted_boltgun: {
-    code_name: "master_crafted_boltgun",
     display_name: "Master-crafted Boltgun",
     RNG: 12,
     NB: 3,
@@ -55,10 +93,10 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     AP: -1,
     DMG: 1,
   },
-  
-  // Melee Weapons
+  // #########################################################################################
+  // #################################### Melee Weapons ######################################
+  // #########################################################################################
   close_combat_weapon: {
-    code_name: "close_combat_weapon",
     display_name: "Close Combat Weapon",
     NB: 3,
     ATK: 3,
@@ -66,17 +104,23 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     AP: 0,
     DMG: 1,
   },
-  chainsword: {
-    code_name: "chainsword",
-    display_name: "Chainsword",
-    NB: 4,
+  intercessor_chainsword: {
+    display_name: "Astartes Chainsword",
+    NB: 5,
+    ATK: 3,
+    STR: 4,
+    AP: -1,
+    DMG: 1,
+  },
+  assault_intercessor_chainsword: {
+    display_name: "Astartes Chainsword",
+    NB: 5,
     ATK: 3,
     STR: 4,
     AP: -1,
     DMG: 1,
   },
   power_fist: {
-    code_name: "power_fist",
     display_name: "Power Fist",
     NB: 5,
     ATK: 2,
@@ -85,7 +129,6 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     DMG: 2,
   },
   power_fist_terminator: {
-    code_name: "power_fist_terminator",
     display_name: "Power Fist",
     NB: 3,
     ATK: 3,

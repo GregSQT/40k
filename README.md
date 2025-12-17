@@ -42,10 +42,13 @@ The game implements strict Warhammer 40K turn structure:
 4. **Fight Phase** - Melee combat resolution
 
 ### Unit Management
-- **Comprehensive Unit Types**: Intercessors, Assault Intercessors, Termagants
+- **Comprehensive Unit Types**: Intercessors, Assault Intercessors, Termagants, Carnifex
+- **Multiple Weapons System**: Units can have up to 3 ranged and 2 melee weapons
+- **Automatic Weapon Selection**: AI automatically selects optimal weapon per target
 - **UPPERCASE Field Convention**: All unit stats use proper naming (HP_CUR, MOVE_LEFT, etc.)
 - **Dynamic Unit Registry**: Configurable unit definitions with full stat tracking
 - **Real-time Status Updates**: HP bars, movement remaining, attack counters
+- **Centralized Armory**: Single source of truth for all weapon definitions
 
 ### Game Modes
 - **PvE Mode**: Human vs AI with intelligent opponents
@@ -249,6 +252,8 @@ The project includes comprehensive documentation covering:
 - **AI_TURN.md**: Complete turn sequence specification
 - **AI_GAME.md**: Game rules and mechanics documentation
 - **AI_ARCHITECTURE.md**: System architecture overview
+- **AI_WEAPON_SELECTION.md**: How AI agents automatically select optimal weapons
+- **ARMORY_REFACTOR.md**: Weapon management guide (how to add/remove weapons)
 
 ## 🎮 Getting Started
 

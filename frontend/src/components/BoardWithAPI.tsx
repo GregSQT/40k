@@ -45,6 +45,15 @@ export const BoardWithAPI: React.FC = () => {
   const [aiError, setAiError] = useState<string | null>(null);
   const [lastProcessedTurn, setLastProcessedTurn] = useState<string>('');
   
+  // Track previous values to prevent console flooding during animations
+  const prevAICheckRef = useRef<{
+    currentPhase: string;
+    currentPlayer: number;
+    isAITurn: boolean;
+    shouldTriggerAI: boolean;
+    turnKey: string;
+  } | null>(null);
+  
   const clearAIError = () => setAiError(null);
 
   // AI Turn Processing Effect - Trigger AI when it's AI player's turn and has eligible units
@@ -147,16 +156,7 @@ export const BoardWithAPI: React.FC = () => {
                                (fightSubphaseForCheck === 'charging' && apiProps.gameState?.currentPlayer === 1))
       : apiProps.gameState?.currentPlayer === 1;
     
-    console.log(`🔍 [BOARD_WITH_API] AI turn check:`, {
-      currentPhase,
-      currentPlayer: apiProps.gameState.currentPlayer,
-      fight_subphase: apiProps.gameState.fight_subphase,
-      hasEligibleAIUnits,
-      isAITurn,
-      isPvEMode,
-      isAIProcessing: isAIProcessingRef.current,
-      gameNotOver
-    });
+    // Removed duplicate log - now handled below with change detection
     
     const fightSubphaseForKey = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase || '';
     const turnKey = `${apiProps.gameState?.currentPlayer}-${currentPhase}-${fightSubphaseForKey}-${apiProps.gameState?.currentTurn || 1}`;
@@ -185,47 +185,83 @@ export const BoardWithAPI: React.FC = () => {
                            gameNotOver && 
                            hasEligibleAIUnits;
     
-    console.log(`🔍 [BOARD_WITH_API] shouldTriggerAI=${shouldTriggerAI}, lastProcessedTurn=${lastProcessedTurn}, turnKey=${turnKey}`);
+    // Only log when values actually change (prevents console flooding during animations)
+    const currentAICheck = {
+      currentPhase,
+      currentPlayer: apiProps.gameState.currentPlayer,
+      isAITurn,
+      shouldTriggerAI,
+      turnKey
+    };
+    
+    const prevCheck = prevAICheckRef.current;
+    const hasChanged = !prevCheck || 
+      prevCheck.currentPhase !== currentAICheck.currentPhase ||
+      prevCheck.currentPlayer !== currentAICheck.currentPlayer ||
+      prevCheck.isAITurn !== currentAICheck.isAITurn ||
+      prevCheck.shouldTriggerAI !== currentAICheck.shouldTriggerAI ||
+      prevCheck.turnKey !== currentAICheck.turnKey;
+    
+    if (hasChanged) {
+      console.log(`🔍 [BOARD_WITH_API] AI turn check:`, {
+        currentPhase,
+        currentPlayer: apiProps.gameState.currentPlayer,
+        fight_subphase: apiProps.gameState.fight_subphase,
+        hasEligibleAIUnits,
+        isAITurn,
+        isPvEMode,
+        isAIProcessing: isAIProcessingRef.current,
+        gameNotOver
+      });
+      console.log(`🔍 [BOARD_WITH_API] shouldTriggerAI=${shouldTriggerAI}, lastProcessedTurn=${lastProcessedTurn}, turnKey=${turnKey}`);
+      prevAICheckRef.current = currentAICheck;
+    }
     
     if (shouldTriggerAI) {
-      console.log(`Triggering AI turn for Player 1 (AI) - Phase: ${currentPhase}, Eligible AI units: ${hasEligibleAIUnits}`);
+      console.log(`✅ [BOARD_WITH_API] Triggering AI turn for Player 1 (AI) - Phase: ${currentPhase}, Eligible AI units: ${hasEligibleAIUnits}`);
       isAIProcessingRef.current = true;
       // Don't set lastProcessedTurn here - wait until AI completes successfully
       
       // Small delay to ensure UI updates are complete
       setTimeout(async () => {
-        console.log('Timer fired, checking executeAITurn:', typeof apiProps.executeAITurn);
+        console.log('⏱️ [BOARD_WITH_API] Timer fired, checking executeAITurn:', typeof apiProps.executeAITurn);
         try {
           if (apiProps.executeAITurn) {
-            console.log('Calling executeAITurn...');
+            console.log('🤖 [BOARD_WITH_API] Calling executeAITurn...');
             await apiProps.executeAITurn();
-            console.log('AI turn completed');
+            console.log('✅ [BOARD_WITH_API] AI turn completed');
             // Don't set lastProcessedTurn here - allow multiple activations in same phase
             // lastProcessedTurn will be set when phase actually changes (via useEffect dependency)
           } else {
-            console.error('executeAITurn function not available, type:', typeof apiProps.executeAITurn);
+            console.error('❌ [BOARD_WITH_API] executeAITurn function not available, type:', typeof apiProps.executeAITurn);
             setAiError('AI function not available');
           }
         } catch (error) {
-          console.error('AI turn failed:', error);
+          console.error('❌ [BOARD_WITH_API] AI turn failed:', error);
           setAiError(error instanceof Error ? error.message : 'AI turn failed');
         } finally {
           isAIProcessingRef.current = false;
         }
       }, 1500);
     } else if (isPvEMode && isAITurn && !hasEligibleAIUnits) {
-      console.log(`⚠️ [BOARD_WITH_API] AI turn skipped - Phase: ${currentPhase}, No eligible AI units in activation pool`);
-    } else if (isPvEMode && !shouldTriggerAI) {
-      console.log(`⚠️ [BOARD_WITH_API] AI turn NOT triggered. Reasons:`, {
-        isPvEMode,
-        isAITurn,
-        isAIProcessing: isAIProcessingRef.current,
-        gameNotOver,
-        hasEligibleAIUnits,
-        lastProcessedTurn,
-        turnKey,
-        turnKeyMatches: lastProcessedTurn === turnKey
-      });
+      // Only log when this condition changes
+      if (!prevCheck || prevCheck.shouldTriggerAI !== shouldTriggerAI) {
+        console.log(`⚠️ [BOARD_WITH_API] AI turn skipped - Phase: ${currentPhase}, No eligible AI units in activation pool`);
+      }
+    } else if (isPvEMode && !shouldTriggerAI && hasChanged) {
+      // Only log when values change, and only in debug scenarios
+      // Suppress the "NOT triggered" warning to reduce console noise
+      // Uncomment below if you need to debug AI triggering issues
+      // console.log(`⚠️ [BOARD_WITH_API] AI turn NOT triggered. Reasons:`, {
+      //   isPvEMode,
+      //   isAITurn,
+      //   isAIProcessing: isAIProcessingRef.current,
+      //   gameNotOver,
+      //   hasEligibleAIUnits,
+      //   lastProcessedTurn,
+      //   turnKey,
+      //   turnKeyMatches: lastProcessedTurn === turnKey
+      // });
     }
   }, [isPvE, apiProps.gameState?.currentPlayer, apiProps.gameState?.phase, apiProps.gameState?.fight_subphase, apiProps.gameState?.pve_mode, apiProps.gameState?.move_activation_pool, apiProps.gameState?.charge_activation_pool, apiProps.gameState?.non_active_alternating_activation_pool, apiProps.gameState?.active_alternating_activation_pool, apiProps.gameState?.charging_activation_pool, apiProps.unitsMoved, apiProps.unitsCharged, apiProps.unitsAttacked, apiProps.gameState?.units, apiProps.executeAITurn, lastProcessedTurn]);
   

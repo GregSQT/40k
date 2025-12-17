@@ -41,8 +41,8 @@ export function parse_log_file_from_text(text: string) {
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // Episode start
-    if (trimmed.includes('=== EPISODE START ===')) {
+    // Episode start - matches both "=== EPISODE START ===" and "=== EPISODE 1 START ==="
+    if (trimmed.includes('=== EPISODE') && trimmed.includes('START ===')) {
       if (currentEpisode) {
         episodes.push(currentEpisode);
       }
@@ -230,6 +230,8 @@ export function parse_log_file_from_text(text: string) {
         const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)/);
         // Extract reward from format: [R:+53.2] or [R:-10.0]
         const rewardMatch = trimmed.match(/\[R:([+-]?\d+\.?\d*)\]/);
+        // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract weapon name from format: with [weapon_name]
+        const weaponMatch = trimmed.match(/with \[([^\]]+)\]/);
 
         // Removed verbose logging
         // console.log('Parsing shoot line:', trimmed);
@@ -265,6 +267,10 @@ export function parse_log_file_from_text(text: string) {
           // Add reward if available
           if (rewardMatch) {
             action.reward = parseFloat(rewardMatch[1]);
+          }
+          // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Add weapon name if available
+          if (weaponMatch) {
+            action.weapon_name = weaponMatch[1];
           }
 
           currentEpisode.actions.push(action);
@@ -398,8 +404,8 @@ export function parse_log_file_from_text(text: string) {
     }
 
     // Parse FIGHT actions
-    // Format: [timestamp] T1 P0 FIGHT : Unit 2(9, 6) FOUGHT unit 8 - Hit:3+:2(MISS) [SUCCESS]
-    const fightMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+), (\d+)\) FOUGHT unit (\d+)/);
+    // Format: [timestamp] T1 P0 FIGHT : Unit 2(9, 6) ATTACKED unit 8 with [weapon] - Hit:3+:2(MISS) [SUCCESS]
+    const fightMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+), (\d+)\) ATTACKED unit (\d+)/);
     if (fightMatch) {
       const timestamp = fightMatch[1];
       const turn = fightMatch[2];
@@ -408,6 +414,10 @@ export function parse_log_file_from_text(text: string) {
       const attackerCol = parseInt(fightMatch[5]);
       const attackerRow = parseInt(fightMatch[6]);
       const targetId = parseInt(fightMatch[7]);
+
+      // Parse weapon name if present (MULTIPLE_WEAPONS_IMPLEMENTATION.md)
+      const weaponMatch = trimmed.match(/with \[([^\]]+)\]/);
+      const weaponName = weaponMatch ? weaponMatch[1] : undefined;
 
       // Parse combat details - Hit:3+:2(MISS/HIT) Wound:4+:5(SUCCESS/FAIL) Save:3+:2(FAIL) Dmg:1HP
       const hitMatch = trimmed.match(/Hit:(\d+)\+:(\d+)\((HIT|MISS)\)/);
@@ -423,6 +433,7 @@ export function parse_log_file_from_text(text: string) {
         attacker_id: attackerId,
         attacker_pos: { col: attackerCol, row: attackerRow },
         target_id: targetId,
+        weapon_name: weaponName,  // Add weapon name for display
         damage: 0  // Will be calculated below based on combat results
       };
 

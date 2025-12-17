@@ -1,10 +1,13 @@
 /**
  * Tyranid Armory - Centralized weapon definitions.
  * 
+ * SINGLE SOURCE OF TRUTH: This is the ONLY place where weapons are declared.
+ * Python parses this file dynamically using engine/armory_parser.py
+ * 
  * AI_IMPLEMENTATION.md COMPLIANCE:
  * - NO DEFAULT: getWeapon() raises error if weapon missing (pas de fallback)
  * - Validation stricte: toutes les armes référencées doivent exister
- * - Même structure que armory Python (synchronisation manuelle requise)
+ * - No duplicate Python armory needed - parsed at runtime
  */
 
 import type { Weapon } from '../../types/game';

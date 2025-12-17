@@ -1,0 +1,43 @@
+{
+  "RAPID_FIRE": {
+    "name": "Rapid Fire",
+    "description": "Make X additional attacks when target within half range",
+    "has_parameter": true
+  },
+  "ASSAULT": {
+    "name": "Assault",
+    "description": "No penalty when shooting after advancing or falling back",
+    "has_parameter": false
+  },
+  "HEAVY": {
+    "name": "Heavy",
+    "description": "Subtract 1 from hit rolls if the shooter moved this turn",
+    "has_parameter": false
+  },
+  "MELTA": {
+    "name": "Melta",
+    "description": "Roll 2 dice for damage and pick the highest result when target is within X hexes",
+    "has_parameter": true
+  },
+  "BLAST": {
+    "name": "Blast",
+    "description": "Cannot target units that are in melee combat",
+    "has_parameter": false
+  },
+  "PISTOL": {
+    "name": "Pistol",
+    "description": "Can be fired even if shooter is within melee range of enemy units",
+    "has_parameter": false
+  },
+  "GRENADE": {
+    "name": "Grenade",
+    "description": "Only one grenade weapon per unit can be fired per phase",
+    "has_parameter": false
+  },
+  "TORRENT": {
+    "name": "Torrent",
+    "description": "Automatically hits the target (no hit roll required)",
+    "has_parameter": false
+  }
+}
+

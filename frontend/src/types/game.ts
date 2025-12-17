@@ -20,7 +20,6 @@ export interface Position {
 }
 
 export interface Weapon {
-  code_name: string;        // Nom utilisé dans le tableau de l'unité
   display_name: string;     // Nom affiché dans l'UI
   RNG?: number;             // Portée (armes à distance uniquement)
   NB: number;               // Nombre d'attaques

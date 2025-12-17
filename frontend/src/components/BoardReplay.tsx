@@ -182,7 +182,7 @@ export const BoardReplay: React.FC = () => {
           ICON_SCALE: UnitClass.ICON_SCALE || 1
         };
       } catch (error) {
-        console.warn(`Failed to enrich unit ${unit.id} (${unit.type}):`, error);
+        console.error(`❌ Failed to enrich unit ${unit.id} (${unit.type}):`, error);
         return unit;
       }
     });
@@ -442,6 +442,10 @@ export const BoardReplay: React.FC = () => {
         const saveTarget = action.save_target || 0;
         const damage = action.damage || 0;
 
+        // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name if available
+        const weaponName = action.weapon_name;
+        const weaponSuffix = weaponName ? ` with [${weaponName}]` : '';
+
         // Determine hit target (assuming 3+ for now - could be in log later)
         const hitTarget = 3;
         const woundTarget = 4; // Assuming 4+ for now
@@ -473,19 +477,19 @@ export const BoardReplay: React.FC = () => {
 
         if (hitRoll !== undefined && hitRoll < hitTarget) {
           // Hit failed
-          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row}) : Hit ${hitRoll}(${hitTarget}+) : FAILED !`;
+          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) : FAILED !`;
         } else if (woundRoll !== undefined && woundRoll < woundTarget) {
           // Wound failed
-          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row}) : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) : FAILED !`;
+          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) : FAILED !`;
         } else if (saveRoll !== undefined && saveTarget > 0 && saveRoll >= saveTarget) {
           // Save succeeded
-          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row}) : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) : SAVED !`;
+          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) : SAVED !`;
         } else if (damage > 0) {
           // Damage dealt
-          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row}) : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) - ${damage} DAMAGE DELT !`;
+          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) - ${damage} DAMAGE DELT !`;
         } else {
           // Fallback
-          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row})`;
+          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row})${weaponSuffix}`;
         }
 
         // Use addEvent directly with custom formatted message to match PvP format
@@ -571,9 +575,13 @@ export const BoardReplay: React.FC = () => {
         const attackerId = action.attacker_id!;
         const targetId = action.target_id!;
         const attackerPos = action.attacker_pos || { col: 0, row: 0 };
+        
+        // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name if available
+        const weaponName = action.weapon_name;
+        const weaponSuffix = weaponName ? ` with [${weaponName}]` : '';
 
         // Build message based on combat results
-        let message = `Unit ${attackerId} (${attackerPos.col}, ${attackerPos.row}) FOUGHT Unit ${targetId}`;
+        let message = `Unit ${attackerId} (${attackerPos.col}, ${attackerPos.row}) FOUGHT Unit ${targetId}${weaponSuffix}`;
         if (action.hit_roll !== undefined) {
           const hitResult = action.hit_result || (action.hit_roll >= (action.hit_target || 3) ? 'HIT' : 'MISS');
           message += ` : Hit ${action.hit_roll}(${action.hit_target || 3}+)`;

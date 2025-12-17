@@ -247,32 +247,12 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     EXACT COPY from w40k_engine_save.py _has_valid_shooting_targets logic
     WITH ALWAYS-ON DEBUG LOGGING
     """
-    # FIXED: Disable debug output completely during training
-    debug_mode = False  # Set to True only for manual debugging
-    
-    if debug_mode:
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers for debug
-        from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_max_ranged_range, get_melee_range
-        selected_rng = get_selected_ranged_weapon(unit)
-        rng_nb_debug = selected_rng.get('NB', 0) if selected_rng else 0
-        max_rng_debug = get_max_ranged_range(unit)
-        melee_range_debug = get_melee_range()
-        print(f"\n🔍 ELIGIBILITY CHECK: Unit {unit['id']} @ ({unit['col']}, {unit['row']})")
-        print(f"   Player: {unit['player']}, Current Player: {current_player}")
-        print(f"   HP: {unit['HP_CUR']}/{unit['HP_MAX']}")
-        print(f"   RNG_NB: {rng_nb_debug}, RNG_RNG: {max_rng_debug}")
-        print(f"   CC_RNG: {melee_range_debug}")
-    
     # unit.HP_CUR > 0?
     if unit["HP_CUR"] <= 0:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: Unit is dead (HP_CUR={unit['HP_CUR']})")
         return False
         
     # unit.player === current_player?
     if unit["player"] != current_player:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: Wrong player (unit.player={unit['player']} != current_player={current_player})")
         return False
         
     # units_fled.includes(unit.id)?
@@ -280,16 +260,10 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     if "units_fled" not in game_state:
         raise KeyError("game_state missing required 'units_fled' field")
     if unit["id"] in game_state["units_fled"]:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: Unit has fled")
         return False
     
     # CRITICAL FIX: Add missing adjacency check - units in melee cannot shoot
     # This matches the frontend logic: hasAdjacentEnemyShoot check
-    if debug_mode:
-        print(f"   Checking for adjacent enemies (CC_RNG={unit.get('CC_RNG', 'MISSING')})...")
-    
-    adjacent_enemies = []
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
@@ -300,71 +274,28 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
             from engine.utils.weapon_helpers import get_melee_range
             melee_range = get_melee_range()  # Always 1
             
-            if debug_mode:
-                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): distance={distance}, melee_range={melee_range}")
-            
             if distance <= melee_range:
-                adjacent_enemies.append(f"{enemy['id']}@dist={distance}")
-                if debug_mode:
-                    print(f"         ⚠️ Enemy {enemy['id']} IS ADJACENT (distance={distance} <= CC_RNG={unit['CC_RNG']})")
-    
-    if adjacent_enemies:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: Adjacent enemies found: {adjacent_enemies}")
-            print(f"   RESULT: Unit {unit['id']} CANNOT SHOOT (W40K rule: engaged in melee)")
-        return False
-    
-    if debug_mode:
-        print(f"   ✅ No adjacent enemies found")
+                return False
         
     # unit.RNG_NB > 0?
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_NB
     from engine.utils.weapon_helpers import get_selected_ranged_weapon
     selected_weapon = get_selected_ranged_weapon(unit)
     if not selected_weapon:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: No ranged weapons")
         return False
     rng_nb = selected_weapon.get("NB", 0)
     if rng_nb <= 0:
-        if debug_mode:
-            print(f"   ❌ BLOCKED: No ranged attacks (RNG_NB={rng_nb})")
         return False
     
-    if debug_mode:
-        print(f"   ✅ Unit has ranged attacks (RNG_NB={unit['RNG_NB']})")
-        print(f"   Checking for valid ranged targets (RNG_RNG={unit.get('RNG_RNG', 0)})...")
-    
-    # Check for valid targets with detailed debugging
-    valid_targets_found = []
-    
+    # Check for valid targets
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
             is_valid = _is_valid_shooting_target(game_state, unit, enemy)
             
-            if debug_mode:
-                print(f"      Enemy {enemy['id']} @ ({enemy['col']}, {enemy['row']}): dist={distance}, RNG_RNG={unit.get('RNG_RNG', 0)}, valid={is_valid}")
-                if not is_valid:
-                    if distance > unit.get('RNG_RNG', 0):
-                        print(f"         ❌ OUT OF RANGE")
-                    elif distance <= unit.get('CC_RNG', 1):
-                        print(f"         ❌ TOO CLOSE (melee range)")
-                    else:
-                        print(f"         ❌ NO LINE OF SIGHT")
-            
             if is_valid:
-                valid_targets_found.append(enemy["id"])
-                if debug_mode:
-                    print(f"         ✅ VALID TARGET")
+                return True
     
-    if debug_mode:
-        if len(valid_targets_found) > 0:
-            print(f"   ✅ RESULT: {len(valid_targets_found)} valid targets found: {valid_targets_found}")
-        else:
-            print(f"   ❌ RESULT: NO valid targets found")
-    
-    return len(valid_targets_found) > 0
+    return False
 
 
 def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
@@ -372,29 +303,20 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     EXACT COPY from w40k_engine_save.py working validation with proper LoS
     PERFORMANCE: Uses LoS cache for instant lookups (0.001ms vs 5-10ms)
     """
-    # Disable debug prints entirely for training performance
-    debug_mode = False
-    
     # Range check using proper hex distance
     distance = _calculate_hex_distance(shooter["col"], shooter["row"], target["col"], target["row"])
     # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
     if "RNG_RNG" not in shooter:
         raise KeyError(f"Shooter missing required 'RNG_RNG' field: {shooter}")
     if distance > shooter["RNG_RNG"]:
-        if debug_mode:
-            print(f"         ❌ Out of range: dist={distance} > RNG_RNG={shooter['RNG_RNG']}")
         return False
         
     # Dead target check
     if target["HP_CUR"] <= 0:
-        if debug_mode:
-            print(f"         ❌ Target is dead: HP_CUR={target['HP_CUR']}")
         return False
         
     # Friendly fire check
     if target["player"] == shooter["player"]:
-        if debug_mode:
-            print(f"         ❌ Friendly fire: target.player={target['player']} == shooter.player={shooter['player']}")
         return False
     
     # Adjacent check - can't shoot at adjacent enemies (melee range)
@@ -402,8 +324,6 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     from engine.utils.weapon_helpers import get_melee_range
     melee_range = get_melee_range()  # Always 1
     if distance <= melee_range:
-        if debug_mode:
-            print(f"         ❌ Too close: dist={distance} <= melee_range={melee_range}")
         return False
     
     # PERFORMANCE: Use LoS cache if available (instant lookup)
@@ -421,12 +341,6 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     else:
         # No cache: fall back to direct calculation (pre-phase-start calls)
         has_los = _has_line_of_sight(game_state, shooter, target)
-    
-    if debug_mode:
-        if has_los:
-            print(f"         ✅ VALID TARGET: dist={distance}, LoS=clear")
-        else:
-            print(f"         ❌ No LoS: blocked by terrain")
     
     return has_los
 
@@ -1232,15 +1146,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     # Check for gym training mode and PvE AI mode
     is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
     is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
-    
-    print(f"🔍 [FIGHT_HANDLER] execute_action: action={action.get('action')}, unit={unit['id'] if unit else None}, is_gym_training={is_gym_training}, is_pve_ai={is_pve_ai}")
 
     # GYM TRAINING / PvE AI: Auto-activate unit if not already active
     active_fight_unit = game_state.get("active_fight_unit")
     if (is_gym_training or is_pve_ai) and not active_fight_unit and action_type == "fight":
-        print(f"🔍 [FIGHT_HANDLER] Auto-activating unit {unit['id']}")
         activation_result = _handle_fight_unit_activation(game_state, unit, config)
-        print(f"🔍 [FIGHT_HANDLER] Activation result: success={activation_result[0]}")
         if not activation_result[0]:
             return activation_result  # Activation failed
         # Check if activation ended (no targets → end_activation was called)
@@ -1257,20 +1167,15 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return _handle_fight_unit_activation(game_state, unit, config)
 
     elif action_type == "fight":
-        print(f"🔍 [FIGHT_HANDLER] Processing 'fight' action")
         # AI_TURN.md: Fight action with target selection
         # GYM TRAINING / PvE AI: Auto-select target if not provided
         if "targetId" not in action:
             if is_gym_training or is_pve_ai:
-                print(f"🔍 [FIGHT_HANDLER] Auto-select enabled for {'gym_training' if is_gym_training else 'pve_ai'}")
                 valid_targets = game_state.get("valid_fight_targets", [])
-                print(f"🔍 [FIGHT_HANDLER] Valid targets: {valid_targets}")
                 if valid_targets:
                     if is_pve_ai:
                         # Use AI target selection for PvE AI
-                        print(f"🔍 [FIGHT_HANDLER] Using AI target selection for PvE AI")
                         target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets)
-                        print(f"🔍 [FIGHT_HANDLER] AI selected target: {target_id}")
                         if target_id:
                             action["targetId"] = target_id
                         else:
@@ -1282,7 +1187,6 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                         first_target = valid_targets[0]
                         action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
                 else:
-                    print(f"⚠️ [FIGHT_HANDLER] No valid targets available")
                     # No targets - skip this unit
                     result = end_activation(
                         game_state, unit,
@@ -1299,13 +1203,9 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                         _update_fight_subphase(game_state)
                     return True, result
             else:
-                print(f"❌ [FIGHT_HANDLER] Fight action missing targetId and not gym/pve mode!")
                 raise KeyError(f"Fight action missing required 'targetId' field: {action}")
-        else:
-            print(f"🔍 [FIGHT_HANDLER] Action already has targetId: {action.get('targetId')}")
         
         target_id = action["targetId"]
-        print(f"🔍 [FIGHT_HANDLER] Executing fight attack: unit={unit['id']}, target={target_id}")
         return _handle_fight_attack(game_state, unit, target_id, config)
 
     elif action_type == "postpone":
@@ -1952,6 +1852,19 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
         "timestamp": "server_time"
     })
 
+    # Add separate death log event if target was killed
+    if target_died:
+        game_state["action_logs"].append({
+            "type": "death",
+            "message": f"Unit {target_id} was destroyed",
+            "turn": game_state["turn"],
+            "phase": "fight",
+            "targetId": target_id,
+            "unitId": target_id,
+            "player": target["player"],
+            "timestamp": "server_time"
+        })
+
     return {
         "hit_roll": hit_roll,
         "hit_target": hit_target,
@@ -1964,7 +1877,8 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
         "save_success": save_success,
         "damage": damage_dealt,
         "target_died": target_died,
-        "attack_log": attack_log
+        "attack_log": attack_log,
+        "weapon_name": weapon_name  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
     }
 
 
