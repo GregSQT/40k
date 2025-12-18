@@ -58,13 +58,13 @@ const UnitRow = memo<UnitRowProps>(({
           <col style={{ width: '40px' }} />
           <col style={{ width: '40px' }} />
           <col style={{ width: 'auto' }} />
-          <col style={{ width: '60px' }} />
           <col style={{ width: '70px' }} />
-          <col style={{ width: '50px' }} />
-          <col style={{ width: '50px' }} />
-          <col style={{ width: '50px' }} />
-          <col style={{ width: '50px' }} />
-          <col style={{ width: '50px' }} />
+          <col style={{ width: '70px' }} />
+          <col style={{ width: '70px' }} />
+          <col style={{ width: '70px' }} />
+          <col style={{ width: '70px' }} />
+          <col style={{ width: '70px' }} />
+          <col style={{ width: '70px' }} />
         </colgroup>
         <tbody>
           <tr 
@@ -123,11 +123,6 @@ const UnitRow = memo<UnitRowProps>(({
               {unitName}
             </td>
           
-            {/* VALUE */}
-            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px', backgroundColor: '#222', fontSize: '12px' }}>
-              {unit.VALUE || '-'}
-            </td>
-          
             {/* HP */}
             <td className="unit-status-cell unit-status-cell--hp" style={{ textAlign: 'center', padding: '4px 8px', backgroundColor: '#222', fontSize: '12px' }}>
               {currentHP}/{unit.HP_MAX}
@@ -157,6 +152,11 @@ const UnitRow = memo<UnitRowProps>(({
             <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px', backgroundColor: '#222', fontSize: '12px' }}>
               {unit.OC || '-'}
             </td>
+          
+            {/* VALUE */}
+            <td className="unit-status-cell unit-status-cell--stat" style={{ textAlign: 'center', padding: '4px 8px', backgroundColor: '#222', fontSize: '12px' }}>
+              {unit.VALUE || '-'}
+            </td>
           </tr>
         </tbody>
       </table>
@@ -169,24 +169,23 @@ const UnitRow = memo<UnitRowProps>(({
             <table style={{ width: 'calc(100% - 16px)', borderCollapse: 'collapse', marginBottom: '4px', tableLayout: 'fixed' }}>
               <colgroup>
                 <col style={{ width: '200px' }} />
-                <col style={{ width: '60px' }} />
-                <col style={{ width: '50px' }} />
-                <col style={{ width: '50px' }} />
-                <col style={{ width: '50px' }} />
-                <col style={{ width: '50px' }} />
-                <col style={{ width: '60px' }} />
+                <col style={{ width: '48px' }} />
+                <col style={{ width: '48px' }} />
+                <col style={{ width: '48px' }} />
+                <col style={{ width: '48px' }} />
+                <col style={{ width: '48px' }} />
+                <col style={{ width: '48px' }} />
               </colgroup>
               <thead>
                 <tr 
                   className="unit-status-row unit-status-row--section-header"
                   style={{ 
-                    backgroundColor: 'rgba(100, 150, 200, 0.15)',
+                    backgroundColor: 'rgba(50, 150, 200, 0.2)',
                     fontWeight: 'bold',
                     fontSize: '0.9em'
                   }}
                 >
                   <th 
-                    colSpan={7} 
                     className="unit-status-cell" 
                     style={{ 
                       backgroundColor: 'rgba(50, 150, 200, 0.2)', 
@@ -230,23 +229,13 @@ const UnitRow = memo<UnitRowProps>(({
                     </button>
                     <span style={{ fontSize: '11px' }}>RANGE WEAPON(S)</span>
                   </th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(50, 150, 200, 0.2)' }}>Rng</th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(50, 150, 200, 0.2)' }}>A</th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(50, 150, 200, 0.2)' }}>BS</th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(50, 150, 200, 0.2)' }}>S</th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(50, 150, 200, 0.2)' }}>AP</th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(50, 150, 200, 0.2)' }}>DMG</th>
                 </tr>
-                {isRangedExpanded && (
-                  <tr 
-                    className="unit-status-row unit-status-row--sub-header"
-                    style={{ 
-                      backgroundColor: 'rgba(100, 150, 200, 0.08)'
-                    }}
-                  >
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px', width: 'auto' }}>Name</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>Rng</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>A</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>BS</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>S</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px', borderRight: '1px solid #333' }}>AP</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>DMG</th>
-                  </tr>
-                )}
               </thead>
               {isRangedExpanded && (
                 <tbody>
@@ -255,7 +244,7 @@ const UnitRow = memo<UnitRowProps>(({
                       key={`rng-${idx}`}
                       className="unit-status-row unit-status-row--weapon"
                       style={{ 
-                        backgroundColor: idx % 2 === 0 ? 'rgba(0, 0, 0, 0.1)' : 'transparent'
+                        backgroundColor: idx === 0 ? '#222' : '#2a2a2a'
                       }}
                     >
                       <td className="unit-status-cell" style={{ padding: '4px 8px', textAlign: 'right', fontSize: '12px' }}>
@@ -294,24 +283,23 @@ const UnitRow = memo<UnitRowProps>(({
             <table style={{ width: 'calc(100% - 16px)', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
               <colgroup>
                 <col style={{ width: '200px' }} />
-                <col style={{ width: '60px' }} />
-                <col style={{ width: '50px' }} />
-                <col style={{ width: '50px' }} />
-                <col style={{ width: '50px' }} />
-                <col style={{ width: '50px' }} />
-                <col style={{ width: '60px' }} />
+                <col style={{ width: '48px' }} />
+                <col style={{ width: '48px' }} />
+                <col style={{ width: '48px' }} />
+                <col style={{ width: '48px' }} />
+                <col style={{ width: '48px' }} />
+                <col style={{ width: '48px' }} />
               </colgroup>
               <thead>
                 <tr 
                   className="unit-status-row unit-status-row--section-header"
                   style={{ 
-                    backgroundColor: 'rgba(200, 100, 150, 0.15)',
+                    backgroundColor: 'rgba(200, 50, 50, 0.2)',
                     fontWeight: 'bold',
                     fontSize: '0.9em'
                   }}
                 >
                   <th 
-                    colSpan={7} 
                     className="unit-status-cell" 
                     style={{ 
                       backgroundColor: 'rgba(200, 50, 50, 0.2)', 
@@ -355,23 +343,13 @@ const UnitRow = memo<UnitRowProps>(({
                     </button>
                     <span style={{ fontSize: '11px' }}>MELEE WEAPON(S)</span>
                   </th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(200, 50, 50, 0.2)' }}>Rng</th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(200, 50, 50, 0.2)' }}>A</th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(200, 50, 50, 0.2)' }}>CC</th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(200, 50, 50, 0.2)' }}>S</th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(200, 50, 50, 0.2)' }}>AP</th>
+                  <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '11px', backgroundColor: 'rgba(200, 50, 50, 0.2)' }}>DMG</th>
                 </tr>
-                {isMeleeExpanded && (
-                  <tr 
-                    className="unit-status-row unit-status-row--sub-header"
-                    style={{ 
-                      backgroundColor: 'rgba(200, 100, 150, 0.08)'
-                    }}
-                  >
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px', width: 'auto' }}>Name</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>Rng</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>A</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>CC</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>S</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px', borderRight: '1px solid #333' }}>AP</th>
-                    <th className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', color: '#aee6ff', fontWeight: 'bold', fontSize: '14px' }}>DMG</th>
-                  </tr>
-                )}
               </thead>
               {isMeleeExpanded && (
                 <tbody>
@@ -380,7 +358,7 @@ const UnitRow = memo<UnitRowProps>(({
                       key={`cc-${idx}`}
                       className="unit-status-row unit-status-row--weapon"
                       style={{ 
-                        backgroundColor: idx % 2 === 0 ? 'rgba(0, 0, 0, 0.1)' : 'transparent'
+                        backgroundColor: idx === 0 ? '#222' : '#2a2a2a'
                       }}
                     >
                       <td className="unit-status-cell" style={{ padding: '4px 8px', textAlign: 'right', fontSize: '12px' }}>
@@ -584,26 +562,26 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
               <col style={{ width: '40px' }} />
               <col style={{ width: '40px' }} />
               <col style={{ width: 'auto' }} />
-              <col style={{ width: '60px' }} />
               <col style={{ width: '70px' }} />
-              <col style={{ width: '50px' }} />
-              <col style={{ width: '50px' }} />
-              <col style={{ width: '50px' }} />
-              <col style={{ width: '50px' }} />
-              <col style={{ width: '50px' }} />
+              <col style={{ width: '70px' }} />
+              <col style={{ width: '70px' }} />
+              <col style={{ width: '70px' }} />
+              <col style={{ width: '70px' }} />
+              <col style={{ width: '70px' }} />
+              <col style={{ width: '70px' }} />
             </colgroup>
             <thead>
               <tr className="unit-status-header">
                 <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }}></th>
                 <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', borderRight: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }}>ID</th>
                 <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }}>Name</th>
-                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }}>VAL</th>
                 <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }}>HP</th>
                 <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', borderRight: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }} title="Movement">M</th>
                 <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }} title="Toughness">T</th>
                 <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }} title="Save Value">SV</th>
                 <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }} title="Leadership">LD</th>
                 <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }} title="Objective Control">OC</th>
+                <th className="unit-status-header-cell" style={{ padding: '6px 8px', textAlign: 'center', backgroundColor: 'rgba(0, 0, 0, 0.05)', border: '1px solid rgba(0, 0, 0, 0.1)', fontSize: '14px' }} title="Unit Value">VAL</th>
               </tr>
             </thead>
           </table>

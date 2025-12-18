@@ -524,6 +524,9 @@ export const useEngineAPI = () => {
         T: unit.T,
         ARMOR_SAVE: unit.ARMOR_SAVE,
         INVUL_SAVE: unit.INVUL_SAVE,
+        LD: unit.LD,
+        OC: unit.OC,
+        VALUE: unit.VALUE,
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Map weapons arrays
         RNG_WEAPONS: unit.RNG_WEAPONS,
         CC_WEAPONS: unit.CC_WEAPONS,

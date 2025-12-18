@@ -42,6 +42,8 @@ interface ReplayAction {
   wound_target?: number;
   wound_result?: string;
   save_result?: string;
+  // Weapon info
+  weapon_name?: string;
   // Charge action fields
   charge_roll?: number;
   charge_success?: boolean;
@@ -173,6 +175,9 @@ export const BoardReplay: React.FC = () => {
           MOVE: UnitClass.MOVE || 0,
           T: UnitClass.T || 0,
           ARMOR_SAVE: UnitClass.ARMOR_SAVE || 0,
+          LD: UnitClass.LD || 0,
+          OC: UnitClass.OC || 0,
+          VALUE: UnitClass.VALUE || 0,
           // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract from weapons arrays
           RNG_WEAPONS: UnitClass.RNG_WEAPONS || [],
           CC_WEAPONS: UnitClass.CC_WEAPONS || [],

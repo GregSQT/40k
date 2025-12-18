@@ -147,10 +147,6 @@ class GameStateManager:
                 
                 try:
                     full_unit_data = unit_registry.get_unit_data(unit_type)
-                    # DEBUG: Print what unit_registry returns
-                    print(f"🔍 DEBUG: unit_type='{unit_type}'")
-                    print(f"🔍 DEBUG: VALUE={full_unit_data.get('VALUE')}, LD={full_unit_data.get('LD')}, OC={full_unit_data.get('OC')}")
-                    print(f"🔍 DEBUG: All keys: {list(full_unit_data.keys())}")
                 except Exception as e:
                     raise ValueError(f"Failed to get unit data for '{unit_type}': {e}")
                 

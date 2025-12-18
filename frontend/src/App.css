@@ -787,26 +787,13 @@ body {
   /* overflow and text-overflow removed - handled by column width rules */
 }
 
-.unit-status-cell--hp {
-  /* width removed to allow inline width styles to work */
-}
-
 .unit-status-cell--stat {
   /* width removed to allow inline width styles to work */
   font-family: 'Courier New', monospace;
   font-weight: var(--font-weight-medium);
 }
 
-/* Add thicker borders between column groups */
-.unit-status-header-cell:nth-child(6),
-.unit-status-cell:nth-child(6) {
-  border-right: 2px solid #666;
-}
-
-.unit-status-header-cell:nth-child(12),
-.unit-status-cell:nth-child(12) {
-  border-right: 2px solid #666;
-}
+/* Thicker borders between column groups removed after VAL column move */
 
 /* HP Bar styles */
 .unit-status-hp-container {
@@ -978,14 +965,6 @@ body {
   .unit-status-cell {
     padding: 3px 5px;
   }
-  
-  .unit-status-cell--stat {
-    /* width removed to allow inline width styles to work */
-  }
-  
-  .unit-status-cell--type {
-    /* width and min-width removed to allow inline width styles to work */
-  }
 }
 
 @media (max-width: 900px) {
@@ -1021,8 +1000,6 @@ body {
     flex-direction: column;
     padding: var(--spacing-sm);
   }
-  
-  
   
   .unit-status-tables {
     margin-left: 0;
