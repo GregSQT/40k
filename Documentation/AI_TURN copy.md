@@ -445,6 +445,17 @@ For each PLAYER unit
 │   │       └── End of shooting → end_activation (ACTION, 1, SHOOTING, SHOOTING)
 │   └── No more activable units → pass
 └── End of shooting phase → Advance to charge phase
+
+
+
+
+
+
+
+
+
+
+
 ```
 
 ### Target Restrictions Logic
