@@ -543,6 +543,8 @@ export const BoardWithAPI: React.FC = () => {
         onAdvanceMove={apiProps.onAdvanceMove}
         onCancelAdvance={apiProps.onCancelAdvance}
         getAdvanceDestinations={apiProps.getAdvanceDestinations}
+        advanceRoll={apiProps.advanceRoll}
+        advancingUnitId={apiProps.advancingUnitId}
       />
     </SharedLayout>
   );

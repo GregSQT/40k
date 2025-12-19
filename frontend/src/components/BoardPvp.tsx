@@ -125,6 +125,9 @@ type BoardProps = {
   // Charge roll display for replay mode
   chargeRoll?: number | null; // The charge roll value to display
   chargeSuccess?: boolean; // Whether the charge was successful
+  // Advance roll display
+  advanceRoll?: number | null;
+  advancingUnitId?: number | null;
   mode: Mode;
   movePreview: { unitId: number; destCol: number; destRow: number } | null;
   attackPreview: { unitId: number; col: number; row: number } | null;
@@ -190,6 +193,8 @@ export default function Board({
   fightTargetId,
   chargeRoll,
   chargeSuccess,
+  advanceRoll,
+  advancingUnitId,
   mode,
   movePreview,
   attackPreview,
@@ -1156,6 +1161,9 @@ export default function Board({
           // Pass charge roll info for replay mode
           chargeRoll,
           chargeSuccess,
+          // Advance roll display
+          advanceRoll,
+          advancingUnitId,
           // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action props
           canAdvance: (phase === 'shoot' && isEligibleForRendering && !unitsFled?.includes(unit.id)) ?? false,
           onAdvance: (unitId: number) => {

@@ -308,6 +308,20 @@ export const useEngineAPI = () => {
           let shouldAutoAdvance = false;
           let autoAdvanceUnitId: string | null = null;
           
+          // Handle advance execution with destination - display advance roll badge before cleanup
+          if (lastActionRef.current?.action === "advance" && 
+              data.result?.advance_range !== undefined &&
+              data.result?.activation_ended === true) {
+            // Advance was executed - show badge with the roll value
+            const unitId = parseInt(data.result.unitId || lastActionRef.current.unitId);
+            const advanceRollValue = data.result.advance_range; // Backend returns advance_range, use as advance_roll
+            console.log("🟠 ADVANCE EXECUTED: Displaying advance roll badge", { unitId, advanceRollValue });
+            setAdvanceRoll(advanceRollValue);
+            setAdvancingUnitId(unitId);
+            // Keep selected unit to show badge
+            setSelectedUnitId(unitId);
+          }
+          
           // Debug: always log when we have activate_unit in shoot phase
           if (lastActionRef.current?.action === "activate_unit" && lastActionRef.current?.phase === "shoot") {
             console.log("🟠 DEBUG: activate_unit in shoot phase detected:", {
@@ -374,11 +388,19 @@ export const useEngineAPI = () => {
           if (data.result?.reset_mode && !shouldAutoAdvance) {
             console.log("🧹 Backend requested mode reset");
             setMode("select");
+            // Clear advance state when mode resets
+            setAdvanceDestinations([]);
+            setAdvancingUnitId(null);
+            setAdvanceRoll(null);
           }
           
           if (data.result?.clear_selected_unit && !shouldAutoAdvance) {
             console.log("🧹 Backend requested selected unit clear");
             setSelectedUnitId(null);
+            // Clear advance state when selected unit is cleared
+            setAdvanceDestinations([]);
+            setAdvancingUnitId(null);
+            setAdvanceRoll(null);
           }
           
           if (data.result?.clear_attack_preview && !shouldAutoAdvance) {
@@ -926,11 +948,8 @@ export const useEngineAPI = () => {
       destRow: destRow
     });
 
-    // Reset advance state after move
-    setAdvanceDestinations([]);
-    setAdvancingUnitId(null);
-    setAdvanceRoll(null);
-    setMode("select");
+    // Don't reset advance state here - let backend cleanup signals handle it
+    // This allows the advance roll badge to be displayed before cleanup
   }, [executeAction]);
 
   const handleFightAttack = useCallback(async (attackerId: number | string, targetId: number | string | null) => {

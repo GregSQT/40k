@@ -190,6 +190,27 @@ export function useGameLog(currentTurn?: number) {
     });
   }, [addEvent, currentTurn]);
 
+  const logAdvanceAction = useCallback((
+    unit: Unit,
+    startCol: number,
+    startRow: number,
+    endCol: number,
+    endRow: number,
+    turnNumber: number,
+    player?: number
+  ) => {
+    addEvent({
+      type: 'advance',
+      message: `${unit.name} advanced from (${startCol}, ${startRow}) to (${endCol}, ${endRow})`,
+      unitId: unit.id,
+      turnNumber: currentTurn ?? turnNumber,
+      phase: 'shooting',
+      startHex: `(${startCol}, ${startRow})`,
+      endHex: `(${endCol}, ${endRow})`,
+      player: player ?? (unit as any).player
+    });
+  }, [addEvent, currentTurn]);
+
   const logCombatAction = useCallback((
     attacker: Unit,
     target: Unit,
@@ -252,6 +273,7 @@ export function useGameLog(currentTurn?: number) {
     logShootingAction,
     logChargeAction,
     logChargeCancellation,
+    logAdvanceAction,
     logCombatAction,
     logUnitDeath,
     clearLog,

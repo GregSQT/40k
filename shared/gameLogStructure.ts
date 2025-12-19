@@ -17,11 +17,12 @@
  * - phase_change: Game phase changed
  * - move_cancel: Movement was cancelled
  * - charge_cancel: Charge was cancelled
+ * - advance: Unit performed an advance move during shooting phase
  */
 import { formatMoveMessage, formatShootingMessage, formatCombatMessage, formatChargeMessage, formatDeathMessage, formatMoveCancelMessage, formatChargeCancelMessage, formatTurnStartMessage, formatPhaseChangeMessage } from './gameLogUtils';
 
 export interface BaseLogEntry {
-  type: 'move' | 'shoot' | 'combat' | 'charge' | 'charge_fail' | 'death' | 'turn_change' | 'phase_change' | 'move_cancel' | 'charge_cancel';
+  type: 'move' | 'shoot' | 'combat' | 'charge' | 'charge_fail' | 'death' | 'turn_change' | 'phase_change' | 'move_cancel' | 'charge_cancel' | 'advance';
   message: string;
   turnNumber?: number;
   phase?: string;
@@ -283,6 +284,7 @@ export function getEventIcon(type: string): string {
     case 'death': return '💀';
     case 'move_cancel': return '✕'; // X for cancellation
     case 'charge_cancel': return '✕'; // X for cancellation
+    case 'advance': return '⇒'; // Double arrow for advance
     case 'wait': return '⏸'; // Pause icon for wait
     default: return '•'; // Bullet point for unknown
   }
@@ -326,6 +328,7 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
     case 'death': return 'game-log-entry--death';
     case 'move_cancel': return 'game-log-entry--cancel';
     case 'charge_cancel': return 'game-log-entry--cancel';
+    case 'advance': return 'game-log-entry--advance';
     default: return 'game-log-entry--default';
   }
 }

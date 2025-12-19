@@ -1960,12 +1960,15 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     unit_id = unit["id"]
     orig_col, orig_row = unit["col"], unit["row"]
     
-    # Roll 1D6 for advance range (from config)
-    advance_dice_max = config.get("game_rules", {}).get("advance_distance_range", 6)
-    advance_range = random.randint(1, advance_dice_max)
-    
-    # Store advance range on unit for frontend display
-    unit["advance_range"] = advance_range
+    # Use existing advance_range if already rolled (to keep same roll for destination selection)
+    # Otherwise roll new 1D6 for advance range (from config)
+    if "advance_range" in unit and unit["advance_range"] is not None:
+        advance_range = unit["advance_range"]
+    else:
+        advance_dice_max = config.get("game_rules", {}).get("advance_distance_range", 6)
+        advance_range = random.randint(1, advance_dice_max)
+        # Store advance range on unit for frontend display
+        unit["advance_range"] = advance_range
     
     # Build valid destinations using BFS (same as movement phase)
     # Temporarily override unit MOVE attribute with advance_range
