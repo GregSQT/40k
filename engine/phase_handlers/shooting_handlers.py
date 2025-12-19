@@ -2023,7 +2023,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             game_state["action_logs"] = []
         game_state["action_logs"].append({
             "type": "advance",
-            "message": f"Unit {unit_id} ({orig_col}, {orig_row}) ADVANCED to ({dest_col}, {dest_row}) [range: {advance_range}]",
+            "message": f"Unit {unit_id} ({orig_col}, {orig_row}) ADVANCED to ({dest_col}, {dest_row}) (Roll: {advance_range})",
             "turn": game_state.get("turn", 1),
             "phase": "shoot",
             "unitId": unit_id,

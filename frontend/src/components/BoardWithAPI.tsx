@@ -12,6 +12,7 @@ import { GameLog } from './GameLog';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
 import { useGameLog } from '../hooks/useGameLog';
 import type { PlayerId } from '../types';
+import { SettingsMenu } from './SettingsMenu';
 
 export const BoardWithAPI: React.FC = () => {
   const apiProps = useEngineAPI();
@@ -36,6 +37,21 @@ export const BoardWithAPI: React.FC = () => {
   // Track UnitStatusTable collapse states
   const [player0Collapsed, setPlayer0Collapsed] = useState(false);
   const [player1Collapsed, setPlayer1Collapsed] = useState(false);
+  
+  // Settings menu state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const handleOpenSettings = () => setIsSettingsOpen(true);
+  
+  // Settings preferences (from localStorage)
+  const [showAdvanceWarning, setShowAdvanceWarning] = useState<boolean>(() => {
+    const saved = localStorage.getItem('showAdvanceWarning');
+    return saved ? JSON.parse(saved) : false; // Default: false (désactivé)
+  });
+  
+  const handleToggleAdvanceWarning = (value: boolean) => {
+    setShowAdvanceWarning(value);
+    localStorage.setItem('showAdvanceWarning', JSON.stringify(value));
+  };
   
   // Calculate available height for GameLog dynamically
   const [logAvailableHeight, setLogAvailableHeight] = useState(220);
@@ -481,6 +497,7 @@ export const BoardWithAPI: React.FC = () => {
       rightColumnContent={rightColumnContent}
       showHexCoordinates={showHexCoordinates}
       onToggleHexCoordinates={setShowHexCoordinates}
+      onOpenSettings={handleOpenSettings}
     >
       <BoardPvp
         units={apiProps.units}
@@ -549,7 +566,15 @@ export const BoardWithAPI: React.FC = () => {
         onConfirmAdvanceWarning={apiProps.onConfirmAdvanceWarning}
         onCancelAdvanceWarning={apiProps.onCancelAdvanceWarning}
         onSkipAdvanceWarning={apiProps.onSkipAdvanceWarning}
-      />
-    </SharedLayout>
-  );
-};
+        showAdvanceWarningPopup={showAdvanceWarning}
+        />
+        <SettingsMenu
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          showAdvanceWarning={showAdvanceWarning}
+          onToggleAdvanceWarning={handleToggleAdvanceWarning}
+        />
+      </SharedLayout>
+    );
+  };
+  

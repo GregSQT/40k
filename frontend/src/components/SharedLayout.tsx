@@ -9,14 +9,16 @@ interface SharedLayoutProps {
   className?: string;
   showHexCoordinates?: boolean;
   onToggleHexCoordinates?: (checked: boolean) => void;
+  onOpenSettings?: () => void;
 }
 
 interface NavigationProps {
   showHexCoordinates?: boolean;
   onToggleHexCoordinates?: (checked: boolean) => void;
+  onOpenSettings?: () => void;
 }
 
-const Navigation: React.FC<NavigationProps> = ({ showHexCoordinates, onToggleHexCoordinates }) => {
+const Navigation: React.FC<NavigationProps> = ({ showHexCoordinates, onToggleHexCoordinates, onOpenSettings }) => {
   const location = useLocation();
   
   const getButtonClass = (path: string) => {
@@ -58,7 +60,25 @@ const Navigation: React.FC<NavigationProps> = ({ showHexCoordinates, onToggleHex
             <div className={`hex-toggle-track ${showHexCoordinates ? 'hex-toggle-track--on' : 'hex-toggle-track--off'}`}>
               <div className={`hex-toggle-thumb ${showHexCoordinates ? 'hex-toggle-thumb--on' : 'hex-toggle-thumb--off'}`} />
             </div>
-          </label>
+            </label>
+          {onOpenSettings && (
+            <button
+              onClick={onOpenSettings}
+              className="settings-button"
+              title="Paramètres"
+              style={{
+                marginLeft: '12px',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '20px',
+                color: '#9ca3af',
+                padding: '4px',
+              }}
+            >
+              ⚙️
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -71,6 +91,7 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
   className,
   showHexCoordinates,
   onToggleHexCoordinates,
+  onOpenSettings,
 }) => {
   return (
     <div className={`game-controller ${className || ''}`} style={{ background: '#222', height: '100vh' }}>
@@ -83,9 +104,10 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
           </div>
 
           <div className="unit-status-tables" style={{ paddingTop: '0px', marginTop: '0px', gap: '4px' }}>
-            <Navigation 
+          <Navigation 
               showHexCoordinates={showHexCoordinates}
               onToggleHexCoordinates={onToggleHexCoordinates}
+              onOpenSettings={onOpenSettings}
             />
             {rightColumnContent}
           </div>

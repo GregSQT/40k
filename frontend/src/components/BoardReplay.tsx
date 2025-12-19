@@ -82,6 +82,10 @@ export const BoardReplay: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [showHexCoordinates, setShowHexCoordinates] = useState<boolean>(false);
+  
+  // Settings menu state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const handleOpenSettings = () => setIsSettingsOpen(true);
 
   const playbackInterval = useRef<number | null>(null);
 
@@ -1132,6 +1136,7 @@ export const BoardReplay: React.FC = () => {
       rightColumnContent={rightColumnContent}
       showHexCoordinates={showHexCoordinates}
       onToggleHexCoordinates={setShowHexCoordinates}
+      onOpenSettings={handleOpenSettings}
     >
       {centerContent}
     </SharedLayout>

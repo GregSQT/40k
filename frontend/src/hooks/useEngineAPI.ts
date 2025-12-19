@@ -386,7 +386,7 @@ export const useEngineAPI = () => {
             setTargetPreview(null);
           }
           
-          if (data.result?.reset_mode && !shouldAutoAdvance && !advanceWarningPopup) {
+          if (data.result?.reset_mode && !shouldAutoAdvance) {
             console.log("🧹 Backend requested mode reset");
             setMode("select");
             // Clear advance state when mode resets
@@ -395,7 +395,7 @@ export const useEngineAPI = () => {
             setAdvanceRoll(null);
           }
           
-          if (data.result?.clear_selected_unit && !shouldAutoAdvance && !advanceWarningPopup) {
+          if (data.result?.clear_selected_unit && !shouldAutoAdvance) {
             console.log("🧹 Backend requested selected unit clear");
             setSelectedUnitId(null);
             // Clear advance state when selected unit is cleared
@@ -904,11 +904,24 @@ export const useEngineAPI = () => {
     // Change mode immediately to prevent shooting preview from showing
     setMode("select");
     
-    // Show warning popup instead of executing directly
-    setAdvanceWarningPopup({
-      unitId: unitId,
-      timestamp: Date.now()
-    });
+    // Check if advance warning popup is enabled (from localStorage)
+    const showAdvanceWarningStr = localStorage.getItem('showAdvanceWarning');
+    const showAdvanceWarning = showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : false;
+    
+    if (showAdvanceWarning) {
+      // Show warning popup
+      setAdvanceWarningPopup({
+        unitId: unitId,
+        timestamp: Date.now()
+      });
+    } else {
+      // Auto-confirm: execute advance directly (bypass popup)
+      console.log("🟠 Advance warning disabled - auto-confirming");
+      await executeAction({
+        action: "advance",
+        unitId: unitId.toString()
+      });
+    }
     
     // Backend will return valid_destinations and advance_roll
     // State will be updated in executeAction response handler (will set mode to advancePreview)

@@ -176,6 +176,7 @@ type BoardProps = {
   onConfirmAdvanceWarning?: () => void;
   onCancelAdvanceWarning?: () => void;
   onSkipAdvanceWarning?: () => void;
+  showAdvanceWarningPopup?: boolean; // If false, skip advance warning popup
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // For replay mode: override available cells (green highlights)
   objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
@@ -245,6 +246,7 @@ export default function Board({
   onConfirmAdvanceWarning,
   onCancelAdvanceWarning,
   onSkipAdvanceWarning,
+  showAdvanceWarningPopup = false,
   wallHexesOverride,
   availableCellsOverride,
   objectivesOverride,
@@ -1260,7 +1262,7 @@ export default function Board({
       }
 
       // ✅ ADVANCE WARNING POPUP RENDERING
-      if (advanceWarningPopup && onConfirmAdvanceWarning && onCancelAdvanceWarning && onSkipAdvanceWarning) {
+      if (showAdvanceWarningPopup && advanceWarningPopup && onConfirmAdvanceWarning && onCancelAdvanceWarning && onSkipAdvanceWarning) {
         const popupContainer = new PIXI.Container();
         popupContainer.name = 'advance-warning-popup';
         popupContainer.zIndex = 10001; // Above charge roll popup
