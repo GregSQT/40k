@@ -15,6 +15,14 @@ _target_pool_cache = {}  # {(unit_id, col, row): [enemy_id, enemy_id, ...]}
 _cache_size_limit = 100  # Prevent memory leak in long episodes
 
 
+def _weapon_has_assault_rule(weapon: Dict[str, Any]) -> bool:
+    """Check if weapon has ASSAULT rule allowing shooting after advance."""
+    if not weapon:
+        return False
+    rules = weapon.get("rules", [])
+    return "ASSAULT" in rules
+
+
 def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     AI_Shooting_Phase.md EXACT: Initialize shooting phase and build activation pool
@@ -190,7 +198,9 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
 
 def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any], current_player: int) -> bool:
     """
-    EXACT COPY from w40k_engine_save.py _has_valid_shooting_targets logic
+    ADVANCE_IMPLEMENTATION: Updated to support Advance action.
+    Unit is eligible for shooting phase if it CAN_SHOOT OR CAN_ADVANCE.
+    CAN_ADVANCE = alive AND correct player AND not fled AND not in melee.
     """
     # unit.HP_CUR > 0?
     if unit["HP_CUR"] <= 0:
@@ -207,7 +217,7 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     if unit["id"] in game_state["units_fled"]:
         return False
     
-    # CRITICAL FIX: Add missing adjacency check - units in melee cannot shoot
+    # CRITICAL FIX: Add missing adjacency check - units in melee cannot shoot OR advance
     # This matches the frontend logic: hasAdjacentEnemyShoot check
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of CC_RNG
     from engine.utils.weapon_helpers import get_melee_range
@@ -218,25 +228,42 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
             distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
             if distance <= melee_range:
                 return False
-        
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has ranged weapons
+    
+    # ADVANCE_IMPLEMENTATION: At this point, unit CAN_ADVANCE (alive, correct player, not fled, not in melee)
+    # So we return True even if unit has no ranged weapons or no valid targets
+    # The actual action selection (shoot vs advance vs wait) happens later
+    
+    # Check CAN_SHOOT: has ranged weapons AND has valid targets
+    can_shoot = False
     from engine.utils.weapon_helpers import get_selected_ranged_weapon
     selected_weapon = get_selected_ranged_weapon(unit)
-    if not selected_weapon:
-        return False
+    if selected_weapon:
+        from shared.data_validation import require_key
+        rng_nb = require_key(selected_weapon, "NB")
+        if rng_nb > 0:
+            # Check for valid targets
+            for enemy in game_state["units"]:
+                if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+                    if _is_valid_shooting_target(game_state, unit, enemy):
+                        can_shoot = True
+                        break
     
-    from shared.data_validation import require_key
-    rng_nb = require_key(selected_weapon, "NB")
-    if rng_nb <= 0:
-        return False
+    # CAN_ADVANCE is always True if we passed the checks above (alive, correct player, not fled, not in melee)
+    can_advance = True
     
-    # Check for valid targets
-    for enemy in game_state["units"]:
-        if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            if _is_valid_shooting_target(game_state, unit, enemy):
-                return True
+    # ASSAULT RULE: If unit has advanced, can only shoot with Assault weapons
+    unit_id = unit["id"]
+    has_advanced = unit_id in game_state.get("units_advanced", set())
+    if has_advanced and can_shoot:
+        # Unit advanced - can only shoot if selected weapon has ASSAULT rule
+        can_shoot = _weapon_has_assault_rule(selected_weapon)
     
-    return False
+    # Store capability flags on unit for later use in action validation
+    unit["_can_shoot"] = can_shoot
+    unit["_can_advance"] = can_advance
+    
+    # Unit is eligible if CAN_SHOOT OR CAN_ADVANCE
+    return can_shoot or can_advance
 
 
 def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
@@ -890,10 +917,33 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if SHOOT_LEFT equals selected weapon NB
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
         selected_weapon = get_selected_ranged_weapon(unit)
+        
+        # CLEAN FLAG DETECTION: Use config parameter
+        unit_check = _get_unit_by_id(game_state, unit_id)
+        is_pve_ai = config.get("pve_mode", False) and unit_check and unit_check["player"] == 1
+        is_gym_training = config.get("gym_training_mode", False) and unit_check and unit_check["player"] == 1
+        
+        # For AI/gym: end activation as before
+        if is_pve_ai or is_gym_training:
+            if selected_weapon and unit["SHOOT_LEFT"] == selected_weapon["NB"]:
+                # No targets at activation
+                result = _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
+                return True, result
+            else:
+                # Shot last target available
+                result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+                return True, result
+        
+        # For human players: allow advance mode instead of ending activation
         if selected_weapon and unit["SHOOT_LEFT"] == selected_weapon["NB"]:
-            # No targets at activation
-            result = _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
-            return True, result
+            # No targets at activation - return signal to allow advance mode
+            return True, {
+                "waiting_for_player": True,
+                "unitId": unit_id,
+                "no_targets": True,
+                "allow_advance": True,
+                "context": "no_targets_advance_available"
+            }
         else:
             # Shot last target available
             result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
@@ -1052,6 +1102,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         
         # Execute shooting directly without UI loops
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
+    
+    elif action_type == "advance":
+        # ADVANCE_IMPLEMENTATION: Handle advance action during shooting phase
+        return _handle_advance_action(game_state, unit, action, config)
     
     elif action_type == "wait" or action_type == "skip":
         # Handle gym wait/skip actions - unit chooses not to shoot
@@ -1880,3 +1934,137 @@ def _check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any
                 return True
     
     return False
+
+
+# ============================================================================
+# ADVANCE_IMPLEMENTATION: Advance action handler
+# ============================================================================
+
+def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """
+    ADVANCE_IMPLEMENTATION: Handle advance action during shooting phase.
+    
+    Advance allows unit to move 1D6 hexes using movement pathfinding rules.
+    After advance: cannot shoot (unless Assault weapon), cannot charge.
+    Unit is only marked as "advanced" if it actually moved to a different hex.
+    """
+    import random
+    from engine.phase_handlers.movement_handlers import (
+        movement_build_valid_destinations_pool,
+        _get_hex_neighbors,
+        _is_traversable_hex,
+        _is_hex_adjacent_to_enemy,
+        _build_enemy_adjacent_hexes
+    )
+    
+    unit_id = unit["id"]
+    orig_col, orig_row = unit["col"], unit["row"]
+    
+    # Roll 1D6 for advance range (from config)
+    advance_dice_max = config.get("game_rules", {}).get("advance_distance_range", 6)
+    advance_range = random.randint(1, advance_dice_max)
+    
+    # Store advance range on unit for frontend display
+    unit["advance_range"] = advance_range
+    
+    # Build valid destinations using BFS (same as movement phase)
+    # Temporarily override unit MOVE attribute with advance_range
+    original_move = unit["MOVE"]
+    unit["MOVE"] = advance_range
+    
+    # Use movement pathfinding to get valid destinations
+    valid_destinations = movement_build_valid_destinations_pool(game_state, unit_id)
+    
+    # Restore original MOVE
+    unit["MOVE"] = original_move
+    
+    # Check if destination provided in action
+    dest_col = action.get("destCol")
+    dest_row = action.get("destRow")
+    
+    if dest_col is not None and dest_row is not None:
+        # Destination provided - validate and execute
+        if (dest_col, dest_row) not in valid_destinations:
+            return False, {"error": "invalid_advance_destination", "destination": (dest_col, dest_row)}
+        
+        # Execute advance movement
+        unit["col"] = dest_col
+        unit["row"] = dest_row
+        
+        # Mark as advanced ONLY if actually moved
+        actually_moved = (orig_col != dest_col) or (orig_row != dest_row)
+        if actually_moved:
+            if "units_advanced" not in game_state:
+                game_state["units_advanced"] = set()
+            game_state["units_advanced"].add(unit_id)
+        
+        # Clean up advance state
+        if "advance_range" in unit:
+            del unit["advance_range"]
+        
+        # End activation
+        result = _shooting_activation_end(game_state, unit, "ACTION", 1, "PASS", "SHOOTING")
+        result.update({
+            "action": "advance",
+            "unitId": unit_id,
+            "fromCol": orig_col,
+            "fromRow": orig_row,
+            "toCol": dest_col,
+            "toRow": dest_row,
+            "advance_range": advance_range,
+            "actually_moved": actually_moved
+        })
+        
+        # Log the advance action
+        if "action_logs" not in game_state:
+            game_state["action_logs"] = []
+        game_state["action_logs"].append({
+            "type": "advance",
+            "message": f"Unit {unit_id} ({orig_col}, {orig_row}) ADVANCED to ({dest_col}, {dest_row}) [range: {advance_range}]",
+            "turn": game_state.get("turn", 1),
+            "phase": "shoot",
+            "unitId": unit_id,
+            "player": unit["player"],
+            "fromCol": orig_col,
+            "fromRow": orig_row,
+            "toCol": dest_col,
+            "toRow": dest_row,
+            "advance_range": advance_range,
+            "actually_moved": actually_moved,
+            "timestamp": "server_time"
+        })
+        
+        return True, result
+    
+    else:
+        # No destination - return valid destinations for player/AI to choose
+        # For AI, auto-select best destination
+        is_gym_training = config.get("gym_training_mode", False)
+        is_pve_ai = config.get("pve_mode", False) and unit["player"] == 1
+        
+        if (is_gym_training or is_pve_ai) and valid_destinations:
+            # Auto-select: move toward nearest enemy (aggressive strategy)
+            enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+            
+            if enemies:
+                nearest_enemy = min(enemies, key=lambda e: _calculate_hex_distance(unit["col"], unit["row"], e["col"], e["row"]))
+                best_dest = min(valid_destinations, key=lambda d: _calculate_hex_distance(d[0], d[1], nearest_enemy["col"], nearest_enemy["row"]))
+            else:
+                best_dest = valid_destinations[0] if valid_destinations else (orig_col, orig_row)
+            
+            # Recursively call with destination
+            action["destCol"] = best_dest[0]
+            action["destRow"] = best_dest[1]
+            return _handle_advance_action(game_state, unit, action, config)
+        
+        # Human player - return destinations for UI
+        # ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Use advance_destinations and advance_roll names
+        # to match frontend expectations in useEngineAPI.ts (lines ~330-340)
+        return True, {
+            "waiting_for_player": True,
+            "action": "advance_select_destination",
+            "unitId": unit_id,
+            "advance_roll": advance_range,
+            "advance_destinations": [{"col": d[0], "row": d[1]} for d in valid_destinations],
+            "highlight_color": "orange"
+        }

@@ -6,11 +6,11 @@ import { useGameConfig } from '../hooks/useGameConfig';
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
 import { drawBoard } from './BoardDisplay';
-const setupBoardInteractions = (app: any, boardConfig: any, config: any) => {};
-const cleanupBoardInteractions = (app: any) => {};
+const setupBoardInteractions = (_app: any, _boardConfig: any, _config: any) => {};
+const cleanupBoardInteractions = (_app: any) => {};
 import { renderUnit } from './UnitRenderer';
-import { offsetToCube, cubeDistance, hasLineOfSight, getHexLine, isUnitInRange } from '../utils/gameHelpers';
-import { getMaxRangedRange, getSelectedRangedWeapon, getMeleeRange, getSelectedMeleeWeapon } from '../utils/weaponHelpers';
+import { offsetToCube, cubeDistance, hasLineOfSight, getHexLine } from '../utils/gameHelpers';
+import { getMaxRangedRange, getMeleeRange } from '../utils/weaponHelpers';
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
@@ -106,7 +106,7 @@ function calculateObjectiveControl(
   return { controlMap, updatedControllers };
 }
 
-type Mode = "select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview";
+type Mode = "select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview" | "advancePreview";
 
 type BoardProps = {
   units: Unit[];
@@ -164,6 +164,11 @@ type BoardProps = {
   gameState: GameState; // Add gameState prop
   chargeRollPopup?: { unitId: number; roll: number; tooLow: boolean; timestamp: number } | null;
   getChargeDestinations: (unitId: number) => { col: number; row: number }[];
+  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callback
+  onAdvance?: (unitId: number) => void;
+  onAdvanceMove?: (unitId: number | string, destCol: number, destRow: number) => void;
+  onCancelAdvance?: () => void;
+  getAdvanceDestinations?: (unitId: number) => { col: number; row: number }[];
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // For replay mode: override available cells (green highlights)
   objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
@@ -194,7 +199,7 @@ export default function Board({
   blinkState,
   onSelectUnit,
   onSkipUnit,
-  onStartTargetPreview,
+  onStartTargetPreview: _onStartTargetPreview,
   onStartMovePreview,
   onDirectMove,
   onStartAttackPreview,
@@ -217,12 +222,16 @@ export default function Board({
   onCancelCharge,
   onValidateCharge,
   onLogChargeRoll,
-  shootingPhaseState,
+  shootingPhaseState: _shootingPhaseState,
   targetPreview,
   onCancelTargetPreview,
   gameState,
   chargeRollPopup,
   getChargeDestinations,
+  onAdvance,
+  onAdvanceMove,
+  onCancelAdvance,
+  getAdvanceDestinations,
   wallHexesOverride,
   availableCellsOverride,
   objectivesOverride,
@@ -257,10 +266,13 @@ export default function Board({
     onCancelMove: () => void;
     onShoot: (shooterId: number, targetId: number) => void;
     onFightAttack?: (attackerId: number, targetId: number | null) => void;
+    onActivateFight?: (fighterId: number) => void;
     onCharge?: (chargerId: number, targetId: number) => void;
     onActivateCharge?: (chargerId: number) => void;
     onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
     onCancelCharge?: () => void;
+    onCancelAdvance?: () => void;
+    onAdvanceMove?: (unitId: number | string, destCol: number, destRow: number) => void;
     onValidateCharge?: (chargerId: number) => void;
     onLogChargeRoll?: (unit: Unit, roll: number) => void;
   }>({
@@ -276,6 +288,8 @@ export default function Board({
     onActivateCharge,
     onMoveCharger,
     onCancelCharge,
+    onCancelAdvance,
+    onAdvanceMove,
     onValidateCharge,
     onLogChargeRoll
   });
@@ -296,6 +310,8 @@ export default function Board({
     onActivateCharge,
     onMoveCharger,
     onCancelCharge,
+    onCancelAdvance,
+    onAdvanceMove,
     onValidateCharge,
     onLogChargeRoll
   };
@@ -364,12 +380,7 @@ export default function Board({
     };
 
     // ✅ ALL COLORS FROM CONFIG - NO FALLBACKS, RAISE ERRORS IF MISSING
-    const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight);
-    const ATTACK_COLOR = parseColor(boardConfig.colors.attack!);
-    const CHARGE_COLOR = parseColor(boardConfig.colors.charge!);
     const ELIGIBLE_COLOR = parseColor(boardConfig.colors.eligible!);
-    const OBJECTIVE_ZONE_COLOR = parseColor(boardConfig.colors.objective_zone!);
-    const WALL_COLOR = parseColor(boardConfig.colors.wall!);
 
     // Use wallHexesOverride if provided (from replay), otherwise use config wall_hexes
     const effectiveWallHexes: [number, number][] = wallHexesOverride
@@ -437,13 +448,11 @@ export default function Board({
     const ELIGIBLE_OUTLINE_ALPHA = displayConfig.eligible_outline_alpha!;
     const HP_BAR_WIDTH_RATIO = displayConfig.hp_bar_width_ratio!;
     const HP_BAR_HEIGHT = displayConfig.hp_bar_height!;
-    const HP_BAR_Y_OFFSET_RATIO = displayConfig.hp_bar_y_offset_ratio!;
     const UNIT_CIRCLE_RADIUS_RATIO = displayConfig.unit_circle_radius_ratio!;
     const UNIT_TEXT_SIZE = displayConfig.unit_text_size!;
     const SELECTED_BORDER_WIDTH = displayConfig.selected_border_width!;
     const CHARGE_TARGET_BORDER_WIDTH = displayConfig.charge_target_border_width!;
     const DEFAULT_BORDER_WIDTH = displayConfig.default_border_width!;
-    const CANVAS_BORDER = displayConfig.canvas_border!;
 
     const gridWidth = (BOARD_COLS - 1) * HEX_HORIZ_SPACING + HEX_WIDTH;
     const gridHeight = (BOARD_ROWS - 1) * HEX_VERT_SPACING + HEX_HEIGHT;
@@ -516,14 +525,26 @@ export default function Board({
       onCombatAttack: stableCallbacks.current.onFightAttack || (() => {}),
       onConfirmMove: stableCallbacks.current.onConfirmMove,
       onCancelCharge: stableCallbacks.current.onCancelCharge,
+      onCancelAdvance: stableCallbacks.current.onCancelAdvance,
       onActivateCharge: stableCallbacks.current.onActivateCharge,
       onActivateFight: stableCallbacks.current.onActivateFight,
       onMoveCharger: stableCallbacks.current.onMoveCharger,
+      onAdvanceMove: stableCallbacks.current.onAdvanceMove,
       onStartMovePreview: onStartMovePreview,
       onDirectMove: (unitId: number | string, col: number | string, row: number | string) => {
         onDirectMove(unitId, col, row);
       },
     });
+
+    // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Listen for advance button click
+    const advanceClickHandler = (e: Event) => {
+      const { unitId } = (e as CustomEvent<{ unitId: number }>).detail;
+      console.log("🟠 ADVANCE CLICK: unitId =", unitId);
+      if (onAdvance) {
+        onAdvance(unitId);
+      }
+    };
+    window.addEventListener('boardAdvanceClick', advanceClickHandler);
 
     // Right click cancels move/attack preview
     if (app.view && app.view.addEventListener) {
@@ -567,13 +588,12 @@ export default function Board({
       // Find all enemies within CC_RNG range
       fightTargets = units.filter(u =>
         u.player !== selectedUnit.player &&
-        parseInt(u.HP_CUR) > 0 &&
+        u.HP_CUR > 0 &&
         cubeDistance(c1, offsetToCube(u.col, u.row)) <= fightRange
       );
     }
 
     // ✅ SIMPLIFIED SHOOTING PREVIEW - No animations to prevent re-render loop
-    let shootingTarget: Unit | null = null;
     if (phase === "shoot" && mode === "attackPreview" && selectedUnit && attackPreview) {
       // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers (imported at top)
       
@@ -583,28 +603,13 @@ export default function Board({
       }
       
       // Simple target identification - no state changes here
-      const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
-      const enemiesInRange = units.filter(u =>
-        u.player !== selectedUnit.player &&
-        cubeDistance(c1, offsetToCube(u.col, u.row)) <= getMaxRangedRange(selectedUnit)
-      );
-      
-      // Use the first valid target or null
-      shootingTarget = enemiesInRange[0] || null;
+      // Target identification is handled elsewhere
     }
 
     // ✅ SIMPLIFIED FIGHT PREVIEW - No animations to prevent re-render loop
-    let fightTarget: Unit | null = null;
     if (phase === "fight" && selectedUnit) {
       // Simple target identification - no state changes here
-      const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
-      const enemiesInRange = units.filter(u =>
-        u.player !== selectedUnit.player &&
-        cubeDistance(c1, offsetToCube(u.col, u.row)) === 1
-      );
-      
-      // Use the first valid target or null
-      fightTarget = enemiesInRange[0] || null;
+      // Target identification is handled by fightTargets array above
     }
 
     // AI_TURN.md: Show charge destinations in both select and chargePreview modes
@@ -655,8 +660,6 @@ export default function Board({
 
         const centerCol = selectedUnit.col;
         const centerRow = selectedUnit.row;
-
-        const originCube = offsetToCube(centerCol, centerRow);
 
         // Use cube coordinate system for proper hex neighbors
         const cubeDirections = [
@@ -842,6 +845,7 @@ export default function Board({
           previewUnit &&
           attackFromCol !== null &&
           attackFromRow !== null &&
+          mode !== "advancePreview" &&
           (
             mode === "movePreview" ||
             mode === "attackPreview" ||
@@ -1027,6 +1031,9 @@ export default function Board({
         attackCells,
         coverCells,
         chargeCells,
+        advanceCells: (mode === "advancePreview" && selectedUnitId && getAdvanceDestinations) 
+          ? getAdvanceDestinations(selectedUnitId) 
+          : [],  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Populated when in advancePreview mode
         blockedTargets,
         coverTargets,
         phase,
@@ -1076,15 +1083,7 @@ export default function Board({
         
         // Debug only for key units - EXACT UnitRenderer.tsx logic check
         if (unit.id === 8 || unit.id === 9) {
-          let distance = 0;
-          if (selectedUnit) {
-            const cube1 = offsetToCube(selectedUnit.col, selectedUnit.row);
-            const cube2 = offsetToCube(unit.col, unit.row);
-            distance = cubeDistance(cube1, cube2);
-          }
-          const inRangeResult = selectedUnit && selectedUnit.RNG_WEAPONS && selectedUnit.RNG_WEAPONS.length > 0
-            ? isUnitInRange(selectedUnit, unit, getMaxRangedRange(selectedUnit))
-            : false;
+          // Debug code removed - variables were not used
         }
         // AI_TURN.md: Calculate queue-based eligibility during shooting phase
         const isEligibleForRendering = (() => {
@@ -1156,7 +1155,12 @@ export default function Board({
           fightTargetId,
           // Pass charge roll info for replay mode
           chargeRoll,
-          chargeSuccess
+          chargeSuccess,
+          // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action props
+          canAdvance: (phase === 'shoot' && isEligibleForRendering && !unitsFled?.includes(unit.id)) ?? false,
+          onAdvance: (unitId: number) => {
+            window.dispatchEvent(new CustomEvent('boardAdvanceClick', { detail: { unitId } }));
+          }
         });
       }
 

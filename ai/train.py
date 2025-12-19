@@ -1530,7 +1530,18 @@ def main():
             masked_env = ActionMasker(base_env, mask_fn)
             
             # Load model
-            model = MaskablePPO.load(model_path, env=masked_env)
+            try:
+                model = MaskablePPO.load(model_path, env=masked_env)
+            except ValueError as e:
+                error_msg = str(e)
+                if "Observation spaces do not match" in error_msg:
+                    print(f"❌ Model incompatible: {error_msg}")
+                    print(f"⚠️  The model was trained with a different observation space size.")
+                    print(f"💡 Solution: Re-train the model with --new-model flag:")
+                    print(f"   python ai/train.py --agent {args.agent} --training-config {args.training_config} --rewards-config {args.rewards_config} --scenario bot --new-model")
+                    return 1
+                else:
+                    raise
             
             # Run bot evaluation ONLY
             # Use test_episodes if provided, otherwise default to 50 per bot

@@ -169,6 +169,29 @@ class StepLogger:
                 base_msg += f" [R:{reward:+.1f}]"
 
             return base_msg
+
+        elif action_type == "advance" and details:
+            # ADVANCE_IMPLEMENTATION: Format advance action message
+            if "start_pos" in details and "end_pos" in details:
+                start_col, start_row = details["start_pos"]
+                end_col, end_row = details["end_pos"]
+                advance_range = details.get("advance_range", 0)
+                if advance_range is not None and advance_range > 0:
+                    base_msg = f"Unit {unit_id}{unit_coords} ADVANCED from ({start_col}, {start_row}) to ({end_col}, {end_row}) [Roll: {advance_range}]"
+                else:
+                    base_msg = f"Unit {unit_id}{unit_coords} ADVANCED from ({start_col}, {start_row}) to ({end_col}, {end_row})"
+            elif "col" in details and "row" in details:
+                # Fallback: use destination coordinates
+                base_msg = f"Unit {unit_id}{unit_coords} ADVANCED to ({details['col']}, {details['row']})"
+            else:
+                raise KeyError("Advance action missing required position data")
+
+            # Add reward if available
+            reward = details.get("reward")
+            if reward is not None:
+                base_msg += f" [R:{reward:+.1f}]"
+
+            return base_msg
                 
         elif action_type == "shoot":
             if "target_id" not in details:

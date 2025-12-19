@@ -23,7 +23,7 @@ class ActionDecoder:
     
     def get_action_mask(self, game_state: Dict[str, Any]) -> np.ndarray:
         """Return action mask with dynamic target slot masking - True = valid action."""
-        mask = np.zeros(12, dtype=bool)
+        mask = np.zeros(13, dtype=bool)  # ADVANCE_IMPLEMENTATION: 13 actions (0-12)
         current_phase = game_state["phase"]
         eligible_units = self._get_eligible_units_for_current_phase(game_state)
         
@@ -49,7 +49,7 @@ class ActionDecoder:
             mask[[0, 1, 2, 3]] = True
             mask[11] = True  # Wait always valid
         elif current_phase == "shoot":
-            # Shooting phase: actions 4-8 (target slots 0-4) + 11 (wait)
+            # Shooting phase: actions 4-8 (target slots 0-4) + 11 (wait) + 12 (advance)
             # CRITICAL FIX: Dynamically enable based on ACTUAL available targets
             active_unit = eligible_units[0] if eligible_units else None
             if active_unit:
@@ -64,6 +64,15 @@ class ActionDecoder:
                     # Enable shoot actions for available targets only (up to 5 slots)
                     for i in range(min(5, num_targets)):
                         mask[4 + i] = True
+                
+                # ADVANCE_IMPLEMENTATION: Enable advance action if unit can advance
+                # CAN_ADVANCE = alive AND not fled AND not adjacent to enemy (already checked in eligibility)
+                can_advance = active_unit.get("_can_advance", True)  # Default True if flag not set
+                if can_advance:
+                    # Check if unit has NOT already advanced this turn
+                    units_advanced = game_state.get("units_advanced", set())
+                    if active_unit["id"] not in units_advanced:
+                        mask[12] = True  # Advance action
             
             mask[11] = True  # Wait always valid (can choose not to shoot)
         elif current_phase == "charge":
@@ -83,7 +92,7 @@ class ActionDecoder:
         if phase == "move":
             return [0, 1, 2, 3, 11]  # Move directions + wait
         elif phase == "shoot":
-            return [4, 5, 6, 7, 8, 11]  # Target slots 0-4 + wait
+            return [4, 5, 6, 7, 8, 11, 12]  # Target slots 0-4 + wait + advance
         elif phase == "charge":
             return [9, 11]  # Charge + wait
         elif phase == "fight":
@@ -248,6 +257,14 @@ class ActionDecoder:
                     
             elif action_int == 11:  # WAIT - agent chooses not to shoot
                 return {"action": "wait", "unitId": selected_unit_id}
+            
+            elif action_int == 12:  # ADVANCE - agent chooses to advance instead of shoot
+                # ADVANCE_IMPLEMENTATION: Convert to advance action
+                # Handler will roll 1D6 and select destination
+                return {
+                    "action": "advance",
+                    "unitId": selected_unit_id
+                }
                 
         elif current_phase == "charge":
             if action_int == 9:  # Charge action - handler selects target internally

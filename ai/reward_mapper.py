@@ -227,6 +227,49 @@ class RewardMapper:
         
         raise ValueError("Target was not killed - no kill bonus applicable")
     
+    def get_advance_reward(self, unit, old_pos, new_pos, tactical_context):
+        """
+        ADVANCE_IMPLEMENTATION: Calculate advance rewards during shooting phase.
+        
+        Advance is a trade-off:
+        - Gives up shooting this turn (unless Assault weapon)
+        - But allows repositioning (closer to enemies, better cover, etc.)
+        
+        Returns:
+            tuple: (reward_value, action_name) where action_name is the reward config key
+        """
+        unit_rewards = self._get_unit_rewards(unit)
+        base_actions = unit_rewards.get("base_actions", {})
+        
+        # Base advance reward (should be defined in rewards_config.json)
+        # Default to move_close reward if advance not specifically defined
+        if "advance" in base_actions:
+            base_reward = base_actions["advance"]
+            action_name = "advance"
+        else:
+            # Fallback: advance is similar to aggressive movement but during shooting
+            base_reward = base_actions.get("move_close", 0.1)
+            action_name = "advance_fallback"
+        
+        total_reward = base_reward
+        
+        # Tactical bonuses for advance
+        tactical_bonuses = unit_rewards.get("tactical_bonuses", {})
+        
+        # Bonus: Advanced closer to enemies (aggressive positioning)
+        if tactical_context.get("moved_closer"):
+            total_reward += tactical_bonuses.get("advanced_closer", 0.1)
+        
+        # Bonus: Advanced to better cover position
+        if tactical_context.get("moved_to_cover"):
+            total_reward += tactical_bonuses.get("advanced_to_cover", 0.1)
+        
+        # Penalty: Advanced away from enemies (usually suboptimal)
+        if tactical_context.get("moved_away"):
+            total_reward -= 0.05  # Small penalty for retreating during shooting phase
+        
+        return (total_reward, action_name)
+    
     def get_movement_reward(self, unit, old_pos, new_pos, tactical_context):
         """Calculate movement rewards using existing rewards_config.json structure.
         

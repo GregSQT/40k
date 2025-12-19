@@ -308,8 +308,8 @@ class W40KEngine(gym.Env):
         
         # CRITICAL: Initialize Gym spaces BEFORE any other operations
         # Gym interface properties - dynamic action space based on phase
-        self.action_space = gym.spaces.Discrete(12)  # Expanded: 4 move + 5 shoot + charge + fight + wait
-        self._current_valid_actions = list(range(12))  # Will be masked dynamically
+        self.action_space = gym.spaces.Discrete(13)  # Expanded: 4 move + 5 shoot + charge + fight + wait + advance
+        self._current_valid_actions = list(range(13))  # Will be masked dynamically
         
         # Observation space: Asymmetric egocentric perception with R=25 radius
         # Size is now configurable via training_config.json observation_params.obs_size
@@ -661,7 +661,7 @@ class W40KEngine(gym.Env):
            
             # CHANGE 3: STRICT validation - only log if action_type in StepLogger whitelist
             # Prevents "Unknown action_type 'activate_unit'" errors
-            valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait"]
+            valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait", "advance"]
             if (action_type in valid_action_types and
                 unit_id and unit_id != "none" and unit_id != "SYSTEM"):
                
@@ -701,6 +701,21 @@ class W40KEngine(gym.Env):
                             "end_pos": end_pos,
                             "col": dest_col,  # Use semantic action destination
                             "row": dest_row   # Use semantic action destination
+                        })
+
+                    if action_type == "advance":
+                        # ADVANCE_IMPLEMENTATION: Handle advance action logging (similar to move)
+                        start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
+                        # Use result destination (from advance handler)
+                        dest_col = result.get("toCol", updated_unit["col"])
+                        dest_row = result.get("toRow", updated_unit["row"])
+                        end_pos = (dest_col, dest_row)
+                        action_details.update({
+                            "start_pos": start_pos,
+                            "end_pos": end_pos,
+                            "col": dest_col,
+                            "row": dest_row,
+                            "advance_range": result.get("advance_range")  # Include advance roll
                         })
 
                     if action_type == "shoot":

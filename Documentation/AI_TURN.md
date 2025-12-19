@@ -191,6 +191,7 @@ end_activation (Arg1, Arg2, Arg3, Arg4, Arg5)
 │	├── CASE Arg3 = MOVE → Mark as units_moved
 │	├── CASE Arg3 = FLED → Mark as units_moved AND Mark as units_fled
 │	├── CASE Arg3 = SHOOTING → Mark as units_shot
+│	├── CASE Arg3 = ADVANCE → Mark as units_advanced
 │	├── CASE Arg3 = CHARGE → Mark as units_charged
 │	└── CASE Arg3 = FIGHT → Mark as units_fought
 ├── Arg4 = ?
@@ -356,7 +357,9 @@ Decision factors: Unit value, importance of actions this turn, long term strateg
 
 ## 🎯 SHOOTING PHASE Decision Tree
 
-### SHOOTING PHASE Decision Tree
+### SHOOTING PHASE Decision Tree (with ADVANCE action)
+
+**⚠️ ADVANCE_IMPLEMENTATION_PLAN.md**: Shooting phase now supports ADVANCE action in addition to SHOOT.
 
 ```javascript
 For each PLAYER unit
@@ -369,10 +372,13 @@ For each PLAYER unit
 │   │   └── YES → ❌ Fled unit (Skip, no log)
 │   ├── Adjacent to enemy unit within melee range (1 hex)?
 │   │   └── YES → ❌ In fight (Skip, no log)
-│   ├── unit.RNG_WEAPONS.length > 0?
-│   │   └── NO → ❌ No ranged weapon (Skip, no log)
-│   ├── Has LOS to enemies within max_ranged_range (from RNG_WEAPONS)?
-│   │   └── NO → ❌ No valid targets (Skip, no log)
+│   │
+│   ├── CAPABILITY CHECK:
+│   │   ├── CAN_SHOOT = unit.RNG_WEAPONS.length > 0 AND has_LOS_to_enemies_within_range
+│   │   ├── CAN_ADVANCE = true (always available if passed above checks)
+│   │   └── (CAN_SHOOT OR CAN_ADVANCE)?
+│   │       └── NO → ❌ No valid actions (Skip, no log)
+│   │
 │   └── ALL conditions met → ✅ Add to shoot_activation_pool → Highlight the unit with a green circle around its icon
 │
 ├── STEP : UNIT_ACTIVABLE_CHECK → is shoot_activation_pool NOT empty ?
@@ -387,18 +393,21 @@ For each PLAYER unit
 │   │   │           ├── YES → SHOOTING PHASE ACTIONS AVAILABLE
 │   │   │           │   ├── Display the shooting preview (all the hexes with LoS and RNG_RNG are red)
 │   │   │           │   ├── Display the HP bar blinking animation for every unit in valid_target_pool
-│   │   │           │   ├── 🎯 VALID ACTIONS: [shoot, wait]
+│   │   │           │   ├── 🎯 VALID ACTIONS: [shoot, advance, wait]
 │   │   │           │   ├── ❌ INVALID ACTIONS: [move, charge, attack] → end_activation (ERROR, 0, PASS, SHOOTING)
+│   │   │           │   └── AGENT ACTION SELECTION → Choose advance?
+│   │   │           │       ├── YES → ✅ VALID → Execute advance action
+│   │   │           │       │   ├── Roll 1D6 → advance_range (from config: advance_distance_range)
+│   │   │           │       │   ├── Display advance_range on unit icon
+│   │   │           │       │   ├── Build valid_advance_destinations (BFS, advance_range, no walls, no enemy-adjacent)
+│   │   │           │       │   ├── Highlight destinations in ORANGE
+│   │   │           │       │   ├── Select destination hex
+│   │   │           │       │   ├── Unit actually moved to different hex?
+│   │   │           │       │   │   ├── YES → Mark units_advanced, end_activation(ACTION, 1, ADVANCED, SHOOTING)
+│   │   │           │       │   │   └── NO → end_activation without marking (unit didn't advance)
+│   │   │           │       │   └── POST-ADVANCE: Cannot shoot (unless weapon has "Assault" rule), Cannot charge
+│   │   │           │       │
 │   │   │           │   └── AGENT ACTION SELECTION → Choose shoot?
-│   │   │           │       ├── YES → ✅ VALID → Execute shoot
-│   │   │           │       ├── Agent choose a target in valid_target_pool
-│   │   │           │       │   ├── Execute attack_sequence(RNG)
-│   │   │           │       │   ├── SHOOT_LEFT -= 1
-│   │   │           │       │   ├── Concatenate Return to TOTAL_ACTION log
-│   │   │           │       │   ├── selected_target dies → Remove from valid_target_pool, continue
-│   │   │           │       │   ├── selected_target survives → Continue
-│   │   │           │       │   └── GO TO STEP : PLAYER_ACTION_SELECTION
-│   │   │           │       │   └── end_activation (ACTION, 1, SHOOTING, SHOOTING)
 │   │   │           │       └── NO → Agent chooses: wait?
 │   │   │           │           ├── YES → ✅ VALID → Execute wait action
 │   │   │           │           │   └── end_activation (WAIT, 1, PASS, SHOOTING)
@@ -417,6 +426,20 @@ For each PLAYER unit
 │   │       │       │   ├── STEP : PLAYER_ACTION_SELECTION
 │   │       │       │   ├── Display the shooting preview (all the hexes with LoS and RNG_RNG are red)
 │   │       │       │   └── Display the HP bar blinking animation for every unit in valid_target_pool
+│   │       │       │       ├── Click ADVANCE logo → ⚠️ POINT OF NO RETURN
+│   │       │       │       │   ├── Roll 1D6 → advance_range (from config: advance_distance_range)
+│   │       │       │       │   ├── Display advance_range on unit icon
+│   │       │       │       │   ├── Build valid_advance_destinations (BFS, advance_range, no walls, no enemy-adjacent)
+│   │       │       │       │   ├── Highlight destinations in ORANGE
+│   │       │       │       │   ├── Left click on valid advance hex → Move unit
+│   │       │       │       │   │   ├── Unit actually moved to different hex?
+│   │       │       │       │   │   │   ├── YES → Mark units_advanced, end_activation(ACTION, 1, ADVANCED, SHOOTING)
+│   │       │       │       │   │   │   └── NO → end_activation without marking (unit didn't advance)
+│   │       │       │       │   │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │       │       │       │   ├── Left click on unit / Right-click → Stay in place
+│   │       │       │       │   │   └── end_activation without marking (unit didn't advance)
+│   │       │       │       │   │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │       │       │       │   └── POST-ADVANCE: Cannot shoot (unless weapon has "Assault" rule), Cannot charge
 │   │       │       │       ├── Left click on a target in valid_target_pool
 │   │       │       │       │   ├── Execute attack_sequence(RNG)
 │   │       │       │       │   ├── SHOOT_LEFT -= 1
@@ -493,9 +516,49 @@ Result: Eliminate two threats in one action through dynamic targeting
 ```
 Marine (selected ranged weapon: NB = 2) faces one wounded Ork (HP_CUR 1) which is the only "Valid target"
 Shot 1: Target the Ork, kill it
+
 Shot 2: No more "Valid target" available, remaining shots are cancelled
 Result: Avoid a shooting unit to be stuck because it as no more "Valid target" while having remaining shots to perform
+
 ```
+
+### Advance Distance Logic
+
+**1D6 Roll System:**
+- **When rolled**: When advance action is selected (at activation start)
+- **Distance determination**: Roll determines maximum advance distance (1 to `advance_distance_range` from config)
+- **Variability purpose**: Adds uncertainty and tactical risk to advance decisions
+
+**Advance Distance Mechanics:**
+- **Pathfinding**: Uses same BFS pathfinding as movement phase
+- **Restrictions**: Cannot move through walls, cannot move to/through hexes adjacent to enemies
+- **Destination selection**: Player/AI selects valid destination hex within rolled range
+- **Marking rule**: Unit only marked as "advanced" if it actually moves to a different hex (staying in place doesn't count)
+
+**Why Random Distance:**
+- **Tactical uncertainty**: Cannot guarantee exact positioning after advance
+- **Risk/reward decisions**: Longer advances closer to enemy but cannot shoot (unless Assault weapon)
+- **Game balance**: Prevents guaranteed advance+shoot combinations
+
+**Post-Advance Restrictions:**
+- **Shooting**: ❌ Forbidden unless weapon has "Assault" rule
+- **Charging**: ❌ Forbidden (unit marked in `units_advanced` set)
+- **Fighting**: ✅ Allowed normally
+
+**Example:**
+```
+Marine 5 hexes from enemy, needs to get closer to shoot
+Roll 1D6 → Gets 4 (advance_distance_range = 6)
+Can advance up to 4 hexes toward enemy
+Decision: Advance to get within shooting range, but cannot shoot this turn (no Assault weapon)
+Trade-off: Better position next turn vs losing shooting opportunity this turn
+```
+
+**Irreversibility:**
+- Once advance logo clicked, unit cannot shoot (point of no return)
+- Exception: Weapons with "Assault" rule allow shooting after advance
+- Strategic importance: Must commit to advance before knowing exact distance
+
 ---
 
 ## ⚡ CHARGE PHASE 
@@ -511,6 +574,8 @@ For each unit
 │   │   └── NO → ❌ Wrong player (Skip, no log)
 │   ├── units_fled.includes(unit.id)?
 │   │   └── YES → ❌ Fled unit (Skip, no log)
+│   ├── units_advanced.includes(unit.id)?
+│   │   └── YES → ❌ Advanced unit cannot charge (Skip, no log)
 │   ├── Adjacent to enemy unit within CC_RNG?
 │   │   └── YES → ❌ Already in fight (Skip, no log)
 │   ├── Enemies exist within charge_max_distance hexes?
@@ -1608,6 +1673,12 @@ Result: Charging grants first strike, then fair alternation
 - **Purpose**: Track units that have charged
 - **Reset timing**: Start of movement phase
 - **Usage**: Fight priority determination
+
+**units_advanced** (Shooting Phase) - ⚠️ ADVANCE_IMPLEMENTATION_PLAN.md:
+- **Purpose**: Track units that advanced during shooting phase
+- **Reset timing**: Start of movement phase
+- **Usage**: Prevents charge eligibility (advanced units cannot charge)
+- **Note**: Only marked if unit actually moved (not if stayed in place)
 
 **units_fought** (Fight Phase):
 - **Purpose**: Track units that have attacked

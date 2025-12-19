@@ -14,12 +14,15 @@ export function setupBoardClickHandler(callbacks: {
   onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
   onConfirmMove(): void;
   onCancelCharge?(): void;
+  onCancelAdvance?(): void;
   onActivateCharge?(chargerId: UnitId): void;
   onActivateFight?(fighterId: UnitId): void;
   onValidateCharge?(chargerId: UnitId): void;
   onMoveCharger?(chargerId: UnitId, destCol: number, destRow: number): void;
   onStartMovePreview?(unitId: UnitId, col: number, row: number): void;
   onDirectMove?(unitId: UnitId, col: number, row: number): void;
+  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callbacks
+  onAdvanceMove?(unitId: UnitId, destCol: number, destRow: number): void;
 }) {
 
   // Remove existing unit click handler
@@ -43,6 +46,12 @@ export function setupBoardClickHandler(callbacks: {
 
     console.log(`🔥 BOARD CLICK HANDLER | Unit : ${unitId} | Phase : ${phase} | Mode : ${mode} | Selected : ${selectedUnitId} | Click : ${clickType} |`);
 
+    // Ignore unit clicks in advancePreview mode - hex clicks are handled by hex handler
+    if (mode === 'advancePreview') {
+      console.log("  ⏭️ Ignoring unit click in advancePreview mode - hex clicks handle advance movement");
+      return;
+    }
+
     // AI_TURN.md: Validate player context before processing clicks
     // Note: Actual player validation happens in useGameActions.selectUnit
     
@@ -63,8 +72,8 @@ export function setupBoardClickHandler(callbacks: {
       console.log("  ✅ SHOOTING SELECT LOGIC TRIGGERED");
       console.log("    - Calling onSelectUnit with unitId:", unitId);
       callbacks.onSelectUnit(unitId);
-      console.log("    - Calling onStartAttackPreview with unitId:", unitId);
-      callbacks.onStartAttackPreview(unitId);
+      // Don't call onStartAttackPreview here - wait for backend response
+      // Backend will return blinking_units (attackPreview) or allow_advance (advancePreview)
     } else if (phase === 'shoot' && mode === 'attackPreview' && selectedUnitId != null) {
       console.log("  ✅ SHOOTING ATTACK PREVIEW LOGIC");
       if (selectedUnitId !== unitId) {
@@ -137,6 +146,20 @@ export function setupBoardClickHandler(callbacks: {
   (window as any).cancelChargeHandler = cancelChargeHandler;
   
   window.addEventListener('boardCancelCharge', cancelChargeHandler);
+
+  // Remove existing advance cancel handler before adding new one
+  const existingCancelAdvanceHandler = (window as any).cancelAdvanceHandler;
+  if (existingCancelAdvanceHandler) {
+    window.removeEventListener('boardCancelAdvance', existingCancelAdvanceHandler);
+  }
+  
+  // Create new cancel advance handler and store reference
+  const cancelAdvanceHandler = () => {
+    callbacks.onCancelAdvance?.();
+  };
+  (window as any).cancelAdvanceHandler = cancelAdvanceHandler;
+  
+  window.addEventListener('boardCancelAdvance', cancelAdvanceHandler);
   
   const skipShootHandler = (e: Event) => {
     const { unitId } = (e as CustomEvent<{ unitId: number }>).detail;
@@ -166,16 +189,22 @@ export function setupBoardClickHandler(callbacks: {
     } else {
       console.error(`🟠 onMoveCharger callback is missing!`);
     }
-    } else if (mode === 'select' && selectedUnitId !== null && phase === 'move') {
-      // In Movement Phase, clicking green hex should directly move the unit      
-      if (callbacks.onDirectMove) {
-        callbacks.onDirectMove(selectedUnitId, col, row);
-      } else if (callbacks.onStartMovePreview) {
-        callbacks.onStartMovePreview(selectedUnitId, col, row);
-        callbacks.onConfirmMove();
-      }
-    } else if (mode === 'movePreview') {
+  } else if (mode === 'select' && selectedUnitId !== null && phase === 'move') {
+    // In Movement Phase, clicking green hex should directly move the unit      
+    if (callbacks.onDirectMove) {
+      callbacks.onDirectMove(selectedUnitId, col, row);
+    } else if (callbacks.onStartMovePreview) {
+      callbacks.onStartMovePreview(selectedUnitId, col, row);
       callbacks.onConfirmMove();
+    }
+  } else if (mode === 'advancePreview' && selectedUnitId !== null && phase === 'shoot') {
+    // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance mode - clicking orange hex moves the unit
+    console.log("  ✅ ADVANCE MOVE LOGIC → calling onAdvanceMove");
+    if (callbacks.onAdvanceMove) {
+      callbacks.onAdvanceMove(selectedUnitId, col, row);
+    }
+  } else if (mode === 'movePreview') {
+    callbacks.onConfirmMove();
     }
   };
   

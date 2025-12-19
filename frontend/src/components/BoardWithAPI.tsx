@@ -539,6 +539,10 @@ export const BoardWithAPI: React.FC = () => {
         onLogChargeRoll={apiProps.onLogChargeRoll}
         gameState={apiProps.gameState!}
         getChargeDestinations={apiProps.getChargeDestinations}
+        onAdvance={apiProps.onAdvance}
+        onAdvanceMove={apiProps.onAdvanceMove}
+        onCancelAdvance={apiProps.onCancelAdvance}
+        getAdvanceDestinations={apiProps.getAdvanceDestinations}
       />
     </SharedLayout>
   );

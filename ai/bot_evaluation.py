@@ -230,10 +230,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             avg_ai_opportunities = sum(s['ai_shoot_opportunities'] for s in stats_list) / len(stats_list)
             avg_ai_shoot_rate = sum(s['ai_shoot_rate'] for s in stats_list) / len(stats_list)
 
-            if show_progress:
-                print(f"\n   📊 {bot_name.capitalize()}Bot: {avg_shoot_rate:.1f}% shoot rate ({avg_opportunities:.1f} opportunities/game)")
-                print(f"   🤖 AI Agent:  {avg_ai_shoot_rate:.1f}% shoot rate ({avg_ai_opportunities:.1f} opportunities/game)")
-
     if show_progress:
         print("\r" + " " * 120)  # Clear the progress bar line
         print()  # New line after clearing

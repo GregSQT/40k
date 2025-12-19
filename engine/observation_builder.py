@@ -647,6 +647,8 @@ class ObservationBuilder:
         obs[5] = 1.0 if active_unit["id"] in game_state["units_moved"] else 0.0
         obs[6] = 1.0 if active_unit["id"] in game_state["units_shot"] else 0.0
         obs[7] = 1.0 if active_unit["id"] in game_state["units_attacked"] else 0.0
+        # ADVANCE_IMPLEMENTATION: Track if unit has advanced this turn
+        obs[8] = 1.0 if active_unit["id"] in game_state.get("units_advanced", set()) else 0.0
 
         # Count alive units for strategic awareness
         alive_friendlies = sum(1 for u in game_state["units"]
@@ -654,85 +656,85 @@ class ObservationBuilder:
         alive_enemies = sum(1 for u in game_state["units"]
                            if u["player"] != active_unit["player"] and u["HP_CUR"] > 0)
         max_nearby = self.max_nearby_units
-        obs[8] = alive_friendlies / max(1, max_nearby)
-        obs[9] = alive_enemies / max(1, max_nearby)
+        obs[9] = alive_friendlies / max(1, max_nearby)
+        obs[10] = alive_enemies / max(1, max_nearby)
 
         # Objective control status (5 floats for 5 objectives)
         # -1.0 = enemy controls, 0.0 = contested/empty, 1.0 = we control
-        self._encode_objective_control(obs, active_unit, game_state, base_idx=10)
+        self._encode_objective_control(obs, active_unit, game_state, base_idx=11)
 
         # === SECTION 2: Active Unit Capabilities (22 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md ===
-        obs[15] = active_unit.get("MOVE", 0) / 12.0
+        obs[16] = active_unit.get("MOVE", 0) / 12.0
 
         # RNG_WEAPONS[0] (3 floats: RNG, DMG, NB)
         rng_weapons = active_unit.get("RNG_WEAPONS", [])
         if len(rng_weapons) > 0:
-            obs[16] = rng_weapons[0].get("RNG", 0) / 24.0
-            obs[17] = rng_weapons[0].get("DMG", 0) / 5.0
-            obs[18] = rng_weapons[0].get("NB", 0) / 10.0
+            obs[17] = rng_weapons[0].get("RNG", 0) / 24.0
+            obs[18] = rng_weapons[0].get("DMG", 0) / 5.0
+            obs[19] = rng_weapons[0].get("NB", 0) / 10.0
         else:
-            obs[16] = obs[17] = obs[18] = 0.0
+            obs[17] = obs[18] = obs[19] = 0.0
 
         # RNG_WEAPONS[1] (3 floats)
         if len(rng_weapons) > 1:
-            obs[19] = rng_weapons[1].get("RNG", 0) / 24.0
-            obs[20] = rng_weapons[1].get("DMG", 0) / 5.0
-            obs[21] = rng_weapons[1].get("NB", 0) / 10.0
+            obs[20] = rng_weapons[1].get("RNG", 0) / 24.0
+            obs[21] = rng_weapons[1].get("DMG", 0) / 5.0
+            obs[22] = rng_weapons[1].get("NB", 0) / 10.0
         else:
-            obs[19] = obs[20] = obs[21] = 0.0
+            obs[20] = obs[21] = obs[22] = 0.0
 
         # RNG_WEAPONS[2] (3 floats)
         if len(rng_weapons) > 2:
-            obs[22] = rng_weapons[2].get("RNG", 0) / 24.0
-            obs[23] = rng_weapons[2].get("DMG", 0) / 5.0
-            obs[24] = rng_weapons[2].get("NB", 0) / 10.0
+            obs[23] = rng_weapons[2].get("RNG", 0) / 24.0
+            obs[24] = rng_weapons[2].get("DMG", 0) / 5.0
+            obs[25] = rng_weapons[2].get("NB", 0) / 10.0
         else:
-            obs[22] = obs[23] = obs[24] = 0.0
+            obs[23] = obs[24] = obs[25] = 0.0
 
         # CC_WEAPONS[0] (5 floats: NB, ATK, STR, AP, DMG)
         cc_weapons = active_unit.get("CC_WEAPONS", [])
         if len(cc_weapons) > 0:
-            obs[25] = cc_weapons[0].get("NB", 0) / 10.0
-            obs[26] = cc_weapons[0].get("ATK", 0) / 6.0
-            obs[27] = cc_weapons[0].get("STR", 0) / 10.0
-            obs[28] = cc_weapons[0].get("AP", 0) / 6.0
-            obs[29] = cc_weapons[0].get("DMG", 0) / 5.0
+            obs[26] = cc_weapons[0].get("NB", 0) / 10.0
+            obs[27] = cc_weapons[0].get("ATK", 0) / 6.0
+            obs[28] = cc_weapons[0].get("STR", 0) / 10.0
+            obs[29] = cc_weapons[0].get("AP", 0) / 6.0
+            obs[30] = cc_weapons[0].get("DMG", 0) / 5.0
         else:
-            obs[25] = obs[26] = obs[27] = obs[28] = obs[29] = 0.0
+            obs[26] = obs[27] = obs[28] = obs[29] = obs[30] = 0.0
 
         # CC_WEAPONS[1] (5 floats)
         if len(cc_weapons) > 1:
-            obs[30] = cc_weapons[1].get("NB", 0) / 10.0
-            obs[31] = cc_weapons[1].get("ATK", 0) / 6.0
-            obs[32] = cc_weapons[1].get("STR", 0) / 10.0
-            obs[33] = cc_weapons[1].get("AP", 0) / 6.0
-            obs[34] = cc_weapons[1].get("DMG", 0) / 5.0
+            obs[31] = cc_weapons[1].get("NB", 0) / 10.0
+            obs[32] = cc_weapons[1].get("ATK", 0) / 6.0
+            obs[33] = cc_weapons[1].get("STR", 0) / 10.0
+            obs[34] = cc_weapons[1].get("AP", 0) / 6.0
+            obs[35] = cc_weapons[1].get("DMG", 0) / 5.0
         else:
-            obs[30] = obs[31] = obs[32] = obs[33] = obs[34] = 0.0
+            obs[31] = obs[32] = obs[33] = obs[34] = obs[35] = 0.0
 
-        obs[35] = active_unit.get("T", 0) / 10.0
-        obs[36] = active_unit.get("ARMOR_SAVE", 0) / 6.0
+        obs[36] = active_unit.get("T", 0) / 10.0
+        obs[37] = active_unit.get("ARMOR_SAVE", 0) / 6.0
 
         # === SECTION 3: Directional Terrain Awareness (32 floats) ===
-        # Global Context: [0:15] = 15 floats
-        # Active Unit Capabilities: [15:37] = 22 floats
-        # base_idx = 15 + 22 = 37
-        self._encode_directional_terrain(obs, active_unit, game_state, base_idx=37)
+        # Global Context: [0:16] = 16 floats (ADVANCE_IMPLEMENTATION: +1 for has_advanced)
+        # Active Unit Capabilities: [16:38] = 22 floats
+        # base_idx = 16 + 22 = 38
+        self._encode_directional_terrain(obs, active_unit, game_state, base_idx=38)
 
         # === SECTION 4: Allied Units (72 floats) ===
-        # Directional Terrain: [37:69] = 32 floats
-        # base_idx = 37 + 32 = 69
-        self._encode_allied_units(obs, active_unit, game_state, base_idx=69)
+        # Directional Terrain: [38:70] = 32 floats
+        # base_idx = 38 + 32 = 70
+        self._encode_allied_units(obs, active_unit, game_state, base_idx=70)
 
         # === SECTION 5: Enemy Units (132 floats) ===
-        # Allied Units: [69:141] = 72 floats
-        # base_idx = 69 + 72 = 141
-        self._encode_enemy_units(obs, active_unit, game_state, base_idx=141)
+        # Allied Units: [70:142] = 72 floats
+        # base_idx = 70 + 72 = 142
+        self._encode_enemy_units(obs, active_unit, game_state, base_idx=142)
 
         # === SECTION 6: Valid Targets (40 floats) ===
-        # Enemy Units: [141:273] = 132 floats (6 × 22 features)
-        # base_idx = 141 + 132 = 273
-        self._encode_valid_targets(obs, active_unit, game_state, base_idx=273)
+        # Enemy Units: [142:274] = 132 floats (6 × 22 features)
+        # base_idx = 142 + 132 = 274
+        self._encode_valid_targets(obs, active_unit, game_state, base_idx=274)
         
         return obs
     

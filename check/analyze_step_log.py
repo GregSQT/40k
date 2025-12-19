@@ -349,6 +349,22 @@ def parse_log(filepath):
                         action_type = 'skip'
                         stats['shoot_vs_wait']['skip'] += 1
                         stats['shoot_vs_wait_by_player'][player]['skip'] += 1
+                    elif 'advanced' in action_desc.lower():
+                        action_type = 'advance'
+
+                        # Update unit position (same as move)
+                        move_match = re.search(r'Unit (\d+)\((\d+), (\d+)\)', action_desc)
+                        if move_match:
+                            move_unit_id = move_match.group(1)
+                            dest_col = int(move_match.group(2))
+                            dest_row = int(move_match.group(3))
+                            unit_positions[move_unit_id] = (dest_col, dest_row)
+
+                            # Check if unit moved into a wall
+                            if (dest_col, dest_row) in wall_hexes:
+                                stats['wall_collisions'][player] += 1
+                    elif 'charge' in action_desc.lower():
+                        action_type = 'charge'
                     elif 'moves' in action_desc.lower() or 'moved' in action_desc.lower():
                         action_type = 'move'
 
@@ -363,9 +379,7 @@ def parse_log(filepath):
                             # Check if unit moved into a wall
                             if (dest_col, dest_row) in wall_hexes:
                                 stats['wall_collisions'][player] += 1
-                    elif 'charge' in action_desc.lower():
-                        action_type = 'charge'
-                    elif 'fight' in action_desc.lower() or 'combat' in action_desc.lower():
+                    elif 'fought' in action_desc.lower() or 'attacked' in action_desc.lower():
                         action_type = 'fight'
                     else:
                         action_type = 'other'

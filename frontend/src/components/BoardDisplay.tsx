@@ -61,6 +61,7 @@ interface DrawBoardOptions {
   attackCells?: HighlightCell[];
   coverCells?: HighlightCell[];
   chargeCells?: HighlightCell[];
+  advanceCells?: HighlightCell[];  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Orange hexes
   blockedTargets?: Set<string>;
   coverTargets?: Set<string>;
   phase?: "move" | "shoot" | "charge" | "fight";
@@ -119,6 +120,7 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
       attackCells = [],
       coverCells = [],
       chargeCells = [],
+      advanceCells = [],  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4
       blockedTargets = new Set<string>(),
       coverTargets = new Set<string>(),
       phase = "move",
@@ -193,6 +195,9 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
           console.log(`🟠 CHARGE HEX DETECTED at (${col}, ${row})`);
         }
 
+        // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance destinations (orange)
+        const isAdvanceDestination = advanceCells.some(cell => cell.col === col && cell.row === row);
+
         // Check if this is a wall hex
         const isWallHex = wallHexSet.has(`${col},${row}`);
 
@@ -236,12 +241,15 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
         }
 
         // Create highlight hex (only if needed) - NO INTERACTIONS
-        if (isChargeable || isAttackable || isInCover || isAvailable) {
+        if (isAdvanceDestination || isChargeable || isAttackable || isInCover || isAvailable) {
           const highlightCell = new PIXI.Graphics();
 
           // Shooting phase: use unified vivid blue tones for attack preview
           if (phase === "shoot") {
-            if (isAttackable) {
+            if (isAdvanceDestination) {
+              // ADVANCE_IMPLEMENTATION_PLAN.md: Orange for advance destinations
+              highlightCell.beginFill(0xFF8C00, 0.5);
+            } else if (isAttackable) {
               // Vivid medium blue for clear line of sight (plus bleu, même luminosité)
               highlightCell.beginFill(0x4f8bff, 0.4);
             } else if (isInCover) {
@@ -270,8 +278,8 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
           highlightCell.drawPolygon(points);
           highlightCell.endFill();
 
-          // AI_TURN.md: Add click handlers for movement and charge hexes
-          if (isAvailable || isChargeable) {
+          // AI_TURN.md: Add click handlers for movement, charge, and advance hexes
+          if (isAvailable || isChargeable || isAdvanceDestination) {
             highlightCell.eventMode = 'static';
             highlightCell.cursor = 'pointer';
             highlightCell.on('pointerdown', (e: PIXI.FederatedPointerEvent) => {

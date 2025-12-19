@@ -26,6 +26,7 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["units_charged"] = set()
     game_state["units_fought"] = set()  # AI_TURN.md line 242: ❌ Remove Mark units_fought
     game_state["units_attacked"] = set()
+    game_state["units_advanced"] = set()  # ADVANCE_IMPLEMENTATION: Track units that advanced during shooting phase
 
     # Clear movement preview state
     game_state["valid_move_destinations_pool"] = []

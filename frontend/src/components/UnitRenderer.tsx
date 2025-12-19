@@ -1,7 +1,7 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview, FightSubPhase, PlayerId } from "../types/game";
-import { areUnitsAdjacent, offsetToCube, cubeDistance } from '../utils/gameHelpers';
+import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
 import { getSelectedRangedWeapon, getSelectedMeleeWeapon, getMeleeRange } from '../utils/weaponHelpers';
 
 interface UnitRendererProps {
@@ -70,6 +70,10 @@ interface UnitRendererProps {
   chargeTargets: Unit[];
   fightTargets: Unit[];
   targetPreview?: TargetPreview | null;
+  
+  // Advance action (Phase 4 - ADVANCE_IMPLEMENTATION_PLAN.md)
+  canAdvance?: boolean;
+  onAdvance?: (unitId: number) => void;
   
   // Callbacks
   onConfirmMove?: () => void;
@@ -154,6 +158,7 @@ export class UnitRenderer {
     this.renderGreenActivationCircle(isEligible, unitIconScale);
     this.renderHPBar(unitIconScale);
     this.renderShootingCounter(unitIconScale);
+    this.renderAdvanceButton(unitIconScale, iconZIndex);
     this.renderTargetIndicator(iconZIndex); // Shows 🎯 for all targets (shoot, charge, fight)
     this.renderShootingIndicator(iconZIndex);
     this.renderMovementIndicator(iconZIndex);
@@ -164,7 +169,7 @@ export class UnitRenderer {
   }
   
   private calculateEligibilityCompliant(): boolean {
-    const { unit, phase, currentPlayer, unitsMoved, unitsCharged, unitsAttacked, unitsFled } = this.props;
+    const { unit, phase, currentPlayer, unitsMoved, unitsFled } = this.props;
 
     // AI_TURN.md: Basic eligibility checks
     // Allow just-killed units to be rendered as grey ghosts
@@ -289,6 +294,15 @@ export class UnitRenderer {
           window.dispatchEvent(new CustomEvent('boardCancelCharge'));
         }
       });
+    } else if (phase === "shoot" && selectedUnitId === unit.id && this.props.mode === "advancePreview") {
+      // Cancel advance on click (left or right) of active unit in advancePreview mode
+      unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+        if (e.button === 0 || e.button === 2) { // Left or right click
+          e.preventDefault();
+          e.stopPropagation();
+          window.dispatchEvent(new CustomEvent('boardCancelAdvance'));
+        }
+      });
     } else {
       // AI_TURN.md: Block enemy unit clicks when no friendly unit is selected
       let addClickHandler = true;
@@ -381,7 +395,7 @@ export class UnitRenderer {
   
   private renderUnitIcon(iconZIndex: number): void {
     const { unit, centerX, centerY, app, isPreview, previewType, HEX_RADIUS,
-             ICON_SCALE, phase, currentPlayer, units, onConfirmMove, selectedUnitId } = this.props;
+             ICON_SCALE, phase, currentPlayer, onConfirmMove, selectedUnitId } = this.props;
     
     const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
     
@@ -514,7 +528,7 @@ export class UnitRenderer {
     
     // NEW: Add red circle around green circle for charged units in fight phase
     const { unit, phase, fightSubPhase } = this.props;
-    if (phase === "fight" && fightSubPhase === "charged_units" && unit.hasChargedThisTurn && isEligible) {
+    if (phase === "fight" && fightSubPhase === "charging" && unit.hasChargedThisTurn && isEligible) {
       const chargedOutline = new PIXI.Graphics();
       const outerCircleRadius = circleRadius + ELIGIBLE_OUTLINE_WIDTH + 2; // Slightly larger than green circle
       chargedOutline.lineStyle(ELIGIBLE_OUTLINE_WIDTH, 0xff0000, ELIGIBLE_OUTLINE_ALPHA); // Red color
@@ -625,19 +639,15 @@ export class UnitRenderer {
     console.log(`🎯 renderTargetIndicator: Added iconText to ${uiElementsContainer ? 'UI container' : 'stage'} for unit ${unitIdNum} zIndex: ${iconText.zIndex} position: ${positionX} ${positionY} visible: ${iconText.visible} alpha: ${iconText.alpha} fontSize: ${iconText.style.fontSize}`);
   }
 
-  private renderExplosionIcon(iconZIndex: number): void {
-    // DEPRECATED: Replaced by renderTargetIndicator
-    // Keep for backward compatibility but redirect to target indicator
-    this.renderTargetIndicator(iconZIndex);
-  }
+  // DEPRECATED: renderExplosionIcon removed - use renderTargetIndicator directly
 
   private renderActionIconInSquare(
     iconZIndex: number,
-    iconPath: string, // Path to icon image file
-    bgColorVar: string, // CSS variable name for background color
-    borderColorVar: string, // CSS variable name for border color
-    iconSizeVar: string, // CSS variable name for icon size
-    squareSizeVar: string, // CSS variable name for square size ratio
+    iconPath: string,
+    bgColorVar: string,
+    _borderColorVar: string, // unused - kept for API consistency
+    iconSizeVar: string,
+    squareSizeVar: string,
     positionX: number,
     positionY: number
   ): void {
@@ -726,12 +736,11 @@ export class UnitRenderer {
   }
 
   private renderShootingIndicator(iconZIndex: number): void {
-    const { unit, shootingUnitId, centerX, centerY, app, HEX_RADIUS } = this.props;
+    const { unit, shootingUnitId, centerX, centerY, HEX_RADIUS } = this.props;
 
     // Only show shooting indicator on the unit that is shooting
     if (!shootingUnitId || unit.id !== shootingUnitId) return;
 
-    const iconSize = this.getCSSNumber('--icon-shoot-size', 1.2);
     const offset = HEX_RADIUS * 0.6;
     const positionX = centerX - offset;
     const positionY = centerY + offset;
@@ -750,12 +759,11 @@ export class UnitRenderer {
   }
 
   private renderMovementIndicator(iconZIndex: number): void {
-    const { unit, movingUnitId, centerX, centerY, app, HEX_RADIUS } = this.props;
+    const { unit, movingUnitId, centerX, centerY, HEX_RADIUS } = this.props;
 
     // Only show movement indicator on the unit that is moving
     if (!movingUnitId || unit.id !== movingUnitId) return;
 
-    const iconSize = this.getCSSNumber('--icon-move-size', 1.0);
     const offset = HEX_RADIUS * 0.6;
     const positionX = centerX - offset;
     const positionY = centerY + offset;
@@ -773,12 +781,11 @@ export class UnitRenderer {
   }
 
   private renderChargeIndicator(iconZIndex: number): void {
-    const { unit, chargingUnitId, centerX, centerY, app, HEX_RADIUS } = this.props;
+    const { unit, chargingUnitId, centerX, centerY, HEX_RADIUS } = this.props;
 
     // Only show charge indicator on the unit that is charging
     if (!chargingUnitId || unit.id !== chargingUnitId) return;
 
-    const iconSize = this.getCSSNumber('--icon-charge-size', 1.2);
     const offset = HEX_RADIUS * 0.6;
     const positionX = centerX - offset;
     const positionY = centerY + offset;
@@ -800,12 +807,11 @@ export class UnitRenderer {
   // Charge targets now show 🎯 icon via renderTargetIndicator
 
   private renderFightIndicator(iconZIndex: number): void {
-    const { unit, fightingUnitId, centerX, centerY, app, HEX_RADIUS } = this.props;
+    const { unit, fightingUnitId, centerX, centerY, HEX_RADIUS } = this.props;
 
     // Only show fight indicator on the unit that is fighting
     if (!fightingUnitId || unit.id !== fightingUnitId) return;
 
-    const iconSize = this.getCSSNumber('--icon-fight-size', 1.2);
     const offset = HEX_RADIUS * 0.6;
     const positionX = centerX - offset;
     const positionY = centerY + offset;
@@ -1016,8 +1022,9 @@ export class UnitRenderer {
         const activeAttacker = this.props.units.find(u => u.id === activeAttackerId);
 
         if (activeAttacker && this.props.phase === "shoot") {
-          const hitProb = Math.max(0, (7 - (activeAttacker.RNG_ATK || 4)) / 6);
-          const strength = activeAttacker.RNG_STR || 4;
+          const rngWeapon = getSelectedRangedWeapon(activeAttacker);
+          const hitProb = Math.max(0, (7 - (rngWeapon?.ATK || 4)) / 6);
+          const strength = rngWeapon?.STR || 4;
           const toughness = unit.T || 4;
           let woundTarget = 4;
           if (strength >= toughness * 2) woundTarget = 2;
@@ -1026,13 +1033,14 @@ export class UnitRenderer {
           else if (strength < toughness) woundTarget = 5;
           else woundTarget = 6;
           const woundProb = Math.max(0, (7 - woundTarget) / 6);
-          const saveTarget = Math.max(2, Math.min((unit.ARMOR_SAVE || 5) - (activeAttacker.RNG_AP || 0), unit.INVUL_SAVE || 7));
+          const saveTarget = Math.max(2, Math.min((unit.ARMOR_SAVE || 5) - (rngWeapon?.AP || 0), unit.INVUL_SAVE || 7));
           const saveFailProb = Math.max(0, (saveTarget - 1) / 6);
           displayProbability = hitProb * woundProb * saveFailProb;
         } else if (activeAttacker && this.props.phase === "fight") {
           // AI_TURN.md: Fight phase uses CC_ stats instead of RNG_ stats
-          const hitProb = Math.max(0, (7 - (activeAttacker.CC_ATK || 4)) / 6);
-          const strength = activeAttacker.CC_STR || 4;
+          const ccWeapon = getSelectedMeleeWeapon(activeAttacker);
+          const hitProb = Math.max(0, (7 - (ccWeapon?.ATK || 4)) / 6);
+          const strength = ccWeapon?.STR || 4;
           const toughness = unit.T || 4;
           let woundTarget = 4;
           if (strength >= toughness * 2) woundTarget = 2;
@@ -1041,7 +1049,7 @@ export class UnitRenderer {
           else if (strength < toughness) woundTarget = 5;
           else woundTarget = 6;
           const woundProb = Math.max(0, (7 - woundTarget) / 6);
-          const saveTarget = Math.max(2, Math.min((unit.ARMOR_SAVE || 5) - (activeAttacker.CC_AP || 0), unit.INVUL_SAVE || 7));
+          const saveTarget = Math.max(2, Math.min((unit.ARMOR_SAVE || 5) - (ccWeapon?.AP || 0), unit.INVUL_SAVE || 7));
           const saveFailProb = Math.max(0, (saveTarget - 1) / 6);
           displayProbability = hitProb * woundProb * saveFailProb;
         }
@@ -1105,6 +1113,51 @@ export class UnitRenderer {
     app.stage.addChild(shootText);
   }
   
+  private renderAdvanceButton(unitIconScale: number, iconZIndex: number): void {
+    const { unit, phase, currentPlayer, app, centerX, centerY, HEX_RADIUS, 
+            canAdvance, onAdvance, isEligible } = this.props;
+    
+    // Show only during shoot phase for eligible units of current player
+    if (phase !== 'shoot') return;
+    if (unit.player !== currentPlayer) return;
+    if (!isEligible) return;
+    if (canAdvance === false) return;
+    
+    // Position: above HP bar (same calculation as renderHPBar)
+    const scaledYOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
+    const HP_BAR_HEIGHT = this.props.HP_BAR_HEIGHT;
+    const barY = centerY - scaledYOffset - HP_BAR_HEIGHT;
+    const squareSizeRatio = this.getCSSNumber('--icon-square-standard-size', 0.5);
+    const squareSize = HEX_RADIUS * squareSizeRatio;
+    const positionX = centerX;
+    const positionY = barY - squareSize / 2 - 5; // 5px spacing above HP bar
+    
+    // Get values from CSS variables for icon size
+    const iconSize = this.getCSSNumber('--icon-advance-size', 1.5);
+    const iconScale = this.getCSSNumber('--icon-square-icon-scale', 0.7);
+    
+    // Load and create icon sprite (same pattern as renderActionIconInSquare, but without background square)
+    const texture = PIXI.Texture.from('/icons/Action_Logo/3-5 - Advance.png');
+    const iconSprite = new PIXI.Sprite(texture);
+    iconSprite.anchor.set(0.5);
+    iconSprite.position.set(positionX, positionY);
+    const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
+    iconSprite.width = iconDisplaySize;
+    iconSprite.height = iconDisplaySize;
+    iconSprite.zIndex = iconZIndex + 1001;
+    iconSprite.eventMode = 'static';
+    iconSprite.cursor = 'pointer';
+    
+    iconSprite.on('pointerdown', (e: PIXI.FederatedPointerEvent) => {
+      if (e.button === 0 && onAdvance) {
+        e.stopPropagation();
+        onAdvance(typeof unit.id === 'number' ? unit.id : parseInt(unit.id as string));
+      }
+    });
+    
+    app.stage.addChild(iconSprite);
+  }
+
   private renderAttackCounter(unitIconScale: number): void {
     const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled, units, mode, selectedUnitId, fightSubPhase, isEligible } = this.props;
 

@@ -101,10 +101,14 @@ export const useEngineAPI = () => {
   const [error, setError] = useState<string | null>(null);
   const [maxTurnsFromConfig, setMaxTurnsFromConfig] = useState<number>(8);
   const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
-  const [mode, setMode] = useState<"select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview">("select");
+  const [mode, setMode] = useState<"select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview" | "advancePreview">("select");
   const [movePreview, setMovePreview] = useState<{ unitId: number; destCol: number; destRow: number } | null>(null);
   const [attackPreview, setAttackPreview] = useState<{ unitId: number; col: number; row: number } | null>(null);
   const [chargeDestinations, setChargeDestinations] = useState<Array<{ col: number; row: number }>>([]);
+  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Advance state management
+  const [advanceDestinations, setAdvanceDestinations] = useState<Array<{ col: number; row: number }>>([]);
+  const [advancingUnitId, setAdvancingUnitId] = useState<number | null>(null);
+  const [advanceRoll, setAdvanceRoll] = useState<number | null>(null);
   const [targetPreview, setTargetPreview] = useState<{
   shooterId: number;
   targetId: number;
@@ -127,6 +131,9 @@ export const useEngineAPI = () => {
   const [failedChargeRoll, setFailedChargeRoll] = useState<{unitId: number, roll: number, targetId?: number} | null>(null);
   // State for successful charge target display
   const [successfulChargeTarget, setSuccessfulChargeTarget] = useState<{unitId: number, targetId: number} | null>(null);
+  
+  // Track last action to detect activate_unit in shoot phase
+  const lastActionRef = useRef<{action: string, phase: string, unitId?: string} | null>(null);
   
   // Load config values
   useEffect(() => {
@@ -187,6 +194,13 @@ export const useEngineAPI = () => {
       return;
     }
     
+    // Track last action for auto-advance detection
+    lastActionRef.current = {
+      action: action.action,
+      phase: gameState.phase,
+      unitId: action.unitId
+    };
+    
     try {
       const requestId = Date.now();
       const requestBody = JSON.stringify({...action, requestId});
@@ -201,6 +215,20 @@ export const useEngineAPI = () => {
       }
       
       const data = await response.json();
+
+      // Debug: log advance action responses
+      if (action.action === "advance" || data.result?.advance_destinations) {
+        console.log("🟠 ADVANCE ACTION RESPONSE:", {
+          action: action.action,
+          unitId: action.unitId,
+          result: data.result,
+          hasAdvanceDestinations: !!data.result?.advance_destinations,
+          advanceRoll: data.result?.advance_roll,
+          phase: data.game_state?.phase,
+          fullResult: JSON.stringify(data.result, null, 2),
+          error: data.result?.error
+        });
+      }
 
       // ONLY LOG FIGHT PHASE FOR DEBUGGING
       if (data.game_state?.phase === "fight") {
@@ -275,7 +303,55 @@ export const useEngineAPI = () => {
             }
           }
           
-          // Process backend cleanup signals FIRST
+          // ADVANCE_IMPLEMENTATION_PLAN.md: Check for auto-advance BEFORE processing cleanup signals
+          // This ensures we can trigger advance even if backend sends cleanup signals
+          let shouldAutoAdvance = false;
+          let autoAdvanceUnitId: string | null = null;
+          
+          // Debug: always log when we have activate_unit in shoot phase
+          if (lastActionRef.current?.action === "activate_unit" && lastActionRef.current?.phase === "shoot") {
+            console.log("🟠 DEBUG: activate_unit in shoot phase detected:", {
+              lastAction: lastActionRef.current,
+              resultUnitId: data.result?.unitId,
+              lastActionUnitId: lastActionRef.current?.unitId,
+              unitIdMatch: data.result?.unitId === lastActionRef.current?.unitId,
+              hasBlinkingUnits: !!data.result?.blinking_units,
+              hasAdvanceDestinations: !!data.result?.advance_destinations,
+              currentPhase: data.game_state?.phase,
+              fullResult: data.result
+            });
+          }
+          
+          // Check if we just activated a unit in shoot phase (use lastActionRef phase, not current phase which may have changed)
+          // Backend returns allow_advance: true when unit has no valid targets
+          if (lastActionRef.current?.action === "activate_unit" &&
+            lastActionRef.current?.phase === "shoot" &&
+            data.result?.unitId && 
+            data.result?.unitId === lastActionRef.current?.unitId &&
+            data.result?.allow_advance === true) {
+          shouldAutoAdvance = true;
+          autoAdvanceUnitId = data.result.unitId;
+          console.log("🟠 Unit activated with no targets in shoot phase - will auto-trigger advance for unit:", autoAdvanceUnitId, "current phase:", data.game_state?.phase);
+        }
+          
+          // Trigger auto-advance IMMEDIATELY if needed (BEFORE processing cleanup signals)
+          if (shouldAutoAdvance && autoAdvanceUnitId) {
+            const unitId = parseInt(autoAdvanceUnitId);
+            console.log("🟠 Triggering auto-advance IMMEDIATELY for unit:", unitId);
+            // Clear last action ref to prevent double-triggering
+            lastActionRef.current = null;
+            // Execute immediately, before cleanup signals are processed
+            executeAction({
+              action: "advance",
+              unitId: unitId.toString()
+            }).catch((error) => {
+              console.error("🟠 Error triggering auto-advance:", error);
+            });
+            // Set flag to prevent cleanup signals from interfering
+            shouldAutoAdvance = false;
+          }
+          
+          // Process backend cleanup signals (but don't clear selectedUnitId if we're about to auto-advance)
           if (data.result?.clear_preview) {
             console.log("🧹 Backend requested preview cleanup");
             setTargetPreview(null);
@@ -295,19 +371,38 @@ export const useEngineAPI = () => {
             setTargetPreview(null);
           }
           
-          if (data.result?.reset_mode) {
+          if (data.result?.reset_mode && !shouldAutoAdvance) {
             console.log("🧹 Backend requested mode reset");
             setMode("select");
           }
           
-          if (data.result?.clear_selected_unit) {
+          if (data.result?.clear_selected_unit && !shouldAutoAdvance) {
             console.log("🧹 Backend requested selected unit clear");
             setSelectedUnitId(null);
           }
           
-          if (data.result?.clear_attack_preview) {
+          if (data.result?.clear_attack_preview && !shouldAutoAdvance) {
             console.log("🧹 Backend requested attack preview clear");
             setMode("select");
+          }
+
+          setGameState(data.game_state);
+
+          // Trigger auto-advance IMMEDIATELY if needed (BEFORE processing cleanup signals that might remove unit from pool)
+          if (shouldAutoAdvance && autoAdvanceUnitId) {
+            const unitId = parseInt(autoAdvanceUnitId);
+            console.log("🟠 Triggering auto-advance IMMEDIATELY for unit:", unitId);
+            // Clear last action ref to prevent double-triggering
+            lastActionRef.current = null;
+            // Execute immediately, before cleanup signals are processed
+            executeAction({
+              action: "advance",
+              unitId: unitId.toString()
+            }).catch((error) => {
+              console.error("🟠 Error triggering auto-advance:", error);
+            });
+            // Set flag to prevent cleanup signals from interfering
+            shouldAutoAdvance = false;
           }
           
           // Auto-display Python console logs in browser (only during actions)
@@ -368,9 +463,31 @@ export const useEngineAPI = () => {
           });
         }
 
+        // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance activation response
+        if (data.result?.advance_destinations && data.result?.advance_roll) {
+          console.log("🟠 ADVANCE ACTIVATION: Valid destinations received, switching to advancePreview mode");
+          console.log("🟠 Advance roll:", data.result.advance_roll);
+          console.log("🟠 Valid destinations count:", data.result.advance_destinations.length);
+          // Clear shooting preview when entering advancePreview mode (from either advance button click or unit activation)
+          if (targetPreview?.blinkTimer) {
+            clearInterval(targetPreview.blinkTimer);
+          }
+          setTargetPreview(null);
+          setAttackPreview(null);
+          // Clear HP bar blinking
+          if (blinkingUnits.blinkTimer) {
+            clearInterval(blinkingUnits.blinkTimer);
+          }
+          setBlinkingUnits({unitIds: [], blinkTimer: null, blinkState: false});
+          setAdvanceDestinations(data.result.advance_destinations);
+          setAdvanceRoll(data.result.advance_roll);
+          setAdvancingUnitId(parseInt(data.result.unitId));
+          setSelectedUnitId(parseInt(data.result.unitId));
+          setMode("advancePreview" as any);  // TODO: Add advancePreview to Mode type
+        }
         // AI_TURN.md: Handle charge activation response with valid destinations
         // MUST be after setGameState to prevent being overwritten
-        if (data.result?.valid_destinations && data.result?.waiting_for_player) {
+        else if (data.result?.valid_destinations && data.result?.waiting_for_player) {
           console.log("🎯 CHARGE ACTIVATION: Valid destinations received, switching to chargePreview mode");
           console.log("🎯 Valid destinations count:", data.result.valid_destinations.length);
           console.log("🎯 Charge roll:", data.result.charge_roll);
@@ -476,10 +593,12 @@ export const useEngineAPI = () => {
         // AI_TURN.md COMPLIANCE: Clear stale attackPreview from previous fight phases
         // This prevents Unit 3 (fled) from rendering at old position when Unit 4 (shooter) is activated
         // Root cause: attackPreview was set during fight phase and never cleared when shooting started
-        else if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
+        // Don't set mode to attackPreview here - wait for backend response (blinking_units or allow_advance)
+        // Skip this if allow_advance is present (will be handled by advance handler)
+        else if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit && !data.result?.allow_advance) {
           setSelectedUnitId(parseInt(data.game_state.active_shooting_unit));
           setAttackPreview(null);  // Clear stale attackPreview to prevent ghost rendering
-          setMode("attackPreview");
+          // Mode will be set by blinking_units handler (attackPreview) or allow_advance handler (advancePreview)
         } else {
           setSelectedUnitId(null);
         }
@@ -583,6 +702,12 @@ export const useEngineAPI = () => {
   const handleSelectUnit = useCallback(async (unitId: number | string | null) => {
     const numericUnitId = typeof unitId === 'string' ? parseInt(unitId) : unitId;
     
+    // Block unit selection when in advancePreview mode (same as chargePreview)
+    if (mode === "advancePreview") {
+      console.log("🟠 Blocked unit selection: in advancePreview mode");
+      return;
+    }
+    
     // AI_TURN.md: Shooting phase click handling
     // AI_TURN.md: Shooting phase click handling
     if (gameState && gameState.phase === "shoot") {
@@ -617,7 +742,7 @@ export const useEngineAPI = () => {
     setMovePreview(null);
     setTargetPreview(null);
     // Remove all frontend shooting state - backend manages everything
-  }, [gameState, handleShootingPhaseClick, executeAction]);
+  }, [gameState, handleShootingPhaseClick, executeAction, mode]);
 
   // Right-click handler for shooting phase
   const handleRightClick = useCallback(async (unitId: number) => {
@@ -733,6 +858,79 @@ export const useEngineAPI = () => {
       action: "activate_unit",
       unitId: numericFighterId.toString()
     });
+  }, [executeAction]);
+
+  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance action
+  const handleAdvance = useCallback(async (unitId: number) => {
+    console.log("🟠 handleAdvance called with unitId:", unitId);
+    
+    // Cancel target preview IMMEDIATELY (replace shooting preview with advance preview)
+    // Clear blinking timer if it exists
+    if (targetPreview?.blinkTimer) {
+      clearInterval(targetPreview.blinkTimer);
+    }
+    setTargetPreview(null);
+    // Also clear attackPreview if it exists
+    setAttackPreview(null);
+    // Clear HP bar blinking (blinkingUnits)
+    if (blinkingUnits.blinkTimer) {
+      clearInterval(blinkingUnits.blinkTimer);
+    }
+    setBlinkingUnits({unitIds: [], blinkTimer: null, blinkState: false});
+    // Change mode immediately to prevent shooting preview from showing
+    setMode("select");
+    
+    // Send advance action to backend to trigger 1D6 roll and get destinations
+    await executeAction({
+      action: "advance",
+      unitId: unitId.toString()
+    });
+    
+    // Backend will return valid_destinations and advance_roll
+    // State will be updated in executeAction response handler (will set mode to advancePreview)
+  }, [executeAction, targetPreview, blinkingUnits]);
+
+  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Cancel advance action
+  const handleCancelAdvance = useCallback(async () => {
+    console.log("🟠 handleCancelAdvance called");
+    
+    // Get the advancing unit ID before clearing state
+    const unitIdToSkip = advancingUnitId;
+    
+    // Clear advance state
+    setAdvanceDestinations([]);
+    setAdvancingUnitId(null);
+    setAdvanceRoll(null);
+    setMode("select");
+    setSelectedUnitId(null);
+    
+    // Send skip action to backend to remove unit from activation pool
+    if (unitIdToSkip !== null) {
+      await executeAction({
+        action: "skip",
+        unitId: unitIdToSkip.toString()
+      });
+    }
+  }, [executeAction, advancingUnitId]);
+
+  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance move to destination
+  const handleAdvanceMove = useCallback(async (unitId: number | string, destCol: number, destRow: number) => {
+    console.log("🟠 handleAdvanceMove called with:", { unitId, destCol, destRow });
+    const numericUnitId = typeof unitId === 'string' ? parseInt(unitId) : unitId;
+
+    // Send advance action with destination to backend
+    await executeAction({
+      action: "advance",
+      unitId: numericUnitId.toString(),
+      destCol: destCol,
+      destRow: destRow
+    });
+
+    // Reset advance state after move
+    setAdvanceDestinations([]);
+    setAdvancingUnitId(null);
+    setAdvanceRoll(null);
+    setMode("select");
   }, [executeAction]);
 
   const handleFightAttack = useCallback(async (attackerId: number | string, targetId: number | string | null) => {
@@ -1014,6 +1212,8 @@ export const useEngineAPI = () => {
       onStartAttackPreview: () => {},
       onConfirmMove: () => {},
       onCancelMove: () => {},
+      onCancelAdvance: () => {},
+      onAdvanceMove: async () => {},
       onShoot: () => {},
       onSkipShoot: () => {},
       onStartTargetPreview: () => {},
@@ -1026,6 +1226,10 @@ export const useEngineAPI = () => {
       onValidateCharge: () => {},
       onLogChargeRoll: () => {},
       getChargeDestinations: () => [],
+      onAdvance: async () => {},
+      getAdvanceDestinations: () => [],
+      advancingUnitId: null,
+      advanceRoll: null,
       blinkingUnits: [],
       isBlinkingActive: false,
       blinkState: false,
@@ -1102,10 +1306,17 @@ export const useEngineAPI = () => {
     onCharge: () => {},
     onActivateCharge: handleActivateCharge,
     onMoveCharger: handleMoveCharger,
+    onAdvanceMove: handleAdvanceMove,
     onCancelCharge: () => {},
     onValidateCharge: () => {},
-onLogChargeRoll: () => {},
+    onLogChargeRoll: () => {},
     getChargeDestinations,
+    // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Export advance state and handler
+    getAdvanceDestinations: (_unitId: number) => advanceDestinations,
+    advancingUnitId,
+    advanceRoll,
+    onAdvance: handleAdvance,
+    onCancelAdvance: handleCancelAdvance,
     // Export blinking state for HP bar components
     blinkingUnits: blinkingUnits.unitIds,
     isBlinkingActive: blinkingUnits.blinkTimer !== null,

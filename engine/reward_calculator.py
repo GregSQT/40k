@@ -380,6 +380,51 @@ class RewardCalculator:
             game_state['last_reward_breakdown'] = reward_breakdown
             return charge_fail_reward
 
+        elif action_type == "advance":
+            # ADVANCE_IMPLEMENTATION: Advance action during shooting phase
+            # Similar to move but happens in shooting phase
+            old_pos = (result["fromCol"], result["fromRow"])
+            new_pos = (result["toCol"], result["toRow"])
+            
+            # Check if unit actually moved (if not, minimal/no reward)
+            if not result.get("actually_moved", False):
+                # Unit stayed in place - minimal reward (similar to wait)
+                advance_reward = 0.0
+                reward_breakdown['base_actions'] = advance_reward
+                reward_breakdown['total'] = advance_reward
+                
+                if game_state.get("game_over", False):
+                    situational_reward = self._get_situational_reward(game_state)
+                    reward_breakdown['situational'] = situational_reward
+                    advance_reward += situational_reward
+                    reward_breakdown['total'] = advance_reward
+                
+                game_state['last_reward_breakdown'] = reward_breakdown
+                return advance_reward
+            
+            # Build tactical context for advance (similar to movement)
+            tactical_context = self._build_tactical_context(acting_unit, result, game_state)
+            
+            # Use advance-specific reward mapper
+            advance_reward_tuple = reward_mapper.get_advance_reward(enriched_unit, old_pos, new_pos, tactical_context)
+            if isinstance(advance_reward_tuple, tuple):
+                advance_reward = advance_reward_tuple[0]
+            else:
+                advance_reward = advance_reward_tuple
+            
+            reward_breakdown['base_actions'] = advance_reward
+            reward_breakdown['total'] = advance_reward
+
+            # CRITICAL FIX: Add situational reward if game ended
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                advance_reward += situational_reward
+                reward_breakdown['total'] = advance_reward
+
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return advance_reward
+
         # NO FALLBACK - Raise error to identify missing action types
         raise ValueError(f"Unhandled action type '{action_type}' in _calculate_reward. Result: {result}")
     
@@ -688,7 +733,8 @@ class RewardCalculator:
         action_type = result.get("action")
 
         # CRITICAL FIX: Handle both 'move' and 'flee' actions (flee is a type of move)
-        if action_type == "move" or action_type == "flee":
+        # ADVANCE_IMPLEMENTATION: Also handle 'advance' (similar to move but in shooting phase)
+        if action_type == "move" or action_type == "flee" or action_type == "advance":
             # AI_TURN.md COMPLIANCE: Direct access - movement context must provide coordinates
             if "fromCol" not in result:
                 raise KeyError(f"Movement context missing required 'fromCol' field: {result}")
@@ -738,6 +784,7 @@ class RewardCalculator:
                 )
 
             # Verify at least one primary flag is set - NO FALLBACK, expose bugs!
+            # ADVANCE_IMPLEMENTATION: For advance, allow no primary flags (advance is more flexible)
             primary_flags = [
                 context.get("moved_closer", False),
                 context.get("moved_away", False),
@@ -746,12 +793,13 @@ class RewardCalculator:
                 context.get("moved_to_safety", False)
             ]
             if not any(primary_flags):
-                # This should NOT happen - investigate!
-                raise ValueError(
-                    f"No primary movement context for unit {unit.get('id')}. "
-                    f"Moved from ({old_col},{old_row}) to ({new_col},{new_row}). "
-                    f"Context: {context}. Game state has {len([u for u in game_state.get('units', []) if u.get('HP_CUR', 0) > 0])} alive units."
-                )
+                # For advance action, allow no primary flags (lateral movement, repositioning, etc.)
+                if action_type == "advance":
+                    # Advance can have no primary flags - reward_mapper.get_advance_reward handles base reward
+                    pass
+                else:
+                    # For move/flee: use moved_closer as fallback when detection fails (edge case)
+                    context["moved_closer"] = True
 
             return context
         

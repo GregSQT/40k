@@ -93,6 +93,10 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if unit["id"] in game_state["units_fled"]:
             continue  # Fled units cannot charge
 
+        # ADVANCE_IMPLEMENTATION: Units that advanced cannot charge
+        if unit["id"] in game_state.get("units_advanced", set()):
+            continue  # Advanced units cannot charge
+
         # AI_TURN.md: "Has valid charge target?"
         # Must have at least one enemy within charge range (via BFS pathfinding)
         if not _has_valid_charge_target(game_state, unit):

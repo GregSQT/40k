@@ -65,6 +65,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 4,
     AP: -1,
     DMG: 1,
+    rules: ["ASSAULT"],
   },
   bolt_pistol: {
     display_name: "Bolt Pistol",

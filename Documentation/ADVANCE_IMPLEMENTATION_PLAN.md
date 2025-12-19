@@ -3,7 +3,7 @@
 ## Overview
 
 **Feature**: Add "Advance" action to Shooting Phase  
-**Status**: Planning  
+**Status**: Phase 1 ✅ TERMINÉE  
 **Created**: 2025-12-18
 
 ---
@@ -24,85 +24,101 @@
 
 ## Implementation Checklist
 
-### Phase 1: Backend - Engine Core
+### Phase 1: Backend - Engine Core ✅ TERMINÉE
 
-- [ ] **1.1** Add `units_advanced` tracking set to `game_state.py`
-  - File: `engine/game_state.py`
-  - Add to reset logic at start of movement phase
+- [x] **1.1** Add `units_advanced` tracking set to `game_state.py` ✅
+  - File: `engine/phase_handlers/movement_handlers.py` (ligne 27)
+  - Reset dans `movement_phase_start()`
 
-- [ ] **1.2** Add `ADVANCE` action type to action definitions
+- [x] **1.2** Add `ADVANCE` action type to action definitions ✅
   - File: `config/action_definitions.json`
-  - Define action structure with destination parameter
+  - Action "4" = Advance (phase: shoot, type: movement)
 
-- [ ] **1.3** Update Shooting Phase eligibility logic
-  - File: `engine/phase_handlers/shooting_phase.py` (or equivalent)
-  - Change: Unit eligible if CAN_SHOOT OR CAN_ADVANCE (not just CAN_SHOOT)
-  - CAN_ADVANCE = alive AND not fled AND not adjacent to enemy
+- [x] **1.3** Update Shooting Phase eligibility logic ✅
+  - File: `engine/phase_handlers/shooting_handlers.py`
+  - Unit eligible if CAN_SHOOT OR CAN_ADVANCE
 
-- [ ] **1.4** Implement advance action execution
-  - Roll 1D6 for advance_range
-  - Build valid destinations using BFS (same as movement)
-  - Execute move if destination valid
-  - Mark unit in `units_advanced` ONLY if unit actually moved
+- [x] **1.4** Implement advance action execution ✅
+  - File: `engine/phase_handlers/shooting_handlers.py`
+  - `_handle_advance_action()` implémenté
 
-- [ ] **1.5** Update Charge Phase eligibility
-  - File: `engine/phase_handlers/charge_phase.py` (or equivalent)
-  - Add check: `units_advanced.includes(unit.id)` → ineligible
+- [x] **1.5** Update Charge Phase eligibility ✅
+  - File: `engine/phase_handlers/charge_handlers.py` (ligne 86-88)
+  - `units_advanced.includes(unit.id)` → ineligible
 
-### Phase 2: Backend - AI/Observation
+### Phase 2: Backend - AI/Observation ✅ TERMINÉE
 
-- [ ] **2.1** Update action mask for shooting phase
-  - File: `engine/observation_builder.py` (or equivalent)
-  - Add advance action to valid actions mask
-  - Advance should be valid for all non-fled, non-adjacent units
-
-- [ ] **2.2** Update observation space
-  - Add `can_advance` flag to unit observations (if needed)
-  - Add `has_advanced` flag to track state
-
-- [ ] **2.3** Update action decoder
+- [x] **2.1** Update action decoder ✅
   - File: `engine/action_decoder.py`
-  - Add ADVANCE action type decoding
-  - Handle advance_destination parameter
+  - Action space élargi de 12 à 13 actions (action 12 = ADVANCE)
+  - `get_action_mask()`: mask[12] activé en shooting phase si unit peut advance
+  - `convert_gym_action()`: gère action_int == 12 pour advance
 
-### Phase 3: Backend - Assault Weapon Rule
+- [x] **2.2** Update observation space ✅
+  - File: `engine/observation_builder.py`
+  - Ajouté `has_advanced` (obs[8]) dans Global Context
+  - ⚠️ **BREAKING CHANGE**: obs_size passe de 313 à 314 floats
+  - Tous les indices décalés de 1 à partir de obs[8]
 
-- [ ] **3.1** Add "Assault" weapon rule to config
+- [x] **2.3** Update reward mapper ✅
+  - File: `ai/reward_mapper.py`
+  - Ajouté `get_advance_reward()` méthode
+  - Récompense tactique pour avancement (moved_closer, moved_to_cover)
+
+### Phase 3: Backend - Assault Weapon Rule ✅ TERMINÉE
+
+- [x] **3.1** Add "Assault" weapon rule to config ✅
   - File: `config/weapon_rules.json`
   - Define Assault rule that allows shooting after advance
+  - ⚠️ **Existait déjà dans weapon_rules.json**
 
-- [ ] **3.2** Implement Assault rule check
+- [x] **3.2** Implement Assault rule check ✅
   - After advance, if weapon has Assault rule → unit can still shoot
   - Modify shooting eligibility to check: `not advanced OR has_assault_weapon`
+  - **Fichiers modifiés:**
+    - `frontend/src/types/game.ts`: Ajout `rules?: string[]` au type Weapon
+    - `frontend/src/roster/spaceMarine/armory.ts`: Ajout `rules: ["ASSAULT"]` au bolt_rifle
+    - `engine/phase_handlers/shooting_handlers.py`: 
+      - Ajout `_weapon_has_assault_rule()` helper
+      - Modification `_has_valid_shooting_targets()` pour vérifier ASSAULT après advance
 
-### Phase 4: Frontend - UI Components
+### Phase 4: Frontend - UI Components ⏳ EN COURS
 
-- [ ] **4.1** Add Advance logo/button component
-  - Display above unit icon when unit activated in shooting phase
-  - Always visible (not dependent on CAN_SHOOT)
+- [x] **4.1** Add Advance logo/button component ✅
+  - File: `frontend/src/components/UnitRenderer.tsx`
+  - Props `canAdvance` et `onAdvance` passés à renderUnit()
+  - File: `frontend/src/components/BoardPvp.tsx` (lignes ~850-853)
 
-- [ ] **4.2** Implement advance click handler
-  - On logo click: Roll 1D6, display result in bottom-right square
-  - Point of no return: cannot cancel after clicking logo
+- [x] **4.2** Implement advance click handler ✅
+  - File: `frontend/src/components/BoardPvp.tsx`
+  - Événement `boardAdvanceClick` émis par UnitRenderer
+  - Listener ajouté dans BoardPvp.tsx après setupBoardClickHandler
 
-- [ ] **4.3** Update hex highlighting
-  - Show valid advance destinations in **orange**
-  - File: likely `frontend/src/components/Board.tsx` or similar
+- [x] **4.3** Update hex highlighting ✅
+  - File: `frontend/src/components/BoardDisplay.tsx`
+  - Interface `DrawBoardOptions` inclut `advanceCells`
+  - Couleur orange (0xFF8C00, alpha 0.5) pour les destinations advance
+  - `isAdvanceDestination` détecté et rendu dans shooting phase
 
-- [ ] **4.4** Handle advance destination selection
-  - Left click on valid hex → move unit
-  - Right/Left click on unit → stay in place (no advance marking)
+- [x] **4.4** Handle advance destination selection ✅
+  - File: `frontend/src/utils/boardClickHandler.ts`
+  - Callback `onAdvanceMove` ajouté à l'interface
+  - Mode `advancePreview` géré dans globalHexClickHandler
 
-### Phase 5: Frontend - State Management
+### Phase 5: Frontend - State Management ✅ TERMINÉE
 
-- [ ] **5.1** Add advance state to game state
-  - `advanceRange`: number (1D6 result)
-  - `advancingUnit`: unit ID currently in advance mode
-  - `hasAdvanced`: boolean per unit
+- [x] **5.1** Add advance state to game state ✅
+  - File: `frontend/src/hooks/useEngineAPI.ts` (lignes ~103-106)
+  - `advanceDestinations`: Array<{col, row}>
+  - `advancingUnitId`: number | null
+  - `advanceRoll`: number | null (résultat 1D6)
 
-- [ ] **5.2** Update shooting phase UI flow
-  - Detect advance mode vs shoot mode
-  - Handle state transitions correctly
+- [x] **5.2** Update shooting phase UI flow ✅
+  - File: `frontend/src/hooks/useEngineAPI.ts`
+  - Handler `handleAdvance()` implémenté (lignes ~538-549)
+  - Réponse backend `advance_destinations` / `advance_roll` gérée (lignes ~330-340)
+  - Mode `advancePreview` activé automatiquement
+  - Export des états et handler dans returnObject
 
 ### Phase 6: Documentation & Config
 
