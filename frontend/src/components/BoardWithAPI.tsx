@@ -31,9 +31,6 @@ export const BoardWithAPI: React.FC = () => {
   // Track clicked (but not selected) units for blue highlighting
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
   
-  // Track hex coordinate display toggle
-  const [showHexCoordinates, setShowHexCoordinates] = useState<boolean>(false);
-  
   // Track UnitStatusTable collapse states
   const [player0Collapsed, setPlayer0Collapsed] = useState(false);
   const [player1Collapsed, setPlayer1Collapsed] = useState(false);
@@ -43,14 +40,23 @@ export const BoardWithAPI: React.FC = () => {
   const handleOpenSettings = () => setIsSettingsOpen(true);
   
   // Settings preferences (from localStorage)
-  const [showAdvanceWarning, setShowAdvanceWarning] = useState<boolean>(() => {
-    const saved = localStorage.getItem('showAdvanceWarning');
-    return saved ? JSON.parse(saved) : false; // Default: false (désactivé)
+  const [settings, setSettings] = useState(() => {
+    const showAdvanceWarningStr = localStorage.getItem('showAdvanceWarning');
+    const showDebugStr = localStorage.getItem('showDebug');
+    return {
+      showAdvanceWarning: showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : false,
+      showDebug: showDebugStr ? JSON.parse(showDebugStr) : false,
+    };
   });
   
   const handleToggleAdvanceWarning = (value: boolean) => {
-    setShowAdvanceWarning(value);
+    setSettings(prev => ({ ...prev, showAdvanceWarning: value }));
     localStorage.setItem('showAdvanceWarning', JSON.stringify(value));
+  };
+  
+  const handleToggleDebug = (value: boolean) => {
+    setSettings(prev => ({ ...prev, showDebug: value }));
+    localStorage.setItem('showDebug', JSON.stringify(value));
   };
   
   // Calculate available height for GameLog dynamically
@@ -486,7 +492,7 @@ export const BoardWithAPI: React.FC = () => {
           getElapsedTime={gameLog.getElapsedTime}
           availableHeight={logAvailableHeight}
           currentTurn={apiProps.gameState?.currentTurn ?? 1}
-          debugMode={showHexCoordinates}
+          debugMode={settings.showDebug}
         />
       </ErrorBoundary>
     </>
@@ -495,14 +501,12 @@ export const BoardWithAPI: React.FC = () => {
   return (
     <SharedLayout 
       rightColumnContent={rightColumnContent}
-      showHexCoordinates={showHexCoordinates}
-      onToggleHexCoordinates={setShowHexCoordinates}
       onOpenSettings={handleOpenSettings}
     >
       <BoardPvp
         units={apiProps.units}
         selectedUnitId={apiProps.selectedUnitId}
-        showHexCoordinates={showHexCoordinates}
+        showHexCoordinates={settings.showDebug}
         eligibleUnitIds={apiProps.eligibleUnitIds}
         mode={apiProps.mode}
         movePreview={apiProps.movePreview}
@@ -566,13 +570,15 @@ export const BoardWithAPI: React.FC = () => {
         onConfirmAdvanceWarning={apiProps.onConfirmAdvanceWarning}
         onCancelAdvanceWarning={apiProps.onCancelAdvanceWarning}
         onSkipAdvanceWarning={apiProps.onSkipAdvanceWarning}
-        showAdvanceWarningPopup={showAdvanceWarning}
+        showAdvanceWarningPopup={settings.showAdvanceWarning}
         />
         <SettingsMenu
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
-          showAdvanceWarning={showAdvanceWarning}
+          showAdvanceWarning={settings.showAdvanceWarning}
           onToggleAdvanceWarning={handleToggleAdvanceWarning}
+          showDebug={settings.showDebug}
+          onToggleDebug={handleToggleDebug}
         />
       </SharedLayout>
     );

@@ -81,11 +81,14 @@ export const BoardReplay: React.FC = () => {
   const [currentActionIndex, setCurrentActionIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
-  const [showHexCoordinates, setShowHexCoordinates] = useState<boolean>(false);
   
-  // Settings menu state
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const handleOpenSettings = () => setIsSettingsOpen(true);
+  // Debug mode - read from localStorage only (managed in settings menu, no UI in replay mode)
+  const showHexCoordinates = (() => {
+    const saved = localStorage.getItem('showDebug');
+    return saved ? JSON.parse(saved) : false;
+  })();
+  
+  // Settings menu state (future: add SettingsMenu to replay mode)
 
   const playbackInterval = useRef<number | null>(null);
 
@@ -1123,20 +1126,9 @@ export const BoardReplay: React.FC = () => {
     </div>
   );
 
-  // Removed verbose render log to reduce console flooding
-  // console.log('BoardReplay render:', {
-  //   selectedFileName,
-  //   selectedEpisode,
-  //   currentState: !!currentState,
-  //   units: currentState?.units?.map((u: any) => ({ id: u.id, player: u.player, type: u.type }))
-  // });
-
   return (
     <SharedLayout
       rightColumnContent={rightColumnContent}
-      showHexCoordinates={showHexCoordinates}
-      onToggleHexCoordinates={setShowHexCoordinates}
-      onOpenSettings={handleOpenSettings}
     >
       {centerContent}
     </SharedLayout>

@@ -7,18 +7,14 @@ interface SharedLayoutProps {
   children: React.ReactNode; // Left column content (GameBoard, ReplayViewer, etc.)
   rightColumnContent: React.ReactNode; // Right column content (varies by page)
   className?: string;
-  showHexCoordinates?: boolean;
-  onToggleHexCoordinates?: (checked: boolean) => void;
   onOpenSettings?: () => void;
 }
 
 interface NavigationProps {
-  showHexCoordinates?: boolean;
-  onToggleHexCoordinates?: (checked: boolean) => void;
   onOpenSettings?: () => void;
 }
 
-const Navigation: React.FC<NavigationProps> = ({ showHexCoordinates, onToggleHexCoordinates, onOpenSettings }) => {
+const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
   const location = useLocation();
   
   const getButtonClass = (path: string) => {
@@ -45,41 +41,24 @@ const Navigation: React.FC<NavigationProps> = ({ showHexCoordinates, onToggleHex
         <button onClick={() => window.location.href = '/game'} className={getButtonClass('/game')}>PvP</button>
         <button onClick={() => window.location.href = '/game?mode=pve'} className={getButtonClass('/game?mode=pve')}>PvE</button>
         <button onClick={() => window.location.href = '/replay'} className={getButtonClass('/replay')}>Replay</button>
-      </nav>
+        </nav>
       
-      {onToggleHexCoordinates && (
-        <div className="hex-toggle-container">
-          <span className="hex-toggle-label">Debug</span>
-          <label className="hex-toggle-switch">
-            <input
-              type="checkbox"
-              className="hex-toggle-input"
-              checked={showHexCoordinates || false}
-              onChange={(e) => onToggleHexCoordinates(e.target.checked)}
-            />
-            <div className={`hex-toggle-track ${showHexCoordinates ? 'hex-toggle-track--on' : 'hex-toggle-track--off'}`}>
-              <div className={`hex-toggle-thumb ${showHexCoordinates ? 'hex-toggle-thumb--on' : 'hex-toggle-thumb--off'}`} />
-            </div>
-            </label>
-          {onOpenSettings && (
-            <button
-              onClick={onOpenSettings}
-              className="settings-button"
-              title="Paramètres"
-              style={{
-                marginLeft: '12px',
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: '20px',
-                color: '#9ca3af',
-                padding: '4px',
-              }}
-            >
-              ⚙️
-            </button>
-          )}
-        </div>
+      {onOpenSettings && (
+        <button
+          onClick={onOpenSettings}
+          className="settings-button"
+          title="Paramètres"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '20px',
+            color: '#9ca3af',
+            padding: '4px',
+          }}
+        >
+          ⚙️
+        </button>
       )}
     </div>
   );
@@ -89,8 +68,6 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
   children,
   rightColumnContent,
   className,
-  showHexCoordinates,
-  onToggleHexCoordinates,
   onOpenSettings,
 }) => {
   return (
@@ -105,8 +82,6 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
 
           <div className="unit-status-tables" style={{ paddingTop: '0px', marginTop: '0px', gap: '4px' }}>
           <Navigation 
-              showHexCoordinates={showHexCoordinates}
-              onToggleHexCoordinates={onToggleHexCoordinates}
               onOpenSettings={onOpenSettings}
             />
             {rightColumnContent}
