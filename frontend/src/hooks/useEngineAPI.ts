@@ -109,6 +109,7 @@ export const useEngineAPI = () => {
   const [advanceDestinations, setAdvanceDestinations] = useState<Array<{ col: number; row: number }>>([]);
   const [advancingUnitId, setAdvancingUnitId] = useState<number | null>(null);
   const [advanceRoll, setAdvanceRoll] = useState<number | null>(null);
+  const [advanceWarningPopup, setAdvanceWarningPopup] = useState<{ unitId: number; timestamp: number } | null>(null);
   const [targetPreview, setTargetPreview] = useState<{
   shooterId: number;
   targetId: number;
@@ -351,18 +352,18 @@ export const useEngineAPI = () => {
           // Trigger auto-advance IMMEDIATELY if needed (BEFORE processing cleanup signals)
           if (shouldAutoAdvance && autoAdvanceUnitId) {
             const unitId = parseInt(autoAdvanceUnitId);
-            console.log("🟠 Triggering auto-advance IMMEDIATELY for unit:", unitId);
+            console.log("🟠 Showing advance warning popup for unit:", unitId);
             // Clear last action ref to prevent double-triggering
             lastActionRef.current = null;
-            // Execute immediately, before cleanup signals are processed
-            executeAction({
-              action: "advance",
-              unitId: unitId.toString()
-            }).catch((error) => {
-              console.error("🟠 Error triggering auto-advance:", error);
+            // Ensure selectedUnitId is set before showing popup
+            setSelectedUnitId(unitId);
+            // Show warning popup instead of executing directly
+            setAdvanceWarningPopup({
+              unitId: unitId,
+              timestamp: Date.now()
             });
-            // Set flag to prevent cleanup signals from interfering
-            shouldAutoAdvance = false;
+            // Keep shouldAutoAdvance = true to prevent cleanup signals from interfering
+            // It will be reset on next render cycle
           }
           
           // Process backend cleanup signals (but don't clear selectedUnitId if we're about to auto-advance)
@@ -385,7 +386,7 @@ export const useEngineAPI = () => {
             setTargetPreview(null);
           }
           
-          if (data.result?.reset_mode && !shouldAutoAdvance) {
+          if (data.result?.reset_mode && !shouldAutoAdvance && !advanceWarningPopup) {
             console.log("🧹 Backend requested mode reset");
             setMode("select");
             // Clear advance state when mode resets
@@ -394,7 +395,7 @@ export const useEngineAPI = () => {
             setAdvanceRoll(null);
           }
           
-          if (data.result?.clear_selected_unit && !shouldAutoAdvance) {
+          if (data.result?.clear_selected_unit && !shouldAutoAdvance && !advanceWarningPopup) {
             console.log("🧹 Backend requested selected unit clear");
             setSelectedUnitId(null);
             // Clear advance state when selected unit is cleared
@@ -403,7 +404,7 @@ export const useEngineAPI = () => {
             setAdvanceRoll(null);
           }
           
-          if (data.result?.clear_attack_preview && !shouldAutoAdvance) {
+          if (data.result?.clear_attack_preview && !shouldAutoAdvance && !advanceWarningPopup) {
             console.log("🧹 Backend requested attack preview clear");
             setMode("select");
           }
@@ -739,7 +740,8 @@ export const useEngineAPI = () => {
         }
         const shootActivationPool = gameState.shoot_activation_pool.map(id => parseInt(id));
         
-        if (shootActivationPool.includes(numericUnitId) && !gameState.active_shooting_unit) {
+        if (shootActivationPool.includes(numericUnitId) && 
+            (!gameState.active_shooting_unit || gameState.active_shooting_unit === numericUnitId.toString())) {
           await executeAction({
             action: "activate_unit", 
             unitId: numericUnitId.toString()
@@ -902,10 +904,10 @@ export const useEngineAPI = () => {
     // Change mode immediately to prevent shooting preview from showing
     setMode("select");
     
-    // Send advance action to backend to trigger 1D6 roll and get destinations
-    await executeAction({
-      action: "advance",
-      unitId: unitId.toString()
+    // Show warning popup instead of executing directly
+    setAdvanceWarningPopup({
+      unitId: unitId,
+      timestamp: Date.now()
     });
     
     // Backend will return valid_destinations and advance_roll
@@ -934,6 +936,74 @@ export const useEngineAPI = () => {
       });
     }
   }, [executeAction, advancingUnitId]);
+
+  // Handle advance warning popup confirmation
+  const handleConfirmAdvanceWarning = useCallback(async () => {
+    if (!advanceWarningPopup) return;
+    
+    const unitId = advanceWarningPopup.unitId;
+    console.log("🟠 Advance warning confirmed, executing advance for unit:", unitId);
+    
+    // Clear popup
+    setAdvanceWarningPopup(null);
+    
+    // Cancel target preview IMMEDIATELY (replace shooting preview with advance preview)
+    if (targetPreview?.blinkTimer) {
+      clearInterval(targetPreview.blinkTimer);
+    }
+    setTargetPreview(null);
+    setAttackPreview(null);
+    // Clear HP bar blinking
+    if (blinkingUnits.blinkTimer) {
+      clearInterval(blinkingUnits.blinkTimer);
+    }
+    setBlinkingUnits({unitIds: [], blinkTimer: null, blinkState: false});
+    setMode("select");
+    
+    // Send advance action to backend to trigger 1D6 roll and get destinations
+    await executeAction({
+      action: "advance",
+      unitId: unitId.toString()
+    });
+  }, [advanceWarningPopup, executeAction, targetPreview, blinkingUnits]);
+
+  // Handle advance warning popup cancellation
+  const handleCancelAdvanceWarning = useCallback(() => {
+    console.log("🟠 Advance warning cancelled, resetting selection");
+    // Clear popup
+    setAdvanceWarningPopup(null);
+    // Clear all advance-related state and reset to selection mode
+    // Don't send skip - keep unit in pool for re-activation
+    setAdvanceDestinations([]);
+    setAdvancingUnitId(null);
+    setAdvanceRoll(null);
+    setMode("select");
+    setSelectedUnitId(null);
+  }, []);
+
+  // Handle skip from advance warning popup
+  const handleSkipAdvanceWarning = useCallback(async () => {
+    if (!advanceWarningPopup) return;
+    
+    const unitIdToSkip = advanceWarningPopup.unitId;
+    console.log("🟠 Advance warning skipped, skipping unit:", unitIdToSkip);
+    
+    // Clear popup
+    setAdvanceWarningPopup(null);
+    
+    // Clear all advance-related state
+    setAdvanceDestinations([]);
+    setAdvancingUnitId(null);
+    setAdvanceRoll(null);
+    setMode("select");
+    setSelectedUnitId(null);
+    
+    // Send skip action to backend to remove unit from activation pool
+    await executeAction({
+      action: "skip",
+      unitId: unitIdToSkip.toString()
+    });
+  }, [advanceWarningPopup, executeAction]);
 
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance move to destination
   const handleAdvanceMove = useCallback(async (unitId: number | string, destCol: number, destRow: number) => {
@@ -1249,6 +1319,10 @@ export const useEngineAPI = () => {
       getAdvanceDestinations: () => [],
       advancingUnitId: null,
       advanceRoll: null,
+      advanceWarningPopup: null,
+      onConfirmAdvanceWarning: async () => {},
+      onCancelAdvanceWarning: () => {},
+      onSkipAdvanceWarning: async () => {},
       blinkingUnits: [],
       isBlinkingActive: false,
       blinkState: false,
@@ -1336,6 +1410,10 @@ export const useEngineAPI = () => {
     advanceRoll,
     onAdvance: handleAdvance,
     onCancelAdvance: handleCancelAdvance,
+    advanceWarningPopup,
+    onConfirmAdvanceWarning: handleConfirmAdvanceWarning,
+    onCancelAdvanceWarning: handleCancelAdvanceWarning,
+    onSkipAdvanceWarning: handleSkipAdvanceWarning,
     // Export blinking state for HP bar components
     blinkingUnits: blinkingUnits.unitIds,
     isBlinkingActive: blinkingUnits.blinkTimer !== null,

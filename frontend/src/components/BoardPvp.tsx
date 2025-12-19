@@ -172,6 +172,10 @@ type BoardProps = {
   onAdvanceMove?: (unitId: number | string, destCol: number, destRow: number) => void;
   onCancelAdvance?: () => void;
   getAdvanceDestinations?: (unitId: number) => { col: number; row: number }[];
+  advanceWarningPopup?: { unitId: number; timestamp: number } | null;
+  onConfirmAdvanceWarning?: () => void;
+  onCancelAdvanceWarning?: () => void;
+  onSkipAdvanceWarning?: () => void;
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // For replay mode: override available cells (green highlights)
   objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
@@ -237,6 +241,10 @@ export default function Board({
   onAdvanceMove,
   onCancelAdvance,
   getAdvanceDestinations,
+  advanceWarningPopup,
+  onConfirmAdvanceWarning,
+  onCancelAdvanceWarning,
+  onSkipAdvanceWarning,
   wallHexesOverride,
   availableCellsOverride,
   objectivesOverride,
@@ -1247,6 +1255,147 @@ export default function Board({
         popupContainer.position.set((canvasWidth - 300) / 2, (canvasHeight - 80) / 2);
         popupContainer.addChild(popupBg);
         popupContainer.addChild(popupTextObj);
+        
+        app.stage.addChild(popupContainer);
+      }
+
+      // ✅ ADVANCE WARNING POPUP RENDERING
+      if (advanceWarningPopup && onConfirmAdvanceWarning && onCancelAdvanceWarning && onSkipAdvanceWarning) {
+        const popupContainer = new PIXI.Container();
+        popupContainer.name = 'advance-warning-popup';
+        popupContainer.zIndex = 10001; // Above charge roll popup
+        
+        const popupWidth = 450;
+        const popupHeight = 200;
+        
+        // Create popup background
+        const popupBg = new PIXI.Graphics();
+        popupBg.beginFill(0x000000, 0.95);
+        popupBg.lineStyle(3, 0xFFAA00, 1.0); // Orange border for warning
+        popupBg.drawRoundedRect(0, 0, popupWidth, popupHeight, 10);
+        popupBg.endFill();
+        
+        // Create warning text
+        const warningText = new PIXI.Text('WARNING !', {
+          fontSize: 28,
+          fill: 0xFFAA00,
+          fontWeight: 'bold',
+          align: 'center'
+        });
+        warningText.anchor.set(0.5);
+        warningText.position.set(popupWidth / 2, 35);
+        
+        // Create message text
+        const messageText = new PIXI.Text('Making an advance move won\'t allow you to shoot or charge in this turn.', {
+          fontSize: 18,
+          fill: 0xFFFFFF,
+          align: 'center',
+          wordWrap: true,
+          wordWrapWidth: popupWidth - 40
+        });
+        messageText.anchor.set(0.5);
+        messageText.position.set(popupWidth / 2, 85);
+        
+        // Create Confirm button
+        const buttonWidth = 100;
+        const buttonHeight = 36;
+        const buttonSpacing = 25;
+        const buttonY = popupHeight - 56;
+        const confirmButtonX = 50;
+        
+        const confirmButtonBg = new PIXI.Graphics();
+        confirmButtonBg.beginFill(0x00AA00, 0.9);
+        confirmButtonBg.lineStyle(2, 0x00FF00, 1.0);
+        confirmButtonBg.drawRoundedRect(0, 0, buttonWidth, buttonHeight, 5);
+        confirmButtonBg.endFill();
+        confirmButtonBg.position.set(confirmButtonX, buttonY);
+        confirmButtonBg.eventMode = 'static';
+        confirmButtonBg.cursor = 'pointer';
+        confirmButtonBg.on('pointerdown', () => {
+          onConfirmAdvanceWarning();
+        });
+        
+        const confirmText = new PIXI.Text('Confirm', {
+          fontSize: 18,
+          fill: 0xFFFFFF,
+          fontWeight: 'bold',
+          align: 'center'
+        });
+        confirmText.anchor.set(0.5);
+        confirmText.position.set(confirmButtonX + buttonWidth / 2, buttonY + buttonHeight / 2);
+        confirmText.eventMode = 'static';
+        confirmText.cursor = 'pointer';
+        confirmText.on('pointerdown', () => {
+          onConfirmAdvanceWarning();
+        });
+        
+        // Create Skip button (in the middle)
+        const skipButtonX = confirmButtonX + buttonWidth + buttonSpacing;
+        const skipButtonBg = new PIXI.Graphics();
+        skipButtonBg.beginFill(0x666666, 0.9);
+        skipButtonBg.lineStyle(2, 0x888888, 1.0);
+        skipButtonBg.drawRoundedRect(0, 0, buttonWidth, buttonHeight, 5);
+        skipButtonBg.endFill();
+        skipButtonBg.position.set(skipButtonX, buttonY);
+        skipButtonBg.eventMode = 'static';
+        skipButtonBg.cursor = 'pointer';
+        skipButtonBg.on('pointerdown', () => {
+          onSkipAdvanceWarning();
+        });
+        
+        const skipText = new PIXI.Text('Skip', {
+          fontSize: 18,
+          fill: 0xFFFFFF,
+          fontWeight: 'bold',
+          align: 'center'
+        });
+        skipText.anchor.set(0.5);
+        skipText.position.set(skipButtonX + buttonWidth / 2, buttonY + buttonHeight / 2);
+        skipText.eventMode = 'static';
+        skipText.cursor = 'pointer';
+        skipText.on('pointerdown', () => {
+          onSkipAdvanceWarning();
+        });
+        
+        // Create Cancel button
+        const cancelButtonX = skipButtonX + buttonWidth + buttonSpacing;
+        const cancelButtonBg = new PIXI.Graphics();
+        cancelButtonBg.beginFill(0xAA0000, 0.9);
+        cancelButtonBg.lineStyle(2, 0xFF0000, 1.0);
+        cancelButtonBg.drawRoundedRect(0, 0, buttonWidth, buttonHeight, 5);
+        cancelButtonBg.endFill();
+        cancelButtonBg.position.set(cancelButtonX, buttonY);
+        cancelButtonBg.eventMode = 'static';
+        cancelButtonBg.cursor = 'pointer';
+        cancelButtonBg.on('pointerdown', () => {
+          onCancelAdvanceWarning();
+        });
+        
+        const cancelText = new PIXI.Text('Cancel', {
+          fontSize: 18,
+          fill: 0xFFFFFF,
+          fontWeight: 'bold',
+          align: 'center'
+        });
+        cancelText.anchor.set(0.5);
+        cancelText.position.set(cancelButtonX + buttonWidth / 2, buttonY + buttonHeight / 2);
+        cancelText.eventMode = 'static';
+        cancelText.cursor = 'pointer';
+        cancelText.on('pointerdown', () => {
+          onCancelAdvanceWarning();
+        });
+        
+        // Position popup in center of screen
+        popupContainer.position.set((canvasWidth - popupWidth) / 2, (canvasHeight - popupHeight) / 2);
+        popupContainer.addChild(popupBg);
+        popupContainer.addChild(warningText);
+        popupContainer.addChild(messageText);
+        popupContainer.addChild(confirmButtonBg);
+        popupContainer.addChild(confirmText);
+        popupContainer.addChild(skipButtonBg);
+        popupContainer.addChild(skipText);
+        popupContainer.addChild(cancelButtonBg);
+        popupContainer.addChild(cancelText);
         
         app.stage.addChild(popupContainer);
       }

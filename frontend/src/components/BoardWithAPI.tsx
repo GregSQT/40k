@@ -545,6 +545,10 @@ export const BoardWithAPI: React.FC = () => {
         getAdvanceDestinations={apiProps.getAdvanceDestinations}
         advanceRoll={apiProps.advanceRoll}
         advancingUnitId={apiProps.advancingUnitId}
+        advanceWarningPopup={apiProps.advanceWarningPopup}
+        onConfirmAdvanceWarning={apiProps.onConfirmAdvanceWarning}
+        onCancelAdvanceWarning={apiProps.onCancelAdvanceWarning}
+        onSkipAdvanceWarning={apiProps.onSkipAdvanceWarning}
       />
     </SharedLayout>
   );
