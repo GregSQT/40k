@@ -1329,16 +1329,17 @@ export class UnitRenderer {
     const badgeX = centerX + scaledOffset;
     const badgeY = centerY + scaledOffset;
 
-    // Badge colors (orange theme for advance)
-    const textColor = 0xFFE4B5; // Light orange text
-    const bgColor = 0xFF8C00; // Dark orange background
+    // Badge colors - same as charge roll success (green theme)
+    // Success: light green text (#90EE90) on dark green background (#006400)
+    const textColor = 0x90EE90;
+    const bgColor = 0x006400;
 
     // Create badge background (rounded rectangle)
     const badgeWidth = 28;
     const badgeHeight = 20;
     const badgeBg = new PIXI.Graphics();
     badgeBg.beginFill(bgColor, 0.95);
-    badgeBg.lineStyle(2, 0xFF6600, 1);
+    badgeBg.lineStyle(2, 0x00AA00, 1);
     badgeBg.drawRoundedRect(badgeX - badgeWidth / 2, badgeY - badgeHeight / 2, badgeWidth, badgeHeight, 4);
     badgeBg.endFill();
     badgeBg.name = `advance-badge-${unitIdNum}-bg`;
