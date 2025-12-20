@@ -276,181 +276,228 @@ return {
 
 ---
 
-## Phase 5 : Frontend - UI Component (Frontend)
+## Phase 5 : Frontend - UI Components (Frontend)
 
-### Nouveau fichier : `frontend/src/components/WeaponSelectionMenu.tsx`
+### 5.1 - Icône d'arme sur l'unité active
 
-**Créer un composant React :**
+**Fichier : `frontend/src/components/UnitRenderer.tsx`**
+
+Ajouter une icône pistolet en haut à droite de l'unité quand elle est activée pour tirer :
 
 ```typescript
-import React from 'react';
-import type { WeaponSelectionState } from '../types/game';
+// Dans renderActiveShootingIndicator() ou nouvelle fonction :
+private renderWeaponIcon(): PIXI.Container | null {
+  const { unit, isActiveShooter, onWeaponIconClick } = this.props;
+  
+  if (!isActiveShooter) return null;
+  
+  // Check if unit has multiple weapons (manual mode only)
+  const hasMultipleWeapons = unit.RNG_WEAPONS && unit.RNG_WEAPONS.length > 1;
+  if (!hasMultipleWeapons) return null;
+  
+  const iconContainer = new PIXI.Container();
+  
+  // Position en haut à droite de l'unité
+  const iconSize = 24;
+  iconContainer.position.set(
+    this.hexRadius * 0.7,  // Top right
+    -this.hexRadius * 0.7
+  );
+  
+  // Background circle
+  const bg = new PIXI.Graphics();
+  bg.beginFill(0x333333, 0.9);
+  bg.drawCircle(0, 0, iconSize / 2);
+  bg.endFill();
+  iconContainer.addChild(bg);
+  
+  // Pistol icon (simple graphic or sprite)
+  const icon = new PIXI.Text('🔫', {
+    fontSize: 18,
+    align: 'center'
+  });
+  icon.anchor.set(0.5);
+  iconContainer.addChild(icon);
+  
+  // Make interactive
+  iconContainer.interactive = true;
+  iconContainer.cursor = 'pointer';
+  iconContainer.on('pointerdown', (event) => {
+    event.stopPropagation();
+    onWeaponIconClick?.(unit.id);
+  });
+  
+  // Hover effect
+  iconContainer.on('pointerover', () => {
+    bg.clear();
+    bg.beginFill(0xFFD700, 0.9);
+    bg.drawCircle(0, 0, iconSize / 2);
+    bg.endFill();
+  });
+  
+  iconContainer.on('pointerout', () => {
+    bg.clear();
+    bg.beginFill(0x333333, 0.9);
+    bg.drawCircle(0, 0, iconSize / 2);
+    bg.endFill();
+  });
+  
+  return iconContainer;
+}
+```
 
-interface WeaponSelectionMenuProps {
-  weaponSelection: WeaponSelectionState;
+### 5.2 - Menu déroulant compact
+
+**Nouveau fichier : `frontend/src/components/WeaponDropdown.tsx`**
+
+Menu compact qui apparaît près de l'icône :
+
+```typescript
+import React, { useRef, useEffect } from 'react';
+import type { WeaponOption } from '../types/game';
+
+interface WeaponDropdownProps {
+  weapons: WeaponOption[];
+  position: { x: number; y: number };  // Position de l'icône
   onSelectWeapon: (index: number) => void;
-  onCancel: () => void;
+  onClose: () => void;
+  hasAdvanced?: boolean;
 }
 
-export const WeaponSelectionMenu: React.FC<WeaponSelectionMenuProps> = ({
-  weaponSelection,
+export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
+  weapons,
+  position,
   onSelectWeapon,
-  onCancel
+  onClose,
+  hasAdvanced
 }) => {
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Close on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        onClose();
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [onClose]);
+  
   return (
-    <div className="weapon-selection-menu">
-      <div className="header">
-        <h3>Select Weapon</h3>
-        {weaponSelection.hasAdvanced && (
-          <span className="warning">
-            ⚠️ Unit has advanced - only ASSAULT weapons available
-          </span>
-        )}
-      </div>
+    <div 
+      ref={dropdownRef}
+      className="weapon-dropdown"
+      style={{
+        position: 'absolute',
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+      }}
+    >
+      {hasAdvanced && (
+        <div className="dropdown-warning">⚠️ Only ASSAULT</div>
+      )}
       
       <div className="weapon-list">
-        {weaponSelection.weapons.map((weaponOption) => {
+        {weapons.map((weaponOption) => {
           const weapon = weaponOption.weapon;
           const isDisabled = !weaponOption.canUse;
           
           return (
             <button
               key={weaponOption.index}
-              className={`weapon-option ${isDisabled ? 'disabled' : ''}`}
+              className={`weapon-item ${isDisabled ? 'disabled' : ''}`}
               onClick={() => !isDisabled && onSelectWeapon(weaponOption.index)}
               disabled={isDisabled}
+              title={weaponOption.reason}
             >
               <div className="weapon-name">
                 {weapon.display_name}
                 {weapon.WEAPON_RULES?.includes('ASSAULT') && (
-                  <span className="assault-badge">ASSAULT</span>
+                  <span className="assault">⚡</span>
                 )}
               </div>
-              
-              <div className="weapon-stats">
-                <span>RNG: {weapon.RNG || '-'}</span>
-                <span>NB: {weapon.NB}</span>
-                <span>ATK: {weapon.ATK}+</span>
-                <span>DMG: {weapon.DMG}</span>
+              <div className="weapon-stats-compact">
+                {weapon.RNG && `${weapon.RNG}"`} • {weapon.NB}A • {weapon.DMG}D
               </div>
-              
-              {isDisabled && weaponOption.reason && (
-                <div className="disabled-reason">{weaponOption.reason}</div>
-              )}
             </button>
           );
         })}
       </div>
-      
-      <button className="cancel-btn" onClick={onCancel}>
-        Cancel
-      </button>
     </div>
   );
 };
 ```
 
-**CSS associé (à ajouter dans un fichier CSS) :**
+**CSS associé (compact et près de l'icône) :**
 
 ```css
-.weapon-selection-menu {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: rgba(0, 0, 0, 0.95);
+.weapon-dropdown {
+  background: rgba(20, 20, 20, 0.98);
   border: 2px solid #ffd700;
-  border-radius: 8px;
-  padding: 20px;
-  min-width: 400px;
+  border-radius: 6px;
+  padding: 8px;
+  min-width: 200px;
+  max-width: 250px;
   z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
-.weapon-selection-menu .header {
-  margin-bottom: 15px;
-}
-
-.weapon-selection-menu .header h3 {
-  color: #ffd700;
-  margin: 0 0 10px 0;
-}
-
-.weapon-selection-menu .warning {
+.dropdown-warning {
   color: #ff6b6b;
-  font-size: 0.9em;
+  font-size: 0.85em;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  background: rgba(255, 107, 107, 0.1);
+  border-radius: 3px;
+  text-align: center;
 }
 
 .weapon-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 15px;
+  gap: 4px;
 }
 
-.weapon-option {
-  background: rgba(255, 255, 255, 0.1);
-  border: 2px solid #666;
+.weapon-item {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid #444;
   border-radius: 4px;
-  padding: 12px;
+  padding: 8px 10px;
   cursor: pointer;
   text-align: left;
-  transition: all 0.2s;
+  transition: all 0.15s;
 }
 
-.weapon-option:hover:not(.disabled) {
-  background: rgba(255, 255, 255, 0.2);
+.weapon-item:hover:not(.disabled) {
+  background: rgba(255, 215, 0, 0.15);
   border-color: #ffd700;
 }
 
-.weapon-option.disabled {
-  opacity: 0.5;
+.weapon-item.disabled {
+  opacity: 0.4;
   cursor: not-allowed;
-  border-color: #444;
 }
 
 .weapon-name {
-  font-weight: bold;
+  font-weight: 600;
   color: #fff;
-  margin-bottom: 8px;
+  font-size: 0.9em;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+  margin-bottom: 3px;
 }
 
-.assault-badge {
-  background: #4caf50;
-  color: white;
-  padding: 2px 8px;
-  border-radius: 3px;
-  font-size: 0.8em;
+.assault {
+  color: #4caf50;
+  font-size: 1.1em;
 }
 
-.weapon-stats {
-  display: flex;
-  gap: 15px;
-  color: #ccc;
-  font-size: 0.9em;
-}
-
-.disabled-reason {
-  color: #ff6b6b;
-  font-size: 0.85em;
-  margin-top: 5px;
-  font-style: italic;
-}
-
-.cancel-btn {
-  width: 100%;
-  padding: 10px;
-  background: #666;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.cancel-btn:hover {
-  background: #888;
+.weapon-stats-compact {
+  color: #aaa;
+  font-size: 0.75em;
 }
 ```
 
