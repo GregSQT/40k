@@ -255,24 +255,9 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     # CAN_ADVANCE is True only if unit has NOT already advanced
     can_advance = not has_advanced
     
-    # DEBUG LOGS
-    print(f"🔍 ASSAULT DEBUG - Unit {unit_id}:")
-    print(f"   has_advanced: {has_advanced}")
-    print(f"   selected_weapon: {selected_weapon}")
-    if selected_weapon:
-        print(f"   WEAPON_RULES in weapon: {'WEAPON_RULES' in selected_weapon}")
-        print(f"   WEAPON_RULES value: {selected_weapon.get('WEAPON_RULES', 'MISSING')}")
-        has_assault = _weapon_has_assault_rule(selected_weapon)
-        print(f"   _weapon_has_assault_rule result: {has_assault}")
-    print(f"   can_shoot BEFORE check: {can_shoot}")
-    
     # If unit has advanced without ASSAULT weapon, it cannot shoot
     if has_advanced and not _weapon_has_assault_rule(selected_weapon):
         can_shoot = False
-    
-    print(f"   can_shoot AFTER check: {can_shoot}")
-    print(f"   can_advance: {can_advance}")
-    print(f"   return value: {can_shoot or can_advance}")
     
     # Store capability flags on unit for later use in action validation
     unit["_can_shoot"] = can_shoot
@@ -2024,26 +2009,15 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # Check if unit can shoot after advance (ASSAULT weapon rule)
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
         selected_weapon = get_selected_ranged_weapon(unit)
-        
-        # DEBUG LOGS
-        print(f"🔫 ADVANCE SHOOT CHECK - Unit {unit_id}:")
-        print(f"   selected_weapon: {selected_weapon}")
-        if selected_weapon:
-            print(f"   'WEAPON_RULES' in weapon: {'WEAPON_RULES' in selected_weapon}")
-            print(f"   WEAPON_RULES value: {selected_weapon.get('WEAPON_RULES', 'MISSING')}")
-        
         can_shoot_after_advance = _weapon_has_assault_rule(selected_weapon)
-        print(f"   can_shoot_after_advance: {can_shoot_after_advance}")
         
         if can_shoot_after_advance:
             # Continue to shooting phase with ASSAULT weapon
-            print(f"   ✅ CONTINUING TO SHOOT with ASSAULT weapon")
             return _shooting_unit_execution_loop(game_state, unit_id, config)
         else:
             # No ASSAULT weapon - end activation
-            print(f"   ❌ ENDING ACTIVATION - no ASSAULT weapon")
             result = _shooting_activation_end(game_state, unit, "ACTION", 1, "PASS", "SHOOTING")
-            return result  # IMPORTANT: ajouter ce return !
+            return result
         result.update({
             "action": "advance",
             "unitId": unit_id,
