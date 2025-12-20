@@ -27,7 +27,7 @@ export interface Weapon {
   STR: number;              // Force
   AP: number;               // Pénétration d'armure
   DMG: number;              // Dégâts
-  rules?: string[];         // Règles spéciales (ASSAULT, RAPID_FIRE, etc.)
+  WEAPON_RULES?: string[];  // Règles spéciales (ASSAULT, RAPID_FIRE, etc.)
 }
 
 export interface Unit {

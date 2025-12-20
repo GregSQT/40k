@@ -1,3 +1,5 @@
+// frontend/src/roster/spaceMarine/armory.ts
+//
 /**
  * Space Marine Armory - Centralized weapon definitions.
  * 
@@ -65,7 +67,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 4,
     AP: -1,
     DMG: 1,
-    rules: ["ASSAULT"],
+    WEAPON_RULES: ["ASSAULT", "HEAVY"],
   },
   bolt_pistol: {
     display_name: "Bolt Pistol",
@@ -75,6 +77,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 4,
     AP: 0,
     DMG: 1,
+    WEAPON_RULES: ["PISTOL"],
   },
   storm_bolter: {
     display_name: "Storm Bolter",

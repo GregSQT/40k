@@ -1,42 +1,72 @@
 {
   "RAPID_FIRE": {
     "name": "Rapid Fire",
-    "description": "Make X additional attacks when target within half range",
+    "description": "Increase this weapon's Attacks by X when targeting units within half range.",
     "has_parameter": true
   },
   "ASSAULT": {
     "name": "Assault",
-    "description": "No penalty when shooting after advancing or falling back",
+    "description": " The bearer can shoot with this weapon even if he Advanced.",
     "has_parameter": false
   },
   "HEAVY": {
     "name": "Heavy",
-    "description": "Subtract 1 from hit rolls if the shooter moved this turn",
+    "description": "Add 1 to Hit rolls if the bearer Remained Stationary this turn.",
     "has_parameter": false
   },
   "MELTA": {
     "name": "Melta",
-    "description": "Roll 2 dice for damage and pick the highest result when target is within X hexes",
+    "description": "Increase the Damage by X when targeting units within half range.",
     "has_parameter": true
-  },
-  "BLAST": {
-    "name": "Blast",
-    "description": "Cannot target units that are in melee combat",
-    "has_parameter": false
   },
   "PISTOL": {
     "name": "Pistol",
-    "description": "Can be fired even if shooter is within melee range of enemy units",
+    "description": "The bearer can shoot with this weapon even if within Engagement Range of enemy units, but must target one of those enemy units. Cannot be shot alongside any other non-Pistol weapon (except by a Monster or Vehicle).",
     "has_parameter": false
   },
-  "GRENADE": {
-    "name": "Grenade",
-    "description": "Only one grenade weapon per unit can be fired per phase",
+  "LETHAL HITS": {
+    "name": "Lethal Hits",
+    "description": "Each time an attack is made with such a weapon, a Critical Hit automatically wounds the target.",
+    "has_parameter": false
+  },
+  "DEVASTATING WOUNDS": {
+    "name": "Devastating Wounds",
+    "description": "A Critical Wound inflicts mortal wounds equal to the weapon Damage characteristic, instead of any normal damage.",
+    "has_parameter": false
+  },
+  "SUSTAINED HITS": {
+    "name": "Sustained Hits",
+    "description": "Each Critical Hit scores X additional hits on the target.",
+    "has_parameter": true
+  },
+  "IGNORES COVER": {
+    "name": "Ignores Cover",
+    "description": "The target cannot have the Benefit of Cover against an attack made with this weapon.",
+    "has_parameter": false
+  },
+  "TWIN LINKED": {
+    "name": "Twin Linked",
+    "description": "You can re-roll each attack with this weapon Wound roll.",
+    "has_parameter": false
+  },
+  "HAZARDOUS": {
+    "name": "Hazardous",
+    "description": "After the bearer shoots or fights, roll one Hazardous test (one D6). If the roll is 1, the beared is destroyed.",
+    "has_parameter": false
+  },
+  "ANTI": {
+    "name": "Anti-<Keyword>",
+    "description": "An unmodified Wound roll of X+ against a target with the matching keyword scores a Critical Wound.",
+    "has_parameter": true
+  },
+  "EXTRA ATTACKS": {
+    "name": "Extra Attacks",
+    "description": "The bearer can attack with this weapon in addition to any other weapons it can make attacks with.",
     "has_parameter": false
   },
   "TORRENT": {
     "name": "Torrent",
-    "description": "Automatically hits the target (no hit roll required)",
+    "description": "Each time an attack is made with such a weapon, that attack automatically hits the target.",
     "has_parameter": false
   }
 }
