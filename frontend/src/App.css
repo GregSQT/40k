@@ -1904,3 +1904,85 @@ textarea:focus {
   font-family: 'Courier New', monospace;
   font-size: var(--font-size-sm);
 }
+
+/* Weapon Selection Dropdown */
+.weapon-dropdown {
+  background: rgba(20, 20, 20, 0.98);
+  border: 2px solid #4caf50;
+  border-radius: 6px;
+  padding: 8px;
+  min-width: 400px;
+  max-width: 600px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.weapon-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+
+.weapon-table thead {
+  background: rgba(11, 65, 13, 0.5);
+  border-bottom: 2px solid #4caf50;
+}
+
+.weapon-table th {
+  padding: 6px 8px;
+  text-align: center;
+  font-weight: 700;
+  color: #66bb6a;
+  font-size: 0.9em;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.weapon-table th:first-child {
+  text-align: left;
+  width: 50%;
+}
+
+.weapon-table tbody tr {
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid #333;
+}
+
+.weapon-table tbody tr:hover:not(.disabled) {
+  background: rgba(76, 175, 80, 0.15);
+}
+
+.weapon-table tbody tr.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.weapon-table td {
+  padding: 6px 8px;
+  text-align: center;
+  color: #fff;
+}
+
+.weapon-table td:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+
+.rule-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 4px;
+  background: rgba(76, 175, 80, 0.3);
+  border: 1px solid #4caf50;
+  border-radius: 3px;
+  font-size: 0.75em;
+  color: #4caf50;
+  cursor: help;
+  font-weight: normal;
+}
+
+.rule-badge:hover {
+  background: rgba(76, 175, 80, 0.5);
+  border-color: #66bb6a;
+}

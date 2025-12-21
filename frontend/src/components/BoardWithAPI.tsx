@@ -43,9 +43,11 @@ export const BoardWithAPI: React.FC = () => {
   const [settings, setSettings] = useState(() => {
     const showAdvanceWarningStr = localStorage.getItem('showAdvanceWarning');
     const showDebugStr = localStorage.getItem('showDebug');
+    const autoSelectWeaponStr = localStorage.getItem('autoSelectWeapon');
     return {
       showAdvanceWarning: showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : false,
       showDebug: showDebugStr ? JSON.parse(showDebugStr) : false,
+      autoSelectWeapon: autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true,
     };
   });
   
@@ -57,6 +59,11 @@ export const BoardWithAPI: React.FC = () => {
   const handleToggleDebug = (value: boolean) => {
     setSettings(prev => ({ ...prev, showDebug: value }));
     localStorage.setItem('showDebug', JSON.stringify(value));
+  };
+  
+  const handleToggleAutoSelectWeapon = (value: boolean) => {
+    setSettings(prev => ({ ...prev, autoSelectWeapon: value }));
+    localStorage.setItem('autoSelectWeapon', JSON.stringify(value));
   };
   
   // Calculate available height for GameLog dynamically
@@ -123,22 +130,6 @@ export const BoardWithAPI: React.FC = () => {
       // Fight phase: Check fight subphase pools for AI eligibility
       // Try both apiProps.fightSubPhase and apiProps.gameState.fight_subphase
       const fightSubphase = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase;
-      console.log(`🔍 [BOARD_WITH_API] Fight phase check:`, {
-        fightSubphase_from_props: apiProps.fightSubPhase,
-        fight_subphase_from_gameState: apiProps.gameState?.fight_subphase,
-        fightSubphase_used: fightSubphase,
-        gameState_keys: apiProps.gameState ? Object.keys(apiProps.gameState) : 'gameState is null'
-      });
-      console.log(`🔍 [BOARD_WITH_API] Available pools:`, {
-        charging: apiProps.gameState?.charging_activation_pool,
-        non_active: apiProps.gameState?.non_active_alternating_activation_pool,
-        active: apiProps.gameState?.active_alternating_activation_pool,
-        pools_length: {
-          charging: apiProps.gameState?.charging_activation_pool?.length || 0,
-          non_active: apiProps.gameState?.non_active_alternating_activation_pool?.length || 0,
-          active: apiProps.gameState?.active_alternating_activation_pool?.length || 0
-        }
-      });
       
       let fightPool: string[] = [];
       if (fightSubphase === 'charging' && apiProps.gameState.charging_activation_pool) {
@@ -153,21 +144,12 @@ export const BoardWithAPI: React.FC = () => {
         fightPool = apiProps.gameState.active_alternating_activation_pool;
       }
       
-      console.log(`🔍 [BOARD_WITH_API] Selected fight pool: ${fightPool.length} units`, fightPool);
-      
       hasEligibleAIUnits = fightPool.some(unitId => {
         // Normalize comparison: pools contain strings, unit.id might be number
         const unit = apiProps.gameState.units.find((u: any) => String(u.id) === String(unitId));
         const isAI = unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
-        if (unit) {
-          console.log(`🔍 [BOARD_WITH_API] Checking unit: poolId=${unitId} (${typeof unitId}), unit.id=${unit.id} (${typeof unit.id}), player=${unit.player}, HP=${unit.HP_CUR}, isAI=${isAI}`);
-        } else {
-          console.log(`🔍 [BOARD_WITH_API] Unit not found for poolId=${unitId} (${typeof unitId}). Available unit IDs:`, apiProps.gameState.units.map((u: any) => `${u.id} (${typeof u.id})`));
-        }
         return isAI;
       });
-      
-      console.log(`🔍 [BOARD_WITH_API] hasEligibleAIUnits=${hasEligibleAIUnits} for fight phase`);
     }
     
     // CRITICAL: In fight phase, currentPlayer stays 0, but AI can still act in alternating phase
@@ -193,7 +175,6 @@ export const BoardWithAPI: React.FC = () => {
       
       // If turn or phase changed, reset lastProcessedTurn
       if (lastTurn !== currentTurn || lastPhase !== currentPhase) {
-        console.log(`🔄 [BOARD_WITH_API] Turn/phase changed (turn: ${lastTurn}→${currentTurn}, phase: ${lastPhase}→${currentPhase}), resetting lastProcessedTurn`);
         setLastProcessedTurn('');
       }
     }
@@ -224,20 +205,9 @@ export const BoardWithAPI: React.FC = () => {
       prevCheck.shouldTriggerAI !== currentAICheck.shouldTriggerAI ||
       prevCheck.turnKey !== currentAICheck.turnKey;
     
-    if (hasChanged) {
-      console.log(`🔍 [BOARD_WITH_API] AI turn check:`, {
-        currentPhase,
-        currentPlayer: apiProps.gameState.currentPlayer,
-        fight_subphase: apiProps.gameState.fight_subphase,
-        hasEligibleAIUnits,
-        isAITurn,
-        isPvEMode,
-        isAIProcessing: isAIProcessingRef.current,
-        gameNotOver
-      });
-      console.log(`🔍 [BOARD_WITH_API] shouldTriggerAI=${shouldTriggerAI}, lastProcessedTurn=${lastProcessedTurn}, turnKey=${turnKey}`);
-      prevAICheckRef.current = currentAICheck;
-    }
+      if (hasChanged) {
+        prevAICheckRef.current = currentAICheck;
+      }
     
     if (shouldTriggerAI) {
       console.log(`✅ [BOARD_WITH_API] Triggering AI turn for Player 1 (AI) - Phase: ${currentPhase}, Eligible AI units: ${hasEligibleAIUnits}`);
@@ -246,10 +216,8 @@ export const BoardWithAPI: React.FC = () => {
       
       // Small delay to ensure UI updates are complete
       setTimeout(async () => {
-        console.log('⏱️ [BOARD_WITH_API] Timer fired, checking executeAITurn:', typeof apiProps.executeAITurn);
         try {
           if (apiProps.executeAITurn) {
-            console.log('🤖 [BOARD_WITH_API] Calling executeAITurn...');
             await apiProps.executeAITurn();
             console.log('✅ [BOARD_WITH_API] AI turn completed');
             // Don't set lastProcessedTurn here - allow multiple activations in same phase
@@ -266,10 +234,7 @@ export const BoardWithAPI: React.FC = () => {
         }
       }, 1500);
     } else if (isPvEMode && isAITurn && !hasEligibleAIUnits) {
-      // Only log when this condition changes
-      if (!prevCheck || prevCheck.shouldTriggerAI !== shouldTriggerAI) {
-        console.log(`⚠️ [BOARD_WITH_API] AI turn skipped - Phase: ${currentPhase}, No eligible AI units in activation pool`);
-      }
+      // AI turn skipped - no eligible units
     } else if (isPvEMode && !shouldTriggerAI && hasChanged) {
       // Only log when values change, and only in debug scenarios
       // Suppress the "NOT triggered" warning to reduce console noise
@@ -302,7 +267,6 @@ export const BoardWithAPI: React.FC = () => {
       const lastPhase = lastParts.length >= 2 ? lastParts[1] : null;
       
       if (lastTurn !== currentTurn || lastPhase !== apiProps.gameState?.phase) {
-        console.log(`🔄 [BOARD_WITH_API] Phase/turn changed, clearing lastProcessedTurn`);
         setLastProcessedTurn('');
       }
     }
@@ -541,7 +505,6 @@ export const BoardWithAPI: React.FC = () => {
             clearInterval(targetPreview.blinkTimer);
           }
           // Clear target preview in engine API
-          console.log("🎯 Canceling target preview");
         }}
         onFightAttack={apiProps.onFightAttack}
         onActivateFight={apiProps.onActivateFight}
@@ -571,6 +534,7 @@ export const BoardWithAPI: React.FC = () => {
         onCancelAdvanceWarning={apiProps.onCancelAdvanceWarning}
         onSkipAdvanceWarning={apiProps.onSkipAdvanceWarning}
         showAdvanceWarningPopup={settings.showAdvanceWarning}
+        autoSelectWeapon={settings.autoSelectWeapon}
         />
         <SettingsMenu
           isOpen={isSettingsOpen}
@@ -579,6 +543,8 @@ export const BoardWithAPI: React.FC = () => {
           onToggleAdvanceWarning={handleToggleAdvanceWarning}
           showDebug={settings.showDebug}
           onToggleDebug={handleToggleDebug}
+          autoSelectWeapon={settings.autoSelectWeapon}
+          onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}
         />
       </SharedLayout>
     );

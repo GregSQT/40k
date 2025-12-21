@@ -1,7 +1,7 @@
 // frontend/src/components/BoardPvp.tsx
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js-legacy";
-import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState } from "../types/game";
+import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState, WeaponOption } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
@@ -11,6 +11,7 @@ const cleanupBoardInteractions = (_app: any) => {};
 import { renderUnit } from './UnitRenderer';
 import { offsetToCube, cubeDistance, hasLineOfSight, getHexLine } from '../utils/gameHelpers';
 import { getMaxRangedRange, getMeleeRange } from '../utils/weaponHelpers';
+import { WeaponDropdown } from './WeaponDropdown';
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
@@ -180,6 +181,7 @@ type BoardProps = {
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // For replay mode: override available cells (green highlights)
   objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
+  autoSelectWeapon?: boolean;
 };
 
 export default function Board({
@@ -250,6 +252,7 @@ export default function Board({
   wallHexesOverride,
   availableCellsOverride,
   objectivesOverride,
+  autoSelectWeapon,
 }: BoardProps) {
   React.useEffect(() => {
   }, [phase, mode, selectedUnitId]);
@@ -341,6 +344,53 @@ export default function Board({
   // const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   // const [currentFightTarget, setCurrentFightTarget] = useState<number | null>(null);
   // const [selectedFightTarget, setSelectedFightTarget] = useState<number | null>(null);
+
+  // Weapon selection menu state
+  const [weaponSelectionMenu, setWeaponSelectionMenu] = useState<{
+    unitId: number;
+    position: { x: number; y: number };
+  } | null>(null);
+
+  // Listen for weapon selection icon click
+  useEffect(() => {
+    if (!boardConfig) return; // Wait for board config to load
+
+    const weaponClickHandler = (e: Event) => {
+      const { unitId } = (e as CustomEvent<{ unitId: number }>).detail;
+      const unit = units.find(u => u.id === unitId);
+      if (!unit || !unit.RNG_WEAPONS || unit.RNG_WEAPONS.length <= 1) return;
+
+      // Calculate position near the icon (top-right of unit)
+      const canvas = containerRef.current?.querySelector('canvas');
+      if (!canvas) return;
+
+      // Calculate constants from boardConfig (same as in main useEffect)
+      const HEX_RADIUS = boardConfig.hex_radius;
+      const MARGIN = boardConfig.margin;
+      const HEX_WIDTH = 1.5 * HEX_RADIUS;
+      const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+      const HEX_HORIZ_SPACING = HEX_WIDTH;
+      const HEX_VERT_SPACING = HEX_HEIGHT;
+
+      const rect = canvas.getBoundingClientRect();
+      // Position will be calculated relative to canvas, but we need screen coordinates for dropdown
+      const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+      const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+      
+      setWeaponSelectionMenu({
+        unitId,
+        position: {
+          x: rect.left + centerX + HEX_RADIUS * 0.6,
+          y: rect.top + centerY - HEX_RADIUS * 0.6
+        }
+      });
+    };
+
+    window.addEventListener('boardWeaponSelectionClick', weaponClickHandler);
+    return () => {
+      window.removeEventListener('boardWeaponSelectionClick', weaponClickHandler);
+    };
+  }, [units, boardConfig]);
 
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
@@ -507,7 +557,6 @@ export default function Board({
       uiElementsContainerRef.current.name = 'ui-elements-container';
       uiElementsContainerRef.current.zIndex = 10000; // Very high z-index to be on top
       app.stage.addChild(uiElementsContainerRef.current);
-      console.log(`🟢 BoardPvp: Created UI container and added to stage. Stage now has ${app.stage.children.length} children`);
     }
 
     // ✅ CANVAS STYLING FROM CONFIG - EXACT BOARDREPLAY MATCH
@@ -1145,6 +1194,7 @@ export default function Board({
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
           phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
           fightSubPhase, fightActivePlayer,
+          gameState,
           units, chargeTargets, fightTargets, targetPreview,
           onConfirmMove, parseColor,
           // Pass blinking state
@@ -1154,6 +1204,7 @@ export default function Board({
           shootingUnitId,
           // Pass movement indicator
           movingUnitId,
+          autoSelectWeapon,
           // Pass charge indicators
           chargingUnitId,
           // Calculate chargeTargetId: prioritize props (for failed/successful charges) over chargeTargets (for preview)
@@ -1199,7 +1250,8 @@ export default function Board({
             phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
             fightSubPhase, fightActivePlayer,
             units, chargeTargets, fightTargets, targetPreview,
-            onConfirmMove, parseColor
+            onConfirmMove, parseColor,
+            autoSelectWeapon,
           });
         }
       }
@@ -1221,7 +1273,8 @@ export default function Board({
             phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
             fightSubPhase, fightActivePlayer,
             units, chargeTargets, fightTargets, targetPreview,
-            onConfirmMove, parseColor
+            onConfirmMove, parseColor,
+            autoSelectWeapon,
           });
         }
       }
@@ -1453,6 +1506,102 @@ export default function Board({
         getChargeDestinations
       ]);
 
+      // Handle weapon selection
+      const handleSelectWeapon = async (weaponIndex: number) => {
+        console.log('🔵 WEAPON SELECT CALLED:', {
+          unitId: weaponSelectionMenu?.unitId,
+          weaponIndex,
+          hasMenu: !!weaponSelectionMenu
+        });
+        if (!weaponSelectionMenu) return;
+
+        // Close menu immediately (optimistic update)
+        setWeaponSelectionMenu(null);
+
+        try {
+          const API_BASE = 'http://localhost:5001/api';
+          console.log('🔵 SENDING select_weapon to backend:', {
+            unitId: weaponSelectionMenu.unitId,
+            weaponIndex,
+            autoSelectWeapon
+          });
+          const response = await fetch(`${API_BASE}/game/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'select_weapon',
+              unitId: weaponSelectionMenu.unitId.toString(),
+              weaponIndex: weaponIndex,
+              autoSelectWeapon: autoSelectWeapon
+            })
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log('🔵 BACKEND RESPONSE:', {
+              success: data.success,
+              hasGameState: !!data.game_state
+            });
+            if (data.success && data.game_state) {
+              // Log the unit's weapon selection for debugging
+              const unit = data.game_state.units?.find((u: any) => u.id === weaponSelectionMenu.unitId.toString());
+              console.log('🔫 Weapon selection response:', {
+                unitId: weaponSelectionMenu.unitId,
+                weaponIndex,
+                unitSelectedWeapon: unit?.selectedRngWeaponIndex,
+                unitWeapons: unit?.RNG_WEAPONS?.map((w: any, idx: number) => ({ idx, name: w.display_name }))
+              });
+              
+              // Trigger a custom event to notify useEngineAPI to update gameState
+              // This ensures the frontend state is synchronized with backend
+              window.dispatchEvent(new CustomEvent('weaponSelected', {
+                detail: { gameState: data.game_state }
+              }));
+            }
+          } else {
+            console.error('Failed to select weapon: response not OK');
+          }
+        } catch (error) {
+          console.error('🔴 WEAPON SELECT ERROR:', error);
+        }
+      };
+
+      // Build weapon options
+      const weaponOptions: WeaponOption[] = weaponSelectionMenu ? (() => {
+        const unit = units.find(u => u.id === weaponSelectionMenu.unitId);
+        if (!unit || !unit.RNG_WEAPONS) return [];
+
+        // Try to use available_weapons from unit if available
+        const unitWithWeapons = unit as any;
+        const availableWeapons = unitWithWeapons?.available_weapons;
+        
+        console.log('🔫 WEAPON MENU DEBUG:', {
+          hasGameState: !!gameState,
+          hasAvailableWeapons: !!availableWeapons,
+          availableWeapons: availableWeapons,
+          gameStateKeys: Object.keys(gameState || {})
+        });
+        
+        if (availableWeapons && Array.isArray(availableWeapons)) {
+          // Use backend-filtered weapons
+          return availableWeapons.map((w: any) => ({
+            index: w.index,
+            weapon: w.weapon,
+            canUse: w.can_use || false,
+            reason: w.reason || undefined
+          }));
+        }
+
+        
+        // Fallback: build from unit weapons (for backward compatibility)
+        return unit.RNG_WEAPONS.map((weapon, index) => ({
+          index,
+          weapon,
+          canUse: true, // All weapons can be used during selection
+          reason: undefined
+        }));
+      })() : [];
+
       // Simple container return - loading/error handled inside useEffect
       return (
         <div>
@@ -1474,6 +1623,14 @@ export default function Board({
             />
           )}
           */}
+          {weaponSelectionMenu && (
+            <WeaponDropdown
+              weapons={weaponOptions}
+              position={weaponSelectionMenu.position}
+              onSelectWeapon={handleSelectWeapon}
+              onClose={() => setWeaponSelectionMenu(null)}
+            />
+          )}
         </div>
       );
 

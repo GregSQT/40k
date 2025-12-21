@@ -455,6 +455,12 @@ Each handler module implements complete phase logic:
 - Hit/wound/save rolls
 - Damage application
 - LoS validation
+- Advance action (when no targets available)
+  - Human players: `allow_advance: true` signal when unit has no valid targets
+  - Advance range calculation (1D6 roll from config)
+  - Advance destination validation (BFS pathfinding, no walls, no enemy-adjacent)
+  - Marking units in `units_advanced` set (blocks charge phase)
+  - Assault weapon rule exception (allows shooting after advance)
 
 **charge_handlers.py:**
 - Charge eligibility
@@ -820,6 +826,139 @@ shooting_handlers.execute_action():
       │  └─> movement_handlers.movement_phase_start(game_state)
       │
       └─ Return: {"phase_complete": True, "next_phase": "move"}
+```
+
+**Advance Action Flow (Human Players):**
+```
+Human player activates unit in shoot phase:
+│
+├─ shooting_handlers._shooting_unit_execution_loop():
+│  │
+│  ├─ Build valid_target_pool
+│  │
+│  └─ If valid_target_pool is EMPTY:
+│     │
+│     ├─ For AI/gym agents:
+│     │  └─ End activation immediately (PASS or ACTION)
+│     │
+│     └─ For human players:
+│        └─ Return: {
+│             "waiting_for_player": True,
+│             "unitId": unit_id,
+│             "no_targets": True,
+│             "allow_advance": True,
+│             "context": "no_targets_advance_available"
+│           }
+
+Frontend receives allow_advance signal:
+│
+├─ useEngineAPI.executeAction() response handler:
+│  │
+│  ├─ Detect: data.result?.allow_advance === true
+│  │
+│  └─ Set: advanceWarningPopup = { unitId, timestamp }
+│
+└─ Display advance warning popup:
+   │
+   ├─ Message: "Making an advance move won't allow you to shoot or charge in this turn."
+   │
+   └─ Three buttons:
+      │
+      ├─ "Confirm" (green) → handleConfirmAdvanceWarning():
+      │  │
+      │  ├─ Clear popup and shooting preview state
+      │  ├─ Send advance action (no destination yet)
+      │  │
+      │  └─ Backend: _handle_advance_action():
+      │     │
+      │     ├─ Roll 1D6 for advance_range (from config: advance_distance_range)
+      │     ├─ Store advance_range on unit
+      │     ├─ Calculate valid destinations (BFS, advance_range hexes, no walls, no enemy-adjacent)
+      │     │
+      │     └─ Return: {
+      │          "advance_destinations": [{col, row}, ...],
+      │          "advance_range": 1-6,
+      │          "waiting_for_player": True
+      │        }
+      │
+      ├─ "Skip" (grey) → handleSkipAdvanceWarning():
+      │  │
+      │  ├─ Clear popup and advance state
+      │  ├─ Send skip action to backend
+      │  │
+      │  └─ Backend: Remove unit from shoot_activation_pool
+      │
+      └─ "Cancel" (red) → handleCancelAdvanceWarning():
+         │
+         ├─ Clear popup and advance state
+         ├─ Reset visual selection (mode → "select", selectedUnitId → null)
+         │
+         └─ NO backend action (unit stays in pool for re-activation)
+
+After "Confirm" → Advance preview mode:
+│
+├─ Frontend receives advance_destinations:
+│  │
+│  ├─ Set mode = "advancePreview"
+│  ├─ Set advanceDestinations = [...]
+│  ├─ Set advancingUnitId = unit_id
+│  │
+│  └─ Display orange hex highlights for valid destinations
+│
+└─ Player clicks orange hex:
+   │
+   ├─ boardClickHandler → onAdvanceMove callback:
+   │  │
+   │  └─ Send advance action with destination:
+   │     {
+   │       "action": "advance",
+   │       "unitId": unit_id,
+   │       "destCol": clicked_col,
+   │       "destRow": clicked_row
+   │     }
+   │
+   └─ Backend: _handle_advance_action() with destination:
+      │
+      ├─ Validate destination is in valid_advance_destinations
+      ├─ Reuse existing advance_range (if already rolled)
+      ├─ Move unit to destination
+      ├─ Mark unit in units_advanced set (if actually moved)
+      │
+      └─ Return: {
+           "advance_range": 1-6,
+           "activation_ended": True,
+           "reset_mode": "select",
+           "clear_selected_unit": True
+         }
+
+Frontend displays advance roll badge:
+│
+├─ On advance execution success:
+│  │
+│  ├─ Set advanceRoll = advance_range value
+│  ├─ Set advancingUnitId = unit_id
+│  │
+│  └─ UnitRenderer.renderAdvanceRollBadge():
+│     │
+│     └─ Display green badge at bottom-right of unit icon
+│        (similar to charge roll badge)
+
+Cleanup signals:
+│
+├─ Backend sends reset_mode → Frontend: mode = "select"
+├─ Backend sends clear_selected_unit → Frontend: selectedUnitId = null
+│
+└─ Frontend clears advance state:
+   ├─ advanceDestinations = []
+   ├─ advancingUnitId = null
+   └─ advanceRoll = null
+
+Post-advance restrictions:
+│
+├─ Charge phase: Units in units_advanced are ineligible
+│
+└─ Shooting phase: Advanced units cannot shoot
+   └─ Exception: Weapons with "Assault" rule can shoot after advance
 ```
 
 ---

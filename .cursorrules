@@ -13,7 +13,7 @@ L'autonomie est secondaire.
 - Ne jamais modifier du code sans validation préalable.
 
 2. ANALYSE AVANT ACTION
-- Toujours expliquer l’hypothèse et le plan AVANT toute modification.
+- Toujours expliquer l'hypothèse et le plan AVANT toute modification.
 - Une seule hypothèse à la fois.
 - Attendre confirmation avant de continuer.
 
@@ -39,7 +39,7 @@ L'autonomie est secondaire.
 
 === WORKFLOW OBLIGATOIRE ===
 
-Étape 1 : Expliquer brièvement l’hypothèse et le plan.
+Étape 1 : Expliquer brièvement l'hypothèse et le plan.
 Étape 2 : Attendre ma validation.
 Étape 3 : Appliquer UNE modification minimale.
 Étape 4 : STOP et attendre instruction.
@@ -48,42 +48,54 @@ Toute violation de ces règles est une erreur.
 
 === FORMAT DE MISE À JOUR OBLIGATOIRE ===
 
-Pour TOUT changement de code :
+TEMPLATE STRICT pour TOUTE modification de code :
 
-1. Fournir DEUX blocs de code consécutifs.
+**Fichier :** `<chemin_complet>` 
+[Lien clickable](<chemin_complet>)
 
-2. Bloc 1 : CODE ACTUEL
-- Contient EXACTEMENT le code actuel à modifier.
-- Inclure 3 lignes de contexte AVANT et 3 lignes APRÈS (si elles existent).
-- Aucun autre code.
+**CODE ACTUEL**
+```langage
+<3 lignes contexte AVANT>
+<code à modifier>
+<3 lignes contexte APRÈS>
+```
 
-3. Bloc 2 : CODE MIS À JOUR
-- Reprendre EXACTEMENT les mêmes 3 lignes de contexte AVANT et APRÈS.
-- Remplacer UNIQUEMENT le code central par la version mise à jour.
+**CODE MIS À JOUR**
+```langage
+<MÊMES 3 lignes contexte AVANT>
+<code modifié>
+<MÊMES 3 lignes contexte APRÈS>
+```
 
-4. Les lignes de contexte doivent être STRICTEMENT IDENTIQUES entre les deux blocs.
+EXEMPLE :
 
-5. Ne jamais :
-- modifier les lignes de contexte
-- ajouter ou supprimer d’autres lignes
-- inclure du code non concerné
+**Fichier :** `src/utils/helper.ts`
+[helper.ts](src/utils/helper.ts)
 
-6. Interdiction d’utiliser le format diff (+ / -) :
-- seul le format "CODE ACTUEL / CODE MIS À JOUR" est autorisé.
+**CODE ACTUEL**
+```typescript
+export const processData = (data: any) => {
+  const result = data.map(x => x * 2);
+  return result;
+};
+```
 
-Si ce format ne peut pas être respecté, STOP et demander instruction.
+**CODE MIS À JOUR**
+```typescript
+export const processData = (data: number[]) => {
+  const result = data.map(x => x * 2);
+  return result;
+};
+```
 
-RÈGLE DE FIDÉLITÉ ABSOLUE DU CODE
+RÈGLES NON NÉGOCIABLES :
 
-- Le bloc "CODE ACTUEL" doit être une copie strictement identique du fichier (caractère pour caractère).
-- Interdiction absolue de :
-  - modifier l’indentation
-  - modifier les espaces
-  - modifier les fins de ligne
-- Si le code exact ne peut pas être reproduit, STOP et demander instruction.
+✓ Chemin complet + lien clickable OBLIGATOIRE en début
+✓ DEUX blocs obligatoires : CODE ACTUEL + CODE MIS À JOUR
+✓ Contexte (3 lignes avant/après) STRICTEMENT identique dans les deux blocs
+✓ CODE ACTUEL = copie exacte du fichier (caractère par caractère, avec indentation)
+✓ Format diff (+/-) INTERDIT
 
-Si une modification nécessite plusieurs fichiers :
-- STOP
-- lister les fichiers
-- expliquer pourquoi
-- attendre validation explicite
+Si le format ne peut pas être respecté → STOP et demander instruction.
+
+Si plusieurs fichiers → STOP, lister, expliquer, attendre validation.

@@ -82,6 +82,8 @@ def parse_log(filepath):
             0: {'move_wait': 0, 'shoot_wait_with_los': 0, 'shoot_wait_no_los': 0},
             1: {'move_wait': 0, 'shoot_wait_with_los': 0, 'shoot_wait_no_los': 0}
         },
+        # Track shots after advance (Assault weapon rule)
+        'shots_after_advance': {0: 0, 1: 0},
         # Enemy death order tracking with unit types
         'death_orders': [],
         'current_episode_deaths': [],
@@ -105,12 +107,14 @@ def parse_log(filepath):
     current_episode_num = 0
     episode_turn = 0
     episode_actions = 0
+    last_turn = 0  # Track last turn to detect turn changes
 
     # Track unit HP and positions for LOS calculation
     unit_hp = {}  # unit_id -> current HP
     unit_player = {}  # unit_id -> player (0 or 1)
     unit_positions = {}  # unit_id -> (col, row)
     unit_types = {}  # unit_id -> unit_type
+    units_advanced_this_turn = set()  # Track units that advanced this turn (for Assault rule)
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -149,6 +153,7 @@ def parse_log(filepath):
                 unit_positions = {}
                 unit_types = {}
                 wall_hexes = set()
+                units_advanced_this_turn = set()  # Reset for new episode
                 continue
 
             # Parse wall hexes from step log
@@ -236,6 +241,11 @@ def parse_log(filepath):
                 success = match.group(5) == 'SUCCESS'
                 step_inc = match.group(6) == 'YES'
 
+                # Reset advanced units when turn changes
+                if turn != last_turn:
+                    units_advanced_this_turn = set()
+                    last_turn = turn
+
                 episode_turn = max(episode_turn, turn)
 
                 if step_inc:
@@ -262,6 +272,10 @@ def parse_log(filepath):
 
                             # Update shooter position
                             unit_positions[shooter_id] = (shooter_col, shooter_row)
+                            
+                            # Check if this unit advanced this turn (Assault weapon rule)
+                            if shooter_id in units_advanced_this_turn:
+                                stats['shots_after_advance'][player] += 1
 
                             stats['target_priority'][player]['total_shots'] += 1
 
@@ -359,6 +373,9 @@ def parse_log(filepath):
                             dest_col = int(move_match.group(2))
                             dest_row = int(move_match.group(3))
                             unit_positions[move_unit_id] = (dest_col, dest_row)
+                            
+                            # Mark this unit as having advanced this turn (for Assault rule tracking)
+                            units_advanced_this_turn.add(move_unit_id)
 
                             # Check if unit moved into a wall
                             if (dest_col, dest_row) in wall_hexes:
@@ -515,6 +532,13 @@ def print_statistics(stats):
         agent_pct = (agent_count / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
         bot_pct = (bot_count / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
         print(f"{action.capitalize():<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
+    
+    # Shots after advance (Assault weapon rule)
+    agent_shots_after_advance = stats['shots_after_advance'][0]
+    bot_shots_after_advance = stats['shots_after_advance'][1]
+    agent_pct_after_advance = (agent_shots_after_advance / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
+    bot_pct_after_advance = (bot_shots_after_advance / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
+    print(f"{'Shoot+Advance':<12} {agent_shots_after_advance:6d} ({agent_pct_after_advance:5.1f}%)   {bot_shots_after_advance:6d} ({bot_pct_after_advance:5.1f}%)")
 
     # WAIT BEHAVIOR - shoot waits with LOS only
     print("\n" + "-" * 80)

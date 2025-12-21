@@ -82,7 +82,7 @@
       - Ajout `_weapon_has_assault_rule()` helper
       - Modification `_has_valid_shooting_targets()` pour vérifier ASSAULT après advance
 
-### Phase 4: Frontend - UI Components ⏳ EN COURS
+### Phase 4: Frontend - UI Components ✅ TERMINÉE
 
 - [x] **4.1** Add Advance logo/button component ✅
   - File: `frontend/src/components/UnitRenderer.tsx`
@@ -119,6 +119,23 @@
   - Réponse backend `advance_destinations` / `advance_roll` gérée (lignes ~330-340)
   - Mode `advancePreview` activé automatiquement
   - Export des états et handler dans returnObject
+
+- [x] **5.3** Implement advance warning popup ✅
+  - File: `frontend/src/hooks/useEngineAPI.ts`
+  - State `advanceWarningPopup` avec unitId et timestamp
+  - Handlers: `handleConfirmAdvanceWarning()`, `handleSkipAdvanceWarning()`, `handleCancelAdvanceWarning()`
+  - Popup affiché automatiquement quand unité activée sans cibles (allow_advance signal)
+  - File: `frontend/src/components/BoardPvp.tsx`
+  - Rendering PIXI.js du popup avec 3 boutons: "Confirm" (green), "Skip" (grey), "Cancel" (red)
+  - Message d'avertissement: "Making an advance move won't allow you to shoot or charge in this turn."
+  - File: `frontend/src/components/UnitRenderer.tsx`
+  - Badge d'affichage du roll d'advance (green badge, bottom-right) après exécution
+
+- [x] **5.4** Advance roll badge display ✅
+  - File: `frontend/src/components/UnitRenderer.tsx`
+  - Méthode `renderAdvanceRollBadge()` similaire à `renderChargeRollBadge()`
+  - Badge vert affiché après exécution réussie de l'advance
+  - Props `advanceRoll` et `advancingUnitId` ajoutés
 
 ### Phase 6: Documentation & Config
 
@@ -159,20 +176,33 @@ ACTIONS:
 ├── advance (always available)
 └── wait
 
-ADVANCE FLOW:
-├── Click ADVANCE logo → ⚠️ POINT OF NO RETURN
-├── Roll 1D6 → advance_range
-├── Display advance_range on unit icon
-├── Build valid_advance_destinations (BFS, advance_range)
-├── Highlight destinations in ORANGE
-│
-├── Click valid hex → Move unit
-│   ├── Unit actually moved?
-│   │   ├── YES → Mark units_advanced, end_activation(ACTION, 1, ADVANCED, SHOOTING)
-│   │   └── NO → end_activation without marking (unit didn't advance)
-│
-└── Click unit / Right-click → Stay in place
-    └── end_activation without marking (unit didn't advance)
+ADVANCE FLOW (Human Players):
+├── Unit activated in shoot phase with NO valid targets
+│   ├── Backend returns: {allow_advance: true, no_targets: true}
+│   │
+│   └── Frontend displays WARNING POPUP:
+│       ├── Message: "Making an advance move won't allow you to shoot or charge in this turn."
+│       │
+│       └── Three buttons:
+│           │
+│           ├── "Confirm" (green) → Execute advance:
+│           │  ├── Clear popup and shooting preview
+│           │  ├── Send advance action (no destination)
+│           │  ├── Backend rolls 1D6 → advance_range
+│           │  ├── Backend calculates valid_advance_destinations (BFS, advance_range)
+│           │  ├── Display advance_range badge on unit icon
+│           │  ├── Highlight destinations in ORANGE
+│           │  │
+│           │  └── Click valid hex → Move unit:
+│           │     ├── Unit actually moved?
+│           │     │   ├── YES → Mark units_advanced, end_activation(ACTION, 1, ADVANCED, SHOOTING)
+│           │     │   └── NO → end_activation without marking
+│           │
+│           ├── "Skip" (grey) → Skip unit activation:
+│           │  └── Remove unit from shoot_activation_pool
+│           │
+│           └── "Cancel" (red) → Cancel selection:
+│              └── Reset visual state, unit stays in pool for re-activation
 
 POST-ADVANCE:
 ├── Can shoot? → ONLY if weapon has "Assault" rule
@@ -203,4 +233,8 @@ POST-ADVANCE:
 - **Color coding**: Advance hexes = Orange, Charge hexes = Violet
 - **Assault rule**: Exception that allows both advance AND shoot
 - **"Considered advanced"**: Only if unit actually moved to a different hex
-- **Irreversibility**: Once advance logo clicked, unit cannot shoot (unless Assault)
+- **Warning popup**: When unit activated without targets, popup appears with 3 options:
+  - Confirm: Execute advance (point of no return)
+  - Skip: Skip unit activation (removes from pool)
+  - Cancel: Reset selection (unit stays in pool for re-activation)
+- **Advance roll badge**: Green badge displayed at bottom-right of unit icon after advance execution (similar to charge roll badge)

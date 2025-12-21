@@ -49,6 +49,12 @@ interface APIGameState {
       AP: number;
       DMG: number;
     }>;
+    available_weapons?: Array<{
+      index: number;
+      weapon: any;
+      can_use: boolean;
+      reason?: string;
+    }>;
     CC_WEAPONS: Array<{
       code_name: string;
       display_name: string;
@@ -186,6 +192,28 @@ export const useEngineAPI = () => {
     };
     
     startGame();
+  }, []);
+
+  // Listen for weapon selection events to update gameState
+  useEffect(() => {
+    const weaponSelectedHandler = (e: Event) => {
+      const { gameState: newGameState } = (e as CustomEvent<{ gameState: any }>).detail;
+      if (newGameState) {
+        console.log('🔫 Weapon selected - updating gameState:', {
+          units: newGameState.units?.map((u: any) => ({
+            id: u.id,
+            selectedRngWeaponIndex: u.selectedRngWeaponIndex,
+            RNG_WEAPONS: u.RNG_WEAPONS?.map((w: any) => w.display_name)
+          }))
+        });
+        setGameState(newGameState);
+      }
+    };
+
+    window.addEventListener('weaponSelected', weaponSelectedHandler);
+    return () => {
+      window.removeEventListener('weaponSelected', weaponSelectedHandler);
+    };
   }, []);
 
   // Execute action via API
@@ -678,9 +706,11 @@ export const useEngineAPI = () => {
         ICON_SCALE: unit.ICON_SCALE,
         SHOOT_LEFT: unit.SHOOT_LEFT,
         ATTACK_LEFT: unit.ATTACK_LEFT,
+        available_weapons: unit.available_weapons,
       };
     });
   }, []);
+  
 
   // Helper function using backend state only
   const determineClickTarget = useCallback((unitId: number, gameState: APIGameState): string => {
@@ -1234,7 +1264,6 @@ export const useEngineAPI = () => {
         return []; // Empty pool is valid - phase will auto-advance
       }
       const eligible = gameState.charge_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
-      console.log("🔍 getEligibleUnitIds returning for charge phase:", eligible);
       return eligible;
     } else if (gameState.phase === 'fight') {
       // AI_TURN.md COMPLIANCE: Fight phase has sub-phases - only show units from current sub-phase

@@ -2,23 +2,27 @@
 import React from 'react';
 
 interface SettingsMenuProps {
-    isOpen: boolean;
-    onClose: () => void;
-    showAdvanceWarning: boolean;
-    onToggleAdvanceWarning: (value: boolean) => void;
-    showDebug: boolean;
-    onToggleDebug: (value: boolean) => void;
-  }
-  
-  export const SettingsMenu: React.FC<SettingsMenuProps> = ({
-    isOpen,
-    onClose,
-    showAdvanceWarning,
-    onToggleAdvanceWarning,
-    showDebug,
-    onToggleDebug,
-  }) => {
-    if (!isOpen) return null;
+  isOpen: boolean;
+  onClose: () => void;
+  showAdvanceWarning: boolean;
+  onToggleAdvanceWarning: (value: boolean) => void;
+  showDebug: boolean;
+  onToggleDebug: (value: boolean) => void;
+  autoSelectWeapon: boolean;
+  onToggleAutoSelectWeapon: (value: boolean) => void;
+}
+
+export const SettingsMenu: React.FC<SettingsMenuProps> = ({
+  isOpen,
+  onClose,
+  showAdvanceWarning,
+  onToggleAdvanceWarning,
+  showDebug,
+  onToggleDebug,
+  autoSelectWeapon,
+  onToggleAutoSelectWeapon,
+}) => {
+  if (!isOpen) return null;
 
   return (
     <div
@@ -79,10 +83,25 @@ interface SettingsMenuProps {
           <p style={{ color: '#9ca3af', fontSize: '14px', marginLeft: '30px', marginTop: '4px' }}>
             Affiche les coordonnées des hex et les récompenses
           </p>
-        </div>
+          </div>
 
-        <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end' }}>
-          <button
+<div style={{ marginBottom: '16px' }}>
+  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', color: '#e5e7eb' }}>
+    <input
+      type="checkbox"
+      checked={autoSelectWeapon}
+      onChange={(e) => onToggleAutoSelectWeapon(e.target.checked)}
+      style={{ marginRight: '12px', width: '18px', height: '18px', cursor: 'pointer' }}
+    />
+    <span>Sélection automatique d'arme</span>
+  </label>
+  <p style={{ color: '#9ca3af', fontSize: '14px', marginLeft: '30px', marginTop: '4px' }}>
+    Désactiver pour choisir manuellement l'arme à utiliser pour chaque tir.
+  </p>
+</div>
+
+<div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end' }}>
+  <button
             onClick={onClose}
             style={{
               padding: '8px 16px',

@@ -20,14 +20,29 @@ export interface Position {
 }
 
 export interface Weapon {
-  display_name: string;     // Nom affiché dans l'UI
-  RNG?: number;             // Portée (armes à distance uniquement)
-  NB: number;               // Nombre d'attaques
-  ATK: number;              // Cible de toucher
-  STR: number;              // Force
-  AP: number;               // Pénétration d'armure
-  DMG: number;              // Dégâts
-  WEAPON_RULES?: string[];  // Règles spéciales (ASSAULT, RAPID_FIRE, etc.)
+  display_name: string;
+  RNG?: number;
+  NB: number;
+  ATK: number;
+  STR: number;
+  AP: number;
+  DMG: number;
+  WEAPON_RULES?: string[];
+}
+
+export interface WeaponOption {
+  index: number;
+  weapon: Weapon;
+  canUse: boolean;
+  reason?: string;
+}
+
+export interface WeaponSelectionState {
+  isActive: boolean;
+  unitId: UnitId;
+  weapons: WeaponOption[];
+  hasAdvanced: boolean;
+  position?: { x: number; y: number };
 }
 
 export interface Unit {

@@ -79,6 +79,9 @@ interface UnitRendererProps {
   canAdvance?: boolean;
   onAdvance?: (unitId: number) => void;
   
+  // Weapon selection
+  autoSelectWeapon?: boolean;
+  
   // Callbacks
   onConfirmMove?: () => void;
   parseColor: (colorStr: string) => number;
@@ -130,7 +133,6 @@ export class UnitRenderer {
     this.cleanupExistingBlinkIntervals();
 
     const { unit } = this.props;
-    console.log(`🟢 UnitRenderer.render: Starting render for unit ${unit.id}`);
 
     // AI_TURN.md COMPLIANCE: Dead units don't render - UNLESS just killed (show as grey ghost)
     // Just-killed units are shown in grey, then removed in the next action
@@ -163,6 +165,7 @@ export class UnitRenderer {
     this.renderHPBar(unitIconScale);
     this.renderShootingCounter(unitIconScale);
     this.renderAdvanceButton(unitIconScale, iconZIndex);
+    this.renderWeaponSelectionIcon(unitIconScale, iconZIndex);
     this.renderTargetIndicator(iconZIndex); // Shows 🎯 for all targets (shoot, charge, fight)
     this.renderShootingIndicator(iconZIndex);
     this.renderMovementIndicator(iconZIndex);
@@ -544,36 +547,24 @@ export class UnitRenderer {
   }
 
   private renderTargetIndicator(iconZIndex: number): void {
-    const { unit, shootingTargetId, chargeTargetId, fightTargetId, centerX, centerY, app, HEX_RADIUS, uiElementsContainer, phase } = this.props;
+    const { unit, shootingTargetId, chargeTargetId, fightTargetId, centerX, centerY, app, HEX_RADIUS, uiElementsContainer } = this.props;
     
     // Use persistent UI container if available (for all phases - it survives drawBoard cleanup)
     // Otherwise fall back to stage (for backward compatibility)
     const targetContainer = uiElementsContainer || app.stage;
-    
-    console.log(`🎯 renderTargetIndicator: unit ${unit.id}, phase=${phase}, hasUIContainer=${!!uiElementsContainer}, using ${targetContainer === uiElementsContainer ? 'UI container' : 'stage'}`);
 
     // Show target indicator (🎯) on units that are targets of any action
     // CRITICAL: Compare as numbers to handle string/number mismatches
     const unitIdNum = typeof unit.id === 'string' ? parseInt(unit.id) : unit.id;
     const chargeTargetIdNum = chargeTargetId ? (typeof chargeTargetId === 'string' ? parseInt(chargeTargetId) : chargeTargetId) : null;
     
-    // Debug logging
-    if (chargeTargetIdNum) {
-      console.log("🎯 renderTargetIndicator: unitIdNum =", unitIdNum, "chargeTargetIdNum =", chargeTargetIdNum, "match =", unitIdNum === chargeTargetIdNum);
-    }
-    
     const isTarget = (shootingTargetId && unitIdNum === (typeof shootingTargetId === 'string' ? parseInt(shootingTargetId) : shootingTargetId)) ||
                     (chargeTargetIdNum && unitIdNum === chargeTargetIdNum) ||
                     (fightTargetId && unitIdNum === (typeof fightTargetId === 'string' ? parseInt(fightTargetId) : fightTargetId));
     
     if (!isTarget) {
-      if (chargeTargetIdNum) {
-        console.log("🎯 renderTargetIndicator: NOT a target - unitIdNum =", unitIdNum, "chargeTargetIdNum =", chargeTargetIdNum);
-      }
       return;
     }
-    
-    console.log("🎯 renderTargetIndicator: IS a target - rendering for unit", unitIdNum);
 
     const iconSize = this.getCSSNumber('--icon-target-size', 1.6);
     const squareSizeRatio = this.getCSSNumber('--icon-target-square-size', 0.5);
@@ -628,7 +619,6 @@ export class UnitRenderer {
     squareBg.name = `target-indicator-${unitIdNum}-bg`;
     squareBg.zIndex = iconZIndex + 1000; // Very high z-index to be on top of everything
     targetContainer.addChild(squareBg);
-    console.log(`🎯 renderTargetIndicator: Added squareBg to ${uiElementsContainer ? 'UI container' : 'stage'} for unit ${unitIdNum} zIndex: ${squareBg.zIndex} position: ${positionX} ${positionY} visible: ${squareBg.visible} alpha: ${squareBg.alpha}`);
 
     // Create target emoji text (🎯) - keep emoji for targets
     const iconText = new PIXI.Text('🎯', {
@@ -641,7 +631,6 @@ export class UnitRenderer {
     iconText.name = `target-indicator-${unitIdNum}-text`;
     iconText.zIndex = iconZIndex + 1001; // Very high z-index to be on top of everything
     targetContainer.addChild(iconText);
-    console.log(`🎯 renderTargetIndicator: Added iconText to ${uiElementsContainer ? 'UI container' : 'stage'} for unit ${unitIdNum} zIndex: ${iconText.zIndex} position: ${positionX} ${positionY} visible: ${iconText.visible} alpha: ${iconText.alpha} fontSize: ${iconText.style.fontSize}`);
   }
 
   // DEPRECATED: renderExplosionIcon removed - use renderTargetIndicator directly
@@ -1157,6 +1146,64 @@ export class UnitRenderer {
       if (e.button === 0 && onAdvance) {
         e.stopPropagation();
         onAdvance(typeof unit.id === 'number' ? unit.id : parseInt(unit.id as string));
+      }
+    });
+    
+    app.stage.addChild(iconSprite);
+  }
+  
+  private renderWeaponSelectionIcon(unitIconScale: number, iconZIndex: number): void {
+    const { unit, phase, currentPlayer, app, centerX, centerY, HEX_RADIUS, gameState, selectedUnitId, autoSelectWeapon } = this.props;
+    
+    // Show only during shoot phase for active unit with multiple weapons
+    if (phase !== 'shoot') return;
+    if (unit.player !== currentPlayer) return;
+    
+    // Check if unit is active shooting unit or selected unit
+    const isActiveShooting = (gameState?.active_shooting_unit && 
+      parseInt(gameState.active_shooting_unit) === unit.id) ||
+      (selectedUnitId !== null && selectedUnitId === unit.id);
+    if (!isActiveShooting) return;
+    
+    // Check if unit has multiple ranged weapons
+    if (!unit.RNG_WEAPONS || unit.RNG_WEAPONS.length <= 1) return;
+    
+    // Only show icon when automatic weapon selection is disabled
+    if (autoSelectWeapon !== false) return;
+    
+    // Position: to the right of Advance icon (same Y position as Advance)
+    const scaledYOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
+    const HP_BAR_HEIGHT = this.props.HP_BAR_HEIGHT;
+    const barY = centerY - scaledYOffset - HP_BAR_HEIGHT;
+    const squareSizeRatio = this.getCSSNumber('--icon-square-standard-size', 0.5);
+    const squareSize = HEX_RADIUS * squareSizeRatio;
+    const positionY = barY - squareSize / 2 - 5; // Same Y as Advance icon
+    
+    // Position X: to the right of Advance icon (centerX + spacing)
+    const iconSize = this.getCSSNumber('--icon-advance-size', 1.5);
+    const iconScale = this.getCSSNumber('--icon-square-icon-scale', 0.7);
+    const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
+    const spacing = iconDisplaySize * 1.2; // Spacing between icons
+    const positionX = centerX + spacing; // To the right of Advance icon
+  
+    // Load pistol icon
+    const texture = PIXI.Texture.from('/icons/Action_Logo/3-1 - Gun_Choice.png');
+    const iconSprite = new PIXI.Sprite(texture);
+    iconSprite.anchor.set(0.5);
+  
+    iconSprite.position.set(positionX, positionY);
+    iconSprite.width = iconDisplaySize;
+    iconSprite.height = iconDisplaySize;
+    iconSprite.zIndex = iconZIndex + 1001;
+    iconSprite.eventMode = 'static';
+    iconSprite.cursor = 'pointer';
+    
+    iconSprite.on('pointerdown', (e: PIXI.FederatedPointerEvent) => {
+      if (e.button === 0) {
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent('boardWeaponSelectionClick', { 
+          detail: { unitId: typeof unit.id === 'number' ? unit.id : parseInt(unit.id as string) }
+        }));
       }
     });
     

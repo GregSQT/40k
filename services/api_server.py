@@ -470,7 +470,15 @@ def execute_action():
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(dict(engine.game_state))
-        
+
+        # WEAPON_SELECTION: Copy available_weapons from result to active unit in game_state
+        if result and isinstance(result, dict) and "available_weapons" in result:
+            active_unit_id = result.get("shooterId") or engine.game_state.get("active_shooting_unit")
+            if active_unit_id and "units" in serializable_state:
+                for unit in serializable_state["units"]:
+                    if str(unit.get("id")) == str(active_unit_id):
+                        unit["available_weapons"] = result["available_weapons"]
+                        break
         # Extract and send detailed action logs to frontend
         action_logs = serializable_state.get("action_logs", [])
         # CRITICAL: Always clear logs after each AI turn to prevent accumulation
